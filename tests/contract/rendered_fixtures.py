@@ -24,6 +24,21 @@ interpolation set, which is profile-dependent and deliberately incomplete for th
 references whose values arrive from root-owned state at deploy time (ADR 0013).
 Named narrowly on purpose: a check whose name is wider than its evidence is this
 repository's standing defect.
+
+**D1284 added the second measurement.** A RELEASED MIGRATION can be added with
+no outputs migration beside it -- Session 24's `0032` is the first in several
+sessions -- and then the proxy is not merely narrow, it is wrong in the
+reassuring direction: the fixture is at the current version and its rendered
+migration set is a release behind, so this module answered `current` while
+`test_migration_ledger` read a 31-entry render against a 32-entry release set.
+CI never saw it, because CI has no `.generated/` to be stale. So the rendered
+manifest's RELEASE entries are now compared to the release manifest's, by
+version, in order.
+
+What that still does not catch is a PROJECT set that has moved: resolving which
+project manifest a rendered fixture came from means reading the manifest, and a
+currency check that loads manifests is a second renderer. The release set is the
+one both fixtures carry and the one a release bump moves.
 """
 
 from __future__ import annotations
@@ -33,7 +48,7 @@ from pathlib import Path
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, output_migrations
+from agentic_postgres import REPO_ROOT, migrations, output_migrations, rendering
 
 RENDER_ROOT = REPO_ROOT / ".generated"
 
@@ -43,6 +58,28 @@ RENDER_ROOT = REPO_ROOT / ".generated"
 FIXTURE_KEYS = ("fixture-alpha-dev", "fixture-alpine-dev")
 
 RERENDER = "re-render: ./deploy.sh --render-only"
+
+
+def _release_versions() -> list[str]:
+    """The release set's versions, in the order the manifest declares them."""
+    return [entry["version"] for entry in migrations.release_set().load_manifest()["migrations"]]
+
+
+def _rendered_release_versions(key: str) -> list[str] | None:
+    """A fixture's RENDERED release-set versions, or None when it rendered none.
+
+    Entries carry ``set`` since ADR 0198; a render that predates it declared
+    only the release's, so a missing key reads as ``release`` rather than as a
+    reason to skip the comparison.
+    """
+    path = RENDER_ROOT / key / "migrations" / rendering.MIGRATION_MANIFEST_NAME
+    if not path.is_file():
+        return None
+    try:
+        entries = json.loads(path.read_text(encoding="utf-8"))["migrations"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+    return [entry["version"] for entry in entries if entry.get("set", "release") == "release"]
 
 
 def _state() -> tuple[str, str]:
@@ -64,7 +101,32 @@ def _state() -> tuple[str, str]:
     if behind:
         gaps = ", ".join(f"{key} at v{version}" for key, version in sorted(behind.items()))
         return "stale", f"{gaps}; the code renders v{current} -- {RERENDER}"
-    return "current", f"both fixtures at v{current}"
+
+    # D1284. Same version, older release set: the case the proxy above cannot
+    # see, and the one a session that adds a migration without an outputs
+    # migration produces. Reported as a version gap is, because the remedy is
+    # the same re-render and the reader should not have to infer which of the
+    # two drifted.
+    released = _release_versions()
+    for key in FIXTURE_KEYS:
+        rendered = _rendered_release_versions(key)
+        if rendered is None:
+            return (
+                "stale",
+                f"{key} has no readable rendered migration manifest; "
+                f"the code releases {len(released)} migrations -- {RERENDER}",
+            )
+        if rendered != released:
+            missing = [version for version in released if version not in rendered]
+            extra = [version for version in rendered if version not in released]
+            gap = f"{len(rendered)} rendered against {len(released)} released"
+            if missing:
+                gap += f"; absent from the render: {', '.join(missing)}"
+            if extra:
+                gap += f"; rendered but not released: {', '.join(extra)}"
+            return "stale", f"{key}'s release set is {gap} -- {RERENDER}"
+
+    return "current", f"both fixtures at v{current}, release set of {len(released)}"
 
 
 STATE, DETAIL = _state()

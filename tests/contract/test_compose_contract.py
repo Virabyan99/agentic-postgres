@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,7 @@ from rendered_fixtures import (  # type: ignore[import-not-found]
     needs_rendered_fixtures,
 )
 
-from agentic_postgres import REPO_ROOT, output_migrations
+from agentic_postgres import REPO_ROOT, migrations, output_migrations, rendering
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -648,6 +649,75 @@ def test_the_fixture_currency_check_names_the_version_the_code_renders() -> None
         "the currency check must read the version from output_migrations"
     )
     assert rendered_fixtures.output_migrations.CURRENT_VERSION == output_migrations.CURRENT_VERSION
+
+
+def test_a_fixture_whose_release_set_is_a_migration_behind_reads_as_stale(
+    tmp_path: Path,
+) -> None:
+    """D1284. Same outputs version, older release set -- and the check saw it.
+
+    A released migration can land with no outputs migration beside it; Session
+    24's `0032` is the first in several sessions. The fixture then stays at the
+    current version and its rendered migration set is a release behind, so the
+    version proxy answered `current` while `test_migration_ledger` read a
+    31-entry render against a 32-entry release set. Wrong in the REASSURING
+    direction, which is the direction this repository's premises fail in
+    (D930, D957), and invisible to CI, which has no `.generated/` to be stale.
+
+    Built rather than asserted about: both fixtures are copied into `tmp_path`,
+    one loses its newest release entry, and `_state()` is asked. The untouched
+    copy is the control -- without it this would measure "any tampering is
+    detected" rather than "this drift is".
+    """
+    import rendered_fixtures  # type: ignore[import-not-found]
+
+    root = tmp_path / ".generated"
+    for key in rendered_fixtures.FIXTURE_KEYS:
+        source = rendered_fixtures.RENDER_ROOT / key
+        if not (source / "outputs.json").is_file():
+            pytest.skip(f"{key} is not rendered in this tree")
+        shutil.copytree(source, root / key)
+
+    monkeypatched = pytest.MonkeyPatch()
+    monkeypatched.setattr(rendered_fixtures, "RENDER_ROOT", root)
+    try:
+        state, detail = rendered_fixtures._state()
+        assert state == "current", f"the untouched copy is the control: {state} {detail}"
+
+        victim = rendered_fixtures.FIXTURE_KEYS[-1]
+        manifest = root / victim / "migrations" / rendering.MIGRATION_MANIFEST_NAME
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+        release = [e for e in document["migrations"] if e.get("set", "release") == "release"]
+        assert release, "the fixture rendered no release migration; nothing to remove"
+        dropped = release[-1]["version"]
+        document["migrations"] = [e for e in document["migrations"] if e is not release[-1]]
+        manifest.write_text(json.dumps(document, indent=2), encoding="utf-8")
+
+        state, detail = rendered_fixtures._state()
+    finally:
+        monkeypatched.undo()
+
+    assert state == "stale", f"a release set a migration behind must read as stale, not {state!r}"
+    assert dropped in detail, f"the message must name the absent migration; got {detail!r}"
+    assert victim in detail, f"the message must name which fixture drifted; got {detail!r}"
+
+
+def test_the_fixture_currency_check_reads_the_release_set_from_the_code() -> None:
+    """D1284's wiring, for the same reason the version check has one above.
+
+    A currency check holding its own copy of the released set would agree with
+    itself while both drifted. Asserting the wiring, so adding migration 0033
+    needs no edit here.
+    """
+    import rendered_fixtures  # type: ignore[import-not-found]
+
+    source = (REPO_ROOT / "tests" / "contract" / "rendered_fixtures.py").read_text(encoding="utf-8")
+    assert "migrations.release_set()" in source, (
+        "the currency check must read the released set from agentic_postgres.migrations"
+    )
+    assert rendered_fixtures._release_versions() == [
+        entry["version"] for entry in migrations.release_set().load_manifest()["migrations"]
+    ]
 
 
 @needs_rendered_fixtures
