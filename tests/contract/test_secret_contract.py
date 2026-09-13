@@ -18,6 +18,7 @@ The cross-check between a consumer's numeric UID and the Compose service's
 from __future__ import annotations
 
 import copy
+import re
 from pathlib import Path
 from typing import Any
 
@@ -1012,3 +1013,54 @@ def test_every_consumer_of_a_retired_secret_is_gone_before_the_secret_is(
                 f"{filename}. Retiring a credential something signs with breaks that "
                 "signer rather than removing a dependency (D821)."
             )
+
+
+def test_every_service_that_reads_a_secret_declares_it_as_a_consumer() -> None:
+    """D1291. The model reads `/run/secrets/<file>`; this file decides what is there.
+
+    Nothing connected the two. ADR 0206 added `dbmate-project`, whose entrypoint
+    is byte-identical to `dbmate`'s and therefore reads
+    `/run/secrets/migration_user_password` -- and no consumer declared it, so the
+    secret was never materialised for that service. Compose validated, the
+    render validated, the whole offline suite passed, and it failed on a host
+    with `cat: can't open '/run/secrets/migration_user_password'` **after the
+    cluster had already been migrated** -- the order D1096 names as the worst
+    one for this plane.
+
+    Read out of `compose.yaml` rather than listed here, so a service added
+    tomorrow is covered by this test on the day it is added rather than on the
+    day someone remembers to extend a roster.
+    """
+    model = yaml.safe_load((REPO_ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    contract = yaml.safe_load((REPO_ROOT / "secrets.required.yaml").read_text(encoding="utf-8"))
+
+    declared: set[tuple[str, str]] = set()
+    for secret in contract["secrets"]:
+        for consumer in secret.get("consumers") or []:
+            if consumer.get("plane") == "compose":
+                declared.add((consumer["service"], consumer["target_file"]))
+
+    pattern = re.compile(r"/run/secrets/([A-Za-z0-9_.-]+)")
+    missing: list[str] = []
+    read_by_someone = 0
+    for service, definition in sorted(model["services"].items()):
+        text = yaml.safe_dump(definition, sort_keys=True)
+        for target in sorted(set(pattern.findall(text))):
+            # A path built from an interpolation is not a filename this can
+            # check; those are named by their own consumers and are covered by
+            # the digest checks instead.
+            if "${" in target:
+                continue
+            read_by_someone += 1
+            if (service, target) not in declared:
+                missing.append(f"{service} reads /run/secrets/{target} and declares no consumer")
+
+    assert read_by_someone > 0, (
+        "no service appears to read /run/secrets at all; this scan has stopped measuring anything"
+    )
+    assert not missing, (
+        "a service reads a secret this contract does not materialise for it:\n  "
+        + "\n  ".join(missing)
+        + "\nAdd a consumer in secrets.required.yaml. A missing one fails when the "
+        "container starts, which on a deploy is after the cluster has migrated."
+    )
