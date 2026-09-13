@@ -29,6 +29,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -52,7 +53,26 @@ def rendered(tmp_path: Path) -> Path:
     somewhere else would be testing a reader nobody calls.
 
     Returns the ROOT, which is what `repo_root=` takes.
+
+    **Traversable to the checkout's owner under root** (D1300). D1165's repair
+    re-enters as that owner so these proofs run under the identity the gate
+    uses, and root's pytest temp directory is `0700` -- so without this the
+    re-entry is refused at an ANCESTOR and never reaches the directory the proof
+    makes unreadable. Their first execution in any environment said so exactly:
+    `Permission denied: '/tmp/pytest-of-root/…/.generated'`, which is `.generated`
+    and not the project inside it, and a bare `PermissionError` there is D1151's
+    shape rather than the reader's own refusal.
+
+    Only the ancestors, and only under `/tmp`: what the proof makes unreadable
+    it makes unreadable itself, and this must not reach it.
     """
+    if os.geteuid() == 0:
+        probe = tmp_path
+        temporary = Path(tempfile.gettempdir()).resolve()
+        while probe != probe.parent and probe.resolve().is_relative_to(temporary):
+            probe.chmod(0o755)
+            probe = probe.parent
+
     directory = tmp_path / ".generated" / "fixture-honest-dev"
     directory.mkdir(parents=True)
     (directory / "outputs.json").write_text(
