@@ -408,6 +408,8 @@ def test_list_resources_on_beta_reports_the_lock_the_plane_confirmed(
     psql: Callable[..., tuple[int, str, str]],
     mcp_rpc: Callable[..., Any],
     sh_status: Callable[..., tuple[int, str, str]],
+    api_call: Callable[..., Any],
+    app_base: Callable[[dict[str, Any]], str],
 ) -> None:
     """`AGT-META-001`. Three readings of one digest, and they must be one.
 
@@ -462,9 +464,25 @@ def test_list_resources_on_beta_reports_the_lock_the_plane_confirmed(
             assert route.get("status") == "ready" and route.get("url"), (
                 f"{label}: routes.mcp is {route!r}; deploy twice (D326)"
             )
+
+            # The SECRET is exchanged for a token; it is not one (D1295). The
+            # agent plane verifies a JWT this project's auth application signed,
+            # so a bearer that is the raw secret is refused at the verifier with
+            # 401 and never reaches a tool -- which reads exactly like a plane
+            # that will not report its lock, and is not. Sessions 22 and 24 both
+            # exchange first; this proof is a host claim and had never run, so
+            # nothing compared the three.
+            issued = api_call(
+                f"{app_base(document)}/auth/agent-token",
+                method="POST",
+                body={"agent_id": agent_id.strip(), "secret": AGENT_SECRET},
+            )
+            assert issued.status == 200, (
+                f"{label}: no agent token ({issued.status}): {issued.body[:200]}"
+            )
             answer = mcp_rpc(
                 str(route["url"]),
-                token=AGENT_SECRET,
+                token=json.loads(issued.body)["access_token"],
                 method="tools/call",
                 params={"name": "list_resources", "arguments": {}},
             )

@@ -461,7 +461,14 @@ def observe_restored_instance(plan: restore_drill.DrillPlan) -> dict[str, Any]:
         "achieved_lsn": "SELECT pg_last_wal_replay_lsn()",
         "timeline_id": "SELECT timeline_id FROM pg_control_checkpoint()",
         "schema_version": ("SELECT coalesce(max(version), '') FROM app_private.schema_migrations"),
-        "schema_migration_count": "SELECT count(*) FROM app_private.schema_migrations",
+        # Every set (ADR 0206). This feeds `carries_a_schema_version`, which only
+        # asks whether the restored cluster carries one at all -- but a count
+        # that silently omitted a project's migrations would describe a restore
+        # nobody performed.
+        "schema_migration_count": (
+            "SELECT (SELECT count(*) FROM app_private.schema_migrations)"
+            " + (SELECT count(*) FROM app_private.project_schema_migrations)"
+        ),
     }
     observed: dict[str, Any] = {}
     for name, sql in reads.items():
@@ -537,10 +544,21 @@ def smoke_checks(
     # it is already loaded, and a second reader of it would be a second answer
     # to which sets this project applies.
     released = released_versions(document)
+    # BOTH tables since ADR 0206, because `released_versions` is every set this
+    # project applies and this is a SET EQUALITY against it. A project's set
+    # records into `project_schema_migrations`, so reading the release's table
+    # alone compares 32 restored versions against 34 released ones and fails on
+    # every project that declares a set -- which is what beta's drill did
+    # (D1296). The union is ordered by version across both, matching the order
+    # `released_versions` returns.
     present = [
         line
         for line in query(
-            plan, "SELECT version FROM app_private.schema_migrations ORDER BY version"
+            plan,
+            "SELECT version FROM ("
+            "  SELECT version FROM app_private.schema_migrations"
+            "  UNION ALL SELECT version FROM app_private.project_schema_migrations"
+            ") AS every_set ORDER BY version",
         )[1].splitlines()
         if line.strip()
     ]

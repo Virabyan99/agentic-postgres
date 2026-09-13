@@ -124,6 +124,45 @@ def mcp_rpc(api_call: Callable[..., Any]) -> Callable[..., Any]:
     return call
 
 
+def sse_result(body: str) -> dict[str, Any] | None:
+    """The JSON-RPC message out of an SSE response (D458).
+
+    Byte-for-byte the helper Sessions 16, 21, 22 and 23 each carry. The agent
+    plane runs `stateless_http` and answers `text/event-stream`: every reply is
+    SSE-framed even when it is one message.
+    """
+    payload = None
+    for line in body.splitlines():
+        if line.startswith("data: "):
+            payload = json.loads(line[6:])
+    return payload
+
+
+def mcp_message(answer: Any) -> dict[str, Any]:
+    """One MCP reply, decoded the way the plane actually frames it.
+
+    **This module set `MCP_ACCEPT` and never decoded what it asked for.**
+    `json.loads` fails on an SSE body, and the fallback reported the failure as
+    `{"error": {"message": "HTTP 200: event: message..."}}` -- so `refused()`
+    saw an `error` key and every proof below read a SUCCESSFUL `list_resources`
+    as a refusal. A 200 relayed as an error is D433's shape, inside a proof
+    rather than a product, and it survived because the module had never run:
+    its claims are host claims and this was their first execution.
+
+    SSE first, then plain JSON, and only then an error -- and the error names
+    the status, so "it answered something I cannot read" stays distinguishable
+    from "it refused" (ADR 0195).
+    """
+    for decode in (sse_result, json.loads):
+        try:
+            message = decode(answer.body)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if isinstance(message, dict):
+            return message
+    return {"error": {"message": f"HTTP {answer.status}: {answer.body[:200]}"}}
+
+
 def refused(result: dict[str, Any]) -> bool:
     """Session 16's helper. Reads BOTH shapes.
 
@@ -373,10 +412,7 @@ def revocation(
     def resources() -> dict[str, Any]:
         answer = mcp_rpc(mcp_route, token=agent_token, method="tools/call",
                          params={"name": "list_resources", "arguments": {}})  # fmt: skip
-        try:
-            return dict(json.loads(answer.body))
-        except (json.JSONDecodeError, TypeError, ValueError):
-            return {"error": {"message": f"HTTP {answer.status}: {answer.body[:200]}"}}
+        return mcp_message(answer)
 
     before = resources()
     wrong_status, wrong_body = launched_studio.call(

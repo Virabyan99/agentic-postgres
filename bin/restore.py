@@ -380,8 +380,16 @@ def observe_instance(plan: node_restore.RestorePlan) -> dict[str, Any]:
         "achieved_recovery_point": "SELECT pg_last_xact_replay_timestamp()",
         "achieved_lsn": "SELECT pg_last_wal_replay_lsn()",
         "timeline_id": "SELECT timeline_id FROM pg_control_checkpoint()",
+        # The newest RELEASE version, which is what "how far is this cluster
+        # migrated" means for the platform; a project set's versions are its
+        # own and are counted below (ADR 0206).
         "schema_version": "SELECT coalesce(max(version), '') FROM app_private.schema_migrations",
-        "schema_migration_count": "SELECT count(*) FROM app_private.schema_migrations",
+        # Every set, so the record a restore leaves describes the whole cluster
+        # rather than the release's half of it (ADR 0206).
+        "schema_migration_count": (
+            "SELECT (SELECT count(*) FROM app_private.schema_migrations)"
+            " + (SELECT count(*) FROM app_private.project_schema_migrations)"
+        ),
         "instance_uuid": "SELECT instance_uuid FROM app_private.project_identity",
     }
     observed: dict[str, Any] = {}
