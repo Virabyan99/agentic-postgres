@@ -83,7 +83,24 @@ AUDITOR_SCOPES = ("admin_agents:read", "admin_agents:write", "admin_audit:read")
 
 #: The scope the agent holds, chosen because `list_resources` needs it and
 #: nothing else does: a refusal below must be the REVOCATION, not a scope.
-AGENT_SCOPES = ("meta:read",)
+#: The probe agent's scopes.
+#:
+#: **D1297.** `meta:read` alone was not enough, and the reason is a decision
+#: rather than an oversight: `list_resources` and `describe_resource` answer
+#: from the loaded lock and reach nothing, so they sit outside `AUDITED_KINDS`
+#: -- and `meta:read` is the scope for exactly those two. An agent holding only
+#: it cannot produce an audit row at all, which made `AGT-AUDIT-002` ask for a
+#: row that could never exist while `STU-REVOKE-001` was proved against a call
+#: that reaches nothing.
+#:
+#: `notes:read` admits `query_resource` over the release's own relation, which
+#: is `KIND_READ` and therefore audited. Alpha's vocabulary carries it.
+AGENT_SCOPES = ("meta:read", "notes:read")
+
+#: The relation the audited probe reads. The release's own, so this works on a
+#: project that declares no set of its own -- alpha, which is where the
+#: revocation proofs run.
+AUDITED_RELATION = "notes"
 
 #: Where the alpha manifest lives on the host. Inside the checkout for alpha and
 #: beta, outside it for a third project (D971: a third manifest inside the
@@ -414,7 +431,30 @@ def revocation(
                          params={"name": "list_resources", "arguments": {}})  # fmt: skip
         return mcp_message(answer)
 
+    def audited_read() -> dict[str, Any]:
+        """A call the plane AUDITS, which `list_resources` is not (D1297).
+
+        `query_resource` is `KIND_READ`: it reaches the database through the
+        caller's own role and the plane opens an audit record for it. That is
+        what gives `AGT-AUDIT-002` a row to read -- both the served one before
+        the revocation and the refused one after, which is the pair that makes
+        `denial_reason` mean something rather than being a constant.
+        """
+        answer = mcp_rpc(
+            mcp_route,
+            token=agent_token,
+            method="tools/call",
+            params={
+                "name": "query_resource",
+                "arguments": {"resource": AUDITED_RELATION, "limit": 1},
+            },
+        )
+        return mcp_message(answer)
+
     before = resources()
+    # An audited read on each side of the revocation, so the audit view has a
+    # served row and a refused one to show (D1297).
+    served_read = audited_read()
     wrong_status, wrong_body = launched_studio.call(
         "POST", "/__apg/revoke", {"agent_id": identifier, "confirm": "yes"}
     )
@@ -423,6 +463,7 @@ def revocation(
         "POST", "/__apg/revoke", {"agent_id": identifier, "confirm": identifier}
     )
     after_right = resources()
+    refused_read = audited_read()
 
     audit_status, audit_body = launched_studio.call("GET", f"/__apg/audit?agent_id={identifier}")
 
@@ -433,6 +474,8 @@ def revocation(
         "after_wrong": after_wrong,
         "right": (right_status, right_body),
         "after_right": after_right,
+        "served_read": served_read,
+        "refused_read": refused_read,
         "audit": (audit_status, audit_body),
     }
 
