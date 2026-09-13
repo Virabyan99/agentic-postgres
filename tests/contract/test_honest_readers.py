@@ -62,8 +62,15 @@ def _traversable_to_the_checkout_owner(leaf: Path) -> None:
     if os.geteuid() != 0:
         return
     temporary = Path(tempfile.gettempdir()).resolve()
-    probe = leaf
-    while probe != probe.parent and probe.resolve().is_relative_to(temporary):
+    probe = leaf.resolve()
+
+    # **Stop BEFORE the temporary root** (D1301). `is_relative_to` is true of a
+    # path against itself, so a loop that only asks "is this under /tmp" walks
+    # onto /tmp and chmods it -- which this did, as root, on the deployment
+    # host: `0755` on a shared directory, sticky bit and world-write gone, and
+    # every unprivileged write to /tmp refused until it was restored to `1777`.
+    # The root is excluded by name, not by the shape of the condition.
+    while probe != temporary and probe != probe.parent and probe.is_relative_to(temporary):
         probe.chmod(0o755)
         probe = probe.parent
 
