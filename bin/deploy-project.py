@@ -195,6 +195,23 @@ def _establish_directory(path: Path) -> Path:
     return path
 
 
+def _has_project_migrations(rendered_directory: Path) -> bool:
+    """Does this render carry a project's own migration set (ADR 0206)?
+
+    Derived from the directory rather than from the document, and that is the
+    right source HERE even though `build_override` takes it as a declaration:
+    what the override does with the answer is name a bind SOURCE, and naming one
+    that does not exist has Docker create an empty directory in its place --
+    D463's shape, which is why the release's mount is written the way it is. The
+    directory that must be there is the fact worth reading.
+
+    `dbmate-project` is started only for a project that has one, so a wrong
+    `False` here is a service that cannot find its migrations and a wrong `True`
+    is a mount with no source. Both were live: the first happened.
+    """
+    return (Path(rendered_directory) / "migrations-project").is_dir()
+
+
 def _write_root_only(path: Path, payload: bytes) -> None:
     """Write `0600 root:root`, atomically.
 
@@ -1862,6 +1879,7 @@ def render_runtime_only(arguments: argparse.Namespace) -> int:
         **_override_names(compose_env),
         https_entrypoint=host["edge"]["https_entrypoint"],
         rendered_directory=str(rendered_directory),
+        project_migrations=_has_project_migrations(rendered_directory),
     )
     _write_root_only(rendered_directory / "runtime-compose.override.yaml", payload)
     print(f"  {rendered_directory / 'runtime-compose.override.yaml'}")
@@ -2013,6 +2031,9 @@ def main(argv: list[str] | None = None) -> int:
         # the staging copy of the very directory it names, and the name has to
         # be the one Compose will resolve at runtime.
         rendered_directory=str(deployed_output.rendered_path(key)),
+        # Asked of the SOURCE, which is where the render just wrote it; the
+        # install copies it to the path named above (ADR 0206).
+        project_migrations=_has_project_migrations(rendered_dir),
     )
     rendered_directory = install_rendered(
         rendered_dir, deployed_output.rendered_path(key), override_payload

@@ -1488,3 +1488,61 @@ def test_the_metrics_collector_is_not_deferred() -> None:
     """
     assert runtime_override.METRICS_SERVICE not in runtime_override.POST_ARTIFACT_SERVICES
     assert runtime_override.METRICS_SERVICE not in runtime_override.DEFERRED_SERVICES
+
+
+def test_a_project_with_a_migration_set_is_given_its_own_mount() -> None:
+    """ADR 0206's mount, asserted where a host is not needed to find it missing.
+
+    `dbmate-project` is started only for a project that declares a set, and it
+    reads `/migrations-project`. Nothing offline connected the two: the override
+    was rendered with `project_migrations` defaulted off at both deploy call
+    sites, the model validated, the suite passed, and the host answered
+    `Error: could not find migrations directory /migrations-project` -- after
+    the release set had already been applied.
+    """
+    payload = runtime_override.render_override(
+        **NAMES,
+        https_entrypoint="websecure",
+        rendered_directory=RENDERED,
+        project_migrations=True,
+    )
+    document = yaml.safe_load(payload.decode("utf-8"))
+    services = document["services"]
+
+    assert runtime_override.MIGRATION_PROJECT_SERVICE in services, (
+        "a project that declares a migration set gets no mount for it, so the "
+        "service that applies it cannot find its directory"
+    )
+    volumes = services[runtime_override.MIGRATION_PROJECT_SERVICE]["volumes"]
+    assert volumes == [
+        f"{RENDERED}/migrations-project:{runtime_override.PROJECT_MIGRATIONS_MOUNT}:ro"
+    ], volumes
+
+    # The release's mount is untouched by any of this, which is the property
+    # ADR 0206 rests on for every project that declares no set.
+    assert services[runtime_override.MIGRATION_SERVICE]["volumes"] == [
+        f"{RENDERED}/migrations:{runtime_override.MIGRATIONS_MOUNT}:ro"
+    ]
+
+
+def test_a_project_without_one_is_given_no_such_mount() -> None:
+    """The control, and the case D463 is about.
+
+    Naming a bind source that does not exist does not fail: Docker creates a
+    DIRECTORY there and the container opens an empty one, which dbmate reports
+    as a set with nothing in it. So the absence is asserted rather than assumed,
+    and the default is the absence.
+    """
+    payload = runtime_override.render_override(
+        **NAMES,
+        https_entrypoint="websecure",
+        rendered_directory=RENDERED,
+    )
+    document = yaml.safe_load(payload.decode("utf-8"))
+    assert runtime_override.MIGRATION_PROJECT_SERVICE not in document["services"], (
+        "a project with no migration set is given a mount whose source does not "
+        "exist; Docker would create it empty and dbmate would report no migrations"
+    )
+    assert runtime_override.MIGRATION_SERVICE in document["services"], (
+        "the release's mount must be there either way"
+    )

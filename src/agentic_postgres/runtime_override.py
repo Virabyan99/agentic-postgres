@@ -561,11 +561,14 @@ def build_override(
     publications: dict[str, Any] | None = None,
     #: Does this project declare a migration set of its own (ADR 0206)?
     #:
-    #: Declared rather than derived from whether `migrations-project/` happens
-    #: to exist: the override and the migration render are written by two
-    #: functions, and a mount that depended on which ran first would be a mount
-    #: that is sometimes there. Defaulted off, so a project with no set gets
-    #: exactly the override it got before ADR 0206.
+    #: Declared here rather than sniffed here: this function is given a
+    #: directory NAME and may be called before anything has been written to it,
+    #: so a check inside it would depend on which of two functions ran first.
+    #: The DEPLOY derives it, from the directory it is about to name as a bind
+    #: source -- see `_has_project_migrations` in `bin/deploy-project.py`, and
+    #: D463 for why naming a source that does not exist is the hazard.
+    #: Defaulted off, so a project with no set gets exactly the override it got
+    #: before ADR 0206.
     project_migrations: bool = False,
 ) -> dict[str, Any]:
     """Build the override document for one project's health route and migrations.
