@@ -78,9 +78,19 @@ def test_one_file_per_declared_migration(manifest: dict, document: dict) -> None
         for entry in migration_set.load_manifest()["migrations"]
     ]
     assert len(manifest["migrations"]) == len(declared)
-    assert {path.name for path in MIGRATIONS.glob("*.sql")} == {
-        entry["file"] for entry in manifest["migrations"]
-    }
+
+    # Per DIRECTORY since ADR 0206, and the comparison is still an equality in
+    # both directions -- a payload on disk that the manifest does not name is
+    # what this catches, and it would be invisible if only the union were
+    # compared.
+    for subdir in sorted({entry.get("dir", "migrations") for entry in manifest["migrations"]}):
+        on_disk = {path.name for path in (ALPHA / subdir).glob("*.sql")}
+        recorded = {
+            entry["file"]
+            for entry in manifest["migrations"]
+            if entry.get("dir", "migrations") == subdir
+        }
+        assert on_disk == recorded, f"{subdir}: {sorted(on_disk ^ recorded)}"
 
 
 def test_the_rendered_manifest_names_the_set_of_every_file(manifest: dict, document: dict) -> None:
@@ -128,7 +138,11 @@ def test_the_rendered_manifest_names_the_set_of_every_file(manifest: dict, docum
 def test_each_recorded_digest_is_the_digest_of_the_file(manifest: dict) -> None:
     """The manifest describes these bytes, not the template they came from."""
     for entry in manifest["migrations"]:
-        payload = (MIGRATIONS / entry["file"]).read_text(encoding="utf-8")
+        # From the directory the manifest names (ADR 0206), not from a single
+        # one: a project set now renders beside the release rather than into it.
+        payload = (ALPHA / entry.get("dir", "migrations") / entry["file"]).read_text(
+            encoding="utf-8"
+        )
         assert migrations.digest(payload) == entry["sha256"], entry["file"]
 
 
@@ -218,6 +232,16 @@ def test_the_modes_are_the_ones_a_non_root_container_can_read() -> None:
 #: startup: loud, but it reads as a bad config rather than a bad mode.
 RENDERED_FILE_MODES: dict[str, int] = {
     "migrations": 0o755,
+    # ADR 0206. A project's set is rendered beside the release's rather than
+    # into it, so the two are ordered independently -- and it is mounted into
+    # the dbmate container the same way, read-only, by a container running as a
+    # uid that does not own it. Same mode as `migrations` and for the same
+    # reason: the directory has to be traversable by that uid or dbmate reports
+    # an empty set rather than a permission error (D1288's neighbourhood).
+    #
+    # Present only for a project that declares a set, which is why the
+    # assertion below compares against the fixture that has one.
+    "migrations-project": 0o755,
     "compose.env": 0o600,
     "outputs.json": 0o600,
     "rendered-summary.txt": 0o600,

@@ -27,7 +27,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, api_surface, migrations, sql_surface
+from agentic_postgres import REPO_ROOT, api_surface, migrations, rendering, sql_surface
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -742,3 +742,150 @@ def test_the_example_lock_records_two_migrations_in_order(
         "a project version appears in the release lock, so `freeze-lock --project` "
         "wrote the release's lock as well as the project's"
     )
+
+
+# ---------------------------------------------------------------------------
+# ADR 0206: the two sets are ordered independently
+# ---------------------------------------------------------------------------
+
+
+def test_a_release_version_below_an_applied_project_version_is_no_longer_refused() -> None:
+    """D1288, as a unit, with the exact interleaving that stopped beta's deploy.
+
+    Release `20260912120032` sorts BELOW the project's applied `20260914120001`,
+    because the release stamps by authoring date and the example project's set
+    was stamped two days ahead of the release's clock to clear
+    `follows_release_version`. While the two sets shared a directory and a table
+    this was a render error and then, on a deployed cluster, an `up --strict`
+    refusal that applied nothing.
+
+    Each set now has its own directory and its own table, so the interleaving is
+    legal and this must NOT raise. The committed manifests cannot express this
+    case without being edited, which is why the rule is a function taking
+    entries rather than a check inside the render.
+    """
+    entries = [
+        {"version": "20260912120031", "set": "release"},
+        {"version": "20260912120032", "set": "release"},
+        {"version": "20260914120001", "set": "project"},
+        {"version": "20260914120002", "set": "project"},
+    ]
+    rendering.assert_migration_order(entries)
+
+    # And the other direction, which is the shape D1288 actually produced: a
+    # release version authored AFTER the project's and stamped below it.
+    rendering.assert_migration_order(
+        [
+            {"version": "20260914120001", "set": "project"},
+            {"version": "20260914120002", "set": "project"},
+            {"version": "20260912120032", "set": "release"},
+        ]
+    )
+
+
+def test_a_set_whose_own_versions_do_not_ascend_is_still_refused() -> None:
+    """The control. Within a set the order is still dbmate's, and still checked.
+
+    Without this the proof above would be satisfied by a rule that checks
+    nothing at all -- which is the easy way to make a cross-set constraint go
+    away and the reason this pair exists.
+    """
+    with pytest.raises(rendering.RenderError) as raised:
+        rendering.assert_migration_order(
+            [
+                {"version": "20260912120032", "set": "release"},
+                {"version": "20260912120031", "set": "release"},
+            ]
+        )
+    assert "ascending version order" in str(raised.value)
+
+
+def test_two_sets_may_not_share_a_version_even_with_separate_tables() -> None:
+    """The tables would tolerate it; `migration_ledger` would not.
+
+    It keys on the version alone and is written `ON CONFLICT (version) DO
+    NOTHING`, so a shared version applies twice and is recorded once -- and the
+    ledger is the one record of which bytes ran (D1096). The reason changed
+    with ADR 0206; the rule did not.
+    """
+    with pytest.raises(rendering.RenderError) as raised:
+        rendering.assert_migration_order(
+            [
+                {"version": "20260914120001", "set": "release"},
+                {"version": "20260914120001", "set": "project"},
+            ]
+        )
+    assert "share a version" in str(raised.value)
+    assert "migration_ledger" in str(raised.value)
+
+
+def test_each_set_is_rendered_into_its_own_directory_and_names_its_own_table() -> None:
+    """The layout the two dbmate services are pointed at (ADR 0206)."""
+    manifest = json.loads(
+        (FIXTURE / "migrations" / rendering.MIGRATION_MANIFEST_NAME).read_text(encoding="utf-8")
+    )
+    by_set: dict[str, set[str]] = {}
+    for entry in manifest["migrations"]:
+        by_set.setdefault(entry["set"], set()).add(entry["dir"])
+
+    assert by_set == {
+        "release": {rendering.RELEASE_MIGRATIONS_SUBDIR},
+        "project": {rendering.PROJECT_MIGRATIONS_SUBDIR},
+    }, f"a set is rendered into more than one directory: {by_set}"
+
+    assert manifest["migrations_table"] == rendering.MIGRATIONS_TABLE
+    assert manifest["project_migrations_table"] == rendering.PROJECT_MIGRATIONS_TABLE
+    assert rendering.MIGRATIONS_TABLE != rendering.PROJECT_MIGRATIONS_TABLE, (
+        "one table is one ordering space, which is the whole of D1288"
+    )
+
+    for subdir in (rendering.RELEASE_MIGRATIONS_SUBDIR, rendering.PROJECT_MIGRATIONS_SUBDIR):
+        on_disk = {path.name for path in (FIXTURE / subdir).glob("*.sql")}
+        recorded = {e["file"] for e in manifest["migrations"] if e["dir"] == subdir}
+        assert on_disk == recorded, f"{subdir}: {sorted(on_disk ^ recorded)}"
+
+
+def test_the_move_takes_the_project_versions_and_only_those() -> None:
+    """D1288's repair, read as SQL before it is ever run on a cluster.
+
+    A cluster migrated before ADR 0206 recorded both sets in one table, so the
+    release's `max(applied)` includes project versions -- which is what refused
+    beta. The move is driven by the rendered manifest, so it names exactly the
+    versions this release rendered as a project's.
+    """
+    statement = migrations.project_ledger_move_statement(FIXTURE)
+    assert statement is not None
+
+    project_versions = [
+        entry["version"]
+        for entry in json.loads(
+            (FIXTURE / "migrations" / rendering.MIGRATION_MANIFEST_NAME).read_text(encoding="utf-8")
+        )["migrations"]
+        if entry["set"] == "project"
+    ]
+    assert project_versions, "the fixture declares no project set; this proves nothing"
+
+    for version in project_versions:
+        assert f"'{version}'" in statement
+    # And no release version is swept along with them.
+    release_versions = [
+        entry["version"] for entry in migrations.release_set().load_manifest()["migrations"]
+    ]
+    for version in release_versions:
+        assert f"'{version}'" not in statement, f"the move names release version {version}"
+
+    assert statement.startswith("BEGIN;"), "a delete that outlived its insert would lose a record"
+    assert statement.rstrip().endswith("COMMIT;")
+    assert "ON CONFLICT (version) DO NOTHING" in statement, "the move must be re-runnable"
+    assert rendering.MIGRATIONS_TABLE in statement
+    assert rendering.PROJECT_MIGRATIONS_TABLE in statement
+
+
+def test_a_project_with_no_set_is_moved_nothing_at_all() -> None:
+    """The control, and the case nearly every project is in.
+
+    `None` rather than an empty transaction: the caller issues nothing, so a
+    project with no set reaches no psql at all and cannot fail in a path that
+    has no work to do for it.
+    """
+    assert migrations.project_ledger_move_statement(SECOND_FIXTURE) is None

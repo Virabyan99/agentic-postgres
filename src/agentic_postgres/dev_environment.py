@@ -464,7 +464,7 @@ def planned_migrations(rendered_dir: Path) -> list[dict[str, Any]]:
     return migrations.verify_rendered_directory(rendered_dir)
 
 
-def transaction_body(payload: str, version: str) -> str:
+def transaction_body(payload: str, version: str, table: str | None = None) -> str:
     """One migration payload's `up` half plus its own `schema_migrations` row.
 
     **The row goes inside the migration's own transaction**, which is where
@@ -485,17 +485,24 @@ def transaction_body(payload: str, version: str) -> str:
     what they must agree on is this transformation, and they do because there is
     one of it.
     """
+    # ADR 0206: a project set records into its own table, so a dev cluster's
+    # two ledgers have the same shape a deployment's do and `migrate.sh status`
+    # reads either the same way. Defaulted to the release's, so every caller
+    # that applies release migrations is unchanged.
+    from agentic_postgres import rendering
+
+    target = table or rendering.MIGRATIONS_TABLE
     body = payload.split("-- migrate:down", 1)[0].replace("-- migrate:up", "", 1)
     return (
         body.rstrip()
-        + "\n\nINSERT INTO app_private.schema_migrations (version) VALUES "
+        + f"\n\nINSERT INTO {target} (version) VALUES "
         + f"({migrations.quote_literal(version)});\n"
     )
 
 
-def migration_transaction(path: Path, version: str) -> str:
+def migration_transaction(path: Path, version: str, table: str | None = None) -> str:
     """`transaction_body` over a rendered file. What `apg dev up` applies."""
-    return transaction_body(path.read_text(encoding="utf-8"), version)
+    return transaction_body(path.read_text(encoding="utf-8"), version, table)
 
 
 # ---------------------------------------------------------------------------

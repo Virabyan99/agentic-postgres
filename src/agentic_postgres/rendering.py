@@ -662,6 +662,7 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "BACKUP_MIRROR_ENDPOINT",
     "BACKUP_MIRROR_BUCKET",
     "MIGRATIONS_TABLE",
+    "PROJECT_MIGRATIONS_TABLE",
     # The one role name that reaches a container. dbmate's connection URL is
     # assembled inside the migration container from this, the database name and
     # a password file; the alternative -- storing a whole URL as the secret --
@@ -964,6 +965,81 @@ ACCEPTANCE_PROBE_FUNCTION = "apg_acceptance_probe"
 #: field: the ledger's location is part of the migration contract, and a
 #: project that could choose it could point two projects at one table.
 MIGRATIONS_TABLE = "app_private.schema_migrations"
+
+#: Where dbmate records a PROJECT set's applied versions (ADR 0206).
+#:
+#: **D1288.** The two sets shared this table and therefore one ordering space,
+#: and `up --strict` refuses a pending version below `max(applied)` whichever
+#: set either came from. A project set must stamp above the release's newest at
+#: freeze, and every later release migration must stamp above every applied
+#: project version -- two demands that climb past each other indefinitely. Beta
+#: is where they met: release `20260912120032` against an applied
+#: `20260914120001`, refused, nothing applied.
+#:
+#: Separate tables give each set its own ordering space, so a release migration
+#: is compared only against applied release migrations. `--strict` stays on
+#: both: it guards partial application, not only order.
+PROJECT_MIGRATIONS_TABLE = "app_private.project_schema_migrations"
+
+#: The rendered subdirectory for each set. The release keeps `migrations/` --
+#: unchanged path, unchanged mount, unchanged invocation -- so a project with no
+#: set renders exactly what it rendered before ADR 0206.
+RELEASE_MIGRATIONS_SUBDIR = "migrations"
+PROJECT_MIGRATIONS_SUBDIR = "migrations-project"
+
+
+def migrations_subdir(label: str) -> str:
+    """The rendered subdirectory a set's payloads live in."""
+    return PROJECT_MIGRATIONS_SUBDIR if label == "project" else RELEASE_MIGRATIONS_SUBDIR
+
+
+def migrations_table(label: str) -> str:
+    """The dbmate table a set's applied versions are recorded in."""
+    return PROJECT_MIGRATIONS_TABLE if label == "project" else MIGRATIONS_TABLE
+
+
+def assert_migration_order(entries: list[dict[str, Any]]) -> None:
+    """Ascending WITHIN each set, and unique ACROSS them (ADR 0206).
+
+    Two rules with two different reasons, which is why they are not one check:
+
+    * **Within a set**, dbmate orders that set's directory by filename, so a
+      set whose versions do not ascend would be applied in a different order
+      than the render describes.
+    * **Across sets**, nothing needs to ascend any more -- each set is applied
+      from its own directory against its own table. That cross-set constraint
+      is what ADR 0206 removes, and it is what refused beta's deploy: release
+      `20260912120032` sorted below an applied project `20260914120001` and
+      `up --strict` stopped, having applied nothing (D1288).
+    * **But versions stay unique across sets**, because
+      `app_private.migration_ledger` keys on the version alone and is written
+      `ON CONFLICT (version) DO NOTHING`. Two sets sharing one would apply both
+      and record one, and the ledger is the only record of which bytes ran
+      (D1096).
+
+    A function rather than the inline check it replaced, so the case that
+    matters can be handed to it directly: the committed manifests cannot
+    express a release version above a project version without being edited.
+    """
+    for label in sorted({entry["set"] for entry in entries}):
+        versions = [entry["version"] for entry in entries if entry["set"] == label]
+        if versions != sorted(versions):
+            raise RenderError(
+                f"the rendered {label} migrations are not in ascending version "
+                f"order: {versions}. dbmate orders one directory by filename, so "
+                "this set would be applied in a different order than this render "
+                "describes."
+            )
+
+    all_versions = [entry["version"] for entry in entries]
+    duplicates = sorted({v for v in all_versions if all_versions.count(v) > 1})
+    if duplicates:
+        raise RenderError(
+            f"two migrations share a version across sets: {duplicates}. "
+            "app_private.migration_ledger keys on the version and is written ON "
+            "CONFLICT DO NOTHING, so one of them would be applied and never "
+            "recorded."
+        )
 
 
 def build_pgbackrest_conf(
@@ -1670,6 +1746,11 @@ def build_compose_env(
         **_archive_settings(identity, backup_enabled=backup_enabled),
         **_mirror_settings(identity, backup_settings=backup_settings),
         "MIGRATIONS_TABLE": MIGRATIONS_TABLE,
+        # ADR 0206. Exported for every project, not only one that declares a
+        # set: `dbmate-project` names it `:?required`, and a value that
+        # appeared only sometimes would make `compose config` fail for the
+        # projects that have no set -- which is most of them.
+        "PROJECT_MIGRATIONS_TABLE": PROJECT_MIGRATIONS_TABLE,
         "MIGRATION_ROLE_NAME": identity.roles["migration_user"],
         "POSTGRES_SERVICE_HOST": POSTGRES_SERVICE_HOST,
         "PGBOUNCER_SERVICE_HOST": PGBOUNCER_SERVICE_HOST,
@@ -2197,17 +2278,18 @@ def write_rendered_migrations(directory: Path, document: dict[str, Any]) -> Path
     refuse a file edited after it was rendered without re-rendering it to find
     out.
 
-    **One directory, two sets** (ADR 0198). dbmate is handed a directory, not a
-    list, so the release's migrations and the project's land side by side and
-    dbmate orders the whole of it by filename. That is why the version rule
-    exists and why it is checked again here rather than trusted: rig 20a
-    measured `up --strict` exiting 2 and applying nothing when the order is
-    broken on a deployed cluster, and applying the same pair silently on a fresh
-    one -- one set producing two schemas (D1098).
+    **One directory per set** (ADR 0206). dbmate is handed a directory, not a
+    list, and it orders the whole of that directory by filename -- so while the
+    two sets shared one directory they also shared one ordering space, and a
+    release migration stamped below an applied project migration was refused on
+    a deployed cluster while a fresh one applied the same pair silently (D1098,
+    and D1288 where it finally fired). The release keeps `migrations/`; a
+    project set is rendered to `migrations-project/` and applied against its own
+    table, so neither set's versions constrain the other's.
     """
     from agentic_postgres import migrations
 
-    target = directory / "migrations"
+    target = directory / RELEASE_MIGRATIONS_SUBDIR
     target.mkdir(mode=MIGRATION_DIRECTORY_MODE)
 
     entries = []
@@ -2236,7 +2318,11 @@ def write_rendered_migrations(directory: Path, document: dict[str, Any]) -> Path
             # repository controls, and the applied version is a value the ledger
             # keeps forever.
             filename = f"{entry['version']}_{entry['name']}.sql"
-            path = target / filename
+            subdir = migrations_subdir(migration_set.label)
+            payload_directory = directory / subdir
+            if not payload_directory.is_dir():
+                payload_directory.mkdir(mode=MIGRATION_DIRECTORY_MODE)
+            path = payload_directory / filename
             path.write_text(payload, encoding="utf-8")
             path.chmod(MIGRATION_FILE_MODE)
             entries.append(
@@ -2250,6 +2336,11 @@ def write_rendered_migrations(directory: Path, document: dict[str, Any]) -> Path
                     # to look the version up in one lock and then the other --
                     # which is exactly the reader D1096 broke.
                     "set": migration_set.label,
+                    # And WHERE it was written, since ADR 0206 gave each set its
+                    # own directory. Recorded for the same reason as `set`: a
+                    # reader that derived it would be a second place the layout
+                    # is decided.
+                    "dir": subdir,
                 }
             )
         if migration_set.is_project:
@@ -2263,25 +2354,7 @@ def write_rendered_migrations(directory: Path, document: dict[str, Any]) -> Path
                 "count": len(manifest["migrations"]),
             }
 
-    # The order files were written is the order sets were applied. Assert it is
-    # ALSO ascending version order, which is the order dbmate will use -- if the
-    # two ever disagree, the deploy would apply a different sequence from the one
-    # this function just described, and the cluster would be the first to know.
-    versions = [entry["version"] for entry in entries]
-    if versions != sorted(versions):
-        raise RenderError(
-            "the rendered migrations are not in ascending version order: "
-            f"{versions}. dbmate orders one directory by filename, so a project "
-            "version that sorts before a release version would be applied in a "
-            "different order than this render describes. Re-stamp the project's "
-            "migration later than the release lock's newest and freeze again."
-        )
-    duplicates = sorted({v for v in versions if versions.count(v) > 1})
-    if duplicates:
-        raise RenderError(
-            f"two migrations share a version across sets: {duplicates}. dbmate keys "
-            "its ledger on the version, so one of them would silently never apply."
-        )
+    assert_migration_order(entries)
 
     manifest_path = target / MIGRATION_MANIFEST_NAME
     manifest_path.write_text(
@@ -2289,6 +2362,10 @@ def write_rendered_migrations(directory: Path, document: dict[str, Any]) -> Path
             {
                 "project_key": document["project"]["key"],
                 "migrations_table": MIGRATIONS_TABLE,
+                # ADR 0206. Written whether or not this project declares a set,
+                # so a reader never has to decide whether an absent field means
+                # "no project set" or "rendered before the split".
+                "project_migrations_table": PROJECT_MIGRATIONS_TABLE,
                 "project_set": project_set_record,
                 "migrations": entries,
             }

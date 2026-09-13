@@ -358,6 +358,23 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
         "GRANT SELECT, INSERT, DELETE ON app_private.schema_migrations "
         f"TO {q(roles['migration_user'])};"
     )
+    # ADR 0206: a project's set records its applied versions here instead, so
+    # the two sets are ordered independently. Created for every project, not
+    # only one that declares a set -- an empty table costs nothing and a table
+    # that appeared only for some projects would be a second shape the
+    # bootstrap has to reason about. Same owner and same three grants as the
+    # release's, for the same reasons.
+    statements.append(
+        "CREATE TABLE IF NOT EXISTS app_private.project_schema_migrations "
+        "(version varchar(255) NOT NULL PRIMARY KEY);"
+    )
+    statements.append(
+        f"ALTER TABLE app_private.project_schema_migrations OWNER TO {q(roles['object_owner'])};"
+    )
+    statements.append(
+        "GRANT SELECT, INSERT, DELETE ON app_private.project_schema_migrations "
+        f"TO {q(roles['migration_user'])};"
+    )
     statements.append(
         "CREATE TABLE IF NOT EXISTS app_private.project_identity ("
         "singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton), "

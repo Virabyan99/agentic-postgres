@@ -1420,3 +1420,40 @@ def test_the_render_dependent_skip_stays_on_the_tests_that_need_it() -> None:
         f"{sorted(decorated - needed)} carry the marker and need no render, so they stop "
         "running in a clean checkout for no reason"
     )
+
+
+def test_the_two_migration_services_differ_only_in_their_two_values() -> None:
+    """ADR 0206's duplication, guarded rather than merely true today.
+
+    `bin/compose.sh` refuses `-e/--env` with `run` -- it is how a credential
+    enters a container through argv -- so the project set's invocation is a
+    second SERVICE rather than an overridden one. That buys a duplicated
+    entrypoint, including the password percent-encoding, which is the last thing
+    in this model that should drift.
+
+    So the entrypoints are compared as bytes, and the difference between the two
+    services is asserted to be exactly the two values ADR 0206 changes.
+    """
+    model = yaml.safe_load((REPO_ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    release = model["services"]["dbmate"]
+    project = model["services"]["dbmate-project"]
+
+    assert release["entrypoint"] == project["entrypoint"], (
+        "the two migration services' entrypoints have drifted; the password "
+        "encoding now has two authorities"
+    )
+
+    differing = {key for key in set(release) | set(project) if release.get(key) != project.get(key)}
+    assert differing == {"environment"}, (
+        f"the two services differ in {sorted(differing)}; ADR 0206 changes only their environment"
+    )
+
+    changed = {
+        key
+        for key in set(release["environment"]) | set(project["environment"])
+        if release["environment"].get(key) != project["environment"].get(key)
+    }
+    assert changed == {"APG_MIGRATIONS_TABLE", "APG_MIGRATIONS_DIR"}, (
+        f"the two services' environments differ in {sorted(changed)}; only the "
+        "table and the directory may"
+    )

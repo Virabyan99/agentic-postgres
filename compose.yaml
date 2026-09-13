@@ -347,6 +347,14 @@ services:
       APG_MIGRATION_ROLE: ${MIGRATION_ROLE_NAME:?required}
       APG_DATABASE_NAME: ${POSTGRES_DATABASE_NAME:?required}
       APG_MIGRATIONS_TABLE: ${MIGRATIONS_TABLE:?required}
+      # ADR 0206. The directory is an environment value for the same reason the
+      # table already was: `dbmate-project` below applies a project's set from
+      # its own directory against its own table, and the two services'
+      # entrypoints have to stay byte-identical or the password encoding has two
+      # authorities. `-e` cannot do this job -- bin/compose.sh refuses it with
+      # `run`, because injecting an environment value is how a credential
+      # reaches a container through argv.
+      APG_MIGRATIONS_DIR: /migrations
     # Unbraced shell references throughout, and not for style. The braced
     # escaped form is a literal Compose never interpolates, but it is
     # indistinguishable from a real required interpolation to anything reading
@@ -374,7 +382,62 @@ services:
         APG_MIGRATION_DATABASE_URL="postgres://$$APG_MIGRATION_ROLE:$$password@postgres:5432/$$APG_DATABASE_NAME?sslmode=disable"
         exec /usr/local/bin/dbmate
         --env APG_MIGRATION_DATABASE_URL
-        --migrations-dir /migrations
+        --migrations-dir "$$APG_MIGRATIONS_DIR"
+        --migrations-table "$$APG_MIGRATIONS_TABLE"
+        --no-dump-schema
+        "$$@"
+      - dbmate
+    command: [status]
+    networks:
+      - internal
+
+  # A PROJECT's migration set, applied from its own directory against its own
+  # table (ADR 0206).
+  #
+  # **D1288 is why this service exists.** While the two sets shared one
+  # directory they shared one ordering space, and `up --strict` refuses a
+  # pending version below `max(applied)` whichever set either came from -- so a
+  # release migration stamped below an applied project migration was refused on
+  # a deployed cluster, having applied nothing. A project set must stamp above
+  # the release's newest at freeze, and every later release migration must stamp
+  # above every applied project version: two demands that climb past each other
+  # indefinitely.
+  #
+  # Everything below `environment` is byte-identical to `dbmate` above, and
+  # `test_the_two_migration_services_differ_only_in_their_two_values` asserts
+  # it. The duplication is the price of NOT weakening bin/compose.sh's refusal
+  # of `-e` with `run`; the guard makes it a duplication that cannot drift
+  # rather than one nobody compares.
+  #
+  # Started only for a project that declares a set: nothing mounts
+  # /migrations-project otherwise, and bin/migrate.py runs this service only
+  # when `sets_for` answers with one.
+  dbmate-project:
+    image: ${DBMATE_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    profiles: [migration]
+    restart: "no"
+    user: "65532:65532"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      APG_MIGRATION_ROLE: ${MIGRATION_ROLE_NAME:?required}
+      APG_DATABASE_NAME: ${POSTGRES_DATABASE_NAME:?required}
+      APG_MIGRATIONS_TABLE: ${PROJECT_MIGRATIONS_TABLE:?required}
+      APG_MIGRATIONS_DIR: /migrations-project
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        set -eu;
+        raw="$$(cat /run/secrets/migration_user_password)";
+        password="$$(printf %s "$$raw" | od -An -tx1 -v | tr -d ' \n' | sed 's/../%&/g')";
+        APG_MIGRATION_DATABASE_URL="postgres://$$APG_MIGRATION_ROLE:$$password@postgres:5432/$$APG_DATABASE_NAME?sslmode=disable"
+        exec /usr/local/bin/dbmate
+        --env APG_MIGRATION_DATABASE_URL
+        --migrations-dir "$$APG_MIGRATIONS_DIR"
         --migrations-table "$$APG_MIGRATIONS_TABLE"
         --no-dump-schema
         "$$@"

@@ -55,6 +55,7 @@ from agentic_postgres import (
     dev_environment,
     migrations,
     naming,
+    rendering,
 )
 
 READY_ROUNDS = 2
@@ -222,10 +223,19 @@ def container_state(container: str) -> str | None:
 
 
 def applied_count(environment: dev_environment.Environment) -> int | None:
+    """Every set's applied versions, which is what `planned` counts (ADR 0206).
+
+    Both tables, because `status` prints this beside the number of PLANNED
+    migrations and the two halves of that sentence have to be counted the same
+    way. Counting only the release's said "32 of 34" on a cluster that had
+    applied all thirty-four -- caught by the live cluster proof, which is the
+    only place the two numbers meet.
+    """
     probe = as_superuser(
         environment.container,
         environment.database,
-        "SELECT count(*)::text FROM app_private.schema_migrations;",
+        "SELECT (SELECT count(*) FROM app_private.schema_migrations) "
+        "+ (SELECT count(*) FROM app_private.project_schema_migrations);",
     )
     if probe.returncode != 0:
         return None
@@ -393,8 +403,15 @@ def up(arguments: argparse.Namespace) -> int:
 
     applied: list[str] = []
     for entry in planned:
+        # The directory and the table both come from the entry (ADR 0206): a
+        # project set is rendered beside the release's and records into its own
+        # table, and deriving either here would be a second place the layout is
+        # decided. An entry rendered before the split carries neither key and
+        # falls back to the release's, which is what it was.
+        subdir = entry.get("dir") or rendering.RELEASE_MIGRATIONS_SUBDIR
+        table = rendering.migrations_table(entry.get("set") or "release")
         body = dev_environment.migration_transaction(
-            rendered_dir.parent / "migrations" / entry["file"], entry["version"]
+            rendered_dir.parent / subdir / entry["file"], entry["version"], table
         )
         result = as_migration_user(environment, migration_env, body)
         if result.returncode != 0:

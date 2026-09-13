@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from agentic_postgres import migrations, rendering
+from agentic_postgres import migrations, rendering, runtime_override
 
 EXIT_CONTRACT = 5
 
@@ -134,7 +134,7 @@ def assert_installed_render_is_current(
     )
 
 
-def run_dbmate(mode: str, document: dict, rendered_dir: str) -> int:
+def run_dbmate(mode: str, document: dict, rendered_dir: str, service: str = "dbmate") -> int:
     """Run one dbmate subcommand through bin/compose.sh, as migration_user.
 
     Through the wrapper, never `docker` directly: the wrapper is what pins the
@@ -151,7 +151,7 @@ def run_dbmate(mode: str, document: dict, rendered_dir: str) -> int:
         "migration",
         "run",
         "--rm",
-        "dbmate",
+        service,
         mode,
     ]
     if mode == "up":
@@ -160,12 +160,110 @@ def run_dbmate(mode: str, document: dict, rendered_dir: str) -> int:
         # what it can and exits 0 on a partially applied set.
         command.append("--strict")
 
-    print(f"migrate: {mode} as {document['database']['roles']['migration_user']}")
+    print(f"migrate: {mode} {service} as {document['database']['roles']['migration_user']}")
     result = subprocess.run(command, check=False)
-    if result.returncode != 0 or mode != "up":
-        return result.returncode
+    return result.returncode
 
+
+def run_every_set(mode: str, document: dict, rendered_dir: str) -> int:
+    """One dbmate invocation per set, release first, then the ledger once.
+
+    **Each set has its own directory and its own table** since ADR 0206, so each
+    is ordered against its own applied set alone. While they shared a table they
+    shared an ordering space, and `up --strict` refuses a pending version below
+    `max(applied)` whichever set either came from -- which is how a release
+    migration stamped below an applied PROJECT migration came to refuse a deploy
+    on beta, having applied nothing (D1288).
+
+    Release first is ADR 0198's order and is kept. It no longer decides anything
+    about ordering -- that is what the split removed -- but a project's
+    migrations are written against the schema the release's migrations create,
+    so the dependency is real even though the constraint is gone.
+
+    The ledger is written ONCE, after both, and is not split: it keys on the
+    version across every set and is the one record of which bytes ran (D1096).
+    It is also why a failure in the second set still leaves the first recorded
+    only if the first succeeded -- the early return below stops before the
+    ledger, so a partially applied pair records nothing and says so, rather than
+    recording a set that half ran.
+    """
+    if mode == "up":
+        status = reconcile_project_ledger(document, rendered_dir)
+        if status != 0:
+            return status
+
+    for migration_set in migrations.sets_for(document, REPO_ROOT):
+        service = (
+            runtime_override.MIGRATION_PROJECT_SERVICE
+            if migration_set.is_project
+            else runtime_override.MIGRATION_SERVICE
+        )
+        status = run_dbmate(mode, document, rendered_dir, service)
+        if status != 0:
+            return status
+
+    if mode != "up":
+        return 0
     return record_ledger(document, rendered_dir)
+
+
+def reconcile_project_ledger(document: dict, rendered_dir: str) -> int:
+    """Move a project set's applied versions into its own table (ADR 0206).
+
+    Runs BEFORE either dbmate invocation and as the superuser, over the
+    container socket, exactly as `record_ledger` does -- `migration_user` may
+    write its own bookkeeping but must not rearrange it, and this moves rows
+    between two tables it does not own the relationship between.
+
+    **This is D1288's repair on a cluster that predates the split.** Such a
+    cluster recorded both sets in `app_private.schema_migrations`, so the
+    release's `max(applied)` includes project versions and `up --strict` refuses
+    any release migration stamped below one of them -- which is precisely how
+    beta refused Session 24's deploy, having applied nothing. Moving the rows
+    restores the release's own ordering without re-applying anything.
+
+    Re-runnable, and a no-op on a cluster that has already been moved or never
+    had project migrations: the statement is `None` when this release renders
+    none, the insert is `ON CONFLICT DO NOTHING`, and the delete names the same
+    versions. Nothing here is conditional on "has this run before", because a
+    repair that had to know would be a repair with state of its own.
+    """
+    statement = migrations.project_ledger_move_statement(Path(rendered_dir))
+    if statement is None:
+        return 0
+
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            document["database"]["container"],
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            document["database"]["name"],
+            "-X",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-qtA",
+            "-f",
+            "-",
+        ],
+        input=statement,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        print(
+            "migrate: the project set's applied versions could not be moved into "
+            f"{rendering.PROJECT_MIGRATIONS_TABLE}: {result.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return EXIT_CONTRACT
+    print(f"migrate: project versions recorded in {rendering.PROJECT_MIGRATIONS_TABLE} (ADR 0206)")
+    return 0
 
 
 def record_ledger(document: dict, rendered_dir: str) -> int:
@@ -366,7 +464,7 @@ def main() -> int:
             # first means the answer names the right remedy.
             assert_installed_render_is_current(rendered, arguments.rendered_dir)
             assert_rendered_files_match(arguments.rendered_dir)
-            return run_dbmate(arguments.mode, document, arguments.rendered_dir)
+            return run_every_set(arguments.mode, document, arguments.rendered_dir)
 
     except migrations.MigrationError as error:
         print(f"migrate: {error}", file=sys.stderr)

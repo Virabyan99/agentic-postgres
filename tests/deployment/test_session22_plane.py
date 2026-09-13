@@ -336,10 +336,19 @@ def test_an_agent_reads_rows_through_a_tenant_tool_on_beta(
     """
     key = project_b["project"]["key"]
 
+    # BOTH tables, since ADR 0206 gave a project set its own (D1288's repair).
+    # This version belongs to the example project's set, so on a cluster the
+    # deploy has moved it is in `project_schema_migrations`; on one that predates
+    # the move it is still in `schema_migrations`. The question here is "did this
+    # migration run", which neither table alone can answer any more.
     code, out, error = psql(
         project_b,
-        "SELECT count(*)::text FROM app_private.schema_migrations "
-        f"WHERE version = '{GRANT_VERSION}';",
+        "SELECT (count(*) FILTER (WHERE source = 'release') "
+        "     + count(*) FILTER (WHERE source = 'project'))::text FROM ("
+        "  SELECT 'release' AS source, version FROM app_private.schema_migrations"
+        "  UNION ALL"
+        "  SELECT 'project' AS source, version FROM app_private.project_schema_migrations"
+        f") AS every_set WHERE version = '{GRANT_VERSION}';",
     )
     assert code == 0, f"{key}: {error.strip()[:300]}"
     assert out.strip() == "1", (

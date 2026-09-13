@@ -447,6 +447,13 @@ APP_SNAPSHOT_ENV_KEY = "APG_DOCS_APP_SNAPSHOT"
 MIGRATION_SERVICE = "dbmate"
 MIGRATIONS_MOUNT = "/migrations"
 
+#: The project set's service and mount (ADR 0206). Mounted only when the
+#: project declares a set: naming a source that does not exist would have
+#: Docker create a DIRECTORY there, and dbmate would then report an empty
+#: set rather than a missing one -- D463's shape, one directory along.
+MIGRATION_PROJECT_SERVICE = "dbmate-project"
+PROJECT_MIGRATIONS_MOUNT = "/migrations-project"
+
 __all__ = [
     "APP_SNAPSHOT_CONTAINER_PATH",
     "APP_SNAPSHOT_ENV_KEY",
@@ -552,6 +559,14 @@ def build_override(
     metrics_router_name: str,
     metrics_auth_middleware_name: str,
     publications: dict[str, Any] | None = None,
+    #: Does this project declare a migration set of its own (ADR 0206)?
+    #:
+    #: Declared rather than derived from whether `migrations-project/` happens
+    #: to exist: the override and the migration render are written by two
+    #: functions, and a mount that depended on which ran first would be a mount
+    #: that is sometimes there. Defaulted off, so a project with no set gets
+    #: exactly the override it got before ADR 0206.
+    project_migrations: bool = False,
 ) -> dict[str, Any]:
     """Build the override document for one project's health route and migrations.
 
@@ -664,6 +679,17 @@ def build_override(
             MIGRATION_SERVICE: {
                 "volumes": [f"{rendered_directory}/migrations:{MIGRATIONS_MOUNT}:ro"]
             },
+            **(
+                {
+                    MIGRATION_PROJECT_SERVICE: {
+                        "volumes": [
+                            f"{rendered_directory}/migrations-project:{PROJECT_MIGRATIONS_MOUNT}:ro"
+                        ]
+                    }
+                }
+                if project_migrations
+                else {}
+            ),
             ROUTED_SERVICE: {
                 "labels": {
                     "traefik.enable": "true",
@@ -1527,12 +1553,14 @@ def render_override(
     metrics_router_name: str,
     metrics_auth_middleware_name: str,
     publications: dict[str, Any] | None = None,
+    project_migrations: bool = False,
 ) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
     document = build_override(
         router_name=router_name,
         https_entrypoint=https_entrypoint,
         rendered_directory=rendered_directory,
+        project_migrations=project_migrations,
         rest_router_name=rest_router_name,
         buffering_middleware_name=buffering_middleware_name,
         stripprefix_middleware_name=stripprefix_middleware_name,

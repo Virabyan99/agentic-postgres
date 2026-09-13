@@ -748,24 +748,102 @@ def verify_rendered_directory(rendered_dir: Path) -> list[dict[str, Any]]:
 
     recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
     entries = list(recorded["migrations"])
-    expected = {entry["file"]: entry["sha256"] for entry in entries}
-    found = {path.name for path in directory.glob("*.sql")}
 
-    if found != set(expected):
+    # One directory per set since ADR 0206, so the set of files is compared per
+    # directory. An entry rendered before the split carries no `dir`; it read
+    # from `migrations/`, which is what the release still uses.
+    root = Path(rendered_dir)
+    by_directory: dict[str, dict[str, str]] = {}
+    for entry in entries:
+        subdir = entry.get("dir") or rendering.RELEASE_MIGRATIONS_SUBDIR
+        by_directory.setdefault(subdir, {})[entry["file"]] = entry["sha256"]
+
+    for subdir, expected in sorted(by_directory.items()):
+        payload_directory = root / subdir
+        found = {path.name for path in payload_directory.glob("*.sql")}
+        if found != set(expected):
+            raise MigrationError(
+                f"the rendered migration directory {subdir} does not match its "
+                f"manifest: unexpected {sorted(found - set(expected))}, "
+                f"missing {sorted(set(expected) - found)}"
+            )
+        for filename, sha in sorted(expected.items()):
+            actual = digest((payload_directory / filename).read_text(encoding="utf-8"))
+            if actual != sha:
+                raise MigrationError(
+                    f"{subdir}/{filename} does not match the payload that was rendered "
+                    f"({actual[:16]} != {sha[:16]}); it was edited after rendering."
+                )
+
+    # A stray directory is as much a mismatch as a stray file: a project set
+    # removed from a manifest but left on disk would otherwise still be mounted
+    # and applied.
+    stray = {
+        path.name for path in root.glob(f"{rendering.PROJECT_MIGRATIONS_SUBDIR}*") if path.is_dir()
+    } - set(by_directory)
+    if stray:
         raise MigrationError(
-            f"the rendered migration directory does not match its manifest: "
-            f"unexpected {sorted(found - set(expected))}, missing {sorted(set(expected) - found)}"
+            f"the render holds migration directories its manifest does not name: {sorted(stray)}"
         )
 
-    for filename, sha in sorted(expected.items()):
-        actual = digest((directory / filename).read_text(encoding="utf-8"))
-        if actual != sha:
-            raise MigrationError(
-                f"{filename} does not match the payload that was rendered "
-                f"({actual[:16]} != {sha[:16]}); it was edited after rendering."
-            )
-
     return entries
+
+
+def project_ledger_move_statement(rendered_dir: Path) -> str | None:
+    """Move a project set's applied versions into the project table (ADR 0206).
+
+    `None` when this project renders no project migration, so the caller issues
+    nothing at all rather than an empty transaction.
+
+    **This is the one-time repair D1288 needs, written to be re-runnable.** A
+    cluster migrated before ADR 0206 recorded both sets in
+    `app_private.schema_migrations`, so the release's `max(applied)` includes
+    project versions -- which is exactly what made `up --strict` refuse a
+    release migration stamped below one of them. Moving them restores the
+    release's own ordering without re-applying anything: the example project's
+    first migration is a bare `CREATE TABLE` and could not be re-applied, and a
+    row deleted rather than moved would make the cluster's history unreadable.
+
+    Driven by the RENDERED MANIFEST rather than by "everything not in the
+    release lock". The manifest records which set each payload came from
+    (TEN-SET-001), so this moves versions this release actually rendered as
+    project migrations and nothing else -- a row belonging to a set that has
+    since been removed stays where it is, visible, rather than being swept into
+    a table it was never applied from.
+
+    Both statements in one transaction: a delete that outlived its insert would
+    lose the record that a migration ran.
+    """
+    from agentic_postgres import rendering
+
+    manifest_path = Path(rendered_dir) / "migrations" / rendering.MIGRATION_MANIFEST_NAME
+    if not manifest_path.is_file():
+        return None
+    recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    versions = sorted(
+        entry["version"]
+        for entry in recorded.get("migrations", [])
+        if entry.get("set") == "project"
+    )
+    if not versions:
+        return None
+
+    listed = ", ".join(quote_literal(version) for version in versions)
+    release_table = rendering.MIGRATIONS_TABLE
+    project_table = rendering.PROJECT_MIGRATIONS_TABLE
+    # S608, suppressed narrowly and for the reason the neighbouring ledger
+    # insert gives: both table names are module constants in this repository,
+    # and every version reaches the statement through `quote_literal` after
+    # being read out of a manifest this release rendered. No value here comes
+    # from an operator or from a caller.
+    return (
+        "BEGIN;\n"  # noqa: S608
+        f"INSERT INTO {project_table} (version)\n"
+        f"  SELECT version FROM {release_table} WHERE version IN ({listed})\n"
+        "  ON CONFLICT (version) DO NOTHING;\n"
+        f"DELETE FROM {release_table} WHERE version IN ({listed});\n"
+        "COMMIT;\n"
+    )
 
 
 def ledger_insert_statement(

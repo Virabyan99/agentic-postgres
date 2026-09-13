@@ -269,3 +269,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0203](0203-the-local-environment-is-the-database-built-from-the-render-and-the-release.md) | The local environment is the database, built from the render and the release, and it holds no production secret | 22 | Accepted |
 | [0204](0204-a-generated-client-is-a-claim-about-the-surface-it-was-generated-from.md) | A generated client is a claim about the surface it was generated from, and its proof reads the served surface as the caller | 23 | Accepted |
 | [0205](0205-studio-is-a-same-origin-forwarder-that-holds-the-token-and-binds-loopback.md) | Studio is a same-origin forwarder that holds the human's token and binds loopback with no alternative | 24 | Accepted |
+| [0206](0206-a-project-migration-set-gets-its-own-ordering-space.md) | A project's migration set gets its own directory and its own migrations table, so the two sets are ordered independently | 24 | Accepted |

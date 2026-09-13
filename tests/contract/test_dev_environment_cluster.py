@@ -126,12 +126,38 @@ def test_up_applies_every_planned_migration_as_the_migration_user_and_records_bo
     planned = dev_environment.planned_migrations(Path(state["rendered_dir"]))
     assert len(planned) >= 32, f"only {len(planned)} migrations were planned"
 
+    # Both tables since ADR 0206, and UNION ALL rather than a join: each set
+    # records into its own, and what this asserts is that between them they
+    # carry exactly the planned versions. Ordered by version across the union,
+    # which is how `planned` is ordered within each set -- the two sets no
+    # longer interleave by version, so this also fails if a payload landed in
+    # the wrong table.
     versions = as_superuser(
-        state, "SELECT string_agg(version, ',' ORDER BY version) FROM app_private.schema_migrations"
+        state,
+        "SELECT string_agg(version, ',' ORDER BY version) FROM ("
+        "SELECT version FROM app_private.schema_migrations "
+        "UNION ALL SELECT version FROM app_private.project_schema_migrations) AS every_set",
     )
-    assert versions.split(",") == [entry["version"] for entry in planned], (
-        "schema_migrations does not carry exactly the planned versions in order"
+    assert sorted(versions.split(",")) == sorted(entry["version"] for entry in planned), (
+        "the two migration tables do not carry exactly the planned versions"
     )
+
+    # And each set's versions are in ITS OWN table, which is the property ADR
+    # 0206 rests on: one table is one ordering space, and that is what refused
+    # beta's deploy (D1288).
+    for table, label in (
+        ("app_private.schema_migrations", "release"),
+        ("app_private.project_schema_migrations", "project"),
+    ):
+        recorded = as_superuser(
+            state, f"SELECT coalesce(string_agg(version, ',' ORDER BY version), '') FROM {table}"
+        )
+        expected = [
+            entry["version"] for entry in planned if (entry.get("set") or "release") == label
+        ]
+        assert [v for v in recorded.split(",") if v] == expected, (
+            f"{table} does not hold exactly the {label} set's versions"
+        )
 
     ledger = as_superuser(
         state,
