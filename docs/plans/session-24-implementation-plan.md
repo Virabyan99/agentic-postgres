@@ -228,6 +228,7 @@ rewritten with the numbers.
 | **D1285** | `bin/dev.py::container_state`: *"`docker inspect`'s word for this container, or `None` if it cannot say"*, deciding between the two on `"No such object" not in probe.stderr`; and `dev_environment.status_of`'s docstring, *"four outcomes and not three, because 'there is no environment' and 'there is an environment and I could not ask it anything' are different facts and a developer acts differently on each (ADR 0195)"*. | **The distinction was never made, because the substring is capitalised and docker's is not.** Measured at the pinned daemon with a control: an absent container gives **exit 1** and stderr `error: no such object: <name>` — **lower case**, no capitalised match — while an existing one gives exit 0, stdout `running`, empty stderr. So `container_state` returned `None` for every absent container, and `apg dev status` printed *"state records container X, and docker could not be asked about it; **is the daemon running?**"* while the daemon was answering every other call in the same process. **ADR 0195's class inverted**: not a reader folding *I could not determine it* into an answer, but a reader that HAD the answer and reported that it had not — with a remedy attached that sends the developer to the wrong thing entirely. **And `container_state` had no proof at all**: `grep -rn container_state tests/` returned nothing, so the one branch separating the two outcomes had never run in any environment. Found because the gate's second run hit it for real — my own cleanup had removed a container the killed run's state still recorded — and the exit code cannot stand in for the wording, since `inspect` exits 1 for an absent object and an unreachable daemon alike. A comment in `test_session5_api_contract.py` has recorded the lower-case spelling since Session 5 (D195), one grep away the whole time. | **`ABSENT_PHRASES` is a named constant matched case-insensitively against a lower-cased stderr, and both spellings are in it** — `inspect` says *object*, the typed verbs say *container*, and neither is a contract. Three proofs where there were none, and the PAIR is what makes them mean anything: one asserts a definite *no such thing* reads as `absent`, one asserts an unreachable daemon reads as `None`, and either alone is satisfied by a conflation. Battery 3/3, first pass — mutation 1 restores the defect and kills only the `absent` proof, mutation 2 returns `absent` for every failure and kills only the unreachable one. Neither proof starts a container, so the module's standing rule holds. | **The single reader nobody had ever tested, in the function whose docstring is about telling two silences apart.** Session 22 wrote the four-outcome design and the ADR 0195 reasoning correctly and then compared against a string it had not measured — question 3 of §7, asked of a third party rather than of an identity. The trip merges `apg dev`'s own claims, so shipping this while writing Session 22's evidence would have been the wrong order. | 0195, 0203, D195, D267 |
 | **D1286** | `services/auth-api/app/mcp_runtime.py`, at the assignment: *"Recorded here and nowhere else: after `load_lock` has accepted it and before a server exists to serve it, so the module-level value and the server's lock are the same object by construction rather than by two assignments agreeing (D1153)"*; and `agent_plane.PROBE`, which reads `m.LOADED_LOCK` to answer *"which lock is the RUNNING plane serving"*. | **The probe is a different process from the server, so it could never read that global — and the first deploy ever to run this path was this one.** `agent_plane_constants` asks with `docker exec … python -c`, a FRESH interpreter in the same container: it imports `app.mcp_runtime` anew, and only `create_mcp_app` assigns `LOADED_LOCK`, so the import sees the module-level `None`. Measured on alpha-dev with the plane **up 17 minutes and healthy**, answering 401 on its route: probe stdout `["2025-11-25", false, "agent", null, null]` against a lock file carrying `schema_version 4`, `tool_count 6`, `tools_sha256 aac4bcf0…`. `has attribute: True`, value `NoneType`. The reasoning in the comment is exactly right *within one process* and empty across two. **It has never worked anywhere**: the path landed in `565a176` (Session 22 Run 2), which is not an ancestor of the deployed release `f61f716`, so every previous deploy read the file instead — which is why Session 21's §5 could list *"D1153's container-confirmed count"* as owed and nobody had seen it fail. **And the proof that catches it is `not_run`**: `test_session22_plane.py:262` asserts *"the document withheld mcp.tool_count while the plane is answering"* — `OPS-PLANE-001` / `plane_confirmed_count`, owed since Session 22, and one of the claims this very trip exists to pay. The contract proof that does pass (`test_lock_roster.py:582`) sets and reads the global **in one interpreter**, so it proves the assignment happens and cannot address whether anyone else can see it. | **The serving process writes what it loaded where a second process can read it.** `LOADED_LOCK_RECORD` is a module-level constant — which a fresh import CAN read — naming a file under the container's only writable mount (`tmpfs /tmp`, mode 0700, owned by the service's uid; per-container and per-boot, which is the right lifetime for *what THIS process loaded*). `record_loaded_lock` writes the signature beside the existing assignment, best effort: a plane serving correctly must not fail to start because a diagnostic could not be written, and a caller that cannot read it gets the third outcome it already handles. The probe asks the MODULE for the path rather than holding a copy of it (D486), falls back to the global, and `getattr` with a default so a plane from an older release still answers `null`. Four proofs where the cross-process question had none — one running a **real subprocess** against a module whose `LOADED_LOCK` is `None`, its control with no record file, the wiring, and the runtime-side write. Battery 4/4 first pass, **mutation 1 being the defect itself restored**. | **The deploy did not merely report the wrong thing — it could not finish.** `status: "ready"` with a null `tool_count` is a pair the schema refuses (D1287), so this stopped the trip's first deploy twice, after the cluster had already migrated. Question 6 of §7, in its purest form: the fixture and the code shared the belief *the global is set*, which was true; the deploy's question was *can another process see it*, which nobody asked until a host did. | 0195, 0203, D1152, D1153, D1201, D486 |
 | **D1287** | `deployedMcp` in `schemas/outputs.schema.json`: *"`unavailable` … **forces every other member null**, so a partially-filled block cannot be published as an observation"*; and `bin/deploy-project.py`, which on an unconfirmed lock keeps `status: "ready"`, nulls `tool_count`, and prints *"the agent plane did not say which lock it loaded; tool_count unpublished"* — citing ADR 0195's third outcome in the comment above it. | **The third outcome is reported to stdout and has nowhere to live in the document, so the deploy dies on its own schema.** `ready` with `tool_count: null` validates against neither branch of the root union, and `build_deployed_document` raises `ManifestError` at the last step of step 7 — after step 6 has migrated the cluster and ADR 0155 has recreated the containers. Twice on alpha-dev on 2026-09-13, each attempt materialising a fresh secret generation (`80a7f7bb…`, then `90b75bfd…`) for a document that was never written. The deployment is left converged with a record that still describes the previous session — *a cluster that has moved and a record that has not*, which this repository already names as the worst order a failure can arrive in on the migration plane, one level up. | **Recorded, not taken.** D1286's repair removes the case that fired here, so the deploy can finish; it does not make the pair representable, and a plane that genuinely cannot confirm still stops a deploy with a traceback rather than a diagnosis. The two candidate repairs are priced and neither is a trip-day change: (a) let the document carry *serving, lock unconfirmed* — the ADR-0195-shaped fix, which relaxes a RELEASED schema and wants its own ADR and probably an outputs version, since every reader of v18 may assume `ready` implies a count; (b) refuse with an operator sentence and an exit code instead of an exception — cheap, contract-free, and still a stop. | A reader with three outcomes and a document with two is the same defect as a reader with two outcomes and a reality with three; this one is just at the layer where it can halt a deploy. The printed sentence is the tell: the code knew exactly what had happened and had no way to say so in the artefact anyone would later read. | 0195, 0158, D1286, D941 |
+| **D1288** | `migrations._assert_follows_release_version`, on why only one direction is checked: *"The direction is not symmetric and that is the whole rule. A project migration older than an APPLIED release migration is refused by the cluster; **a release migration newer than an applied project migration is fine, because it sorts after everything on both a fresh cluster and a deployed one.** So the rule constrains only what a project may author, and never what the release may."* | **Beta refused Session 24's deploy on exactly the case that sentence rules out**, at step 6, having applied nothing: *"migration `20260912120032` is out of order with already applied migrations, the version number has to be higher than the applied migration `20260914120001` in --strict mode"*. The argument conflates *authored later* with *sorts higher*. The release stamps by authoring date and was at `20260912…`; the example project's set was stamped `20260914120001`/`…0002` — **two days ahead of the release's clock**, chosen at freeze to sort after `follows_release_version` `20260912120031`. That left the release a window in which any migration it authored sorted BELOW an already-applied project migration, and `0032` landed in it. `follows_release_version` guards the project's side only, because the docstring argued the release's side needed no guard. Alpha is untouched: it declares no project set, and its ledger is 32 with `0032` applied. **Measured, so the harm is not a judgement**: the two sets are disjoint — `0032` touches `app_private.auth_list_agent_audit` and its grants, the project set touches `app.note_embeddings`, `api.set_note_embedding`, pgvector and grants — so the schema would be identical in either order here. The guard fired correctly for the general case, not because these two interact. | **Not repaired on the trip, and beta is left at session 21 with nothing half-applied.** `--strict` is appended unconditionally (`bin/migrate.py:161`), so the only same-day unblocks are to loosen a released safety property in code or to run dbmate outside the product on a deployed host — the first needs an ADR and the second is the inversion of D1114. Re-stamping is refused from both ends: `0032` is APPLIED on alpha and `20260914120001` is APPLIED on beta, and D912 is fix-forward only. The three candidate repairs are priced for the session that takes them: (a) a guard at freeze AND at release-manifest time that no release version may sort below any project set's minimum — cheap, and it would have caught this on a workstation; (b) give the two sets separate ordering spaces, since sharing one merged directory is the root cause; (c) an idempotent re-stamp of the project set with the orphaned ledger row reconciled. | **A docstring that reasons its way out of a check is the most expensive kind of comment this repository produces.** The asymmetry claim reads as analysis, was never measured, and is the sentence that decided not to write the guard — a premise wrong in the reassuring direction (D930, D957), holding until the first deployment where a project stamped its versions ahead of the release's clock. And it cost the trip: alpha deployed through 24, beta blocked, the one sweep unrun. | 0198, D912, D940, D1098, D930 |
 
 ---
 
@@ -1487,8 +1488,149 @@ are the operator's**, numbered on the sheet:
     to the scratchpad first) with a `SESSION 24 COMPLETE` block; memory;
     commit, push, CI; fast-forward to `main`; delete the branch.
 
-**Done.** *(the day, in order, with every number; what the trip cost; what
-it left.)*
+**Done — PARTIALLY. 2026-09-13. Alpha is deployed through session 24; beta is
+not, and the sweep did not run.** The trip is the one thing this session needed
+and it is the one thing it did not finish, so this records what was paid, what
+was not, and why.
+
+**Before the day, on this workstation.** CI green on the branch head by full
+SHA, all three jobs. `--setup-plan` for `test_session22_plane`,
+`test_session23_client`, `test_session24_studio` and `test_honest_readers` with
+the variables set: 3, 2, 2 and 24 tests planned, none skipping. `git diff --stat
+main..session-24` read against §5's list, one line each (D1116). The host read
+first: up 35 days, so the kernel restart never happened and `/tmp/g20-sentinel.py`
+survived — byte-identical to `--help`'s block. All five Session 18 declarations
+present. Nine scripts staged under `/home/op`, digests compared both ends.
+
+**Four divergence rows before the host was touched, two of them repairs.**
+**D1282**: Run 7's own sheet says to point `--kit-dir` at a freshly exported kit
+and names REC-KIT-003 against it, and that proof `pytest.fail`s on exactly that
+— the claim IS the version gap. Measured on the host: `kit-2026-09-06` stores
+v16, `kit-2026-09-11` stores v17, the tree renders v18. The sweep would have got
+the old kit; the fresh export stays the operational obligation it is.
+**D1283**: the writer accepts a Session 24 host half for `--session 22` — it
+never compares a half's own `session` field to the argument — and the
+offline/deployment commit difference is printed, not fatal. The plan's fallback
+is not needed. Measured offline, with Session 21's half standing in.
+**D1284**: the pre-trip offline gate went red on one P0 proof (`assert 31 == 32`)
+while CI was green at the same commit. Not ordering — the JUnit records
+execution order and it is CI's. `.generated/fixture-alpine-dev` was rendered
+before migration `0032`, its outputs version was still v18, and the currency
+check compared outputs versions and nothing else. Proved with a control pair:
+the same directory rendered from `4af67ca` gives v18, 31 migrations, `current`,
+and the sweep's exact assertion; from the tree, v18, 32, `current`, five passes.
+**And it was not local** — the host's `.generated/` was Session 21's, v18 with 31
+migrations, read before anything was re-rendered, so the host's offline gate
+would have failed the same way. One measurement added; battery 3/3 first pass.
+**D1285**: `container_state` decided docker's two silences on `"No such object"`
+capitalised, and docker 29.5.2 writes it lower case — so every absent container
+read as *could not be asked*, with *is the daemon running?* attached, while the
+daemon answered every other call. ADR 0195's class inverted. The function had no
+proof at all. Battery 3/3, the pair killing one mutation each.
+
+**The day, in order.**
+1. *(sudo 0)* `chown -R op:op .generated` — Session 21's sweep left
+   `.generated/alpha-dev` root-owned 0700 (D1110/D1151). All five directories
+   `op:op` after.
+2. *(op)* Bundle over the host's own HEAD as basis, `FETCH_HEAD` confirmed
+   equal before any checkout (D504). `uv pip sync` exit 0. Both upgrade
+   candidates present in the transported history.
+3. *(op)* Four renders, all exit 0, all at template 1.5.0. D1284's widened check
+   on the host: `current — both fixtures at v18, release set of 32`. Two
+   worktrees at `8823877e` and `2121c029` rendered `candidate-13.json` (1.3.0)
+   and `candidate-14.json` (1.4.0) and were removed; 1.5.0's candidate is the
+   checkout's own render, not a third worktree. No worktree left behind.
+4. *(sudo 1–3)* **Four `upgrade plan` verdicts, all `minor`, none blocking**
+   (D1081's question, answered on a host for the first time for all three
+   proposed minors). Installed 1.2.0 on both, `deployed_through_session 21`.
+   **1.3.0 moves ONE leaf — `template_version` alone**: Session 22's release is
+   a minor a deployment cannot see, which is right for a developer command that
+   touches no deployment and is the first time that has been priced. 1.4.0 moves
+   two (`inputs.versions_lock_sha256`, `template_version`) plus `image_digest`.
+   1.5.0 on alpha moves three, adding `migrations.release_lock_sha256`; on beta
+   five, adding `project_set.count 1 → 2` and its lock — **D1189's grant repair
+   visible as pending before the deploy rather than after**.
+5. *(sudo 4, twice — FAILED)* Alpha's deploy reached step 7 and refused its own
+   document, twice, the second time with the agent plane up 17 minutes and
+   healthy. **D1286**: `agent_plane.PROBE` runs in `docker exec … python -c`, a
+   fresh interpreter, and read `m.LOADED_LOCK`, which only `create_mcp_app`
+   assigns in the SERVER's process. Measured: probe stdout
+   `["2025-11-25", false, "agent", null, null]` against a lock file carrying
+   `tools_sha256 aac4bcf0…`, `has attribute: True`, value `NoneType`. The
+   assignment's own comment reasons the global and the server's lock are *"the
+   same object by construction"* — true within one process, empty across two.
+   **It had never worked anywhere**: the path landed in `565a176` (Session 22
+   Run 2), not an ancestor of the deployed release `f61f716`, so every earlier
+   deploy read the file — which is how Session 21 could list *"D1153's
+   container-confirmed count"* as owed without anyone seeing it fail. **And the
+   proof that catches it is `not_run`**: `test_session22_plane.py:262`, which is
+   `OPS-PLANE-001` / `plane_confirmed_count`, one of the claims this trip exists
+   to pay. The contract proof that passes reads the global in ONE interpreter.
+   Repaired: the serving process writes its lock's signature to a module-named
+   path under the container's only writable mount, and the probe asks the module
+   for the path (D486). Battery 4/4 first pass, mutation 1 being the defect
+   restored. **D1287** recorded, not taken: `status: "ready"` with a null
+   `tool_count` is a pair the schema refuses, which is why this HALTED a deploy
+   rather than merely reporting wrongly — the third outcome is printed to stdout
+   and has nowhere to live in the document. Each failed attempt materialised a
+   fresh secret generation (`80a7f7bb…`, `90b75bfd…`) for a document never
+   written.
+6. *(sudo 4b)* **Alpha deployed through session 24** on the repaired release.
+   Ledger **32**, `0032` applied, `Pending: 0` — read from the ledger, never the
+   migrator's line (D941). Lock schema 4, six tools, `tools_sha256 aac4bcf0…`,
+   `vocabulary.data` five scopes. Document schema 18, template **1.5.0**,
+   through session 24, `source_commit 39fab00…`. **`mcp.tool_count 6`** — the
+   value that was `null` through two failed deploys. Doctor **10 ok, 0 warning,
+   0 problem, 0 unknown**, including *"capability drift — the lock on disk is the
+   one the deployed document recorded, **and the one the running agent plane
+   loaded**"*: D1286's repair confirmed by the product's own reader. Issuer
+   answers 400. **D1164's reading: `.generated/alpha-dev` is `op:op` after a
+   sudo deploy**, confirming D1110 rather than assuming it.
+7. *(sudo 6 — REFUSED)* Beta's deploy stopped at step 6 **having applied
+   nothing**: *"migration `20260912120032` is out of order with already applied
+   migrations, the version number has to be higher than the applied migration
+   `20260914120001` in --strict mode"*. **D1288**, and the sentence it refutes is
+   a docstring: *"a release migration newer than an applied project migration is
+   fine … the rule constrains only what a project may author, and never what the
+   release may."* That conflates *authored later* with *sorts higher*. The
+   example project's set is stamped two days ahead of the release's clock, so
+   the release had a window in which anything it authored sorted below an
+   applied project migration, and `0032` landed in it. Beta's ledger stays 32,
+   `Pending: 2`, document still session 21 / 1.2.0, only `docs` recreated.
+   Measured, so the harm is a reading and not a judgement: the two sets are
+   **disjoint** — `0032` touches `app_private.auth_list_agent_audit` and its
+   grants, the project set `app.note_embeddings`, `api.set_note_embedding`,
+   pgvector and grants. The guard fired for the general case, correctly.
+8. *(sudo 5/7)* **D1255's numbers, which the retention statement starts from.**
+   Alpha: **1,328** audit rows spanning **19.7 days** (2026-08-22 to 2026-09-11),
+   **40 of them with no `completed_at`**, 616 kB; **186** idempotency rows,
+   112 kB. Beta: 8 rows over 0.0 days, 64 kB; 0 idempotency rows, 16 kB. The
+   column is `started_at`; the first version of the counts script asked for
+   `created_at`, a name assumed rather than read from migration 0019 — CLAUDE.md
+   §7's habit, caught by two error lines and no data.
+
+**What the trip cost, read before the next one.** Four defects, three of them
+found by the host and none catchable offline as the tree stood, plus two found
+by the pre-flight. Three share one shape — **a premise wrong in the reassuring
+direction, written down as the reason not to check**: D1284's currency proxy,
+D1286's *same object by construction*, and D1288's asymmetry argument. D1288's
+is the starkest and the most expensive: a docstring that reasoned its way out of
+a guard that would have caught this on a workstation, for the price of one
+comparison at freeze time. Three of the day's five repairs were to product code
+on the branch, each with a battery at 3/3 or 4/4 first pass and each CI-green
+before transport; the fourth and fifth are recorded and not taken.
+
+**What it left, and what is still owed.** No host sweep, no external run, no
+merged evidence: **Sessions 22, 23 and 24 all still owe their live halves**, and
+`plane_confirmed_count` — the claim that would have caught D1286 — is still
+`not_run` for the third session running. Beta is at session 21 with two pending
+migrations and an agent plane on the pre-repair image, so its `capability drift`
+check reads `UNKNOWN` by the same mechanism D1286 describes. Alpha is deployed,
+healthy and unblocked. The next trip's first task is **not** the sweep: it is
+D1288's repair, priced at three candidates in its row, of which (a) — a
+freeze-time and manifest-time guard that no release version may sort below any
+project set's minimum — is cheap and would have moved this whole day onto a
+workstation.
 
 ---
 
