@@ -1505,7 +1505,9 @@ are the operator's**, numbered on the sheet:
 **Done — PARTIALLY. 2026-09-13. Alpha is deployed through session 24; beta is
 not, and the sweep did not run.** The trip is the one thing this session needed
 and it is the one thing it did not finish, so this records what was paid, what
-was not, and why.
+was not, and why. **The trip was finished later the same day under Run 8, after
+D1288's repair — its Done paragraph is the record of the sweep, the external
+half and the three merges.**
 
 **Before the day, on this workstation.** CI green on the branch head by full
 SHA, all three jobs. `--setup-plan` for `test_session22_plane`,
@@ -1687,12 +1689,50 @@ key added only to the dict and the render refused by name, and
 `RENDERED_FILE_MODES` refused the new directory until it carried a stated mode
 with a reason (ADR 0154). D1289 records what was measured and rejected.
 
-**What it leaves.** Beta is still at session 21 and still owes its deploy; the
-host sweep, the external run and the three merges are still Run 7's, and
-Sessions 22, 23 and 24 still owe their live halves. What changed is that beta
-can now be deployed: the move takes its two project versions out of the
-release's applied set, and `0032` is then the newest release version pending
-against a release table whose maximum is `20260912120031`.
+**The trip, completed. 2026-09-13.** Beta deployed through session 24 on the
+repaired ordering, so both projects are at release `bd38ebb`, template 1.5.0,
+**doctor 10 ok / 0 problem each**. One cumulative sweep, as a trip may cost:
+**977 passed, 0 failed, 12 skipped**, `GATE_24_HOST_EXIT=5` with the host half
+written — exit 5 is D686's contract and not a failure of the suite. The external
+half from this workstation: **25 passed, 0 failed**, exit 0, five claims
+(`connection_tooling`, `public_agent_boundary`, `public_api_boundary`,
+`public_storage_boundary`, `transport_boundary`). **The three merges (D1244),
+one trip paying three sessions**: `evidence/session-22.json` at 118 claims with
+its offline half at `8823877e`, `session-23.json` at 120 with `2121c029`, and
+`session-24.json` at **122 — the count §7 predicted** — with `bd38ebb`. Each
+carries `status: not_run` and exits 5 on the same nine, which is how Sessions
+18, 20 and 21 closed.
+
+**What the trip came for, all of it paid.** `plane_confirmed_count` and
+`agent_tenant_read` are `passed` for Session 22, having been `not_run` since it
+closed and through two sessions after it; `generated_client_hash` and
+`agent_lock_reported` for Session 23; `studio_revocation`,
+`audit_boundary_reported`, `studio_boundary` and `studio_surface` for Session
+24.
+
+**Five rows in this half of the run, and one process failure behind four of
+them.** D1298, an invented field name — the proof indexed both audit readers on
+`audit_id`, which neither publishes and the table does not have. D1299, a
+revoked credential is refused at the credential boundary BEFORE
+`agent_audit_begin`, so the refusal the proof wanted could never be audited and
+the plane was right. D1300, D1165's root-branch re-entry refused at an ANCESTOR,
+so the proof measured the wrong directory and agreed with the expected answer.
+D1301, **my own fixture chmodded `/tmp` to `0755` as root on the deployment
+host** — sticky bit gone, every unprivileged write refused, found when a bundle
+`scp` was denied and remediated by the operator with `chmod 1777`. D1302, the
+ninth `not_run` that §7 named a finding in advance. **D1298 through D1301 were
+each claimed in a commit subject and written into this table in none of them**,
+found by counting rows rather than by rereading what I had said — D1116 one
+level up, and the second occurrence in this session after D1292/D1293.
+
+**What it leaves.** `honest_readers` is recorded and NOT repaired (D1302): its
+23 node ids span four modules and the one that still skips under root lives in
+`test_render_atomicity.py`, which D1165's re-entry never reached. The repair is
+named in the row and costs a second host sweep, so it was the operator's call
+and the call was to close with nine. **The DR kit re-export remains owed as an
+operational obligation** (D1282) — `kit-2026-09-11` stores v17 and the tree
+renders v18; it is not a gate argument and was not taken. The rotation D860 has
+waited for since Session 16 was again not performed.
 
 ---
 
