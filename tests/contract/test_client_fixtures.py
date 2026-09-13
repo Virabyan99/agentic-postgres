@@ -459,11 +459,30 @@ def test_only_the_prisma_fixture_holds_the_migration_credential() -> None:
 
     Any other fixture appearing here would be a client with schema authority it
     has no use for.
+
+    **`dbmate-project` joined the roster under ADR 0206** and is not a fixture:
+    it is the migration plane's second service, applying a project's set from
+    its own directory against its own table, as the same migration role through
+    the same transport. It reaches this file because its entrypoint is asserted
+    byte-identical to `dbmate`'s -- which is also how it came to read a secret
+    nobody had declared for it (D1291), caught on a host rather than here.
+
+    The fixture rule is now ASSERTED rather than only described. The equality
+    below would have admitted a new client fixture exactly as readily as a new
+    migration service, and telling those two apart is the whole of this test.
     """
     contract = yaml.safe_load((REPO_ROOT / "secrets.required.yaml").read_text(encoding="utf-8"))
     migration = next(s for s in contract["secrets"] if s["name"] == "migration_user_password")
     consumers = {consumer["service"] for consumer in migration["consumers"]}
-    assert consumers == {"dbmate", "client-prisma"}
+    assert consumers == {"dbmate", "dbmate-project", "client-prisma"}
+
+    # The rule the docstring states, as a second assertion rather than a
+    # sentence: of every client fixture this repository ships, exactly one may
+    # hold schema authority.
+    assert consumers & set(FIXTURES.values()) == {"client-prisma"}, (
+        "a client fixture other than Prisma holds the migration credential: "
+        f"{sorted((consumers & set(FIXTURES.values())) - {'client-prisma'})}"
+    )
 
 
 def test_the_two_fixture_identities_are_distinct_uuids() -> None:
