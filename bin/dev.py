@@ -673,7 +673,11 @@ def psql(arguments: argparse.Namespace) -> int:
 
     try:
         argv = dev_environment.psql_arguments(
-            environment, arguments.role, dev_environment.state_dir(key), arguments.rest
+            environment,
+            arguments.role,
+            dev_environment.state_dir(key),
+            arguments.rest,
+            tty=getattr(arguments, "tty", True),
         )
     except dev_environment.DevEnvironmentError as error:
         fail(dev_environment.EXIT_INPUT, str(error))
@@ -700,6 +704,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--as", dest="role", default="app-runtime")
     parser.add_argument("rest", nargs="*")
     arguments = parser.parse_args(argv)
+
+    # **The `--` that separates psql's flags from this command's is argparse's
+    # to handle, and it can** (D1353, rig 25q). What was broken was one layer
+    # up: `bin/dev.sh` shifted the separator away before forwarding, so nothing
+    # reached this parser to say which flags were psql's, and `-c` was refused
+    # as an unrecognised argument of this command. The wrapper forwards it now.
+    #
+    # A split was written here first and then removed, because a mutation could
+    # not break it: with the wrapper repaired, argparse carries even
+    # `-- --as postgres`, where a psql flag collides with one this command
+    # defines. Two mechanisms for one separator is one more than there is a
+    # rule for (ADR 0002's habit, applied to a parser).
+    #
+    # **A terminal is allocated only when there is one** (D1354). `docker exec
+    # -t` refuses with *cannot attach stdin to a TTY-enabled container* when
+    # stdin is not a terminal, which is every non-interactive caller -- a script,
+    # a CI job, and every test in this suite. That refusal is why the forwarding
+    # above was proved by SCANNING the wrapper's source rather than by running
+    # the command, and scanning the wrapper measured the half that was correct.
+    arguments.tty = sys.stdin.isatty()
 
     if arguments.verb == "seed" and not arguments.name:
         parser.error("seed requires a seed NAME")

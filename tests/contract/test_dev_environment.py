@@ -932,6 +932,25 @@ def test_the_psql_arguments_carry_the_subject_the_loopback_and_no_password() -> 
 
     argv = dev_environment.psql_arguments(environment, "app-runtime", directory)
     assert argv[:2] == ["exec", "-it"]
+
+    # **`-t` only when the caller says there is a terminal** (D1354). It was
+    # unconditional, and `docker exec -t` refuses outright when stdin is not
+    # one -- so `psql ... -- -c 'SELECT 1'` from a script, from CI or from a
+    # test could not run at all. That is why the forwarding proof in
+    # `test_dev_command.py` read the wrapper's source instead of running the
+    # command, and reading the source measured the half that was correct.
+    #
+    # The default stays `True`, so the interactive session asserted above is
+    # unchanged and this is a widening rather than a change.
+    headless = dev_environment.psql_arguments(
+        environment, "app-runtime", directory, ["-c", "SELECT 1"], tty=False
+    )
+    assert headless[:2] == ["exec", "-i"], (
+        f"a non-terminal caller still gets a TTY allocated: {headless[:2]}"
+    )
+    assert headless[-2:] == ["-c", "SELECT 1"], (
+        f"the forwarded arguments did not survive: {headless[-2:]}"
+    )
     assert "--env-file" in argv
     assert argv[argv.index("--env-file") + 1].endswith(dev_environment.APP_RUNTIME_ENV)
     assert f"PGOPTIONS=-c app.user_id={environment.subject_id}" in argv

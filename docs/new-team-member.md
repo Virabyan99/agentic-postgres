@@ -1,10 +1,17 @@
 # New team member guide
 
-Fourteen steps, **every one of them available now and every one of them
-offline**. None requires editing a file this repository ships, and none needs a
-host, root, a credential or a provider. The single exception is named where you
-meet it: the OpenAPI snapshot in step 9 is captured from a running deployment,
-and until you have one the contract check for it stays red by design.
+Fourteen steps, **every one of them available now**, and **twelve of them
+offline**. None requires editing a file this repository ships, and none needs
+root, a credential or a provider.
+
+**Two of the fourteen wait for your project's first deploy, and both wait on
+the same file.** `projects/<slug>/contracts/postgrest-openapi.canonical.json`
+is your surface as a running PostgREST serves it, and a checkout cannot serve
+one — `apg dev` is the database alone (ADR 0203). So if you add a table of your
+own at step 9, then step 11's *compile* and step 12's *generate* refuse with
+exit 5 until you have deployed once and captured that snapshot. Each step says
+so where you meet it, and step 11 carries the four-line order to follow. A
+reader who adds no table of their own meets neither wall.
 
 Every step on this page runs against the release you have. For fifteen
 sessions some of them were labelled as belonging to a session still to come,
@@ -67,8 +74,15 @@ paths only — never the environment, never a secret.
 ### 5. Verify you have the specification you think you have — *available now*
 
 ```bash
-sha256sum -c docs/source-specification.sha256
+(cd docs && sha256sum -c source-specification.sha256)
 ```
+
+**The `cd` is load-bearing** and it is the one command on this page that is not
+run from the repository root. The checksum file names `source-specification.md`
+with no directory, because that is what `sha256sum` wrote when it was made
+beside the file it digests — so run from the root it looks for
+`./source-specification.md`, does not find it, and reports *No such file or
+directory* with exit 1. The subshell keeps your shell where it was.
 
 ### 6. Read the contract — *available now*
 
@@ -86,6 +100,14 @@ cp capabilities.example.yaml capabilities.yaml
 Set the slug, environment, and domain. `capabilities.yaml` stays empty: no
 capability can be enabled until a live API contract exists to validate it
 against.
+
+**Remove the `mcp.capabilities` key for now, and put it back at step 11.** The
+example manifest you just copied carries it, and it names a file that does not
+exist yet in your project — the manifest loader refuses that, so the first
+`freeze-lock` at step 9 would be refused before it read a single migration. The
+key is added back once `bin/agent.sh init --head` has written
+`projects/<slug>/capabilities.yaml`. The order is: a migration set first, then
+the capability over it, which is also the order the two steps appear in below.
 
 **Neither file may ever contain a secret.** The loader rejects secret-bearing
 keys at any depth.
@@ -185,10 +207,12 @@ and nothing reaches a provider — see [the developer loop](dev-environment.md).
 
 It needs Docker, which step 2 installed and step 4 confirmed.
 
-### 11. Give an agent your table — *available now*
+### 11. Give an agent your table — *the manifest now, the compile after your first deploy*
 
 An agent reaches your relations through a capability manifest you own, beside
-your migration set, and through nothing else (ADR 0201):
+your migration set, and through nothing else (ADR 0201). **The first two
+commands run here; the last three do not, and the reason is a file only a
+deployment can produce** — see the note under this block before you run them:
 
 ```bash
 bin/agent.sh init --head > projects/<slug>/capabilities.yaml
@@ -198,6 +222,36 @@ bin/mcp-contract.sh compile --project project.yaml \
   > projects/<slug>/contracts/mcp-capabilities.canonical.json
 bin/mcp-contract.sh check --project project.yaml
 bin/render-evaluation-report.py --write --project project.yaml
+```
+
+**Where this stops, and why.** `bin/agent.sh init` runs here and writes you a
+correct manifest. The three commands after it — `compile`, `check` and the
+report — each refuse with exit 5:
+
+> `projects/<slug> has no approved snapshot at
+> contracts/postgrest-openapi.canonical.json. It is captured from the project's
+> deployment with bin/api-contract.sh --update ...`
+
+That snapshot is the surface **as a running PostgREST serves it**, and there is
+no way to produce it in a checkout: `apg dev` is the database alone and stands
+up no PostgREST (ADR 0203, and D1211 in the ledger records the cost of changing
+that). So a capability over your own view is *declared* on your machine and
+*compiled* after your project's first deploy, in this order:
+
+1. here: `bin/agent.sh init` writes `projects/<slug>/capabilities.yaml`, and you
+   commit it;
+2. deploy the project once (`./deploy.sh --project project.yaml ...`);
+3. `bin/api-contract.sh --update --project project.yaml --project-outputs
+   <the deployed outputs.json>`, review the captured snapshot and commit it;
+4. then the three commands above, and step 12's `generate`, all run offline
+   from then on.
+
+Nothing is lost by the wait — the deploy does not need the capability, and the
+agent plane serves the release's six tools until your own is compiled into the
+lock. **If you are following this guide to the end without a deployment, stop
+at `bin/agent.sh init` and read step 13.**
+
+```bash
 bin/render-mcp-catalog.py --write --project project.yaml
 ```
 
@@ -230,7 +284,7 @@ That is a second migration, because the first is frozen; fix forward, never an
 amendment. `projects/example/migrations/templates/0002-agent-grants.sql` is the
 worked example.
 
-### 12. Generate a client — *available now*
+### 12. Generate a client — *after your first deploy, if you added a table*
 
 ```bash
 bin/apg.sh generate --project project.yaml
@@ -240,8 +294,15 @@ A third of a second, and it writes a typed TypeScript package over the
 surface your project publishes — including the view and the write function you
 added in step 9, and the tool you declared in step 11: one method per published
 object, one per agent tool, and the digests that say which surface and which
-lock they came from. It reads four committed artefacts and nothing live, so it
-works here, before any deployment exists.
+lock they came from.
+
+**It reads four committed artefacts and nothing live — but one of the four is
+`projects/<slug>/contracts/postgrest-openapi.canonical.json`, and only a
+deployment can produce it.** So this command works today for a project with no
+migration set of its own, over the release's surface alone, and refuses with
+exit 5 for a project that HAS one until that project has been deployed once and
+its snapshot captured. If you followed step 9 you have one, and this step waits.
+The note under step 11 is the same wall and says what to do about it.
 
 You cannot *call* anything with it yet — there is no REST service until a
 deploy — and that is worth seeing rather than reading about: `init()` is the

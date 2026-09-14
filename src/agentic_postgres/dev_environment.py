@@ -803,11 +803,19 @@ def psql_arguments(
     role_key: str,
     state_directory: Path,
     extra: list[str] | None = None,
+    tty: bool = True,
 ) -> list[str]:
-    """The whole `docker exec` for an interactive session. No password in it.
+    """The whole `docker exec` for a session. No password in it.
 
-    `--env-file` again, for D1160's reason, and `-it` so the session is a
-    terminal. `PGOPTIONS` carries the development subject: measured in rig
+    `--env-file` again, for D1160's reason, and `-i` always.
+
+    **`-t` only when the caller says there is a terminal** (D1354). It was
+    unconditional, and `docker exec -t` refuses outright when stdin is not one
+    -- so `psql ... -- -c 'SELECT 1'` from a script, from CI, or from a test
+    could not run at all. The caller decides, because whether stdin is a
+    terminal is I/O and this module does none; `bin/dev.py` reads
+    `sys.stdin.isatty()` and passes the answer. The default stays `True` so an
+    interactive session is unchanged. `PGOPTIONS` carries the development subject: measured in rig
     22b-2, `api.notes` returns the subject's row with it, nothing without it,
     and nothing with another subject's id -- which is row-level security doing
     its work on a cluster a developer can break.
@@ -824,7 +832,7 @@ def psql_arguments(
     role_suffix = PSQL_ROLES[role_key]
     arguments = [
         "exec",
-        "-it",
+        "-it" if tty else "-i",
         "--env-file",
         str(state_directory / PSQL_ENV_FILES[role_suffix]),
     ]

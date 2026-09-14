@@ -71,9 +71,11 @@ you:**
 1. Get the workstation ready and render the example project.
 2. Add a table of your own choosing — one table, with one view over it and one
    write function — as a migration set that belongs to a project you name.
-3. Give an agent a capability over that view.
+3. Declare an agent capability over that view, and follow the documentation
+   to wherever it tells you the declaration stops.
 4. Build a local database and see your migration set applied to it.
-5. Generate a typed client over the surface you extended.
+5. Generate a typed client, and follow the documentation to wherever it tells
+   you that stops for a project shaped like yours.
 6. Read what Studio is and what it needs. You have no deployment, so you will
    not open it; find out what it says when you point it at what you do have,
    and write that sentence down.
@@ -87,9 +89,15 @@ you:**
   notebook.
 - **Ask nobody anything.** There is no one to ask. If you find yourself wanting
   to, write the question down as an undocumented step and decide for yourself.
-- **Nothing needs `sudo`, a host, a credential, a provider or a deploy.** If a
-  step looks like it needs one, that is a finding: write it down, skip the step,
-  and carry on.
+- **Nothing needs `sudo`, a host, a credential or a provider.** If a step looks
+  like it needs one, that is a finding: write it down, skip the step, and carry
+  on.
+- **Two steps do wait for a deploy, and the documentation says which.** You have
+  no deployment and will not get one. Where a page tells you a step needs one,
+  reaching that sentence, recording it, and carrying on IS completing the step —
+  it is not a finding and it is not a block. Where a page tells you a step runs
+  now and it does not, that IS a finding, and it is the most valuable thing you
+  can write down.
 - **Do not edit any file the repository ships.** Copying an example to a name
   the repository ignores, and editing the copy, is expected. Editing a tracked
   file is the thing this walk exists to detect.
@@ -139,8 +147,10 @@ verdict; read it, and do not edit the record to make it happier. If it reports
 findings, they are the documentation's, not yours.
 
 **Set `reached_success_criterion` honestly.** It is true only if all seven
-goals above are done, `check` reports no findings, and the gate exits 0 on a
-clean tree with your project directory tracked. If it is false, add a
+goals above are done — a goal whose documented answer is *this waits for a
+deploy* counts as done when you have found that sentence and recorded it —
+`check` reports no findings, and the gate exits 0 on a clean tree with your
+project directory tracked. If it is false, add a
 `"blocked_by"` member: one sentence naming the step you stopped at and what
 refused you. A walk that stops is a useful result; a walk that says it finished
 when it did not is the only useless one.

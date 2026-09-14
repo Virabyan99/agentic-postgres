@@ -22,6 +22,7 @@ import copy
 import hashlib
 import json
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -197,6 +198,120 @@ def test_a_project_version_older_than_the_release_lock_is_refused(copied: Path) 
     # The control, in the same invocation (D499).
     real = migrations.MigrationSet(label="project", root=EXAMPLE / "migrations")
     migrations.verify_lock(real.load_manifest(), real.load_lock(), real.root)
+
+
+def test_a_manifest_the_loader_refuses_is_an_argument_error_and_not_a_traceback(
+    tmp_path: Path,
+) -> None:
+    """`D1352`. `freeze-lock --project` on a manifest that does not load.
+
+    **This is D1340 one caller over.** That row repaired `bin/render-config.py`
+    for `MigrationError`, having found that `bin/migrate.py` and `bin/dev.py`
+    had handled the class since Session 20 and the render -- the third caller --
+    never got the decision. Nobody then grepped for a FOURTH, and
+    `bin/migrate.py` was raising `config.ManifestError` straight out of `main`:
+    a full Python traceback and **exit 1**, which is not a code the runbook's
+    convention defines at all.
+
+    The second walk met it at step 9 of the guide, which is the first command
+    an adopter runs against a manifest they wrote themselves. Rig 25m then
+    counted the class properly: of the twenty-five `bin/` commands that load a
+    project manifest, this was the only one that raised.
+
+    **Exit 2, not 5.** An unreadable manifest is invalid operator input, and 2
+    is what `deploy.sh --render-only`, `render-mcp-catalog.py` and
+    `render-evaluation-report.py` already answer for the very same file.
+
+    Three arms, and the third is the one that keeps the repair honest: a new
+    `except` clause placed above an old one is exactly how an error class gets
+    swallowed, so a real `MigrationError` must still come back as 5.
+    """
+    manifest = tmp_path / "project.yaml"
+    manifest.write_text(
+        (REPO_ROOT / "project.example.yaml")
+        .read_text(encoding="utf-8")
+        .replace("projects/example", "projects/no-such-project"),
+        encoding="utf-8",
+    )
+
+    refused = subprocess.run(
+        [str(REPO_ROOT / "bin" / "migrate.sh"), "--project", str(manifest), "freeze-lock"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    combined = refused.stdout + refused.stderr
+
+    assert "Traceback (most recent call last)" not in combined, (
+        "the command answered with a Python traceback. An operator reading one has "
+        f"been handed the implementation instead of the problem:\n{combined[-1500:]}"
+    )
+    assert refused.returncode == 2, (
+        f"exit {refused.returncode}; an unreadable manifest is invalid operator input, "
+        f"which the convention numbers 2. Exit 1 is not in the convention at all.\n"
+        f"{combined[-800:]}"
+    )
+    assert "no-such-project" in combined, (
+        f"the refusal does not name what it could not read:\n{combined}"
+    )
+
+    # The control the repair could break: a VALID manifest still verifies.
+    accepted = subprocess.run(
+        [
+            str(REPO_ROOT / "bin" / "migrate.sh"),
+            "--project",
+            str(REPO_ROOT / "project.example.yaml"),
+            "verify-lock",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert accepted.returncode == 0, (
+        f"the example project no longer verifies:\n{accepted.stdout}{accepted.stderr}"
+    )
+
+    # **And a real `MigrationError` is still 5, not 2.** A new `except` clause
+    # placed above an old one is how an error class gets swallowed, and this
+    # arm exists because the battery proved nothing was watching: widening the
+    # new clause to `(ManifestError, MigrationError)` left every proof in this
+    # module green. Rig 25p had measured it by hand, which is not the same
+    # thing as a test measuring it -- §7 question 1, asked of the repair rather
+    # than of the product.
+    #
+    # The lock is copied back and compared byte for byte, never restored with
+    # `git checkout` (CLAUDE.md's rule for anything that mutates a tracked
+    # file).
+    lock = REPO_ROOT / "projects" / "example" / "migrations" / "released.lock.json"
+    before = lock.read_bytes()
+    document = json.loads(before.decode("utf-8"))
+    document["migrations"][0]["canonical_render_sha256"] = "0" * 64
+    lock.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        drifted = subprocess.run(
+            [
+                str(REPO_ROOT / "bin" / "migrate.sh"),
+                "--project",
+                str(REPO_ROOT / "project.example.yaml"),
+                "verify-lock",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        lock.write_bytes(before)
+    assert lock.read_bytes() == before, "the planted lock was not restored"
+
+    assert drifted.returncode == 5, (
+        f"a digest that disagrees with the templates came back {drifted.returncode}, not 5. "
+        "The manifest clause above has swallowed the contract class beneath it, and a "
+        "drifted lock now reads as a typo in an argument.\n"
+        f"{drifted.stdout}{drifted.stderr}"
+    )
 
 
 def test_the_release_lock_is_never_rewritten_by_a_project_freeze() -> None:

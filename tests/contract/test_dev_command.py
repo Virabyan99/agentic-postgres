@@ -309,15 +309,68 @@ def test_a_seed_name_is_accepted_in_either_position() -> None:
 
 
 def test_the_wrapper_forwards_psql_arguments_after_a_double_dash_unread() -> None:
-    """Everything after `--` is psql's own.
+    """Everything after `--` is psql's own -- asserted by RUNNING the command.
 
-    Asserted on the wrapper's source rather than by running psql: the forwarding
-    is the property, and running it needs a terminal this test does not have.
+    **This proof used to read the wrapper's source and it passed for two
+    sessions on a command that did not work** (D1353). It asserted that
+    `bin/dev.sh` forwards `"$@"` and handles `--` before the unknown-argument
+    refusal, and both were true; what it never looked at was the OTHER half.
+    The wrapper `shift`ed the separator away before handing the rest to
+    `bin/dev.py`, whose argparse then refused `-c` as an unrecognised argument
+    of this command. The documented line in `docs/dev-environment.md` had
+    therefore never worked, and the second walk found it by typing it.
+
+    Its own docstring named the reason it did not run the command -- *running
+    it needs a terminal this test does not have* -- and that was the SECOND
+    defect (D1354, `docker exec -t` unconditionally). Two defects held each
+    other up: the TTY made the command untestable, and being untestable is how
+    the parser defect survived. Both are fixed, so this now does what D1114
+    asks and calls the product's own command.
+
+    No cluster is needed, and that is the point of the assertion's shape. What
+    is being proved is that psql's flags reach psql rather than this command's
+    parser -- so the arm that matters is that the run gets PAST the parser to
+    the environment check. Exit 4 with *no development environment* is a pass;
+    exit 2 with *unrecognized arguments* is the defect.
     """
+    documented = dev("psql", "--project", PROJECT, "--", "-c", r"\dt api.*")
+    assert "unrecognized arguments" not in documented.stderr, (
+        "psql's own flags were refused as this command's, which is what `--` exists "
+        f"to prevent:\n{documented.stderr}"
+    )
+    assert documented.returncode != 2, (
+        f"the documented psql line was refused as an argument error:\n{documented.stderr}"
+    )
+
+    # The control the mutation cannot reach: an unknown flag BEFORE the
+    # separator must STILL be refused. Splitting argv on `--` must narrow what
+    # the parser sees, never switch it off.
+    refused = dev("psql", "--project", PROJECT, "--nonsense")
+    assert refused.returncode == 2, (
+        f"an unknown flag before the separator was not refused:\n{refused.stderr}"
+    )
+
+    # And a bare positional with no separator at all still reaches `rest`,
+    # which is how `dev seed --project P example` has always been typed.
+    seeded = dev("seed", "--project", PROJECT, "example")
+    assert "unrecognized arguments" not in seeded.stderr, seeded.stderr
+
+    # The wrapper's own half, kept: it forwards the rest AND the separator with
+    # it, and it handles `--` before the unknown-argument refusal.
     source = DEV.read_text(encoding="utf-8")
     assert 'arguments+=("$@")' in source, "the wrapper does not forward the rest"
     body = source.split("main() {", 1)[1]
     assert body.index("--)") < body.index('die 2 "unknown argument'), (
         "`--` is handled after the unknown-argument refusal, so psql's own flags would "
         "be refused as this command's"
+    )
+    # **Comments stripped first** (D277, D1197) -- and this assertion needed
+    # that within a minute of being written, because the repair's own comment
+    # beside the branch explains that the separator used to be shifted away.
+    # A scan that reads prose measures prose, every time, including this one.
+    code = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
+    branch = code[code.index("--)") : code.index("--)") + 300]
+    assert "shift" not in branch.split("arguments+=")[0], (
+        "the wrapper shifts the separator away before forwarding, so bin/dev.py "
+        f"cannot tell psql's flags from its own (D1353):\n{branch}"
     )

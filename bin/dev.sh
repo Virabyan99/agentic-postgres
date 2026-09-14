@@ -141,8 +141,17 @@ main() {
         shift 2
         ;;
       --)
-        # Everything after `--` is psql's own, forwarded unread.
-        shift
+        # Everything after `--` is psql's own, forwarded unread -- **and the
+        # separator goes WITH them** (D1353). This shifted it away, so
+        # `bin/dev.py` received `-c '\dt api.*'` with nothing to say those were
+        # psql's, and its parser refused `-c` as an unrecognised argument of
+        # this command. The documented line in docs/dev-environment.md has
+        # therefore never worked; the second walk found it and had to guess a
+        # doubled `-- --` to get past.
+        #
+        # The parser on the other side splits on the first `--` before it looks
+        # at anything, so forwarding it is what makes the two halves agree about
+        # which flags belong to whom.
         arguments+=("$@")
         break
         ;;

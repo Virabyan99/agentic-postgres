@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from agentic_postgres import migrations, rendering, runtime_override
+from agentic_postgres import config, migrations, rendering, runtime_override
 
 EXIT_CONTRACT = 5
 
@@ -465,6 +465,26 @@ def main() -> int:
             assert_installed_render_is_current(rendered, arguments.rendered_dir)
             assert_rendered_files_match(arguments.rendered_dir)
             return run_every_set(arguments.mode, document, arguments.rendered_dir)
+
+    except config.ManifestError as error:
+        # An invalid project manifest, which is INVALID OPERATOR INPUT and not a
+        # contract drift -- so exit 2, the code `deploy.sh --render-only`,
+        # `render-mcp-catalog.py` and `render-evaluation-report.py` already give
+        # for the same file (measured, rig 25m).
+        #
+        # Before this clause the exception escaped: `freeze-lock --project` on a
+        # manifest naming a directory that does not exist printed a full Python
+        # traceback and exited 1, and 1 is not a code the runbook's convention
+        # defines at all. **This is D1340 exactly, one caller over** -- that row
+        # repaired `bin/render-config.py`, which was the third caller of a
+        # decision `bin/migrate.py` and `bin/dev.py` already had, and nobody
+        # grepped for the fourth. Rig 25m grepped: of the twenty-five `bin/`
+        # commands that load a manifest, this was the only one that raised.
+        #
+        # The second walk met it at step 9 of the guide, which is the first
+        # command an adopter runs against a manifest they wrote themselves.
+        print(f"migrate: {error}", file=sys.stderr)
+        return 2
 
     except migrations.MigrationError as error:
         print(f"migrate: {error}", file=sys.stderr)

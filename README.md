@@ -344,31 +344,38 @@ environment exists to surface before a deploy does.
 
 ## Adding your own tables
 
-**Eight steps, and every one of them runs on your own machine.** This section
-and the next are steps 3 and 4 in detail; [the new team member
-guide](docs/new-team-member.md) walks all eight from a clean machine, and its
-*done* section is this list again.
+**Eight steps. Six of them run entirely on your own machine, and two wait for
+your project's first deploy.** This section and the next are steps 3 and 4 in
+detail; [the new team member guide](docs/new-team-member.md) walks all eight
+from a clean machine, and its *done* section is this list again.
 
 1. `bin/doctor.sh` — the toolchain answers *(offline)*
 2. `./deploy.sh --project project.yaml --capabilities capabilities.yaml
    --render-only` — a render of your project *(offline)*
 3. `projects/<slug>/migrations/`, then `bin/migrate.sh --project project.yaml
    freeze-lock` — a table of your own, frozen into your set *(offline)*
-4. `projects/<slug>/capabilities.yaml` from `bin/agent.sh init`, then
-   `bin/mcp-contract.sh compile --project project.yaml` and `check` — an agent
-   capability over it *(offline)*
+4. `projects/<slug>/capabilities.yaml` from `bin/agent.sh init` *(offline)*,
+   then `bin/mcp-contract.sh compile --project project.yaml` and `check` —
+   an agent capability over it *(**after your first deploy**: the compile reads
+   a snapshot of your surface as a running PostgREST serves it, and row 4 of the
+   table below is where it comes from)*
 5. `bin/apg.sh dev up --project project.yaml` — your set applied by the role
    that will apply it on a deployment *(offline)*
 6. `bin/apg.sh generate --project project.yaml` — a typed client over your
-   surface *(offline)*
+   surface *(offline **without** a migration set of your own; **after your
+   first deploy** with one, for the same snapshot as step 4)*
 7. `bin/apg.sh studio --help` — Studio is **read** here and not opened: a
    launch takes a deployed document, and you do not have one yet *(offline)*
 8. `bin/session-01-check.sh` — the gate, on a clean tree with your project
    directory tracked *(offline)*
 
-Nothing above needs a host, a credential, root or a provider. Step 4's snapshot
-is the one exception and it is a row in the table below, with what to do about
-it.
+Nothing above needs a host, a credential, root or a provider **except the
+snapshot at row 4 of the table below** — and steps 4 and 6 both wait on it once
+your project has a migration set of its own. That file is your surface as a
+running PostgREST serves it, and a checkout cannot serve one: `apg dev` is the
+database alone (ADR 0203). Declare the capability now, deploy once, capture the
+snapshot with `bin/api-contract.sh --update`, and both steps run offline
+thereafter.
 
 **Your tables live in your own directory, and you edit none of the
 release's files.** A project that declares a migration set owns everything
@@ -408,7 +415,7 @@ Then, in order:
 | 2b | `bin/apg.sh dev up --project project.yaml` — your set applies as the role that will apply it, before any deploy exists to apply it to. A migration that fails here fails in ten seconds rather than in a convergence | **yes** |
 | 3 | `projects/<slug>/contracts/postgrest-api-surface.yaml` — your reviewed surface, merged with the release's for every comparison | yes |
 | 4 | `projects/<slug>/contracts/postgrest-openapi.canonical.json` — captured from a **running deployment** and refuses a hand edit | **no** |
-| 5 | `bin/apg.sh generate --project project.yaml` — a typed client over your surface, regenerated after every capture | yes |
+| 5 | `bin/apg.sh generate --project project.yaml` — a typed client over your surface, regenerated after every capture | **only after row 4** |
 
 `projects/example/` is a worked one: a pgvector column beside each note, a
 `security_invoker` view, and one `SECURITY DEFINER` write function.

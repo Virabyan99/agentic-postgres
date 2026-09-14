@@ -275,7 +275,21 @@ def test_the_deploy_sequence_stays_within_the_specifications_bound() -> None:
 GUIDE = REPO_ROOT / "docs" / "new-team-member.md"
 
 #: The label the guide is allowed to carry, and the only one.
-AVAILABLE = "*available now*"
+#: The labels a step's heading may carry, and every one of them is MEASURED off
+#: the page rather than imagined. Run 4 asserted the single label `*available
+#: now*` against every step, which was true of the page it was written for; the
+#: second walk then found that two steps cannot honestly claim it, because the
+#: compile and the generate wait on a snapshot only a deployment produces
+#: (D1357). Widening to the set the page uses is not a weakening -- CLAUDE.md's
+#: line is that widening an allowlist to a MEASURED set is not, and loosening it
+#: to a subset check is. The check below got stricter in the same move: it is
+#: now per-step, so a step carrying NO label fails, where the old count would
+#: have absorbed that as long as some other step carried two.
+STEP_LABELS = (
+    "*available now*",
+    "*the manifest now, the compile after your first deploy*",
+    "*after your first deploy, if you added a table*",
+)
 
 #: What the guide claimed for fifteen sessions about steps that were built,
 #: deployed and measured. Both spellings, with and without a session number.
@@ -313,9 +327,18 @@ def test_the_guide_labels_nothing_as_future_that_this_release_implements() -> No
         f"the guide's steps do not run 1..{len(steps)}: {steps}. A reader following a page "
         "whose numbers skip cannot tell a missing step from a renumbering"
     )
-    assert text.count(AVAILABLE) == len(steps), (
-        f"{text.count(AVAILABLE)} steps are labelled {AVAILABLE} and there are {len(steps)}; "
-        "the label vocabulary this scans for is not the one the page uses"
+    headings = re.findall(r"^### \d+\. .+$", text, flags=re.MULTILINE)
+    unlabelled = [
+        heading for heading in headings if not any(label in heading for label in STEP_LABELS)
+    ]
+    assert not unlabelled, (
+        f"these steps carry no label this scan knows: {unlabelled}. Either a step was "
+        f"added without one, or the page's vocabulary moved and {list(STEP_LABELS)} did "
+        "not move with it -- and a scan looking for words the page no longer uses "
+        "reports nothing and passes"
+    )
+    assert any("*available now*" in heading for heading in headings), (
+        "no step is labelled *available now*; the page cannot be all deferral"
     )
 
     stale: list[str] = []
