@@ -33,7 +33,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from agentic_postgres import config, host_config, rendering  # noqa: E402
+from agentic_postgres import config, host_config, migrations, rendering  # noqa: E402
 
 BEGIN = "<!-- BEGIN GENERATED: bounds -->"
 END = "<!-- END GENERATED: bounds -->"
@@ -131,6 +131,20 @@ def render(project: Path, capabilities: Path) -> int:
     except config.ManifestError as exc:
         print(f"deploy: {exc}", file=sys.stderr)
         return 2
+    except migrations.MigrationError as exc:
+        # A project's OWN migration set, refused by the lock it was frozen
+        # against or by the lint (ADR 0198). `write_rendered_migrations` calls
+        # `verify_lock`, which raises `MigrationError` and its `ProjectSetError`
+        # subclass -- neither of which is a `RenderError`, so both escaped this
+        # handler and reached the operator as a traceback with exit 1, a code
+        # the convention does not define. Measured on the adopter's own path
+        # (rig 25i): a version stamped below the frozen release version, and a
+        # table in `app` without FORCE row level security. `bin/migrate.py` and
+        # `bin/dev.py` had both handled this class since Session 20; the render
+        # is the third caller and it did not (D979, §7 question 5).
+        print(f"deploy: {exc}", file=sys.stderr)
+        print("deploy: the previous valid render, if any, is unchanged.", file=sys.stderr)
+        return 5
     except rendering.RenderError as exc:
         print(f"deploy: {exc}", file=sys.stderr)
         print("deploy: the previous valid render, if any, is unchanged.", file=sys.stderr)

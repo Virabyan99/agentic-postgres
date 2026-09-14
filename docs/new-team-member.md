@@ -1,11 +1,23 @@
 # New team member guide
 
-Fourteen steps, each labelled **available now** or **future session**. Nothing
-labelled "available now" requires editing a source file.
+Fourteen steps, **every one of them available now and every one of them
+offline**. None requires editing a file this repository ships, and none needs a
+host, root, a credential or a provider. The single exception is named where you
+meet it: the OpenAPI snapshot in step 9 is captured from a running deployment,
+and until you have one the contract check for it stays red by design.
 
-This is the transcription of source specification §1.4 into the CLI this
-repository actually has. The specification's positional form
-(`./deploy.sh project.yaml`) is not accepted — see decision V in
+Every step on this page runs against the release you have. For fifteen
+sessions some of them were labelled as belonging to a session still to come,
+on steps that had already been built, deployed and measured; a reader who
+followed it was told the product could not do things it had been doing for a
+year (D1313). One label, and it is true of all fourteen.
+
+This is source specification §1.4 transcribed into the CLI this repository
+actually has, extended with what Stage 3 added: a table of your own, an agent
+capability over it, a local database, a generated client and Studio.
+
+The specification's positional form (`./deploy.sh project.yaml`) is not
+accepted — see decision V in
 [the implementation plan](plans/session-01-implementation-plan.md) — because it
 cannot express the capability manifest or the mandatory render-only mode.
 
@@ -84,10 +96,71 @@ keys at any depth.
 ./deploy.sh --project project.yaml --capabilities capabilities.yaml --render-only
 ```
 
-`--render-only` is mandatory. Without it the command exits `10` and tells you
-deployment begins in Session 2. It does not partially deploy.
+`--render-only` is mandatory and it does not partially deploy: it needs no host,
+no root and no provider, and it contacts nobody. It does need Docker, because it
+validates the staged Compose model before publishing it.
 
-### 8a. Build a local database — *available now*
+Then look at what it wrote:
+
+```bash
+jq . .generated/<project-key>/outputs.json
+cat  .generated/<project-key>/rendered-summary.txt
+bin/compose.sh .generated/<project-key> --profile contract config
+bin/compose.sh .generated/<project-key> ps --quiet     # empty
+```
+
+Database endpoints read `"status": "unavailable"` with null host, port, URL and
+secret reference. That is correct rather than incomplete — there is no tunnel
+host or bound port yet, and a placeholder that looked like a DSN would
+eventually be pasted into a connection dialog. Always reach Compose through the
+wrapper: calling `docker compose` directly lets inherited shell variables
+override the generated identity and the locked digests.
+
+### 9. Add a table of your own — *available now*
+
+Everything you add lives under `projects/<slug>/` and you edit none of the
+release's files (ADR 0198). Write the migration, declare it, and freeze:
+
+```bash
+mkdir -p projects/<slug>/migrations/templates
+# projects/<slug>/migrations/templates/0001-<name>.sql
+#   your table with FORCE ROW LEVEL SECURITY and its owner-scoped policy, its
+#   `api` view, its SECURITY DEFINER write function, and a `-- migrate:down`
+#   block that raises AP900
+# projects/<slug>/migrations/manifest.json
+#   the entry: version, name, template, placeholders
+bin/migrate.sh --project project.yaml freeze-lock
+```
+
+Then point your own manifest at it, at schema version 5:
+
+```yaml
+schema_version: 5
+migrations:
+  set: projects/<slug>
+```
+
+`projects/example/` is a worked set — a pgvector column beside each note, a
+`security_invoker` view and one write function — and reading it first is
+cheaper than meeting the refusals.
+
+Two of those refusals are the ones to know about. Your versions must sort
+**after** the release lock's newest at the moment you freeze, and `freeze-lock`
+records that version in your own lock; a table in `app` without FORCE row
+level security is refused before a byte of it is rendered, because FORCE is
+what makes the row policies apply to the table's owner and every write function
+this product publishes is SECURITY DEFINER running as that owner. Both are exit
+`5` from `freeze-lock`, both name the migration, and both are in the table at
+the end of this page.
+
+One thing here is **not** offline and it is the only one on this page: the
+OpenAPI snapshot at `projects/<slug>/contracts/postgrest-openapi.canonical.json`
+is captured from a running deployment and refuses a hand edit, so the contract
+check stays red until your first deploy. That is expected rather than a mistake
+you made — [Adding your own tables](../README.md#adding-your-own-tables) has
+the capture command.
+
+### 10. Build a local database — *available now*
 
 ```bash
 bin/apg.sh dev up --project project.yaml
@@ -97,8 +170,12 @@ bin/apg.sh dev psql --project project.yaml
 About ten seconds, and it is the first thing in this guide that gives you
 something to type SQL at. It builds a disposable PostgreSQL cluster from what
 you just rendered: the locked image, the deploy's own bootstrap, and every
-migration applied **as the migration user** — the role that will apply them on
-a deployment. `psql` puts you in the application role with a development
+migration applied **as the migration user** — the release's and **the set you
+wrote in the step before**, in manifest order, each in its own transaction. The
+migration user is the role that will apply them on a deployment, so a migration
+of yours that fails here fails in ten seconds rather than in a convergence.
+
+`psql` puts you in the application role with a development
 subject asserted, so what you see is what that subject sees under row-level
 security.
 
@@ -108,17 +185,63 @@ and nothing reaches a provider — see [the developer loop](dev-environment.md).
 
 It needs Docker, which step 2 installed and step 4 confirmed.
 
-### 8b. Generate a client — *available now*
+### 11. Give an agent your table — *available now*
+
+An agent reaches your relations through a capability manifest you own, beside
+your migration set, and through nothing else (ADR 0201):
+
+```bash
+bin/agent.sh init --head > projects/<slug>/capabilities.yaml
+bin/agent.sh init --project project.yaml --operation <your view> \
+  >> projects/<slug>/capabilities.yaml
+bin/mcp-contract.sh compile --project project.yaml \
+  > projects/<slug>/contracts/mcp-capabilities.canonical.json
+bin/mcp-contract.sh check --project project.yaml
+bin/render-evaluation-report.py --write --project project.yaml
+bin/render-mcp-catalog.py --write --project project.yaml
+```
+
+`init` scaffolds **one entry** from your reviewed surface and writes no file, so
+you read what it wrote before it becomes a file. An operation your surface does
+not publish is refused with the ones it does; so is one the release already
+serves, and the refusal says which of the two it is. Point your manifest at the
+directory, at schema version 6:
+
+```yaml
+schema_version: 6
+migrations:
+  set: projects/<slug>
+mcp:
+  capabilities: projects/<slug>
+```
+
+`check --project` is the approval: it compares your manifest against your
+reviewed surface and your snapshot, and refuses a drift with exit `5`. The last
+two lines write the two documents that describe what you just declared — the
+evaluation report beside your contract, and your own tool catalog at
+`projects/<slug>/docs/mcp-tool-catalog.md`, which says in its first lines that
+these are your tools and not the whole of what a deployment serves.
+
+**The SQL grant is yours and nothing above it can see one.** A tool over your
+view is served the moment the lock carries it and refused by the database until
+your own set grants `SELECT` on the view to `{{agent_reader}}` and
+`{{agent_writer}}`, and `EXECUTE` on the write function to `{{agent_writer}}`.
+That is a second migration, because the first is frozen; fix forward, never an
+amendment. `projects/example/migrations/templates/0002-agent-grants.sql` is the
+worked example.
+
+### 12. Generate a client — *available now*
 
 ```bash
 bin/apg.sh generate --project project.yaml
 ```
 
 A third of a second, and it writes a typed TypeScript package over the
-surface your project publishes: one method per published object, one per
-agent tool, and the digests that say which surface and which lock they came
-from. It reads four committed artefacts and nothing live, so it works here,
-before any deployment exists.
+surface your project publishes — including the view and the write function you
+added in step 9, and the tool you declared in step 11: one method per published
+object, one per agent tool, and the digests that say which surface and which
+lock they came from. It reads four committed artefacts and nothing live, so it
+works here, before any deployment exists.
 
 You cannot *call* anything with it yet — there is no REST service until a
 deploy — and that is worth seeing rather than reading about: `init()` is the
@@ -126,29 +249,35 @@ first thing a caller runs, and against nothing it answers `unreachable`
 rather than pretending the contract is stale. Read the generated `README.md`
 and [generated clients](generated-clients.md).
 
-### 9. Inspect the output — *available now*
+### 13. Read Studio — *available now*
 
 ```bash
-jq . .generated/<project-key>/outputs.json
-cat  .generated/<project-key>/rendered-summary.txt
+bin/apg.sh studio --help
 ```
 
-Database endpoints read `"status": "unavailable"` with null host, port, URL, and
-secret reference. That is correct, not incomplete — there is no tunnel host or
-bound port yet, and a placeholder that looked like a DSN would eventually be
-pasted into a connection dialog.
+Studio is a loopback page over a **deployment**, and you do not have one — so
+this is the step where you read what it does rather than open it (ADR 0205).
+`--help` exits `0` and describes it: one standard-library process bound to
+`127.0.0.1`, holding your access token in memory, serving three first-party
+files and a same-origin forwarder with an enumerated table of the requests it
+may make. There is no SQL box, not hidden and not behind a flag.
 
-### 10. Validate the Compose model — *available now*
+Point it at the document you rendered in step 8 and it refuses, on purpose:
 
-```bash
-bin/compose.sh .generated/<project-key> --profile contract config
-bin/compose.sh .generated/<project-key> ps --quiet     # empty
+```
+studio: that is a rendered document; the REST route is an observation, and a
+render has made none. Deploy the project, then pass --outputs the outputs.json
+that deploy published (ADR 0158). Until then `studio --help` is what there is
+to read.
 ```
 
-Always through the wrapper. Calling `docker compose` directly lets inherited
-shell variables override the generated identity and the locked digests.
+Exit `2`. A render says what was asked for and a route is an observation of
+what happened, so a rendered document has no address to open. That refusal is
+the same shape as `init()`'s `unreachable` in the step before, and it is worth
+meeting once: a clear sentence naming what is missing is this product working,
+not failing. [Studio](studio.md) is the longer form.
 
-### 11. Run the gate — *available now*
+### 14. Run the gate — *available now*
 
 ```bash
 bin/session-01-check.sh
@@ -157,41 +286,37 @@ bin/session-01-check.sh
 Requires a clean tracked tree. CI runs this exact script; there is no second,
 divergent definition of "passing".
 
-### 12. Bootstrap providers — *implemented in Session 2*
-
-`bin/bootstrap-providers.sh` is the only command permitted to provision
-external resources. It documented its future inputs and exited `10` when this
-guide was written; Session 2 implemented it, so a bare invocation is now
-missing input (`2`) rather than an unavailable capability.
-
-### 13. Connect to the database and run migrations — *implemented in Sessions 3–4*
-
-`bin/migrate.sh` left the stub list in Session 3 and `bin/connect.sh` in
-Session 4; both are real commands with real exit codes. Migrations always use
-the direct endpoint; transaction pooling breaks DDL and advisory-lock
-semantics.
-
-`bin/connect.sh` opens an SSH forward to one *access profile* and records it,
-and defaults to `runtime_direct` — the application role. It prints no password
-under any flag: `exec` puts the credential in a `0600` file and names it to the
-child through `PGPASSFILE`. `bin/restore-test.sh` is now the only command still
-documenting a future capability.
-
-### 14. Rehearse a restore — *future session (10)*
-
-`bin/restore-test.sh` performs a timestamp-targeted restore into a disposable
-volume and never touches the active one. It documents that contract and exits
-`10` today.
-
 ---
 
-## What "done" looks like today
+## What "done" looks like
 
-Steps 1–11 complete with no source edits and no undocumented commands. You have
-two rendered projects with provably disjoint identities, an immutable image
-lock, and a gate that CI runs identically.
+**Steps 1–14 complete, `bin/apg.sh dx-record check` reports none, none and
+none, and the gate exits 0 on your clean tree with your project directory
+tracked.** That sentence is the success criterion, and it is what a walk's
+record means when it says `reached_success_criterion: true` (ADR 0207 §4).
 
-You do not have a running database. That is Session 3.
+The record is the walk's own artefact rather than something every reader owes:
+if you are following this page as [a second walk](second-walk.md) you keep one
+as you go and `dx-record digest`, then `check`, are your last two commands. If
+you are not, the first clause of that sentence and the last are your whole
+criterion.
+
+Concretely, you have:
+
+- a rendered project, byte-identical across renders with identical inputs;
+- **a table of your own** under `projects/<slug>/`, frozen into your own lock,
+  with none of the release's files edited;
+- **an agent capability over it**, compiled, checked and catalogued;
+- **a local database** with that set applied by the role that will apply it on
+  a deployment;
+- **a generated client** over the surface you extended, whose `init()` answers
+  `unreachable` against nothing rather than pretending the contract is stale;
+- **Studio read**, and its refusal against a render recorded;
+- **the gate green**, the same script CI runs.
+
+You do not have a deployment, and nothing on this page needs one. A deployment
+is a host, a domain, certificates and providers, and it is the
+[operator guides](README.md#operator-guides) rather than this page.
 
 ## If something fails
 
@@ -202,3 +327,10 @@ You do not have a running database. That is Session 3.
 | `chmod 600` reports `666` | Repository is on NTFS or a `/mnt/c` mount | Move it to the Linux filesystem |
 | `lock-versions: BLOCKED` | A digest will not resolve for the target platform | Do not substitute a tag; change the candidate deliberately |
 | Gate fails on a clean checkout | Generated documentation drifted | `python bin/render-acceptance-matrix.py --write` |
+| `freeze-lock` exit **5**: *these project migrations do not sort after the release version this set was frozen against (…)* | A migration of yours is stamped at or below the release version your set was frozen against. dbmate applies one directory in filename order, so the same set would produce two schemas — refused on a deployed cluster, applied silently on a fresh one | Re-stamp the migration with a version later than the release's newest, and freeze again |
+| `freeze-lock` exit **5**: *… creates a table in app without FORCE ROW LEVEL SECURITY: app.&lt;name&gt; (ENABLE without FORCE)* | `ENABLE` alone does not apply the policies to the table's **owner**, and every write function here is SECURITY DEFINER running as that owner | Add `ALTER TABLE app.<name> FORCE ROW LEVEL SECURITY;` to the migration and freeze again |
+| `agent init` exit **2**: *the merged reviewed surface names no operation '…'. It names: …* | The capability names something your reviewed surface does not publish. An object the surface does not publish cannot be given to an agent (ADR 0050) | Publish it in `projects/<slug>/contracts/postgrest-api-surface.yaml` first, or pick one of the names the refusal lists |
+| `deploy.sh --render-only` exit **5**: *the previous valid render, if any, is unchanged* | Your set was refused before anything was published — the lock, the ordering or the lint | Read the line above it: it names the migration and what is wrong with it |
+
+Each of the last four sentences is quoted from a run of the command, not from
+its source.

@@ -2,7 +2,7 @@
 """Read a second walk's record, or fill in the digests it needs.
 
 Reached as `apg dx-record` (ADR 0093). `bin/dx-record.sh` decides every argument
-error before this runs; what is left here is the four readings and the report.
+error before this runs; what is left here is the readings and the report.
 
 **This exists so the walker can see their own verdict** (ADR 0207 §3). The same
 four functions decide `DX-001` during the host sweep, and a walker who could not
@@ -91,16 +91,18 @@ def check(record_path: Path, slug_override: str | None) -> int:
     unnamed = dx_record.unnamed_commands(record, dx_record.documented_commands(REPO_ROOT))
     stale = dx_record.stale_documents(record, REPO_ROOT)
     followed_by = dx_record.followed_by_problems(record)
+    blocked_by = dx_record.blocked_by_problems(record)
     unread = dx_record.missing_documents(record)
 
     report("source edits", edits)
     report("commands the documentation does not name", unnamed)
     report("documents that moved after the walk", stale)
     report("followed_by", followed_by)
+    report("blocked_by", blocked_by)
     report("documents the walk did not record reading", unread)
     report("undocumented steps the walker recorded", record.undocumented_steps)
 
-    findings = bool(edits or unnamed or stale or followed_by)
+    findings = bool(edits or unnamed or stale or followed_by or blocked_by)
     if record.reached_success_criterion is not True:
         findings = True
         print()

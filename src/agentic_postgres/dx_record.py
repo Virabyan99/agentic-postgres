@@ -417,6 +417,43 @@ def absent_documents(record: Record, tree: Path) -> list[str]:
     return sorted(relative for relative in record.documents_read if not (tree / relative).is_file())
 
 
+def blocked_by_problems(record: Record) -> list[str]:
+    """What a walk owes when it did NOT reach the success criterion.
+
+    `blocked_by` is optional and is read only in the case it exists for. The
+    task statement (ADR 0207 §1) asks for it, and a field a statement asks for
+    and nothing reads is the shape D816, D929 and D1247 each named -- so it has
+    a reader from the day it is asked for rather than after the walk that
+    needed it.
+
+    Both directions. A failed walk with no `blocked_by` leaves the builder
+    knowing the path broke and not where, which costs the second walk §9 allows
+    on a search rather than on a repair. A record that reached the criterion
+    and still carries one is a record whose two halves disagree, and reading
+    only the reassuring half is exactly what §7 warns about.
+    """
+    value = record.document.get("blocked_by")
+    if record.reached_success_criterion is True:
+        if value in (None, "", [], {}):
+            return []
+        return [
+            f"blocked_by is set ({value!r}) on a record that says the success criterion was "
+            "reached. One of the two is wrong and the record does not say which"
+        ]
+    if value is None:
+        return [
+            "reached_success_criterion is not true and blocked_by is absent. The record says "
+            "the walk did not finish and not where it stopped, which is the one thing a "
+            "failed walk is for"
+        ]
+    if not isinstance(value, str) or not value.strip():
+        return [
+            f"blocked_by is {type(value).__name__} and must be a non-empty sentence naming "
+            "the step the walk stopped at and what it was refused by"
+        ]
+    return []
+
+
 def missing_documents(record: Record) -> list[str]:
     """Documents the walk should have read and the record does not name.
 

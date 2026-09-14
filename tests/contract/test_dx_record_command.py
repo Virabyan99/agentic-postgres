@@ -199,3 +199,40 @@ def test_the_live_proof_calls_the_same_reader() -> None:
         "the live proof still compiles a command regex of its own; the resolution belongs to "
         "dx_record so that both sides normalise the same way"
     )
+
+
+def test_check_reads_blocked_by_and_prints_which_way_it_is_wrong(tmp_path: Path) -> None:
+    """The reading reaches the OPERATOR and the walker, not only the library.
+
+    A walker who cannot see the verdict a sweep will reach is being marked by a
+    hidden rubric, which is this module's premise -- so a reading added to
+    `dx_record` that the command does not print is half a repair, and the half
+    that is missing is the half a walker can act on.
+
+    The exit code does not move: a walk that did not reach the criterion is
+    already exit 5. What moves is whether the report says where it stopped.
+    """
+    absent = run("check", "--record", str(a_record_file(tmp_path, reached_success_criterion=False)))
+    assert absent.returncode == 5, absent.stdout + absent.stderr
+    assert "blocked_by: 1" in absent.stdout, absent.stdout
+    assert "blocked_by is absent" in absent.stdout, absent.stdout
+
+    named = run(
+        "check",
+        "--record",
+        str(
+            a_record_file(
+                tmp_path,
+                reached_success_criterion=False,
+                blocked_by="step 11: mcp-contract check exited 5 and no page says what to fix",
+            )
+        ),
+    )
+    assert named.returncode == 5, "a walk that did not finish is still a finding"
+    assert "blocked_by: none" in named.stdout, named.stdout
+    assert "the success criterion was not reached" in named.stdout, named.stdout
+
+    # The control, in the same invocation: the clean record reports it clean.
+    clean = run("check", "--record", str(a_record_file(tmp_path)))
+    assert clean.returncode == 0, clean.stdout + clean.stderr
+    assert "blocked_by: none" in clean.stdout, clean.stdout

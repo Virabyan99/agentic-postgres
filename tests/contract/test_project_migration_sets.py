@@ -889,3 +889,88 @@ def test_a_project_with_no_set_is_moved_nothing_at_all() -> None:
     has no work to do for it.
     """
     assert migrations.project_ledger_move_statement(SECOND_FIXTURE) is None
+
+
+# ---------------------------------------------------------------------------
+# What the ADOPTER sees when their own set is refused (Session 25, rig 25i)
+# ---------------------------------------------------------------------------
+
+
+def _render_config_module():
+    """`bin/render-config.py`, imported by path and REGISTERED in `sys.modules`.
+
+    Registration matters for any module that builds a dataclass at import time
+    (`@dataclass` resolves `sys.modules[cls.__module__]` while the class is
+    created), and it costs nothing here.
+    """
+    import importlib.util
+    import sys
+
+    name = "_render_config_under_test"
+    spec = importlib.util.spec_from_file_location(name, REPO_ROOT / "bin" / "render-config.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_render_reports_a_project_sets_refusal_instead_of_a_stack(monkeypatch, capsys) -> None:
+    """**Measured before it was fixed** (rig 25i, 2026-09-14).
+
+    A project migration stamped below the version its set was frozen against,
+    and a table in `app` without FORCE row level security, are the two refusals
+    an adopter is most likely to meet. `write_rendered_migrations` calls
+    `verify_lock`, which raises `ProjectSetError` -- a `MigrationError`, which is
+    a `ValueError` and is **not** a `RenderError`. `bin/render-config.py` caught
+    `RenderError`, `ManifestError` and `CapabilityContractError`, so both
+    escaped: `./deploy.sh --render-only` printed a Python traceback and exited
+    **1**, a code the exit-code convention does not define.
+
+    `bin/migrate.py` and `bin/dev.py` had handled this class since Session 20.
+    The render is the third caller of the same function and it did not, which is
+    D979 and §7's fifth question: when a decision is implemented, which of its
+    callers got it.
+
+    Three arms, because a handler that returns 5 for everything is worse than
+    the traceback: the project error is reported, the `RenderError` branch that
+    already existed still is, and an unrelated exception still propagates rather
+    than being swallowed into a contract exit code.
+    """
+    module = _render_config_module()
+    project = REPO_ROOT / "project.example.yaml"
+    capabilities = REPO_ROOT / "capabilities.example.yaml"
+
+    # The anti-vacuity check: the name being replaced is the real one.
+    assert callable(module.rendering.render_project), (
+        "render-config no longer calls rendering.render_project, so this proof is "
+        "monkeypatching something the command does not use"
+    )
+
+    sentence = "do not sort after the release version this set was frozen against"
+
+    def refuse_the_set(*_args, **_kwargs):
+        raise migrations.ProjectSetError(f"these project migrations {sentence} (20260912120032)")
+
+    monkeypatch.setattr(module.rendering, "render_project", refuse_the_set)
+    code = module.render(project, capabilities)
+    printed = capsys.readouterr().err
+    assert code == 5, f"a refused project set exited {code}, not 5"
+    assert sentence in printed, f"the refusal was not reported: {printed!r}"
+    assert "Traceback" not in printed, "the refusal reached the operator as a stack"
+
+    # The branch that already existed, unchanged.
+    def refuse_the_render(*_args, **_kwargs):
+        raise module.rendering.RenderError("the staged model does not validate")
+
+    monkeypatch.setattr(module.rendering, "render_project", refuse_the_render)
+    assert module.render(project, capabilities) == 5
+    assert "does not validate" in capsys.readouterr().err
+
+    # And the control: the new clause is not a blanket `except Exception`.
+    def something_else(*_args, **_kwargs):
+        raise RuntimeError("a defect in the renderer, not a refusal of the input")
+
+    monkeypatch.setattr(module.rendering, "render_project", something_else)
+    with pytest.raises(RuntimeError, match="a defect in the renderer"):
+        module.render(project, capabilities)

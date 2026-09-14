@@ -309,3 +309,40 @@ def test_load_tells_absent_from_incomplete(tmp_path: Path) -> None:
     whole = tmp_path / "whole.json"
     whole.write_text(json.dumps(a_record().document), encoding="utf-8")
     assert dx_record.load(whole).project_slug == SLUG
+
+
+def test_a_failed_walk_must_say_where_it_stopped() -> None:
+    """`blocked_by` gets a reader on the day the task statement asks for it.
+
+    ADR 0207 §1's statement tells a walker to write `blocked_by` when the
+    success criterion was not reached. A declared field with no reader is an
+    unverified field, and this repository has paid for that three times (D816,
+    D929, D1247) -- so the field is read rather than merely collected. A failed
+    walk that does not say WHERE it stopped tells the builder the path is broken
+    and nothing about where, and §9 allows at most two walks: the second one
+    should be spent on a repair, not on a search.
+
+    Five arms. The fourth and fifth are what make this more than a presence
+    check: a named blocker is accepted, and a record that reached the criterion
+    while carrying a blocker has two halves that disagree -- reading only the
+    reassuring one is what §7 warns about.
+    """
+    # The control: a walk that finished and says nothing about being blocked.
+    assert dx_record.blocked_by_problems(a_record()) == []
+
+    absent = a_record(reached_success_criterion=False)
+    problems = dx_record.blocked_by_problems(absent)
+    assert problems and "blocked_by is absent" in problems[0], problems
+
+    empty = a_record(reached_success_criterion=False, blocked_by="   ")
+    assert dx_record.blocked_by_problems(empty), "an empty sentence was accepted"
+
+    named = a_record(
+        reached_success_criterion=False,
+        blocked_by="step 9: freeze-lock exited 5 and no page says what to re-stamp",
+    )
+    assert dx_record.blocked_by_problems(named) == [], "a named blocker was refused"
+
+    contradictory = a_record(blocked_by="step 9 refused me")
+    problems = dx_record.blocked_by_problems(contradictory)
+    assert problems and "success criterion was reached" in problems[0], problems

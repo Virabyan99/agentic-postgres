@@ -306,7 +306,13 @@ def address_book(document: dict[str, Any]) -> AddressBook:
     happened (D132).
     """
     if document.get("document_kind") != "deployed":
-        raise StudioError(2, "that is a rendered document; the REST route is an observation")
+        raise StudioError(
+            2,
+            "that is a rendered document; the REST route is an observation, and a render "
+            "has made none. Deploy the project, then pass --outputs the outputs.json that "
+            "deploy published (ADR 0158). Until then `studio --help` is what there is to "
+            "read.",
+        )
     rest_url = _route(document, "rest")
     app_url = _route(document, "app")
     expected_host, expected_base_path = _published_address(rest_url)

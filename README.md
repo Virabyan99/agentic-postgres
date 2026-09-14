@@ -322,162 +322,33 @@ to do when Docker is absent, when the state is stale, when a seed is refused,
 and when a migration fails as the migration user — which is the case the
 environment exists to surface before a deploy does.
 
-## Studio
-
-```bash
-bin/apg.sh studio --project project.yaml --outputs alpha-outputs.json
-```
-
-It prints a URL on `127.0.0.1` with a one-time path in it. Open that, and the
-page shows you your deployment as **you**: the relations your token can read, a
-query builder that becomes one PostgREST request (reads only, values encoded so
-that a comma is a comma), the audit page with its denial boundaries, the
-compiled lock, the agent roster with a revocation that makes you type the
-agent's id, and your own sessions. Ctrl-C ends it, and it revokes the login
-session it opened.
-
-`--outputs` takes a **deployed** document — what a deploy published, not a
-render. The password comes from a prompt or a `0600` file; there is no
-`--password` flag and no environment variable is read for one.
-
-Five checks run before anything else on every request: `OPTIONS` is 405 so no
-preflight can succeed and the custom header stays unsettable cross-origin, a
-foreign `Host` is 421, a foreign `Origin` is 403, no launch cookie is 401, and a
-forwarder call without the header is 403. Full guide:
-[docs/studio.md](docs/studio.md).
-
-## A generated client
-
-`apg generate` writes a TypeScript client over **your** surface: the release's
-published objects merged with your project's, the tools your lock compiles to,
-and the digests that say which surface and which lock they came from. It reads
-four committed artefacts — the merged API surface, the project's OpenAPI
-snapshot, the app service's own document and the compiled lock — and nothing
-live. It is the same command whether you have a migration set or not; without
-one it generates over the release's surface alone.
-
-```bash
-bin/apg.sh generate --project project.yaml           # writes projects/<slug>/clients/typescript
-bin/apg.sh generate --project project.yaml --check   # exit 5 names the first file that differs
-```
-
-**Call `init()` before anything else**, because a generated client is a claim
-about a surface and `init()` is where the claim is checked. It fetches the
-document the deployment serves *as the caller*, normalizes it the way this
-repository does, and compares the fingerprint with the one compiled into
-`contract.ts`. Four answers, and the differences between them are the point:
-`ok`; `stale_contract`, naming **both** digests, when the deployment serves a
-surface this client was not generated from; `unreachable`, when the service did
-not answer, so nothing is known about its surface; and `unparsable`. An
-unreachable service is never reported as a stale contract (ADR 0195).
-
-**The client holds a URL and a token you passed it, and nothing else.** No
-credential, no deployment address and no caller value is written into a
-generated file — the emitter refuses its own output if one appears — so the
-package is safe to commit and the secret stays wherever you already keep it.
-
-**The version is the artefact's own, and it is derived rather than typed.** The
-generator diffs this contract's intermediate representation against the one it
-last wrote and applies ADR 0162's change classes: an object or a tool your
-project adds is a minor, one that disappears from under a caller is a major,
-and a contract that has not moved keeps the number it had. `projects/example/`
-holds a worked client at `1.0.0`, committed, and `--check` is what keeps it
-honest.
-
-[Generated clients](docs/generated-clients.md) is the longer form: the files,
-the two result unions and the sentence each member carries, the toolchain image
-that typechecks a client with no network, and what to do when `init()` answers
-something other than `ok`.
-
-## Deploying
-
-**Deploying is an ordered sequence, and no step makes its own preconditions.** A
-deploy that quietly performed them would be one whose failure halfway leaves
-nobody able to say which half ran.
-
-**Two steps come before this list**, and the operator guide's step 0 has them:
-get the release onto the host (`git bundle` + `scp` — never a GitHub credential
-there), and **create the operator user named by `ssh.operator_user`**.
-`provision-host.sh` does not create it and its second pass installs
-`PermitRootLogin no`, so on a fresh host that step removes the only way in
-(D659).
-
-```bash
-sudo bin/provision-host.sh      --host host.yaml                  # once per host
-sudo bin/edge.sh                --host host.yaml up               # once per host
-sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
-sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 24
-sudo ./deploy.sh --host host.yaml --project project.yaml \
-     --capabilities capabilities.yaml --through-session 24
-```
-
-`deploy.sh --through-session` **refuses before it changes anything** when a
-prerequisite is absent, and lists every absent item at once with the command that
-supplies each. It reports what it could not check separately from what it found
-missing, because "the edge is not running" and "the Docker daemon could not be
-reached, so nobody looked" are different sentences (ADR 0157).
-
-The [operator guides](docs/README.md#operator-guides) carry the host sequence per
-session, the two rollback timers that stop host hardening from locking you out,
-and the Let's Encrypt rate limits.
-
-**Failed ACME validations cap at 5 per hour per hostname. Never retry in a loop.**
-
-## Operating a deployment
-
-```bash
-sudo bin/doctor.sh --project <key>            # containers, TLS, database, pool,
-                                              # migrations, backups, WAL, mirror, disk, lock
-sudo bin/doctor.sh --project <key> --verbose  # the numbers behind each verdict
-sudo bin/doctor.sh --project <key> --json     # the same verdicts as a document
-sudo bin/fleet.sh [--json] [--window HOURS]   # every project on this host: release,
-                                              # live health, backup timers, denials
-sudo bin/project-retire.sh --host host.yaml --project <key> --confirm <key> \
-     --record <path> --plan                   # what retiring it would remove; nothing changes
-
-sudo bin/dr-kit.sh export --host host.yaml --capabilities capabilities.yaml \
-     --output <dir> --project project.yaml     # the disaster kit: identifiers, never a value
-bin/dr-kit.sh verify <dir>                    # is the kit whole? (docs/node-loss-runbook.md)
-                                              # `verify` takes no --project, and so dr-kit
-                                              # receives no APG_PROJECT default (D1316)
-sudo bin/rehearse.sh <scenario> --outputs <outputs.json> [--plan]
-                                              # one bounded failure: induce, read, reverse
-sudo bin/rehearse.sh reverse                  # replay an interrupted rehearsal's reversal
-                                              # (docs/recovery-operations.md)
-
-sudo bin/migrate.sh --project project.yaml status    # applied and pending
-sudo bin/backup.sh  --outputs <outputs.json> info --json
-sudo bin/backup.sh  --outputs <outputs.json> schedule status  # both timers enabled? 0 if so
-sudo bin/restore-test.sh --target-time <iso8601> --project-dir <dir>
-
-# A verified SSH forward, then a session over it. `tunnel` needs the host;
-# everything after it needs only the project key, because the tunnel recorded it.
-bin/connect.sh tunnel    --project <key> --ssh <user>@<host>
-bin/connect.sh print-env --project <key>            # connection variables, no password
-bin/connect.sh psql      --project <key>
-bin/connect.sh stop      --project <key>
-```
-
-**Four ways of naming a project, and the difference is real.** `doctor.sh` and
-`connect.sh` take `--project <key>`, the derived `apg-<slug>-<env>` identity;
-`migrate.sh` takes `--project <manifest file>`; `backup.sh` takes `--outputs`,
-the path to that project's deployed `outputs.json`; `restore-test.sh` takes
-`--project-dir`, the generated project directory. Copying the wrong one produces
-a refusal rather than a wrong action — but it is the first thing a reader trips
-over, and it is worth knowing before you do.
-
-`doctor.sh --project` reads the deployed document for identities only. **Every
-verdict comes from a live read**: that document records what was observed at
-deploy time, so a project whose archiver died yesterday still publishes the status
-it had at its last deploy (ADR 0158).
-
-Read-only diagnosis without a terminal is `apg-diag`, over its own SSH identity:
-
-```bash
-ssh -i ~/.ssh/apg_agent_ed25519 apg-agent@<host> sudo apg-diag containers
-```
-
 ## Adding your own tables
+
+**Eight steps, and every one of them runs on your own machine.** This section
+and the next are steps 3 and 4 in detail; [the new team member
+guide](docs/new-team-member.md) walks all eight from a clean machine, and its
+*done* section is this list again.
+
+1. `bin/doctor.sh` — the toolchain answers *(offline)*
+2. `./deploy.sh --project project.yaml --capabilities capabilities.yaml
+   --render-only` — a render of your project *(offline)*
+3. `projects/<slug>/migrations/`, then `bin/migrate.sh --project project.yaml
+   freeze-lock` — a table of your own, frozen into your set *(offline)*
+4. `projects/<slug>/capabilities.yaml` from `bin/agent.sh init`, then
+   `bin/mcp-contract.sh compile --project project.yaml` and `check` — an agent
+   capability over it *(offline)*
+5. `bin/apg.sh dev up --project project.yaml` — your set applied by the role
+   that will apply it on a deployment *(offline)*
+6. `bin/apg.sh generate --project project.yaml` — a typed client over your
+   surface *(offline)*
+7. `bin/apg.sh studio --help` — Studio is **read** here and not opened: a
+   launch takes a deployed document, and you do not have one yet *(offline)*
+8. `bin/session-01-check.sh` — the gate, on a clean tree with your project
+   directory tracked *(offline)*
+
+Nothing above needs a host, a credential, root or a provider. Step 4's snapshot
+is the one exception and it is a row in the table below, with what to do about
+it.
 
 **Your tables live in your own directory, and you edit none of the
 release's files.** A project that declares a migration set owns everything
@@ -607,7 +478,18 @@ bin/mcp-contract.sh compile --project project.yaml \
   > projects/<slug>/contracts/mcp-capabilities.canonical.json
 bin/mcp-contract.sh check --project project.yaml          # refuses a drift, exit 5
 bin/render-evaluation-report.py --write --project project.yaml
+bin/render-mcp-catalog.py --write --project project.yaml
 ```
+
+**The last line writes your tools a page of their own**, at
+`projects/<slug>/docs/mcp-tool-catalog.md`: every tool, the scopes each needs,
+the ceilings, and for a read the frozen columns and filters. It is your half
+and it says so — the release's tools are in
+[the MCP tool catalog](docs/mcp-tool-catalog.md), a deployment serves both
+joined into one lock, and a tool name **both** contracts carry (`query_resource`
+today) is two authorizations under one name, which the generated header marks
+because a scope granted for one grants nothing for the other. The gate runs
+`--check --project`, so the page cannot fall behind the contract.
 
 Then regenerate the client, because the lock is half of what one is a claim
 about: `bin/apg.sh generate --project project.yaml`. Your tool arrives in the
@@ -656,6 +538,161 @@ that is a guarantee (D1138).
 `projects/example/` carries all of it: the manifest the scaffold wrote for
 `note_embeddings` and `set_note_embedding`, byte for byte, its contract, its
 cases and its report.
+
+## A generated client
+
+`apg generate` writes a TypeScript client over **your** surface: the release's
+published objects merged with your project's, the tools your lock compiles to,
+and the digests that say which surface and which lock they came from. It reads
+four committed artefacts — the merged API surface, the project's OpenAPI
+snapshot, the app service's own document and the compiled lock — and nothing
+live. It is the same command whether you have a migration set or not; without
+one it generates over the release's surface alone.
+
+```bash
+bin/apg.sh generate --project project.yaml           # writes projects/<slug>/clients/typescript
+bin/apg.sh generate --project project.yaml --check   # exit 5 names the first file that differs
+```
+
+**Call `init()` before anything else**, because a generated client is a claim
+about a surface and `init()` is where the claim is checked. It fetches the
+document the deployment serves *as the caller*, normalizes it the way this
+repository does, and compares the fingerprint with the one compiled into
+`contract.ts`. Four answers, and the differences between them are the point:
+`ok`; `stale_contract`, naming **both** digests, when the deployment serves a
+surface this client was not generated from; `unreachable`, when the service did
+not answer, so nothing is known about its surface; and `unparsable`. An
+unreachable service is never reported as a stale contract (ADR 0195).
+
+**The client holds a URL and a token you passed it, and nothing else.** No
+credential, no deployment address and no caller value is written into a
+generated file — the emitter refuses its own output if one appears — so the
+package is safe to commit and the secret stays wherever you already keep it.
+
+**The version is the artefact's own, and it is derived rather than typed.** The
+generator diffs this contract's intermediate representation against the one it
+last wrote and applies ADR 0162's change classes: an object or a tool your
+project adds is a minor, one that disappears from under a caller is a major,
+and a contract that has not moved keeps the number it had. `projects/example/`
+holds a worked client at `1.0.0`, committed, and `--check` is what keeps it
+honest.
+
+[Generated clients](docs/generated-clients.md) is the longer form: the files,
+the two result unions and the sentence each member carries, the toolchain image
+that typechecks a client with no network, and what to do when `init()` answers
+something other than `ok`.
+
+## Studio
+
+```bash
+bin/apg.sh studio --project project.yaml --outputs alpha-outputs.json
+```
+
+It prints a URL on `127.0.0.1` with a one-time path in it. Open that, and the
+page shows you your deployment as **you**: the relations your token can read, a
+query builder that becomes one PostgREST request (reads only, values encoded so
+that a comma is a comma), the audit page with its denial boundaries, the
+compiled lock, the agent roster with a revocation that makes you type the
+agent's id, and your own sessions. Ctrl-C ends it, and it revokes the login
+session it opened.
+
+`--outputs` takes a **deployed** document — what a deploy published, not a
+render. The password comes from a prompt or a `0600` file; there is no
+`--password` flag and no environment variable is read for one.
+
+Five checks run before anything else on every request: `OPTIONS` is 405 so no
+preflight can succeed and the custom header stays unsettable cross-origin, a
+foreign `Host` is 421, a foreign `Origin` is 403, no launch cookie is 401, and a
+forwarder call without the header is 403. Full guide:
+[docs/studio.md](docs/studio.md).
+
+## Deploying
+
+**Deploying is an ordered sequence, and no step makes its own preconditions.** A
+deploy that quietly performed them would be one whose failure halfway leaves
+nobody able to say which half ran.
+
+**Two steps come before this list**, and the operator guide's step 0 has them:
+get the release onto the host (`git bundle` + `scp` — never a GitHub credential
+there), and **create the operator user named by `ssh.operator_user`**.
+`provision-host.sh` does not create it and its second pass installs
+`PermitRootLogin no`, so on a fresh host that step removes the only way in
+(D659).
+
+```bash
+sudo bin/provision-host.sh      --host host.yaml                  # once per host
+sudo bin/edge.sh                --host host.yaml up               # once per host
+sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
+sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 24
+sudo ./deploy.sh --host host.yaml --project project.yaml \
+     --capabilities capabilities.yaml --through-session 24
+```
+
+`deploy.sh --through-session` **refuses before it changes anything** when a
+prerequisite is absent, and lists every absent item at once with the command that
+supplies each. It reports what it could not check separately from what it found
+missing, because "the edge is not running" and "the Docker daemon could not be
+reached, so nobody looked" are different sentences (ADR 0157).
+
+The [operator guides](docs/README.md#operator-guides) carry the host sequence per
+session, the two rollback timers that stop host hardening from locking you out,
+and the Let's Encrypt rate limits.
+
+**Failed ACME validations cap at 5 per hour per hostname. Never retry in a loop.**
+
+## Operating a deployment
+
+```bash
+sudo bin/doctor.sh --project <key>            # containers, TLS, database, pool,
+                                              # migrations, backups, WAL, mirror, disk, lock
+sudo bin/doctor.sh --project <key> --verbose  # the numbers behind each verdict
+sudo bin/doctor.sh --project <key> --json     # the same verdicts as a document
+sudo bin/fleet.sh [--json] [--window HOURS]   # every project on this host: release,
+                                              # live health, backup timers, denials
+sudo bin/project-retire.sh --host host.yaml --project <key> --confirm <key> \
+     --record <path> --plan                   # what retiring it would remove; nothing changes
+
+sudo bin/dr-kit.sh export --host host.yaml --capabilities capabilities.yaml \
+     --output <dir> --project project.yaml     # the disaster kit: identifiers, never a value
+bin/dr-kit.sh verify <dir>                    # is the kit whole? (docs/node-loss-runbook.md)
+                                              # `verify` takes no --project, and so dr-kit
+                                              # receives no APG_PROJECT default (D1316)
+sudo bin/rehearse.sh <scenario> --outputs <outputs.json> [--plan]
+                                              # one bounded failure: induce, read, reverse
+sudo bin/rehearse.sh reverse                  # replay an interrupted rehearsal's reversal
+                                              # (docs/recovery-operations.md)
+
+sudo bin/migrate.sh --project project.yaml status    # applied and pending
+sudo bin/backup.sh  --outputs <outputs.json> info --json
+sudo bin/backup.sh  --outputs <outputs.json> schedule status  # both timers enabled? 0 if so
+sudo bin/restore-test.sh --target-time <iso8601> --project-dir <dir>
+
+# A verified SSH forward, then a session over it. `tunnel` needs the host;
+# everything after it needs only the project key, because the tunnel recorded it.
+bin/connect.sh tunnel    --project <key> --ssh <user>@<host>
+bin/connect.sh print-env --project <key>            # connection variables, no password
+bin/connect.sh psql      --project <key>
+bin/connect.sh stop      --project <key>
+```
+
+**Four ways of naming a project, and the difference is real.** `doctor.sh` and
+`connect.sh` take `--project <key>`, the derived `apg-<slug>-<env>` identity;
+`migrate.sh` takes `--project <manifest file>`; `backup.sh` takes `--outputs`,
+the path to that project's deployed `outputs.json`; `restore-test.sh` takes
+`--project-dir`, the generated project directory. Copying the wrong one produces
+a refusal rather than a wrong action — but it is the first thing a reader trips
+over, and it is worth knowing before you do.
+
+`doctor.sh --project` reads the deployed document for identities only. **Every
+verdict comes from a live read**: that document records what was observed at
+deploy time, so a project whose archiver died yesterday still publishes the status
+it had at its last deploy (ADR 0158).
+
+Read-only diagnosis without a terminal is `apg-diag`, over its own SSH identity:
+
+```bash
+ssh -i ~/.ssh/apg_agent_ed25519 apg-agent@<host> sudo apg-diag containers
+```
 
 ## Checks
 
@@ -764,7 +801,7 @@ and what closes the plane now is the same thing that closes the REST surface:
   capability somebody reviewed, compiled from a manifest the checkout tracks.
 
 A project opens the plane to its own tables by owning a capability manifest
-beside its migration set (ADR 0201; *Giving an agent your tables* below). A
+beside its migration set (ADR 0201; *Giving an agent your tables* above). A
 capability that borrows `notes:read` to read something that is not a note is
 still representable and still caught: the manifest no longer compiles to the
 approved contract, and `bin/mcp-contract.sh` says so.

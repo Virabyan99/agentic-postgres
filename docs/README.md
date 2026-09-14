@@ -80,6 +80,7 @@ Before a deployment exists, and on a machine that is not one.
 |---|---|
 | [Acceptance matrix](acceptance-matrix.md) | Every requirement, its node ids, and whether they collect **(generated)** |
 | [Evaluation report](evaluation-report.md) | Every case the evaluation harness asks of the agent surface, derived and written counted apart **(generated)** |
+| [The second walk](second-walk.md) | How `DX-001` is answered: who may walk the documented path, the task statement a walker is handed verbatim, the record they write and the five readings the product takes of it |
 | [Security acceptance](security-acceptance.md) | The security requirements and how each is proved |
 | [Threat model](threat-model.md) | What is defended against, and what is not |
 | [Source specification](source-specification.md) | The original brief. **Digest-pinned** — quoted, never edited |

@@ -33,6 +33,16 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 CURRENT_PATH_DOCUMENTS = (
     "README.md",
     "docs/README.md",
+    # **D1323.** The guide IS the documented path -- it is what
+    # `docs/README.md` sends a new reader to first -- and it was not in this
+    # set for thirteen sessions, while `dx_record.DOCUMENT_ROOTS` (the LIVE
+    # half's scan) does read it. The two halves of one claim were reading
+    # different documents. Added here rather than removed there: the guide is
+    # the page most likely to name a command that has moved.
+    "docs/new-team-member.md",
+    # The statement a walker is handed. If it names a command that does not
+    # exist, the walk fails on the builder's typing rather than on the product.
+    "docs/second-walk.md",
     "docs/api-operations.md",
     "docs/pool-operations.md",
     "docs/database-connections.md",
@@ -253,4 +263,172 @@ def test_the_deploy_sequence_stays_within_the_specifications_bound() -> None:
     assert len(commands) < 15, (
         f"the deploy sequence is {len(commands)} commands and the specification fixes "
         f"the operator path at fewer than 15 steps: {commands}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# `DX-DOC-001` -- the guide is the path this release has, and the README is in
+# the order an adopter walks it (Session 25, D1313, D1329)
+# ---------------------------------------------------------------------------
+
+
+GUIDE = REPO_ROOT / "docs" / "new-team-member.md"
+
+#: The label the guide is allowed to carry, and the only one.
+AVAILABLE = "*available now*"
+
+#: What the guide claimed for fifteen sessions about steps that were built,
+#: deployed and measured. Both spellings, with and without a session number.
+FUTURE_LABEL = re.compile(r"future session(?:\s*\((\d+)\))?", re.IGNORECASE)
+
+
+def test_the_guide_labels_nothing_as_future_that_this_release_implements() -> None:
+    """**D1313.** The guide's step 14 said *future session (10)* while the
+    restore it describes had been rehearsed against a real deployment and
+    timed at 247 s; step 12 said *implemented in Session 2* thirteen sessions
+    later; and its *done* section told a reader they had no database in the
+    paragraph after the one that had just given them one.
+
+    D693's guard catches a stale `--session N` an operator would TYPE. It
+    cannot catch a stale sentence, because a sentence is not an argument -- and
+    the guide is the one document whose whole purpose is to be read by a
+    stranger. This is that half.
+
+    The rule is the strong one and it is what the page can now honestly claim:
+    **no `future session` label at all.** A label carrying a number this
+    release has passed is a lie about the product; a label carrying no number
+    is a lie a reader cannot even check.
+
+    The control is in the same test: the scan finds the label vocabulary the
+    page does use, so a page that had been emptied would not pass by having no
+    labels to fault.
+    """
+    text = GUIDE.read_text(encoding="utf-8")
+
+    # The control first. A guide with no labels at all would satisfy the
+    # assertion below about nothing (D374).
+    steps = re.findall(r"^### (\d+)\. .+$", text, flags=re.MULTILINE)
+    assert len(steps) >= 10, f"the guide has {len(steps)} numbered steps; it is not a path"
+    assert [int(number) for number in steps] == list(range(1, len(steps) + 1)), (
+        f"the guide's steps do not run 1..{len(steps)}: {steps}. A reader following a page "
+        "whose numbers skip cannot tell a missing step from a renumbering"
+    )
+    assert text.count(AVAILABLE) == len(steps), (
+        f"{text.count(AVAILABLE)} steps are labelled {AVAILABLE} and there are {len(steps)}; "
+        "the label vocabulary this scans for is not the one the page uses"
+    )
+
+    stale: list[str] = []
+    for line_number, line in enumerate(text.splitlines(), 1):
+        for match in FUTURE_LABEL.finditer(line):
+            session = match.group(1)
+            if session is None or int(session) <= CURRENT_SESSION:
+                stale.append(f"docs/new-team-member.md:{line_number}: {line.strip()!r}")
+
+    assert not stale, (
+        f"the guide labels steps as belonging to a future session, and this release "
+        f"implements through {CURRENT_SESSION}. A reader is told the product cannot do "
+        f"something it has been doing for a year:\n  " + "\n  ".join(stale)
+    )
+
+
+def test_the_guide_names_the_tenant_path_and_the_three_surfaces() -> None:
+    """The guide is the walk's own page, so it has to contain the walk.
+
+    Stage 3 gave an adopter four things the guide named none of: a directory of
+    their own, a local database, a generated client and Studio. A walker
+    following a page that stops at *render* would record every one of them as
+    an undocumented step -- correctly, and about the documentation rather than
+    about the product.
+
+    The `done` section is checked for the tenant path specifically, because
+    that is the sentence that was wrong in the most misleading way: it said
+    *"You do not have a running database. That is Session 3"* one paragraph
+    after the step that builds one.
+    """
+    text = GUIDE.read_text(encoding="utf-8")
+
+    # **Either spelling of a surface counts**, because both are documented and
+    # `dx_record.normalise` resolves them to one for exactly this reason: the
+    # guide writes `bin/apg.sh dev up`, README writes both, and a guard that
+    # demanded the bare `apg dev` would be holding the page to a spelling no
+    # page uses. What is asserted is that the surface is REACHED, not how it
+    # was typed.
+    surfaces = {
+        "the local database": ("apg dev ", "apg.sh dev ", "bin/dev.sh"),
+        "the generated client": ("apg generate", "apg.sh generate", "bin/generate.sh"),
+        "Studio": ("apg studio", "apg.sh studio", "bin/studio.sh"),
+        "a directory of the reader's own": ("projects/<slug>",),
+    }
+    for surface, spellings in surfaces.items():
+        assert any(spelling in text for spelling in spellings), (
+            f"the guide never reaches {surface} (looked for {list(spellings)}); a reader "
+            "following it reaches a `done` that does not describe what this release does"
+        )
+
+    marker = '\n## What "done" looks like'
+    assert marker in text, "the guide has no `done` section, which is the walk's own criterion"
+    done = text.split(marker, 1)[1].split("\n## ", 1)[0]
+    for named in ("projects/<slug>", "dx-record check", "gate"):
+        assert named in done, (
+            f"the guide's `done` section does not name {named!r}, so it is not the success "
+            "criterion a walk is measured against (ADR 0207 §4)"
+        )
+    # The sentence that was wrong, gone rather than contradicted elsewhere.
+    for stale in ("That is Session 3", "You do not have a running database"):
+        assert stale not in text, f"the guide still says {stale!r}"
+
+
+#: The order an adopter walks the README, and the reason the sections moved.
+#: Read as a list rather than asserted pairwise: what matters is the sequence,
+#: and a pairwise check passes on an order that is right in every pair and
+#: wrong overall.
+ADOPTER_WALK = (
+    "What runs",
+    "Local bootstrap",
+    "Rendering a project",
+    "A local environment",
+    "Adding your own tables",
+    "Giving an agent your tables",
+    "A generated client",
+    "Studio",
+    "Deploying",
+    "Operating a deployment",
+    "Checks",
+)
+
+
+def test_the_readme_sections_are_in_the_order_an_adopter_walks() -> None:
+    """**D1329.** The README described the product in the order it was BUILT.
+
+    Studio and the generated client -- Sessions 24 and 23 -- came before the
+    two sections that tell a reader how to add a table at all, so a reader met
+    a client over "your surface" nine hundred words before the section that
+    lets them have one. Every section's prose is untouched by the reorder and
+    that is asserted elsewhere: two proofs in this suite hold sentences inside
+    two of them, and they are unchanged.
+
+    The tail after *Checks* is deliberately not constrained. It is reference
+    material -- Compose, version locks, the exit-code convention, the
+    repository map -- and fixing its order here would be a guard with an
+    opinion nobody has argued for.
+    """
+    text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    headings = re.findall(r"^## (.+)$", text, flags=re.MULTILINE)
+
+    missing = [name for name in ADOPTER_WALK if name not in headings]
+    assert not missing, f"the README has no sections named {missing}"
+
+    walked = [name for name in headings if name in ADOPTER_WALK]
+    assert walked == list(ADOPTER_WALK), (
+        "the README's sections are not in the order an adopter walks them.\n"
+        f"  expected: {list(ADOPTER_WALK)}\n"
+        f"  found:    {walked}"
+    )
+
+    # The control: the walk is a PREFIX of the document, so nothing in the
+    # reference tail has drifted up into the middle of the path.
+    assert headings[: len(ADOPTER_WALK)] == list(ADOPTER_WALK), (
+        f"a section that is not part of the adopter's path appears inside it: "
+        f"{headings[: len(ADOPTER_WALK)]}"
     )

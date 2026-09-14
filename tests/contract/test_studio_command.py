@@ -258,6 +258,19 @@ def test_a_document_without_a_ready_route_exits_five(tmp_path: Path) -> None:
     )  # fmt: skip
     assert rendered.returncode == 2, rendered.stderr
     assert "rendered document" in rendered.stderr
+    # **ADR 0207 §4.** The second walk reaches Studio with a render and no
+    # deployment, records this refusal verbatim, and stops there. A reader who
+    # has never deployed anything cannot turn "the REST route is an
+    # observation" into "deploy first", so the sentence names the remedy and
+    # this asserts it does. An ADR 0195 answer that arrives as a clear sentence
+    # is a documented path working, not failing.
+    assert "Deploy the project" in rendered.stderr, (
+        "the refusal does not name a deploy as what is missing, which is the whole of what "
+        "the walk's Studio step can learn"
+    )
+    assert "--help" in rendered.stderr, (
+        "the refusal does not say what a reader with no deployment can read instead"
+    )
 
 
 def test_an_http_route_to_a_non_loopback_host_is_refused(tmp_path: Path) -> None:

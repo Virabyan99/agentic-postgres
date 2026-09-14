@@ -465,3 +465,94 @@ def test_the_readme_says_what_closes_the_agent_plane_and_how_a_project_opens_it(
     # The old closure must be gone, not merely contradicted somewhere else.
     for stale in ("closed enum", "exactly six names", "no agent surface at all"):
         assert stale not in section, f"the README still states the old closure: {stale!r}"
+
+
+# ---------------------------------------------------------------------------
+# The second walk's page (Session 25, ADR 0207)
+# ---------------------------------------------------------------------------
+
+
+SECOND_WALK = REPO_ROOT / "docs" / "second-walk.md"
+TASK_BEGIN = "<!-- task-statement:begin -->"
+TASK_END = "<!-- task-statement:end -->"
+
+
+def test_the_second_walk_page_carries_the_task_statement_and_the_record_schema() -> None:
+    """The statement is copied verbatim into a fresh session, so it is an
+    ARTEFACT with a boundary rather than a passage somebody paraphrases.
+
+    Two literal markers, because a builder handing the walk over reads
+    "everything between these" and a human eye cannot be trusted to find the
+    end of a prose section under time pressure. What is asserted here is that
+    the markers exist exactly once each, in order, with a statement of real
+    size between them; that the statement carries every rule the walk depends
+    on; and that the page's schema section names every field the READER
+    requires -- read out of `dx_record` rather than typed, so a field added to
+    the reader and not to the page is caught here rather than by a walker who
+    wrote a record the product refuses.
+    """
+    from agentic_postgres import dx_record
+
+    text = SECOND_WALK.read_text(encoding="utf-8")
+    assert text.count(TASK_BEGIN) == 1 and text.count(TASK_END) == 1, (
+        "the task statement's markers are not each present exactly once, so 'everything "
+        "between them' does not name one passage"
+    )
+    assert text.index(TASK_BEGIN) < text.index(TASK_END), "the markers are in the wrong order"
+    statement = text[text.index(TASK_BEGIN) + len(TASK_BEGIN) : text.index(TASK_END)]
+    assert len(statement.split()) >= 300, (
+        f"the task statement is {len(statement.split())} words. It is the WHOLE prompt of a "
+        "session that has nothing else, and a short one is a walk the builder filled in later"
+    )
+
+    # Each of these is a rule the walk's validity rests on, and a statement
+    # missing one produces a record nobody can read as evidence (ADR 0207 §1).
+    required = {
+        "~/walk/agentic-postgres": "the clone's path",
+        "~/walk/dx-record.json": "where the record goes",
+        "docs/plans/": "the one directory a walker may not read",
+        "wsl bash -lc": "the shell, when the walk is driven from Windows",
+        "dx-record digest": "the first of the two closing commands",
+        "dx-record check": "the second",
+        "Ask nobody": "that a question is an undocumented step",
+        "sudo": "that no host, credential or deploy is in scope",
+        "reached_success_criterion": "the walker's own verdict",
+        "blocked_by": "what a walk that stopped owes",
+        "undocumented step": "what the walk is actually collecting",
+    }
+    for needle, why in required.items():
+        assert needle in statement, f"the task statement does not name {why} ({needle!r})"
+
+    # The schema section names what the reader requires. Derived, not typed:
+    # a field added to `dx_record.REQUIRED_FIELDS` and not to this page would
+    # otherwise reach a walker as a refusal of a record they wrote correctly.
+    schema = text.split("## 3. The record", 1)
+    assert len(schema) == 2, "the page has no record-schema section"
+    body = schema[1].split("\n## ", 1)[0]
+    for field in dx_record.REQUIRED_FIELDS:
+        assert field in body, f"the record's schema section does not describe {field!r}"
+    for field in dx_record.FOLLOWED_BY_FIELDS:
+        assert field in body, f"the schema section does not describe followed_by.{field}"
+
+    # **`blocked_by` is the one member that is not a row of the table**, so it
+    # has to be described in the section's PROSE. A battery deleting its
+    # paragraph left `assert "blocked_by" in body` green, because the row for
+    # `reached_success_criterion` mentions it in passing -- D200's shape, a
+    # substring standing in for a description. What is required now is a
+    # paragraph that names the field AND the condition under which it is read;
+    # a walker who is told only that the field exists does not know when to
+    # write one.
+    prose = [
+        paragraph
+        for paragraph in body.split("\n\n")
+        if not paragraph.lstrip().startswith("|") and "blocked_by" in paragraph
+    ]
+    assert any("reached_success_criterion" in paragraph for paragraph in prose), (
+        "the schema section does not say when `blocked_by` is required. It is the only "
+        f"member outside the table, and the prose paragraphs naming it are {prose}"
+    )
+
+    # And the page is reachable: the index proof above only checks that every
+    # page is listed once, which a page listed under the wrong heading passes.
+    index = INDEX.read_text(encoding="utf-8")
+    assert "(second-walk.md)" in index, "the second walk's page is not in the index"
