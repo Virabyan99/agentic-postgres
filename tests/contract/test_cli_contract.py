@@ -82,6 +82,9 @@ SHELL_COMMANDS = (
     "bin/dev.sh",
     "bin/dev-token.sh",
     "bin/dr-kit.sh",
+    # Session 25 (ADR 0207 §3): the walker reads their own record the way the
+    # sweep will. Listed the run it landed (D1014), `git add`ed first (D1188).
+    "bin/dx-record.sh",
     "bin/docs.sh",
     "bin/migrate.sh",
     "bin/postgres-bootstrap.sh",
@@ -159,6 +162,9 @@ PYTHON_COMMANDS = (
     "bin/docs.py",
     "bin/doctor.py",
     "bin/dr-kit.py",
+    # Session 25 (ADR 0207 §3): the four readings that decide DX-001, run by
+    # the walker as well as by the sweep. Listed the run it landed (D1014).
+    "bin/dx-record.py",
     "bin/fleet.py",
     "bin/generate.py",
     "bin/materialize-secrets.py",

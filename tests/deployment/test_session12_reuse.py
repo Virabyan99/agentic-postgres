@@ -21,13 +21,12 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, output_migrations
+from agentic_postgres import REPO_ROOT, deployed_output, dx_record
 
 pytestmark = [pytest.mark.p0]
 
@@ -47,6 +46,16 @@ def _declared(variable: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # DEP-001 — a fresh project deploys on an empty host
 # ---------------------------------------------------------------------------
+
+#: The oldest outputs version whose `routes` block this proof can read.
+#:
+#: v16 is the version the DR kit facility first exported and the version the
+#: outsider's 2026-09-08 bring-up published (ADR 0197, D1312). Below it a
+#: document predates the route-status vocabulary this proof reads, so the
+#: honest answer is *this release cannot read that document* rather than a
+#: verdict about the host that wrote it — `dr_kit.KIT_FIRST_OUTPUTS_VERSION`
+#: draws the same line for the same reason (D1141).
+FIRST_READABLE_FRESH_HOST_VERSION = 16
 
 
 @pytest.mark.live_host
@@ -68,8 +77,32 @@ def test_a_project_deployed_on_an_empty_host_is_a_working_deployment(
     restatement of every other host claim. So the declared host must not be the
     host `project_a` is deployed on.
 
-    Goes red if: the fresh host's deployment is not at this release's outputs
-    version, publishes no ready route, or is the host we already had.
+    **The version is read the way the DR kit reads one, and Session 25 is why**
+    (D1326, ADR 0207 §3d). This used to require the declared document to be at
+    the tree's CURRENT outputs version. The artefact it exists to read is a
+    document from a bring-up that happened at an older release — the outsider's
+    2026-09-08 host published outputs v16 and this release renders v18 — so the
+    assertion refused the only document that could ever satisfy the claim, with
+    a message (*it describes an older product*) that sends an operator to
+    redeploy a host that was fine.
+
+    The obvious repair does not exist. `carry_to_current` **refuses every
+    deployed document**: all sixteen single-step migrators call
+    `require_kind(document, "rendered")`, which is ADR 0012 on purpose — a
+    migrator that carried a deployed document forward would republish an
+    observation under a version that never measured it. Measured on four real
+    archived documents in rig 25f, v16 through v18.
+
+    So this takes the shape `dr_kit.verify_deployed_document` already uses for
+    exactly this problem (D1122, D1141): read by version. The current version is
+    validated in full; an older one is read for what the claim is ABOUT — a
+    deployed document, naming a host that is not ours, publishing ready routes —
+    and a version this release cannot read at all is **reported**, not failed,
+    because that is a statement about the reader.
+
+    Goes red if: the declared document is not a deployed one, publishes no ready
+    route, or is the host we already had. Reports and stays `not_run` if: the
+    document is at a version this release cannot read.
     """
     fresh = _declared("APG_FRESH_HOST_OUTPUTS")
 
@@ -77,10 +110,26 @@ def test_a_project_deployed_on_an_empty_host_is_a_working_deployment(
         f"the declared document is {fresh.get('document_kind')!r}, not a deployed one. "
         "A render proves the manifest is valid, not that a host deployed it"
     )
-    assert fresh.get("schema_version") == output_migrations.CURRENT_VERSION, (
-        f"the fresh host's document is at outputs v{fresh.get('schema_version')} and this "
-        f"release is v{output_migrations.CURRENT_VERSION}. It describes an older product"
+
+    version = fresh.get("schema_version")
+    current = deployed_output.SCHEMA_VERSION
+    assert isinstance(version, int) and not isinstance(version, bool), (
+        f"the declared document's schema_version is {version!r}, not an integer. Nothing "
+        "below can be read against a version that is not one"
     )
+    if version > current:
+        pytest.skip(
+            f"the declared document is outputs version {version} and this release reads up "
+            f"to {current}. Read it from a checkout at least as new as the one that wrote "
+            "it; this says nothing about whether that host's deployment worked"
+        )
+    if version < FIRST_READABLE_FRESH_HOST_VERSION:
+        pytest.skip(
+            f"the declared document is outputs version {version}, below "
+            f"{FIRST_READABLE_FRESH_HOST_VERSION} — older than any document this release can "
+            "read the routes of. DEP-001 stays not_run with the version named, rather than "
+            "failing a deployment nobody has shown to be broken"
+        )
 
     declared_host = (fresh.get("host") or {}).get("id")
     running_host = (project_a.get("host") or {}).get("id")
@@ -177,97 +226,96 @@ def test_removing_one_project_leaves_the_other_whole(
 # DX-001 — somebody who did not build this completed the documented path
 # ---------------------------------------------------------------------------
 
-#: What the record must carry. Each is a question whose answer decides the claim,
-#: and an absent one is refused rather than assumed favourable.
-DX_RECORD_FIELDS = (
-    "followed_by",
-    "completed_at",
-    "release",
-    "commands_run",
-    "files_edited",
-    "undocumented_steps",
-    "reached_success_criterion",
-)
-
-#: The operator inputs a reader legitimately creates and edits. Anything else
-#: they had to edit is a source edit, which is `DX-001`'s stated failure.
-OPERATOR_INPUTS = frozenset(
-    {"project.yaml", "capabilities.yaml", "host.yaml", "project.beta.yaml", "project.alpha.yaml"}
-)
-
-_COMMAND = re.compile(r"(?:^|[\s`(])(\./deploy\.sh|bin/[a-z0-9-]+\.(?:sh|py))")
-
 
 @pytest.mark.live_host
 @pytest.mark.requires_environment("APG_DX_RECORD_FILE")
 def test_a_developer_who_did_not_build_this_completed_the_documented_path() -> None:
     """`DX-001`. The one claim in this repository that a test cannot make alone.
 
-    **The record is a declaration and this refuses a false one**, three ways:
-    an incomplete record, a record that contradicts itself, and — the one that
-    matters — **a record listing a command the documentation does not name**.
-    That last check is `DX-001`'s actual subject: the path is complete only if
-    somebody walked it without being told anything that is not written down.
+    **The record is a declaration and this refuses a false one.** An incomplete
+    record, a record that contradicts itself, and -- the one that matters -- a
+    record listing a command the documentation does not name. That last check is
+    `DX-001`'s actual subject: the path is complete only if somebody walked it
+    without being told anything that is not written down.
 
     It deliberately does **not** check that the reader succeeded quickly, or
     without confusion. It checks that they needed no source edit and no
     undocumented command, which is what the requirement says.
 
-    **Why a declaration rather than automation**: the variable under test is a
-    person who did not build this. Nothing in a repository can stand in for
+    **Why a declaration rather than automation**: the variable under test is
+    somebody who did not build this. Nothing in a repository can stand in for
     that, and a test that tried would be measuring its author.
+
+    **Every reading here is `dx_record`'s, and that is Session 25's repair**
+    (ADR 0207 §3). The checks used to live in this module, comparing edited
+    files by BASENAME against five operator inputs and resolving commands no
+    further than `bin/apg.sh`. They were written in Session 12, six sessions
+    before an adopter had a directory of their own, and **no record was ever
+    declared, so they had never run**. Rig 25d ran them for the first time
+    against a walk that followed README exactly: seven false source edits, and
+    `bin/apg.sh no-such-verb` passing while `bin/dev.sh up` was refused. The
+    same four functions now answer for the walker, through
+    `bin/apg.sh dx-record check`, so nobody is marked by a rubric they could
+    not run.
+
+    Goes red if: the walker edited a file this repository ships, ran a command
+    no document names, read a document that has moved since, recorded a
+    `followed_by` that does not say what their context held, or did not reach
+    the success criterion.
     """
-    record = _declared("APG_DX_RECORD_FILE")
+    path = Path(os.environ["APG_DX_RECORD_FILE"])
+    try:
+        record = dx_record.load(path)
+    except (dx_record.RecordUnreadable, dx_record.RecordIncomplete) as problem:
+        pytest.fail(str(problem))
 
-    missing = [field for field in DX_RECORD_FIELDS if field not in record]
-    assert not missing, (
-        f"the record is missing {missing}. An absent answer is not a favourable one, and a "
-        "claim this size is not made on a partial record"
+    shape = dx_record.shape_problems(record)
+    assert not shape, (
+        f"the record's shape is wrong, so every reading below would be answering a "
+        f"different question: {shape}"
     )
 
-    assert record["reached_success_criterion"] is True, (
+    absent = dx_record.absent_documents(record, REPO_ROOT)
+    assert not absent, (
+        f"the record names documents this checkout does not have: {absent}. That is a "
+        "statement about the tree this sweep is reading, not about the walk"
+    )
+
+    assert record.reached_success_criterion is True, (
         f"the record says the success criterion was not reached: "
-        f"{record.get('blocked_by') or record['reached_success_criterion']!r}"
+        f"{record.document.get('blocked_by') or record.reached_success_criterion!r}"
     )
 
-    undocumented = record["undocumented_steps"]
-    assert not undocumented, (
-        f"the reader needed steps the documentation does not give: {undocumented}. That is "
-        "precisely what DX-001 asserts does not happen"
+    assert not record.undocumented_steps, (
+        f"the reader needed steps the documentation does not give: "
+        f"{record.undocumented_steps}. That is precisely what DX-001 asserts does not happen"
     )
 
-    edited = {Path(name).name for name in record["files_edited"]}
-    source_edits = sorted(edited - OPERATOR_INPUTS)
+    source_edits = dx_record.source_edits(record)
     assert not source_edits, (
         f"the reader had to edit files this repository ships: {source_edits}. DX-001's own "
-        "words are 'without source edits' — editing a shipped file forks the template"
+        "words are 'without source edits' — editing a shipped file forks the template. "
+        f"Files under projects/{record.project_slug}/ are the walker's own and are not "
+        "counted (ADR 0198, ADR 0207)"
     )
 
-    # Every command they ran must be one the documentation names. This is the
-    # half that makes the record more than a self-report: it is checked against
-    # the documents in this tree rather than against the reader's memory.
-    documented: set[str] = set()
-    for name in ("README.md", "docs/README.md"):
-        path = REPO_ROOT / name
-        if path.is_file():
-            documented |= {
-                match.group(1).lstrip("./")
-                for match in _COMMAND.finditer(path.read_text(encoding="utf-8"))
-            }
-    for guide in sorted((REPO_ROOT / "docs").glob("session-*-operator-guide.md")):
-        documented |= {
-            match.group(1).lstrip("./")
-            for match in _COMMAND.finditer(guide.read_text(encoding="utf-8"))
-        }
+    documented = dx_record.documented_commands(REPO_ROOT)
     assert documented, "no documented commands were found, so this comparison is vacuous"
-
-    ran = {
-        match.group(1).lstrip("./")
-        for line in record["commands_run"]
-        for match in _COMMAND.finditer(f" {line}")
-    }
-    unnamed = sorted(ran - documented)
+    unnamed = dx_record.unnamed_commands(record, documented)
     assert not unnamed, (
         f"the reader ran commands the documentation does not name: {unnamed}. Either they "
         "were told out of band, or they worked it out — and both mean the path is incomplete"
+    )
+
+    stale = dx_record.stale_documents(record, REPO_ROOT)
+    assert not stale, (
+        f"the documentation moved after the walk: {stale}. A walk is a measurement of a "
+        "document at a commit; walk again, or record why this reading still stands"
+    )
+
+    followed_by = dx_record.followed_by_problems(record)
+    assert not followed_by, (
+        f"the record does not say whose walk this was, in the terms ADR 0207 admits: "
+        f"{followed_by}. A claim closed by its author's hands leaves the next reader unable "
+        "to tell a proved guarantee from a plausible one (D478)"
     )

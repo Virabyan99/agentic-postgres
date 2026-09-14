@@ -272,8 +272,12 @@ def test_the_printed_script_prints_no_environment_value() -> None:
     """D105's neighbourhood: a completion script is sourced, so anything it
     prints lands in the operator's terminal on a keystroke."""
     planted = "APG_CANARY_VALUE_bH3x9Qf2"
-    environment = _environment()
-    environment["APG_CANARY"] = planted
+    # A literal, not `environment["APG_CANARY"] = ...`: the environment-gate
+    # guard reads a subscript with an `APG_`-prefixed constant as a test
+    # CONSUMING that variable, and it is right to -- it cannot tell a read from
+    # a write, and the read is the one that errors instead of skipping. Planting
+    # one in a child's environment is the shape `test_cli_contract` uses.
+    environment = {**_environment(), "APG_CANARY": planted}
     result = subprocess.run(
         [str(APG), "completion", "bash"],
         cwd=REPO_ROOT,
