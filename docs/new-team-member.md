@@ -2,7 +2,9 @@
 
 Fourteen steps, **every one of them available now**, and **twelve of them
 offline**. None requires editing a file this repository ships, and none needs
-root, a credential or a provider.
+a credential or a provider. **One needs root and it is step 2**: two packages
+come from `apt-get`. Nothing after it does, and if `sudo` is not yours to use,
+step 2's note says how to get the same two tools without it.
 
 **Two of the fourteen wait for your project's first deploy, and both wait on
 the same file.** `projects/<slug>/contracts/postgrest-openapi.canonical.json`
@@ -51,6 +53,14 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv python install 3.12
 ```
 
+**This is the one step that needs root, and only for the first line.** `uv`
+installs into `~/.local/bin` as you. If you cannot use `sudo`, `shellcheck` and
+`jq` both ship single static binaries — put them anywhere on your `PATH` and
+step 4 will confirm them by name, which is all anything here asks of them. If
+they are already installed, this step is a no-op and you should skip it rather
+than run it: nothing later distinguishes a package you installed from one that
+was there.
+
 ### 3. Create the pinned environment — *available now*
 
 ```bash
@@ -97,11 +107,24 @@ cp project.example.yaml project.yaml
 cp capabilities.example.yaml capabilities.yaml
 ```
 
-Set the slug, environment, and domain. `capabilities.yaml` stays empty: no
-capability can be enabled until a live API contract exists to validate it
-against.
+Set the slug, environment, and domain in `project.yaml`.
 
-**Remove the `mcp.capabilities` key for now, and put it back at step 11.** The
+**`capabilities.yaml` is the reviewed release set and you keep it as copied.**
+It is not empty — it carries the release's capabilities, enabled, and step 8
+will print `Capabilities 7 enabled` from it. (Empty was the correct state
+through Session 7 only; `capabilities.example.yaml`'s own header says so.) This
+file is the RELEASE's surface; the capability over a table of your own is a
+different file in a different place, and step 11 is where you write it.
+
+**Two keys in the copied `project.yaml` point at the example project, and both
+must move.** `mcp.capabilities` and `migrations.set` are each
+`projects/example` in the file you just copied:
+
+- **`migrations.set`** — delete it now. Left as copied it renders *another
+  project's* migration set into yours, and step 9's `freeze-lock` freezes
+  `projects/example` while appearing to work. You put it back at step 9,
+  pointing at your own directory.
+- **`mcp.capabilities`** — delete it now and put it back at step 11. The
 example manifest you just copied carries it, and it names a file that does not
 exist yet in your project — the manifest loader refuses that, so the first
 `freeze-lock` at step 9 would be refused before it read a single migration. The
@@ -131,6 +154,13 @@ bin/compose.sh .generated/<project-key> --profile contract config
 bin/compose.sh .generated/<project-key> ps --quiet     # empty
 ```
 
+**A project's own migrations render to their own directory.** The release's
+set lands in `.generated/<project-key>/migrations/` and yours in
+`.generated/<project-key>/migrations-project/` — a separate ordering space, so
+that a set of yours can never interleave with a released migration (ADR 0206).
+If you look for your migration under the first directory after step 9 you will
+not find it, and nothing has gone wrong.
+
 Database endpoints read `"status": "unavailable"` with null host, port, URL and
 secret reference. That is correct rather than incomplete — there is no tunnel
 host or bound port yet, and a placeholder that looked like a DSN would
@@ -151,16 +181,37 @@ mkdir -p projects/<slug>/migrations/templates
 #   block that raises AP900
 # projects/<slug>/migrations/manifest.json
 #   the entry: version, name, template, placeholders
-bin/migrate.sh --project project.yaml freeze-lock
+# projects/<slug>/contracts/postgrest-api-surface.yaml
+#   your reviewed surface: the view and the function you just published, at
+#   api-surface schema 2. `projects/example/contracts/` is the worked one.
 ```
 
-Then point your own manifest at it, at schema version 5:
+**Point your manifest at the directory before you freeze**, at schema version
+6 — this is the `migrations.set` key you removed at step 7:
 
 ```yaml
-schema_version: 5
+schema_version: 6
 migrations:
   set: projects/<slug>
 ```
+
+**Then, and not before:**
+
+```bash
+bin/migrate.sh --project project.yaml freeze-lock
+```
+
+The order is the whole point. `freeze-lock` freezes the set the manifest names
+at the moment it runs, so freezing first freezes whatever the copied manifest
+still pointed at — silently, and with a lock that looks correct.
+
+**Write the reviewed surface now too, in the same step.** It is listed in the
+block above because it belongs to the table rather than to the agent:
+`projects/<slug>/contracts/postgrest-api-surface.yaml` is what publishes your
+view and your function to every later comparison, and step 11's
+`bin/agent.sh init` reads it. Without it that command refuses with exit `2` and
+*the merged reviewed surface names no operation* — which is a step you have not
+done yet rather than a mistake you made.
 
 `projects/example/` is a worked set — a pgvector column beside each note, a
 `security_invoker` view and one write function — and reading it first is
@@ -251,9 +302,27 @@ agent plane serves the release's six tools until your own is compiled into the
 lock. **If you are following this guide to the end without a deployment, stop
 at `bin/agent.sh init` and read step 13.**
 
+**If you ran the compile line anyway, delete the file it left behind.** The
+redirect is the shell's, not the command's: `>` creates and truncates the
+target before `compile` runs, so a compile that refuses still leaves a 0-byte
+`mcp-capabilities.canonical.json` in your contracts directory. Every command
+that reads it will tell you it is empty and say to delete it (exit `5`), and
+the gate at step 14 would otherwise ask you to commit an empty contract:
+
+```bash
+rm -f projects/<slug>/contracts/mcp-capabilities.canonical.json
+```
+
+**A fourth command waits on the same file**, and it is the one below rather
+than one of the three named above:
+
 ```bash
 bin/render-mcp-catalog.py --write --project project.yaml
 ```
+
+It renders your tools a page of their own from the compiled contract, so it
+runs when `compile` does and not before — after your first deploy, with the
+other three.
 
 `init` scaffolds **one entry** from your reviewed surface and writes no file, so
 you read what it wrote before it becomes a file. An operation your surface does
@@ -325,6 +394,11 @@ may make. There is no SQL box, not hidden and not behind a flag.
 
 Point it at the document you rendered in step 8 and it refuses, on purpose:
 
+```bash
+bin/apg.sh studio --project project.yaml \
+  --outputs .generated/<project-key>/outputs.json
+```
+
 ```
 studio: that is a rendered document; the REST route is an observation, and a
 render has made none. Deploy the project, then pass --outputs the outputs.json
@@ -340,12 +414,27 @@ not failing. [Studio](studio.md) is the longer form.
 
 ### 14. Run the gate — *available now*
 
+The gate refuses a tree with untracked or uncommitted changes, so everything
+you wrote under `projects/<slug>/` is committed first — that is what "your
+project directory tracked" means in the criterion below:
+
 ```bash
+git add projects/<slug>
+git commit -m "<slug>: a project's own migration set, surface and capability"
 bin/session-01-check.sh
 ```
 
-Requires a clean tracked tree. CI runs this exact script; there is no second,
-divergent definition of "passing".
+**A clone you have just made may have no committer configured**, and `git
+commit` then stops with *Author identity unknown*. Set one for this repository
+rather than globally:
+
+```bash
+git config user.name  "Your Name"
+git config user.email "you@example.com"
+```
+
+CI runs this exact script; there is no second, divergent definition of
+"passing".
 
 ---
 

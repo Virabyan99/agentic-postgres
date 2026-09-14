@@ -189,7 +189,7 @@ an earlier session).
 ---
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1359**. Rows D1303–D1314
+Six columns, next free number after this table **D1370**. Rows D1303–D1314
 were read from the tree or measured in a rig on 2026-09-14 at `bb93a53`. The
 runs add theirs below them as they go, each run's numbers named in its Done
 paragraph.
@@ -252,6 +252,17 @@ paragraph.
 | **D1356** | **The first walk's finding.** Guide step 7: `cp project.example.yaml project.yaml`, set the slug, then step 9 freezes the migration lock. | **The copied manifest carries `mcp.capabilities`**, naming a file the new project does not have yet, and the loader refuses that -- so the FIRST `freeze-lock` is refused before it reads a migration. The guide shows schema 5 before schema 6 and README says the manifest is refused until the file exists, but no page says the key must come OUT of a copied manifest and go back after `bin/agent.sh init` has written the file. The walker worked the ordering out and commented the key out in between. | Step 7 says to remove the key and put it back at step 11, with the reason and the order. | An ordering that is obvious to whoever wrote both steps and invisible to whoever reads them once. It is also what made D1352 the first thing an adopter meets. | -- |
 | **D1357** | **The finding that decides the session.** README: *"Eight steps, and every one of them runs on your own machine"*, steps 4 and 6 labelled *(offline)*; the guide's steps 11 and 12 headed *available now*, with step 12 promising the generator *"reads four committed artefacts and nothing live, so it works here, before any deployment exists"*; the guide's header, *"Fourteen steps, every one of them available now and every one of them offline"*. | **Two of the adopter's seven goals are unreachable offline.** `mcp-contract compile --project`, its `check`, both project report renderers and `apg generate --project` all refuse with exit 5 for a project that has a migration set, until `projects/<slug>/contracts/postgrest-openapi.canonical.json` exists -- and that file is the surface **as a running PostgREST serves it**, capturable only by `bin/api-contract.sh --update` from a deployment. The walker's control settles which half is wrong: the shipped manifest with NO set generates fine, so it is HAVING a set that makes `generate` refuse. **The cause is already in the ledger**: D1211, `apg dev` is the database alone and stands up no PostgREST (ADR 0203). Nobody joined it to the adopter's path. README's own table is honest at row 4 (*captured from a running deployment*, offline **no**) and contradicts itself at row 5, which marks `generate` offline **yes**. | The documentation says where the offline path ends: README's headline sentence, steps 4 and 6, the exception paragraph and row 5; the guide's header, step 11's heading with a four-line order to follow, and step 12's heading and body. **Building the missing capability was considered and refused** -- a PostgREST beside `apg dev` is D1211's own price, a new plane, an ADR moving ADR 0203's boundary and ~150 s on every offline sweep, and §9 stops a session that starts one. It is named in §14 and on Stage 4's bill instead. | **A promise the product could not keep, in four places, none of them the place that told the truth.** The ledger had the cause for two sessions and the adopter's path was never read against it. This is what a walk buys that a review does not: nobody who knew the answer would have typed step 12. | -- |
 | **D1358** | This plan's Run 6 step 7: a second walk *"from a fresh clone at the repaired SHA"*, against the task statement. | **The statement's goals 3 and 5 asked for what the product cannot do offline**, so a second walk against it would block at exactly the same wall and prove only that the repair did not change the product. | Goals 3 and 5 restated as what the corrected documentation promises -- declare the capability, follow the page to where it says the declaration stops -- with a rule separating a DOCUMENTED wall (reaching it, recording it and carrying on completes the step) from an UNDOCUMENTED one (a finding, and the most valuable one). The success criterion says the same. | **This is the change to read hardest, because narrowing a criterion so that it passes is the one move this session must not make.** What is narrowed is not the bar but a promise the documentation should never have made: the first walk's record stands, and `documented_path` FAILS on the release it measured. The second walk measures a different release, whose documentation is true. | -- |
+| **D1359** | **The second walk's sharpest finding.** Guide step 11 and README both print `bin/mcp-contract.sh compile --project project.yaml > projects/<slug>/contracts/mcp-capabilities.canonical.json`. | **Following that line verbatim leaves a 0-byte contract, and the NEXT documented command dies on it.** `compile` refuses correctly with exit 5 -- but `>` creates and truncates the target before the command runs, so the refusal leaves an empty file where a contract belongs. `bin/render-mcp-catalog.py --write --project` then exited **1** with an unhandled `json.decoder.JSONDecodeError` out of `load_contract()`. Exit 1 is not in the convention. The walker measured the cause by deleting the file: the same command then refuses properly with a sentence and exit 2. **Four commands read a compiled contract with a bare `json.loads`** -- the catalog, `generate`, `studio` and `mcp-contract` itself -- so the shape was the class, not the instance. | `capability_manifest.load_contract_document(path)` is the one guarded reader: empty, unparseable and not-an-object each become a `CapabilityContractError` naming the file and saying a refused compile leaves its redirect target behind. All four commands route through it, each mapping the failure in ITS convention (5 for the catalog, `generate` and `mcp-contract`; `EXIT_INPUT` for `studio`, where 5 is `EXIT_NO_ROUTE` and an answer about a deployment). **The ABSENT case is untouched** -- its own sentence, its own exit 2 -- and is the control in the proof. The guide and README both say to delete the empty file. | **ADR 0195's third outcome, on the documented path.** A reader has the answer, the other answer, and *I could not read what is there*; the third was folded into a traceback. It is also §7 question 5: the absent case had been thought about carefully and the unreadable case not at all, in four places. | 0195 |
+| **D1360** | Guide step 11, written in Run 6a: *"the three commands after it -- `compile`, `check` and the report -- each refuse with exit 5"*. | **Two of the three.** `compile` 5, `check` 5, `bin/render-evaluation-report.py --write --project` **2** -- on the identical sentence, from the identical raise site. `capability_manifest.project_inputs` raises a plain `ManifestError` for a surface or snapshot that has not been captured, and the report maps `ManifestError` to 2 while `mcp-contract` maps it to 5 in all seven of its handlers and `generate` in all of its. **`config.CapabilityContractError` was minted for exactly this distinction** -- its own docstring says *"the CLI maps it to exit 5 (contract failure) rather than exit 2 (invalid operator input): the manifest is well formed, it just asserts something untrue"* -- and these two raise sites never got it. | Both sites raise `CapabilityContractError`. Because it is a SUBCLASS every existing `except config.ManifestError` still catches it, so nothing else moves; the report names the subclass above its base and returns 5. **The documentation was not changed**: the page said what the product should have done, and the product was wrong. The control in the proof is the other direction -- a manifest that is genuinely invalid still exits 2. | §7 question 5 again, one session after D1352 was the same question about `migrate.py`. A decision gets implemented where somebody was looking; the sites nobody was looking at keep the old behaviour and read as deliberate. | -- |
+| **D1361** | Guide line 4: *"None requires editing a file this repository ships, and none needs root, a credential or a provider"*. | **Step 2 is `sudo apt-get update && sudo apt-get install -y shellcheck jq`.** On a genuinely clean machine it needs root, and no page says what to do without it. The walker skipped it -- the tools were already present -- and carried on with the apt half never run, which is a step of the documented path that the record cannot distinguish from a step that worked. | The preamble names step 2 as the one step needing root and says nothing after it does; step 2 says only its first line needs root, that both tools ship as static binaries if `sudo` is not available, and that an already-installed toolchain means skipping the step rather than running it. | A sentence written about the *repository* ("nothing here needs privilege") read as a sentence about the *page*. The first walk hit no wall here because its machine already had the tools -- which is exactly how a documented step goes four sessions without being executed. | -- |
+| **D1362** | Guide step 7: *"`capabilities.yaml` stays empty: no capability can be enabled until a live API contract exists to validate it against"*, one line after `cp capabilities.example.yaml capabilities.yaml`. | **The file it names carries seven capabilities, all `enabled: true`**, and the copy renders: step 8 printed `Capabilities 7 enabled`. The sentence describes the pre-Session-8 state, which `capabilities.example.yaml`'s own header calls historical. **And the same step names one of the two keys that must move**: `mcp.capabilities` is called out, `migrations.set` is not, though the copied manifest points it at `projects/example`. A reader editing only the three fields step 7 names renders another project's migration set into their own and freezes it at step 9. | Step 7 says the file is the reviewed release set and is kept as copied, with the historical note; and it names BOTH keys as *two keys that point at the example project and both must move*, `migrations.set` deleted now and restored at step 9, `mcp.capabilities` deleted now and restored at step 11. | Two defects in four lines, and the second is the one that damages a lock quietly. D1356 repaired one key in Run 6a and did not ask whether it was the only one -- the same narrowness this row records. | -- |
+| **D1363** | Guide step 9 prints `bin/migrate.sh --project project.yaml freeze-lock` inside the code block, then *"Then point your own manifest at it"* with the `migrations.set` yaml below it. | **In that order `freeze-lock` freezes the wrong set.** It freezes whatever the manifest names when it runs, which for a manifest copied from the example is `projects/example` -- silently, producing a lock that looks correct. The walker inferred the reverse order. **The same block declares `schema_version: 5`** while step 11 and README both say 6. | The manifest edit comes first, at schema version 6, under its own heading (*"Point your manifest at the directory before you freeze"*), with `freeze-lock` in a second block below it and one sentence saying why the order is the point. | The commands were listed in the order they were WRITTEN, not the order they must RUN. Nothing fails loudly, which is the property that let it survive. | 0206 |
+| **D1364** | Guide step 9 tells the reader to write the migration set; step 11 tells them to run `bin/agent.sh init --project ... --operation <your view>`. | **Nothing on the page tells them to write `projects/<slug>/contracts/postgrest-api-surface.yaml`, which `init` reads.** Without it `init` exits 2 with *the merged reviewed surface names no operation*. The page carries that path only in its failure table, as a REMEDY for a symptom -- and README's *Adding your own tables* has it as row 3, on the other page. A file that must exist before a documented command is a step, not a remedy. | Step 9's block names it beside the migration and the manifest, with a paragraph saying it belongs to the table rather than to the agent, that step 11's `init` reads it, and that the refusal means a step not yet done rather than a mistake. | The failure table is where a reader looks AFTER something goes wrong. Putting a required step only there guarantees every reader meets it as a failure first. | 0198 |
+| **D1365** | Guide steps 8 and 9 say nothing about where a project's migrations are rendered. | **The release's set renders to `.generated/<key>/migrations/` and a project's to `.generated/<key>/migrations-project/`**, a directory no page names (ADR 0206 gave a project's set its own ordering space in Session 24). The walker looked for their migration under the documented path, did not find it, and read it as a render that had silently ignored the set; they located it with `find(1)`. | Step 8 names both directories and says why they are separate. | ADR 0206 moved a directory and no adopter-facing page moved with it. The reader's conclusion -- *the render ignored my set* -- is worse than confusion: it is a wrong diagnosis the page led them to. | 0206 |
+| **D1366** | Guide step 13 quotes Studio's refusal against a rendered document verbatim and says *"Point it at the document you rendered in step 8"*. | **It never gives the command.** The walker took the invocation from README's Studio section and supplied `.generated/<key>/outputs.json`; the refusal then came back byte for byte as quoted, exit 2. The quoted output was right and the reader had to reconstruct the input. | Step 13 carries the invocation in its own block above the quoted refusal. | A step whose expected OUTPUT is documented to the byte and whose INPUT is described in prose. Whoever wrote it was reading the output they already had. | 0205 |
+| **D1367** | `docs/handoff.md` §Git: *"Identity and credentials are already configured"*. Guide step 14: `bin/session-01-check.sh`, *"Requires a clean tracked tree"*. | **A fresh clone has no committer**, and `git commit` stops with *Author identity unknown ... empty ident name*. The gate refuses an untracked or staged tree, so *"your project directory tracked"* means `git add` and `git commit` -- neither of which any page spells. `handoff.md` describes the builder's own checkout and reads as a statement about the repository. | Step 14 carries `git add`, `git commit` and the `git config user.name/user.email` pair, set repository-locally rather than globally. `handoff.md` says its claim is about the checkout it describes and that a clone inherits neither. | The success criterion's own words (*your project directory tracked*) presuppose two commands the page never gives, and the one page that mentions git identity asserts the opposite of what an adopter finds. | -- |
+| **D1368** | This plan's §9: *"at most two walks"*; Run 6's step 5 hands the record to the trip. | **The second walk also returns `reached_success_criterion: false`** -- seven goals reached, five readings clean, the gate green on a clean tree, and **eleven** undocumented steps. Its record is on `a4b9685`, and `dx-record check` does NOT bind a record to the checkout's HEAD (measured with a record claiming release `000...0`: identical reading), so Run 6b's repairs do not invalidate it for the trip. | **`documented_path` is reported `failed` with its eleven, and nothing is softened.** The repairs of D1359-D1367 land in Run 6b and are measured by proofs and a battery rather than by a walk, because there is no third walk in this session -- §9 allows two and both are spent. The record the trip carries is the SECOND walk's, and §10 carries the fact that the repairs after it are unwalked. **And a second reading goes non-clean as a consequence**: repairing README and the guide moves the digests the walk recorded, so `check` now reports *documents that moved after the walk: 2*. That is the reading working -- the record measured a release whose documentation has since changed -- and it is reported rather than avoided; re-digesting the record to make it clean would be falsifying the measurement. | The point of a second walk was to measure the first walk's repairs, and it did: of eleven findings, **two were Run 6a's own text** and one was the product defect Run 6a's documentation repair walked the reader straight into. A repair measured only by its author is what the walk exists to distrust, and that is exactly what D1359-D1367 now are. | 0207 |
+| **D1369** | This plan's Run 6 step 7: *"if the second is not clean, `documented_path` stays `not_run`"*. §7's claim table, on the same claim: *"`failed` naming the list if it is not -- **never `not_run` once a record is declared**"*. `CLAUDE.md` §2: *"a `failed` documented_path is reported as failed, never softened"*. | **The plan contradicts itself, and Run 6 step 7 is the wrong half.** ADR 0163 separates the two: `not_run` means the EVIDENCE is missing, `failed` means the SYSTEM is wrong. A record exists, was digested, and was checked -- the evidence is present and it says eleven undocumented steps. Calling that `not_run` would report a measured failure as an absence of measurement, which is the exact softening §7 and `CLAUDE.md` forbid. | **`failed`, with the list.** §7's table and `CLAUDE.md` govern; Run 6 step 7's clause is struck. The trip's proof fails with the eleven named, which is D686's honest verdict, and §10 carries the list. | A plan written before the walk hedged in the reassuring direction in one place and got it right in two others. The hedge is the one a reader reaches for at the moment it is most costly to accept -- which is why the row exists rather than a silent reconciliation (§6). | 0163 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1429,8 +1440,11 @@ recomputes). Its `apg dev down` is the last thing it types.
    stays and the SHA moves. **Then a SECOND walk by a NEW session**
    (never the same one — it has seen the defect) from a fresh clone at the
    repaired SHA, steps 1–5 again. **There is no third walk in this
-   session** (§9): if the second is not clean, `documented_path` stays
-   `not_run`, the record with its `blocked_by` is still handed to the
+   session** (§9): if the second is not clean, `documented_path` is
+   reported **`failed`** with its list — *not* `not_run`, which this step
+   said until D1369 struck it: a record that exists and says eleven is
+   evidence that the system is wrong, not evidence that is missing
+   (ADR 0163). The record with its `blocked_by` is still handed to the
    trip (the proof fails with the list, which is the honest verdict,
    D686), and §10 carries the list.
 8. This run's Done: the walker's `followed_by` block verbatim, the
@@ -1441,7 +1455,93 @@ recomputes). Its `apg dev down` is the last thing it types.
 repair runs nothing before push (documentation only); a product repair
 runs what it touches.
 
-**Done.** *(filled by the run.)*
+**Done.** Two walks, two records, and the second is the one the trip carries.
+
+**The walk.** A fresh session, from a clone at `a4b9685` under `~/walk/`, given
+the 4899 bytes of `docs/second-walk.md`'s task statement (sha256
+`976e917fee6e936e1afaebd56529311bfa98ff96458925d95687045213c7e4b1`) as its
+whole first message and nothing else. Its `followed_by` block, verbatim:
+
+> `kind`: agent
+> `identity`: Claude Opus 5 (claude-opus-5[1m]), via Claude Code
+> `instructed_by`: gmparstone99@gmail.com (repository owner), via Claude Code session
+> `context`: A fresh session given nothing but a clone of the Agentic Postgres
+> release at ~/walk/agentic-postgres and the second walk's task statement, told
+> to reach its seven goals using only the repository's own documentation and to
+> record every undocumented step.
+
+**What it reached.** All seven goals, project slug `reading-room`: the
+toolchain and `doctor.sh` at 0; a render; `app.bookmarks` with FORCE RLS, an
+`api` view and a SECURITY DEFINER write function, frozen at `20260915120001`
+after `20260912120032`; 33 migrations applied by `apg dev` as the migration
+user, a row written through the function and read back through the view with
+`relforcerowsecurity = t`; `agent.sh init` writing both capabilities; the
+compile stopping at the documented wall (exit 5); `generate` at the same wall;
+Studio's refusal against a rendered document returned **byte for byte** as step
+13 quotes it, exit 2; and `bin/session-01-check.sh` **exit 0** on a clean tree
+with `projects/reading-room/` tracked and no shipped file edited.
+
+**The verdict: `reached_success_criterion: false`, `check` exit 5.** Four
+readings clean — no source edit, no command the documentation does not name,
+`followed_by` and `blocked_by` both present and well formed, no unread
+document — and **eleven undocumented steps** where the first walk had six. Read
+from the working checkout the same reading returns, plus one the walk could not
+have: *documents that moved after the walk: 2*, README and the guide, which is
+this run's own repairs moving under the record (D1368).
+
+| | walk 1 | walk 2 |
+|---|---|---|
+| release | `040f733` | `a4b9685` |
+| slug | `bookmarks` | `reading-room` |
+| commands recorded | 88 | 39 |
+| files edited | 9 | 8 |
+| undocumented steps | 6 | **11** |
+| criterion | false | false |
+
+**Eleven, and none was the walker's error** — every one re-measured by the
+executor before a line changed. **Two were Run 6a's own text.** Rows
+**D1359–D1367**, and the two that are product defects rather than prose:
+
+- **D1359**, the sharpest. The documented `compile … > contract.json` leaves a
+  **0-byte contract** when it correctly refuses, because the shell truncates
+  the target first — and the next documented command then died in an unhandled
+  `JSONDecodeError` with **exit 1**, which the convention does not define. Four
+  commands read a compiled contract with a bare `json.loads`; all four now go
+  through one guarded reader, and the ABSENT case keeps its own sentence and
+  exit 2 as the control.
+- **D1360**. `compile` 5, `check` 5, the evaluation report **2** — one raise
+  site, one sentence, two codes. `CapabilityContractError` had existed for
+  exactly this distinction since Session 8 and these two sites never got it.
+  The documentation was *not* changed: Run 6a's step 11 said what the product
+  should have done, and P2 made it true.
+
+**Battery: 8 mutations, 0 survivors, 0 broken fixtures**, every target `FAILED`
+and every control green in the same invocation, all three files restored by
+copy and compared with `filecmp`. One survivor on the way there was worth
+having: a scan that listed the variable names it expected (`CANONICAL_MCP`,
+`contract_path`) walked straight past a revert spelled `path`. It now asserts
+an **absence** — `bin/render-mcp-catalog.py` parses no JSON of its own at all,
+the contract having been its only parse — which is a claim about the file
+rather than about a substring.
+
+**Targeted:** `test_mcp_catalog.py`, `test_project_agent_surface.py` (37),
+`test_session12_documented_path.py`, `test_repository_contract.py`,
+`test_documentation_index.py`, `test_dx_record.py`, `test_studio_assets.py`
+(271), `test_acceptance_registry.py` (23) after the four new node ids and two
+clauses. Registry stays at 219 requirements; no new claim.
+
+**Which record the trip reads: the second.** It is copied to
+`evidence/session-25-dx-record.json` (gitignored, beside the halves) and is
+Run 7's `--dx-record-file`. `dx-record check` does **not** bind a record to the
+checkout's HEAD — measured with a record claiming release `000…0`, which read
+identically — so this run's repairs do not invalidate it.
+
+**`documented_path` is `failed`, and it is reported as failed** (D1369 struck
+this run's own `not_run` hedge). **There is no third walk in this session**, so
+D1359–D1367 are measured by proofs and a battery and by nothing that read them
+cold. §10 carries that.
+
+**Done.**
 ### Run 7 — the trip: the Stage 3 release deployed, one sweep
 
 **This run is the only one that touches the host.** Split as the memory
@@ -1775,6 +1875,21 @@ date; `requirements-dev.in` pinning nothing.
   rotates first).
 - **`honest_readers`** (D1302): repaired offline (D1310) and collected in
   the one sweep; no second sweep.
+- **`documented_path` closes `failed`, and the repairs after it are
+  unwalked** (D1368, D1369). Two walks were run and §9 allows no third, so
+  the second record — eleven undocumented steps, on `a4b9685` — is what the
+  trip carries and what the claim reports. **D1359–D1367 were repaired after
+  the last cold reader had gone**: the two product defects are measured by
+  proofs and an eight-mutation battery, and the nine documentation repairs
+  are measured by nobody who had not already seen the defect. That is a
+  weaker measurement than a walk and is named as one. **Stage 4's first walk
+  reads this release's documentation before anything is added to it**, and
+  the record it produces is the evidence these nine repairs do not yet have.
+- **The record's `documents_moved` reading is non-clean by construction.**
+  Repairing README and the guide moved the digests the walk recorded, so the
+  trip's proof will report two moved documents beside the eleven steps. The
+  record is not re-digested: a record says what was measured, and a walk's
+  digests are its measurement of what it read.
 
 **Created here, not addressed:**
 

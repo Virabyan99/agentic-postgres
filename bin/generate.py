@@ -112,7 +112,10 @@ def load_inputs(project_path: Path, capabilities_path: Path):
     except FileNotFoundError as error:
         fail(EXIT_PREREQUISITE, f"missing input: {error}")
 
-    canonical = json.loads(CANONICAL_MCP.read_text(encoding="utf-8"))
+    try:
+        canonical = capability_manifest.load_contract_document(CANONICAL_MCP)
+    except config.CapabilityContractError as error:
+        fail(EXIT_CONTRACT, str(error))
     sources: dict[str, str] = {}
     vocabulary_surface = None
     root = None

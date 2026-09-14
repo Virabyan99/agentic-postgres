@@ -61,7 +61,6 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
-import json
 import os.path
 import sys
 from dataclasses import dataclass
@@ -110,7 +109,12 @@ RESERVED_WRITE_PARAMETERS = ("idempotency_key", "dry_run")
 
 
 def load_contract(path: Path = CONTRACT) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    """Read a compiled contract; an unreadable one is reported, not raised.
+
+    The parse lives in `capability_manifest` because three other commands read
+    the same kind of file and all four met an empty one as a traceback (D1359).
+    """
+    return capability_manifest.load_contract_document(path)
 
 
 def scope_expression(scope_sets: list[list[str]]) -> str:
@@ -395,6 +399,12 @@ def main() -> int:
         target = (
             release_target() if arguments.project is None else project_target(arguments.project)
         )
+    except config.CapabilityContractError as error:
+        # **A contract that is there and cannot be read is a CONTRACT failure**
+        # (D1359), not invalid operator input: nothing the operator typed is
+        # wrong, and the file the documented redirect left behind is the cause.
+        print(f"render-mcp-catalog: {error}", file=sys.stderr)
+        return 5
     except config.ManifestError as error:
         print(f"render-mcp-catalog: {error}", file=sys.stderr)
         return 2

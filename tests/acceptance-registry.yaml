@@ -2963,11 +2963,20 @@
     - tests/contract/test_project_agent_surface.py::test_the_three_shapes_a_project_may_not_declare_are_refused
     - tests/contract/test_project_agent_surface.py::test_the_render_records_the_committed_contract_and_null_for_a_project_without_one
     - tests/contract/test_project_agent_surface.py::test_the_deployed_schema_couples_the_block_to_a_ready_plane
+    - tests/contract/test_project_agent_surface.py::test_an_artefact_the_project_has_not_captured_is_a_contract_failure_not_operator_input
+    - tests/contract/test_project_agent_surface.py::test_the_commands_that_read_project_inputs_price_a_missing_artefact_alike
     - tests/contract/test_agent_command.py::test_the_example_projects_manifest_compiles_to_its_committed_contract
     - tests/contract/test_output_migrations.py::test_v17_to_v18_adds_the_project_capabilities_block_and_nothing_else
     - tests/deployment/test_session12_isolation_matrix.py::test_every_leaf_is_classified
     - tests/deployment/test_session21_agent.py::test_betas_lock_carries_the_tenant_write_the_plane_refuses_it_pending_approval_and_audits_it
   description: >-
+    A project whose reviewed surface or approved snapshot has not been captured
+    yet is refused as a CONTRACT failure and not as invalid operator input: the
+    manifest is well formed and the artefact is the project's own review, so
+    both raise sites raise `CapabilityContractError` and every command that
+    meets them exits 5 -- `compile`, `check`, `generate` and the evaluation
+    report alike, which last exited 2 on the same sentence until D1360. A
+    manifest that is genuinely invalid still exits 2.
     A project manifest at schema 6 may name a capability manifest under
     `projects/<slug>/`, beside its migration set; it is compiled against the
     merged surface and the project's own snapshot into the project's contract,
@@ -3808,6 +3817,8 @@
     - tests/contract/test_documentation_index.py::test_the_second_walk_page_carries_the_task_statement_and_the_record_schema
     - tests/contract/test_mcp_catalog.py::test_a_project_catalog_is_rendered_from_the_projects_contract
     - tests/contract/test_mcp_catalog.py::test_check_project_refuses_a_stale_catalog
+    - tests/contract/test_mcp_catalog.py::test_a_contract_that_is_present_and_unreadable_is_reported_and_never_a_traceback
+    - tests/contract/test_mcp_catalog.py::test_the_shared_reader_is_what_all_four_contract_readers_use
   description: >-
     The documentation an adopter reads describes the release they are holding.
     `docs/new-team-member.md` carries no *future session* label for a session at
@@ -3823,7 +3834,12 @@
     `bin/render-mcp-catalog.py --write --project <manifest>` writes a project's
     own tool catalog under `projects/<slug>/docs/`, `--check --project` exits 5
     on a drift and changes nothing, and the example project's catalog is
-    committed and current.
+    committed and current. A compiled contract that is PRESENT and cannot be
+    read -- the 0-byte file a refused `compile >` redirect leaves behind, or a
+    malformed one -- is reported with exit 5 and a sentence naming the file,
+    never as a traceback and never as exit 1; an ABSENT contract keeps its own
+    report and exit 2, and all four commands that load a compiled contract read
+    it through one guarded reader (ADR 0195, D1359).
 
 - id: SEC-DX-001
   priority: P0

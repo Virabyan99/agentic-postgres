@@ -554,3 +554,143 @@ def test_published_objects_come_from_the_projects_snapshot(
     assert inputs.published_objects == frozenset(openapi_normalize.declared_objects(snapshot))
     assert "note_embeddings" in inputs.published_objects
     assert "rpc/set_note_embedding" in inputs.published_objects
+
+
+# ---------------------------------------------------------------------------
+# an artefact the project has not captured yet (D1360)
+# ---------------------------------------------------------------------------
+
+
+def test_an_artefact_the_project_has_not_captured_is_a_contract_failure_not_operator_input(
+    checkout: Path, manifest: dict[str, Any]
+) -> None:
+    """`CapabilityContractError` exists for exactly this, and two sites missed it.
+
+    Its docstring draws the line: *"the CLI maps it to exit 5 (contract
+    failure) rather than exit 2 (invalid operator input): the manifest is well
+    formed, it just asserts something untrue."* A project manifest naming a
+    snapshot that has not been captured yet **is** well formed -- the capture
+    needs a running deployment (ADR 0198, D1211) -- but both sites raised a
+    plain `ManifestError`, so `render-evaluation-report.py` exited 2 while
+    `mcp-contract compile`, `check` and `apg generate` all exited 5 on the very
+    same sentence (D1360, the second walk's eighth finding).
+
+    The control is the one that matters: a manifest that is genuinely invalid
+    must still be a plain `ManifestError`, or the repair has simply moved every
+    manifest error to 5 and lost the distinction the other way.
+    """
+    surface = capability_manifest.CONTRACTS_DIRECTORY, "postgrest-api-surface.yaml"
+    snapshot = capability_manifest.CONTRACTS_DIRECTORY, "postgrest-openapi.canonical.json"
+    project = checkout / "projects" / "example"
+
+    for directory, name in (snapshot, surface):
+        path = project / directory / name
+        assert path.is_file(), f"the fixture never had {name}, so its absence proves nothing"
+        kept = path.read_bytes()
+        path.unlink()
+        try:
+            with pytest.raises(config.CapabilityContractError) as raised:
+                capability_manifest.project_inputs(manifest, repo_root=checkout)
+        finally:
+            path.write_bytes(kept)
+        assert name in str(raised.value), (
+            f"the refusal does not name the artefact that is missing: {raised.value}"
+        )
+        assert isinstance(raised.value, ManifestError), (
+            "CapabilityContractError must stay a ManifestError, or every existing "
+            "`except config.ManifestError` stops catching it"
+        )
+
+    # The control: a well-formed file is what makes it a contract failure. A
+    # manifest that is NOT well formed is still operator input.
+    broken = dict(manifest)
+    broken["mcp"] = dict(manifest["mcp"], capabilities="projects/does-not-exist")
+    with pytest.raises(ManifestError) as raised:
+        capability_manifest.project_inputs(broken, repo_root=checkout)
+    assert not isinstance(raised.value, config.CapabilityContractError), (
+        "a manifest naming a directory that does not exist is invalid operator input "
+        "and must not be priced as a contract failure"
+    )
+
+
+def test_the_commands_that_read_project_inputs_price_a_missing_artefact_alike() -> None:
+    """One condition, one number -- across every command that meets it.
+
+    Each command's `main` is called with `project_inputs` raising what the real
+    raise sites raise, so this measures the MAPPING each command applies rather
+    than a fixture's guess at it. The second call of each pair is the control:
+    a plain `ManifestError` -- a manifest the operator really did get wrong --
+    must still be 2 wherever it was 2 before.
+
+    Only `render-evaluation-report.py` has a 2 AND a 5 to tell apart, so it is
+    the one carrying the control. `generate.py` and `mcp-contract.py` map every
+    `ManifestError` to 5 already; what they prove is that a subclass did not
+    change what they did. `studio` maps a contract failure to 2 on purpose (5
+    is `EXIT_NO_ROUTE` there, an answer about a deployment), and
+    `render-mcp-catalog.py` never reads `project_inputs` -- its own mapping is
+    proved in `test_mcp_catalog.py`, where a contract is the subject.
+    """
+    import importlib.util
+
+    def command(name: str):
+        path = REPO_ROOT / "bin" / name
+        spec = importlib.util.spec_from_file_location(f"_d1360_{name.replace('.', '_')}", path)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def exit_code(module, error: Exception, argv: list[str]) -> int:
+        import contextlib
+        import io
+
+        def raise_it(*_args: Any, **_kwargs: Any):
+            raise error
+
+        original = capability_manifest.project_inputs
+        module_inputs = getattr(module, "capability_manifest", None)
+        assert module_inputs is not None, f"{module} does not read capability_manifest"
+        module_inputs.project_inputs = raise_it
+        try:
+            with (
+                contextlib.redirect_stderr(io.StringIO()),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                saved, sys.argv = sys.argv, argv
+                try:
+                    return module.main()
+                except SystemExit as exit_info:
+                    return int(exit_info.code or 0)
+                finally:
+                    sys.argv = saved
+        finally:
+            module_inputs.project_inputs = original
+
+    sentence = "has no approved snapshot at contracts/postgrest-openapi.canonical.json"
+    manifest_argument = str(REPO_ROOT / "project.example.yaml")
+
+    for name, argv in (
+        ("render-evaluation-report.py", ["x", "--write", "--project", manifest_argument]),
+        ("generate.py", ["x", "--project", manifest_argument]),
+        ("mcp-contract.py", ["x", "check", "--project", manifest_argument]),
+    ):
+        module = command(name)
+        contract_failure = exit_code(module, config.CapabilityContractError(sentence), list(argv))
+        assert contract_failure == 5, (
+            f"bin/{name} prices an uncaptured artefact {contract_failure}, not 5; "
+            "compile, check and generate all say 5 on this sentence"
+        )
+
+    # The control, on the one command that has both codes to tell apart: a
+    # manifest the operator really did get wrong is still invalid input.
+    report = command("render-evaluation-report.py")
+    operator_input = exit_code(
+        report,
+        ManifestError("slug: expected a string"),
+        ["x", "--write", "--project", manifest_argument],
+    )
+    assert operator_input == 2, (
+        f"a genuinely invalid manifest is now priced {operator_input}; the subclass was "
+        "meant to narrow the 5, not widen it"
+    )

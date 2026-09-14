@@ -431,6 +431,21 @@ named is ADR 0195's folded outcome in the reassuring direction.
 
 ## 14. What Session 25 left open
 
+**The second walk's repairs are unwalked, and `documented_path` is `failed`.**
+Two walks were run (ADR 0207, §9 allows no third). The first, on `040f733`,
+recorded six undocumented steps and found that two of the adopter's seven
+goals are unreachable offline (D1357). The second, on the repaired `a4b9685`,
+recorded **eleven** — two of them against the first repair's own prose, and one
+a product defect the repaired documentation walked the reader into: the
+documented `compile … > contract.json` leaves a 0-byte file when it refuses,
+and every reader of it exited 1 with a traceback (D1359). Those eleven are
+repaired in Run 6b as D1359–D1367, **and no cold reader has seen the result**.
+The two product repairs carry proofs and a battery; the nine documentation
+repairs carry the judgement of the session that wrote them, which is the thing
+a walk exists to distrust. Stage 4's first act should be a walk of this
+release's documentation, before anything is added to it.
+
+
 Session 25 built no plane. It hardened the three developer surfaces against
 every security invariant Stage 3 declares, gave the outsider's second walk an
 instrument the product itself reads, re-derived the documentation an adopter

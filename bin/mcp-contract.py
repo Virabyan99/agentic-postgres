@@ -313,7 +313,10 @@ def command_lock(arguments: argparse.Namespace) -> int:
     except config.ManifestError as exc:
         return fail(EXIT_CONTRACT, f"cannot read the project manifest: {exc}")
 
-    canonical = json.loads(CANONICAL_PATH.read_text(encoding="utf-8"))
+    try:
+        canonical = capability_manifest.load_contract_document(CANONICAL_PATH)
+    except config.CapabilityContractError as exc:
+        return fail(EXIT_CONTRACT, str(exc))
     surface = None
     sources: dict[str, str] = {}
     if inputs is not None:

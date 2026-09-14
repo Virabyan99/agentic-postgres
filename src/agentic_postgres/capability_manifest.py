@@ -60,6 +60,7 @@ __all__ = [
     "compile_project_contract",
     "disabled_release_capabilities",
     "joined_capabilities",
+    "load_contract_document",
     "load_project_capabilities",
     "project_capabilities_path",
     "project_contract_path",
@@ -92,6 +93,56 @@ def project_contract_path(root: Path) -> Path:
 def project_report_path(root: Path) -> Path:
     """The project's evaluation report, rendered from its joint contract."""
     return root / CONTRACTS_DIRECTORY / PROJECT_REPORT_NAME
+
+
+def load_contract_document(path: Path) -> dict[str, Any]:
+    """Read a compiled capability contract, REPORTING one that cannot be read.
+
+    **Why this is a function and not four `json.loads` calls** (D1359). The
+    documented way to produce a project's contract is a shell redirect::
+
+        bin/mcp-contract.sh compile --project project.yaml > <this path>
+
+    and the shell creates and truncates the target BEFORE the command runs. So
+    when `compile` correctly refuses -- which it does for every project until
+    its first deploy has produced the OpenAPI snapshot it compiles against --
+    the refusal leaves a 0-byte file exactly where a contract belongs. The
+    second walk followed that line and the NEXT documented command died in an
+    unhandled `json.JSONDecodeError` with exit 1, a code
+    `docs/exit-codes.md` does not define.
+
+    ADR 0195's three outcomes: the contract, the absence of one, and **I could
+    not read what is there**. The third was folded into a traceback. Absence
+    stays each caller's to report -- it is the caller that knows what to
+    suggest -- and this reports the other two as a `CapabilityContractError`,
+    which every one of these commands already maps to its own convention.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise config.CapabilityContractError(f"{path} could not be read: {error}") from error
+
+    if not raw.strip():
+        raise config.CapabilityContractError(
+            f"{path} is empty, so there is no contract in it. A compile that REFUSES still "
+            "leaves its redirect target behind, because the shell truncates the file before "
+            "the command runs -- delete it, and compile again once the snapshot it needs "
+            "has been captured."
+        )
+
+    try:
+        document = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise config.CapabilityContractError(
+            f"{path} is not readable JSON: {error}. It is written by "
+            "`bin/mcp-contract.sh compile`; nothing else should edit it."
+        ) from error
+
+    if not isinstance(document, dict):
+        raise config.CapabilityContractError(
+            f"{path} is {type(document).__name__}, not a JSON object"
+        )
+    return document
 
 
 def disabled_release_capabilities(document: dict[str, Any]) -> tuple[str, ...]:
@@ -239,14 +290,20 @@ def project_inputs(
 
     surface_path = api_surface.project_contract_path(set_root)
     if not surface_path.is_file():
-        raise ManifestError(
+        # **A CONTRACT failure, not invalid operator input** (D1360). The
+        # manifest is well formed and names a real set; what is missing is an
+        # artefact of the project's own review. `CapabilityContractError`'s
+        # own docstring draws that line, and these two sites never got it, so
+        # the evaluation report exited 2 where compile, check and generate all
+        # exited 5 on this very sentence.
+        raise config.CapabilityContractError(
             f"{set_named} has no reviewed surface at {surface_path}; a project's capabilities "
             "are approved against it (ADR 0201). Write it beside the set (ADR 0198) and check "
             "it with `bin/api-contract.sh --check --project <manifest>`."
         )
     snapshot_path = api_surface.project_snapshot_path(set_root)
     if not snapshot_path.is_file():
-        raise ManifestError(
+        raise config.CapabilityContractError(
             f"{set_named} has no approved snapshot at {snapshot_path}. It is captured from the "
             "project's deployment with `bin/api-contract.sh --update --project <manifest> "
             "--project-outputs <deployed outputs.json>`, reviewed and committed (ADR 0198)."

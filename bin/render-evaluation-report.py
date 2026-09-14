@@ -168,6 +168,12 @@ def main() -> int:
     except evaluation_harness.HarnessError as error:
         print(f"render-evaluation-report: {error}", file=sys.stderr)
         return 5
+    except config.CapabilityContractError as error:
+        # **Ordered before `ManifestError`, which is its base class** (D1360):
+        # Python takes the first matching clause, so the general one above the
+        # specific one would make this unreachable and silently keep exit 2.
+        print(f"render-evaluation-report: {error}", file=sys.stderr)
+        return 5
     except config.ManifestError as error:
         print(f"render-evaluation-report: {error}", file=sys.stderr)
         return 2

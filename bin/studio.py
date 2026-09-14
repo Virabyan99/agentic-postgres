@@ -147,7 +147,14 @@ def build_ir(project_path: Path, capabilities_path: Path) -> client_ir.IR:
     except FileNotFoundError as error:
         fail(EXIT_PREREQUISITE, f"missing input: {error}")
 
-    canonical = json.loads(CANONICAL_MCP.read_text(encoding="utf-8"))
+    try:
+        canonical = capability_manifest.load_contract_document(CANONICAL_MCP)
+    except config.CapabilityContractError as error:
+        # **EXIT_INPUT and not 5**: in this command 5 is EXIT_NO_ROUTE, which is
+        # an answer about a deployment. An unreadable file in the checkout is
+        # not that answer, and reusing the code would make two conditions
+        # indistinguishable to a caller reading the number (D1359, ADR 0195).
+        fail(EXIT_INPUT, str(error))
     sources: dict[str, str] = {}
     vocabulary_surface = None
     root = None

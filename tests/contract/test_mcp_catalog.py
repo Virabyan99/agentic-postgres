@@ -626,3 +626,141 @@ def test_check_project_refuses_a_stale_catalog(tmp_path, monkeypatch) -> None:
     assert PROJECT_CATALOG.read_bytes() == before, (
         "this proof wrote inside the checkout; the redirection did not hold"
     )
+
+
+# ---------------------------------------------------------------------------
+# a contract that is PRESENT and cannot be read (D1359, ADR 0195)
+# ---------------------------------------------------------------------------
+
+
+def test_a_contract_that_is_present_and_unreadable_is_reported_and_never_a_traceback(
+    tmp_path, monkeypatch
+) -> None:
+    """The second walk's sharpest finding, as a proof.
+
+    The documented way to produce a project's contract is a shell redirect::
+
+        bin/mcp-contract.sh compile --project project.yaml > <the contract>
+
+    and the shell truncates the target BEFORE the command runs. `compile`
+    refuses for every project until its first deploy has captured the OpenAPI
+    snapshot -- correctly, with exit 5 -- so following the documented line
+    leaves a **0-byte contract** in the project directory. This renderer then
+    read it and died in `json.JSONDecodeError`: a traceback, and exit **1**,
+    which the exit-code convention does not define.
+
+    ADR 0195's three outcomes. `absent` had a good sentence and exit 2 and
+    still does -- the last arm here is that control, because a repair that
+    reported everything as unreadable would pass the first three arms. What
+    was missing is the third outcome: **I cannot read what is there.**
+
+    Each arm asserts NO traceback as well as the code, because a command that
+    exits 5 by crashing would satisfy the number alone.
+    """
+    module = _renderer_module("_render_catalog_unreadable")
+    contract = tmp_path / "mcp-capabilities.canonical.json"
+    monkeypatch.setattr(module.capability_manifest, "project_contract_path", lambda root: contract)
+    module.PROJECT_CATALOG = tmp_path / "catalog.md"
+
+    def run() -> tuple[int, str]:
+        import contextlib
+        import io
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["render-mcp-catalog.py", "--write", "--project", str(PROJECT_MANIFEST)],
+        )
+        err, out = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            code = module.main()
+        return code, err.getvalue() + out.getvalue()
+
+    # 1. what the documented redirect leaves behind when compile refuses.
+    contract.write_bytes(b"")
+    code, message = run()
+    assert code == 5, f"a 0-byte contract did not report as a contract failure: {code}"
+    assert "Traceback" not in message, f"the empty contract crashed rather than reported: {message}"
+    assert "is empty" in message, f"the report does not say what is wrong: {message!r}"
+
+    # 2. present, non-empty, and not JSON.
+    contract.write_text("not json at all", encoding="utf-8")
+    code, message = run()
+    assert code == 5, f"a malformed contract did not report as a contract failure: {code}"
+    assert "Traceback" not in message, f"the malformed contract crashed: {message}"
+    assert "not readable JSON" in message, f"the report does not say what is wrong: {message!r}"
+
+    # 3. readable JSON that is not a contract at all.
+    contract.write_text("[1, 2, 3]", encoding="utf-8")
+    code, message = run()
+    assert code == 5, f"a JSON array was accepted as a contract: {code}"
+    assert "Traceback" not in message, f"the array crashed: {message}"
+
+    # 4. THE CONTROL the repair must not swallow: absent is still absent, with
+    #    its own sentence and its own code.
+    contract.unlink()
+    code, message = run()
+    assert code == 2, f"an absent contract no longer reports absence: {code}"
+    assert "does not exist" in message and "compile" in message, (
+        f"the absent case lost the command that fixes it: {message!r}"
+    )
+
+
+def test_the_shared_reader_is_what_all_four_contract_readers_use(tmp_path) -> None:
+    """D1359's class, guarded at the definition rather than at the field.
+
+    Four commands load a compiled capability contract. Repairing only the one
+    the walk happened to reach would leave the same traceback in three others
+    (D600, D918, D926: guard the class against the definition). This asserts
+    the reader exists and reports, and that no command still parses a contract
+    with a bare `json.loads` -- the shape that produced the defect.
+    """
+    from agentic_postgres import capability_manifest, config
+
+    empty = tmp_path / "empty.json"
+    empty.write_bytes(b"")
+    with pytest.raises(config.CapabilityContractError):
+        capability_manifest.load_contract_document(empty)
+
+    absent = tmp_path / "absent.json"
+    with pytest.raises(config.CapabilityContractError):
+        capability_manifest.load_contract_document(absent)
+
+    good = tmp_path / "good.json"
+    good.write_text('{"tools": []}', encoding="utf-8")
+    assert capability_manifest.load_contract_document(good) == {"tools": []}
+
+    # Every scan below is on COMMENT-STRIPPED text: this file's own prose names
+    # `json.loads` repeatedly, and measuring prose by accident is D277/D1197.
+    def code_of(name: str) -> str:
+        source = (REPO_ROOT / "bin" / name).read_text(encoding="utf-8")
+        return "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
+
+    readers = ("render-mcp-catalog.py", "generate.py", "studio.py", "mcp-contract.py")
+    for name in readers:
+        assert "load_contract_document" in code_of(name), (
+            f"bin/{name} no longer routes its contract through the shared reader, so an "
+            "unreadable contract reaches it as a traceback again (D1359)"
+        )
+
+    # **This renderer parses no JSON of its own.** The contract was its only
+    # parse, so the shared reader took the last one with it -- the file does not
+    # import `json` at all. Asserting the ABSENCE of a parse is what an earlier
+    # version of this scan got wrong: it listed the variable names it expected
+    # (`CANONICAL_MCP`, `contract_path`) and a revert spelled `path` walked
+    # straight through it, and the battery said so.
+    catalog_code = code_of("render-mcp-catalog.py")
+    assert "json.loads(" not in catalog_code and "json.load(" not in catalog_code, (
+        "bin/render-mcp-catalog.py parses JSON directly again; its only parse was the "
+        "compiled contract, and an unguarded one is the defect D1359 repaired"
+    )
+
+    # The other three keep legitimate parses -- snapshots, tokens, request
+    # bodies -- so what is asserted there is narrower: not the contract.
+    for name in ("generate.py", "studio.py", "mcp-contract.py"):
+        code = code_of(name)
+        for constant in ("CANONICAL_MCP", "CANONICAL_PATH"):
+            assert f"json.loads({constant}" not in code, (
+                f"bin/{name} still parses the contract with a bare json.loads({constant}...), "
+                "which is the unguarded read D1359 is about"
+            )

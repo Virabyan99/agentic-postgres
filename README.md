@@ -508,6 +508,12 @@ bin/render-evaluation-report.py --write --project project.yaml
 bin/render-mcp-catalog.py --write --project project.yaml
 ```
 
+**All four wait on the snapshot in row 4 above**, so all four refuse with exit
+`5` until your project's first deploy has been captured. If you run the first
+line before then, delete the file the redirect left behind — `>` truncates the
+target before the command runs, so a refused compile still leaves a 0-byte
+contract there, and every reader of it will say so.
+
 **The last line writes your tools a page of their own**, at
 `projects/<slug>/docs/mcp-tool-catalog.md`: every tool, the scopes each needs,
 the ceilings, and for a read the frozen columns and filters. It is your half
