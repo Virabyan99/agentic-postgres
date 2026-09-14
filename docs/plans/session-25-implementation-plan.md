@@ -1344,8 +1344,25 @@ D1280 row (repaired in Run 5b). One premise re-read and rewritten
 `docs/stage-4-decision-report.md` written with every trip number marked
 *[filled at the trip's close]* (D992), its §6 left as a heading.
 
-`bin/session-01-check.sh` on the clean tree -> **GATE_VERDICT**. Three commits
-pushed and each verdict read by full SHA: **CI_VERDICTS**.
+`bin/session-01-check.sh` on the clean tree at `040f733` -> **PASSED**, exit 0:
+**5700 contract tests passed, 0 failed, 3 skipped, 0 errors, 0 P0 future
+placeholders** (5668 at Run 4's close; the 32 are this session's six
+requirements' proofs plus the two the release contract adds). Step 6 prints
+both catalogs current, the release's and the project's.
+
+Three commits pushed and each verdict read by full SHA. **5a `0dffcf1`
+success. 5c `040f733` success. 5b `ec5d17d` CANCELLED** -- and that is
+recorded rather than rounded up: pushing 5c cancelled 5b's in-flight run by
+the workflow's concurrency group, so **5b has no verdict of its own**. What
+stands in for it is 5c, which is 5b's tree plus four documentation files and
+came back green; the gate above also ran on 5c's tree, which contains every
+line 5b added. A verdict inherited from a descendant is weaker than a
+commit's own and the difference is written down here rather than smoothed
+over. The lesson for Run 8: push a code commit and read its verdict before
+pushing the next one, or the middle commit of three never gets measured.
+
+**This commit is the release candidate the walker clones.** Run 6's task
+statement names `040f733`.
 
 ### Run 6 — the second walk
 
