@@ -29,6 +29,11 @@ from typing import Any
 
 import pytest
 import yaml
+from checkout_owner import (
+    as_checkout_owner,
+    python_for_the_owner,
+    traversable_to_the_checkout_owner,
+)
 
 from agentic_postgres import (
     CURRENT_SESSION,
@@ -125,16 +130,26 @@ else:
 
 
 def _read_state_as_the_checkout_owner(root: Path) -> tuple[str, str]:
-    owner = REPO_ROOT.stat()
-    if owner.st_uid == 0:
-        pytest.skip(
-            f"{REPO_ROOT} is root-owned, so there is no unprivileged checkout owner to "
-            "make the reading as (D1121/D1155)"
-        )
+    """The reading, made as the checkout's owner, through the shared helper.
+
+    **This was a third hand-rolled copy of the `sudo -u` prefix, and it was
+    green for the wrong reason** (D1331). It carried the prefix and NOT the
+    traversability step D1300 added beside it, so under root the child was
+    refused at `/tmp/pytest-of-root` -- mode `0700`, measured -- rather than at
+    the `0000` directory the proof had just built. Both refusals come back as
+    `StateUnreadable` with the same wording, measured side by side in rig 25c's
+    seventh arm, so the proof could not tell which one it had observed and
+    passed either way. D374: a test that passes for a reason other than the one
+    it names is worse than a weak assertion.
+
+    `traversable_to_the_checkout_owner` is now called by the proof before it
+    shuts the directory, so the only refusal left is the one it constructed.
+    """
+    prefix = as_checkout_owner()
     result = subprocess.run(
         [
-            "sudo", "-n", "-u", f"#{owner.st_uid}", "-g", f"#{owner.st_gid}",
-            str(REPO_ROOT / ".venv" / "bin" / "python"), "-c", _READ_STATE_AS_OWNER,
+            *prefix,
+            python_for_the_owner(), "-c", _READ_STATE_AS_OWNER,
             str(REPO_ROOT / "src"), str(REPO_ROOT / "services" / "auth-api"), str(root),
         ],
         capture_output=True,
@@ -521,6 +536,11 @@ def test_state_that_is_absent_unreadable_or_stale_are_three_different_answers(
     """
     with pytest.raises(dev_environment.StateAbsent):
         dev_environment.read_state("nothing-here-dev", tmp_path)
+
+    # Under root, make the ancestors traversable BEFORE shutting the directory
+    # (D1300, D1331): otherwise the child is refused at root's 0700 temporary
+    # directory and this proof reports on a refusal it did not construct.
+    traversable_to_the_checkout_owner(tmp_path)
 
     shut = dev_environment.state_dir("unreadable-dev", tmp_path)
     shut.mkdir(parents=True)

@@ -29,10 +29,10 @@ import json
 import os
 import re
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
+from checkout_owner import as_checkout_owner, traversable_to_the_checkout_owner
 
 from agentic_postgres import REPO_ROOT, deployed_output
 
@@ -42,37 +42,6 @@ RESOLVER = REPO_ROOT / "bin" / "rendered-document.py"
 
 EXIT_UNREADABLE = 3
 EXIT_ABSENT = 4
-
-
-def _traversable_to_the_checkout_owner(leaf: Path) -> None:
-    """Let the checkout's owner reach `leaf`, when this process is root (D1300).
-
-    D1165's repair re-enters as that owner so these proofs run under the
-    identity the gate uses, and root's pytest temp directory is `0700` -- so
-    without this the re-entry is refused at an ANCESTOR and never reaches the
-    directory a proof made unreadable. Their first execution in any environment
-    said so exactly: `Permission denied: '/tmp/pytest-of-root/…/.generated'`,
-    which is `.generated` and not the project inside it, and a bare
-    `PermissionError` there is D1151's shape rather than the reader's refusal.
-
-    Ancestors only, and only under the temporary directory: what a proof makes
-    unreadable it makes unreadable itself, and this must not reach it. A no-op
-    unprivileged, where the owner is already the user running the test.
-    """
-    if os.geteuid() != 0:
-        return
-    temporary = Path(tempfile.gettempdir()).resolve()
-    probe = leaf.resolve()
-
-    # **Stop BEFORE the temporary root** (D1301). `is_relative_to` is true of a
-    # path against itself, so a loop that only asks "is this under /tmp" walks
-    # onto /tmp and chmods it -- which this did, as root, on the deployment
-    # host: `0755` on a shared directory, sticky bit and world-write gone, and
-    # every unprivileged write to /tmp refused until it was restored to `1777`.
-    # The root is excluded by name, not by the shape of the condition.
-    while probe != temporary and probe != probe.parent and probe.is_relative_to(temporary):
-        probe.chmod(0o755)
-        probe = probe.parent
 
 
 @pytest.fixture
@@ -97,7 +66,7 @@ def rendered(tmp_path: Path) -> Path:
     Only the ancestors, and only under `/tmp`: what the proof makes unreadable
     it makes unreadable itself, and this must not reach it.
     """
-    _traversable_to_the_checkout_owner(tmp_path)
+    traversable_to_the_checkout_owner(tmp_path)
 
     directory = tmp_path / ".generated" / "fixture-honest-dev"
     directory.mkdir(parents=True)
@@ -109,40 +78,13 @@ def rendered(tmp_path: Path) -> Path:
 
 def run_resolver(key: str, *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [*_as_checkout_owner(), str(REPO_ROOT / ".venv" / "bin" / "python"), str(RESOLVER),
+        [*as_checkout_owner(), str(REPO_ROOT / ".venv" / "bin" / "python"), str(RESOLVER),
          "--project-key", key],
         capture_output=True,
         text=True,
         check=False,
         cwd=cwd or REPO_ROOT,
     )  # fmt: skip
-
-
-def _as_checkout_owner() -> list[str]:
-    """The `sudo -u` prefix that puts a reading in D1060's position, or nothing.
-
-    **D1155, and D1131's shape.** Both refusals in this module are observed by
-    reading through a directory the caller cannot traverse -- and root traverses
-    everything, so as root there is nothing to observe. The two proofs used to
-    carry `skipif(os.geteuid() == 0)`, and the gate runs its static claim proofs
-    as root: they skipped on every gate that could have recorded them, and
-    `honest_readers` stayed `not_run` for two sessions with both halves written.
-    A proof that skips under the identity the gate runs as is a proof the gate
-    can never record (D1121, both halves).
-
-    So under root the reading is made as the checkout's OWNER, which is the user
-    `op` is after a deploy. Unprivileged, nothing is prefixed and the reading is
-    made directly.
-    """
-    if os.geteuid() != 0:
-        return []
-    owner = REPO_ROOT.stat()
-    if owner.st_uid == 0:
-        pytest.skip(
-            f"{REPO_ROOT} is root-owned, so there is no unprivileged checkout owner to "
-            "make the reading as (D1121/D1155); chown the checkout to the operator first"
-        )
-    return ["sudo", "-n", "-u", f"#{owner.st_uid}", "-g", f"#{owner.st_gid}"]
 
 
 #: Read `read_rendered_document` out of process, as the checkout's owner.
@@ -173,7 +115,7 @@ def _unreadable_as_the_checkout_owner(root: Path) -> tuple[str, str | None]:
     """`(message, owner)` from a reading made as the checkout's owner."""
     result = subprocess.run(
         [
-            *_as_checkout_owner(),
+            *as_checkout_owner(),
             str(REPO_ROOT / ".venv" / "bin" / "python"),
             "-c",
             _READ_AS_OWNER,
@@ -231,7 +173,7 @@ def test_an_unreadable_document_is_unreadable_and_never_absent(rendered: Path) -
     traversal did, which is why the owner is resolved by walking upward.
 
     Under root the reading is made as the checkout's owner rather than skipped
-    (D1155); `_as_checkout_owner` carries the reason.
+    (D1155); `as_checkout_owner` carries the reason.
     """
     directory = rendered / ".generated" / "fixture-honest-dev"
     directory.chmod(0o000)
@@ -268,7 +210,7 @@ def test_the_reading_the_root_branch_makes_gives_the_same_answer(rendered: Path)
     and that branch runs only under root -- which is the gate and is not this
     workstation. **Everything about it except the `sudo -u` prefix can still be
     run here**, and this runs it: `_unreadable_as_the_checkout_owner` called
-    directly, unprivileged, where `_as_checkout_owner` contributes no prefix.
+    directly, unprivileged, where `as_checkout_owner` contributes no prefix.
 
     So what stays unmeasured until the gate is the prefix alone, and that is
     D1131's shape, already proved live on the Session 21 trip. What is measured
@@ -696,10 +638,10 @@ def test_publish_and_load_rendered_name_the_owner_and_the_remedy(
     the same three things is what keeps them one class rather than two repairs.
 
     Under root the reading is made as the checkout's owner (D1155,
-    `_as_checkout_owner`): root traverses a 0000 directory and there would be
+    `as_checkout_owner`): root traverses a 0000 directory and there would be
     nothing to observe.
     """
-    _traversable_to_the_checkout_owner(tmp_path)
+    traversable_to_the_checkout_owner(tmp_path)
 
     generated = tmp_path / ".generated"
     directory = generated / "fixture-shut-dev"
@@ -711,7 +653,7 @@ def test_publish_and_load_rendered_name_the_owner_and_the_remedy(
     try:
         result = subprocess.run(
             [
-                *_as_checkout_owner(),
+                *as_checkout_owner(),
                 str(REPO_ROOT / ".venv" / "bin" / "python"),
                 "-c",
                 _LOAD_RENDERED_AS_OWNER,

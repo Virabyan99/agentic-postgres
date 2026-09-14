@@ -11,15 +11,37 @@ the repository's real ``.generated/``.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+from checkout_owner import (
+    as_checkout_owner,
+    owned_by_the_checkout_owner,
+    python_for_the_owner,
+    traversable_to_the_checkout_owner,
+)
 
 from agentic_postgres import REPO_ROOT, config, rendering
+
+#: The reading, made in a child so it can be made as somebody other than root.
+#:
+#: It imports through an explicit `sys.path` entry rather than relying on the
+#: child inheriting pytest's `pythonpath` ini, which it does not.
+_RESOLVE_AS_OWNER = """
+import json, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+from agentic_postgres import rendering
+print(json.dumps({
+    "resolved": rendering.owner_of(pathlib.Path(sys.argv[2])),
+    "me": rendering.current_user(),
+}))
+"""
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -377,9 +399,24 @@ def test_the_owner_is_resolved_upward_when_the_path_itself_cannot_answer(
 
     A directory at mode 0000 refuses `stat` on everything inside it, so asking
     about the document gives `PermissionError` and asking about the directory
-    gives the answer. Unprivileged only: root stats through 0000, so there is
-    nothing to walk up from and the branch cannot be entered.
+    gives the answer.
+
+    **Under root this re-enters as the checkout's owner, and Session 25 is why**
+    (D1302, D1310). Root stats through 0000, so as root there is nothing to walk
+    up from -- and this carried a bare `pytest.skip` for that reason while the
+    GATE runs its static claim proofs as root. It skipped on every run that
+    could have recorded it, and `honest_readers` stayed `not_run` for three
+    sessions with all 23 of its node ids written. D1165 repaired exactly this in
+    `test_honest_readers.py`, and the repair never reached this module: the fix
+    went to one caller of a decision rather than to the class, which is §7's
+    fifth question.
+
+    D1302 said it could not be shown offline. It can, and rig 25c did:
+    `SKIPPED` as uid 0 in the pinned image, `PASSED` as a named non-root uid,
+    and both arms re-run after this repair.
     """
+    traversable_to_the_checkout_owner(tmp_path)
+
     directory = tmp_path / "shut"
     directory.mkdir()
     document = directory / "outputs.json"
@@ -387,15 +424,48 @@ def test_the_owner_is_resolved_upward_when_the_path_itself_cannot_answer(
 
     assert rendering.owner_of(document) == rendering.current_user()
 
+    prefix = as_checkout_owner()
+    if prefix:
+        # The subject is WHOSE name comes back, so the fixture is handed to the
+        # reader that will ask (D1332). Traversability alone left it owned by
+        # root, and the child -- running as the owner -- correctly answered
+        # `root`: a real failure, of a proof holding somebody else's fixture.
+        # After the assertion above, which is the unprivileged reading.
+        owned_by_the_checkout_owner(tmp_path, directory, document)
+    resolved: str
+    expected: str
     directory.chmod(0o000)
     try:
-        resolved = rendering.owner_of(document)
+        if prefix:
+            result = subprocess.run(
+                [
+                    *prefix,
+                    python_for_the_owner(),
+                    "-c",
+                    _RESOLVE_AS_OWNER,
+                    str(REPO_ROOT / "src"),
+                    str(document),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        else:
+            resolved = rendering.owner_of(document)
+            expected = rendering.current_user()
     finally:
         directory.chmod(0o755)
 
-    if os.geteuid() == 0:
-        pytest.skip("root stats through a 0000 directory, so nothing is walked up from")
-    assert resolved == rendering.current_user(), (
+    assert directory.stat().st_mode & 0o777 == 0o755, "the fixture directory was not restored"
+
+    if prefix:
+        assert result.returncode == 0, (
+            f"the reading as the checkout owner did not run: {result.stderr.strip()[:400]}"
+        )
+        answer = json.loads(result.stdout)
+        resolved, expected = answer["resolved"], answer["me"]
+
+    assert resolved == expected, (
         f"the owner of an unreachable document resolved to {resolved!r}; the nearest "
         "ancestor that can answer is the point of walking upward"
     )
