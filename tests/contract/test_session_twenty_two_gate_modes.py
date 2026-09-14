@@ -133,7 +133,15 @@ def test_the_gate_resolves_claims_for_its_own_session(source: str) -> None:
     survived one diff, in the usage block an operator copies and in every
     message the gate prints about itself.
     """
-    assert "readonly SESSION=22" in source
+    # **`code(source)`, not `source`** (D1350). The gate's own header says
+    # *`readonly SESSION=22` is the only session literal*, so the raw text
+    # carries the string whatever the assignment below it says. D277 and D1197
+    # are the same class, and the helper this line now uses was written for
+    # them.
+    assert "readonly SESSION=22" in code(source), (
+        "the gate does not assign SESSION=22. Its header may still SAY so, which "
+        "is why this reads the comment-stripped text"
+    )
     provenance = "**Derived from bin/session-21-check.sh by diff, not retyped**"
     stale = [
         line

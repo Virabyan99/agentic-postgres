@@ -135,6 +135,11 @@ SHELL_COMMANDS = (
     # in, which is the line ADR 0202 exists to let a session draw.
     "bin/session-23-check.sh",
     "bin/session-24-check.sh",
+    # Session 25 (ADR 0207). Derived from 24's by diff. Its offline mode
+    # writes a half reporting THREE claims -- one more than any session has
+    # declared offline -- and its host mode answers for this session alone,
+    # because Session 24's trip paid 22, 23 and 24 from one sweep (D1244).
+    "bin/session-25-check.sh",
     "bin/smoke-test.sh",
     # Session 24 (ADR 0205). A loopback client of a deployment's own
     # surfaces, holding the human's token in one process and handing the

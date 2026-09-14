@@ -109,9 +109,17 @@ def source() -> str:
 
 def test_the_gate_exists_and_is_executable_in_the_git_index() -> None:
     """Asserted against the index: writing through the \\\\wsl$ share strips the
-    bit, and a gate nobody can execute fails in a way that reads as a bad path."""
+    bit, and a gate nobody can execute fails in a way that reads as a bad path.
+
+    **The path is derived from `SCRIPT`, not written out** (D1280, repaired in
+    Session 25 Run 5). This module was derived from Session 22's and carried
+    that module's own filename across, so it asserted the PREVIOUS gate's mode
+    bit -- and a Session 23 gate committed without one would have passed it.
+    Session 24's copy was written derived; this is the same repair, one module
+    back.
+    """
     result = subprocess.run(
-        ["git", "ls-files", "--stage", "--", "bin/session-23-check.sh"],
+        ["git", "ls-files", "--stage", "--", str(SCRIPT.relative_to(REPO_ROOT))],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -147,16 +155,36 @@ def test_the_gate_resolves_claims_for_its_own_session(source: str) -> None:
     survived one diff, in the usage block an operator copies and in every
     message the gate prints about itself.
     """
-    assert f"readonly SESSION={SESSION}" in source
-    provenance = "**Derived from bin/session-21-check.sh by diff, not retyped**"
+    # **`code(source)`, not `source`** (D1350). The gate's own header says
+    # *`readonly SESSION=NN` is the only session literal*, so the raw text
+    # carries the string whatever the assignment below it says -- and a battery
+    # that set the assignment to the previous session's number left this GREEN.
+    # D277 and D1197 are the same class, and the helper this line now uses was
+    # written for them.
+    assert f"readonly SESSION={SESSION}" in code(source), (
+        f"the gate does not assign SESSION={SESSION}. Its header may still SAY so, "
+        "which is why this reads the comment-stripped text"
+    )
+
+    # **Derived, because a literal here goes stale silently** (D1280, repaired
+    # in Session 25 Run 5). This module looked for `session-21-check` -- the
+    # gate BEFORE the one this gate was derived from -- so it has been passing
+    # for free since the day it was written, which is the same defect as the
+    # one the guard it contains exists to catch. Session 24's copy was written
+    # derived; this is that repair applied one module back.
+    previous = SESSION_PREVIOUS.name
+    provenance = f"**Derived from bin/{previous} by diff, not retyped**"
+    assert provenance in source, (
+        f"the gate does not say which gate it was derived from: expected {provenance!r}"
+    )
     stale = [
         line
         for line in source.splitlines()
-        if "session-21-check" in line and provenance not in line
+        if previous.removesuffix(".sh") in line and provenance not in line
     ]
     assert not stale, (
-        f"a Session 21 filename survived the derivation: {stale}. The gate would "
-        "write the previous session's evidence while its --help named files it "
+        f"a Session {SESSION - 1} filename survived the derivation: {stale}. The gate "
+        "would write the previous session's evidence while its --help named files it "
         "never writes"
     )
 

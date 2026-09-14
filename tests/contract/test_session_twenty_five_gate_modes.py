@@ -1,38 +1,40 @@
-"""The Session 24 gate: Studio, and one sweep that answers for three sessions.
+"""The Session 25 gate: the hardening pass, the walk's instrument, and the release.
 
-**Derived from `test_session_twenty_three_gate_modes.py` by diff**, and what is
+**Derived from `test_session_twenty_four_gate_modes.py` by diff**, and what is
 carried over is the shape that generalises: a gate is executable in the index,
 answers all three modes, refuses an unknown one, names its OWN session's claims
 rather than an inherited one (D459), writes its offline half from the run that
 selected everything, passes no deployed document for it, refuses a workstation
-with no docker, and deploys nothing. Session 23's two step assertions are kept
-whole -- the drift check and the typecheck are still this gate's steps 6 and
-8b, and this release's bump moves `templateVersion` in the committed client, so
-the first of them is what stops a bump that forgot the regeneration (D1238).
+with no docker, and deploys nothing. Session 23's and 24's step assertions are
+kept whole -- the client drift check, the toolchain typecheck and the
+third-party scan are still this gate's steps 6, 8b and 8c, and this release's
+bump moves `templateVersion` in the committed client, so the first of them is
+what stops a bump that forgot the regeneration (D1238).
 
-**What is new is one step and one sentence.** Step 8c runs
-`test_studio_assets.py` by name. Step 3's sweep already collects it by its
-marks, so the step adds no coverage at all -- what it adds is the line an
-operator reads, and the claim ADR 0205 makes about Studio is mostly about what
-is NOT there. A decision kept by nobody noticing it is one commit away from
-being untrue, and a gate that says *Studio ships no third-party code* out loud
-is a gate somebody has to argue with.
+**What is new is one line in step 7 and one claim that is deliberately absent
+from the offline set.** Step 7 checks a project's OWN tool catalog beside the
+registry's generated documents -- the drift check Run 4 built and put in the
+Session 1 gate, here because this session's `DX-DOC-001` is the claim that
+depends on it.
 
-**And the offline/host split is this session's own argument**, which is why
-this module asserts it rather than deriving it. `studio_boundary` and
-`studio_surface` are declared offline because every proof behind them runs
-against the source or against a rig this checkout builds. `studio_revocation`
-and `audit_boundary_reported` are not, because a checkout cannot say whether a
-RUNNING plane refuses a revoked agent's next request, nor what boundary that
-plane recorded. A later session that folded the second pair in would report a
-revocation nobody performed as green.
+**The offline/host split is this session's own argument**, which is why this
+module asserts it rather than deriving it. Three claims are declared offline --
+one more than any session before -- because every proof behind them runs in a
+checkout: a dispatcher is a shell script, a completion is a bash session the
+test starts, a record is a JSON file, a document is a file in this tree, and
+the hardening scan reads sources and a `.generated/.dev/<key>` this checkout
+builds. `stage_release` is not, because a checkout cannot say whether a
+deployment RUNS the release the tree names nor what upgrading to it would cost
+the operator, and folding it in would let the tree grade its own release.
 
-**This gate's host mode answers for three sessions** (D1244), and the help says
-so: `claims_through_session` is cumulative, so one sweep collects Session 22's
-two owed host claims, Session 23's two, and this session's two. The merges stay
-three, one per session.
+**This gate's host mode answers for ONE session** (D1244 discharged), and the
+help says so: Session 24's trip paid 22, 23 and 24 from one sweep and those
+three merges are done. What its host mode also carries are two STANDING claims
+from Session 12 that this sweep is expected to move -- `documented_path` on the
+walk's record and `fresh_host` on the outsider's document -- through flags every
+gate since 12 has taken and none has ever been given.
 
-The source-reading tests read `bin/session-24-check.sh` as text, which is the
+The source-reading tests read `bin/session-25-check.sh` as text, which is the
 right instrument for a shell script's structure and the wrong one for its
 behaviour -- so the argument tests below actually RUN it.
 """
@@ -48,34 +50,33 @@ from agentic_postgres import evidence_claims as claims
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
-SCRIPT = REPO_ROOT / "bin" / "session-24-check.sh"
-SESSION_PREVIOUS = REPO_ROOT / "bin" / "session-23-check.sh"
+SCRIPT = REPO_ROOT / "bin" / "session-25-check.sh"
+SESSION_PREVIOUS = REPO_ROOT / "bin" / "session-24-check.sh"
 
-SESSION = 24
+SESSION = 25
 
-#: The claims Session 24 introduced, by mode. Written out rather than derived
+#: The claims Session 25 introduced, by mode. Written out rather than derived
 #: from `claims_for_mode`, which would be the mechanism checking itself and
 #: would pass for every possible claim table (D260's second mutation).
 #:
 #: **The split across the two modes is the assertion**, not an accident of how
-#: the session ran. `studio_boundary` is what Studio IS -- where it binds, what
-#: it holds, what it ships, how its command behaves -- and `studio_surface` is
-#: what it SHOWS; every proof behind either runs against the source or against a
-#: rig this checkout builds, and a production deployment would answer none of
-#: them differently. `studio_revocation` and `audit_boundary_reported` are about
-#: a RUNNING plane: whether it refuses a revoked agent's NEXT request, and what
-#: boundary it recorded when it did. A later session that moved one of the
-#: second pair into the first would make this table disagree with
-#: `claims_for_mode`, which is exactly the day somebody should have to think
-#: about it.
+#: the session ran. The three offline ones are each answerable in a checkout and
+#: a production deployment would answer none of them differently: `dx_context`
+#: is a shell script's behaviour, `dx_walk_instrument` is a JSON reader and the
+#: documents an adopter reads, and `dx_hardening` is a scan over sources and
+#: over artefacts this checkout builds. `stage_release` is about a DEPLOYMENT:
+#: whether both projects run the release the tree names, and what `upgrade plan`
+#: prices the candidate at. A later session that moved it into the first group
+#: would make this table disagree with `claims_for_mode`, which is exactly the
+#: day somebody should have to think about it.
 #:
-#: `external` is absent and that is also an assertion: Studio binds loopback and
-#: there is no flag for anywhere else, so nothing it does is reachable from a
-#: network at all. Inventing an external claim to make the shape symmetric is
-#: what ADR 0065 refuses.
-SESSION_TWENTY_FOUR_CLAIMS = {
-    "offline": ("studio_boundary", "studio_surface"),
-    "host": ("studio_revocation", "audit_boundary_reported"),
+#: `external` is absent and that is also an assertion: this session ships no
+#: service, no port and no route, so there is nothing for a stranger to reach.
+#: Inventing an external claim to make the shape symmetric is what ADR 0065
+#: refuses.
+SESSION_TWENTY_FIVE_CLAIMS = {
+    "offline": ("dx_context", "dx_walk_instrument", "dx_hardening"),
+    "host": ("stage_release",),
 }
 
 
@@ -338,6 +339,51 @@ def test_offline_mode_runs_the_round_trip_in_order(source: str) -> None:
     assert "project.example.yaml" in round_trip
 
 
+def test_offline_mode_checks_the_projects_own_tool_catalog(source: str) -> None:
+    """`DX-DOC-001` in the gate. Session 25's one new line in a step.
+
+    A project's own tools get a catalog under `projects/<slug>/docs/`, written
+    by the same renderer that writes the release's and drift-checked the same
+    way (ADR 0201, D1309). Run 4 built it and put the check in
+    `bin/session-01-check.sh`; this session's claim is the one that depends on
+    it, so this gate carries it too.
+
+    **`--check --project`, both flags, and the assertion says so.** Without
+    `--project` the same command checks the RELEASE's catalog, which is a
+    different document that the Session 1 gate already checks -- so a line that
+    lost the flag would still exit 0, still print a reassuring sentence, and
+    measure nothing this claim is about. That is the failure this asserts
+    against, and it is D200's shape: a command standing in for a different
+    command it resembles.
+
+    Found in the comment-stripped text (D1197): the comment beside the line
+    names the same command.
+
+    Goes red if: the check is dropped from step 7; it loses `--project`; or it
+    loses `--check` and starts WRITING a document from inside a gate, which
+    would make the gate the thing that keeps the catalog current instead of the
+    thing that notices it is not.
+    """
+    offline_mode = body_of(source, "mode_offline")
+    catalog = [
+        line.strip() for line in offline_mode.splitlines() if "render-mcp-catalog.py" in line
+    ]
+    assert catalog, (
+        "offline mode does not check the project's tool catalog. `DX-DOC-001` says "
+        "the example project's catalog is committed and current, and a committed "
+        "generated document with no drift check is a document that drifts"
+    )
+    for line in catalog:
+        assert "--check" in line, (
+            f"a gate must not WRITE a generated document: {line!r}. It checks, and an "
+            "operator regenerates"
+        )
+    assert any("--project project.example.yaml" in line for line in catalog), (
+        "the catalog check does not name a project, so it is checking the RELEASE's "
+        f"catalog -- a different document, checked by the Session 1 gate: {catalog}"
+    )
+
+
 def test_offline_mode_checks_the_committed_client_is_current(source: str) -> None:
     """`GEN-VERSION-001` in the gate. The drift check, and WHERE it sits.
 
@@ -512,7 +558,7 @@ def test_each_environment_carries_a_claim_this_session_introduced() -> None:
     rather than derived from `claims_for_mode`, which would be the mechanism
     checking itself.
     """
-    for mode, expected in SESSION_TWENTY_FOUR_CLAIMS.items():
+    for mode, expected in SESSION_TWENTY_FIVE_CLAIMS.items():
         resolved = set(claims.claims_for_mode(mode, SESSION))
         missing = sorted(set(expected) - resolved)
         assert not missing, (
@@ -529,7 +575,7 @@ def test_the_expectation_table_names_every_claim_this_session_introduced() -> No
     `CLAIM_INTRODUCED_IN`, closed the same way: the table and the claim set have
     to name the same things.
     """
-    declared = {claim for group in SESSION_TWENTY_FOUR_CLAIMS.values() for claim in group}
+    declared = {claim for group in SESSION_TWENTY_FIVE_CLAIMS.values() for claim in group}
     introduced = {claim for claim in claims.CLAIMS if claims.claim_session(claim) == SESSION}
     assert declared == introduced, (
         "the expectation table and the claims introduced in this session "
@@ -538,39 +584,46 @@ def test_the_expectation_table_names_every_claim_this_session_introduced() -> No
     )
 
 
-def test_every_session_twenty_four_claim_belongs_to_session_twenty_four() -> None:
+def test_every_session_twenty_five_claim_belongs_to_session_twenty_five() -> None:
     """ADR 0089. A claim built from an earlier session's id moves, silently.
 
     `claim_session` is a `max()`, so one older requirement id mixed into a
-    Session 23 claim either drags it into an earlier gate's evidence -- turning
+    Session 25 claim either drags it into an earlier gate's evidence -- turning
     that session's document red -- or hides it from this one entirely. D1150 is
     the live instance: the plan had two Session 21 requirements joining Session
     16 and Session 18 claims, and the guard caught it on the first run.
     """
-    for expected in SESSION_TWENTY_FOUR_CLAIMS.values():
+    for expected in SESSION_TWENTY_FIVE_CLAIMS.values():
         for claim in expected:
             assert claims.claim_session(claim) == SESSION, (
                 f"{claim} resolves to session {claims.claim_session(claim)}, not {SESSION}"
             )
 
 
-def test_exactly_the_eight_declared_claims_are_offline() -> None:
+def test_exactly_this_sessions_declared_claims_are_offline() -> None:
     """The declaration is the whole definition (ADR 0202), so it is asserted.
 
     **Session 22's version of this test asserted an EQUALITY against the whole
     of `OFFLINE_CLAIMS`**, which was right while that session's four were all
     there were, and became a rule that no later session may declare an offline
-    claim the moment Session 23 did (D1237). This is the third offline session,
-    and the subtraction below is what lets all three coexist: each module owns
-    its own two names and asserts them exactly.
+    claim the moment Session 23 did (D1237). Session 23's replacement was a
+    SUBTRACTION against every EARLIER session, which was right for exactly as
+    long as no LATER session declared one, and Session 24 is where that showed
+    (D1281). This is the fourth offline session and the first to declare three.
 
-    So the property is stated at the level it is actually about. This session
-    owns two names and asserts them exactly, by SUBTRACTION: `OFFLINE_CLAIMS`
-    less every claim an earlier session introduced must be precisely the two
-    this session declared -- neither fewer nor a third that arrived without
-    anybody deciding to, which is the failure the declaration exists to
-    prevent. The earlier sessions' own names are checked by their own modules,
-    where they belong.
+    **The name carries no count, deliberately.** The derivation arrived here
+    reading `..._the_eight_declared_claims_...` while eleven were declared, and
+    a number in a test's own name is a claim nothing reads -- the same shape as
+    a usage text that says four when its command prints five (D1349). What the
+    test is about is not how many there are; it is that the ones THIS session
+    declared and the ones this session introduced are the same set.
+
+    So the property is stated at the level it is actually about, MATCHED ON
+    THIS SESSION: the claims in `OFFLINE_CLAIMS` whose `CLAIM_INTRODUCED_IN`
+    entry is this session must be precisely the ones this module declares --
+    neither fewer nor a fourth that arrived without anybody deciding to, which
+    is the failure the declaration exists to prevent. The earlier sessions'
+    own names are checked by their own modules, where they belong.
     """
     from tests.contract.test_evidence_claims import CLAIM_INTRODUCED_IN
 
@@ -579,26 +632,25 @@ def test_exactly_the_eight_declared_claims_are_offline() -> None:
     # became "no later session may declare one" the moment there was a later
     # one -- which is D1237's own defect, one turn on.
     mine = {name for name in claims.OFFLINE_CLAIMS if CLAIM_INTRODUCED_IN.get(name) == SESSION}
-    assert mine == set(SESSION_TWENTY_FOUR_CLAIMS["offline"]), (
+    assert mine == set(SESSION_TWENTY_FIVE_CLAIMS["offline"]), (
         "the offline claims this session introduced and the ones it declared "
-        f"disagree: {sorted(mine ^ set(SESSION_TWENTY_FOUR_CLAIMS['offline']))}"
+        f"disagree: {sorted(mine ^ set(SESSION_TWENTY_FIVE_CLAIMS['offline']))}"
     )
 
     # And none of this session's HOST claims drifted into the declaration. That
     # is the direction with a consequence: a host claim declared offline goes
     # green on a checkout that never saw the deployment it is about.
-    for claim in SESSION_TWENTY_FOUR_CLAIMS["host"]:
+    # The derivation arrived carrying this loop TWICE, with two different
+    # sentences for the same assertion -- Session 24 wrote one and Session 23's
+    # copy contributed the other. One is kept, with the reason that is this
+    # session's: `stage_release` is about whether a DEPLOYMENT runs the release
+    # the tree names, and a checkout declared able to answer that would grade
+    # the tree against itself.
+    for claim in SESSION_TWENTY_FIVE_CLAIMS["host"]:
         assert claim not in claims.OFFLINE_CLAIMS, (
-            f"{claim} is declared offline. It is about a running deployment -- what "
-            "surface it serves a caller, or which lock its plane loaded -- and a "
-            "checkout answering it would report eight minutes of beta serving the "
-            "wrong lock as green (D1152)"
-        )
-    for claim in SESSION_TWENTY_FOUR_CLAIMS["host"]:
-        assert claim not in claims.OFFLINE_CLAIMS, (
-            f"{claim} is declared offline. It is about a RUNNING plane, and a "
-            "checkout answering it would have reported beta green through the "
-            "eight minutes it served the wrong lock (D1152)"
+            f"{claim} is declared offline. It is about a running deployment -- which "
+            "release it is at, and what upgrading to this one would cost the operator "
+            "-- and a checkout answering it would let the tree grade its own release"
         )
 
 
