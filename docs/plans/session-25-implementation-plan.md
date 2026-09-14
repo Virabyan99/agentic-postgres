@@ -1011,7 +1011,95 @@ directory under `projects/example/docs/`), `test_acceptance_registry`
 the gate's own step changed; if step 2 cannot reach PyPI from WSL, run that
 one step inside the pinned image and say so (D1239). Push; read CI.
 
-**Done.** *(filled by the run.)*
+**Done.** 2026-09-14, in two commits. Six rows plus 4a's four, **D1336–D1345;
+next free D1346.**
+
+**4a — a project's own tools get a catalog.** `render-mcp-catalog.py --project
+FILE` writes `projects/<slug>/docs/mcp-tool-catalog.md` from that project's
+committed contract; the example project's is committed and
+`bin/session-01-check.sh` step 6 drift-checks it. Three of the plan's rows were
+wrong and each is now one of its own. **D1338**: the project's contract carries
+no release row to mark — 2 tools behind 2 capabilities, all its own — so the
+marking moved to a derived HEADER that names the project, says these are not
+the whole of what the deployment serves, links the release catalog by a
+resolved relative path, and names the tool names **both** contracts carry, read
+out of the release contract. `query_resource` is one name over two
+authorizations, and a scope granted for one grants nothing for the other.
+**D1337**: the plan asked for a hand-seeded file of two bare markers;
+`render-evaluation-report.py` already CREATES a project's report from its own
+head constant and reports the absent file with the command that writes it, so
+that shape was copied. Measured: absent → **5** naming `--write --project`;
+`--write --project` creates the file and its parent; `--check --project` then
+0; one byte edited → 5 naming the contract. **D1336**: CI has no
+generated-documents step to add the check to — the workflow invokes the gate
+and nothing else that renders, which its own header says is deliberate — so the
+gate gained the line and the workflow is untouched.
+
+**D1339, and it is the run's cheapest find.** Adding the renderer's first
+`@dataclass` turned three green proofs RED at import: `test_mcp_catalog.py`
+loads the script by path in three places and never registered it in
+`sys.modules`, and `@dataclass` resolves `sys.modules[cls.__module__]` while the
+class is created. Green since Session 8 because the file had no dataclass in it.
+Fixed in the harness — one registering helper, three call sites reduced to calls
+of it — rather than by avoiding the dataclass, which is §7's fourth question
+answered on the side that was actually broken. Battery: five mutations, all
+killed, control green.
+
+**4b — the documentation converged.** README re-ordered into the adopter's
+walk, sections moved WHOLE with their bytes asserted identical (two proofs hold
+sentences inside two of them); *Adding your own tables* opens with the eight
+numbered offline lines and *Giving an agent your tables* ends with the catalog
+command. `docs/new-team-member.md` re-derived by diff, one label, fourteen
+steps, and a *done* section that IS the walk's success criterion — the
+derivation script reproduces the committed file from the committed original,
+asserted rather than claimed. `docs/second-walk.md` written and indexed: who
+may walk, the statement between two literal markers, the record's nine members
+and `followed_by`'s four, and what a failed walk means.
+
+**Four measured contradictions, each a row.** **D1340** is the one that
+mattered: two of the three refusals the guide was told to QUOTE printed a
+Python traceback and exited **1**. A project migration below its frozen release
+version, or a table in `app` without FORCE row level security, raises
+`ProjectSetError` — a `MigrationError`, not a `RenderError` — and
+`bin/render-config.py` caught only the three classes it knew, while
+`bin/migrate.py` and `bin/dev.py` had handled this one since Session 20. The
+render is its third caller and never got the decision (§7 question 5).
+Repaired, re-measured on both arms (exit 5, the sentence, the previous render
+unchanged), and guarded with three arms — the third keeps the new clause from
+being a blanket `except`. **D1341**: ADR 0207 §4 says Studio's refusal names
+the deploy as what is missing; measured, it named what the file IS. The
+sentence gained its remedy. **D1342**: `blocked_by` had no reader on the day
+the task statement asks for it — D816/D929/D1247's shape — and now has one in
+both directions, printed as a fifth reading. **D1343**: the OFFLINE half of
+`DX-001` did not scan `docs/new-team-member.md` while the LIVE half does, so
+the two halves of one claim read different documents; both it and
+`docs/second-walk.md` joined `CURRENT_PATH_DOCUMENTS`.
+
+**Rigs.** 25h (the renderer over a project contract; the release's output
+byte-identical as the control), 25i (the three refusals, RUN, on a throwaway
+copy of the example set, with the untouched copy freezing, verifying and
+rendering as the control), 25j (`studio --help` exit 0 and the rendered-document
+refusal, verbatim), 25k (`dx-record digest` then `check`, and what the report
+prints — five readings and two lines out of the record, not the plan's three,
+which is **D1345**). **D1344**: the catalog module the plan named as new
+already exists, so the two proofs land in `test_mcp_catalog.py` and Run 5's
+registry entry says so.
+
+Battery, 4b: eight mutations, all killed, control green throughout. **`d`
+survived first time** — deleting `blocked_by`'s paragraph from the walk page
+left the assertion green, because a table row mentions the field in passing.
+D200's shape, a substring standing in for a description; the assertion now
+requires a prose paragraph naming the field and the condition it is read under.
+
+**Checks:** ruff format and check clean over the tree; shellcheck clean;
+thirteen targeted modules → **924 passed**; `bin/session-01-check.sh` on the
+clean tree → **PASSED**, 5668 passed, 0 failed, 3 skipped, and its step 6
+now reads *projects/example/docs/mcp-tool-catalog.md is current* beside the
+release's. Both commits pushed and each verdict read by full
+SHA: **4a `d095351` success, 4b `c7b78f0` success**. Eight commits into the
+session, seven were green on their first verdict and Run 2's one red is
+recorded in Run 3's Done rather than tidied away.
+
 ### Run 5 — the bump
 
 **Read first:** `docs/plans/session-24-implementation-plan.md` §5 Run 6
