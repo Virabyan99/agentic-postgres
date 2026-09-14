@@ -4,7 +4,7 @@
 No run has started. §1 is D1303–D1314 (planning rows, each read from the tree
 at `bb93a53` today or measured in a rig today); the runs add theirs below the
 planning rows, each run's numbers named in its Done paragraph. **Next free
-after this table: D1328.** ADR **0207** is this session's (written in Run 1,
+after this table: D1330.** ADR **0207** is this session's (written in Run 1,
 and indexed);
 next free after it 0208.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 25 — Hardening, the second
@@ -189,7 +189,7 @@ an earlier session).
 ---
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1328**. Rows D1303–D1314
+Six columns, next free number after this table **D1330**. Rows D1303–D1314
 were read from the tree or measured in a rig on 2026-09-14 at `bb93a53`. The
 runs add theirs below them as they go, each run's numbers named in its Done
 paragraph.
@@ -221,6 +221,8 @@ paragraph.
 | **D1325** | This plan's D1309: `render-mcp-catalog.py` *"gains `--project FILE` writing `projects/<slug>/docs/mcp-tool-catalog.md`"*, priced as one flag and one output path. | **There is a third thing, and the row does not name it: the renderer cannot create its output.** `main` reads `CATALOG.read_text()` before it writes anything and hands the result to `compose`, which requires both `<!-- BEGIN GENERATED: mcp-catalog -->` and its END marker. Measured (rig 25e): an ABSENT output file raises an unhandled `FileNotFoundError` -- a traceback, not a report; a file present without the markers is refused cleanly with exit 1. A project's first catalog is exactly the absent case. | Run 4 seeds `projects/example/docs/mcp-tool-catalog.md` with the two markers and commits it, and the absent-file traceback is turned into a reported refusal naming the seed as the fix. The two lines the row did name are confirmed: `CONTRACT` at `bin/render-mcp-catalog.py:53` and `CATALOG` at `:54`. Control: `--check` on the tree exits 0 and `--write` leaves the release catalog byte-identical. | ADR 0195 in a generator: a reader that dies with a traceback has not reported the third answer, it has shown the operator a stack. Found by running the new path's first invocation before writing it. | -- |
 | **D1326** | This plan's D1312 and its §9: *"The proof carries the declared document with `carry_to_current` BEFORE the version assertion"*, on D1122's *migrate, then validate* rule; and *"the operator locates the fresh-host document and `carry_to_current` cannot carry it"* as an unlikely stop. | **`carry_to_current` cannot carry ANY deployed document, and `fresh_host`'s document must be a deployed one.** All **16** single-step migrators call `require_kind(document, "rendered")`; measured on four real archived documents (rig 25f), the v16 kit, the 2026-09-06 kit, the v17 kit and the v18 kit all answer *expected a 'rendered' outputs document, got 'deployed'*. That is ADR 0012 on purpose: the migrator never republishes an observation under a version that never measured it. The plan's resolution is not a risk, it is impossible -- and **the tree already solved the same problem seven days earlier**: `dr_kit.verify_deployed_document` (D1141) reads an archived deployed document BY VERSION, three ways. | `DEP-001`'s proof takes the kit verifier's shape, not the migrator's (ADR 0207 §3d): assert what the claim is about -- deployed, names a host, not the host `project_a` runs on, routes ready -- and read the version the way the kit verifier does. A document older than this release is the **reported third answer** and the claim stays `not_run` with the version named; it is never *failed*, and never a silent pass. | §7 question 5, one level up: a decision was implemented (D1141's version-aware read) and only one of its two callers got it. And §7's *premise wrong in the reassuring direction* -- the plan's carry sounded mechanical, would have raised on the first real document, and the refusal a reader would have seen names the wrong subject. | 0207 |
 | **D1327** | This plan's D1310: *"**`tests/fixtures/checkout_owner.py`** (beside `outputs_chain.py` and `rendered_fixtures.py`, the existing helper home)"*; and Run 1's read list: *"`src/agentic_postgres/output_migrations.py` (`carry_to_current`, D1134)"*. | **Both paths are wrong.** `outputs_chain.py` and `rendered_fixtures.py` are in **`tests/contract/`**; `tests/fixtures/` holds JSON fixtures and one `pgbackrest` directory and no Python at all. And `carry_to_current` is **not in `src/`**: it is a test helper in `tests/contract/outputs_chain.py:57`, which is why `test_output_migrations.py` imports it as `from outputs_chain import carry_to_current`. | The lifted helper lands at **`tests/contract/checkout_owner.py`**, which is where both importers already live and where pytest's prepend import mode makes a bare `import checkout_owner` resolve. | A helper put in `tests/fixtures/` would not have been importable by either module without a path change nobody planned, and the mistake is invisible until the import fails. | -- |
+| **D1328** | This plan's D1308 and ADR 0207 §2 as Run 1 wrote it: the default is applied when *"the verb's own `--help` names `--project` as a flag"* -- one predicate, one set of verbs. | **`--project` does not mean one thing.** Measured in rig 25g over the 17 verbs that name it line-anchored: **13** document `--project FILE` and take a manifest path; **4** document `--project KEY` and take a DEPLOYED PROJECT'S KEY -- `connect`, `doctor`, `project-retire`, `upgrade`. Handing a KEY-taking verb a path is **not refused**: `bin/upgrade.sh check --project project.alpha.yaml` derives `/var/lib/agentic-postgres/rendered/project.alpha.yaml/outputs.json` and reports on it. That is the worst of ADR 0195's three outcomes -- an answer, and a wrong one -- reached by a flag the operator never typed. `APG_PROJECT` is specified as a manifest and the dispatcher's `[ -r ]` is a file check, so both already assumed FILE semantics without saying so. | **The derivation reads the metavariable, not just the flag**: the anchor is `^[[:space:]]*--project[[:space:]]+FILE([[:space:]]|$)`, so a verb receives the default when its own help says the flag takes a FILE. Measured to select exactly the 13 and drop exactly the 4, each of which documents `--project KEY`. Still derived, still kept nowhere, and now the readability check and the value agree with what the verb will do with it. A FILE-taking verb that spells its metavariable some third way is left out -- the safe direction, and a one-word usage fix. | The rule as written selected a predicate that was easy to read rather than the one that was true. `dr-kit` (D1316) was the loud version of this class -- a verb that REFUSES the flag -- and these four are the quiet version, which is worse: nothing fails, and the operator gets a report about a project key that is a filename. | 0207 |
+| **D1329** | This plan's Run 2 step 6: *"README's *Checks* names `bin/apg.sh completion bash` and `bin/apg.sh dx-record check`"*. | **README's *Checks* is about gates** -- `smoke-test`, `session-NN-check`, what a mode means, *"the gate is a release control, not a save button"*. A default project manifest and a completion script are neither checks nor release controls, and a reader looking for `--project` is in *Rendering a project*, which is where the flag is introduced and where 8 of README's `--project FILE` invocations are. | The `APG_PROJECT` rules, the `sudo` caveat and `bin/apg.sh completion bash` go in a **`### Typing --project once`** subsection at the end of *Rendering a project*; `Checks` is untouched. `bin/apg.sh dx-record check` lands with the verb in Run 3. **Run 4 owns README's ordering** (D1313, `DX-DOC-001`) and settles the final placement against the path an adopter walks. | `test_every_command_the_readme_names_exists` cares that README names the command, not which section names it -- so the plan's requirement is met and its suggested address is not, which is a divergence rather than a silent reconciliation. | -- |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -617,7 +619,73 @@ whether `dx-record.py` prints a next step; it does not), `test_documentation_ind
 `test_repository_contract`, `test_acceptance_registry` is NOT needed yet (no
 registry change until Run 5). Push; read CI.
 
-**Done.** *(filled by the run.)*
+**Done.** 2026-09-14. Two rows, **D1328–D1329; next free D1330.**
+
+**`APG_PROJECT`.** `bin/apg.sh` applies it when the variable is non-empty, the
+arguments carry no `--project` in either spelling and no `--help`/`-h`, and the
+verb's own `--help` documents the flag; it prints `apg: --project <path> (from
+APG_PROJECT)` on stderr, once, every time; an unreadable value is exit 2 before
+`exec`; the unmodified `exec "${script}" "$@"` path is untouched for everything
+else. Verified end to end: `dev` receives it and names the path back, `upgrade`
+and `lock-versions` do not, `--list`/`--help`/`dev --help` are not rewritten,
+both explicit spellings suppress it, and an unset or empty variable changes
+nothing.
+
+**The predicate is not the one the plan wrote, and D1328 is why.** `--project`
+means a manifest FILE to 13 verbs and a deployed project's KEY to four
+(`connect`, `doctor`, `project-retire`, `upgrade`), and a KEY-taking verb handed
+a path is not refused — `upgrade check --project project.alpha.yaml` derives
+`/var/lib/agentic-postgres/rendered/project.alpha.yaml/outputs.json` and reports
+on it. So the anchor reads the metavariable:
+`^[[:space:]]*--project[[:space:]]+FILE([[:space:]]|$)`, measured (rig 25g) to
+select exactly the 13 and drop exactly the 4.
+
+**D1316 repaired and guarded.** `bin/dr-kit.sh`'s usage no longer carries a line
+beginning `--project`; the flag is documented on `export`'s own line with the
+reason, and `dr-kit` takes no default. The guard is
+`test_every_verb_whose_help_documents_the_flag_actually_accepts_it`, which
+probes the PARSER of every verb whose help documents the flag, bare and once per
+subcommand, with a canary argument that guarantees a parse error before any
+effect — three outcomes, and a root-gated command is reported *undetermined*
+rather than counted as a pass, with a floor on the conclusive count so the
+comparison cannot go vacuous unnoticed.
+
+**`bin/completion.sh`.** `bash` prints the script, `--help` the usage, anything
+else exit 2 naming bash. The printed script derives verbs from `--list` and a
+verb's flags from that verb's `--help` at completion time; the only value
+embedded is the checkout path. `SHELL_COMMANDS` gains it, `git add`ed first
+(D1188).
+
+**The no-list proof is a construct, not a scan.** The first version read the
+dispatcher's source for verb names and failed on its own usage text — D464
+exactly, which this module records two tests above. It now plants two scripts in
+`bin/`, one documenting `--project FILE` and one documenting nothing, and
+observes the default reaching the first and not the second: a verb invented
+thirty seconds ago receiving it is what proves the set was derived.
+
+**Battery: six mutations, six kills, controls green throughout, restored by copy
+and `cmp`.** Anchors pre-flighted to match exactly once. (a) the anchor drops
+`FILE` → killed; (a2) the anchor dropped entirely → killed; (b) the announcement
+removed → killed; (c) the readability check removed → killed as `FAILED`, not
+`ERROR`; (d) a verb baked into the printed script → killed; (e) the `complete
+-F` registration dropped → **SURVIVED on the first pass, and it was a real gap**:
+every completion proof called `_apg_complete` by hand, so a script that defined
+the function and bound it to nothing passed all of them while doing nothing in a
+real shell. `complete -p` is now read first, and (e) is killed.
+
+**Not here, by the plan's own ordering:** `bin/dx-record.sh` and
+`bin/dx-record.py`. D1222 — a caller with no module cannot be committed alone —
+so they land in Run 3 beside `src/agentic_postgres/dx_record.py`. README names
+`bin/apg.sh completion bash` in *Rendering a project* rather than in *Checks*
+(D1329); `dx-record check` joins it in Run 3.
+
+**Checks:** ruff format and check clean over 670 files; shellcheck clean on
+`apg.sh`, `completion.sh` and `dr-kit.sh`; `test_apg_dispatcher`,
+`test_completion_command`, `test_cli_contract`, `test_root_script_policy`,
+`test_printed_commands`, `test_documentation_index`, `test_repository_contract`
+and `test_acceptance_registry` → **900 passed, 2 skipped** (both pre-existing,
+`bin/docker-firewall.sh` and `bin/edge-network.sh` run no Python);
+`test_disaster_kit` → 26 passed. Run 1's CI: **success**.
 
 ### Run 3 — the closing review, the record reader, and D1302
 

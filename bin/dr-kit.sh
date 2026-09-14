@@ -32,8 +32,16 @@ usage() {
   cat <<'USAGE'
 Usage:
   sudo bin/dr-kit.sh export --host host.yaml --capabilities capabilities.yaml \
-       --project project.alpha.yaml [--project project.beta.yaml ...] --output DIR
+       --output DIR --project project.alpha.yaml [--project project.beta.yaml ...]
   bin/dr-kit.sh verify DIR
+
+`export` takes one `--project` per project, repeated, and at least one.
+`verify` takes none and refuses one -- the flag belongs to `export` alone, which
+is why it is written on `export`'s own line and never as an option block entry
+of this command's (D1316). A line whose first word is `--project` reads as a
+flag the command takes in every mode, and `bin/apg.sh` derives its APG_PROJECT
+default by looking for exactly that; `dr-kit verify` would then be handed a flag
+it refuses. So `dr-kit` takes no default project, deliberately.
 
 The kit is written into DIR, which must not exist, owner-only. Copy it off the
 host afterwards: it is the operator's, and docs/node-loss-runbook.md is the

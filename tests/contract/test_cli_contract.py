@@ -51,6 +51,11 @@ SHELL_COMMANDS = (
     "bin/auth-admin.sh",
     "bin/backup.sh",
     "bin/bootstrap-providers.sh",
+    # Session 25 (ADR 0207 §2): prints a bash completion script and installs
+    # nothing. Listed here the run it landed (D1014), and `git add`ed before
+    # this module runs, because `test_commands_are_executable_in_the_git_index`
+    # reads the INDEX's mode and not the working tree's (D1188).
+    "bin/completion.sh",
     "bin/compose.sh",
     "bin/connect.sh",
     "bin/docker-firewall.sh",

@@ -227,6 +227,37 @@ Output is byte-identical across renders with identical inputs.
 `pgbackrest.conf` is `0444`, because it carries no credential by construction and
 the database container reads it as uid 999.
 
+### Typing `--project` once
+
+`bin/apg.sh` is one front door over the commands in `bin/`, and `APG_PROJECT`
+is a default manifest for it:
+
+```bash
+export APG_PROJECT=project.yaml
+bin/apg.sh dev up           # runs bin/dev.sh up --project project.yaml
+bin/apg.sh completion bash  # a bash completion script, on stdout; installs nothing
+```
+
+Three rules, and the first is the one that matters:
+
+- **Only a verb that takes a manifest.** The verb's own `--help` is read, and
+  the default is appended only if that text documents `--project FILE`. Which
+  verbs those are is worked out when you run one, never kept in a list, so a
+  command added tomorrow is covered tomorrow. A verb documenting `--project KEY`
+  — `doctor`, `connect`, `upgrade`, `project-retire` — wants a deployed
+  project's key rather than a path, and is left alone.
+- **Only when you gave none.** An explicit `--project` wins, in either
+  spelling, and `--help` is never rewritten.
+- **Always announced.** Each application prints one line on stderr,
+  `apg: --project <path> (from APG_PROJECT)`. A value naming no readable file
+  is refused with exit 2 before the verb runs.
+
+**`sudo` drops the variable** unless you pass `--preserve-env=APG_PROJECT`, and
+the announcement is how you tell: no line means no default was applied,
+whatever your shell exported. The completion script asks `bin/apg.sh` for the
+verbs and each verb for its flags at the moment you press TAB, so there is
+nothing to regenerate when `bin/` changes (ADR 0207).
+
 ## A local environment
 
 `apg dev` builds a disposable PostgreSQL cluster on your own machine from the
@@ -405,8 +436,10 @@ sudo bin/project-retire.sh --host host.yaml --project <key> --confirm <key> \
      --record <path> --plan                   # what retiring it would remove; nothing changes
 
 sudo bin/dr-kit.sh export --host host.yaml --capabilities capabilities.yaml \
-     --project project.yaml --output <dir>     # the disaster kit: identifiers, never a value
+     --output <dir> --project project.yaml     # the disaster kit: identifiers, never a value
 bin/dr-kit.sh verify <dir>                    # is the kit whole? (docs/node-loss-runbook.md)
+                                              # `verify` takes no --project, and so dr-kit
+                                              # receives no APG_PROJECT default (D1316)
 sudo bin/rehearse.sh <scenario> --outputs <outputs.json> [--plan]
                                               # one bounded failure: induce, read, reverse
 sudo bin/rehearse.sh reverse                  # replay an interrupted rehearsal's reversal
