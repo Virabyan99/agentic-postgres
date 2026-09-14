@@ -94,12 +94,7 @@ def test_the_renderer_check_can_actually_fail(tmp_path) -> None:
     renderer's own module constants -- rather than by editing the tracked file,
     so a failure here cannot leave the working tree dirty.
     """
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("_render_catalog", RENDERER)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+    module = _renderer_module("_render_catalog_perturbed")
 
     perturbed = tmp_path / "catalog.md"
     perturbed.write_text(f"{BEGIN}\n\nnot the contract\n\n{END}\n", encoding="utf-8")
@@ -268,12 +263,7 @@ def test_the_renderer_distinguishes_the_two_shapes_directly() -> None:
     Held here as well as above so that a change to the example contract cannot
     quietly remove the only coverage of the conjunction branch (D332).
     """
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("_render_catalog_unit", RENDERER)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+    module = _renderer_module("_render_catalog_unit")
 
     any_of = module.scope_expression([["a:read"], ["b:read"]])
     all_of = module.scope_expression([["a:read", "b:read"]])
@@ -429,7 +419,6 @@ def test_the_renderers_reserved_parameters_match_the_runtimes(generated: str) ->
     the shape §6 names -- and the renderer is the half a reader of the catalog
     actually depends on.
     """
-    import importlib.util
     import sys as _sys
 
     service = REPO_ROOT / "services" / "auth-api"
@@ -439,10 +428,7 @@ def test_the_renderers_reserved_parameters_match_the_runtimes(generated: str) ->
     finally:
         _sys.path.remove(str(service))
 
-    spec = importlib.util.spec_from_file_location("_render_catalog_reserved", RENDERER)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+    module = _renderer_module("_render_catalog_reserved")
 
     assert module.RESERVED_WRITE_PARAMETERS == mcp_tools.RESERVED_WRITE_PARAMETERS, (
         "the catalog renderer and the runtime disagree about which parameters a write "
@@ -455,3 +441,188 @@ def test_the_renderers_reserved_parameters_match_the_runtimes(generated: str) ->
         assert f"`{parameter}`" in generated, (
             f"{parameter!r} is required of every write and the catalog does not name it"
         )
+
+
+# ---------------------------------------------------------------------------
+# A project's own catalog (Session 25, ADR 0201, D1309)
+# ---------------------------------------------------------------------------
+
+
+PROJECT_MANIFEST = REPO_ROOT / "project.example.yaml"
+PROJECT_CONTRACT = (
+    REPO_ROOT / "projects" / "example" / "contracts" / "mcp-capabilities.canonical.json"
+)
+PROJECT_CATALOG = REPO_ROOT / "projects" / "example" / "docs" / "mcp-tool-catalog.md"
+
+
+def _renderer_module(name: str = "_render_catalog"):
+    """The renderer, imported by path, so a test can reach its constants.
+
+    A fresh instance per call, under a caller-chosen name: three proofs here
+    rebind one of the module's constants, and a shared instance would make each
+    depend on what the last one left behind.
+
+    **It is REGISTERED in `sys.modules`, and that is not a formality.**
+    `@dataclass` resolves its own class's module through
+    `sys.modules[cls.__module__]` while the class is being created, so a module
+    loaded by path and never registered there makes `dataclasses` read
+    `None.__dict__`. Three proofs in this file used the unregistered idiom and
+    were green for seventeen sessions; the first dataclass the renderer gained
+    (Session 25's `Target`) turned all three red at import, before any
+    assertion. importlib's own documentation prescribes the registration, and
+    the name is the caller's so nothing collides.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, RENDERER)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def project_contract() -> dict:
+    return json.loads(PROJECT_CONTRACT.read_text(encoding="utf-8"))
+
+
+def test_a_project_catalog_is_rendered_from_the_projects_contract(
+    project_contract: dict, contract: dict
+) -> None:
+    """**D1309.** A tenant's tools appeared in no rendered document.
+
+    `render-mcp-catalog.py` read one contract and wrote one file, so an adopter
+    who followed README's *Giving an agent your tables* ended with two tools
+    nothing described. The release's catalog does not describe them and cannot:
+    it is rendered from the release's contract, which does not carry them.
+
+    What is asserted here is that the project's catalog is **derived from the
+    project's contract** -- every tool, and no other -- and that its opening
+    lines say what it is not. A catalog of a project's two tools under the same
+    heading the release's six use would tell a reader their deployment serves
+    two, which is the failure mode this whole module exists to prevent, one
+    level down.
+
+    The tool names are read out of the contract rather than typed. The **count**
+    is asserted against 2 as well, because a contract that had quietly emptied
+    would satisfy "every tool it carries is in the table" with nothing on either
+    side (D374, and D1324: the plan said seven, which is the release's
+    capability count read off the wrong document).
+    """
+    result = subprocess.run(
+        [sys.executable, str(RENDERER), "--check", "--project", str(PROJECT_MANIFEST)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"the example project's catalog has drifted from its contract:\n{result.stderr}"
+    )
+
+    text = PROJECT_CATALOG.read_text(encoding="utf-8")
+    block = text[text.index(BEGIN) + len(BEGIN) : text.index(END)]
+
+    names = sorted(tool["name"] for tool in project_contract["tools"])
+    assert len(names) == 2, (
+        f"the example project's contract carries {len(names)} tools ({names}); this proof was "
+        "written against the two it has, and a contract that emptied would pass every "
+        "assertion below about nothing"
+    )
+    for name in names:
+        assert f"`{name}`" in block, f"the project catalog does not name its own tool {name}"
+
+    # What it is NOT. Each of these is a sentence the header derives.
+    assert "Project `example`" in block, "the project catalog does not name the project"
+    assert "not the whole of what its deployment serves" in block, (
+        "the project catalog does not say the release's tools are served beside these, so a "
+        "reader would take two tools for the whole agent surface"
+    )
+    link = "../../../docs/mcp-tool-catalog.md"
+    assert link in block, "the project catalog does not point at the release's"
+    assert (PROJECT_CATALOG.parent / link).resolve() == CATALOG, (
+        f"the project catalog's link to the release's does not resolve: {link}"
+    )
+
+    # The shared name, marked. `query_resource` is one name over two contracts
+    # and two authorizations, and a reader granting a scope has to know.
+    shared = sorted({tool["name"] for tool in contract["tools"]} & set(names))
+    assert shared == ["query_resource"], (
+        f"the two contracts share {shared}; this assertion is written against the one name "
+        "they shared when it was written, and a change to that set changes what the header "
+        "must say"
+    )
+    assert "different authorizations under one name" in block, (
+        "the project catalog does not mark the tool name the release also serves"
+    )
+
+    # And the release's catalog is still the release's: it names none of the
+    # project's own tools, which is the half D1309 measured.
+    release_catalog = CATALOG.read_text(encoding="utf-8")
+    assert "set_note_embedding" not in release_catalog, (
+        "the release's catalog names a project's tool; the two documents have merged"
+    )
+
+
+def test_check_project_refuses_a_stale_catalog(tmp_path, monkeypatch) -> None:
+    """**Guard the guard, for the project path, and D1325's arm with it.**
+
+    Three answers are checked, because the renderer has three and the middle one
+    did not exist until this run: a catalog that is **absent** is reported with
+    the command that writes it, a catalog that has **drifted** exits 5, and a
+    catalog that is current exits 0. Before ADR 0195 was applied here the absent
+    case raised `FileNotFoundError` -- `main` read its output before writing it,
+    and a project's first catalog is exactly the absent case, so the first thing
+    an adopter would have seen was a traceback.
+
+    The output path is redirected through the renderer's own `PROJECT_CATALOG`
+    constant, which `project_target` joins onto `projects/<slug>`; an absolute
+    value replaces the join, so the project's real contract is resolved and read
+    for real while nothing is written inside the checkout. The tracked catalog
+    is asserted untouched at the end rather than assumed.
+    """
+    before = PROJECT_CATALOG.read_bytes()
+    module = _renderer_module("_render_catalog_project")
+    redirected = tmp_path / "catalog.md"
+    module.PROJECT_CATALOG = redirected
+
+    def run(*arguments: str) -> tuple[int, str]:
+        monkeypatch.setattr(
+            sys, "argv", ["render-mcp-catalog.py", *arguments, "--project", str(PROJECT_MANIFEST)]
+        )
+        import contextlib
+        import io
+
+        err = io.StringIO()
+        out = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            code = module.main()
+        return code, err.getvalue() + out.getvalue()
+
+    code, message = run("--check")
+    assert code == 5, "a catalog that does not exist was not reported"
+    assert "does not exist" in message and "--write" in message, (
+        f"the absent catalog was reported without the command that writes it: {message!r}"
+    )
+
+    code, _ = run("--write")
+    assert code == 0 and redirected.is_file(), "--write --project did not create the catalog"
+    code, _ = run("--check")
+    assert code == 0, "the catalog it just wrote is not current"
+
+    # One byte, in the generated block.
+    stale = redirected.read_text(encoding="utf-8").replace("**2 tools**", "**3 tools**", 1)
+    assert stale != redirected.read_text(encoding="utf-8"), (
+        "the perturbation matched nothing, so the drift below is not being tested"
+    )
+    redirected.write_text(stale, encoding="utf-8")
+    code, message = run("--check")
+    assert code == 5, "a drifted project catalog did not report drift"
+    assert "has drifted" in message and "mcp-capabilities.canonical.json" in message, (
+        f"the drift was reported without naming the contract it drifted from: {message!r}"
+    )
+
+    assert PROJECT_CATALOG.read_bytes() == before, (
+        "this proof wrote inside the checkout; the redirection did not hold"
+    )

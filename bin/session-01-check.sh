@@ -204,6 +204,12 @@ step "6. Generated documentation is current"
 # contract and not in the catalog is drift a reader would never notice --
 # and the catalog is what a person reads to decide what to grant an agent.
 "$(python_bin)" bin/render-mcp-catalog.py --check
+# Session 25, Run 4 (ADR 0201, D1309). A project's OWN tools are catalogued the
+# same way, at projects/<slug>/docs/mcp-tool-catalog.md. The example project's
+# is committed, so a tool its contract gains without a re-render is exactly the
+# drift above, one level down -- and it is the one an ADOPTER reads, because the
+# release's catalog says nothing about the tools they wrote.
+"$(python_bin)" bin/render-mcp-catalog.py --check --project project.example.yaml
 
 # ---------------------------------------------------------------------------
 step "7. Compose validates and no project container is running"
