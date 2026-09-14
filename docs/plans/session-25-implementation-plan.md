@@ -4,7 +4,8 @@
 No run has started. §1 is D1303–D1314 (planning rows, each read from the tree
 at `bb93a53` today or measured in a rig today); the runs add theirs below the
 planning rows, each run's numbers named in its Done paragraph. **Next free
-after this table: D1315.** ADR **0207** is this session's (written in Run 1);
+after this table: D1328.** ADR **0207** is this session's (written in Run 1,
+and indexed);
 next free after it 0208.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 25 — Hardening, the second
 walk, and the Stage 3 release* whole (Builds / Already true / Must not /
@@ -188,7 +189,7 @@ an earlier session).
 ---
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1315**. Rows D1303–D1314
+Six columns, next free number after this table **D1328**. Rows D1303–D1314
 were read from the tree or measured in a rig on 2026-09-14 at `bb93a53`. The
 runs add theirs below them as they go, each run's numbers named in its Done
 paragraph.
@@ -207,6 +208,19 @@ paragraph.
 | **D1312** | ADR 0197: `fresh_host` needs *"Nothing but a file. An empty host reached a working deployment on 2026-09-08; supplying its `outputs.json` as `APG_FRESH_HOST_OUTPUTS` is the operator's mechanical step"*. | **The proof refuses that file by construction.** `test_a_project_deployed_on_an_empty_host_is_a_working_deployment` asserts `fresh["schema_version"] == output_migrations.CURRENT_VERSION` — the outsider deployed **1.0.0/1.0.1 (outputs v16)** and the tree renders **v18**, so the declared document fails with *"it describes an older product"* before any route is read. D1122 met the same shape in the DR kit (a v16 kit against a v17 checkout) and decided *migrate, then validate*; `carry_to_current` (D1134) is the helper that does it. Nobody has applied that decision to this proof because nobody has ever declared the file. And **where the file is is unknown to the tree**: `FINDINGS.md` in the launch folder describes the host and names no path; the operator holds it or does not. | The proof carries the declared document with `carry_to_current` BEFORE the version assertion and asserts the carried version (a document the migrators cannot carry is the reported third answer, naming the version it stopped at) — D1122's rule, authorised by ADR 0207 §3. Run 1 asks the operator ONE question in writing (§9): *where is the outsider's `outputs.json`?* If it is produced, Run 7 passes `--fresh-host-outputs`; if not, `fresh_host` stays `not_run` with *the operator did not locate the document* as the reason in §7 and the ledger — never a softened status. | ADR 0197 was right that the artefact exists and wrong that supplying it is mechanical: the proof would have refused it, and a refusal that reads *older product* sends the operator to redeploy a host that was fine. A premise wrong in the reassuring direction (§7). | 0207 |
 | **D1313** | `docs/new-team-member.md`: *"Fourteen steps, each labelled **available now** or **future session**"*; step 14 *"future session (10)"*; *"You do not have a running database. That is Session 3"*; step 12 *"implemented in Session 2"*. D693's guard scans documents for `--session N` an operator types. | **The guide is the documented path and it is fifteen sessions stale in prose D693's guard is right not to flag.** Steps 8a and 8b were added (Sessions 22 and 23) beside labels from Session 1; nothing in it names a table, a capability, a client's `init()` answers, or Studio; its *done* section says the reader has no database in the paragraph after the one that gave them one. A walker following it reaches a *done* that contradicts what they just did, and every such contradiction is a candidate `undocumented_steps` entry. | Run 4 **re-derives the guide by diff** (D693's method) into the path an adopter walks now, with one label vocabulary — *available now* only, because every step is — and a *done* section that IS the walk's success criterion (D1303). A new offline proof in `test_session12_documented_path.py`: no `future session` label survives for a session ≤ `CURRENT_SESSION`, and the guide names each of `apg dev`, `apg generate`, `apg studio` and `projects/<slug>` at least once. | D703's class — the prose a reader reads is the half no guard scans — met in the one document whose whole purpose is to be read by a stranger. Found by reading it as the walker will, before the walker does. | — |
 | **D1314** | `docs/scope-closure.md` §6: *"close `DX-001` regardless of the direction, because the cost is one outsider's afternoon"*; stage plan §4: *"by somebody who did not build Session 20"*. | **Neither the operator nor this plan's executor qualifies, and the plan must say so or the walk will be run by whoever is at the keyboard.** The operator ran every sudo line of Sessions 20–24 and read every plan; the executor of Runs 1–5 will have edited the README the walk reads. Session 19's outsider was a separate session with no prior context, which is why ADR 0197 could accept its findings at all. | **Run 6 is executed by a session that is not this plan's executor**: the executor prepares a clone (`git clone` INSIDE WSL from the local checkout at the release-candidate commit, so modes survive; never through `\\wsl$`), copies the task statement out of `docs/second-walk.md` VERBATIM as the whole prompt, and stops. The operator starts the walker from the clone's directory (a different launch folder → no `CLAUDE.md`, an empty memory directory). The executor's next action is reading the record the walker wrote. Any exchange with the walker during the walk is recorded in `undocumented_steps` by rule. | D478: a claim closed by its author's hands leaves the next reader unable to tell a proved guarantee from a plausible one. The cheapest way to keep the hands apart is to make the handover a file. | 0207 |
+| **D1315** | This plan's D1308, *"measured today, rig 25a, at `bb93a53`"*: **60** verbs, **37** naming `--project`, `--help` costing **12-17 ms**. | **All three numbers are wrong, re-measured in rig 25a on 2026-09-14 at `5ab0c4a`** (documentation-only since `bb93a53`, so `bin/` is byte-identical). `bin/apg.sh --list` prints **65** verbs. All **65** answer `--help` with exit 0, in **11-77 ms** -- median 15, and `session-01-check` is the 77 ms outlier, five times the next slowest. **18** carry a line whose first non-space token is `--project`; **48** contain the string somewhere, so a loose `grep -c -- '--project'` over-counts by **30**, nearly all of them the session gates' `--project-a-outputs`. 37 is neither figure. | The anchored form over the measured 18 is what Run 2 derives from, and ADR 0207 §2 carries the measured numbers rather than the planned ones. The 47 verbs that do not name it receive nothing. | D267: never write a measurement you did not run. The whole of Run 2's design rests on how many verbs take the flag and on the help call being cheap, and the row that priced it had guessed all three. The direction matters too -- 18 is half of 37, so the planned design would have looked like it was under-applying when in fact the estimate was over-counting prose. | 0207 |
+| **D1316** | Stage plan §9's stop condition: *"Rig 25a finds a verb whose `--help` names `--project` in prose but does not take the flag ... stop; do not fall back to a kept list -- record the verb, fix its usage text, and measure again."* | **It happens exactly once in 65 verbs, and it is `dr-kit verify`.** `bin/dr-kit.sh --help` carries the usage continuation `       --project project.alpha.yaml [--project project.beta.yaml ...] --output DIR`, whose first token is `--project`, so the anchored derivation matches. But `--project` is declared on the **`export` subparser only** (`bin/dr-kit.py:188`, `exporter.add_argument`), and `bin/dr-kit.sh verify --project FILE` answers `dr-kit: error: unrecognized arguments: --project`, exit 2 (rig 25a, fourth arm: 18 verbs probed bare and once per subcommand word, one refuser). With `APG_PROJECT` set, `apg dr-kit verify` would stop working. | **The stop condition's own remedy, taken in Run 2**: `dr-kit`'s usage is rewritten so no line begins with `--project` and the flag is documented under `export` where it belongs; `dr-kit` then receives no default at all, which costs nothing real -- `export` is root-only and names its projects explicitly anyway. **Plus the guard the rewrite is not**: a contract proof that every verb whose `--help` names `--project` line-anchored actually accepts it, read from the parser rather than from the prose. | A usage block naming a flag the command does not take is a `DX-002` failure on its own terms, before any dispatcher reads it. And one instance found by hand is not a measurement: the next one has to be found by a test, or the derivation is only as good as the last person who looked. | 0207 |
+| **D1317** | The derivation reads the verb's `--help`, so a verb that takes `--project` without documenting it line-anchored gets no default. | **Sixteen `session-NN-check` gates are exactly that** (rig 25a, third arm): each has a `--project` / `--project=*` `case` arm and each documents only `--project-a-outputs` and `--project-b-outputs` in its usage, so none of the sixteen matches the anchored form. | **Left as it is, deliberately, and recorded rather than repaired.** A missed default is a command that behaves exactly as it did yesterday; a wrong match is a command that stops working. The asymmetry is what chooses the regex, and the sixteen are named here so the next reader knows the under-application was measured and not overlooked. | ADR 0195's shape at the level of a default: the reader has three answers -- takes it, does not take it, and *the help does not say* -- and the third is reported here rather than folded into either of the first two. | 0207 |
+| **D1318** | This plan's Run 2 step 1: *"rig 25a says whether the `=` form is accepted by the verbs; recognise it either way, because recognising too little appends a duplicate"*. | **Measured: the `=` form is refused by all three verbs a walker types most.** `bin/dev.sh --project=/tmp/absent.yaml` prints its usage and exits 2; `--project /tmp/absent.yaml` reaches the manifest check and reports *project manifest not found*. `generate` and `studio` behave identically. So `--project=FILE` is not a spelling this product supports at all. | The dispatcher still treats `--project` and `--project=*` alike when asking whether the arguments **already carry** one, and appends only the two-word form. Recognising too little is the failure that matters: it would append a second `--project` to an invocation that already had one. | The question the check asks is not *is this spelling valid* but *did the operator already say which project*. An operator who typed `--project=x` said so, and deserves the verb's own error about the spelling rather than a second flag on top of it. | 0207 |
+| **D1319** | This plan's Run 1 step 2: *"Record the cost of one completion (a `--help` call, ~15 ms)"*. | **A flag completion costs ~21 ms; a VERB completion costs ~175-225 ms** (rig 25b, seven completions and three controls). The verb path is ten times the estimate because `list_verbs` runs `basename` in a loop -- **65 forks** per press of TAB -- while the flag path is the single `--help` call the estimate priced. `apg d` yields exactly ten verbs; `apg zz` and `apg no-such-verb --` yield none; `apg dev <TAB>` yields none so bash's own path completion is left alone. | The cost is recorded and the design is unchanged: a fifth of a second on TAB is acceptable and staleness is not. **Making `list_verbs` fork once instead of 65 times is not this session's** -- it is a change to the dispatcher's listing, which every proof of ADR 0002's rule reads. | The estimate was for the wrong call. Recording the real number now means the next person to touch `list_verbs` knows there is a caller that runs it on a keystroke. | -- |
+| **D1320** | This plan's D1310 and Run 1 step 3: rig 25c is `docker run --rm -i -u 0 -v "$PWD:/work:ro"` on `PYTHON_RUNTIME_IMAGE`, and *"then `-k` the two `test_honest_readers` proofs D1165 repaired, as root -> PASSED"*. | **The reproduction works and the `test_honest_readers` arm does not, for three reasons that are all the rig's.** The root arm is `SKIPPED` at `test_render_atomicity.py:397` and the control arm `PASSED`, so **D1310 is confirmed: D1302 IS showable offline**. But the control only passes once uid 1000 has a **passwd entry** -- without one `pwd.getpwuid` raises `KeyError`, `owner_of` walks up and returns `root` while `current_user()` returns `uid 1000`, and the control FAILS for a reason the mutation cannot reach (D1321). And `test_honest_readers` needs **`sudo`**, which `python:3.12-slim` does not ship, and **`.venv/bin/python`**, which is a symlink to an interpreter that exists on this workstation and not in the image. | The rig carries all three: a mounted `/etc/passwd` naming the checkout's uid, a throwaway layer with `sudo` installed, and a three-line wrapper mounted at `.venv/bin/python` that execs the container's own locked interpreter. With them, `test_honest_readers.py` as root is **23 passed, 1 failed**, and the one failure is the read-only mount (the proof `chmod`s `.generated/fixture-alpha-dev`) -- **identical in the non-root control**, which is how it is known to be the mount and not the identity. **Run 3 mounts the checkout read-write** and re-runs both arms after the lift. | The rig is a second configuration and must be tied to the product's (ADR 0065/0066). Three of its differences from the gate's environment were invisible until each broke an arm, and a rig whose control fails is not a control. | -- |
+| **D1321** | `rendering.owner_of`: *"The owning user's name, walking upward when the path itself cannot answer ... `unknown` when nothing can -- reported rather than guessed (ADR 0195)."* | **It cannot tell *I may not look* from *this uid has no name*.** The loop is `except (OSError, KeyError): continue`, so a uid with no `/etc/passwd` entry -- a container, a deleted account -- is treated exactly as an unreadable directory and the function returns an ANCESTOR's owner as if it were the path's. Measured incidentally in rig 25c: the document was owned by uid 1000 and `owner_of` returned `root`, the owner of `/tmp` three levels up. | **Recorded, not repaired.** It is the ADR 0195 class in a reader this session does not otherwise touch, and changing what `owner_of` answers changes every message built on it (`_cannot_replace` among them), so it needs an ADR and a grep of every caller (D979) rather than a line. Carried into §10. | The docstring already names the right rule and the code implements two of its three answers. A uid that exists and has no name is a determinable fact reported as somebody else's -- D600's shape, in the function whose docstring cites the ADR that forbids it. | -- |
+| **D1322** | This plan's D1304: *"Rig 25d (Run 1) counts it: a synthetic record of the tenant path lists **6** false source edits"*, over a list of seven paths. | **Seven, not six** (rig 25d). The plan's list omitted README's own row 4, `projects/<slug>/contracts/postgrest-openapi.canonical.json` -- the snapshot captured from a running deployment. README's two tenant sections name **eight** files under `projects/<slug>/` plus `project.yaml`; of the nine basenames only `capabilities.yaml` and `project.yaml` are in `OPERATOR_INPUTS`, so **7** survive as false source edits: `0001-tasks.sql`, `evaluation-cases.yaml`, `manifest.json`, `mcp-capabilities.canonical.json`, `postgrest-api-surface.yaml`, `postgrest-openapi.canonical.json`, `released.lock.json`. | The count in ADR 0207 §3(a) and in Run 3's battery is 7, and the battery's fixture is built from README's table rather than from a list in a plan. | The row was right about the defect and wrong about its size, because it was written from a summary of README instead of from README. The fixture the proof is built against has to be read out of the document the walker reads, or it measures the plan's memory of it. | 0207 |
+| **D1323** | This plan's D1305 names one direction: `_COMMAND` *"captures `bin/apg.sh` and stops"*, so any verb passes. | **It fails in the other direction at the same time, and that half refuses an honest walker.** The documented set is scanned from `README.md`, `docs/README.md` and `docs/session-*-operator-guide.md` -- **not from `docs/new-team-member.md`**, which IS the documented path. Measured (rig 25d): `bin/apg.sh no-such-verb` passes; `bin/dev.sh up --project project.yaml` is **refused**, because `bin/dev.sh` appears in no scanned document while `bin/apg.sh` appears in README. So a walker who runs the script directly is told they used an undocumented command, and a walker who runs a verb that does not exist is not. | Both halves are fixed by the same resolution: resolve `bin/apg.sh <verb>` to `bin/<verb>.sh` on **both** sides, and scan `docs/new-team-member.md` and `docs/second-walk.md` as well. | The scan's omission is D703's class -- the prose a reader reads is the half no guard scans -- in the guard whose entire job is to compare what a reader ran against what a reader was told. | 0207 |
+| **D1324** | This plan's D1309: *"A tenant's tools (`projects/example/contracts/mcp-capabilities.canonical.json`, 7 tools)"*. | **Two tools, behind two capabilities** (rig 25e; the file's own `tool_count` and the catalog the renderer produces from it both say 2: `query_resource` and `set_note_embedding`). **7** is the RELEASE contract's *capability* count -- its catalog line reads *6 tools behind 7 capabilities* -- so the row crossed the two documents' numbers. | The project catalog Run 4 commits is a two-tool table, and the proof that reads it is written against 2. | The size was quoted from the wrong document, and a proof written to expect seven rows would have failed on the example project the session ships. | -- |
+| **D1325** | This plan's D1309: `render-mcp-catalog.py` *"gains `--project FILE` writing `projects/<slug>/docs/mcp-tool-catalog.md`"*, priced as one flag and one output path. | **There is a third thing, and the row does not name it: the renderer cannot create its output.** `main` reads `CATALOG.read_text()` before it writes anything and hands the result to `compose`, which requires both `<!-- BEGIN GENERATED: mcp-catalog -->` and its END marker. Measured (rig 25e): an ABSENT output file raises an unhandled `FileNotFoundError` -- a traceback, not a report; a file present without the markers is refused cleanly with exit 1. A project's first catalog is exactly the absent case. | Run 4 seeds `projects/example/docs/mcp-tool-catalog.md` with the two markers and commits it, and the absent-file traceback is turned into a reported refusal naming the seed as the fix. The two lines the row did name are confirmed: `CONTRACT` at `bin/render-mcp-catalog.py:53` and `CATALOG` at `:54`. Control: `--check` on the tree exits 0 and `--write` leaves the release catalog byte-identical. | ADR 0195 in a generator: a reader that dies with a traceback has not reported the third answer, it has shown the operator a stack. Found by running the new path's first invocation before writing it. | -- |
+| **D1326** | This plan's D1312 and its §9: *"The proof carries the declared document with `carry_to_current` BEFORE the version assertion"*, on D1122's *migrate, then validate* rule; and *"the operator locates the fresh-host document and `carry_to_current` cannot carry it"* as an unlikely stop. | **`carry_to_current` cannot carry ANY deployed document, and `fresh_host`'s document must be a deployed one.** All **16** single-step migrators call `require_kind(document, "rendered")`; measured on four real archived documents (rig 25f), the v16 kit, the 2026-09-06 kit, the v17 kit and the v18 kit all answer *expected a 'rendered' outputs document, got 'deployed'*. That is ADR 0012 on purpose: the migrator never republishes an observation under a version that never measured it. The plan's resolution is not a risk, it is impossible -- and **the tree already solved the same problem seven days earlier**: `dr_kit.verify_deployed_document` (D1141) reads an archived deployed document BY VERSION, three ways. | `DEP-001`'s proof takes the kit verifier's shape, not the migrator's (ADR 0207 §3d): assert what the claim is about -- deployed, names a host, not the host `project_a` runs on, routes ready -- and read the version the way the kit verifier does. A document older than this release is the **reported third answer** and the claim stays `not_run` with the version named; it is never *failed*, and never a silent pass. | §7 question 5, one level up: a decision was implemented (D1141's version-aware read) and only one of its two callers got it. And §7's *premise wrong in the reassuring direction* -- the plan's carry sounded mechanical, would have raised on the first real document, and the refusal a reader would have seen names the wrong subject. | 0207 |
+| **D1327** | This plan's D1310: *"**`tests/fixtures/checkout_owner.py`** (beside `outputs_chain.py` and `rendered_fixtures.py`, the existing helper home)"*; and Run 1's read list: *"`src/agentic_postgres/output_migrations.py` (`carry_to_current`, D1134)"*. | **Both paths are wrong.** `outputs_chain.py` and `rendered_fixtures.py` are in **`tests/contract/`**; `tests/fixtures/` holds JSON fixtures and one `pgbackrest` directory and no Python at all. And `carry_to_current` is **not in `src/`**: it is a test helper in `tests/contract/outputs_chain.py:57`, which is why `test_output_migrations.py` imports it as `from outputs_chain import carry_to_current`. | The lifted helper lands at **`tests/contract/checkout_owner.py`**, which is where both importers already live and where pytest's prepend import mode makes a bare `import checkout_owner` resolve. | A helper put in `tests/fixtures/` would not have been importable by either module without a path change nobody planned, and the mistake is invisible until the import fails. | -- |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -395,8 +409,107 @@ run (documentation and an ADR only; the ADR index is generated content →
 `bin/session-01-check.sh` alone IS the rule for generated artefacts — run
 it if `render-*` touched a tracked file, else nothing). Push; read CI.
 
-**Done.** *(filled by the run: the six rigs' numbers, the operator's answer
-or its absence, the ADR's number.)*
+**Done.** 2026-09-14, on `session-25` off `5ab0c4a`. Six rigs, ten arms, every
+number below run rather than quoted; the scripts and their `.txt` outputs are in
+`/tmp/r25*` and copied to the scratchpad's `run1-rigs/`. **Thirteen rows,
+D1315–D1327; next free D1328.** ADR **0207** written and indexed (207 ADRs).
+
+**Rig 25a — the dispatcher, four arms.** `bin/apg.sh --list` prints **65** verbs
+(not 60); all **65** answer `--help` with exit **0** in **11–77 ms**, median 15,
+`session-01-check` the 77 ms outlier; **18** name `--project` line-anchored (not
+37) and **48** mention the string, a **30**-verb over-count that is almost
+entirely the session gates' `--project-a-outputs` (D1315). Controls: an unknown
+verb exits 2, `--list` exits 0. Reading the shell `case` arms disagreed with the
+help text on ten verbs, and the disagreement was **the rig's** — a GNU ERE
+`\\|` mis-parse plus three verbs (`dr-kit`, `restore`, `upgrade`) that parse
+nothing in shell and forward to argparse — so the arm was rewritten in Python
+and then the flag was probed for real, bare and once per subcommand word, with a
+canary argument that guarantees a parse error before any effect. **Exactly one
+refuser in 65 verbs: `dr-kit verify`** (D1316), the stop condition §9 named,
+resolved by §9's own remedy plus a guard proof. Sixteen session gates take the
+flag without documenting it line-anchored and get no default, deliberately
+(D1317). `--project=FILE` is refused by `dev`, `generate` and `studio`; only the
+two-word form is accepted, and the dispatcher still recognises both as *already
+carries one* (D1318).
+
+**Rig 25b — completion.** A `complete -F` function deriving verbs from `--list`
+and flags from `<verb> --help` works, embeds nothing (`declare -f` grep for a
+verb or a flag: 0), and registers under both `bin/apg.sh` and `apg`. `apg d` →
+exactly ten verbs; `apg dev --` → `--as --capabilities --help --project
+--render-only`; controls `apg zz`, `apg no-such-verb --` and `apg dev <TAB>` all
+empty, the last leaving bash's path completion alone. Cost: **~21 ms** a flag
+completion, **~175–225 ms** a verb completion — ten times the estimate, because
+`list_verbs` forks `basename` 65 times (D1319).
+
+**Rig 25c — D1302 reproduced as root, offline, four arms.** In the pinned image
+with the checkout mounted: root → **SKIPPED** at `test_render_atomicity.py:397`,
+*root stats through a 0000 directory*; a named non-root uid → **PASSED**. **So
+D1310 is confirmed and D1302's "it cannot be shown offline" is wrong.** Three
+rig-side obstacles had to be cleared first and each is recorded (D1320): the
+control FAILED until uid 1000 had a passwd entry, which exposed D1321
+(`owner_of` cannot tell *I may not look* from *this uid has no name*, and walks
+up); `test_honest_readers` needs `sudo`, absent from `python:3.12-slim`; and it
+needs `.venv/bin/python`, a symlink to an interpreter the image does not have.
+With a sudo layer, a mounted passwd and a wrapper at the venv path,
+`test_honest_readers.py` as root is **23 passed, 1 failed**, the one failure the
+read-only mount and **identical in the non-root control**. Run 3 mounts
+read-write and re-runs both arms after the lift.
+
+**Rig 25d — the record against an honest tenant walk.** The current proof's four
+assertions, copied not imported, over a synthetic record built from README's own
+two tenant sections: **7** false source edits, not 6 — the plan's list omitted
+README's row 4, `contracts/postgrest-openapi.canonical.json` (D1322). Basename
+comparison cannot separate the walker's `projects/walker/migrations/manifest.json`
+from the release's `migrations/manifest.json`; the path reading separates them
+and refuses only the release's. `bin/apg.sh no-such-verb` and two other
+nonexistent verbs all **pass** the documented-command check (D1305 confirmed) —
+and `bin/dev.sh up` is **refused**, because the scan reads README and the
+operator guides but **not `docs/new-team-member.md`**, so the proof is wrong in
+both directions at once (D1323). Control: a record editing the release's
+manifest is refused by both readings.
+
+**Rig 25e — the catalog renderer.** `CONTRACT` at line **53** and `CATALOG` at
+line **54** are the two lines Run 4 edits; the word *project* occurs once, in the
+docstring, and nowhere in the arguments (D1309 confirmed). `--check` exits 0 and
+`--write` leaves the release catalog byte-identical with the tree clean. The
+example project's contract rendered through the same renderer gives **2 tools
+behind 2 capabilities**, not the 7 the row said — 7 is the release's *capability*
+count (D1324). And the row missed a third edit: `main` reads its output before
+writing, so an **absent** catalog raises an unhandled `FileNotFoundError` and one
+without markers is refused cleanly at exit 1 — a project's first catalog is the
+absent case, so Run 4 seeds it (D1325).
+
+**Rig 25f — `fresh_host`'s document.** **`carry_to_current` refuses every
+deployed document**, measured on four real archived ones (v16 `dr-kit-1.0.1`,
+v16 `kit-2026-09-06`, v17 `kit-2026-09-11`, v18 `kit-2026-09-13`): all sixteen
+single-step migrators call `require_kind(document, "rendered")`, which is ADR
+0012 on purpose. `fresh_host`'s document must be *deployed* by the proof's own
+first assertion, so **D1312's resolution is not implementable** (D1326) — and the
+tree had already solved the same problem in `dr_kit.verify_deployed_document`
+(D1141), which reads an archived deployed document by version, three ways. ADR
+0207 §3d takes that shape instead. Controls: a v3 document raises the documented
+`ValueError` (so an unguarded caller shows a traceback, not a report), and a v18
+document is returned identical. Also found: the helper home is
+**`tests/contract/`**, not `tests/fixtures/`, and `carry_to_current` is a test
+helper, not `src/agentic_postgres/output_migrations` (D1327).
+
+**THE QUESTION FOR THE OPERATOR, unanswered, and Run 7 depends on it:** *where is
+the outsider's `outputs.json` from the 2026-09-08 bring-up?* No path was guessed
+and the production host was not read for it. What this workstation holds is
+**four archived deployed documents, and not one of them is that host**: all four
+name `host.id` `apg-vps-01`, which is the host `project_a` runs on, and
+`DEP-001` refuses that document by name — it would prove the claim with the
+deployment it is supposed to be independent of. So the file is the operator's or
+it does not exist. **If it is not produced, `fresh_host` stays `not_run` with
+*the operator did not locate the document* as the reason in §7 and the ledger** —
+never a softened status. Note for whoever answers: after D1326 the document no
+longer has to be at v18. A v16 document is now readable, so an older artefact is
+worth producing rather than discarding.
+
+**Not done here, by decision:** nothing in `bin/`, `src/` or `tests/` was
+touched — this run is measurements, one ADR and the rows. `dr-kit`'s usage fix,
+the guard proof and every code change land in Run 2 and later, where the
+targeted lists and batteries are.
 ### Run 2 — `APG_PROJECT`, `apg completion`, and the record's verb
 
 **Read first:** `bin/apg.sh` whole; `tests/contract/test_apg_dispatcher.py`
