@@ -128,6 +128,25 @@ it cannot count but is not a bound on the table. A retention policy is a
 released migration carrying a decision about how long a denial must remain
 readable, and that decision has not been taken.
 
+**The DX layer's review is a matrix, and fourteen of its cells are reasons rather
+than proofs.** `tests/security/test_dx_surfaces_hardening.py` holds
+`HARDENING_MATRIX`: every invariant Stage 3's §8 table lists, against each of
+the three developer surfaces (`apg dev`, `apg generate`, `apg studio`) —
+forty-eight cells, each carrying the node id of the proof that holds it or the
+reason the invariant does not reach that surface. A cell marked *not applicable*
+carries its reason **in the source**, beside the cell, because a blank is
+indistinguishable from an oversight and telling those apart is what a review is
+for. Two guards keep it honest: every node id it names must be collected by the
+sweep that records the claim (D1242 — about fifty proofs here once turned out to
+be collected by no sweep at all), and every invariant in that table must appear
+as a key for all three surfaces, read out of the plan rather than compared
+against a copy of it.
+
+What the matrix does **not** say is that the invariants hold. It says which
+proof is claimed to hold each one, and that the proof runs in the sweep that
+would record it. A cell whose proof is weak looks exactly like a cell whose
+proof is strong.
+
 ## Scope
 
 This model covers the deployed system. It deliberately excludes:

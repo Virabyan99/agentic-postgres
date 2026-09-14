@@ -4,7 +4,7 @@
 No run has started. §1 is D1303–D1314 (planning rows, each read from the tree
 at `bb93a53` today or measured in a rig today); the runs add theirs below the
 planning rows, each run's numbers named in its Done paragraph. **Next free
-after this table: D1333.** ADR **0207** is this session's (written in Run 1,
+after this table: D1336.** ADR **0207** is this session's (written in Run 1,
 and indexed);
 next free after it 0208.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 25 — Hardening, the second
@@ -189,7 +189,7 @@ an earlier session).
 ---
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1333**. Rows D1303–D1314
+Six columns, next free number after this table **D1336**. Rows D1303–D1314
 were read from the tree or measured in a rig on 2026-09-14 at `bb93a53`. The
 runs add theirs below them as they go, each run's numbers named in its Done
 paragraph.
@@ -226,6 +226,9 @@ paragraph.
 | **D1330** | This plan's Run 3 step 4: *"`as_checkout_owner()` moved verbatim with its docstring; `test_honest_readers.py` imports it and the local definition is removed"*. One helper. | **Two helpers, and the second is what makes the first work.** `_as_checkout_owner` alone re-enters as the owner; `_traversable_to_the_checkout_owner` (D1300) is what lets the child REACH the fixture, because root's pytest temporary directory is `0700` -- measured in rig 25c: `drwx------ root:root /tmp/pytest-of-root`, and `sudo -n -u #1000 ls` on it answers *no*. Lifting only the prefix would have produced a proof refused at an ancestor, which is D1300's own failure re-created in the module being repaired. | `tests/contract/checkout_owner.py` (D1327's path) exports **four**: `as_checkout_owner()`, `traversable_to_the_checkout_owner()`, `owned_by_the_checkout_owner()` (D1332) and `python_for_the_owner()` -- the last so a rig that must substitute an interpreter has one place to point at (D1320). Three modules import them; no module keeps a copy. | A helper that is half-moved is worse than one not moved: the importing module looks repaired and behaves as it did. The pair travels together because neither is correct alone. | -- |
 | **D1331** | D1187's rule, and this run's obligation: *"a run that MOVES a definition greps the moved TEXT as well as the moved name"*. D1302 names two modules. | **There is a THIRD copy, and it is green for the wrong reason.** `git grep` for the moved text found `tests/contract/test_dev_environment.py:136` carrying its own `sudo -n -u #{owner.st_uid}` prefix -- and NOT the traversability step beside it. As root the child is refused at `/tmp/pytest-of-root` (0700, measured) rather than at the `0000` state directory the proof had just built, **and `read_state` answers `StateUnreadable` with the same wording for both**: rig 25c's seventh arm ran the two side by side and the JSON is identical. The proof passes as root (25/25, measured) while reporting on a refusal it did not construct. | `_read_state_as_the_checkout_owner` now calls `as_checkout_owner()` and `python_for_the_owner()`, and the proof calls `traversable_to_the_checkout_owner(tmp_path)` before it shuts the directory, so the only refusal reachable is the one it built. Re-run as root: 25 passed. | D374 exactly -- *a test that passes for a reason other than the one it names is worse than a weak assertion* -- reached by grepping the TEXT rather than the name. Grepping the name alone would have found nothing here: this copy is spelled differently and shares not one identifier with the two D1302 lists. | -- |
 | **D1332** | D1300's repair, and this plan's Run 3 step 4: make the ancestors traversable and re-enter as the owner, and the reading is in D1060's position. | **Traversability is not enough when the proof asserts an IDENTITY.** The repaired atomicity proof FAILED on its first execution as root: `AssertionError: the owner of an unreachable document resolved to 'root'` against an expected `'walker'`. Correctly. Root created the fixture, so the nearest ancestor that can answer is owned by root, and a child running as the owner reports exactly that. The two modules D1300 repaired never met this because they assert a MESSAGE, not a name. | `owned_by_the_checkout_owner(*paths)` hands the fixture to the checkout's owner under root, called AFTER the unprivileged reading the proof makes first and before the re-entry. Rig 25c after it: **PASSED as root** where it had SKIPPED, and PASSED as the non-root control; the module whole is 10 failed / 11 passed as root and 10 failed / 11 passed as the control, the ten being `docker is not installed` in the image. | The repair was written from the shape of the two proofs that had it, and the third proof asks a different question of the same arrangement. Found by running it rather than by reading it -- §7 question 2, at the cost of one container invocation. | -- |
+| **D1333** | This plan's Run 3 step 5: *"Fill it from the three sessions' §8 lists"* -- Sessions 22, 23 and 24 each name, per invariant, the proof that holds it. | **Four of the names in Session 23's §8 do not exist.** Resolved against the tree: `test_no_emitted_file_carries_a_credential_a_token_or_a_userinfo_url` is actually `..._a_url_with_userinfo`; `test_nothing_the_client_prints_is_the_token` is `test_nothing_the_client_emits_prints_or_retries` and `test_nothing_any_container_prints_is_the_token`; `test_every_emitted_operation_and_column_is_in_the_ir` and `test_the_filter_operators_are_the_capability_schemas` are one proof, `test_a_request_names_only_reviewed_columns_operators_and_arguments`. The §8 prose was written before the names settled and nothing reads it, so nothing noticed. | The matrix carries the RESOLVED names, and `test_every_matrix_cell_names_a_proof_the_offline_sweep_collects` is what makes that stay true: a node id in a cell is checked against the ids the offline selector actually collects, so a renamed proof turns the review red instead of leaving a cell pointing at nothing. | A §8 section is prose and prose has no reader. The matrix is the same content in a form something can check, which is the whole difference between a list of proofs and a review -- and the first thing checking it did was find four dead names. | -- |
+| **D1334** | This plan's §2: `SEC-DX-001` is in `OFFLINE_CLAIMS`, and its matrix cells would be a mix of offline and live proofs -- Run 3 step 5 anticipated marking the live ones. | **Every filled cell is collected by the OFFLINE sweep, and the two modules that look live are not.** `test_studio_runtime.py` and `test_generated_client_runtime.py` carry `[contract, p0, database, security]` -- no `live_host` -- because they build their own containers in a checkout. Measured by collecting with the gate's own selector: all 28 distinct proofs the matrix names are in that set. | The `live:` kind was written, found to have no member, and **removed**: a kind with no member is dead code that reads as a hedge. The guard now asserts the opposite -- every cell is in the offline collection -- and says in a comment that a future cell needing a deployment turns it red, at which point the CLAIM's mode is what to reconsider. | It is what makes `SEC-DX-001` declarable offline at all (ADR 0202) rather than a claim waiting on a host, and it was worth measuring rather than assuming in either direction. An intermediate version scanned each module's source for the word `live_host` and flagged two modules that merely mention it, including this one -- D464 again, a text scan standing in for a construct, when the collection itself was already the authority. | -- |
+| **D1335** | This plan's Run 3 step 5: the `.generated/.dev` scan asserts *"every file's bytes against the canary, the two declared 0600 files the only permitted matches"*. | **Three declared files, not two, and the anti-vacuity floor is 16, not a guess.** `apg dev up` generates THREE passwords -- superuser, migration user and application role -- into `superuser.env`, `migration-user.env` and `app-runtime.env`, each `0600`. And the three roots the scan walks hold **16** files, not the 20 the first version of the guard demanded: 4 Studio assets, 10 in the generated TypeScript package, 2 in the dev state directory. The guard failed on its own floor. | The floor is measured (>= 12) and, more to the point, the guard **names** what it must have read -- `services/studio/studio.js`, `index.html`, `client.ts`, `agent.ts` -- so a scan that walked the wrong roots is caught by what is missing rather than by a count. Docker's absence FAILS this proof rather than skipping it: `SEC-DX-001` is a declared offline claim and a pass from a run that scanned nothing is what ADR 0202 exists to prevent. | A number nobody measured is exactly what §7 warns about, and writing one into an anti-vacuity guard puts it in the place least likely to be re-read. Naming the artefacts is a construct; counting them is a guess with an assertion around it. | -- |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -808,8 +811,82 @@ renamed or added — D1119; the two live node ids are unchanged, assert that
 by reading the registry), `tests/security` by marker (`-m security` — its
 selection is by marker, and this run adds a module to it). Push; read CI.
 
-**Done.** *(filled by the run: the matrix pasted — every cell, its proof or
-its reason; the battery table; rig 25c's two arms after the repair.)*
+**Done.** 2026-09-14, in three commits. Six rows, **D1330–D1335; next free
+D1336.**
+
+**3a — the record reader, its verb, and both live proofs.**
+`src/agentic_postgres/dx_record.py`, `bin/dx-record.{sh,py}`,
+`test_dx_record.py`, `test_dx_record_command.py`, and `DX-001`'s and
+`DEP-001`'s proofs rewritten. `source_edits` compares paths with the walker's
+`projects/<slug>/` excluded and the slug validated before it becomes a prefix;
+`unnamed_commands` resolves `bin/apg.sh <verb>` to `bin/<verb>.sh` on both sides
+and scans `docs/new-team-member.md`, which the old set did not; `stale_documents`
+and `absent_documents` are two answers, not one; `followed_by` is structured and
+its `context` must name the clone and the statement. `DEP-001` reads by version
+the way `dr_kit.verify_deployed_document` does (D1326) — the carry the plan
+prescribed is impossible, because all sixteen migrators refuse a deployed
+document by ADR 0012. **The rewritten proof was EXECUTED**: an honest walk
+passes, a release edit, an invented verb, a moved document and a prose
+`followed_by` each fail naming the item, and with the variable absent it skips.
+Its predecessor never ran once in thirteen sessions. Battery: seven mutations,
+all killed after `a2` survived first time and turned out to be a real gap in the
+hostile-slug case.
+
+**3b — D1302, and the copy the grep found.**
+`tests/contract/checkout_owner.py` (four helpers, not one — D1330), and rig 25c
+after the repair: the atomicity proof **PASSED as root**, where it had SKIPPED,
+and PASSED as the named non-root control. So the claim needs Run 7's sweep and
+not a second one, and D1302's *cannot be shown offline* was wrong. Two things
+the plan's step 4 did not have: the traversability helper had to move with the
+prefix or the child is refused at root's `0700` temporary directory (measured:
+`drwx------ root:root /tmp/pytest-of-root`), and a proof that asserts an
+IDENTITY needs the fixture handed over as well — the repaired proof failed first
+time as root with *resolved to 'root'*, correctly (D1332). The D1187 grep of the
+moved TEXT found a **third** copy in `test_dev_environment.py`, green while
+observing root's ancestor rather than the `0000` directory it built; both
+refusals return the same `StateUnreadable` wording, measured side by side, so it
+could not tell (D1331). Repaired; 25 passed as root.
+
+**3c — the hardening matrix.**
+`tests/security/test_dx_surfaces_hardening.py`: `HARDENING_MATRIX`, **48 cells**
+= 16 stage-plan §8 invariants × 3 surfaces. **34 hold a node id** (28 distinct
+proofs) and **14 are marked not applicable with their reason in the source**,
+because a blank cannot be told from an oversight. Five proofs:
+
+| Proof | What it holds |
+|---|---|
+| `test_the_matrix_covers_every_invariant_the_stage_plan_lists` | the §8 table is READ OUT OF THE PLAN and compared; 48 cells, no blanks, no reason shorter than a sentence |
+| `test_every_matrix_cell_names_a_proof_the_offline_sweep_collects` | every node id is in the set the gate's own selector collects, imported from the D1242 guard and never retyped |
+| `test_no_dx_module_imports_services_or_names_a_host_path` | five `src/` modules and four `bin/` commands: no `services`/`app` import, no `/var/lib/agentic-postgres`, `/etc/agentic-postgres` or `/root`, comments and docstrings stripped first |
+| `test_no_dx_command_prints_a_planted_secret_on_its_three_cheapest_exits` | nine runs — three surfaces × (`--help`, an argument error, an unrendered project) — with a planted environment value and a planted `0600` password file; neither in stdout or stderr, and each run asserted to have printed something |
+| `test_no_dx_artefact_carries_a_credential_but_the_two_declared_files` | `apg dev up`, then every byte of the state directory, `services/studio/` and the generated package against the three generated passwords; `down` in `finally` |
+
+Three things the plan's step 5 had wrong, each now a row: four of Session 23's
+§8 names do not exist (D1333); the `live:` kind has no member, because both
+runtime modules are `database` and not `live_host`, so **the whole matrix is
+recordable by the offline sweep** and `SEC-DX-001` is declarable (D1334); and
+the dev environment writes **three** `0600` password files, not two, over 16
+scanned artefacts and not 20 (D1335) — the guard now names the files it must
+have read rather than counting them.
+
+Battery: four mutations, all killed, control green throughout — a misspelled
+node id → the collects guard; an invariant dropped from the list → the coverage
+guard; a cell blanked to `n/a` → the coverage guard; a host path planted in
+`dev_environment.py` → the import scan. One defect the battery found in the
+guard itself: it spawned a bare `python`, which is on PATH only with the venv
+activated, so under `.venv/bin/python -m pytest` it errored instead of
+answering. It runs `sys.executable` now.
+
+`docs/threat-model.md` gains a paragraph under *Notes on residual risk*: what
+the matrix is, that a *not applicable* cell carries its reason in the source,
+and what the matrix does **not** say — a cell whose proof is weak looks exactly
+like a cell whose proof is strong.
+
+**Checks:** ruff format and check clean over 676 files; shellcheck clean;
+`test_dx_surfaces_hardening`, `test_acceptance_registry`,
+`test_documentation_index`, `test_repository_contract`,
+`test_deployment_module_shape` → **282 passed**; and the whole `-m security`
+marker, which this run adds a module to. Runs 1, 2 and 3a's CI: success.
 
 ### Run 4 — the documentation converged, and the walker's page
 
