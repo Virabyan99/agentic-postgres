@@ -11,11 +11,12 @@ path with an undocumented step in it, in the one claim about undocumented steps.
 
 Exit codes (runbook §2 convention):
   0  the record is clean: no source edit, no unnamed command, no moved
-     document, and a `followed_by` of the shape ADR 0207 admits
+     document, a `followed_by` of the shape ADR 0207 admits, and a
+     `blocked_by` that agrees with `reached_success_criterion`
   2  invalid operator input, or a record that cannot be read at all
   3  the record names a document this checkout does not have -- the reading is
      being made from the wrong checkout, which is not the record's fault
-  5  the record is readable and one of the four readings has findings
+  5  the record is readable and one of the five readings has findings
 """
 
 from __future__ import annotations
@@ -65,7 +66,7 @@ def check(record_path: Path, slug_override: str | None) -> int:
     if shape:
         report("record shape", shape)
         print(
-            "dx-record: the record's shape is wrong, so the four readings below would be "
+            "dx-record: the record's shape is wrong, so the five readings below would be "
             "answering a different question.",
             file=sys.stderr,
         )

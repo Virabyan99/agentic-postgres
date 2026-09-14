@@ -1079,6 +1079,13 @@ CLAIM_INTRODUCED_IN = {
     "studio_surface": 24,
     "studio_revocation": 24,
     "audit_boundary_reported": 24,
+    # Session 25 (ADR 0207). Three offline and one host, and the host one is
+    # about a deployment rather than about a checkout: whether both projects
+    # RUN the release the tree names, and what upgrading to it would cost.
+    "dx_context": 25,
+    "dx_walk_instrument": 25,
+    "dx_hardening": 25,
+    "stage_release": 25,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

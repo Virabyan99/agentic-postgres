@@ -65,12 +65,19 @@ def a_record_file(tmp_path: Path, **overrides: object) -> Path:
     return path
 
 
-def test_check_is_a_verb_and_reports_the_three_readings(tmp_path: Path) -> None:
+def test_check_is_a_verb_and_reports_every_reading_it_names(tmp_path: Path) -> None:
     """Each reading printed as a list or as `none`, and `none` is not silence.
 
     A reading that printed nothing when it found nothing would be
     indistinguishable from a reading that did not run -- which is the shape this
     repository keeps producing, and the reason the word is there.
+
+    **The usage's count is held to the readings the command prints** (D1349).
+    Run 3 wrote four readings and a usage that said four; Run 4 added
+    `blocked_by` as the fifth and moved no usage text, so for one commit the
+    command's own `--help` undercounted what it did. A number in a usage text
+    with nothing reading it is a declared field with no reader (D816, D929,
+    D1247), and this is the reader.
     """
     assert (
         "dx-record"
@@ -81,13 +88,27 @@ def test_check_is_a_verb_and_reports_the_three_readings(tmp_path: Path) -> None:
 
     clean = run("check", "--record", str(a_record_file(tmp_path)))
     assert clean.returncode == 0, clean.stdout + clean.stderr
-    for reading in (
+    readings = (
         "source edits: none",
         "commands the documentation does not name: none",
         "documents that moved after the walk: none",
         "followed_by: none",
-    ):
+        "blocked_by: none",
+    )
+    for reading in readings:
         assert reading in clean.stdout, f"{reading!r} is not in the report:\n{clean.stdout}"
+
+    #: The usage says how many there are, in two places, and both are held to
+    #: the list above. Spelling the number rather than digitising it is the
+    #: house style for a usage text, so the word is what is matched.
+    number = {3: "three", 4: "four", 5: "five", 6: "six", 7: "seven"}[len(readings)]
+    usage = run("--help").stdout
+    assert f"Print the {number} readings" in usage, (
+        f"`check` prints {len(readings)} readings and the usage does not say {number}:\n{usage}"
+    )
+    assert f"when all {number} are clean" in usage, (
+        f"the usage's verdict sentence does not say {number}:\n{usage}"
+    )
 
     edited = run(
         "check",

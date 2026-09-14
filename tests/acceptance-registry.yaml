@@ -3716,3 +3716,162 @@
     released call site is unchanged. Live, on the deployment: after a real
     refusal on alpha the endpoint's row for it carries the boundary the plane
     recorded.
+
+# ---------------------------------------------------------------------------
+# Session 25 — hardening, the walk's instrument, and the Stage 3 release
+# ---------------------------------------------------------------------------
+
+- id: DX-CTX-001
+  priority: P0
+  target_session: 25
+  test_nodeids:
+    - tests/contract/test_apg_dispatcher.py::test_the_default_project_is_applied_only_to_a_verb_whose_help_names_the_flag
+    - tests/contract/test_apg_dispatcher.py::test_an_explicit_project_wins_over_the_default_and_nothing_is_printed
+    - tests/contract/test_apg_dispatcher.py::test_the_default_is_announced_on_stderr_each_time_it_is_applied
+    - tests/contract/test_apg_dispatcher.py::test_an_unreadable_default_is_refused_before_exec
+    - tests/contract/test_apg_dispatcher.py::test_the_default_never_reaches_help_or_list
+    - tests/contract/test_apg_dispatcher.py::test_the_dispatcher_still_keeps_no_list_of_verbs
+  description: >-
+    `bin/apg.sh` applies `APG_PROJECT` as `--project` only when the variable is
+    set, the verb's own `--help` names `--project FILE`, and the arguments carry
+    no `--project` of their own. The match is on `--project FILE` and not on the
+    flag alone, because four verbs document `--project KEY` and a key-taking verb
+    handed a manifest path is not refused — it derives a state-root path from the
+    filename and reports on it (D1328). It prints one line on stderr naming the
+    value and its source each time it applies the default, and nothing when it
+    does not; an explicit `--project` wins silently; a value naming no readable
+    file is refused with exit 2 before `exec`; a verb whose help does not name
+    the flag receives nothing; `--help` and `--list` are never rewritten. The
+    dispatcher still keeps no list of verbs: it derives them from `bin/`.
+
+- id: DX-COMPLETE-001
+  priority: P0
+  target_session: 25
+  test_nodeids:
+    - tests/contract/test_completion_command.py::test_completion_is_a_verb_of_the_dispatcher
+    - tests/contract/test_completion_command.py::test_the_script_embeds_no_verb_and_no_flag
+    - tests/contract/test_completion_command.py::test_sourced_in_bash_it_completes_verbs_from_the_list
+    - tests/contract/test_completion_command.py::test_it_completes_a_verbs_flags_from_its_help
+    - tests/contract/test_completion_command.py::test_an_unknown_shell_is_refused_with_exit_two
+    - tests/contract/test_cli_contract.py::test_commands_are_executable_in_the_git_index
+  description: >-
+    `bin/completion.sh bash` prints a bash completion script to stdout and
+    nothing else. The printed script embeds neither a verb nor a flag: it derives
+    verbs from `bin/apg.sh --list` and a verb's flags from that verb's own
+    `--help`, at completion time, so a verb added tomorrow completes without the
+    script being regenerated. Sourced in a real bash, `complete -p` names both
+    `bin/apg.sh` and `apg`, and completing `apg d` yields exactly the verbs
+    beginning with `d`. An unknown shell exits 2 naming the one shell that
+    exists. The script prints no environment value.
+
+- id: DX-WALK-001
+  priority: P0
+  target_session: 25
+  test_nodeids:
+    - tests/contract/test_dx_record.py::test_a_walkers_own_project_directory_is_not_a_source_edit_and_a_release_file_is
+    - tests/contract/test_dx_record.py::test_a_verb_typed_through_the_dispatcher_resolves_to_its_script_on_both_sides
+    - tests/contract/test_dx_record.py::test_a_document_that_moved_after_the_walk_is_named
+    - tests/contract/test_dx_record.py::test_followed_by_must_be_structured
+    - tests/contract/test_dx_record.py::test_a_failed_walk_must_say_where_it_stopped
+    - tests/contract/test_dx_record_command.py::test_check_is_a_verb_and_reports_every_reading_it_names
+    - tests/contract/test_dx_record_command.py::test_digest_writes_the_documents_read_member
+    - tests/contract/test_dx_record_command.py::test_check_reads_blocked_by_and_prints_which_way_it_is_wrong
+    - tests/contract/test_dx_record_command.py::test_the_live_proof_calls_the_same_reader
+  description: >-
+    The record a second walk writes is read by `agentic_postgres.dx_record`, and
+    the live proof calls the same functions rather than a copy of them.
+    `source_edits` compares PATHS: everything under the walker's own
+    `projects/<slug>/` is theirs, and so are the five operator inputs at the
+    checkout root, while anything else is a file this repository ships and
+    editing one forks the template. `unnamed_commands` resolves
+    `bin/apg.sh <verb>` to the verb's own script on both sides, so a verb typed
+    through the dispatcher and the same verb typed directly are one command.
+    `stale_documents` names every document the record says was read whose digest
+    has moved since. `followed_by` must carry kind, identity, instructed_by and
+    context, and `blocked_by` must be present when the walk did not reach its
+    success criterion and absent when it did — read in both directions, because
+    the two halves disagreeing is itself the finding.
+    `bin/apg.sh dx-record check --record FILE` prints those five readings, each
+    as a list or as the word `none`, and exits 0 or 5; `digest` computes the
+    record's `documents_read` member from the checkout. A record from the tenant
+    path with no source edit passes; one that edited a release file, typed a verb
+    the documentation does not name, or read a document that has since moved
+    fails naming the item.
+
+- id: DX-DOC-001
+  priority: P0
+  target_session: 25
+  test_nodeids:
+    - tests/contract/test_session12_documented_path.py::test_the_guide_labels_nothing_as_future_that_this_release_implements
+    - tests/contract/test_session12_documented_path.py::test_the_guide_names_the_tenant_path_and_the_three_surfaces
+    - tests/contract/test_session12_documented_path.py::test_the_readme_sections_are_in_the_order_an_adopter_walks
+    - tests/contract/test_documentation_index.py::test_the_second_walk_page_carries_the_task_statement_and_the_record_schema
+    - tests/contract/test_mcp_catalog.py::test_a_project_catalog_is_rendered_from_the_projects_contract
+    - tests/contract/test_mcp_catalog.py::test_check_project_refuses_a_stale_catalog
+  description: >-
+    The documentation an adopter reads describes the release they are holding.
+    `docs/new-team-member.md` carries no *future session* label for a session at
+    or below `CURRENT_SESSION`, names `apg dev`, `apg generate`, `apg studio` and
+    `projects/<slug>` — each accepted in the spelling the guide actually uses,
+    `bin/apg.sh dev up` included — and has a *done* section stating the walk's
+    success criterion. README's sections run in the order an adopter walks them:
+    *Local bootstrap*, *Rendering a project*, *A local environment*, *Adding your
+    own tables*, *Giving an agent your tables*, *A generated client*, *Studio*.
+    `docs/second-walk.md` exists, is indexed in `docs/README.md`, and carries the
+    walker's task statement between two fixed markers together with the record's
+    schema — every member `dx_record` requires, named where the walker reads it.
+    `bin/render-mcp-catalog.py --write --project <manifest>` writes a project's
+    own tool catalog under `projects/<slug>/docs/`, `--check --project` exits 5
+    on a drift and changes nothing, and the example project's catalog is
+    committed and current.
+
+- id: SEC-DX-001
+  priority: P0
+  target_session: 25
+  test_nodeids:
+    - tests/security/test_dx_surfaces_hardening.py::test_no_dx_module_imports_services_or_names_a_host_path
+    - tests/security/test_dx_surfaces_hardening.py::test_no_dx_command_prints_a_planted_secret_on_its_three_cheapest_exits
+    - tests/security/test_dx_surfaces_hardening.py::test_no_dx_artefact_carries_a_credential_but_the_two_declared_files
+    - tests/security/test_dx_surfaces_hardening.py::test_every_matrix_cell_names_a_proof_the_offline_sweep_collects
+    - tests/security/test_dx_surfaces_hardening.py::test_the_matrix_covers_every_invariant_the_stage_plan_lists
+  description: >-
+    The three developer surfaces — `apg dev`, `apg generate`, `apg studio` — and
+    the pure modules behind them import no `services/` module and name no host
+    path (`/var/lib/agentic-postgres`, `/etc/agentic-postgres`, `/root`). Each
+    command, run with a planted secret in its environment and a planted 0600
+    password file beside it, prints neither value on its three cheapest exits:
+    `--help`, an argument error, and an unrendered project. No file under
+    `services/studio/`, under a project's generated TypeScript client, or under a
+    freshly built `.generated/.dev/<key>/` matches the credential canary, with
+    the two declared 0600 files as the named exceptions. And the coverage is
+    itself checked rather than asserted: `HARDENING_MATRIX` names a collectible
+    node id for every stage-plan security invariant crossed with every surface,
+    each named proof exists, and each is selected by the offline sweep's own
+    marker expression — a cell naming a proof no sweep runs is a cell that
+    reports nothing.
+
+- id: REL-STAGE-001
+  priority: P0
+  target_session: 25
+  test_nodeids:
+    - tests/contract/test_release_contract.py::test_the_version_file_and_the_constant_agree
+    - tests/contract/test_release_contract.py::test_the_constants_comment_states_the_class_it_proposes
+    - tests/deployment/test_session25_release.py::test_both_projects_run_this_release_and_verify_against_it
+    - tests/deployment/test_session25_release.py::test_the_plan_priced_this_release_as_the_class_it_proposes
+  description: >-
+    The Stage 3 release names itself consistently and both projects run it. In
+    the checkout: the paragraph above `CURRENT_SESSION` names the version the
+    root `VERSION` file holds and the session the constant holds, and prices the
+    upgrade in ADR 0162's own vocabulary — exactly one class, in the form
+    *ADR 0162 prices it a MINOR*, with the sentence saying which schemas did not
+    move and what confirms the class on a deployment. There is no
+    `agentic_postgres.VERSION` constant to compare the file against: the file is
+    the single authority and `template_version()` reads it (ADR 0002), so what is
+    held together here is the release and the paragraph that describes it. On the
+    deployment: each project's deployed document carries `template_version` equal
+    to the tree's and `deployed_through_session` equal to `CURRENT_SESSION`, and
+    `upgrade verify` exits 0 for both against the candidate this checkout renders
+    from each deployment's own installed manifest. `upgrade plan --json` on alpha
+    prices that candidate at the class the constant's comment proposes, requires
+    no larger class, and returns an `ok` verdict with no blocking reason —
+    neither command changing the deployment.

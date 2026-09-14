@@ -248,7 +248,37 @@ from pathlib import Path
 #: Proposed here; Run 7's `upgrade plan` on the host is what confirms it, and a
 #: `major` required there is a stop condition rather than a number to write
 #: down.
-CURRENT_SESSION = 24
+#:
+#: **Session 25 moves it to 25, all-or-nothing again** (D690): six `DX-*`,
+#: `SEC-*` and `REL-*` requirements and four claims -- three declared offline
+#: and one deliberately not, because whether a deployment runs the release the
+#: tree names and prices it as the class the tree proposes is a fact about a
+#: deployment. Five of the six requirements' proofs were written in the runs
+#: that built their planes (Runs 2-4) and arrive here whole; the sixth is this
+#: run's own, and its live half is collected under `--setup-plan` with the
+#: three declarations set, in this commit, rather than discovered on a host.
+#:
+#: What the session ships is HARDENING and a WALK, not a plane. The three DX
+#: surfaces are held against every stage-plan security invariant by a matrix
+#: that names a collectible node id per cell; the developer-experience layer
+#: gains a context variable, a completion script and a record the outsider's
+#: second walk is measured by; and the documentation an adopter reads was
+#: re-derived by walking it, which is how three product defects were found
+#: (D1340, D1341, D1342).
+#:
+#: `VERSION` moves to `1.6.0`, and ADR 0162 prices it a MINOR. The session adds
+#: **two new operator commands** (`apg completion`, `apg dx-record`), **one
+#: environment variable the dispatcher reads** (`APG_PROJECT`, applied only to
+#: a verb whose own `--help` names `--project`, announced on stderr every time
+#: it applies), and **one optional generated document per project**
+#: (`projects/<slug>/docs/mcp-tool-catalog.md`, written only when asked for).
+#: **No manifest, outputs, capability, lock or secret schema moves, and no
+#: released migration is added.** A project that adopts this release and sets
+#: no `APG_PROJECT` renders byte-identical artefacts and deploys the same
+#: containers. Proposed here; Run 7's `upgrade plan` on the host is what
+#: confirms it, and a `major` required there is a stop condition rather than a
+#: number to write down.
+CURRENT_SESSION = 25
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

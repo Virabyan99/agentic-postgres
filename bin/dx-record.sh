@@ -3,7 +3,7 @@
 # Read a second walk's record: what it says, and what this checkout says back.
 #
 #   bin/apg.sh dx-record digest --record FILE   fill in the documents' digests
-#   bin/apg.sh dx-record check  --record FILE   the four readings, and a verdict
+#   bin/apg.sh dx-record check  --record FILE   the five readings, and a verdict
 #
 # **A walker runs this before they hand the record over** (ADR 0207 §3). The
 # same four functions decide `DX-001` in the host sweep, so a walker who could
@@ -36,9 +36,12 @@ Read the record a second walk writes, the way the sweep will read it.
   digest    Rewrite the record's `documents_read` member from this checkout,
             and print what was digested. Run it in the walk's own clone, at the
             end of the walk, before handing the record over.
-  check     Print the four readings -- source edits, commands the documentation
-            does not name, documents that moved since the walk, and the shape
-            of `followed_by` -- and a verdict. Exit 0 when all four are clean.
+  check     Print the five readings -- source edits, commands the documentation
+            does not name, documents that moved since the walk, the shape of
+            `followed_by`, and whether `blocked_by` agrees with
+            `reached_success_criterion` -- and a verdict, then the two lines
+            that are not findings: documents the walk did not record reading,
+            and undocumented steps it did. Exit 0 when all five are clean.
 
   --record FILE       The record. A JSON object; docs/second-walk.md gives its
                       schema and the task statement a walker is handed.

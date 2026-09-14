@@ -113,6 +113,19 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "generated_client_toolchain",
         "studio_boundary",
         "studio_surface",
+        # Session 25 (ADR 0207). The dispatcher's context variable, the
+        # completion script, the walk's record reader, the documentation an
+        # adopter reads, and the hardening matrix over the three DX surfaces.
+        # Every proof behind these runs in a checkout: a dispatcher is a shell
+        # script, a completion is a bash session this test starts, a record is
+        # a JSON file, a document is a file in this tree, and the hardening
+        # scan reads sources and a `.generated/.dev/<key>` this checkout builds
+        # with Docker. A production deployment would answer none of it
+        # differently -- and a skip is not a pass, so the gate refuses an
+        # absent daemon as 24's does.
+        "dx_context",
+        "dx_walk_instrument",
+        "dx_hardening",
     }
 )
 
@@ -257,6 +270,35 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     ),
     "studio_revocation": ("STU-REVOKE-001",),
     "audit_boundary_reported": ("AGT-AUDIT-002",),
+    # Session 25 (ADR 0207). The hardening pass, the second walk's instrument,
+    # and the Stage 3 release.
+    #
+    # Four claims. `dx_context` is what the developer surface GAINED -- a
+    # context variable the dispatcher applies by derivation and a completion
+    # script that embeds nothing -- and `dx_walk_instrument` is what the walk
+    # is MEASURED BY: the record reader and the documentation the walker
+    # reads. They are separate because they fail separately; a completion
+    # script that leaked an environment value and a guide that mislabelled a
+    # step are not one fact about one thing.
+    #
+    # `dx_hardening` is `SEC-DX-001` alone and stays alone. Its last two node
+    # ids are the ones that make it more than a scan: a matrix that names a
+    # collectible proof per invariant per surface, and a check that the
+    # offline sweep's own selector picks each one up. A security claim whose
+    # coverage is asserted by its author is the shape D1236 names one level up.
+    #
+    # `stage_release` is a HOST claim and is deliberately NOT declared. The
+    # offline half of `REL-STAGE-001` says the tree names one release
+    # consistently and prices it; only a deployment can say whether it RUNS
+    # that release and whether upgrading to it costs the operator anything.
+    # Declaring it offline would let the tree grade its own release. It is
+    # `not_run` at this session's close, by design, and Run 7's trip collects
+    # it alongside the two standing Session 12 claims the walk and the
+    # operator's file move.
+    "dx_context": ("DX-CTX-001", "DX-COMPLETE-001"),
+    "dx_walk_instrument": ("DX-WALK-001", "DX-DOC-001"),
+    "dx_hardening": ("SEC-DX-001",),
+    "stage_release": ("REL-STAGE-001",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined
