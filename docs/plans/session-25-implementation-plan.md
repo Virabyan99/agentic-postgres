@@ -885,8 +885,18 @@ like a cell whose proof is strong.
 **Checks:** ruff format and check clean over 676 files; shellcheck clean;
 `test_dx_surfaces_hardening`, `test_acceptance_registry`,
 `test_documentation_index`, `test_repository_contract`,
-`test_deployment_module_shape` → **282 passed**; and the whole `-m security`
-marker, which this run adds a module to. Runs 1, 2 and 3a's CI: success.
+`test_deployment_module_shape` → **282 passed**; the whole `-m security`
+marker, which this run adds a module to → **1110 passed, 231 skipped** (every
+skip host-gated), exit 0. **CI green on all five of the session's commits so
+far**: Run 1, Run 2, 3a, 3b and 3c, each read by full SHA.
+
+**Run 2's CI was RED and is recorded as red.** `test_every_test_declares_the_environment_it_consumes` failed on
+`test_the_printed_script_prints_no_environment_value`: the guard reads a
+subscript with an `APG_`-prefixed constant as a test CONSUMING that variable,
+and it cannot tell a read from a write — correctly, since the read is the one
+that errors instead of skipping. 3a had already repaired it (a dict literal
+rather than an assignment) before the verdict was read, so the branch was
+never left red; the sequence is recorded rather than tidied away.
 
 ### Run 4 — the documentation converged, and the walker's page
 
