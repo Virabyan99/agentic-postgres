@@ -85,6 +85,7 @@ Before a deployment exists, and on a machine that is not one.
 | [Threat model](threat-model.md) | What is defended against, and what is not |
 | [Source specification](source-specification.md) | The original brief. **Digest-pinned** — quoted, never edited |
 | [Stage 3 decision report](stage-3-decision-report.md) | What 1.0.0 measured, what stayed not_run and why, which Stage 3 premises hold, and the template-or-control-plane recommendation |
+| [Stage 4 decision report](stage-4-decision-report.md) | What 1.6.0 is, what Stage 3's trip measured, what stayed not_run and why, which of Stage 3's three blockers were removed and what the third costs, and what the DX layer's evidence says about the hosted question |
 
 ## Plans
 

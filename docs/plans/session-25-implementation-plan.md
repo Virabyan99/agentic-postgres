@@ -1254,9 +1254,98 @@ then the gate. Push; read CI. **This commit is the release candidate the
 walker clones** — its SHA goes into Run 6's task statement, and its CI
 verdict is read before the clone is made.
 
-**Done.** *(filled by the run: the node ids as WRITTEN against as proposed,
-D1236's table; `--setup-plan` both ways; the D1242 guard's reading; the
-gate's last twenty lines, D1199.)*
+**Done.** 2026-09-14, in three commits. Five rows, **D1346-D1350; next free
+D1351.** `CURRENT_SESSION` 25, `VERSION` 1.6.0, six requirements (not the
+seven this plan's prose said -- D1347, and §7's own arithmetic agreed with
+six), four claims of which three are declared offline, and the registry at
+**219**.
+
+**The node ids as WRITTEN against as proposed** (D1236). Rig 25k read all 34
+of §2's proposed node ids against the tree BY AST -- so a name in a docstring
+could not pass for a definition -- and **28 were present exactly as written**.
+Of the six that were not: two are D1344's, already recorded in Run 4 (the
+catalog module existed under another name, so the registry reads
+`test_mcp_catalog.py`); one is D1349's (a proof renamed off its own stale
+count in this commit); and three are this run's own modules
+(`test_release_contract.py` and `test_session25_release.py`). Every clause of
+every description was then read back against a node id, which is what added
+`test_a_failed_walk_must_say_where_it_stopped` and
+`test_check_reads_blocked_by_and_prints_which_way_it_is_wrong` to
+`DX-WALK-001`: Run 4 wrote them and the plan's proposed list predates them.
+
+**`--setup-plan` both ways.** UNSET: `2 skipped`, *environment absent:
+APG_LIVE_HOST, APG_PROJECT_A_OUTPUTS, APG_PROJECT_B_OUTPUTS*. SET: both
+collected, neither deselected, with the fixture chain resolving --
+`as_root`, `project_a`, `project_b` at module scope and `project_key` ->
+`candidate` per function, the second imported from
+`test_session13_upgrade_plan.py` rather than copied (ADR 0002, and D1164's
+named suspect kept to one instance).
+
+**The D1242 guard's reading.** The newest gate the glob resolves is now
+`session-25-check.sh`, printed and read; `test_the_offline_sweep_selector_is
+_the_newest_gates` passes against it, and the whole of
+`test_acceptance_registry.py` (23 proofs, 37 s) passes with the gate moved
+under it.
+
+**CI, measured rather than assumed** (step 4). `-m "p0 and not future and not
+live_host and not external"` over all seven of this session's modules
+collects **54 of 56**, the two deselected being the live module -- which
+`-m "live_host or external"` collects. The hardening module's five are all
+`security`-marked. **CI gains nothing new**, which is what the plan asked to
+be measured rather than assumed.
+
+**The gate's last twenty lines** (D1199): seven `printf -- ` and no `printf`
+whose format string begins with a dash. shellcheck exits 0; `--help` exits 0
+and every session number it tells an operator to type reads 25; a missing
+mode and an unknown mode each exit 2; no previous gate's filename survives
+outside the provenance line; `bin/session-24-check.sh` is byte-identical.
+
+**Three product-side repairs, and all three were found rather than planned.**
+D1346: there is no `agentic_postgres.VERSION`, so the proposed comparison was
+a tautology -- and rig 25j found that **nothing at all read the paragraph
+where the release says what it is**, which is D816's shape applied to the
+release identity. D1348: `upgrade plan --json` emits `bump`, `requires`,
+`verdict` and `reasons`, not the three keys the plan named; read against the
+emitter before the proof was written, because that one could only have failed
+at the end of a fifteen-minute host sweep. D1349: `dx-record`'s usage said
+FOUR readings in four places while the command printed five -- created by
+Run 4's own D1342 repair, one run earlier.
+
+**D1350 was found by the battery, not by review.** Mutation `h` planted
+`readonly SESSION=24` in the Session 25 gate and
+`test_the_gate_resolves_claims_for_its_own_session` stayed GREEN: the guard
+reads the raw source, and every gate's header says *`readonly SESSION=NN` is
+the only session literal*. The module has carried a `code()` helper written
+for exactly this class since D1197 -- three assertions further down. Repaired
+in all four modules, 22 through 25.
+
+**Batteries: 12 mutations across the two code commits, every one KILLED**,
+each with a paired control the mutation cannot reach, green in the same
+invocation, and every target restored and verified by `filecmp`. Two needed
+correcting before they were evidence: mutation `d`'s anchor matched twice
+(Session 24's paragraph carries the same pricing sentence, and the pre-flight
+made that fatal rather than mutating the wrong release's prose), and mutation
+`l` edited a gate the module under test never opens, so its survival said
+nothing and it was retargeted.
+
+**Also repaired while deriving**, each a count or a name that had gone stale
+by being carried across: a test about Session 25 called
+`..._session_twenty_four_...`, one called `..._the_eight_declared_claims_...`
+when eleven are declared, and a host-claim loop the diff had duplicated with
+two different sentences for one assertion.
+
+**`docs/scope-closure.md` re-audited row by row.** §1 COUNTED from the files
+(D1194): 219 requirements, 126 claims, 195 claimed, 32 migrations, 207 ADRs,
+D1-D1350, 11 offline claims, 1.6.0. **Four rows removed** because a session
+closed them -- §11's and §12's owed-claim pairs, which Session 24's trip
+collected, §13's three-sessions-one-trip row (D1244 discharged), and §13's
+D1280 row (repaired in Run 5b). One premise re-read and rewritten
+(`honest_readers`). **§14 added**, from this plan's §10.
+`docs/stage-4-decision-report.md` written with every trip number marked
+*[filled at the trip's close]* (D992), its §6 left as a heading.
+
+`bin/session-01-check.sh` on the clean tree -> **GATE_VERDICT**. Three commits
+pushed and each verdict read by full SHA: **CI_VERDICTS**.
 
 ### Run 6 — the second walk
 
