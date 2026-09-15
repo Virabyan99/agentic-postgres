@@ -711,3 +711,60 @@ def test_the_gate_takes_no_flag_that_could_carry_a_credential(source: str) -> No
             f"{forbidden} is no longer refused by name; a gate given one measures "
             "the credential somebody typed rather than the deployment"
         )
+
+
+# ---------------------------------------------------------------------------
+# the evidence is written whether or not the suite passed (D1373)
+# ---------------------------------------------------------------------------
+
+
+def test_a_failing_suite_does_not_stop_the_evidence_being_written() -> None:
+    """`failed` is a status this gate could not emit, and its comment said it could.
+
+    The gate runs under `set -euo pipefail` and `run_suite` calls pytest
+    directly, so ANY failing proof used to end the run at step 5 -- before the
+    step that computes claims and the step that writes evidence. Three things
+    said otherwise: ADR 0163 defines `failed` as one of three statuses,
+    `claim_result` computes it, and this gate's own header documents exit 5 as
+    *the evidence was WRITTEN and some claim in it is not passed*. The comment
+    immediately above the call says it outright -- *the evidence is written
+    whether or not the suite passed*.
+
+    It was not. **No evidence document in twenty-five sessions has ever carried
+    a `failed` claim**, which reads as nothing ever having been wrong and means
+    the path had never executed. It executed on 2026-09-15, when Session 25's
+    walk record made `documented_path` genuinely false, and it took the entire
+    host half with it: 318 proofs passed, the JUnit was written, and no
+    `session-25-host.json` existed to record any of them.
+
+    Scanned on COMMENT-STRIPPED text, because this gate explains at length what
+    each step does and the words this test looks for are in those sentences too
+    (D277, D1197, D1350 -- the last one found in this very module).
+
+    Both live modes are checked. Repairing one caller of a decision and leaving
+    the other is §7's fifth question, and it is how D1302 survived three
+    sessions.
+    """
+    source = code(SCRIPT.read_text(encoding="utf-8"))
+
+    for marker in ("live_host", "external"):
+        call = f'run_suite "{marker}"'
+        assert call in source, f"the gate no longer runs the {marker} suite"
+        line = next(entry for entry in source.splitlines() if call in entry)
+        assert "|| suite_status=$?" in line, (
+            f"the {marker} suite's failure is not captured: under `set -e` a failing "
+            f"proof ends the run before the evidence is written, and a claim that is "
+            f"genuinely false can then never be recorded as `failed` (D1373).\n  {line.strip()}"
+        )
+
+    for mode in ("host", "external"):
+        call = f"write_evidence {mode}"
+        assert f"{call} || evidence_status=$?" in source, (
+            f"the {mode} writer's own status is not captured, so the suite's status "
+            "can never be reported when the writer is content (D1373)"
+        )
+
+    assert source.count("suite_status=0") == 2, (
+        "both live modes must initialise the status they capture, or `set -u` ends "
+        f"the run on an unbound variable: found {source.count('suite_status=0')}"
+    )

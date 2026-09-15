@@ -1448,7 +1448,20 @@ mode_host() {
   # using was `pytest tests/deployment -m live_host`, which selects by path --
   # so tests/security/ was a directory it never reached, and five green host
   # runs were five reports about a subset nobody had stated the boundary of.
-  run_suite "live_host" "${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-host-tests.xml"
+  # **A failing proof does not stop the evidence being written** (D1373).
+  # Under `set -e` this call used to end the run, so steps 6 and 7 never ran and
+  # a claim that is genuinely FALSE could not be recorded as `failed` -- the
+  # status ADR 0163 defines, `claim_result` computes, and the header above
+  # documents as exit 5. Session 25's walk record is the first false claim this
+  # project has had, and it took the whole host half with it.
+  suite_status=0
+  run_suite "live_host" "${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-host-tests.xml" || suite_status=$?
+  if [ "${suite_status}" -ne 0 ]; then
+    printf '\n\033[1m%s: the suite reported failures (pytest exit %s).\033[0m\n' \
+      "${PROGRAM}" "${suite_status}"
+    printf 'The evidence below is written anyway, from the JUnit it wrote: a claim whose\n'
+    printf 'proof failed is `failed`, which is a RESULT and not an absence of one.\n'
+  fi
 
   if ! evidence_is_supportable; then
     announce_no_evidence
@@ -1460,7 +1473,18 @@ mode_host() {
   run_claim_proofs host "${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-host-claims.xml"
 
   step "7. Host evidence"
-  write_evidence host
+  # The writer's own status is the authority on 5: it returns it when a claim's
+  # node ids did not all pass. Captured rather than inherited so the suite's
+  # status can still be reported when the writer is content.
+  evidence_status=0
+  write_evidence host || evidence_status=$?
+  if [ "${evidence_status}" -ne 0 ]; then
+    exit "${evidence_status}"
+  fi
+  if [ "${suite_status}" -ne 0 ]; then
+    die 6 "the evidence is written and every claim in it passed, but the suite \
+reported failures. A proof outside every claim went red; read ${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-host-tests.xml."
+  fi
 
   printf '\n\033[1m%s: host PASSED\033[0m\n' "${PROGRAM}"
   printf 'This is one half of three. Session %s also needs --mode external and\n' "${SESSION}"
@@ -1500,7 +1524,14 @@ mode_external() {
   export APG_SSH_DESTINATION="${SSH_DESTINATION}"
   [ -n "${PUBLIC_IPV6}" ] && export APG_PUBLIC_IPV6="${PUBLIC_IPV6}"
 
-  run_suite "external" "${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-external-tests.xml"
+  # D1373, the same repair in the other live mode: repairing one caller of a
+  # decision and not the other is §7's fifth question.
+  suite_status=0
+  run_suite "external" "${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-external-tests.xml" || suite_status=$?
+  if [ "${suite_status}" -ne 0 ]; then
+    printf '\n\033[1m%s: the suite reported failures (pytest exit %s); the evidence is written anyway.\033[0m\n' \
+      "${PROGRAM}" "${suite_status}"
+  fi
 
   if ! evidence_is_supportable; then
     announce_no_evidence
@@ -1512,7 +1543,15 @@ mode_external() {
   run_claim_proofs external "${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-external-claims.xml"
 
   step "4. External evidence"
-  write_evidence external
+  evidence_status=0
+  write_evidence external || evidence_status=$?
+  if [ "${evidence_status}" -ne 0 ]; then
+    exit "${evidence_status}"
+  fi
+  if [ "${suite_status}" -ne 0 ]; then
+    die 6 "the evidence is written and every claim in it passed, but the suite \
+reported failures. Read ${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-external-tests.xml."
+  fi
 
   printf '\n\033[1m%s: external PASSED\033[0m\n' "${PROGRAM}"
   printf 'This is one half of three. Session %s also needs --mode host and\n' "${SESSION}"
