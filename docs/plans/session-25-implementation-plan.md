@@ -1700,7 +1700,110 @@ are the operator's**, numbered on the sheet:
     kit directory name and its verify, and whether the rotation block was
     taken or declined.
 
-**Done.** *(filled by the run.)*
+**Done.** 2026-09-15. **The Stage 3 release is deployed on both projects and
+`evidence/session-25.json` exists: 126 claims, 119 passed, 1 FAILED, 6 not_run.**
+It took two sweeps, and the second one is the reason this run matters.
+
+**The deploys.** `upgrade plan` priced both projects **`minor`** before anything
+moved — `requires patch`, `verdict ok`, `reasons []`, and **exactly one leaf
+differing: `template_version` `1.5.0` → `1.6.0`** — which is this session's "no
+schema moves" claim confirmed by the product rather than by its author (D1081
+stays answered). Alpha and beta are both at **template 1.6.0,
+deployed_through_session 25, `source_commit de2aabf`**, doctor **10 ok / 0
+problem** each. Alpha's ledger reads **32**, unchanged. Beta's reads **34** —
+32 released plus its own two, `Pending: 0` reported twice, once per dbmate
+invocation, which is ADR 0206's second deploy and its first uneventful one.
+Three containers were recreated on each project (`auth`, `mcp`, `storage`) and
+seven were not: the deploy materialised a new secret generation and ADR 0155
+recreated exactly what mounted it. **The lock did not move on either project**,
+and the doctor's capability-drift check confirms it against the RUNNING plane
+rather than the file (D1152/D1153's repair).
+
+**THE FIRST SWEEP FAILED AND PRODUCED NO EVIDENCE.** `GATE_25_HOST_EXIT=1`, a
+code the convention does not define; 318 passed, 3 failed, the JUnit written and
+`session-25-host.json` absent. Three rows came out of it and the third is the
+find of the trip:
+
+* **D1371** — my Run 5 proofs rendered their candidate from
+  `capabilities.example.yaml` while the deployment is rendered from the
+  operator's own `capabilities.yaml`, which on this host enables **nothing**
+  (correctly: D930). Confirmed against the deployment afterwards rather than
+  argued — rendering with `capabilities.yaml` reproduces the installed
+  `inputs.capabilities_sha256` `722ffa85…` **exactly**.
+* **D1372** — the pricing proof asserted `verdict == "ok"`, true only BEFORE a
+  deploy, in a sweep that runs after. It could not have passed in any sweep of
+  any session.
+* **D1373** — **the gate could not emit a `failed` claim and never could.**
+  `set -euo pipefail` plus `run_suite` calling pytest directly ended the run at
+  step 5, before claims were computed and evidence written. ADR 0163 defines the
+  status, `claim_result` has computed it since Session 13, the gate's header
+  documents exit 5 for it, and the comment three lines above the call says *the
+  evidence is written whether or not the suite passed*. No evidence document in
+  twenty-five sessions has ever carried a `failed` claim — which reads as
+  nothing ever having been wrong and means the path had never run. It ran the
+  day a claim was first genuinely false, and took the whole host half with it.
+
+**The second sweep: `GATE_25_HOST_EXIT=5`, 986 s, 320 passed, 1 failed, 9
+skipped — and the document written.** The single failure is `documented_path`,
+which is the honest one.
+
+| claim | status | |
+|---|---|---|
+| `documented_path` | **failed** | eleven undocumented steps; **the first `failed` claim in this project's history** |
+| `fresh_host` | **passed** | `not_run` since Session 12, closed on the outsider's own appliance document (D1370) |
+| `stage_release` | **passed** | both repaired proofs green |
+| `honest_readers` | **passed** | D1310's repair, on the first sweep that could record it |
+| `project_removal` | passed | the `--removed-project-file` declaration the prep caught |
+| `disaster_kit`, `kit_read_at_a_later_release` | passed | `--kit-dir` still `kit-2026-09-11` (D1282) |
+| Sessions 22–24's six host claims | passed | again |
+
+**The three halves and the merge.** Host exit 5 at `de2aabf` (110 claims);
+external exit 0, **25 passed**, five claims; offline **5796 passed, 0 failed, 3
+skipped** at `13c4b39`. The merge printed the commit difference rather than
+folding it (ADR 0202) and wrote **126 claims: 119 passed, 1 failed, 6 not_run**
+— the count §7 predicted, to the number. The six are the three the declined
+rotation would have moved, plus `deployment_convergence`, `port_allocation` and
+`replacement_host_restore`.
+
+**The obligations.** The DR kit re-export is **taken**: `kit-2026-09-15`, 10
+artefacts over both projects at outputs v18 / template 1.6.0 / kind deployed,
+`verify` 0 on the host and **verified again independently in WSL** after copying
+off with modes intact. D1282's gate flag is untouched. **D860's rotation was
+OFFERED and DECLINED on 2026-09-15**, recorded as declined and named as Stage
+4's opening act — never as failed. D1255's counts, read a second time: alpha
+**1508** audit rows over 21.6 days (696 kB, **44 unfinished**) and 234
+idempotency rows; beta 20 rows over 1.9 days and none.
+
+**Four more rows the day found.** **D1374**: `render-jwks` says *the key set
+CHANGED* from a test of the FILE's bytes — measured on both projects, same kid
+and same `public_jwks_sha256` before and after, so nothing rotated and the
+sentence answers a question about bytes while appearing to answer one about
+keys. **D1375**: `op` cannot reach the Docker socket and Session 25 is the first
+release whose OFFLINE mode needs one; the artefact scan this session wrote to
+FAIL rather than skip was the single proof out of 278 Docker-gated skips that
+said so — ADR 0202's argument demonstrated on the first host that could not
+satisfy it — and `op` was **not** added to the docker group, so the host's
+offline half (a control, not an input) was not produced. **D1376**: this run's
+own sheet backgrounded a `sudo` without refreshing the timestamp and it
+SIGTTIN-stopped, the trap `g25-host.sh`'s own header documents. **D1377**: I
+checked the gate repair with `shellcheck -S warning` and the gate runs
+shellcheck at default severity, so an `info`-level SC2016 passed here and failed
+CI — one flag between a local green and a red.
+
+**D1164's reading**: `.generated/alpha-dev` and `.generated/beta-dev` are
+`op:op` before and after every sweep; nothing was left root-owned. The first
+sweep did leave an example-capabilities render in `.generated/alpha-dev` — the
+fixture cleans up only what it created — and the repaired fixture now leaves a
+correct one.
+
+**Batteries and targeted.** 5 mutations, 0 survivors, controls green, both files
+restored by `filecmp`; the informative mutation is the one that removes the
+capture and leaves the words in a comment, which is how D1350 hid for four
+sessions. 587 passed across seven modules. **The two repaired live proofs were
+verified by the sweep and by nothing else** — they are `live_host`, and no
+battery can execute them. That is stated rather than implied.
+
+**Done.**
 
 ### Run 8 — the close: the tag, the report, the handoff
 
@@ -1758,7 +1861,7 @@ D1122's rule).
 | every claim through 24 | host / external / offline | Run 7 | unchanged |
 
 `evidence/session-25.json` is expected at **126 claims** (122 + 4). The
-`not_run` count the plan predicts is **6** (five D478 names and
+`not_run` count the plan predicts is **6** — **and the document written on 2026-09-15 says 6, with `documented_path` `failed` beside them: 126 claims, 119 passed, 1 failed, 6 not_run.** The prediction held to the number (five D478 names and
 `replacement_host_restore`) with the walk clean and the file located, **7**
 with one of those missing, **8** with both — and a `failed` on
 `documented_path` is a different thing from a `not_run` and is reported as
@@ -1896,6 +1999,20 @@ date; `requirements-dev.in` pinning nothing.
   weaker measurement than a walk and is named as one. **Stage 4's first walk
   reads this release's documentation before anything is added to it**, and
   the record it produces is the evidence these nine repairs do not yet have.
+- **`op` cannot reach the Docker socket on the host** (D1375), and Session 25
+  is the first release whose OFFLINE mode requires one. Nothing was changed:
+  adding `op` to the `docker` group is root-equivalent privilege on a production
+  host and no claim needs it. The consequence is that the host's offline half —
+  a CONTROL, never an input — cannot be produced there, and the merge takes the
+  workstation's. **Stage 4 decides**: either the host gains a way to run the
+  offline mode, or the gate's offline mode stops being something a host is asked
+  to run. It should not be settled by adding a group membership in a hurry.
+- **`render-jwks` reports a file event as a domain event** (D1374). *The key set
+  CHANGED* is printed from a test of the file's bytes; measured on both projects
+  the kid and the key-set digest are identical before and after. An operator
+  reading it at the end of a deploy has to decide whether a production signing
+  key just rotated. One sentence, and a deploy path is the wrong place to edit
+  during a release trip.
 - **The record's `documents_moved` reading is non-clean by construction.**
   Repairing README and the guide moved the digests the walk recorded, so the
   trip's proof will report two moved documents beside the eleven steps. The
