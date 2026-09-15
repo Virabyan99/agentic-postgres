@@ -22,9 +22,9 @@ Counted from the files at this session's close, never recalled (D1194).
 | Requirements a claim reports on | **195** | 24 belong to no claim (D697), unchanged in number for the fifth session running; see §4 |
 | Migrations released | **32** | fix-forward only. **Session 25 adds none**, and it is the first session in four of which that is true — part of why ADR 0162 prices this release a minor |
 | Architecture decisions recorded | **207** | 0202–0203 are Session 22's, 0204 Session 23's, 0205 Session 24's, **0206–0207 Session 25's** (0206 landed in Session 24's Run 8) |
-| Divergences measured | **D1–D1350** | D1200–D1242 are Session 23's, D1259–D1281 Session 24's, **D1303–D1350 Session 25's** — 48 rows, of which twelve were planning rows and **five were product defects found by walking the adopter's path or by a battery**, not by reading |
+| Divergences measured | **D1–D1377** | D1200–D1242 are Session 23's, D1259–D1281 Session 24's, **D1303–D1377 Session 25's** — 75 rows, of which twelve were planning rows and **eight were product defects found by walking the adopter's path, by a battery, or by the trip's first sweep** rather than by reading. D1351–D1377 are the two walks, the host trip and their repairs |
 | Claims declared offline | **11** | Sessions 22's four, 23's two, 24's two, **25's three**. Declared, never inferred (ADR 0202) |
-| `template_version` | **1.6.0** | a proposed minor, priced by ADR 0162 in `CURRENT_SESSION`'s own comment — and the comment now has a reader (`test_release_contract.py`, D1346). Run 7's `upgrade plan` on the host is what confirms it |
+| `template_version` | **1.6.0** | a minor, priced by ADR 0162 in `CURRENT_SESSION`'s own comment — and the comment now has a reader (`test_release_contract.py`, D1346). **Confirmed on the host 2026-09-15**: `upgrade plan` returned `minor` on both projects with exactly one leaf differing, and both are deployed at it |
 
 ---
 
@@ -431,19 +431,38 @@ named is ADR 0195's folded outcome in the reassuring direction.
 
 ## 14. What Session 25 left open
 
-**The second walk's repairs are unwalked, and `documented_path` is `failed`.**
-Two walks were run (ADR 0207, §9 allows no third). The first, on `040f733`,
-recorded six undocumented steps and found that two of the adopter's seven
-goals are unreachable offline (D1357). The second, on the repaired `a4b9685`,
-recorded **eleven** — two of them against the first repair's own prose, and one
-a product defect the repaired documentation walked the reader into: the
-documented `compile … > contract.json` leaves a 0-byte file when it refuses,
-and every reader of it exited 1 with a traceback (D1359). Those eleven are
-repaired in Run 6b as D1359–D1367, **and no cold reader has seen the result**.
-The two product repairs carry proofs and a battery; the nine documentation
-repairs carry the judgement of the session that wrote them, which is the thing
-a walk exists to distrust. Stage 4's first act should be a walk of this
-release's documentation, before anything is added to it.
+**`documented_path` closed `failed`, and it is the first `failed` claim this
+project has written.** Two walks were run (ADR 0207, §9 allows no third). The
+first, on `040f733`, recorded six undocumented steps and found that two of the
+adopter's seven goals are unreachable offline (D1357). The second, on the
+repaired `a4b9685`, recorded **eleven** — two of them against the first
+repair's own prose, and one a product defect the repaired documentation walked
+the reader into: the documented `compile … > contract.json` leaves a 0-byte
+file when it refuses, and every reader of it exited 1 with a traceback (D1359).
+
+**Producing that status required repairing the gate**, which could not emit it
+(D1373): `set -euo pipefail` plus a bare pytest call ended every run before
+claims were computed, so in twenty-five sessions no evidence document had ever
+carried a `failed` claim. That read as nothing ever having been wrong and meant
+the path had never executed.
+
+**What is still owed.** The seventeen documentation findings the two walks
+produced were repaired, and **nine of them after the last cold reader had
+gone**. The product defects carry proofs and batteries; the prose carries the
+judgement of the session that wrote it, which is the thing a walk exists to
+distrust. **Stage 4's first act should be a walk of this release's
+documentation, before anything is added to it** — second only to the rotation,
+and for the same reason: both are things built and never exercised.
+
+**Three rows the trip found and did not repair.** D1374: `render-jwks` reports
+a file event as a domain event — *the key set CHANGED* is printed from a test
+of the file's bytes, and on both projects the kid and the key-set digest were
+identical before and after. D1375: `op` on the host cannot reach the Docker
+socket and Session 25 is the first release whose offline mode needs one; the
+group membership was deliberately not granted, so the host's offline half — a
+control, never an input — cannot be produced there. D1376 and D1377 are process
+rows about this session's own sheet and its own shellcheck severity, kept
+because both cost real time.
 
 
 Session 25 built no plane. It hardened the three developer surfaces against
@@ -471,7 +490,7 @@ appeared in the first minute of doing what the documentation says.
 | **`APG_PROJECT` reads a verb's `--help` on every invocation it applies to** | ~15 ms, measured in rig 25a. A verb whose usage were expensive would make the default expensive; none is today. The envelope does not carry the number because it is below anything the envelope measures. |
 | **The completion script is bash's** | A zsh or fish user has `--list` and `--help` and nothing else. A second shell is one more `case` arm printing a second script; nobody has asked, and writing one to be unused is not a decision this session took. |
 | **The DR kit re-export, and the gate's `--kit-dir`** | D1282. The v18 export was taken 2026-09-13 and verifies, so the operational obligation is discharged — but `REC-KIT-003`'s claim IS the version gap between a kit and the tree that reads it, and its proof `pytest.fail`s on exactly that. The gate's `--kit-dir` stays on `kit-2026-09-11`, and the flag's own help text now says so in as many words. The next release that moves the outputs schema must re-read this row before pointing the gate anywhere. |
-| **The rotation has still not been performed** | D860, offered again as an optional block on Run 7's sheet and not a run's action. It is the first item on Stage 4's bill: the stage plan's §6 rule is that a credential which travels rotates first, and this one has never travelled because it has never rotated. |
+| **The rotation has still not been performed** | D860. **Offered on Run 7's sheet and DECLINED by the operator on 2026-09-15**, recorded as declined and never as failed — the fourth trip at which it has been offered. It is the first item on Stage 4's bill: the stage plan's §6 rule is that a credential which travels rotates first, and this one has never travelled because it has never rotated. |
 | **The intermediate versions 1.3.0–1.5.0 have no tag** | D1311, by decision. `1.0.1` and `1.2.0` are tagged and `1.6.0` will be; the three between were released into a tree nobody outside was tracking. README says so once. |
 | **A count in a name, twice in one session** | D1349 and the two names Run 5b repaired. `dx-record`'s usage said four readings while the command printed five; a test was called `..._the_eight_declared_claims_...` while eleven were declared. Both were created by a correct change that moved a count and not the sentence about it. The general repair is not available — nothing can hold every English number in the tree to a Python one — so what is written down is the habit: when a change moves a count, grep for the count. |
 | **The gate-modes guard read its gate's prose for four sessions** | D1350, found by a battery and repaired in all four modules. The near miss is what makes it worth carrying: the helper that fixes it was already in each file, added by an earlier run for the same reason, three assertions further down. A repair that reaches one caller and not the next is §7 question 5, and it is the class this project produces most. |

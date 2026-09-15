@@ -114,7 +114,15 @@ application on 1.0.0, on a host that started empty (see
 [its plan](docs/plans/session-19-implementation-plan.md) and
 [scope closure](docs/scope-closure.md) §8) — and it moved `VERSION` alone, to
 `1.0.1`, the only time in this project's history the two numbers have come
-apart. **Adopt `1.6.0`.** It is a minor over `1.5.0` and ADR 0162 prices it:
+apart. **Adopt `1.6.0`**, and it is the first version since `1.0.1` that a tag
+names. `1.3.0`, `1.4.0` and `1.5.0` were session closes rather than stage
+closes: each moved `VERSION`, each was deployed, and none was tagged. They are
+not being tagged retroactively — a tag is the promise the compatibility
+sentence beside it made at the moment it was cut, and dating one to a commit
+nobody tagged then is a record that looks measured and was not (D1311). Reach
+them by SHA through the session plans if you need them.
+
+`1.6.0` is a minor over `1.5.0` and ADR 0162 prices it:
 two new operator commands (`apg completion`, `apg dx-record`), one environment
 variable the dispatcher reads (`APG_PROJECT`), and one optional generated
 document per project (`projects/<slug>/docs/mcp-tool-catalog.md`, written only
