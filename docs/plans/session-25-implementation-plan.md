@@ -1837,7 +1837,58 @@ battery can execute them. That is stated rather than implied.
 5. Mark this run **Done.** with the document's claim table pasted, the
    `main` SHA, the tag's SHA, and the report's §6 sentence.
 
-**Done.** *(filled by the run.)*
+**Done.** 2026-09-15. **Stage 3 is closed and `1.6.0` is tagged.**
+
+`main` fast-forwarded to **`a16cb84`** — no merge commit, because a merge commit
+would put the tag on a commit CI never measured. The annotated tag **`1.6.0`**
+points at that same SHA, and it is the third tag this repository has: `1.0.0`,
+`1.0.1`, `1.6.0`. `1.3.0`–`1.5.0` were session closes and stay untagged (D1311),
+said once in README's *Adopt* paragraph.
+
+**The document, pasted from `evidence/session-25.json`:**
+
+| | |
+|---|---|
+| claims | **126** |
+| passed | **119** |
+| failed | **1** — `documented_path` |
+| not_run | **6** — `api_authorization`, `bootstrap_identity`, `credential_rotation_planes`, `deployment_convergence`, `port_allocation`, `replacement_host_restore` |
+| `source_commit` | `de2aabf` (the release deployed on both projects) |
+| `offline_checkout_commit` | `13c4b39`, printed by the merge rather than folded (ADR 0202) |
+
+**D1378** records why the tag is on `main`'s head rather than on *"the commit
+both gates measured"*: the trip took two sweeps and no commit was measured by
+both. The host half is `de2aabf`, the offline and external halves `13c4b39`, and
+the difference between those trees — a gate script, two test modules, a plan
+document — is measured rather than asserted: beta's rendered document is
+**byte-identical** across them.
+
+**The report is filled and §6 is written.** Every one of its ten placeholders
+came out of the evidence document by a script that reads each number and
+asserts it, so a blank could not be completed from memory (D992). §6's finding
+is that the release condition the report was drafted with — *0 failed* — is the
+thing to change first: `1.6.0` ships with one failed claim, and that failure is
+the most useful measurement Stage 3 produced. **A condition of zero failures
+would have been met by never declaring a record**, which is exactly what the
+previous twelve sessions did and why the status had never been emitted.
+
+**Stage 4 inherits three things, in this order** (§6, §10, ledger §14):
+
+1. **The rotation** (D860) — offered and declined at four trips, most recently
+   2026-09-15. Built, tested offline, never performed on a deployment.
+2. **A walk of this release's documentation before anything is added to it** —
+   seventeen findings were repaired and **nine after the last cold reader had
+   gone**.
+3. **The Docker question on the host** (D1375) — either the host gains a way to
+   run the offline mode or the mode stops being something a host is asked to
+   run. Not to be settled by a group membership in a hurry.
+
+**What this run did not do**: it wrote no code, ran no gate, and touched no
+host. The only artefacts are documentation, the merge and the tag. Run 8's own
+Done necessarily lands *after* the tagged commit — a record cannot be inside
+the commit it describes.
+
+**Done.**
 
 ---
 ## 7. Evidence and claims
