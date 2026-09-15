@@ -1460,7 +1460,7 @@ mode_host() {
     printf '\n\033[1m%s: the suite reported failures (pytest exit %s).\033[0m\n' \
       "${PROGRAM}" "${suite_status}"
     printf 'The evidence below is written anyway, from the JUnit it wrote: a claim whose\n'
-    printf 'proof failed is `failed`, which is a RESULT and not an absence of one.\n'
+    printf 'proof failed is FAILED, which is a RESULT and not an absence of one.\n'
   fi
 
   if ! evidence_is_supportable; then
