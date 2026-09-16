@@ -116,6 +116,19 @@ shellcheck deploy.sh bin/*.sh libexec/*
 "$(python_bin)" -m ruff check src bin tests
 "$(python_bin)" -m ruff format --check src bin tests
 bin/lock-dev-deps.sh --check
+# **And the environment, which the line above says nothing about** (D297, D384,
+# D1430). `--check` verifies the LOCK; this verifies that the interpreter about
+# to collect 6,000 tests has what the lock pins. The gap has killed this gate
+# three times -- Session 6's host gate died in collection with four
+# ModuleNotFoundErrors after Run 7 added nine packages, Session 7's with boto3,
+# and each time the line above had just printed green. It runs HERE, before the
+# suite, so the answer arrives as a cause and a command rather than as a missing
+# module three steps later.
+#
+# Session 6 deferred it with a reason about TIMING -- a new authority over the
+# environment must not be added in the run that is about to collect evidence --
+# and that reason was read as "never" for twenty-two sessions (D1430).
+bin/lock-dev-deps.sh --check-environment
 bin/lock-versions.sh --check
 
 # ---------------------------------------------------------------------------

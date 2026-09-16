@@ -584,3 +584,60 @@ def test_registry_file_is_the_only_place_ids_are_created() -> None:
         if "CFG-001" in path.read_text(encoding="utf-8")
     ]
     assert not others, f"requirement IDs are hard-coded in source: {others}"
+
+
+# ---------------------------------------------------------------------------
+# A module with no marker is collected by no sweep (D1240, D1447)
+# ---------------------------------------------------------------------------
+
+
+def test_every_module_that_defines_a_test_carries_a_module_marker() -> None:
+    """**D1240's class, guarded against the definition rather than the four.**
+
+    *Collectible, collected, and collected-by-which-sweep are three different
+    questions.* A module with no `pytestmark` answers the first and neither of
+    the others: every gate selects on a marker, so such a module runs when
+    somebody names its path and never otherwise. Four of them sat that way for
+    sessions, and one held a **registered P0 proof** of `AGT-AUDIT-002` that
+    only the gate's explicit claim-proof run in HOST mode ever executed
+    (D1447) -- so for the two releases that took no trip, nothing anywhere ran
+    it.
+
+    Guarded here as a property of the tree rather than as four names, which is
+    D600/D918/D926's rule: fix the class against its definition, never the
+    instances that happened to fail.
+
+    **"Defines a test" is the condition, not "is a test file".**
+    `tests/integration/test_future_database_clients.py` is deliberately empty --
+    its placeholders were replaced in Session 4 and the file stays so the
+    registry's move is readable in one diff -- and a module with no tests
+    collects nothing whether it is marked or not.
+
+    A per-test marker is not accepted in place of a module one, deliberately:
+    the thing this catches is a module somebody added and forgot, and a rule
+    with two acceptable shapes is a rule whose violation is harder to see than
+    the violation.
+    """
+    unmarked: list[str] = []
+    counted = 0
+    for directory in ("contract", "deployment", "integration", "security", "recovery", "external"):
+        root = REPO_ROOT / "tests" / directory
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("test_*.py")):
+            text = path.read_text(encoding="utf-8")
+            if not re.search(r"^(?:async )?def test_", text, re.MULTILINE):
+                continue
+            counted += 1
+            if not re.search(r"^pytestmark\s*=", text, re.MULTILINE):
+                unmarked.append(str(path.relative_to(REPO_ROOT)))
+
+    assert counted > 150, (
+        f"only {counted} test modules were examined, so the assertion below is close to "
+        "vacuous. The scan has broken (D173, D260)"
+    )
+    assert not unmarked, (
+        f"{unmarked} define tests and carry no module marker, so no gate selector "
+        "collects them: they run when somebody names the path and never otherwise. "
+        "That is how a registered P0 proof went unswept for two releases (D1240, D1447)"
+    )

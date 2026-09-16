@@ -574,20 +574,59 @@ def test_no_module_is_imported_only_by_its_own_tests() -> None:
     # comment reads "Classification lives in agentic_postgres.listeners, not in
     # awk" -- and a rule that counted the mention would call `edge_credentials`
     # imported for exactly the same reason it was not.
+    #
+    # **`[\w, \t]` and not `[\w,\s]`, because `\s` matches a newline** (D1451).
+    # The greedy class ran past the end of the import statement and swallowed
+    # whatever word came next, so `from agentic_postgres import dependency_lock`
+    # followed by a blank line and `problems = ...` yielded the name
+    # `dependency_lock\n\nproblems`. Measured across `bin/*.sh`: **seven of the
+    # thirteen names this scan produces were mangled that way** --
+    # `backup_report\n\ndocument`, `deployed_output\n\ndocument`,
+    # `installed_release\n\ncheckout`, `migrations\n\ndocument`,
+    # `naming\ndocument`, `output_migrations\n\nalpha` -- and the guard stayed
+    # green only because every one of those modules has a second caller in
+    # `bin/*.py`. A module imported ONLY from a heredoc was reported as an
+    # orphan, which is this guard failing in the direction it exists to prevent.
     statement = re.compile(
         r"^\s*(?:from\s+agentic_postgres\.(\w+)\s+import|"
-        r"from\s+agentic_postgres\s+import\s+([\w,\s]+)|"
+        r"from\s+agentic_postgres\s+import\s+([\w,][\w, \t]*)|"
         r"import\s+agentic_postgres\.(\w+))",
         re.MULTILINE,
     )
+    from_shell: set[str] = set()
     for script in (REPO_ROOT / "bin").glob("*.sh"):
         for dotted, names, plain in statement.findall(script.read_text(encoding="utf-8")):
             if dotted:
-                imported.add(dotted)
+                from_shell.add(dotted)
             if plain:
-                imported.add(plain)
+                from_shell.add(plain)
             if names:
-                imported.update(name.strip() for name in names.split(",") if name.strip())
+                from_shell.update(name.strip() for name in names.split(",") if name.strip())
+
+    # Every name this scan produces must BE a module. The mangled names were
+    # not, and nothing noticed because a name that is not a module simply fails
+    # to subtract (D1451). Asserted rather than filtered: a scan producing
+    # rubbish is a scan whose real answers cannot be trusted either.
+    #
+    # A name from the package ROOT is legal and is not a module:
+    # `from agentic_postgres import CURRENT_SESSION` is what four commands do.
+    # Read from `__all__` rather than listed here, so the exception cannot
+    # drift from the thing it excepts.
+    import agentic_postgres
+
+    exported = set(agentic_postgres.__all__)
+    invented = sorted(name for name in from_shell if name not in modules and name not in exported)
+    assert not invented, (
+        f"the shell scan produced {invented}, which are neither modules of this package "
+        f"nor names it exports. The pattern is reading past the end of an import "
+        "statement, so the names it does produce are not to be trusted either (D1451)"
+    )
+    assert len(from_shell) >= 10, (
+        f"the shell scan found only {len(from_shell)} imports; there were 13 when this "
+        "was measured, and a collapse would make every heredoc-only caller look like an "
+        "orphan"
+    )
+    imported |= from_shell
 
     assert imported, "no imports of the package found at all; this compared nothing"
     orphans = sorted(modules - imported)
@@ -885,3 +924,79 @@ def test_the_provisioner_writes_no_root_owned_bytecode() -> None:
         "provision-host.sh runs as root and does not suppress bytecode; it will "
         "leave root-owned __pycache__ in the operator's checkout"
     )
+
+
+# ---------------------------------------------------------------------------
+# The environment against the lock, which is not the lock (D297, D384, D1430)
+# ---------------------------------------------------------------------------
+
+
+def test_this_environment_satisfies_the_development_lock() -> None:
+    """The check `bin/lock-dev-deps.sh --check` has never made (D1430).
+
+    That command verifies the LOCK -- that `requirements-dev.txt` is what
+    `requirements-dev.in` resolves to at the lock's own cutoff. It says nothing
+    about what is installed, and the gap has killed a gate three times, each
+    time in collection, each time with a `ModuleNotFoundError` and no cause:
+    Session 6's host gate after nine packages were added (D297), Session 7's
+    with `boto3` (D384), and Session 6's own host run again.
+
+    **This is the offline half and the gate step is the other.** Running it here
+    means a workstation learns before it spends fifteen minutes; running it in
+    step 2 means a host learns before it spends thirteen.
+    """
+    from agentic_postgres import dependency_lock
+
+    pins = dependency_lock.pinned_versions()
+    assert len(pins) > 50, (
+        f"only {len(pins)} pins were read from {dependency_lock.LOCK_PATH.name}; a "
+        "hash-locked requirements file has ~98, and a pattern that reads none would "
+        "make the assertion below vacuous (D173, D260)"
+    )
+
+    problems = dependency_lock.disagreements()
+    assert not problems, dependency_lock.refusal(problems)
+
+
+def test_the_lock_comparison_names_the_remedy_and_tells_absent_from_moved() -> None:
+    """Two kinds of disagreement, two sentences, and a command in both.
+
+    Every one of the three gate deaths ended in a message that named a module.
+    What an operator needed was the cause -- the environment, not the lock --
+    and the command. The two kinds are separated because one produces a
+    `ModuleNotFoundError` and the other produces *behaviour*, which nothing
+    detects at all.
+
+    Name canonicalisation is asserted here too (PEP 503): `typing_extensions`
+    and `typing-extensions` are one distribution, and a comparison that called
+    them two would report a disagreement that is a spelling -- which is how a
+    check like this gets turned off.
+    """
+    from agentic_postgres import dependency_lock
+
+    assert dependency_lock.canonical("Typing_Extensions") == "typing-extensions"
+    assert dependency_lock.canonical("ruamel.yaml") == "ruamel-yaml"
+
+    absent = dependency_lock.disagreements({"cryptography": "46.0.1"}, {})
+    assert absent == ["cryptography==46.0.1 is pinned and NOT INSTALLED"], absent
+
+    moved = dependency_lock.disagreements({"ruff": "0.14.0"}, {"ruff": "0.13.0"})
+    assert moved == ["ruff is installed at 0.13.0; the lock pins 0.14.0"], moved
+
+    # An installed distribution the lock does not pin is NOT a disagreement: a
+    # venv legitimately carries pip and setuptools, and a check that refused
+    # them is a check nobody keeps green.
+    assert (
+        dependency_lock.disagreements({"ruff": "0.14.0"}, {"ruff": "0.14.0", "pip": "25.2"}) == []
+    )
+
+    # And the spelling is compared after canonicalisation, in both directions.
+    assert (
+        dependency_lock.disagreements({"typing-extensions": "4.0"}, {"typing_extensions": "4.0"})
+        == []
+    )
+
+    sentence = dependency_lock.refusal(absent + moved)
+    assert dependency_lock.INSTALL_COMMAND in sentence, sentence
+    assert "The LOCK is fine" in sentence, sentence
+    assert "cryptography" in sentence and "ruff" in sentence

@@ -33,6 +33,7 @@ is that its claim is narrow enough to need one exemption rather than a list:
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -365,6 +366,47 @@ def released_parameter_names() -> dict[str, set[str]]:
     }
 
 
+def _stale_sql_signatures(templates: list[Path]) -> tuple[list[str], int]:
+    """Walk templates in order; return what is stale and how much was compared.
+
+    Extracted from the proof so it can be pointed at a SYNTHETIC set that is
+    stale (D1454). Inside the proof it was unreachable by any input, which made
+    the proof's own assertion vacuous on a healthy tree -- and Run 5's battery
+    measured exactly that: a mutation removing the comparison survived.
+    """
+    live: dict[str, dict[int, set[int]]] = {}
+    checked = 0
+    stale: list[str] = []
+
+    for path in templates:
+        text = sql_surface.sql_only(path.read_text(encoding="utf-8"))
+        events = [(match.start(), "drop", match) for match in DROP.finditer(text)]
+        events += [(match.start(), "create", match) for match in CREATE.finditer(text)]
+        events += [(match.start(), "named", match) for match in SQL_SIGNATURE.finditer(text)]
+
+        for _, kind, match in sorted(events, key=lambda event: event[0]):
+            arguments = _arguments(text, match.end() - 1)
+            if arguments is None:
+                continue
+            name = match.group(1)
+            declarations = live.setdefault(name, {})
+
+            if kind == "drop":
+                declarations.pop(len(arguments), None)
+            elif kind == "create":
+                declarations[len(arguments)] = _callable_arities(arguments)
+            else:
+                checked += 1
+                if len(arguments) not in declarations:
+                    stale.append(
+                        f"{path.name}: {name}({', '.join(arguments)}) spells "
+                        f"{len(arguments)} argument(s); the declarations live at that "
+                        f"point are {sorted(declarations) or 'none'}"
+                    )
+
+    return stale, checked
+
+
 def test_every_sql_signature_names_a_declaration_that_is_live_at_that_point() -> None:
     """ADR 0175's first blind spot, widened against the DEFINITION (D942, D1448).
 
@@ -393,35 +435,9 @@ def test_every_sql_signature_names_a_declaration_that_is_live_at_that_point() ->
     because the pattern was repaired, and it is written down here with that
     reason so the next reader does not "restore" it (D1448).
     """
-    live: dict[str, dict[int, set[int]]] = {}
-    checked = 0
-    stale: list[str] = []
-
-    for path in sorted((REPO_ROOT / "migrations" / "templates").glob("*.sql")):
-        text = sql_surface.sql_only(path.read_text(encoding="utf-8"))
-        events = [(match.start(), "drop", match) for match in DROP.finditer(text)]
-        events += [(match.start(), "create", match) for match in CREATE.finditer(text)]
-        events += [(match.start(), "named", match) for match in SQL_SIGNATURE.finditer(text)]
-
-        for _, kind, match in sorted(events, key=lambda event: event[0]):
-            arguments = _arguments(text, match.end() - 1)
-            if arguments is None:
-                continue
-            name = match.group(1)
-            declarations = live.setdefault(name, {})
-
-            if kind == "drop":
-                declarations.pop(len(arguments), None)
-            elif kind == "create":
-                declarations[len(arguments)] = _callable_arities(arguments)
-            else:
-                checked += 1
-                if len(arguments) not in declarations:
-                    stale.append(
-                        f"{path.name}: {name}({', '.join(arguments)}) spells "
-                        f"{len(arguments)} argument(s); the declarations live at that "
-                        f"point are {sorted(declarations) or 'none'}"
-                    )
+    stale, checked = _stale_sql_signatures(
+        sorted((REPO_ROOT / "migrations" / "templates").glob("*.sql"))
+    )
 
     assert not stale, "a SQL statement names a signature no declaration had:\n" + "\n".join(stale)
     assert checked >= 135, (
@@ -429,6 +445,52 @@ def test_every_sql_signature_names_a_declaration_that_is_live_at_that_point() ->
         "written; a collapse to zero is what a broken pattern looks like, and it would "
         "pass the assertion above (D173, D260)"
     )
+
+
+def test_the_sql_signature_walk_detects_a_stale_reference(tmp_path: Path) -> None:
+    """The POSITIVE control, and the battery is why it exists (D1454).
+
+    The proof above is vacuous on a healthy tree: nothing is stale, so `stale`
+    is empty whether the comparison runs or not. Run 5's own battery proved it
+    -- a mutation that made the walk stop comparing **survived**, green, with
+    `checked` still counting. `checked >= 135` says the guard LOOKED; only this
+    says it COMPARED.
+
+    Three templates, in version order, so the walk is exercised exactly as it is
+    over the release: a declaration, a grant that matches it, and a grant that
+    does not. The matching one must NOT be reported -- without that arm a walk
+    that reported everything would pass this too.
+    """
+    (tmp_path / "0001-create.sql").write_text(
+        "CREATE FUNCTION api.widget(p_a text, p_b uuid) RETURNS void AS $$ $$ LANGUAGE sql;\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "0002-right.sql").write_text(
+        "GRANT EXECUTE ON FUNCTION api.widget(text, uuid) TO nobody;\n",
+        encoding="utf-8",
+    )
+    stale, checked = _stale_sql_signatures(sorted(tmp_path.glob("*.sql")))
+    assert checked == 1, checked
+    assert stale == [], f"a grant matching its declaration was reported stale: {stale}"
+
+    (tmp_path / "0003-wrong.sql").write_text(
+        "REVOKE ALL ON FUNCTION api.widget(text, uuid, jsonb) FROM nobody;\n",
+        encoding="utf-8",
+    )
+    stale, checked = _stale_sql_signatures(sorted(tmp_path.glob("*.sql")))
+    assert checked == 2, checked
+    assert len(stale) == 1, stale
+    assert "0003-wrong.sql" in stale[0] and "3 argument(s)" in stale[0], stale
+
+    # And a reference BEFORE the declaration it names is stale too, which is the
+    # ordering half: a grant in an earlier migration cannot name a function a
+    # later one creates.
+    early = tmp_path / "0000-early.sql"
+    early.write_text(
+        "GRANT EXECUTE ON FUNCTION api.widget(text, uuid) TO nobody;\n", encoding="utf-8"
+    )
+    stale, _ = _stale_sql_signatures(sorted(tmp_path.glob("*.sql")))
+    assert any("0000-early.sql" in item for item in stale), stale
 
 
 def test_an_rpc_body_names_only_parameters_the_declaration_has() -> None:

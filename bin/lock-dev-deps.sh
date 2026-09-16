@@ -23,7 +23,17 @@
 #   0  success
 #   2  invalid operator input
 #   3  missing local prerequisite
-#   5  lock is out of date, or carries no cutoff (--check only)
+#   5  lock is out of date, carries no cutoff, or this environment does not
+#      satisfy it (--check / --check-environment only)
+#
+# **--check and --check-environment are two different questions and confusing
+# them has killed a gate three times** (D297, D384, D1430). --check asks whether
+# the LOCK is what the input resolves to. --check-environment asks whether the
+# interpreter that is about to run the suite actually has what the lock pins.
+# The first can be green while the second is false, and when it was, the gate
+# printed its green line and died in collection with a ModuleNotFoundError.
+# Both live here, in one command, so the distinction is visible at the point it
+# was confused.
 
 set -euo pipefail
 
@@ -41,9 +51,23 @@ readonly LOCK_FILE="${ROOT_DIR}/requirements-dev.txt"
 # a second file that could drift away from the lock it describes.
 readonly CUTOFF_PREFIX="# exclude-newer: "
 
+# The interpreter this check reads its metadata FROM, which is the whole
+# subject: `--check-environment` answers a question about one interpreter's
+# site-packages, so it must be the one the gate runs the suite with. The venv
+# first, for that reason, and never a bare `python` -- Ubuntu ships none.
+interpreter() {
+  if [ -x "${ROOT_DIR}/.venv/bin/python" ]; then
+    printf '%s\n' "${ROOT_DIR}/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  else
+    die 3 "no Python interpreter found (looked for .venv/bin/python, python3)."
+  fi
+}
+
 usage() {
   cat <<'USAGE'
-Usage: bin/lock-dev-deps.sh (--update | --check | --help)
+Usage: bin/lock-dev-deps.sh (--update | --check | --check-environment | --help)
 
   --update   Resolve requirements-dev.in as of NOW, stamp that instant into the
              lock's first line, and write the hash-locked requirements-dev.txt.
@@ -51,6 +75,13 @@ Usage: bin/lock-dev-deps.sh (--update | --check | --help)
   --check    Verify requirements-dev.txt is exactly what --update would have
              produced AT THE CUTOFF THE LOCK ITSELF CARRIES. Modifies nothing,
              and its answer does not change while the tree does not.
+             This checks the LOCK. It says nothing about what is installed.
+  --check-environment
+             Verify that THIS interpreter's installed distributions satisfy the
+             lock: every pinned name present, at the pinned version. Reads no
+             network and resolves nothing. A distribution the lock does not pin
+             is not a disagreement -- a venv legitimately carries pip and
+             setuptools.
   --help     Show this message.
 
 Install the locked set with:
@@ -130,7 +161,7 @@ stamp() {
 main() {
   if [ "$#" -ne 1 ]; then
     usage >&2
-    die 2 "exactly one of --update, --check, or --help is required."
+    die 2 "exactly one of --update, --check, --check-environment, or --help is required."
   fi
 
   case "$1" in
@@ -156,6 +187,29 @@ main() {
       # lock it is about to overwrite.
       stamp "${staged}" "${cutoff}" "${LOCK_FILE}"
       printf 'lock-dev-deps: wrote %s at cutoff %s\n' "${LOCK_FILE}" "${cutoff}"
+      return 0
+      ;;
+    --check-environment)
+      # No `require_uv`: this resolves nothing and reaches no network. It reads
+      # the lock and this interpreter's own metadata, which is the environment
+      # whose answer matters -- asking a subprocess could resolve a different
+      # interpreter, and resolving a different interpreter is half of what D297
+      # was.
+      [ -f "${LOCK_FILE}" ] || die 5 "missing ${LOCK_FILE}; run --update"
+      PYTHONPATH="${ROOT_DIR}/src" "$(interpreter)" - <<'PYTHON'
+import sys
+
+from agentic_postgres import dependency_lock
+
+problems = dependency_lock.disagreements()
+if problems:
+    print(f"lock-dev-deps: {dependency_lock.refusal(problems)}", file=sys.stderr)
+    raise SystemExit(5)
+print(
+    f"lock-dev-deps: this environment satisfies the lock "
+    f"({len(dependency_lock.pinned_versions())} pinned distributions)"
+)
+PYTHON
       return 0
       ;;
     --check)

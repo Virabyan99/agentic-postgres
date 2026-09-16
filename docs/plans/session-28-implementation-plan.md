@@ -9,9 +9,9 @@ Then `docs/scope-closure.md` §15 and `docs/plans/session-27-implementation-plan
 and the tag does not. **Session 29 is the trip**, and Run 8 writes its sheet.
 **Product version at close:** `VERSION` **1.7.0**, `CURRENT_SESSION` moves
 **25 → 28**. 26 and 27 are skipped the way 19 is, and the skip is the record.
-**Next free:** D1451, ADR 0215. *(Run 1 added D1426–D1433; Run 2 added
+**Next free:** D1457, ADR 0215. *(Run 1 added D1426–D1433; Run 2 added
 D1434–D1439 and wrote ADRs 0210, 0211 and 0212; Run 3 added D1440–D1443 and
-built them; Run 4 added D1444–D1446; Run 5 is adding D1447 onward.)*
+built them; Run 4 added D1444–D1446; Run 5 added D1447–D1456.)*
 
 ---
 
@@ -80,10 +80,11 @@ D1406–D1443. **D1406–D1425 were measured during planning on `ad96673`; D1426
 are Run 1's**, from the nine rows planning had not measured; **D1434–D1439 are Run
 2's**, measured on rig 28a and on a pinned PostgreSQL 18.4; **D1440–D1443 are Run
 3's**, from building what Run 2 decided; **D1444–D1446 are Run 4's**, from the
-three readers that report a file event as a domain event; **D1447–D1450 are Run
-5's first half**, and every one of them came from a proof's FIRST EXECUTION. Rows marked
+three readers that report a file event as a domain event; **D1447–D1456 are Run
+5's**, and all but two came from a proof's FIRST EXECUTION or from the run's own
+mutation battery. Rows marked
 **answered** are closed by writing down what the tree already does; rows marked
-**recorded** are not repaired here and say why. Runs allocate from **D1451**.
+**recorded** are not repaired here and say why. Runs allocate from **D1457**.
 
 **Run 1's eight rows changed four of this plan's own run descriptions**, and the
 changes are in §5 rather than only here: D1426 makes D1045 a fourteenth answered
@@ -138,6 +139,12 @@ the same finding, and D1430 revives a deferral whose stated reason has expired.
 | **D1448** | Run 5's own new SQL-signature guard, as first written: *"matched within one statement (`[^;]*?`) over comment-stripped SQL, so a sentence in a `--` block cannot pair them."* It reported **153** references. | **The pattern paired a `GRANT` with a later `CREATE` across intervening statements.** Its first execution flagged `0014-object-storage-plane.sql: storage_create_upload_intent(p_owner_id uuid, …)` as a reference to a declaration that did not exist — because the match WAS the declaration, reached from a `GRANT` several statements above through `[^;]*?` under `DOTALL`. Excluding `CREATE` from the gap gives **140**, and every one of those names a declaration live at that point. | The exclusion is in the pattern with the measurement beside it, and the count assertion says **140** with the reason it moved, so the next reader does not restore 153. The threshold is `>= 135` rather than `== 140`, because a released migration may add one. | A count written into an assertion before the pattern was right would have frozen thirteen false pairings as the expected state — and the guard would then have failed the day the pattern was corrected. | 0175 |
 | **D1449** | Run 5's own new RPC-body guard, twice. | **Two first-execution failures, in opposite directions.** (1) The path pattern required a quote immediately before `/rpc/`, and every deployment proof builds the URL as `f"{base}/rpc/create_note"` — so it read **zero** bodies and the only thing that caught it was the guard's own *did I measure anything* assertion. (2) Taking the next literal dict after the path matched the OpenAPI **schema** documents that `test_client_ir.py` and `test_openapi_normalize.py` build beside such a path — `properties`, `required`, `type`, `in` — producing four failures against a guard that had found nothing real. | `body=`/`json=` is required between the path and the dict; the leading quote is gone. And the two bodies that DO name an undeclared key are named per `(file, function, key)` in `DELIBERATE_UNDECLARED_KEYS`, because both are proofs *about* an undeclared key — a caller-supplied `owner_id` that must be ignored, and `{"nope": 1}` that must be refused without disclosing a role. | A scan whose first execution produces only false positives gets deleted, and a scan that measures nothing passes. Both halves of this guard hit one of those on the way in, and the assertion that saved it is the one that asks *did I look at anything at all* (D173, D260, D509). | 0175 |
 | **D1450** | `_arguments` in `test_database_function_signatures.py`, unchanged since Session 16: it walks forward from a `(` until the parens balance. | **It is unbounded, so the arity guard's verdict on an unterminated example depends on text far below it.** The module's own `_is_a_call` docstring contains ``"CREATE FUNCTION api.agent_audit_begin("`` as an example of a prefix string. Its paren never closes, so the walk runs on through whatever follows — and **adding functions to this file flipped that example from *not a call* to *a call with 14 arguments***, measured on this run's first execution of the suite after the two new guards were inserted above the test. | A **400-character bound**: an argument list that does not close within it is not a call. The longest real call in the tree is 84 characters, and `checked > 100` is what says the bound did not narrow the scan. The bound and its measurement are in the code. | This is the guard for ADR 0175 and it had a verdict that could be changed by editing an unrelated part of the same file. Nothing would have reported it: the flip was toward a FALSE POSITIVE this time, which is the loud direction — the same fragility pointing the other way is a call the guard stops seeing. | 0175 |
+| **D1451** | `test_no_module_is_imported_only_by_its_own_tests`, the guard for D204 — *"a module nothing calls is a feature that does not exist"* — and its shell half: *"Python embedded in a shell script is still a caller."* | **Its pattern reads a module name plus whatever word follows it.** The import list is captured with `[\w,\s]+`, and `\s` matches a newline, so `from agentic_postgres import dependency_lock` followed by a blank line and `problems = …` yields the name `dependency_lock\n\nproblems`. Measured across `bin/*.sh`: **seven of the thirteen names this scan produces are mangled that way** — `backup_report\n\ndocument`, `deployed_output\n\ndocument`, `installed_release\n\ncheckout`, `migrations\n\ndocument`, `naming\ndocument`, `output_migrations\n\nalpha`. The guard stayed green only because every one of those modules has a second caller in `bin/*.py`. A module imported ONLY from a heredoc is reported as an orphan — which is how Run 5's own new module was greeted. | `[\w,][\w, \t]*`, which cannot cross a line, **plus an assertion that every name the shell scan produces is a module of the package or a name it exports** (read from `__all__`, not listed). A scan producing rubbish is a scan whose real answers cannot be trusted either. | The guard built to catch *a feature that does not exist* could not see a caller, and the direction it failed in is the one that fires: it reported a false orphan rather than missing a real one. The same fragility pointing the other way is a module nothing calls, passing. | — |
+| **D1452** | `docs/scope-closure.md` and `CLAUDE.md` §9 on D1282: aiming the gate's `--kit-dir` at the newest kit *"destroys the proof **without failing**, which is the quiet kind."* | **It fails, loudly, and has since Session 21.** `test_the_kit_exported_before_this_release_verifies_at_it` carries a `pytest.fail` on exactly that condition, written with the proof — `git log -L` puts it in `4dde0e5`, the Session 21 bump. The row describes a self-diagnosing guard as a silent trap. | **The characterisation is corrected in the ledger**, and the refusal is made to name **what it found** rather than only what it wanted — an operator holding three kits had to work out which one it meant. The operational half that IS true is kept and given its reason: the claim's premise is the version gap, so at least one kit below the tree's outputs version has to be kept, which is why three are. | A row that calls a loud guard quiet produces the wrong caution: an operator believing they must remember something the product already tells them. It is the inverse of this project's usual defect and it costs the same thing — attention spent where none is needed. | — |
+| **D1453** | Audit 1c and D1429: *"Studio has no live half for the query view's RLS"*, the unnumbered half of the audit's D1276 row. | **Confirmed, and it is the one view that returns a tenant's data.** `test_session24_studio.py` carries live halves for revocation (`STU-REVOKE-001`) and for the audit read (`AGT-AUDIT-002`) and nothing for `POST /__apg/query`. Studio holds no policy of its own: the read is forwarded with the human's own token, `api.notes` is `security_invoker`, and `app.notes` carries FORCE row-level security — so the answer is PostgreSQL's, and nothing live said so. | **Written in Run 5, `not_run` until Session 29's trip.** Two owners, one relation: a row written by the auditor and one by a second subject, both through `POST /rpc/create_note` as themselves, with the stranger's row read back **as the stranger** so its existence is not assumed. Both directions asserted — a view returning nothing satisfies *the stranger's row is absent*, and a view with no policy satisfies *my row is present*. | **D1276 itself is closed** and its mechanism is a stated unknown ADR 0195 permits; this run does not re-repair it and asserts no mechanism for it. A repaired row and an open row sharing one number is how the repaired one gets re-repaired and the open one keeps waiting. | 0205 |
+| **D1454** | Run 5's own SQL-signature guard, after it went green: *"140 such references across 34 templates, and every one of them names a live declaration."* | **The assertion is vacuous on a healthy tree, and the run's own battery proved it.** A mutation that removed the comparison — `if False:` in place of the staleness test — **SURVIVED**, green, because `stale` is empty whether the walk compares or not when nothing is stale. `checked >= 135` says the guard LOOKED; nothing said it COMPARED. That is D173/D260's shape in a guard written this very run, four hours old. | The walk is extracted as `_stale_sql_signatures` and given a **positive control**: three synthetic templates in version order — a declaration, a grant that matches it (which must NOT be reported), a revoke that does not (which must), and a reference standing before the declaration it names. The battery re-run kills it. | A survivor is evidence (CLAUDE.md §1), and this one says *weak test* rather than *uninformative mutation*. It is also the argument for running the battery over a run's whole output rather than over the tests that felt risky: this guard was the one that had just been measured most carefully. | — |
+| **D1455** | `docs/scope-closure.md`: *"`test_honest_readers`' `sudo -u` prefix has still never run … the prefix itself waits for a gate that runs as root."* CLAUDE.md §7: twelve never-executed proofs have failed on first execution. | **It ran, and it passed** — rig 28c, 2026-09-17: `ubuntu:24.04` as **uid 0**, the checkout bind-mounted at its own path so `REPO_ROOT` resolves and still owned by `1000:1000`, the uv interpreter mounted beside it, the owner uid created inside so `sudo -n -u '#1000'` has somebody to become. `euid: 0`, `sudo -n -u` answers `uid=1000`, and **24 passed, 0 skipped** — including `test_an_unreadable_document_is_unreadable_and_never_absent` and `test_the_reading_the_root_branch_makes_gives_the_same_answer`, the two that carry the re-entry. | **Recorded as executed.** The row comes off `scope-closure.md`'s open list, and the rig is a throwaway rebuilt from its script. | **It is the thirteenth never-executed proof and the first not to fail.** The reason is worth more than the result: D1165, D1300, D1301, D1302, D1330 and D1332 each repaired this pair in response to a first execution **elsewhere** — root's `0700` temp directory, the `/tmp` chmod that took the sticky bit off a host, a fixture the re-entered child could not own. Six repairs had already been applied to it from adjacent evidence before it ever ran. | — |
+| **D1456** | Audit 1c: *"the uncached first run of `apg dev up` is measured in CI and nowhere else"*, closing act *"measure it where it is claimed."* | **It is already claimed in the one place the row asks for.** `capacity.UNMEASURED` carries the entry verbatim — the subject, the reason (`docker rmi` of the image the whole contract suite shares, and the number obtained would be this machine's link speed), and `unblocked_by: "nothing that should be run mid-session; the CI row is the measurement"`. `scope-closure.md` §11 carries the same. A test asserts `UNMEASURED` is non-empty for as long as anything is. | **Closed by saying so**, and by nothing else. Measuring it here would evict the image six cluster fixtures share, cost every later test in the session a pull, and produce a number about this machine's link. | The row's closing act is already performed, which is the fourteenth instance of Session 28's own §0 finding: the audit's *closing act* column was written from the documents rather than from the code. Here it was written from neither — the claim is in the envelope the row names. | 0203 |
 
 ---
 
@@ -624,6 +631,58 @@ fatal (D269), a paired control the mutation cannot reach and green in the same
 invocation (D499), and `FAILED` asserted rather than `ERROR` (D386). Restore by
 copy and `cmp`, never `git checkout --`. `test_acceptance_registry` runs because
 test functions are added and renamed (D1119).
+
+**Done.** 2026-09-17, in two commits — `edc3b41` and this one. **D1447–D1456**,
+and all but two came from a proof's first execution or from the run's own
+battery. Eleven mutations, **eleven kills after one survivor was repaired**,
+every control green in the same invocation.
+
+*The survivor is the run's own finding and it is the shape Tier 1c is about*
+(D1454). The SQL-signature guard went green over 140 references, and a mutation
+that removed its comparison **survived**: `stale` is empty whether the walk
+compares or not, on a tree where nothing is stale. `checked >= 135` said the
+guard LOOKED and nothing said it COMPARED. The walk is extracted and given a
+positive control — three synthetic templates, including one grant that matches
+its declaration and must NOT be reported. *A value that looked measured and was
+not*, in a guard four hours old, found by the battery the run owed anyway.
+
+*What each item cost, and what it found:*
+
+- **D1240 / D1421 split 1 + 3** (D1447). A registered P0 proof that only a host
+  trip ever ran; three modules no registry names. The stated worry about the
+  service tree is refuted by `pytest.ini`. 0 → 82 under the gate's selector.
+  **Guarded against the class**, not the four: every test module that defines a
+  test carries a module marker, asserted over 180+ modules with the empty
+  placeholder excluded by condition rather than by name.
+- **D942's two blind spots, built** — 140 SQL signatures checked against the
+  declaration live *at that migration*, and RPC bodies checked by parameter
+  NAME. Three findings on the way in (D1448, D1449, D1450), one of which —
+  `_arguments` being unbounded — meant the ADR 0175 guard's verdict on a
+  docstring example could be changed by editing an unrelated part of the same
+  file.
+- **D1422's stated limit**, in both directions, not a parser.
+- **D1414** onto the module's own `refused()` shape; **D1420**'s two premises,
+  each with a control.
+- **D1430 / D297 taken** — `bin/lock-dev-deps.sh --check-environment`, in the
+  gate's step 2, beside the `--check` it was confused with for twenty-two
+  sessions. The remedy is the point: three gate deaths ended in a module name.
+  **It found a second defect on the way in** (D1451): the orphan guard's shell
+  scan reads a module name plus the word that follows it, and mangles seven of
+  the thirteen names it produces.
+- **`test_honest_readers`' `sudo -u` re-entry RAN** (D1455, rig 28c), as uid 0
+  in a container, and **passed** — the thirteenth never-executed proof and the
+  first not to fail. Six repairs had already reached it from adjacent
+  evidence.
+- **D1429's live half written** (D1453), `not_run` until the trip; **D1282
+  corrected** (D1452) — the trap is loud, not quiet; **the uncached `apg dev up`
+  row closes by saying so** (D1456), because the claim is already in the
+  envelope the row names.
+- **D1431 / D201 recorded in §10** and separated from D1430, as planned.
+
+*Ran before the push*, once: the twelve modules of the first half, plus
+`test_repository_contract`, `test_acceptance_registry`, `test_session24_studio`
+(collection), `test_session21_agent` (collection), `test_honest_readers`, and
+the gate's two collection selectors. Plus the battery. CI is the full check.
 
 ### Run 6 — what the agent record keeps, and for how long
 

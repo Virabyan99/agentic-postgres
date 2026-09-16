@@ -566,10 +566,23 @@ def test_the_kit_exported_before_this_release_verifies_at_it(as_root: None) -> N
     assert versions, f"{kit} holds no deployed document under projects/"
     older = {k: v for k, v in versions.items() if v < output_migrations.CURRENT_VERSION}
     if not older:
+        # **Names what it found, not only what it wanted** (D1282, D1452). The
+        # ledger has called this trap *quiet* -- "aiming --kit-dir at the newest
+        # kit destroys the proof without failing" -- and that is not what
+        # happens: this refuses, loudly, and has since Session 21. What it did
+        # not do was say WHICH kit it was given or what was in it, so an
+        # operator holding three kits had to work out which one it meant. That
+        # is also why the older kits are kept rather than pruned: this claim's
+        # premise IS the version gap, so the deployment needs at least one kit
+        # exported before the current outputs version.
         pytest.fail(
             f"every stored document in {kit} is already at outputs v"
-            f"{output_migrations.CURRENT_VERSION}; point --kit-dir at the kit exported "
-            "BEFORE the deploy through this session (the premise of REC-KIT-003)"
+            f"{output_migrations.CURRENT_VERSION}, so this proof would compare a kit "
+            f"against its own release and pass having measured nothing.\n"
+            f"  found: {versions}\n"
+            f"  wanted: at least one document below v{output_migrations.CURRENT_VERSION}\n"
+            "Point --kit-dir at a kit exported BEFORE the deploy through this session. "
+            "That is the premise of REC-KIT-003 and the reason earlier kits are kept."
         )
     assert min(older.values()) >= dr_kit.KIT_FIRST_OUTPUTS_VERSION, older
 

@@ -70,6 +70,17 @@ MCP_ACCEPT = "application/json, text/event-stream"
 #: accumulate rows nothing removes.
 AUDITOR_USERNAME = "apg-s24-studio-auditor"
 AUDITOR_PASSWORD = "s24-studio-auditor-9c41e7b0d268"  # noqa: S105 -- a probe credential
+
+#: A SECOND human, whose rows the auditor must not be shown (D1276, D1429).
+#:
+#: Studio's query view is a forwarder and holds no policy of its own: the read
+#: goes upstream as the human's own token, PostgREST switches into their request
+#: role, and the row policies on `app.notes` decide what comes back. Nothing
+#: live has ever said so -- the module carries live halves for revocation and
+#: for the audit read and none for this -- and a forwarder that leaked would
+#: leak exactly here, because it is the one view that returns a tenant's data.
+STRANGER_USERNAME = "apg-s24-studio-stranger"
+STRANGER_PASSWORD = "s24-studio-stranger-4f0aa7c31d95"  # noqa: S105 -- a probe credential
 AGENT_NAME = "apg-s24-studio-reader"
 AGENT_SECRET = "s24-studio-reader-3f80a2c5e194"  # noqa: S105 -- a probe credential
 
@@ -668,3 +679,150 @@ def test_the_deployed_audit_read_carries_the_boundary_of_a_real_refusal(
             f"{studio_by_id[audit_id]['denial_reason']!r} vs "
             f"{by_id[audit_id]['denial_reason']!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# The query view's RLS -- the live half this module did not carry (D1429)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def two_owners_one_relation(
+    project_a: dict[str, Any],
+    psql: Callable[..., tuple[int, str, str]],
+    api_call: Callable[..., Any],
+    app_base: Callable[[dict[str, Any]], str],
+    rest_base: Callable[[dict[str, Any]], str],
+    auditor: dict[str, Any],
+) -> Any:
+    """One row owned by the auditor and one owned by somebody else.
+
+    **The second row is the whole proof.** A query view that returned nothing at
+    all would satisfy *the stranger's row is absent*, and a query view with no
+    policy behind it would satisfy *the auditor's row is present*. Only the pair
+    distinguishes a forwarder whose upstream enforces ownership from one that
+    happens to be empty (D173, D260).
+
+    Both rows are written through `POST /rpc/create_note`, as their owners, with
+    their own tokens -- the owner is DERIVED from the request identity and never
+    supplied (migration 0005), so this cannot accidentally write both rows under
+    one subject.
+
+    Created with `auth_create_user` and removed in `finally`, for the reason the
+    auditor fixture gives: a fixture built on an endpoint makes every proof
+    conditional on that endpoint, and rows left behind make the NEXT sweep's
+    controls ambiguous.
+    """
+    hashing = service_source.load("hashing")
+    role_name = project_a["database"]["roles"]["project_admin"]
+
+    psql(project_a, f"DELETE FROM app_private.users WHERE username = '{STRANGER_USERNAME}';")
+    code, stranger_id, error = psql(
+        project_a,
+        "SELECT app_private.auth_create_user("
+        f"'{STRANGER_USERNAME}', 'Session 24 studio stranger', '{role_name}', "
+        "ARRAY[]::text[], "
+        f"'{hashing.Hasher().hash(STRANGER_PASSWORD)}');",
+    )
+    assert code == 0 and stranger_id.strip(), f"could not create the stranger: {error}"
+
+    try:
+        answer = api_call(
+            f"{app_base(project_a)}/auth/login",
+            method="POST",
+            body={"username": STRANGER_USERNAME, "password": STRANGER_PASSWORD},
+        )
+        assert answer.status == 200, (
+            f"the stranger could not log in ({answer.status}: {answer.body[:200]}). "
+            "Without a second owner the assertion below measures nothing"
+        )
+        stranger_token = json.loads(answer.body)["access_token"]
+
+        base = rest_base(project_a)
+        titles = {
+            "mine": f"{AUDITOR_USERNAME}-rls-own",
+            "theirs": f"{STRANGER_USERNAME}-rls-other",
+        }
+        for token, title in (
+            (auditor["token"], titles["mine"]),
+            (stranger_token, titles["theirs"]),
+        ):
+            written = api_call(
+                f"{base}/rpc/create_note",
+                method="POST",
+                token=token,
+                body={"p_title": title, "p_content": ""},
+            )
+            assert written.status in (200, 201, 204), (
+                f"seeding {title} returned {written.status}: {written.body[:200]}"
+            )
+
+        # The stranger's row EXISTS -- read as the stranger, through the same
+        # surface. Without this, "the auditor cannot see it" is satisfied by a
+        # row that was never written (D509).
+        theirs = api_call(
+            f"{base}/notes?select=title&title=eq.{titles['theirs']}", token=stranger_token
+        )
+        assert theirs.status == 200 and json.loads(theirs.body), (
+            "the stranger cannot read their own row, so the assertion below would "
+            "pass against a write that did not happen"
+        )
+
+        yield titles
+    finally:
+        psql(
+            project_a,
+            "DELETE FROM app.notes WHERE title IN ("
+            f"'{AUDITOR_USERNAME}-rls-own', '{STRANGER_USERNAME}-rls-other');",
+        )
+        psql(project_a, f"DELETE FROM app_private.users WHERE username = '{STRANGER_USERNAME}';")
+
+
+def test_the_query_view_shows_the_human_their_own_rows_and_not_anothers(
+    launched_studio: Launched, two_owners_one_relation: dict[str, str]
+) -> None:
+    """**D1276's other half, and the one with work in it** (D1429, D1453).
+
+    The audit's row bundles two findings under one number: the CI fixture that
+    assumed a published loopback port, which is repaired and whose mechanism is
+    a stated unknown ADR 0195 permits -- and this, which is unnumbered and had
+    no live half at all. This module proves revocation and the audit read
+    against the running plane and proved nothing about the one view that
+    returns a TENANT'S DATA.
+
+    **Studio holds no policy and that is the claim.** `query_view` builds a
+    PostgREST path and forwards it with the human's own token (ADR 0205): the
+    request role is theirs, `api.notes` is `security_invoker`, and
+    `app.notes` carries FORCE row-level security with an owner policy. So the
+    answer is PostgreSQL's, not the forwarder's -- and the way to show that is
+    to put a row there that the forwarder would have to filter itself in order
+    to hide.
+
+    Both directions, because each alone is satisfied by a broken view: the
+    auditor's own row present (a view returning nothing passes the second
+    assertion), and the stranger's absent (a view with no policy behind it
+    passes the first).
+    """
+    status, body = launched_studio.call(
+        "POST",
+        "/__apg/query",
+        {"relation": AUDITED_RELATION, "select": ["title"], "limit": 200},
+    )
+    assert status == 200, f"the query view answered {status}: {str(body)[:200]}"
+    assert isinstance(body, dict) and body.get("status") == "ok", (
+        f"the query view did not serve: {body}. A refused view proves nothing about "
+        "row-level security, so this is a prerequisite rather than the finding"
+    )
+
+    titles = [str(row.get("title")) for row in body.get("rows", [])]
+    assert two_owners_one_relation["mine"] in titles, (
+        "the auditor's OWN row is missing from their own query view, so the absence "
+        "asserted below would be the absence of everything (D509)"
+    )
+    assert two_owners_one_relation["theirs"] not in titles, (
+        "Studio's query view returned a row owned by another subject. The read is "
+        "forwarded as the human's token and `app.notes` carries FORCE row-level "
+        "security, so either the token is not the human's or the policy is not "
+        "applying -- and Studio holds no policy of its own to fall back on "
+        "(ADR 0205)"
+    )
