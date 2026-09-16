@@ -13,7 +13,7 @@ Run 7 is the close and the tag.
 **Product version at close:** `VERSION` **1.6.1**, `CURRENT_SESSION` stays
 **25**. This session repairs a release rather than building one, and the
 release it produces is `1.6.1`.
-**Next free:** D1402, ADR 0210.
+**Next free:** D1405, ADR 0210.
 
 ---
 
@@ -63,7 +63,8 @@ carried from the findings file's arithmetic.
 
 ## 1. The divergence table
 
-D1388–D1401. Rows marked **recorded** are not repaired here, with the reason.
+D1388–D1404. Rows marked **recorded** are not repaired here, with the reason.
+D1402–D1404 were opened by Run 1's own measurements and are not in the brief.
 
 | D | Said | Measured or read | This session | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -81,6 +82,10 @@ D1388–D1401. Rows marked **recorded** are not repaired here, with the reason.
 | **D1399** | `docs/upgrade-guide.md` §2 step 5: *"a third manifest inside it is untracked and makes every deploy refuse (D971), so it lives at `/home/op/<name>.yaml`."* | **`.gitignore:48-49` carries `/project.yaml` and `/project.*.yaml`**, added by `1.0.1`'s D1034 repair with a comment saying precisely why (*"the first act of adopting this product was to fork it and edit this file"*). A third manifest inside the checkout is ignored, and the findings file's host has `project.snippets.yaml` in the checkout with `git status --porcelain` empty. The advice is left over from before the release fixed the thing it works around, and following it now moves a file that does not need moving. | **Run 4**: the step says the manifest may live in the checkout since 1.0.1 and names the glob, keeping D971's reason for a manifest that is genuinely untracked. | A workaround that outlived its defect by six sessions, in a page written six sessions later — the ledger's own §2 shape, finished work described as unfinished. | — |
 | **D1400** | README §*Checks*: *"Each session has its own gate, `bin/session-01-check.sh` through `bin/session-10-check.sh`."* README §*Operating a deployment* is a command menu. | **Both are stale and one is a hole.** `ls bin/session-*-check.sh` gives **01–18 and 20–25** — the sentence understates the set by fifteen, and **there is no `session-19-check.sh`**, which no page accounts for (Session 19 was a repair session and registered no claims; nothing says so where a reader counting gates would look). And `bin/upgrade.sh` — the one command in the product whose entire job is this brief — **is absent from the operating menu**, mentioned in the README only inside a parenthetical about which verbs take `--project KEY`. | **Run 4** repairs both sentences and says why 19 has no gate. **Run 5** adds the guard: `test_documentation_index` already asserts every command the README *names* exists, and gains the other direction for a named set — the operator-facing commands a reader must be able to find. | The README's own D623 is *"Status: Session 3 of 12 complete for eight sessions"*, and the repair was a guard on the status line. The set of gates and the set of operator commands both went stale for the same reason: nothing reads them. | — |
 | **D1401** | `REL-STAGE-001`, and `docs/operator-guide.md` §10: a host sweep asserts each project's deployed document carries `template_version` equal to the tree's. | **A patch bump without a deploy makes `stage_release`'s live half fail at the next host sweep**, because the tree will read `1.6.1` and both projects are deployed at `1.6.0`. Measured against the requirement's text rather than assumed. This is not new in kind — Sessions 22 and 23 both closed with the host behind the tree — but it is new for this requirement, which Session 25 registered. | **Recorded, and it is an obligation rather than a defect.** The next host trip deploys the tree before it sweeps, which every trip already does. Named in §10 so the trip that inherits it is not surprised by a red `stage_release` it did not cause. | A requirement that couples a tag to a deployment, met by a session that tags without deploying. Stating it costs nothing; discovering it fifteen minutes into a sweep costs a second one. | — |
+
+| **D1402** | This plan's D1395, from the 2026-09-16 `--help` capture: *"this is the only verb that refuses `--help` for want of privilege."* | **True as stated, and three more verbs refuse `--help` for a different reason.** `bin/upgrade.sh check --help`, `plan --help` and `verify --help` each exit **2** with *the following arguments are required: --project*. Measured cause: `bin/upgrade.py:157` constructs its parser with **`add_help=False`**, so `--help` is not an argument it knows; the wrapper's `case "$1"` matches `--help` only in first position, `check` matches first and is dispatched, and argparse's required-argument error fires before its unrecognised-argument error. So the class is wider than privilege: **a wrapper that dispatches a verb before considering `--help`**, over a Python side that either checks privilege (`dr-kit`) or requires an argument (`upgrade`). Four verbs across two commands. | **Run 2** takes the wider rule: `--help` or `-h` anywhere in `"$@"` prints the wrapper's usage and returns 0 before the verb is dispatched. The guard derives the verbs to probe from each command's own usage block, line-anchored, which is the derivation D1316's repair already uses for `--project` — so the next command that grows a verb is covered without anybody editing a list. | The plan priced one instance and the measurement found a class. Guarding the instance would have left three verbs of the command this session's whole brief is about still refusing to explain themselves. | — |
+| **D1403** | The exit-code convention, and ADR 0195: a reader has three outcomes and reports the third rather than folding it. | **Two commands print a success line AFTER a refusal and exit non-zero.** Measured twice, on two different inputs: `bin/migrate.sh --project <schema-4 manifest> verify-lock` prints *"declares no migrations.set, so it has no lock of its own"*, then prints **"migrate: the released lock agrees with the manifest and templates"**, then exits **5**; `bin/mcp-contract.sh check --project <invalid manifest>` prints *"the project is refused: …"*, then **"the manifest compiles to the approved contract (6 tools)"**, then exits **5**. In both the last line a reader sees reads as success on a failing exit. The findings file noticed the first as *"a small ordering wart"* inside F-014; it is reproducible, it is in two commands, and the second was found by this session's own rig rather than by the brief. | **Run 2**: a refusal is the last thing printed. The release's lock genuinely does agree, and that sentence is still worth printing — before the refusal, not after it. | ADR 0195's family read from the other end: not an unknown reported as an answer, but the right answer printed last. An operator who reads the final line and the exit code disagrees with their own terminal. | 0195 |
+| **D1404** | `docs/upgrade-guide.md` §1's sixth check: *"`generate --check` exits 5 after **every** bump, because the client's `templateVersion` is derived from the release (D1238). Regenerate and commit it."* | **For a project that declares no migration set it exits 5 for a different reason, and regenerating is the wrong remedy.** Measured against a valid schema-4 manifest: *"clients/typescript/README.md is missing; the client has not been generated from this contract."* `bin/generate.sh --help` says the default output is `projects/<slug>/clients/typescript` for a project with a set and `clients/typescript` under the checkout root for one without — and **the release tracks no root-level `clients/` directory at all**. So the check refuses for every schema-4 project, always, and the page's remedy would have the reader create a top-level directory the release does not carry. The findings file reached the same wall from the other side and left it, correctly. | **Run 4** says which of the two refusals a reader is looking at and that a project with no set of its own has no client to regenerate. **Whether the release should track a root-level client, or `generate` should refuse a setless project by name, is §10's** — it is a product decision about what `apg generate` is for, not a sentence. | The page gives one cause and one remedy for a refusal that has two causes and, in the more common case, no remedy the page's own advice reaches. | — |
 
 ---
 
@@ -179,7 +184,88 @@ run rather than the measurement (D267).
 outputs are pasted into the `Done.` paragraph, because a measurement that
 exists only in a scrollback is one the next session will take on trust.
 
-**Done.**
+**Done.** 2026-09-16. Five readings, three new rows (**D1402–D1404; next free
+D1405**), one ADR, and **two apparatus defects of my own, caught before either
+became a finding**.
+
+**Rig 27a (D1390), and it is larger than the brief.** The rig reuses
+`test_generated_client_runtime`'s `served` fixture whole — a dev cluster from
+the render and the release, the authenticator activated through stdin, PostgREST
+configured from `compose.yaml`'s own environment — and adds one superuser DDL: a
+table with a column of every type in `FORMAT_TYPES` plus eight array spellings,
+and a function taking an argument of each. **The control holds**: a
+`vector` column comes back `extensions.vector(768)` and the same type as an
+argument comes back bare `extensions.vector`, exactly as D1216 recorded, so the
+rig is measuring what the product serves.
+
+What it measured, column and argument together:
+
+| Declared | Served as a column | Served as an argument | In the table? |
+|---|---|---|---|
+| `integer` | **`int32`** | **`int32`** | **no** |
+| `smallint` | **`int32`** | **`int32`** | **no** |
+| `bigint` | **`int64`** | **`int64`** | **no** |
+| `text[]`, `integer[]`, `uuid[]`, `double precision[]`, `boolean[]`, `jsonb[]`, `numeric[]` | the same spelling | the same spelling | **no, none of them** |
+| `tsvector` | `tsvector` | `tsvector` | **no, and it must stay no** — it is the control in `test_an_unknown_column_format_is_refused_and_never_typed_any` |
+| the other seventeen | their SQL name | their SQL name | yes |
+
+**`integer`, `smallint` and `bigint` are dead keys.** PostgREST never emits
+those three spellings, for a column or for an argument, so the table's entries
+for them can never match. The findings file found this from one direction — an
+`integer` RPC argument — and the measurement says it is every integer anywhere.
+
+**And the reason nobody met it is free to read.** The two committed snapshots
+between them serve exactly **`text`, `timestamp with time zone`, `uuid`,
+`extensions.vector` in both spellings**, and the enum `task_status`. So
+**seventeen of the table's twenty-one entries have never matched a served
+format in this repository's history** — §7 question 2, answered by counting:
+they have not run at all, in any environment, since the day they were written.
+
+**Step 2 (D1389), the count the page needs.** Against a valid schema-4 manifest,
+of §1's six checks: `migrate verify-lock --project` refuses (exit 5) and
+`api-contract --check --project` refuses (exit 2) for want of a set; **the other
+four do not** — `mcp-contract check --project` exits 0 and compiles the
+release's six tools, `--render-only` exits 0, `apg dev status` exits 4 about
+state rather than the manifest, and `generate --check` exits 5 for D1404's
+reason. **Two of six, not four.** The `--project`-less forms the two refusals
+name both exit 0.
+
+**Step 3 (D1397), and the repair is cheaper than the plan priced it.**
+`deploy.sh` already carries `max_deployable_session()`, which imports
+`CURRENT_SESSION` and prints it; the number is simply not in the usage text,
+whose heredoc is quoted (`<<'USAGE'`) and interpolates nothing. Run 2 prints it
+after the block.
+
+**Step 4 (D1395), widened to D1402.** Every `bin/*.sh --help` and
+`./deploy.sh --help` exits 0 as an unprivileged user. Four VERB-level helps do
+not: `dr-kit export` (exit 3, privilege) and `upgrade check|plan|verify` (exit
+2, a required argument over `add_help=False`).
+
+**Step 5 (D1393), and the JSON is safe to leave alone.** Outside
+`bin/upgrade.py` and `upgrade_plan.py`, exactly one proof reads the payload —
+`test_upgrade_command.py:271`, `payload["verdict"] == "blocked"`, which is
+`plan`'s JSON rather than `check`'s. Nothing anywhere reads `installed_version`
+or `release_version`. So Run 2 moves the human-readable line and no key.
+
+**The two apparatus defects, recorded because the apparatus being the defect is
+this project's standing risk (D736, D742).** Reducing `project.example.yaml` to
+schema 4 by deleting the `set:` line left the parent `migrations:` key with a
+null value; `migrations` is `required: ["set"]`, so the manifest was invalid and
+all six commands refused on **schema validation** — six identical refusals that
+would have read as a finding about the product. The second attempt changed the
+slug and domain and not the CORS origin lists that derive from the domain, and
+was refused by semantic validation. **Both were caught by a load check placed
+before the readings**, which is the only reason neither was written down. The
+third attempt changes only the two keys under test, and protects
+`.generated/fixture-alpha-dev` — a fixture the gate reads (D1284) — by
+snapshot and digest: `32a621d1c11d720b…` before and after, byte-identical.
+
+**ADR 0209** is accepted and indexed: a release is held to its own
+documentation by a test, not by a habit. It decides what is enforceable (the
+pages exist, name `template_version()`, carry a row for the release, and join
+both scans) and what is not (that a tag exists), with five alternatives and the
+reason each lost. The rig and every reading are in the scratchpad under
+`s27-scripts/`; the throwaway module is deleted and the tree is clean.
 
 ### Run 2 — the product repairs the pages will describe
 
