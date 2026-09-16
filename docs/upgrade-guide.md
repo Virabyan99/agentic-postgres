@@ -14,6 +14,13 @@ upgrade surface the product has is `bin/upgrade.sh` (`check`, `plan`,
 `verify`) and `./deploy.sh --through-session N`; what follows is what a person
 does around them.
 
+> **This page is part of release `1.6.0`.** It describes the commands that
+> release ships and the sequence a trip on that release executed. A release
+> that moves `VERSION` and does not move this line is a release whose upgrade
+> procedure describes a release that no longer exists, which is what happened
+> at 1.0.0 (D1033) and again at 1.6.0 (D1388) — so a test now holds this line
+> against `template_version()` (ADR 0209).
+
 **Who this page is for.** §1 is the checkout half, which an adopter who owns a
 `projects/<slug>/` directory does before any host is touched. §2 onwards is
 the host half, which an operator with `sudo` at a terminal does. They happen in

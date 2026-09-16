@@ -43,6 +43,15 @@ CURRENT_PATH_DOCUMENTS = (
     # The statement a walker is handed. If it names a command that does not
     # exist, the walk fails on the builder's typing rather than on the product.
     "docs/second-walk.md",
+    # **D1383, and it is D1323's shape a second time.** The upgrade guide and
+    # the current operator guide are what an operator holds; neither was in
+    # this set nor in `dx_record.DOCUMENT_ROOTS`, so the two halves of one
+    # claim were again reading different documents -- and eighteen defects in
+    # those pages were found by a cold reader rather than by this suite. ADR
+    # 0209 decides they are part of the release; this is where the release
+    # checks them.
+    "docs/operator-guide.md",
+    "docs/upgrade-guide.md",
     "docs/api-operations.md",
     "docs/pool-operations.md",
     "docs/database-connections.md",

@@ -115,6 +115,13 @@ DOCUMENT_ROOTS = (
     "docs/README.md",
     "docs/new-team-member.md",
     "docs/second-walk.md",
+    # **D1383.** Session 26 wrote the two pages an operator actually holds and
+    # neither was in either scan, so a command named ONLY there read to a walk
+    # as undocumented -- the same defect D1323 records for the new-team-member
+    # guide, one release later. ADR 0209 makes them release artefacts; this is
+    # the half of that decision the live reader keeps.
+    "docs/operator-guide.md",
+    "docs/upgrade-guide.md",
 )
 
 #: The operator guides, which name commands the four pages above do not.

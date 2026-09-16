@@ -19,6 +19,11 @@ plane, migrations — this page hands to it and does not repeat it.
 
 ## 1. The release you are operating, in one screen
 
+> **This page is part of release `1.6.0`.** It describes that release as it
+> runs on this deployment. A release that moves `VERSION` and does not move
+> this line, and the table below it, is a release documented by a page about a
+> different one (ADR 0209, D1388).
+
 | | |
 |---|---|
 | `template_version` / `CURRENT_SESSION` | **1.6.0** / **25**, tagged `1.6.0` (`1.3.0`–`1.5.0` were releases without tags, D1311) |

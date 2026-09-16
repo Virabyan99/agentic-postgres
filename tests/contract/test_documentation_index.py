@@ -212,6 +212,226 @@ def test_the_readme_states_the_template_version_the_release_carries(readme: str)
     )
 
 
+#: The two pages an operator holds, which ADR 0209 makes release artefacts.
+#: Named here rather than globbed: a glob would go quiet the day somebody
+#: renames one, which is the failure mode this whole module exists for.
+RELEASE_PAGES: tuple[str, ...] = ("docs/upgrade-guide.md", "docs/operator-guide.md")
+
+#: The canonical sentence each of them carries, and the one thing a bump moves
+#: per page. `([0-9A-Za-z.+-]+)` rather than a strict semver, so a pre-release
+#: or a `+build` is read and compared rather than silently unmatched.
+RELEASE_STATEMENT = re.compile(r"This page is part of release `([0-9A-Za-z.+-]+)`")
+
+#: Operator-facing commands that must be findable in the README (D1400).
+#:
+#: **The other direction of a guard that already existed.** This module has
+#: asserted since Session 11 that every command the README NAMES exists; it
+#: never asserted that a command whose whole job is a reader's task is named at
+#: all. `bin/upgrade.sh` -- the one command in the product for the task the
+#: upgrade guide is about -- was absent from the operating menu for six
+#: sessions and appeared only inside a parenthetical about which verbs take
+#: `--project KEY`. A reader looking for it found it with `ls bin/` or not at
+#: all.
+#:
+#: Deliberately a SET and not the whole directory: `bin/` holds sixty-nine
+#: commands, most of which are a release's own machinery. What belongs here is
+#: the command a person reaches for when the thing they want to do is one of
+#: this product's named jobs.
+README_MUST_NAME: tuple[str, ...] = (
+    "deploy.sh",
+    "bin/apg.sh",
+    "bin/doctor.sh",
+    "bin/fleet.sh",
+    "bin/upgrade.sh",
+    "bin/dr-kit.sh",
+    "bin/backup.sh",
+    "bin/migrate.sh",
+    "bin/restore-test.sh",
+    "bin/rehearse.sh",
+    "bin/project-retire.sh",
+    "bin/connect.sh",
+)
+
+#: The subset whose home is the README's *Operating a deployment* menu, and the
+#: heading that menu lives under.
+#:
+#: **Named apart from `README_MUST_NAME` because being MENTIONED is not the
+#: property D1400 is about.** `bin/upgrade.sh` was mentioned in the README the
+#: whole time it was missing from this menu -- once, inside a parenthetical
+#: about which verbs take `--project KEY`. Measured in this run's own battery:
+#: deleting it from the menu left `in readme` true and the guard green. A
+#: reader whose task is a command's job looks in the menu for that task, not in
+#: a parenthetical about argument spellings.
+#:
+#: `deploy.sh` and `bin/apg.sh` are deliberately absent from this subset: their
+#: homes are *Deploying* and the front-door section, and pinning them here would
+#: assert a layout the README does not have.
+OPERATING_MENU: tuple[str, ...] = (
+    "bin/doctor.sh",
+    "bin/fleet.sh",
+    "bin/upgrade.sh",
+    "bin/dr-kit.sh",
+    "bin/backup.sh",
+    "bin/migrate.sh",
+    "bin/restore-test.sh",
+    "bin/rehearse.sh",
+    "bin/project-retire.sh",
+    "bin/connect.sh",
+)
+
+OPERATING_HEADING = "## Operating a deployment"
+
+
+@pytest.mark.parametrize("command", OPERATING_MENU)
+def test_the_operating_menu_names_every_command_that_belongs_in_it(
+    command: str, readme: str
+) -> None:
+    """**D1400, sharpened by this run's battery.**
+
+    `test_the_readme_names_every_command_a_reader_comes_looking_for` asks
+    whether the README mentions a command anywhere. That is a real property and
+    it is weaker than the finding: `bin/upgrade.sh` was mentioned throughout
+    the six sessions it was missing from this menu, in one parenthetical about
+    argument spellings. The mutation that deleted it from the menu left that
+    guard green — measured, not supposed.
+
+    So this asks the question D1400 actually asks: is the command in the place
+    a reader looking for that task will look. The section is bounded by its own
+    heading and the next `## `, so a command drifting out of the menu into some
+    other part of the file fails here.
+    """
+    start = readme.find(OPERATING_HEADING)
+    assert start != -1, (
+        f"the README has no {OPERATING_HEADING!r} section, so this guard has nothing to "
+        "read; either the heading was renamed or the menu is gone"
+    )
+    end = readme.find("\n## ", start + len(OPERATING_HEADING))
+    section = readme[start : end if end != -1 else len(readme)]
+    assert len(section) > 400, (
+        f"the {OPERATING_HEADING!r} section is {len(section)} characters; it cannot be a "
+        "menu, and every case here would pass over an empty string"
+    )
+    assert command in section, (
+        f"{command} is not in the README's operating menu. It may be mentioned elsewhere "
+        "in the file -- that is not the property: a reader whose task is this command's "
+        "job looks here for it (D1400)"
+    )
+
+
+@pytest.mark.parametrize("page", RELEASE_PAGES)
+def test_the_operator_pages_exist_and_name_the_release_they_describe(page: str) -> None:
+    """**ADR 0209**, and the failure it exists for happened twice, seven
+    sessions apart.
+
+    D1033, Session 19: an adopter checking out `1.0.0` got a tree in which all
+    four documented-path repairs landed after the tag. D1388, Session 27: `git
+    ls-tree -r --name-only 1.6.0 -- docs/` lists ten per-session operator guides
+    and **neither of these two pages** — both land one commit past the tag. An
+    outside agent upgrading a real application to 1.6.0 recorded the
+    consequence: an operator who does what the version number tells them gets a
+    product whose upgrade procedure is not in it.
+
+    Nothing could have caught either. Every guard in this module answers *does
+    the documentation agree with the release it is in?* None answered *is the
+    documentation that describes this release in it at all?*
+
+    **What a test can assert and what it cannot.** It cannot assert that a tag
+    exists or where it points — a test runs inside a commit and the tag is cut
+    after CI is green (ADR 0209 §2). What it can assert is that the pages are
+    here and that they describe THIS release, which is the half that decays and
+    the half that makes a tag on any green commit carry a true page.
+    """
+    path = REPO_ROOT / page
+    assert path.is_file(), (
+        f"{page} is absent. It is a release artefact (ADR 0209): a release without it "
+        "is a release whose operator documentation is somewhere else"
+    )
+
+    text = path.read_text(encoding="utf-8")
+    match = RELEASE_STATEMENT.search(text)
+    assert match, (
+        f"{page} does not carry the sentence 'This page is part of release `N`'. That "
+        "line is what a bump moves, and a page that does not carry it cannot be held to "
+        "the release it is in"
+    )
+    assert match.group(1) == template_version(), (
+        f"{page} says it is part of release {match.group(1)} and VERSION says "
+        f"{template_version()}. One of them describes a release that does not exist "
+        "(D936's class, on the pages an operator actually holds)"
+    )
+
+
+def test_the_upgrade_guides_release_table_has_a_row_for_this_release() -> None:
+    """**ADR 0209 §1.** The table is what an operator reads to find out what
+    their hop crosses; a release missing from it is a hop nobody described.
+
+    Read as a table ROW rather than as a substring: `1.6.0` appears a dozen
+    times in that page as a measurement, a git tag and a merge target, and any
+    of those would satisfy a `in text` check while the table stayed a release
+    behind.
+    """
+    text = (REPO_ROOT / "docs" / "upgrade-guide.md").read_text(encoding="utf-8")
+    versions = re.findall(r"^\|\s*([0-9]+\.[0-9]+\.[0-9]+)\s*\|", text, re.MULTILINE)
+    assert versions, "the upgrade guide has no release table rows at all"
+    assert template_version() in versions, (
+        f"the upgrade guide's release table lists {versions} and this release is "
+        f"{template_version()}. An operator upgrading TO this release has no row to read: "
+        "what it moves, what it meets, and whether it adds a migration"
+    )
+
+
+@pytest.mark.parametrize("page", RELEASE_PAGES)
+def test_the_operator_pages_are_inside_both_documentation_scans(page: str) -> None:
+    """**D1383.** They were outside both, and that is why eighteen defects in
+    them were found by a cold reader rather than by this suite.
+
+    Two scans, two halves of one claim: `dx_record.DOCUMENT_ROOTS` is what the
+    LIVE reader compares a walk against, and
+    `test_session12_documented_path.CURRENT_PATH_DOCUMENTS` is the offline
+    half. D1323 records the same pages-diverging failure for the
+    new-team-member guide one release earlier. Asserted here so that removing a
+    page from either scan is a red test rather than a quiet narrowing.
+    """
+    from tests.contract.test_session12_documented_path import CURRENT_PATH_DOCUMENTS
+
+    from agentic_postgres import dx_record
+
+    assert page in dx_record.DOCUMENT_ROOTS, (
+        f"{page} is outside dx_record.DOCUMENT_ROOTS, so a command named only there "
+        "reads to a walk as undocumented (D1383)"
+    )
+    assert page in CURRENT_PATH_DOCUMENTS, (
+        f"{page} is outside CURRENT_PATH_DOCUMENTS, so the offline half of the "
+        "documented-path claim does not read it (D1383)"
+    )
+
+
+@pytest.mark.parametrize("command", README_MUST_NAME)
+def test_the_readme_names_every_command_a_reader_comes_looking_for(
+    command: str, readme: str
+) -> None:
+    """**D1400's other direction.**
+
+    `test_every_command_the_readme_names_exists` guards the README against
+    naming something absent. Nothing guarded it against being SILENT about
+    something present, and `bin/upgrade.sh` — whose entire job is the task
+    `docs/upgrade-guide.md` describes — was missing from the operating menu
+    while being mentioned once, in a parenthetical about argument spellings.
+
+    The anti-vacuity half is in the assertion: each name must also be a real
+    command in this checkout, so the list cannot drift into naming things that
+    do not exist and passing because the README mentions them.
+    """
+    assert (REPO_ROOT / command).is_file(), (
+        f"README_MUST_NAME lists {command}, which this checkout does not have. Either "
+        "the command was removed and this list was not, or the name is wrong"
+    )
+    assert command in readme, (
+        f"the README never names {command}. A reader whose task is that command's job "
+        "finds it with `ls bin/` or not at all (D1400)"
+    )
+
+
 def test_the_deploy_examples_target_a_session_this_release_can_deploy(readme: str) -> None:
     """`deploy.sh` refuses `--through-session N` above what the release
     implements, so a README example above it is a copied line that exits 10."""

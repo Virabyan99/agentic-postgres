@@ -667,7 +667,67 @@ Each with a battery, each mutation paired with a control.
 **Targeted:** `test_documentation_index`, `test_session12_documented_path`,
 `test_dx_record`, `test_acceptance_registry`.
 
-**Done.**
+**Done.** 2026-09-16. Six proofs, six mutations, six kills — after the first
+pass produced one survivor that turned out to be a real gap between the guard
+and the finding it was written for, and a second that turned out to be an
+uninformative mutation.
+
+**1. Both pages joined both scans, and both modules passed on the first run.**
+That is the answer §7 question 1 demands be checked rather than enjoyed, so it
+was: a probe measured what the widening actually reaches. `dx_record`'s scan now
+reads 26 commands from the operator guide and 19 from the upgrade guide, and
+**eight commands are documented that were reachable through neither of the four
+pages it read before** — `bin/database-ports.sh`, `bin/dev-token.sh`,
+`bin/edge-network.sh`, `bin/rotate-secret.sh`, `bin/rotate-signing-key.sh`,
+`bin/storage-admin.sh`, `bin/upgrade.py`, `bin/write-session-evidence.py`. The
+offline half reads both pages whole (47,683 and 41,935 bytes). Nothing failed
+because Run 4 had already repaired what these assertions test; the widening is
+real, not silent.
+
+**2. ADR 0209's guard needed the pages to say something they did not say.**
+Neither carried a statement of the release it describes — the upgrade guide
+mentions `1.6.0` a dozen times as a git tag, a merge target and a measurement,
+and *any* of those would satisfy a substring check while the page went stale. So
+each page gains one canonical line, **`This page is part of release ` `N` `.`**,
+and the guard reads it against `template_version()`. Three proofs: the pages
+exist and their statement matches the tree; the upgrade guide's release TABLE
+has a row for the current release, read as a table row and not as a substring;
+and both pages are inside both scans, so removing one is red rather than quiet.
+What is deliberately not asserted is the tag, for ADR 0209 §2's reason.
+
+**3. D1400's other direction was weaker than D1400, and the battery said so.**
+The first guard asked whether the README NAMES each operator-facing command. The
+mutation that deleted `bin/upgrade.sh` from the operating menu **survived** —
+correctly, because the command is still mentioned elsewhere in the file. That is
+precisely the state D1400 records: mentioned once, inside a parenthetical about
+which verbs take `--project KEY`, for six sessions. `in readme` cannot tell
+*findable* from *present*. So a second guard reads the *Operating a deployment*
+section between its heading and the next `## ` and asserts each menu command is
+in **that**, with a length check so it cannot pass over an empty string.
+
+**And the second mutation on it was uninformative** (D493) rather than a
+survivor worth acting on: removing one of the three `upgrade.sh` lines left the
+command in the section through the other two. Widened to the whole block, it
+kills. Recorded because a survivor nobody explains gets read as a weak test, and
+this one was a weak mutation.
+
+**The six kills, each with a control it cannot reach**: a release statement one
+patch stale; a release statement removed; a release table row renamed so the
+current release has none; the upgrade guide dropped from the live scan; the
+operator guide dropped from the offline scan; the upgrade block removed from the
+README's menu. Every file byte-identical after.
+
+**Targeted, once:** `test_documentation_index`, `test_session12_documented_path`,
+`test_dx_record`, `test_acceptance_registry` — **86 passed**, after the
+acceptance matrix was regenerated for five new proofs and a widened DX-DOC-001
+clause. `ruff check` found one unsorted import block in the new code and it was
+fixed rather than ignored.
+
+**What this leaves for Run 6.** The release statement is `1.6.0` in both pages
+and the release table's newest row is `1.6.0`. **All three now fail the moment
+`VERSION` moves**, which is the whole point: Run 6's bump cannot be committed
+without moving them, and Run 4's six `since 1.6.1` forward references get their
+reading in the same commit.
 
 ### Run 6 — the bump, all-or-nothing
 

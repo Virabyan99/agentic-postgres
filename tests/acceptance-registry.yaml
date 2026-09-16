@@ -3847,6 +3847,10 @@
     - tests/contract/test_session12_documented_path.py::test_the_guide_names_the_tenant_path_and_the_three_surfaces
     - tests/contract/test_session12_documented_path.py::test_the_readme_sections_are_in_the_order_an_adopter_walks
     - tests/contract/test_documentation_index.py::test_the_second_walk_page_carries_the_task_statement_and_the_record_schema
+    - tests/contract/test_documentation_index.py::test_the_operator_pages_exist_and_name_the_release_they_describe
+    - tests/contract/test_documentation_index.py::test_the_upgrade_guides_release_table_has_a_row_for_this_release
+    - tests/contract/test_documentation_index.py::test_the_operator_pages_are_inside_both_documentation_scans
+    - tests/contract/test_documentation_index.py::test_the_readme_names_every_command_a_reader_comes_looking_for
     - tests/contract/test_mcp_catalog.py::test_a_project_catalog_is_rendered_from_the_projects_contract
     - tests/contract/test_mcp_catalog.py::test_check_project_refuses_a_stale_catalog
     - tests/contract/test_mcp_catalog.py::test_a_contract_that_is_present_and_unreadable_is_reported_and_never_a_traceback
@@ -3871,7 +3875,19 @@
     malformed one -- is reported with exit 5 and a sentence naming the file,
     never as a traceback and never as exit 1; an ABSENT contract keeps its own
     report and exit 2, and all four commands that load a compiled contract read
-    it through one guarded reader (ADR 0195, D1359).
+    it through one guarded reader (ADR 0195, D1359). **And the release is held
+    to its own documentation by a test** (ADR 0209, D1033/D1388):
+    `docs/upgrade-guide.md` and `docs/operator-guide.md` exist, each states the
+    release it is part of and that statement equals `template_version()`, the
+    upgrade guide's release TABLE carries a row for the current release, and both
+    pages are inside `dx_record.DOCUMENT_ROOTS` and
+    `test_session12_documented_path.CURRENT_PATH_DOCUMENTS` so every command they
+    name must exist and be executable. What is deliberately NOT asserted is that
+    a tag exists or where it points: a test runs inside a commit and cannot see a
+    tag cut after CI is green. Separately, an enumerated set of operator-facing
+    commands must be NAMED in the README -- the other direction of the guard that
+    already held every command it names to existing, after `bin/upgrade.sh` spent
+    six sessions absent from the operating menu (D1400).
 
 - id: SEC-DX-001
   priority: P0
