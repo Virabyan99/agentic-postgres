@@ -537,21 +537,42 @@ def verify_lock(
 def _assert_follows_release_version(manifest: dict[str, Any], follows: str) -> None:
     """Every version in a project set sorts after the recorded release version.
 
-    Rig 20a measured why this matters and, just as usefully, what already
-    catches it: dbmate 2.34.1 `up --strict` refuses an out-of-order pending
-    migration with exit 2 and applies nothing, naming both versions. So this is
-    a FREEZE-TIME refusal standing in front of a DEPLOY-TIME one that already
-    exists -- kept for the reason every refusal here is moved earlier. dbmate's
-    arrives after the cluster has been reached, on a host, during a deploy, with
-    a human waiting; this one arrives on a workstation before anything is
-    rendered (D1098, ADR 0198).
+    **This no longer prevents anything the cluster would refuse** (ADR 0206,
+    D1288). It was written when the two sets rendered into ONE directory and
+    applied through ONE `dbmate` invocation against ONE
+    `app_private.schema_migrations`, so their versions shared a single ordering
+    space: there, a project version below an applied release version was an
+    `up --strict` refusal on a deployed cluster and a silent apply on a fresh
+    one, which is the same set producing two different schemas (rig 20a,
+    D1098). Since ADR 0206 a project set renders to its own directory and
+    applies against `app_private.project_schema_migrations`, and **each set is
+    ordered against its own applied set only.**
 
-    The direction is not symmetric and that is the whole rule. A project
-    migration older than an APPLIED release migration is refused by the cluster;
-    a release migration newer than an applied project migration is fine, because
-    it sorts after everything on both a fresh cluster and a deployed one. So the
-    rule constrains only what a project may author, and never what the release
-    may.
+    **What this docstring used to say was false, and Session 24's trip is where
+    it was refuted.** It read: *"The direction is not symmetric and that is the
+    whole rule ... So the rule constrains only what a project may author, and
+    never what the release may."* It conflated *authored later* with *sorts
+    higher*. Versions are authoring-date stamps, so a project set stamped ahead
+    of the release's own clock -- stamped that way to clear THIS rule -- left
+    the release a window in which anything it authored sorted BELOW an applied
+    project migration. Session 24's migration `0032` landed in that window and
+    beta refused the deploy at step 6 having applied nothing. The demand was
+    never one-directional: with one shared ordering space the two climb past
+    each other indefinitely, and no pair of stamping rules satisfies both for an
+    arbitrary sequence of releases. That is why the repair was structural rather
+    than a re-stamp.
+
+    **So what survives here is a record, not a guard.** It says which release a
+    set was reviewed against, and refuses a set whose versions disagree with its
+    own record. ADR 0206 kept it deliberately: removing a released guard is a
+    separate decision from the one that ADR took.
+
+    **What it should do when a set was frozen against an EARLIER release is
+    undecided, and it is the on-ramp session's.** Today the only way forward is
+    to re-freeze the project lock, which moves `follows_release_version` to the
+    release in hand; nothing has decided whether that is the intended workflow
+    or a leftover of the ordering space ADR 0206 removed. Said here because a
+    reader who meets the refusal has no other place to find it.
     """
     if not re.fullmatch(r"[0-9]{14}", follows):
         raise ProjectSetError(
@@ -563,11 +584,15 @@ def _assert_follows_release_version(manifest: dict[str, Any], follows: str) -> N
     if offending:
         raise ProjectSetError(
             f"these project migrations do not sort after the release version this set was "
-            f"frozen against ({follows}): {offending}. dbmate applies one directory in "
-            "filename order, so a project version older than an applied release version is "
-            "refused by `up --strict` on a deployed cluster and applied silently on a fresh "
-            "one -- the same set producing two different schemas. Re-stamp the migration "
-            "with a version later than the release's newest and freeze again."
+            f"frozen against ({follows}): {offending}. Since ADR 0206 the two sets render "
+            "into separate directories and apply into separate tables, so this is no "
+            "longer an ordering a cluster would refuse: follows_release_version is the "
+            "record of which release this set was reviewed against, and these versions "
+            "disagree with that record. Either re-stamp the migration above "
+            f"{follows}, or re-freeze this project's lock against the release you are "
+            "reviewing against (`bin/migrate.sh --project FILE freeze-lock`). Which of "
+            "those is intended when a set was frozen against an earlier release is "
+            "undecided (D1288)."
         )
 
 

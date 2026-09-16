@@ -472,7 +472,49 @@ find.
 **Targeted:** `test_documentation_index` (a `bin/` usage moved),
 `test_session12_documented_path`.
 
-**Done.**
+**Done.** 2026-09-16. Three texts replaced, no executable behaviour changed,
+and one thing the plan did not price.
+
+**The docstring** now says what ADR 0206 established: the rule was written for
+a world with one directory, one `dbmate` invocation and one
+`app_private.schema_migrations`, where a project version below an applied
+release version was an `up --strict` refusal on a deployed cluster and a silent
+apply on a fresh one (rig 20a, D1098); each set now has its own directory and
+its own table and is ordered against its own applied set only. It quotes the
+false paragraph rather than deleting it, and says why it was false — *authored
+later* is not *sorts higher*, versions are authoring-date stamps, and a project
+set stamped ahead of the release's clock **to clear this very rule** left the
+release a window that Session 24's `0032` landed in. It ends with the sentence
+the findings file needed and could not find: **what the rule should do when a
+set was frozen against an earlier release is undecided, and it is the on-ramp
+session's.**
+
+**The REFUSAL MESSAGE was carrying the same refuted reasoning and the plan did
+not name it.** It told an operator that dbmate applies one directory in
+filename order and that they were about to produce *"the same set producing two
+different schemas"* — a consequence that has not been possible since ADR 0206.
+It is explanation rather than enforcement, so it is repaired here: it now says
+that `follows_release_version` is a record, names the two ways forward
+(re-stamp above the recorded version, or re-freeze the project's lock), and
+says which of them is intended is undecided. **The enforcement is byte-for-byte
+the same**: the same `re.fullmatch`, the same comparison, the same
+`ProjectSetError`.
+
+**`bin/migrate.sh --help`** carries the same correction in its own words.
+
+**Measured, not assumed, in two directions.** The refusal still fires on a set
+that does not sort after the recorded version, and a set that does sort after
+is still accepted — the control, in the same reading. And `grep` for the moved
+TEXT rather than the moved name (D1187) found every remaining copy of the false
+paragraph to be a RECORD quoting it in order to refute it: ADR 0206 §Context,
+the Session 24 plan's D1288 row, this plan, and the new docstring itself. No
+fourth copy was still asserting it.
+
+**Targeted, once:** `test_documentation_index`,
+`test_session12_documented_path`, `test_project_migration_sets`,
+`test_migration_ledger`, `test_rendered_migrations` — **86 passed**. `ruff
+check` passes and `bin/migrate.sh --help` exits 0. No battery, because nothing
+executable changed; the one reading above is what stands in for it.
 
 ### Run 4 — the two pages, against every documentation finding
 

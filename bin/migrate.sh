@@ -79,10 +79,18 @@ never creates one, so a lock that is missing is a review that did not happen.
 There are two locks when a project declares a migration set (ADR 0198): the
 release's, covering the platform's own migrations, and the project's, covering
 the SQL under projects/<slug>/. A project lock additionally records
-follows_release_version -- the release version its migrations must all sort
-after -- because dbmate applies one directory in filename order, and a project
-version older than an applied release version is refused by `up --strict` on a
-deployed cluster while a fresh cluster applies the same pair silently.
+follows_release_version, the release version its migrations must all sort after.
+
+That rule was written when both sets rendered into one directory and applied
+through one dbmate invocation against one migrations table. There, a project
+version below an applied release version was an `up --strict` refusal on a
+deployed cluster and a silent apply on a fresh one -- the same set producing two
+different schemas. Since ADR 0206 each set has its own directory and its own
+table and is ordered against its own applied set only, so
+follows_release_version no longer prevents anything a cluster would refuse: it
+RECORDS which release the set was reviewed against, and freeze-lock refuses a
+set that disagrees with its own record. What it should do when a set was frozen
+against an earlier release is undecided (D1288).
 
 Never pass a secret value as a command-line argument.
 USAGE
