@@ -28,6 +28,7 @@ each names where every step was measured.
 |---|---|
 | [Operating a deployment](operator-guide.md) | The current release: where things live on the host, the two accounts, a host from empty and its first project, every day and every week, a project's own tables and the agent plane on a deployment, Studio and the client against it, credentials, the gates, retiring a project, what goes wrong, and what has never been performed |
 | [Upgrading a deployment](upgrade-guide.md) | An operator on any earlier release reaching this one: the release table, the checkout half, the host sequence, what each `upgrade plan` verdict means, skipped releases, a `major`, and what to do when a step refuses or fails halfway |
+| [Everything this project knows is wrong with itself](pre-stage-4-audit.md) | The pre-Stage-4 inventory, dated 2026-09-16: the seven claims that are not `passed`, and every open defect sorted by **what kind of act closes it** — code, a host trip, or a person. Drawn from the evidence, `scope-closure.md`, the session plans and an adopter's findings |
 | [What 1.6.1 did about an adopter's upgrade findings](upgrade-findings-response.md) | Every one of the thirty-four findings an outside agent wrote while upgrading a real deployment from 1.0.0 to 1.6.0, with what was fixed, what was only documented, and **what is still open** — including the two product refusals that keep a fork made before `projects/<slug>/` existed from reaching it |
 
 **The per-session guides below are records, not instructions.** Each describes
