@@ -209,8 +209,14 @@ saying which rows this session struck and why — the page says of itself that i
 *"does not track the current release and is not held to it by a test"*, so the
 note is how it stops being read as current.
 
-**Nothing runs before the push** (documentation only), and the push reads its own
-commit's CI verdict by full SHA.
+**Nothing runs before the push** (documentation only), and **nothing waits on
+CI**: a documentation commit is pushed, said to be pushed, and left. CI still
+runs on GitHub — measured on both of this session's commits, one workflow each,
+both `success` — and nobody reads the verdict for a documentation push unless
+the operator asks. **This is a standing instruction the project has broken four
+times** (Sessions 26–27 at `c5ad14d`, `7032f82`, `90d7b34`, and this run at
+`cbccb0e`), every time by starting a background poll on the pushed SHA. It
+applies to Runs 1 and 2, which are the documentation-only runs.
 
 **Done.** 2026-09-16, on `9bd5ed8`. All 36 Tier 1 rows measured in both
 directions; the nine planning had not reached produced **D1426–D1433**, and four
@@ -296,7 +302,8 @@ question:
   fork does instead.
 
 ADRs and the index only; no product code. `docs/decisions/README.md` gains three
-entries. Nothing runs before the push.
+entries. **Nothing runs before the push and nothing waits on CI** — Run 1's rule,
+which this run is the second and last to be covered by.
 
 ### Run 3 — the on-ramp, built, and the two readings an adopter is missing
 
@@ -802,8 +809,14 @@ dead grant, and D1416 would have undone a decision taken under ADR 0195.
 **How a run is executed here** is `CLAUDE.md` §5. Four of its rules are
 load-bearing for this session in particular:
 
-- **Documentation only runs nothing before push.** Runs 1 and 2 are documentation
-  and ADRs; they push and read CI and run no suite.
+- **Documentation only runs nothing before push, and waits on nothing after it.**
+  Runs 1 and 2 are documentation and ADRs: push, say it is pushed, move on. **Do
+  not poll the pushed SHA and do not report a verdict nobody asked for** — four
+  occurrences now, and this plan's own Run 1 text caused the fourth before it was
+  corrected. A `paths-ignore` is not the remedy either: `test_mcp_catalog` reads
+  `docs/plans/*.md` and fails when the catalog cites a `D` number no plan
+  records, so a plan file is load-bearing, and an empty `runs?head_sha=` listing
+  reads identically as *not registered yet* and *will never fire* (D1057).
 - **A run that adds a page owes `test_documentation_index`** (Run 3's
   `docs/on-ramp.md`, and `docs/README.md` must carry its line); **a run that adds
   or renames a test function owes `test_acceptance_registry`** (D1119, Runs 5, 6
