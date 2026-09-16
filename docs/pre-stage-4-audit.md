@@ -17,9 +17,26 @@ value of this page:
 
 | Tier | Closable by | Count |
 |---|---|---|
-| **1** | Code or documentation, in a session, offline | 31 |
-| **2** | A host trip — a deployment must be touched | 12 |
-| **3** | A person or a decision. **No amount of engineering closes these** | 8 |
+| **1** | Code or documentation, in a session, offline | **36** |
+| **2** | A host trip — a deployment must be touched | **12** |
+| **3** | A person or a decision. **No amount of engineering closes these** | **8** |
+
+*Counted by walking the tables below, not asserted. The first draft of this page
+said 31 for Tier 1 and was wrong by four — written by the same hand that wrote
+this page's own instruction to measure rather than recall, which is worth
+leaving on the page rather than editing out.*
+
+> **Operator decision, 2026-09-16: the signing-key rotation WILL be performed.**
+> It has been offered and declined at four trips (D860). That decision is now
+> reversed, which moves it out of Tier 3 and makes it an act Session 28 plans
+> rather than a question Session 28 asks. Three `not_run` claims —
+> `bootstrap_identity`, `api_authorization`, `credential_rotation_planes` —
+> depend on it and on nothing else.
+>
+> **It is the single highest-value act available to this project**, and also the
+> only irreversible one on this page: `promote` cannot be undone, the slot is
+> free (ADR 0170), and it has never been exercised on a deployment. It gets its
+> own rehearsal and its own run. It is **not** an appendix to a release day.
 
 **The honest headline: Tier 3 cannot be finished by Session 28.** Four of the
 seven unproven claims need a credential rotation performed on production, which
@@ -41,7 +58,7 @@ This is the project's own evidence, `evidence/session-25.json`: **126 claims,
 | `documented_path` | **failed** | The only `failed` claim this project has ever written. Two readers holding nothing but a clone and a task statement recorded **six and then eleven** undocumented steps (ADR 0207). Closing it means repairing what they found and having a *third* reader confirm. **Tier 3** — it needs a reader who has not seen the repository |
 | `bootstrap_identity` | not_run | Needs the signing-key rotation **performed**. **Tier 2** |
 | `api_authorization` | not_run | Same rotation. **Tier 2** |
-| `credential_rotation_planes` | not_run | Same rotation — built, tested offline, offered and **declined at four trips**, most recently 2026-09-15 (D860). **Tier 2/3**: the operator has declined it four times, so the decision is as much the blocker as the work |
+| `credential_rotation_planes` | not_run | Same rotation — built, tested offline, offered and declined at four trips, most recently 2026-09-15 (D860). **DECIDED 2026-09-16: it will be performed.** **Tier 2** now, not 2/3 |
 | `deployment_convergence` | not_run | **Tier 2** |
 | `port_allocation` | not_run | **Tier 2** |
 | `replacement_host_restore` | not_run | **`not_run` BY DECISION** (D1028): a rehearsal ends at the restore. Closing it means reversing that decision and building a replacement host. **Tier 3** |
@@ -100,6 +117,7 @@ the one most worth spending Session 28 on.**
 | **D1276** | Studio has **no live half** for the query view's RLS off this workstation, and a rig that reaches a published loopback port assumes a daemon | A live half that runs where the gate runs |
 | — | The uncached first run of `apg dev up` — the run a new developer actually has — is measured **in CI and nowhere else** | Measure it where it is claimed |
 | **D297 / D201** | The environment is not verified against the lock; a lock verifies only what it dereferences | Verify both |
+| **new — assign a `D` number in Session 28's §1** | **A release's documentation landing one commit past its own tag. It has now happened three times, twice of them on one day.** D1033 at `1.0.0`, repaired by cutting `1.0.1`. D1388 at `1.6.0`, where `docs/upgrade-guide.md` and `docs/operator-guide.md` both landed in the next commit — and ADR 0209 was written for exactly that. Then **on 2026-09-16, in the release that shipped ADR 0209, it happened twice more**: two repairs and a reply page landed past `1.6.1`'s tag, which cost a `1.6.2`; and commits continued after `1.6.1` was cut before anyone asked whether they belonged inside it. **ADR 0209's guard caught none of them, correctly** — a test runs inside a commit and cannot see a tag cut after CI is green, and the ADR says so in as many words. So the guard is right about what it can assert and **the habit around it is what fails**: nothing asks *is this commit the one the tag goes on* before the tag is cut, or *does this commit belong in the release* after | A pre-tag reading the operator runs, not a test: something that lists what is about to be tagged and what has landed since the last tag, so the question is asked out loud. Possibly a `bin/` verb. **Decide whether it is a command or a checklist** — D1033's row says a checklist already existed in prose and the session that wrote it did not follow it |
 | **D387** | The REST observation does not retry | Retry, or state why not |
 | **D340** | Every service role reaches the `postgres` catalog | A decision |
 
@@ -109,7 +127,7 @@ the one most worth spending Session 28 on.**
 
 | ID | What is wrong |
 |---|---|
-| **D860** | **The signing-key rotation has never been performed.** Built, tested offline, offered and declined at four trips. It unblocks three `not_run` claims and is the first item on Stage 4's own bill |
+| **D860** | **The signing-key rotation, and it is now DECIDED rather than offered.** Built, tested offline, declined at four trips, and the operator has reversed that on 2026-09-16: Session 28 performs it. It unblocks `bootstrap_identity`, `api_authorization` and `credential_rotation_planes`, and it is the first item on Stage 4's own bill. **Plan it with its own rehearsal**: `promote` is irreversible, each project publishes exactly one verification key (ADR 0170), and a key cutover recreates all four verifiers (ADR 0155). The one credential path in this product that has been built, tested and never run |
 | **D1375** | `op` on the host **cannot reach the Docker socket**, and Session 25 is the first release whose offline gate mode needs one. The group membership was deliberately not granted (root-equivalent on production) |
 | **D1401** | **The tree is two patches ahead of the deployment**: both projects run `1.6.0`, the tree reads `1.6.2`. `stage_release`'s live half fails until a trip deploys before it sweeps |
 | — | The host reports `systemctl is-system-running` = **DEGRADED**. Unrelated to the deployment, which doctors clean — and **never investigated** |
@@ -145,9 +163,14 @@ Three readings of the operator's goal, priced:
 
 1. **Every Tier 1 row closed.** Achievable in one long session or two. It is the
    largest single improvement available and it needs no host and no person.
-2. **Tier 1 + Tier 2.** Adds one host trip with the rotation performed. That
-   trip closes four of the seven unproven claims and moves the deployment to the
-   tree. **This is the version of "perfect" worth aiming at.**
+2. **Tier 1 + Tier 2. THIS IS THE ONE THE OPERATOR CHOSE, 2026-09-16.** Adds
+   one host trip with **the rotation performed** — reversing four trips' worth of
+   declining it. That trip closes four of the seven unproven claims and moves the
+   deployment to the tree. What remains unproven afterwards is three claims, each
+   for a reason that names an event: `documented_path` until a third reader
+   walks it, `replacement_host_restore` by a standing decision, and
+   `deployment_convergence` or `port_allocation` depending on what the trip
+   exercises.
 3. **Tier 1 + 2 + 3.** Requires a person to walk the documentation, a person to
    open Studio, and two open product questions to be *decided* rather than
    built. The decisions are Stage 4's subject, so this reading asks Session 28
