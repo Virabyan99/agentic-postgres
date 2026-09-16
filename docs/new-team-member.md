@@ -291,7 +291,8 @@ that). So a capability over your own view is *declared* on your machine and
 
 1. here: `bin/agent.sh init` writes `projects/<slug>/capabilities.yaml`, and you
    commit it;
-2. deploy the project once (`./deploy.sh --project project.yaml ...`);
+2. deploy the project once — a host, a domain, certificates and providers,
+   which is [Operating a deployment](operator-guide.md) §3, not this page;
 3. `bin/api-contract.sh --update --project project.yaml --project-outputs
    <the deployed outputs.json>`, review the captured snapshot and commit it;
 4. then the three commands above, and step 12's `generate`, all run offline
@@ -465,8 +466,16 @@ Concretely, you have:
 - **the gate green**, the same script CI runs.
 
 You do not have a deployment, and nothing on this page needs one. A deployment
-is a host, a domain, certificates and providers, and it is the
-[operator guides](README.md#operator-guides) rather than this page.
+is a host, a domain, certificates and providers, and it is
+[Operating a deployment](operator-guide.md) rather than this page: its §3 is a
+host from empty and a first project, in the order the commands impose, with
+where each step was measured. When that deploy exists, three things on this
+page that stopped come back: step 11's three commands and step 12's `generate`
+run once the snapshot is captured (the operator guide's §6 step 4 is the
+capture), and step 13's Studio opens against the deployed document (its §8).
+Moving that deployment to a later release is
+[Upgrading a deployment](upgrade-guide.md), whose §1 is the half you do here,
+in the checkout, before any host is touched.
 
 ## If something fails
 

@@ -18,11 +18,25 @@ none, because it tells a reader the set is whole.
 
 ## Operator guides
 
-One per session, each covering the host sequence that session added. **A guide is
-derived from its predecessor by diff, never retyped** — D505, D507 and D602 were
-all flags or steps lost to retyping the previous session's page.
+**Two pages describe operating the release in this checkout, and they are the
+only ones a reader is sent to** (ADR 0208). Each is derived by diff from its
+predecessors and the trips that executed it, never retyped — D505, D507 and
+D602 were all flags or steps lost to retyping a previous session's page — and
+each names where every step was measured.
 
-| Guide | Adds |
+| Page | Answers |
+|---|---|
+| [Operating a deployment](operator-guide.md) | The current release: where things live on the host, the two accounts, a host from empty and its first project, every day and every week, a project's own tables and the agent plane on a deployment, Studio and the client against it, credentials, the gates, retiring a project, what goes wrong, and what has never been performed |
+| [Upgrading a deployment](upgrade-guide.md) | An operator on any earlier release reaching this one: the release table, the checkout half, the host sequence, what each `upgrade plan` verdict means, skipped releases, a `major`, and what to do when a step refuses or fails halfway |
+
+**The per-session guides below are records, not instructions.** Each describes
+the host sequence *as of* the session named, is cited by number in the
+divergence tables, and is superseded for anything current by the two pages
+above. Sessions 12–25 have no guide of their own by decision: their host
+sequences are in the two pages above and in their plans' §5 Run 7 *Done*
+paragraphs.
+
+| Guide | Added, then |
 |---|---|
 | [Session 2](session-02-operator-guide.md) | The host, the edge plane, the secret store |
 | [Session 3](session-03-operator-guide.md) | A project with its database and migrations |
@@ -94,7 +108,8 @@ divergence table and is the point of the document**: every conflict between what
 a session was asked for and what was measurably true, with the decision and its
 reason. §5 is the run-by-run build order, each run carrying what it measured.
 
-Nothing indexes those ~700 measured facts by subject, so finding one is a `grep`.
+Nothing indexes those measured facts (D1–D1387 at Session 26) by subject, so
+finding one is a `grep`.
 
 [`plans/stage-2-plan.md`](plans/stage-2-plan.md) sits **above** the six Stage 2
 session plans and owns what all of them would otherwise repeat: where Stage 2

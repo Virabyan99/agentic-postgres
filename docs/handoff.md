@@ -12,19 +12,23 @@ done, what is next, and the traps. This file describes the *machine and the
 workflow* and is deliberately not rewritten every run — if the two disagree
 about where the project stands, `CLAUDE.md` is right.
 
-## The session documents
+## The operator's documents
 
+- [Operating a deployment](operator-guide.md) — the current release on the
+  host: paths, accounts, a host from empty, day two, a project's own tables
+  and the agent plane on a deployment, credentials, the gates, what goes
+  wrong, and what has never been performed.
+- [Upgrading a deployment](upgrade-guide.md) — from any earlier release to
+  this one, checkout half first, then the host.
 - [The API surface](api-surface.md) — what is published, the four authorities in
   order, and the three verbs the document advertises and the surface refuses.
 - [API operations](api-operations.md) — the divided connection budget, the
   restart matrix, and rotating each of the three credentials.
-- [Session 5 operator guide](session-05-operator-guide.md) — deploying,
-  capturing the snapshot, the gate's three modes, and the evidence merge.
-- [Session 6 operator guide](session-06-operator-guide.md) — the identity plane
-  and the signing-key cutover's phases.
-- [Session 7 operator guide](session-07-operator-guide.md) — object storage: the
-  bucket, the token, the cleanup and rotation surface, and **§5.4, the host
-  sequence for the trip that has not happened yet**.
+- The per-session operator guides (Sessions 2–11) are **records** of the host
+  sequence as it was then, superseded for anything current by the two pages
+  above (ADR 0208). This list named three of them and called one *the host
+  sequence for the trip that has not happened yet* for eleven sessions after
+  it had (D1385).
 
 ## Where the project lives
 
@@ -131,8 +135,11 @@ edit.
   fails. `bin/lock-dev-deps.sh --check` runs `uv pip compile`, so the gate needs
   PyPI egress from wherever it runs.
 
-Everything else about operating it is in the
-[Session 2 operator guide](session-02-operator-guide.md).
+Everything else about operating it is in
+[Operating a deployment](operator-guide.md); the
+[Session 2 operator guide](session-02-operator-guide.md) §0 is still the
+bring-up of the release and the operator user on an empty host, and the
+current guide's §3 sends you there for exactly that step.
 
 ## The database
 

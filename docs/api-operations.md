@@ -139,8 +139,11 @@ differ:
 3. **Stop the project** if the credential is one a container mounts:
    `sudo bin/project-runtime.sh --host host.yaml --project-key <key>
    --through-session 25 down`. Volumes are preserved.
-4. Redeploy through session 5. This materializes a new generation and re-applies
-   the credential: the bootstrap plane sets the role's verifier,
+4. Redeploy through the current session — the block below shows the number,
+   and it is the one `deploy.sh` accepts for this release (this line said
+   *session 5* from Session 5 until Session 26, beside a block that said 25:
+   D1382, D678's class). The redeploy materializes a new generation and
+   re-applies the credential: the bootstrap plane sets the role's verifier,
    `publish_docs_credential` rewrites the middleware document with the new hash
    inline, and `render-jwks.py` rewrites the JWKS.
 5. Admit the proof with the matching `--rotated-*-from-file` flag.
