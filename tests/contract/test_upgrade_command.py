@@ -253,6 +253,106 @@ def test_no_verb_writes_even_on_the_happy_path(tmp_path: Path) -> None:
     assert "deploy.sh --through-session" in result.stdout
 
 
+def test_the_human_readable_check_says_which_question_it_answered(tmp_path: Path) -> None:
+    """**D1393.** `verdict OK` is accurate and answers the other question.
+
+    `check` reads no candidate. Its verdict is about READABILITY -- could the
+    installed document be read, and is it the same kind of thing this release
+    renders -- and nothing about whether an upgrade is safe. An operator
+    running it from the host's own checkout, which is where the upgrade guide
+    puts it, sees both versions equal and the word `OK`, on a host that is
+    about to take a release six minors ahead. That was measured on a real 1.0.0
+    host taking 1.6.0.
+
+    So the human-readable form says which question was answered. **The JSON key
+    does not move**: exactly one proof outside this command reads the payload,
+    and renaming a published key to improve a sentence is a contract change for
+    a cosmetic gain.
+
+    Both arms, because "nobody looked" is the half that must never read as
+    "nothing changed".
+    """
+    installed = write(tmp_path / "installed.json", rendered())
+
+    present = refuses_without_writing("check", "--project", "alpha", "--installed", str(installed))
+    assert present.returncode == 0, present.stderr
+    assert "a comparison CAN be made" in present.stdout, present.stdout
+    assert "no candidate was" in present.stdout, (
+        "the line does not say that this verb compares nothing, which is the "
+        "misreading D1393 records"
+    )
+
+    absent = refuses_without_writing(
+        "check", "--project", "alpha", "--installed", str(tmp_path / "nothing.json")
+    )
+    assert absent.returncode == EXIT_MISSING, absent.stdout + absent.stderr
+
+    # And the JSON is unchanged, which is the half that makes this safe.
+    machine = refuses_without_writing(
+        "check", "--project", "alpha", "--installed", str(installed), "--json"
+    )
+    payload = json.loads(machine.stdout)
+    assert payload["verdict"] == "ok", payload
+    assert "installed_version" in payload and "release_version" in payload, payload
+
+
+def test_a_key_the_document_does_not_carry_prints_differently_from_a_null(
+    tmp_path: Path,
+) -> None:
+    """**D1394**, on the one output the upgrade guide tells an operator to read
+    before an irreversible step.
+
+    `Difference.ABSENT` exists precisely because `None` is a value a document
+    can legitimately carry, and its own docstring cites D600 for it. The MODEL
+    told the two apart; the renderer printed both through `!r`, so
+    `'<absent>' -> None` meant *this release added a key and this project
+    leaves it empty* in a form indistinguishable from *a value went away*. On a
+    real hop two of seven leaves read exactly that.
+
+    Three leaves here, and all three must print differently: a key only the
+    candidate carries, a key both carry whose candidate value is null, and an
+    ordinary value move as the control.
+    """
+    installed_document = rendered()
+    candidate_document = rendered(template_version="9.9.9")
+    installed_document["jwt"] = {"retire_after": "2026-01-01T00:00:00Z"}
+    candidate_document["jwt"] = {"retire_after": None}
+    candidate_document["a_key_the_installed_release_never_had"] = 7
+
+    installed = write(tmp_path / "installed.json", installed_document)
+    candidate = write(tmp_path / "candidate.json", candidate_document)
+
+    result = refuses_without_writing(
+        "plan",
+        "--project",
+        "alpha",
+        "--installed",
+        str(installed),
+        "--candidate",
+        str(candidate),
+    )
+    assert "jwt.retire_after" in result.stdout, result.stdout + result.stderr
+
+    printed = {
+        line.strip()
+        for line in result.stdout.splitlines()
+        if "->" in line and not line.strip().startswith("upgrade")
+    }
+    joined = "\n".join(sorted(printed))
+
+    assert "(no such key) -> 7" in joined, (
+        f"a key the installed document does not carry is not named as one:\n{joined}"
+    )
+    assert "-> null" in joined, f"a JSON null is not printed as null:\n{joined}"
+    assert "<absent>" not in joined, (
+        "the sentinel is still reaching an operator's terminal, where it is one "
+        f"more quoted string among the values:\n{joined}"
+    )
+    assert "None" not in joined, (
+        f"Python's repr of null is still being printed to an operator:\n{joined}"
+    )
+
+
 def test_the_json_output_is_machine_readable_and_names_the_verdict(tmp_path: Path) -> None:
     installed = write(tmp_path / "installed.json", rendered())
     candidate = write(tmp_path / "candidate.json", rendered())

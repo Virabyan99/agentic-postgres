@@ -231,10 +231,15 @@ def command_check(arguments: argparse.Namespace) -> int:
     if names != tuple(sorted(names)):
         return fail(EXIT_CONTRACT, f"the approved contract's tools are not sorted: {names}")
 
-    print(f"mcp-contract: the manifest compiles to the approved contract ({len(names)} tools)")
+    # **Held until the whole verb has agreed** (D1403). Every sentence below is
+    # true the moment it is computed, and printing it here put a block of
+    # success on the terminal AFTER the `--project` half's refusal -- so the
+    # last line an operator read said the manifest compiles, on exit 5. A
+    # refusal is the last thing printed.
+    report = [f"mcp-contract: the manifest compiles to the approved contract ({len(names)} tools)"]
     for tool in document["tools"]:
         sets = " | ".join(",".join(scopes) for scopes in tool["discovery_scope_sets"])
-        print(f"  {tool['name']:<20} {tool['kind']:<9} {sets}")
+        report.append(f"  {tool['name']:<20} {tool['kind']:<9} {sets}")
 
     # **A profile is refused HERE, at compile time, or not at all** (ADR 0183,
     # D867). `check --project` applies one project's profile to the approved
@@ -258,7 +263,7 @@ def command_check(arguments: argparse.Namespace) -> int:
                     return problem
                 capabilities = config.load_capabilities_manifest(arguments.capabilities)
                 document = capability_manifest.compile_joint_contract(capabilities, inputs)
-                print(
+                report.append(
                     f"mcp-contract: {inputs.root.relative_to(REPO_ROOT)}/capabilities.yaml "
                     f"compiles to its approved contract; the joint contract "
                     f"{document['contract_id']} carries {document['tool_count']} tools"
@@ -269,7 +274,10 @@ def command_check(arguments: argparse.Namespace) -> int:
             return fail(EXIT_PREREQUISITE, f"missing input: {exc}")
         except config.ManifestError as exc:
             return fail(EXIT_CONTRACT, f"the project is refused: {exc}")
+        print("\n".join(report))
         _report_profile(document, profile)
+        return EXIT_OK
+    print("\n".join(report))
     return EXIT_OK
 
 

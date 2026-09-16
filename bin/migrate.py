@@ -384,16 +384,25 @@ def freeze_project_lock(project_path: str) -> int:
     return 0
 
 
-def verify_project_lock(project_path: str) -> int:
+def verify_project_lock(project_path: str) -> str:
+    """Verify a project's own set, RETURNING the sentence rather than printing it.
+
+    **D1403.** The caller used to print the release half's success before
+    calling this, so when this refused -- which it does for every project that
+    declares no set of its own -- the last line an operator saw was
+    *"the released lock agrees with the manifest and templates"*, on exit 5.
+    The sentence was true; its position was the defect. Both halves' sentences
+    are now printed together, after both halves have agreed, so a refusal is
+    the last thing on the terminal.
+    """
     migration_set = project_set_from_manifest(project_path)
     manifest = migration_set.load_manifest()
     migrations.verify_lock(manifest, migration_set.load_lock(), migration_set.root)
     migrations.lint_project_set(migration_set)
-    print(
+    return (
         f"migrate: {migration_set.root} agrees with its own lock, and the set is "
         "within what a project may contain"
     )
-    return 0
 
 
 def main() -> int:
@@ -424,9 +433,16 @@ def main() -> int:
             # platform migration.
             manifest = migrations.load_manifest()
             migrations.verify_lock(manifest, migrations.load_lock())
-            print("migrate: the released lock agrees with the manifest and templates")
+            released = "migrate: the released lock agrees with the manifest and templates"
             if arguments.project:
-                return verify_project_lock(arguments.project)
+                # Computed first, printed last (D1403): `verify_project_lock`
+                # raises for a project with no set of its own, and a sentence
+                # already on the terminal cannot be taken back.
+                project_line = verify_project_lock(arguments.project)
+                print(released)
+                print(project_line)
+                return 0
+            print(released)
             return 0
 
         document = json.loads(Path(arguments.outputs).read_text(encoding="utf-8"))

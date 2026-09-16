@@ -66,6 +66,26 @@ preconditions, and a failure halfway would leave nobody able to say which half.
 
 Never pass a secret value as a command-line argument.
 USAGE
+
+  # **The one argument on this page with no documented origin** (D1397). N is
+  # CURRENT_SESSION in src/agentic_postgres/__init__.py; it is not in VERSION,
+  # and no --help in this repository printed it. A LOWER number is accepted and
+  # deploys less, silently (D59), so an operator who guesses gets exit 0 and
+  # the wrong release.
+  #
+  # Derived from the same function the deploy itself uses -- one value, one
+  # place -- and degraded to a sentence rather than an error when this checkout
+  # has no interpreter, because --help is a read that must need nothing.
+  local session=""
+  if session="$(max_deployable_session 2>/dev/null)" && [ -n "${session}" ]; then
+    printf '\nThis release implements session %s: --through-session %s is the whole of\n' \
+      "${session}" "${session}"
+    printf 'it. The number is CURRENT_SESSION in src/agentic_postgres/__init__.py, and a\n'
+    printf 'lower one is accepted and deploys less, without saying so.\n'
+  else
+    printf '\n--through-session N takes N from CURRENT_SESSION in\n'
+    printf 'src/agentic_postgres/__init__.py. No interpreter here could read it.\n'
+  fi
 }
 
 die() {

@@ -13,7 +13,7 @@ Run 7 is the close and the tag.
 **Product version at close:** `VERSION` **1.6.1**, `CURRENT_SESSION` stays
 **25**. This session repairs a release rather than building one, and the
 release it produces is `1.6.1`.
-**Next free:** D1405, ADR 0210.
+**Next free:** D1406, ADR 0210.
 
 ---
 
@@ -63,8 +63,9 @@ carried from the findings file's arithmetic.
 
 ## 1. The divergence table
 
-D1388–D1404. Rows marked **recorded** are not repaired here, with the reason.
-D1402–D1404 were opened by Run 1's own measurements and are not in the brief.
+D1388–D1405. Rows marked **recorded** are not repaired here, with the reason.
+D1402–D1404 were opened by Run 1's own measurements and D1405 by Run 2's;
+none of the four is in the brief.
 
 | D | Said | Measured or read | This session | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -86,6 +87,8 @@ D1402–D1404 were opened by Run 1's own measurements and are not in the brief.
 | **D1402** | This plan's D1395, from the 2026-09-16 `--help` capture: *"this is the only verb that refuses `--help` for want of privilege."* | **True as stated, and three more verbs refuse `--help` for a different reason.** `bin/upgrade.sh check --help`, `plan --help` and `verify --help` each exit **2** with *the following arguments are required: --project*. Measured cause: `bin/upgrade.py:157` constructs its parser with **`add_help=False`**, so `--help` is not an argument it knows; the wrapper's `case "$1"` matches `--help` only in first position, `check` matches first and is dispatched, and argparse's required-argument error fires before its unrecognised-argument error. So the class is wider than privilege: **a wrapper that dispatches a verb before considering `--help`**, over a Python side that either checks privilege (`dr-kit`) or requires an argument (`upgrade`). Four verbs across two commands. | **Run 2** takes the wider rule: `--help` or `-h` anywhere in `"$@"` prints the wrapper's usage and returns 0 before the verb is dispatched. The guard derives the verbs to probe from each command's own usage block, line-anchored, which is the derivation D1316's repair already uses for `--project` — so the next command that grows a verb is covered without anybody editing a list. | The plan priced one instance and the measurement found a class. Guarding the instance would have left three verbs of the command this session's whole brief is about still refusing to explain themselves. | — |
 | **D1403** | The exit-code convention, and ADR 0195: a reader has three outcomes and reports the third rather than folding it. | **Two commands print a success line AFTER a refusal and exit non-zero.** Measured twice, on two different inputs: `bin/migrate.sh --project <schema-4 manifest> verify-lock` prints *"declares no migrations.set, so it has no lock of its own"*, then prints **"migrate: the released lock agrees with the manifest and templates"**, then exits **5**; `bin/mcp-contract.sh check --project <invalid manifest>` prints *"the project is refused: …"*, then **"the manifest compiles to the approved contract (6 tools)"**, then exits **5**. In both the last line a reader sees reads as success on a failing exit. The findings file noticed the first as *"a small ordering wart"* inside F-014; it is reproducible, it is in two commands, and the second was found by this session's own rig rather than by the brief. | **Run 2**: a refusal is the last thing printed. The release's lock genuinely does agree, and that sentence is still worth printing — before the refusal, not after it. | ADR 0195's family read from the other end: not an unknown reported as an answer, but the right answer printed last. An operator who reads the final line and the exit code disagrees with their own terminal. | 0195 |
 | **D1404** | `docs/upgrade-guide.md` §1's sixth check: *"`generate --check` exits 5 after **every** bump, because the client's `templateVersion` is derived from the release (D1238). Regenerate and commit it."* | **For a project that declares no migration set it exits 5 for a different reason, and regenerating is the wrong remedy.** Measured against a valid schema-4 manifest: *"clients/typescript/README.md is missing; the client has not been generated from this contract."* `bin/generate.sh --help` says the default output is `projects/<slug>/clients/typescript` for a project with a set and `clients/typescript` under the checkout root for one without — and **the release tracks no root-level `clients/` directory at all**. So the check refuses for every schema-4 project, always, and the page's remedy would have the reader create a top-level directory the release does not carry. The findings file reached the same wall from the other side and left it, correctly. | **Run 4** says which of the two refusals a reader is looking at and that a project with no set of its own has no client to regenerate. **Whether the release should track a root-level client, or `generate` should refuse a setless project by name, is §10's** — it is a product decision about what `apg generate` is for, not a sentence. | The page gives one cause and one remedy for a refusal that has two causes and, in the more common case, no remedy the page's own advice reaches. | — |
+
+| **D1405** | This plan's D1402, from Run 1: *"Four verbs across two commands."* | **Seven verbs across three commands**, measured in Run 2 by deriving every verb from every command's own usage and probing each one, which is the guard D1402 asked for and is also how the class was finally counted. `bin/database-ports.sh allocate --help`, `verify --help` and `release --help` each exit **3** with *"must run as root: the allocation registry lives under /etc and the lock under /run/lock."* Same shape as `dr-kit export`: the wrapper dispatches the verb, the verb's arm checks privilege, and `--help` is never considered. Run 1 could not have found these — its reading was the 2026-09-16 `--help` capture, which holds each command's top-level help and the verbs somebody thought to capture; the derivation reads the usage text the command itself prints. | **Run 2**, in the same edit as D1395 and D1402: the loop over `"$@"` goes into all three commands. The guard is a class over `SHELL_COMMANDS`, with the verbs derived per command, so this is the last time anybody counts. | Three rounds of counting one class, each larger than the last, and each reading was honest about the evidence it had. The lesson is not that Run 1 was careless: it is that a capture of what somebody thought to run is not a measurement of what the command offers, and only the derivation closed the gap. | — |
 
 ---
 
@@ -318,7 +321,127 @@ release implements (D1397).
 (D1119 — this run adds test functions) and `test_cli_contract` (two `bin/`
 commands' usage moves).
 
-**Done.**
+**Done.** 2026-09-16. Seven repairs, eleven mutations, **eleven kills, no
+survivors, no errors and no dead controls** — after the battery's first pass
+found three defects in the PROOFS and none in the product.
+
+**The repairs.**
+
+1. **`client_ir.FORMAT_TYPES` (D1390), and rig 27b measured the rest of it.**
+   Run 1's rig answered for the twenty-one declared types and seven array
+   spellings. Run 2 re-ran the same apparatus over the array form of *every*
+   base type — one container, ~43 seconds, the D1216 control holding — because
+   deriving fourteen entries from a rule measured on seven is exactly the
+   "value that looked measured and was not" this project keeps producing. The
+   table goes from 21 entries to **44**: `int32` and `int64`, and twenty-one
+   array spellings. **An array carries the base type's SQL name and never
+   `int32`** (`integer[]` is served `integer[]`), and PostgREST drops a
+   `varchar` modifier in an array as it does for a column — but **keeps
+   `vector`'s**, so `extensions.vector(768)[]` is served whole and
+   `_FORMAT_MODIFIER` had to stop being anchored at the end of the string.
+   The refusal takes its noun from `{where}` rather than saying "column" to
+   somebody looking at an argument. The rig's whole measurement is committed as
+   `RIG_27B_SERVED` beside the new guard, which asserts every served spelling
+   resolves **and that a type's two spellings resolve to the SAME TypeScript
+   type** — the property the old table broke. `tsvector` and `tsvector[]` are
+   named as unserved on purpose, and a mutation that widens the table to reach
+   `tsvector` is one of the eleven kills.
+
+   **One correction to Run 1's account.** "`integer`, `smallint` and `bigint`
+   are dead keys" is right about PostgREST and wrong about the table: the
+   APPLICATION snapshot is typed through the same map, and `_openapi_type`
+   reduces JSON Schema `integer` to `"integer"` and `number` to `"numeric"`.
+   So two of the three are live from the other document and all three are
+   kept, with the reason written where somebody tidying up will read it.
+
+2. **`rendering.py`'s four `mkdir`s (D1391).** `make_directory` gives the
+   generated root, `.staging`, `.locks` and the per-render staging directory
+   what `publish` has had since 1.3.0 — the owner resolved upward, the `chown`
+   named, and `RenderError` rather than a bare traceback and **exit 1, which is
+   not one of the ten codes the README publishes**. The lock FILE's `os.open`
+   is guarded too (D65's trip). The remedy names the whole generated root
+   deliberately: `.staging` and `.locks` are dotfiles, and the check the
+   upgrade guide prescribed (`stat -c %U .generated/*`) cannot see either —
+   which is why the cold reader's check passed and the render then died inside
+   one of them.
+
+3. **`bin/upgrade.sh`'s usage names `--also` (D1381)**, with all eight classes
+   and D743's reason. **The first draft of that block invented four of the
+   eight class names from memory**, and what caught it was writing the guard
+   before trusting the text: the proof reads `DECLARABLE` by AST and asserts
+   every flag the parser declares and every class it accepts appears in the
+   usage. Nothing shipped; it is recorded because the apparatus being the
+   defect is this project's standing risk.
+
+4. **`--help` anywhere in `"$@"` (D1395, D1402, D1405), and the class was
+   bigger a third time.** The guard the plan asked for — derive each command's
+   verbs from its own usage, probe each one — found **seven verbs in three
+   commands**, not four in two: `bin/database-ports.sh allocate|verify|release`
+   refuse `--help` for want of root exactly as `dr-kit export` does (**D1405**).
+   All three wrappers now consider help before dispatching. The derivation had
+   its own defect on first run and it is worth naming: `\s+` matches a NEWLINE,
+   so a usage block whose lines each start with the command name derived the
+   next line's first word as a verb of this one — it read `bin` out of
+   `bin/rotate-secret.sh`. Fixed to spaces and tabs before anything was
+   asserted.
+
+5. **`bin/upgrade.py`'s two readers (D1393, D1394).** `check`'s human-readable
+   form says which question was answered — *"a comparison CAN be made … no
+   candidate was read"* or *"nothing is installed … so nobody looked. This is
+   NOT 'no changes'"* — and **no JSON key moves**, as Run 1 step 5 established.
+   The leaf renderer prints `(no such key)`, `null` and a JSON value as three
+   different things. **`Difference.ABSENT` is a CLASS attribute, not a module
+   one** — Run 1's row said `upgrade_plan.py:106` and the first version of the
+   repair read `upgrade_plan.ABSENT`, which raised an `AttributeError` on the
+   first real hop it was tried against. Caught by running the command rather
+   than by reading the diff. And the model had always distinguished the two
+   cases: `Difference`'s own docstring cites D600 for choosing a sentinel over
+   `None`. Only the renderer put them back together.
+
+6. **`deploy.sh --help` names the session (D1397)**, and Run 1 was right that
+   this is cheap: `max_deployable_session()` already imports `CURRENT_SESSION`.
+   It is derived from that function rather than typed, printed after the quoted
+   heredoc, and **degrades to a sentence rather than an error when no
+   interpreter can be found** — `--help` is a read that must need nothing.
+
+7. **A refusal is not preceded by a success sentence (D1403).**
+   `verify_project_lock` returns its sentence instead of printing it, so both
+   halves print together after both agree; `mcp-contract check` holds its
+   report until the `--project` half has passed. Both measured before and
+   after on the inputs that reach the arm — and the mcp instance needs a
+   manifest the SCHEMA refuses, not a schema-4 one, which the reading found.
+
+**What the battery found, and all three were mine.**
+
+* The `.generated` remedy assertion was a substring test, so a remedy naming
+  `.generated/*` — the glob that cannot reach either dotfile, which is the
+  whole of D1391 — **survived**. It now asserts the path is followed by the
+  closing backtick.
+* **The refusal-ordering proof could not fail.** It took the last line of
+  `stdout + stderr`, and in that concatenation stderr is *always* last, so a
+  refusal on stderr satisfied it whatever stdout said. The mutation survived.
+  **And the property as this plan's D1403 states it — "a refusal is the last
+  thing printed" — is not readable through a pipe at all**: what an operator
+  sees depends on which stream is a tty and how Python buffers it. The
+  checkable property is stronger and is the one that matters: **a command that
+  is going to refuse writes no success sentence to stdout in the first place.**
+  True on a terminal, in a pipe, and in a log. The test is renamed to say so.
+* The control for the `--help` mutation was **reachable by it**: deleting
+  `bin/upgrade.sh`'s loop takes its top-level `--help` with it, because the
+  loop is that path now. Re-pointed at `dr-kit`'s verb help, in a file the
+  mutation does not touch (D499).
+
+**Targeted at the close, once:** `test_client_ir`, `test_client_typescript`,
+`test_render_atomicity`, `test_cli_contract`, `test_upgrade_command`,
+`test_upgrade_plan`, `test_capability_profile`, `test_mcp_catalog`,
+`test_acceptance_registry`, `test_documentation_index` — **730 passed** after
+the acceptance matrix was regenerated (the registry gained seven proofs and two
+widened clauses). `bin/apg.sh generate --check` exits 0: the release's snapshot
+serves only formats whose mapping did not move, so the committed client is
+unchanged, which is itself the measurement of how narrow that snapshot is.
+`ruff format` reformatted three files and `ruff check` passes. The rig module is
+deleted; the fixture the readings could have damaged was snapshotted and is
+byte-identical (`32a621d1c11d720b…`).
 
 ### Run 3 — the refuted rationale, in the code and in the two places that repeat it
 

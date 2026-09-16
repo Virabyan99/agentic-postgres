@@ -107,6 +107,35 @@ DECLARABLE = (
 )
 
 
+def render_leaf_value(value: Any) -> str:
+    """One side of a leaf difference, for a human (D1394).
+
+    **Three outcomes, and the third is reported** (ADR 0195): a key the
+    document does not carry, a key it carries whose value is JSON `null`, and
+    a value. `!r` spelled the first two as `'<absent>'` and `None`, which are
+    both Python repr of something and read as each other -- so on a real hop
+    two leaves said *the v18 schema added this key and this project leaves it
+    empty* in a form indistinguishable from *a value went away*. Same class,
+    opposite direction, and the classification was right either way; what was
+    ambiguous is the only output the upgrade guide tells an operator to read
+    before an irreversible step.
+
+    JSON for a value rather than repr, because the value came out of a JSON
+    document and `'1.6.0'` is not how it is written there.
+
+    **The model already told these apart and only this renderer did not.**
+    `Difference.ABSENT` exists because `None` is a value a document can carry
+    -- `jwt.retire_after` is `null` whenever no rotation is in flight -- and
+    its own docstring names D600 for it. The sentinel was chosen correctly and
+    then printed through `!r`, which put it back.
+    """
+    if isinstance(value, str) and value == upgrade_plan.Difference.ABSENT:
+        return "(no such key)"
+    if value is None:
+        return "null"
+    return json.dumps(value, sort_keys=True)
+
+
 def render_plan_text(plan: upgrade_plan.Plan, project_key: str) -> str:
     lines = [
         f"upgrade plan for {project_key}",
@@ -123,7 +152,9 @@ def render_plan_text(plan: upgrade_plan.Plan, project_key: str) -> str:
         lines.append(f"\n  {len(plan.differences)} leaf/leaves differ")
         for item in plan.differences[:40]:
             lines.append(f"    {item.path}")
-            lines.append(f"      {item.installed!r} -> {item.candidate!r}")
+            lines.append(
+                f"      {render_leaf_value(item.installed)} -> {render_leaf_value(item.candidate)}"
+            )
         if len(plan.differences) > 40:
             lines.append(f"    ... and {len(plan.differences) - 40} more")
     if plan.reasons:
@@ -215,7 +246,25 @@ def main(argv: list[str] | None = None) -> int:
             print(f"upgrade check for {project_key}")
             print(f"  installed   {payload['installed_version']}  ({payload['installed_kind']})")
             print(f"  this release {payload['release_version']}")
-            print(f"  verdict     {payload['verdict'].upper()}")
+            # **The word, not the code** (D1393). This printed
+            # `verdict     OK`, which is accurate about the question `check`
+            # asks and reads as a verdict on the upgrade -- and an operator
+            # running it from the host's own checkout before the new release is
+            # fetched sees both versions equal and `OK`, on a host about to
+            # take a release six minors ahead. `check` reads NO candidate and
+            # compares nothing; it answers whether a comparison is possible.
+            # The JSON key is untouched: one proof reads the payload and
+            # renaming a published key to improve a sentence is a contract
+            # change for a cosmetic gain.
+            if installed is not None:
+                print("  answer      a comparison CAN be made: the installed document was")
+                print("              read, and it is the same kind of document this release")
+                print("              renders. Nothing has been compared and no candidate was")
+                print("              read -- what an upgrade would change is")
+                print("              `bin/upgrade.sh plan --candidate ...`.")
+            else:
+                print("  answer      nothing is installed for this project here, so nobody")
+                print("              looked. This is NOT 'no changes'.")
             for reason in payload["reasons"]:
                 print(f"    - {reason}")
         return EXIT_OK if installed is not None else EXIT_MISSING

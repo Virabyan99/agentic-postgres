@@ -71,8 +71,23 @@ main() {
     usage >&2
     die 2 "a verb is required: export or verify."
   fi
+  # **`--help` or `-h` ANYWHERE in the arguments, before the verb is dispatched**
+  # (D1395, D1402, D1405). A verb's help is a READ: it needs no root, no
+  # required argument and no host. A wrapper that dispatches the verb first
+  # hands the request to a privilege check or to argparse, and the person
+  # trying to learn the command is refused for a reason that has nothing to do
+  # with reading. Measured across every verb this repository documents: seven
+  # of them, in three commands, did exactly that.
+  for argument in "$@"; do
+    case "${argument}" in
+      --help | -h)
+        usage
+        return 0
+        ;;
+    esac
+  done
+
   case "$1" in
-    --help | -h) usage; return 0 ;;
     export)
       # Root unless the operator points --state-root somewhere readable (a
       # proof does; a host never). The Python side reports an unreadable

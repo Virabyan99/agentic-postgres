@@ -81,7 +81,24 @@ class ClientIrError(ManifestError):
 #: `json`/`jsonb` map to `unknown` and that is not a default: it is the correct
 #: type for a value whose shape the contract genuinely does not state, and
 #: `unknown` (unlike `any`) forces the caller to narrow before use.
+#:
+#: **Every key below is a spelling measured against a running PostgREST**, by
+#: rig 27b at Session 27 Run 2 (D1390) -- one column and one RPC argument of
+#: every type in this table plus every array form, read out of the served
+#: document. Before that measurement the table was written from the SQL type
+#: names, and seventeen of its twenty-one entries had never matched a served
+#: format in this repository's history: PostgREST serves an `integer` as
+#: `int32` everywhere, and had never been asked for an array at all. The
+#: measurement is committed beside the guard in
+#: `tests/contract/test_client_ir.py` as `RIG_27B_SERVED`, so the next spelling
+#: this table lacks fails a proof rather than an adopter's first generate.
+#:
+#: `tsvector` is deliberately absent and must stay absent: it is the control in
+#: `test_an_unknown_column_format_is_refused_and_never_typed_any`, and the
+#: property it holds -- that a format nobody decided about refuses rather than
+#: becoming `any` -- is what this table may never be widened past.
 FORMAT_TYPES: dict[str, str] = {
+    # --- what PostgREST serves for a scalar column or argument -------------
     "uuid": "string",
     "text": "string",
     "character varying": "string",
@@ -94,26 +111,67 @@ FORMAT_TYPES: dict[str, str] = {
     "time without time zone": "string",
     "interval": "string",
     "extensions.vector": "string",
-    "integer": "number",
-    "bigint": "number",
-    "smallint": "number",
+    # `int32` and `int64` are what PostgREST actually serves for `integer`,
+    # `smallint` and `bigint`, as a COLUMN and as an ARGUMENT alike (rig 27b).
+    "int32": "number",
+    "int64": "number",
     "real": "number",
     "double precision": "number",
     "numeric": "number",
     "boolean": "boolean",
     "json": "unknown",
     "jsonb": "unknown",
+    # --- the SQL spellings, which PostgREST serves for NO scalar ------------
+    # Kept because `_openapi_type` reduces the APPLICATION snapshot's JSON
+    # Schema types into this same table: `integer` and `numeric` are reached
+    # from there, `text`, `boolean` and `json` above are reached from both.
+    # `smallint` and `bigint` are reached by neither document and are kept only
+    # so that a hand-written surface spelling them resolves rather than refuses.
+    "integer": "number",
+    "bigint": "number",
+    "smallint": "number",
+    # --- arrays, which carry the SQL spelling and never `int32` -------------
+    # Measured by rig 27b over every array form: an array is served as its base
+    # type's SQL name with `[]`, with the modifier kept only for `vector`
+    # (`extensions.vector(768)[]`), which `_FORMAT_MODIFIER` strips.
+    "text[]": "string[]",
+    "character varying[]": "string[]",
+    "character[]": "string[]",
+    "name[]": "string[]",
+    "uuid[]": "string[]",
+    "timestamp with time zone[]": "string[]",
+    "timestamp without time zone[]": "string[]",
+    "date[]": "string[]",
+    "time with time zone[]": "string[]",
+    "time without time zone[]": "string[]",
+    "interval[]": "string[]",
+    "extensions.vector[]": "string[]",
+    "integer[]": "number[]",
+    "bigint[]": "number[]",
+    "smallint[]": "number[]",
+    "real[]": "number[]",
+    "double precision[]": "number[]",
+    "numeric[]": "number[]",
+    "boolean[]": "boolean[]",
+    "json[]": "unknown[]",
+    "jsonb[]": "unknown[]",
 }
 
 #: A parameterised format carries its modifier: a `vector` COLUMN is served as
 #: `extensions.vector(768)` while the same type as an RPC ARGUMENT is served as
-#: bare `extensions.vector`, and `character varying(64)` behaves the same way.
-#: Measured in the example project's snapshot, where the two spellings of one
-#: type appear in one document (D1216). Stripped before the table is consulted,
-#: so the table holds one entry per type rather than one per modifier -- a table
-#: keyed on the modifier would refuse the first column anybody declares at a
-#: different width.
-_FORMAT_MODIFIER = re.compile(r"\(\s*[^()]*\)\s*$")
+#: bare `extensions.vector`. Measured in the example project's snapshot, where
+#: the two spellings of one type appear in one document (D1216). Stripped
+#: before the table is consulted, so the table holds one entry per type rather
+#: than one per modifier -- a table keyed on the modifier would refuse the first
+#: column anybody declares at a different width.
+#:
+#: **The modifier can sit before a trailing `[]`, which is why this is not
+#: anchored at the end of the string** (rig 27b, D1390): an array of vectors is
+#: served as `extensions.vector(768)[]`. `character varying(64)` is NOT one of
+#: these -- PostgREST drops that modifier itself, as a column and in an array
+#: alike -- so `vector` is the one type this branch exists for, and it is the
+#: one the release's own example domain uses.
+_FORMAT_MODIFIER = re.compile(r"\(\s*[^()]*\)\s*(?=(?:\s*\[\s*\])*\s*$)")
 
 #: Every `PT` SQLSTATE this product's migrations raise, matched in SQL text.
 PT_CODE_PATTERN = re.compile(r"\bPT\d{3}\b")
@@ -332,11 +390,15 @@ def _ts_type(
     if bare in enums:
         return _enum_union(enums[bare])
 
+    # `where` is "column <relation>.<column>" or "argument <rpc>.<argument>";
+    # the noun is taken from it rather than assumed, because the sentence used
+    # to say "column" to somebody looking at an argument (D1390).
+    noun = where.split(" ", 1)[0]
     raise ClientIrError(
         f"{where} is served as format {format_name!r}, which this generator has no "
         f"TypeScript type for. Add it to client_ir.FORMAT_TYPES with the type it should "
-        "carry; it is not given `any`, because a column whose type nobody decided is not "
-        "a column a client should silently accept (ADR 0204)"
+        f"carry; it is not given `any`, because a {noun} whose type nobody decided is "
+        f"not a {noun} a client should silently accept (ADR 0204)"
     )
 
 

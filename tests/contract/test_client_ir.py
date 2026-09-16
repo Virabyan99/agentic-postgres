@@ -533,6 +533,152 @@ def test_every_format_the_committed_snapshots_serve_has_a_typescript_type() -> N
         assert required in client_ir.FORMAT_TYPES, f"{required} is served by this tree"
 
 
+#: What PostgREST serves as the `format` of a type, as a COLUMN and as an RPC
+#: ARGUMENT: `(declared SQL type, column spelling, argument spelling)`.
+#:
+#: **Measured, not reasoned** (rig 27b, Session 27 Run 2, D1390). The rig reused
+#: `test_generated_client_runtime`'s `served` fixture whole -- a dev cluster
+#: built from the render and the release, PostgREST configured from
+#: `compose.yaml`'s own environment -- and added one superuser statement: a
+#: table with a column of every type below and a function taking an argument of
+#: each. Its control was D1216's, that a `vector` column comes back
+#: `extensions.vector(768)` and the same type as an argument comes back bare.
+#:
+#: The rig itself is not committed, for `test_generated_client_runtime`'s own
+#: reason: it needs Docker, a cluster and ~40 seconds, and this table is the
+#: part of it worth keeping. What the rig answered once, this table asserts on
+#: every run.
+RIG_27B_SERVED: tuple[tuple[str, str, str], ...] = (
+    ("uuid", "uuid", "uuid"),
+    ("text", "text", "text"),
+    ("character varying(64)", "character varying", "character varying"),
+    ("character(4)", "character", "character"),
+    ("name", "name", "name"),
+    ("timestamp with time zone", "timestamp with time zone", "timestamp with time zone"),
+    (
+        "timestamp without time zone",
+        "timestamp without time zone",
+        "timestamp without time zone",
+    ),
+    ("date", "date", "date"),
+    ("time with time zone", "time with time zone", "time with time zone"),
+    ("time without time zone", "time without time zone", "time without time zone"),
+    ("interval", "interval", "interval"),
+    ("extensions.vector(768)", "extensions.vector(768)", "extensions.vector"),
+    ("integer", "int32", "int32"),
+    ("bigint", "int64", "int64"),
+    ("smallint", "int32", "int32"),
+    ("real", "real", "real"),
+    ("double precision", "double precision", "double precision"),
+    ("numeric", "numeric", "numeric"),
+    ("boolean", "boolean", "boolean"),
+    ("json", "json", "json"),
+    ("jsonb", "jsonb", "jsonb"),
+    ("text[]", "text[]", "text[]"),
+    ("integer[]", "integer[]", "integer[]"),
+    ("uuid[]", "uuid[]", "uuid[]"),
+    ("double precision[]", "double precision[]", "double precision[]"),
+    ("boolean[]", "boolean[]", "boolean[]"),
+    ("jsonb[]", "jsonb[]", "jsonb[]"),
+    ("numeric[]", "numeric[]", "numeric[]"),
+    ("tsvector", "tsvector", "tsvector"),
+    ("character varying(64)[]", "character varying[]", "character varying[]"),
+    ("character(4)[]", "character[]", "character[]"),
+    ("name[]", "name[]", "name[]"),
+    ("timestamp with time zone[]", "timestamp with time zone[]", "timestamp with time zone[]"),
+    (
+        "timestamp without time zone[]",
+        "timestamp without time zone[]",
+        "timestamp without time zone[]",
+    ),
+    ("date[]", "date[]", "date[]"),
+    ("time with time zone[]", "time with time zone[]", "time with time zone[]"),
+    ("time without time zone[]", "time without time zone[]", "time without time zone[]"),
+    ("interval[]", "interval[]", "interval[]"),
+    ("extensions.vector(768)[]", "extensions.vector(768)[]", "extensions.vector[]"),
+    ("bigint[]", "bigint[]", "bigint[]"),
+    ("smallint[]", "smallint[]", "smallint[]"),
+    ("real[]", "real[]", "real[]"),
+    ("json[]", "json[]", "json[]"),
+    ("tsvector[]", "tsvector[]", "tsvector[]"),
+)
+
+#: The two spellings the table must NOT carry. `tsvector` is the control in
+#: `test_an_unknown_column_format_is_refused_and_never_typed_any`: if widening
+#: the table for D1390 had reached it, that proof would still pass -- against a
+#: format the generator now types -- and the property ADR 0204 exists for would
+#: be gone with nothing red. Named here so the widening cannot swallow it.
+UNSERVED_ON_PURPOSE: frozenset[str] = frozenset({"tsvector", "tsvector[]"})
+
+
+def test_every_spelling_postgrest_serves_has_a_typescript_type() -> None:
+    """**GEN-IR-001**, and the half the committed snapshots cannot reach.
+
+    `test_every_format_the_committed_snapshots_serve_has_a_typescript_type`
+    asks whether the table covers the tree. It passed for three sessions while
+    the table could not type an `integer`, because the tree's two snapshots
+    between them serve five formats and an enum -- seventeen of the table's
+    twenty-one entries had never matched a served format in this repository's
+    history (D1390). This asks the other question: whether the table covers
+    what PostgREST SERVES, measured over every type at once.
+
+    Three assertions, and the third is the one D1390 is about: a type's column
+    spelling and its argument spelling must reach the SAME TypeScript type. The
+    old table typed an `integer` column and an `integer` argument differently
+    -- one resolved and one refused -- which is a client disagreeing with
+    itself about one type.
+    """
+    assert RIG_27B_SERVED, "the measurement is empty; this proof would pass over nothing"
+
+    def resolved(spelling: str) -> str | None:
+        bare = client_ir._FORMAT_MODIFIER.sub("", spelling).strip()
+        return client_ir.FORMAT_TYPES.get(bare)
+
+    unmapped: list[str] = []
+    disagreeing: list[str] = []
+    for declared, column, argument in RIG_27B_SERVED:
+        if declared in UNSERVED_ON_PURPOSE:
+            continue
+        for role, spelling in (("column", column), ("argument", argument)):
+            if resolved(spelling) is None:
+                unmapped.append(f"{declared} as a {role} is served {spelling!r}")
+        if resolved(column) is not None and resolved(column) != resolved(argument):
+            disagreeing.append(
+                f"{declared}: column {column!r} -> {resolved(column)}, "
+                f"argument {argument!r} -> {resolved(argument)}"
+            )
+
+    assert not unmapped, (
+        "PostgREST serves spellings client_ir.FORMAT_TYPES has no entry for, so "
+        f"`apg generate` and `apg studio` both refuse a surface using them: {unmapped}"
+    )
+    assert not disagreeing, (
+        "a type's two spellings reach different TypeScript types, so a generated "
+        f"client disagrees with itself about one column: {disagreeing}"
+    )
+
+    #: The control, stated rather than implied: the widening did not reach the
+    #: format the refusal proof relies on being unknown.
+    for control in sorted(UNSERVED_ON_PURPOSE):
+        bare = client_ir._FORMAT_MODIFIER.sub("", control).strip()
+        assert bare not in client_ir.FORMAT_TYPES, (
+            f"{control} is the control in the refusal proof and must have no "
+            "TypeScript type; adding one makes that proof pass over a format "
+            "this generator now accepts, which is ADR 0204's property with "
+            "nothing left holding it"
+        )
+
+    #: And the three the old table carried that PostgREST serves for nothing,
+    #: kept deliberately: `integer` and `numeric` are reached from the
+    #: APPLICATION snapshot through `_openapi_type`, `smallint` and `bigint` by
+    #: neither document. Asserted so that a later tidy-up that deletes them
+    #: reads this sentence first.
+    assert client_ir._openapi_type({"type": "integer"}) == "integer"
+    assert client_ir._openapi_type({"type": "number"}) == "numeric"
+    for sql_only in ("integer", "numeric", "smallint", "bigint"):
+        assert sql_only in client_ir.FORMAT_TYPES
+
+
 def test_the_caller_facing_tokens_match_the_runtimes() -> None:
     """**GEN-IR-001**, and D486's arrangement.
 

@@ -341,6 +341,91 @@ def test_a_render_under_sudo_hands_the_directory_and_the_lock_back(
     assert chowned == [], f"an unprivileged render chowned {chowned}"
 
 
+def test_the_directories_a_render_creates_name_the_owner_and_the_remedy(
+    sandbox: Path, manifest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**D1391**, and it is `publish`'s refusal reaching the rest of its callers.
+
+    The state is the one an operator meets after a `sudo` render: `.generated`
+    and the two dotted directories under it are root-owned, and the next
+    unprivileged render has to create something inside them. `publish` has
+    named the owner since 1.3.0. The four `mkdir`s that run BEFORE `publish`
+    did not, so the failure that arrives FIRST arrived as a bare traceback and
+    **exit 1, a code the README does not publish** -- and the upgrade guide told
+    the reader this class would arrive "as a sentence".
+
+    **Why the denial is applied at the syscall rather than by `chmod`**, which
+    is the sibling proof below's choice for the same reason: the gate runs as
+    root, and root creates a directory inside a `0500` one. A proof that made
+    the state with `chmod` would skip on every gate that could record it
+    (D1121, D1302's shape). What is under test is the handler, and the handler
+    is reached by the error either way.
+
+    Each of the three sites is denied on its own, because they are three
+    different lines and a guard on one is not a guard on the others.
+
+    The control: an `OSError` that is not a permission problem is NOT dressed
+    up as a chown, because "chown this" is wrong advice for a full disk.
+    """
+    real_mkdir = Path.mkdir
+
+    def denying(error: OSError, *, exactly: Path | None = None, inside: Path | None = None):
+        def mkdir(self: Path, *args: object, **kwargs: object) -> None:
+            if (exactly is not None and self == exactly) or (
+                inside is not None and self.parent == inside
+            ):
+                raise error
+            return real_mkdir(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        return mkdir
+
+    denied = PermissionError(13, "Permission denied")
+
+    def refuses(patched: object, expected: Path) -> str:
+        monkeypatch.setattr(Path, "mkdir", patched)
+        with pytest.raises(rendering.RenderError) as raised:
+            rendering.render_project(manifest, CAPABILITIES)
+        message = str(raised.value)
+        assert "cannot create" in message, message
+        assert str(expected) in message, f"{expected} is not named: {message}"
+        assert "owned by" in message and "this user is" in message, message
+        assert "chown" in message, "the remedy is not named, so the operator has only the problem"
+        # The path, and then the closing backtick: `chown -R me:me .generated` is
+        # the remedy, and `chown -R me:me .generated/*` is the check the upgrade
+        # guide prescribed, which cannot reach either dotfile. A substring test
+        # for the root alone passes on both -- measured, in this run's own
+        # battery, where that mutation SURVIVED.
+        assert f"{rendering.GENERATED_ROOT}`" in message, (
+            "the remedy must chown the whole generated root and not a glob of it: "
+            ".staging and .locks are dotfiles, and `chown .generated/*` walks past "
+            f"both, which is the whole of D1391. Got: {message}"
+        )
+        return message
+
+    # The two roots, and then the per-render staging directory -- whose `mkdir`
+    # is the line the cold reader actually died on (`parents=False`, so it
+    # cannot be covered by a guard on its parent).
+    refuses(denying(denied, exactly=rendering.STAGING_ROOT), rendering.STAGING_ROOT)
+    refuses(denying(denied, exactly=rendering.LOCK_ROOT), rendering.LOCK_ROOT)
+    leaf = refuses(denying(denied, inside=rendering.STAGING_ROOT), rendering.STAGING_ROOT)
+    assert leaf.split("cannot create ", 1)[1].startswith(str(rendering.STAGING_ROOT)), leaf
+
+    # The control. A full disk is not a permission problem and keeps its own
+    # report; dressing it as an ownership problem would send the operator to run
+    # a `chown` that changes nothing.
+    monkeypatch.setattr(
+        Path,
+        "mkdir",
+        denying(OSError(28, "No space left on device"), inside=rendering.STAGING_ROOT),
+    )
+    with pytest.raises(OSError) as fell_through:
+        rendering.render_project(manifest, CAPABILITIES)
+    assert "No space left" in str(fell_through.value), str(fell_through.value)
+    assert "chown" not in str(fell_through.value), (
+        "a full disk was reported as an ownership problem, which is advice that cannot work"
+    )
+
+
 def test_publish_names_the_owner_and_the_remedy_when_it_cannot_replace(
     sandbox: Path, manifest: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

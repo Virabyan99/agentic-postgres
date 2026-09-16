@@ -13,9 +13,11 @@ import ast
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 from agentic_postgres import REPO_ROOT
 
@@ -378,6 +380,289 @@ def test_help_exits_zero_and_says_something(relative: str) -> None:
     result = run(str(REPO_ROOT / relative), "--help")
     assert result.returncode == 0, result.stderr
     assert len(result.stdout.strip()) > 40, f"{relative} --help is not informative"
+
+
+#: Commands whose `--help` documents at least one VERB, derived from the text
+#: rather than listed. Named only as the control for the derivation below: if
+#: the regex ever stops matching, every parametrised case passes over an empty
+#: verb list and the whole guard goes quiet (§7 question 1).
+COMMANDS_WITH_VERBS = {
+    "bin/agent.sh",
+    "bin/apg.sh",
+    "bin/connect.sh",
+    "bin/database-access.sh",
+    "bin/database-ports.sh",
+    "bin/dev.sh",
+    "bin/dr-kit.sh",
+    "bin/mcp-contract.sh",
+    "bin/rehearse.sh",
+    "bin/upgrade.sh",
+}
+
+
+def verbs_documented_by(relative: str, help_text: str) -> tuple[str, ...]:
+    """The verbs a command's own `--help` documents, read out of that text.
+
+    **Derived, not listed** -- D1316's repair uses the same shape to find which
+    verbs take `--project`, and for the same reason: a hand-kept list stops
+    covering the directory the first time somebody forgets, and says nothing
+    when it does.
+
+    A verb is a lowercase word following the command's own name on a usage
+    line. The separator class is spaces and tabs and never the whitespace
+    shorthand, which matches a NEWLINE too: with it, a usage block whose lines
+    each begin with the command name derives the next line's first word as a
+    verb of this one. Measured while writing this -- it read `bin` out of
+    `bin/rotate-secret.sh`.
+    """
+    name = re.escape(Path(relative).name)
+    pattern = re.compile(
+        rf"^[ \t]*(?:Usage:[ \t]*)?(?:sudo[ \t]+)?(?:\./|bin/)?{name}[ \t]+"
+        r"([a-z][a-z0-9-]*)(?![\w/-])",
+        re.MULTILINE,
+    )
+    seen: list[str] = []
+    for verb in pattern.findall(help_text):
+        if verb not in seen:
+            seen.append(verb)
+    return tuple(seen)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [command for command in SHELL_COMMANDS if command != "bin/session-01-check.sh"],
+)
+def test_a_verbs_help_is_a_read_and_needs_nothing(relative: str) -> None:
+    """**DX-002**, one level down: a VERB documents itself too (D1395, D1402, D1405).
+
+    `test_help_exits_zero_and_says_something` asks this of the command. Nobody
+    asked it of a verb, and **seven verbs in three commands refused**, each for
+    a reason that has nothing to do with reading:
+
+    * `bin/dr-kit.sh export --help` exited 3 for want of ROOT;
+    * `bin/database-ports.sh allocate|verify|release --help` exited 3, the same;
+    * `bin/upgrade.sh check|plan|verify --help` exited 2, because the Python
+      side is built with `add_help=False` over a required `--project`, so the
+      wrapper dispatched the verb and argparse refused the missing argument
+      before it ever considered the flag.
+
+    Three commands, two unrelated causes, one shape: **a wrapper that
+    dispatches the verb before it considers `--help`**. Guarded as the class
+    rather than as the three instances (D1199's shape), over verbs derived from
+    each command's own usage -- so a command that grows a verb tomorrow is
+    covered tomorrow, with nobody editing a list.
+    """
+    top = run(str(REPO_ROOT / relative), "--help")
+    verbs = verbs_documented_by(relative, top.stdout)
+    if relative in COMMANDS_WITH_VERBS:
+        assert verbs, (
+            f"{relative} documents verbs and none were derived from its --help; the "
+            "derivation is broken, and every other case in this parametrisation is "
+            "passing over an empty list"
+        )
+    for verb in verbs:
+        result = run(str(REPO_ROOT / relative), verb, "--help")
+        assert result.returncode == 0, (
+            f"`{relative} {verb} --help` exited {result.returncode}. A verb's help is a "
+            f"READ: it takes no root, no required argument and no host. {result.stderr[:300]}"
+        )
+        assert len(result.stdout.strip()) > 40, (
+            f"`{relative} {verb} --help` exited 0 and printed nothing worth reading"
+        )
+
+
+def test_every_command_documenting_verbs_is_named_in_the_control() -> None:
+    """The control's other direction, so it cannot rot into a shorter list.
+
+    `COMMANDS_WITH_VERBS` exists to prove the derivation still derives. A name
+    dropped from it weakens the guard silently; a command that GROWS verbs and
+    is not added to it weakens it the same way. Both are failures here.
+    """
+    documenting = {
+        relative
+        for relative in SHELL_COMMANDS
+        if relative != "bin/session-01-check.sh"
+        and verbs_documented_by(relative, run(str(REPO_ROOT / relative), "--help").stdout)
+    }
+    assert documenting == COMMANDS_WITH_VERBS, (
+        "COMMANDS_WITH_VERBS disagrees with what the commands' own --help texts "
+        f"document. Only in the list: {sorted(COMMANDS_WITH_VERBS - documenting)}; "
+        f"only in the tree: {sorted(documenting - COMMANDS_WITH_VERBS)}"
+    )
+
+
+def test_upgrade_usage_names_every_flag_and_class_its_parser_accepts() -> None:
+    """**D1381**, and the reason it is scoped to one command.
+
+    `bin/upgrade.sh --help` documented four options and the parser accepted
+    five: `--also`, which D743 makes an **operator declaration** rather than a
+    convenience, was absent from the page an operator reads to find out what
+    they may declare. A flag nobody can find is a flag nobody uses, and this
+    one is the only way to tell the planner about a migration -- the class that
+    makes a bump irreversible by image rollback.
+
+    Scoped to `bin/upgrade.sh`. A sweep over every parser in `bin/` is a
+    measurement nobody has made and is priced in the plan's §10; asserting it
+    here would either be red on a dozen commands or quietly narrowed to nothing.
+
+    The eight class names are read from `DECLARABLE` and not typed here, for a
+    measured reason: **the first draft of the usage block invented four of
+    them**, and was caught by writing this proof rather than by reading it.
+    """
+    source = (REPO_ROOT / "bin" / "upgrade.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    flags = {
+        node.args[0].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_argument"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+        and node.args[0].value.startswith("--")
+    }
+    assert flags, "no --flags were read from bin/upgrade.py; this proof reads them by shape"
+
+    declarable: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "DECLARABLE" for target in node.targets
+        ):
+            declarable = {
+                element.value
+                for element in ast.walk(node.value)
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            }
+    assert len(declarable) == 8, f"DECLARABLE carries {len(declarable)} classes, expected 8"
+
+    usage = run(str(REPO_ROOT / "bin" / "upgrade.sh"), "--help")
+    assert usage.returncode == 0, usage.stderr
+
+    missing_flags = sorted(flag for flag in flags if flag not in usage.stdout)
+    assert not missing_flags, (
+        f"bin/upgrade.py accepts {missing_flags} and bin/upgrade.sh --help does not name "
+        "them, so an operator cannot find a flag the command takes"
+    )
+
+    missing_classes = sorted(name for name in declarable if name not in usage.stdout)
+    assert not missing_classes, (
+        f"--also accepts {missing_classes} and the usage does not name them. The list an "
+        "operator reads must be the list argparse enforces, or `--also` refuses a class "
+        "the help text offered"
+    )
+
+
+def test_deploy_help_names_the_session_this_release_implements() -> None:
+    """**D1397.** The one argument on that page with no documented origin.
+
+    `--through-session N` takes `CURRENT_SESSION`. It is not in `VERSION`, no
+    `--help` in the 4,478-line capture printed it, and `deploy.sh` accepts any
+    number BELOW it silently (D59) -- so an operator who guesses low gets exit
+    0 and a partial release. The number is derived from the same function the
+    deploy itself uses, never typed into the text.
+    """
+    from agentic_postgres import CURRENT_SESSION
+
+    result = run(str(REPO_ROOT / "deploy.sh"), "--help")
+    assert result.returncode == 0, result.stderr
+    assert str(CURRENT_SESSION) in result.stdout, (
+        f"deploy.sh --help does not name session {CURRENT_SESSION}, so the one "
+        "argument whose wrong value is accepted silently still has no documented "
+        "source"
+    )
+    assert "CURRENT_SESSION" in result.stdout, (
+        "the number is printed and its source is not, so an operator upgrading to a "
+        "release the guide's table does not list has nowhere to read it"
+    )
+
+
+def test_a_command_about_to_refuse_prints_no_success_sentence() -> None:
+    """**D1403.** Two commands printed a success line and then refused.
+
+    `bin/migrate.sh --project <manifest with no set> verify-lock` printed
+    *"the released lock agrees with the manifest and templates"* -- true -- and
+    exited 5. `bin/mcp-contract.sh check --project <refused manifest>` printed
+    the whole approved contract and exited 5. ADR 0195's family from the other
+    end: not an unknown reported as an answer, but the right answer reported
+    when the answer to the question asked is a refusal.
+
+    **The first version of this asserted the wrong thing and could not fail.**
+    It took the last line of `stdout + stderr` -- and in that concatenation
+    stderr is always last, so a refusal on stderr satisfied it whatever stdout
+    said. The battery caught it: the mutation that puts the success sentence
+    back BEFORE the refusing call survived.
+
+    "Last on the terminal" is not a property a proof can read through a pipe
+    anyway: the interleaving an operator sees depends on which stream is a tty
+    and how Python buffers it. What is checkable is stronger and is the thing
+    that actually matters -- **a command that is going to refuse writes no
+    success sentence to stdout at all.** Then the ordering is true on a
+    terminal, in a pipe, and in a log.
+
+    The controls are in the same test: the same two verbs on a VALID project
+    must still print their sentences and exit 0. A repair that deleted the
+    sentences would satisfy the first half by taking a true report away.
+    """
+    manifest = REPO_ROOT / "project.example.yaml"
+    document = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+
+    with tempfile.TemporaryDirectory() as directory:
+        # No `migrations.set`: schema 4's shape, which `verify-lock --project`
+        # refuses by name. The key is REMOVED rather than emptied -- `set` is
+        # required under `migrations`, so leaving a null parent makes the
+        # manifest invalid and every command refuses on schema validation
+        # instead, which is a different arm.
+        setless = dict(document)
+        setless["schema_version"] = 4
+        setless.pop("migrations", None)
+        setless.get("mcp", {}).pop("capabilities", None)
+        setless_path = Path(directory) / "setless.yaml"
+        setless_path.write_text(yaml.safe_dump(setless, sort_keys=False), encoding="utf-8")
+
+        refused = dict(document)
+        refused["a_key_no_schema_allows"] = True
+        refused_path = Path(directory) / "refused.yaml"
+        refused_path.write_text(yaml.safe_dump(refused, sort_keys=False), encoding="utf-8")
+
+        for command, arguments, path in (
+            ("bin/migrate.sh", ("verify-lock",), setless_path),
+            ("bin/mcp-contract.sh", ("check",), refused_path),
+        ):
+            if command == "bin/migrate.sh":
+                result = run(str(REPO_ROOT / command), "--project", str(path), *arguments)
+            else:
+                result = run(str(REPO_ROOT / command), *arguments, "--project", str(path))
+            assert result.returncode != 0, (
+                f"`{command}` was expected to refuse {path.name} and exited 0; this "
+                "proof is no longer exercising the arm it was written for"
+            )
+            claimed = [
+                marker
+                for marker in ("agrees with", "compiles to the approved contract")
+                if marker in result.stdout
+            ]
+            assert not claimed, (
+                f"`{command}` exited {result.returncode} after writing {claimed} to "
+                f"stdout. A sentence already on the terminal cannot be taken back, so "
+                "a command that is going to refuse does not print one (D1403). stdout "
+                f"was:\n{result.stdout}"
+            )
+
+    # The controls: the same two verbs on the release's own project still say
+    # so, and still exit 0.
+    agreeing = run(str(REPO_ROOT / "bin" / "migrate.sh"), "--project", str(manifest), "verify-lock")
+    assert agreeing.returncode == 0, agreeing.stdout + agreeing.stderr
+    assert "the released lock agrees" in agreeing.stdout, (
+        "the release half's sentence was deleted rather than moved, which satisfies "
+        "the ordering rule by taking a true report away"
+    )
+    assert "agrees with its own lock" in agreeing.stdout, agreeing.stdout
+
+    compiling = run(str(REPO_ROOT / "bin" / "mcp-contract.sh"), "check", "--project", str(manifest))
+    assert compiling.returncode == 0, compiling.stdout + compiling.stderr
+    assert "compiles to the approved contract" in compiling.stdout, compiling.stdout
 
 
 def test_bootstrap_providers_is_no_longer_a_stub() -> None:

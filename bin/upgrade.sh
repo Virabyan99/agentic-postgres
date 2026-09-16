@@ -75,6 +75,28 @@ Options:
                     first; it prints the document to pass here. Not read by
                     `check`.
   --json            Machine-readable output on stdout. Human-readable otherwise.
+  --also CLASS      Declare a change class NO pair of rendered documents can
+                    establish, so that the bump is priced with it included.
+                    Repeatable, and read by `plan` and `verify`. One of:
+
+                      migration_added
+                      api_operation_added
+                      api_operation_removed
+                      api_operation_changed
+                      secret_optional_added
+                      document_schema_migratable
+                      document_schema_needs_operator_input
+                      operator_manifest_invalidated
+
+                    `migration_added` is the one an operator owes most often.
+                    A rendered document records no migration count, and
+                    migrations/released.lock.json describes the checkout in
+                    hand and never the release that produced the INSTALLED
+                    document -- so "a migration was added" is undecidable from
+                    here (D743). It is DECLARED rather than inferred: guessing
+                    it from a schema_version move would be answering a question
+                    whose evidence is not in the room, and it is the class that
+                    makes a bump irreversible by image rollback.
 
 Reads only. To perform an upgrade, run ./deploy.sh --through-session N after
 this reports a plan that may proceed.
@@ -98,8 +120,24 @@ main() {
     exit 2
   fi
 
+  # **`--help` or `-h` ANYWHERE in the arguments, before the verb is dispatched**
+  # (D1395, D1402, D1405). A verb's help is a READ: it needs no root, no
+  # required argument and no host. A wrapper that dispatches the verb first
+  # hands the request to a privilege check or to argparse, and the person
+  # trying to learn the command is refused for a reason that has nothing to do
+  # with reading. Measured across every verb this repository documents: seven
+  # of them, in three commands, did exactly that.
+  for argument in "$@"; do
+    case "${argument}" in
+      --help | -h)
+        usage
+        exit 0
+        ;;
+    esac
+  done
+
   case "$1" in
-    --help | -h | help)
+    help)
       usage
       exit 0
       ;;

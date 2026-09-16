@@ -209,12 +209,28 @@
   target_session: 1
   test_nodeids:
     - tests/contract/test_cli_contract.py::test_help_exits_zero_and_says_something
+    - tests/contract/test_cli_contract.py::test_a_verbs_help_is_a_read_and_needs_nothing
+    - tests/contract/test_cli_contract.py::test_every_command_documenting_verbs_is_named_in_the_control
+    - tests/contract/test_cli_contract.py::test_upgrade_usage_names_every_flag_and_class_its_parser_accepts
+    - tests/contract/test_cli_contract.py::test_deploy_help_names_the_session_this_release_implements
+    - tests/contract/test_cli_contract.py::test_a_command_about_to_refuse_prints_no_success_sentence
     - tests/contract/test_cli_contract.py::test_no_command_reports_an_unavailable_capability
     - tests/contract/test_cli_contract.py::test_command_works_from_another_directory
     - tests/contract/test_cli_contract.py::test_commands_do_not_echo_a_planted_environment_variable
   description: >-
     Operator commands document themselves, obey the exit-code convention, work
-    from any directory, and never print the environment.
+    from any directory, and never print the environment. A VERB documents
+    itself too: `--help` anywhere in the arguments prints and exits 0 before
+    the verb is dispatched, so no verb refuses to explain itself for want of
+    root or of a required argument (D1395, D1402, D1405), over verbs derived
+    from each command's own usage rather than from a list. `bin/upgrade.sh`'s
+    usage names every flag its parser accepts and every class `--also` takes
+    (D1381). `deploy.sh --help` names the session this release implements and
+    where that number is read from -- the one argument whose wrong value is
+    accepted silently (D1397, D59). And a command that is going to refuse
+    prints no success sentence at all: a true sentence computed before a later
+    half refuses is held until the whole verb has agreed, so it is never on a
+    terminal that then reports a failure (D1403).
 
 - id: DX-003
   priority: P0
@@ -1806,11 +1822,18 @@
     - tests/contract/test_upgrade_plan.py::test_a_deployed_document_on_either_side_is_undetermined
     - tests/contract/test_upgrade_plan.py::test_every_non_ok_plan_says_why
     - tests/contract/test_upgrade_command.py::test_no_verb_writes_even_on_the_happy_path
+    - tests/contract/test_upgrade_command.py::test_the_human_readable_check_says_which_question_it_answered
+    - tests/contract/test_upgrade_command.py::test_a_key_the_document_does_not_carry_prints_differently_from_a_null
     - tests/deployment/test_session13_upgrade_plan.py::test_a_plan_is_produced_without_changing_the_deployment
   description: >-
     A deployed project produces a complete upgrade plan without changing its
     deployment, and a comparison that could not be made is undetermined rather
-    than reported as no changes.
+    than reported as no changes. What the operator READS says which question
+    was answered: `check` states that a comparison can be made, or that nothing
+    is installed and nobody looked, rather than printing a bare verdict over a
+    verb that reads no candidate (D1393); and a leaf the installed document
+    does not carry prints differently from one it carries as JSON null, which
+    the model has always distinguished and the renderer did not (D1394).
 
 - id: REL-CLI-001
   priority: P0
@@ -2842,6 +2865,7 @@
     - tests/contract/test_honest_readers.py::test_publish_and_load_rendered_name_the_owner_and_the_remedy
     - tests/contract/test_render_atomicity.py::test_a_render_under_sudo_hands_the_directory_and_the_lock_back
     - tests/contract/test_render_atomicity.py::test_publish_names_the_owner_and_the_remedy_when_it_cannot_replace
+    - tests/contract/test_render_atomicity.py::test_the_directories_a_render_creates_name_the_owner_and_the_remedy
     - tests/contract/test_render_atomicity.py::test_the_owner_is_resolved_upward_when_the_path_itself_cannot_answer
     - tests/deployment/test_session20_tenant.py::test_render_as_the_checkout_owner_of_a_root_owned_directory_says_unreadable_not_absent
   description: >-
@@ -2864,7 +2888,12 @@
     lock back to the invoking user itself, rather than leaving that to the one
     caller that remembered; and the out-of-process reading is exercised as far
     as an unprivileged workstation can take it, so what stays unmeasured until
-    a gate runs as root is the `sudo -u` prefix alone.
+    a gate runs as root is the `sudo -u` prefix alone. Session 27 widened it
+    again for the same reason (D1391): the four `mkdir` sites that run BEFORE
+    `publish` -- the generated root, `.staging`, `.locks` and the per-render
+    staging directory -- name the owner and the `chown` too, and the remedy
+    names the whole generated root because two of those directories are
+    dotfiles a glob does not match.
 
 - id: OPS-READ-002
   priority: P0
@@ -3263,6 +3292,7 @@
     - tests/contract/test_client_ir.py::test_a_snapshot_object_the_surface_does_not_name_is_refused_and_vice_versa
     - tests/contract/test_client_ir.py::test_an_unknown_column_format_is_refused_and_never_typed_any
     - tests/contract/test_client_ir.py::test_every_format_the_committed_snapshots_serve_has_a_typescript_type
+    - tests/contract/test_client_ir.py::test_every_spelling_postgrest_serves_has_a_typescript_type
     - tests/contract/test_client_ir.py::test_the_pt_codes_are_scanned_from_the_release_and_the_set
     - tests/contract/test_client_ir.py::test_the_caller_facing_tokens_match_the_runtimes
     - tests/contract/test_client_ir.py::test_the_reserved_write_parameters_match_the_harnesss
@@ -3280,8 +3310,10 @@
     project's own set raise, the seven caller-facing tokens, and four digests.
     A snapshot object the surface does not name is refused and so is a surface
     object the snapshot does not publish; an unknown column format is refused
-    rather than typed `any`. Two builds of one contract are equal (ADR 0204,
-    ADR 0158).
+    rather than typed `any`. Every spelling PostgREST serves for a type -- as a
+    COLUMN and as an RPC ARGUMENT, scalars and arrays alike -- carries a
+    TypeScript type, and a type's two spellings carry the SAME one. Two builds
+    of one contract are equal (ADR 0204, ADR 0158).
 
 - id: GEN-EMIT-001
   priority: P0

@@ -130,6 +130,15 @@ OTEL_CONFIG_MODE = 0o444
 PGBACKREST_CONF_MODE = 0o444
 
 GENERATED_ROOT = REPO_ROOT / ".generated"
+
+#: **Both of these are DOTFILES, and that is load-bearing in a way no page said
+#: until D1391.** A shell glob does not match a leading dot, so `stat -c %U
+#: .generated/*` -- the check the upgrade guide prescribed for exactly this
+#: failure -- cannot see either of them. An operator whose previous render ran
+#: under `sudo` therefore got a clean check and then a render that died inside
+#: `.generated/.staging`. The check that can see them names them:
+#: `stat -c '%U %n' .generated .generated/.staging .generated/.locks
+#: .generated/*`.
 STAGING_ROOT = GENERATED_ROOT / ".staging"
 LOCK_ROOT = GENERATED_ROOT / ".locks"
 
@@ -2082,9 +2091,15 @@ def refuse_symlink(path: Path) -> None:
 @contextmanager
 def project_lock(project_key: str) -> Iterator[None]:
     """Exclusive, non-blocking per-project lock (plan decision I)."""
-    LOCK_ROOT.mkdir(parents=True, exist_ok=True)
+    make_directory(LOCK_ROOT)
     lock_path = LOCK_ROOT / f"{project_key}.lock"
-    handle = os.open(lock_path, os.O_CREAT | os.O_RDWR, FILE_MODE)
+    try:
+        handle = os.open(lock_path, os.O_CREAT | os.O_RDWR, FILE_MODE)
+    except PermissionError as exc:
+        # The lock FILE, not its directory: a previous privileged render leaves
+        # `<key>.lock` root-owned too, and D65 is the trip where the operator's
+        # next render died on it.
+        raise RenderError(_cannot_create(lock_path)) from exc
     try:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -2209,6 +2224,50 @@ def _cannot_replace(target: Path) -> str:
         f"{me}. A privileged render left it behind; `sudo chown -R {me}:{me} {target}` "
         "hands it back."
     )
+
+
+def _cannot_create(target: Path) -> str:
+    """Who owns what is in the way, who is asking, and the command that fixes it.
+
+    `_cannot_replace`'s sentence for the other half of the same state. The
+    thing that refused is usually not `target` -- it does not exist yet -- so
+    the owner is asked of the nearest ancestor that can answer, which is what
+    `owner_of` already does.
+
+    The remedy names `GENERATED_ROOT` recursively rather than the path that
+    refused, because the two directories this reaches most are `.staging` and
+    `.locks`: dotfiles a `chown .generated/*` would walk straight past (D1391).
+    """
+    me = current_user()
+    blocking = target if target.exists() else target.parent
+    return (
+        f"cannot create {target}: {blocking} is owned by {owner_of(blocking)} and this "
+        f"user is {me}. A privileged render left it behind; `sudo chown -R {me}:{me} "
+        f"{GENERATED_ROOT}` hands it back -- the whole directory, because "
+        f"{STAGING_ROOT.name} and {LOCK_ROOT.name} are dotfiles and a glob does not "
+        "match them."
+    )
+
+
+def make_directory(
+    target: Path, *, mode: int | None = None, parents: bool = True, exist_ok: bool = True
+) -> None:
+    """`mkdir`, with a `PermissionError` NAMED rather than relayed (D1391).
+
+    `publish` has had this since 1.3.0 and the four `mkdir` sites that run
+    BEFORE it did not, so the failure an operator actually met first -- a
+    root-owned `.generated/.staging` from a previous `sudo` render -- arrived
+    as a bare traceback and **exit 1, which is not one of the ten codes the
+    README publishes**. The decision was implemented where somebody was
+    looking; this is the rest of its callers (§7 question 5).
+    """
+    try:
+        if mode is None:
+            target.mkdir(parents=parents, exist_ok=exist_ok)
+        else:
+            target.mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
+    except PermissionError as exc:
+        raise RenderError(_cannot_create(target)) from exc
 
 
 def publish(staging: Path, target: Path) -> None:
@@ -2414,14 +2473,14 @@ def render_project(
     outputs = build_outputs(project, capabilities, identity, digests)
 
     refuse_symlink(GENERATED_ROOT)
-    GENERATED_ROOT.mkdir(parents=True, exist_ok=True)
-    STAGING_ROOT.mkdir(parents=True, exist_ok=True)
+    make_directory(GENERATED_ROOT)
+    make_directory(STAGING_ROOT)
 
     target = GENERATED_ROOT / identity.key
 
     with project_lock(identity.key):
         staging = STAGING_ROOT / f"{identity.key}.{os.getpid()}.{secrets.token_hex(8)}"
-        staging.mkdir(mode=DIRECTORY_MODE)
+        make_directory(staging, mode=DIRECTORY_MODE, parents=False, exist_ok=False)
 
         try:
             write_private(staging / "outputs.json", naming.canonical_json(outputs))
