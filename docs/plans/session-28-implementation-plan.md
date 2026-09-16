@@ -1,0 +1,726 @@
+# Session 28 — Sound before Stage 4: the on-ramp decided, and everything the audit found that a checkout can close
+
+**Status:** planned 2026-09-16, against `docs/pre-stage-4-audit.md` at `ad96673`,
+`template_version` **1.6.2**, `CURRENT_SESSION` **25**.
+**Brief:** `docs/pre-stage-4-audit.md` whole — one inventory of everything this
+project knows is wrong with itself, sorted by *what kind of act closes each row*.
+Then `docs/scope-closure.md` §15 and `docs/plans/session-27-implementation-plan.md` §1.
+**Shape:** **nine runs, offline. NO HOST TRIP, NO TAG.** The bump lands in Run 9
+and the tag does not. **Session 29 is the trip**, and Run 8 writes its sheet.
+**Product version at close:** `VERSION` **1.7.0**, `CURRENT_SESSION` moves
+**25 → 28**. 26 and 27 are skipped the way 19 is, and the skip is the record.
+**Next free:** D1426, ADR 0215.
+
+---
+
+## 0. Where the session starts
+
+The operator asked for the project to be sound before Stage 4 is planned, and
+the audit priced three readings of that. **Reading 2 is the one chosen: Tier 1
+closed, Tier 2 prepared and then closed by one trip with the rotation
+performed.** This plan takes the first half and hands the second half a sheet.
+
+**The brief's own number is wrong, and correcting it is the first row of §1.**
+The brief says Tier 1 is 31 rows. The audit page says 36 and shows its working —
+its first draft said 31 and was corrected by counting, and it left that fact on
+the page deliberately. Counted again here, by walking the three sub-tables:
+**1a is 6, 1b is 19, 1c is 11, total 36** (D1406). A plan built on 31 would have
+silently dropped five rows, which is the thing the brief itself says is worse
+than naming them.
+
+**The second thing measured in planning matters more than the count.** Of those
+36 rows, **thirteen are already answered in the tree** — by a stated decision at
+the definition, by a docstring that carries the alternatives, by a test that
+asserts the current state, or by a page that says the thing the row asks for.
+Session 27's own §4 rule is the one that catches this: *a brief that describes
+what already exists prices a free property as a session.* Those thirteen are
+D1407–D1418 and D1420 in §1, each with the command that shows it. They are not
+"skipped" — a row the audit calls open and the tree calls decided **is** a
+divergence, and §6 of `CLAUDE.md` requires a row rather than a silent
+reconciliation.
+
+**So the honest size of Tier 1 is not 36.** It is thirteen rows that close by
+writing down what is already true, sixteen that are a repair or a decision this
+session takes, and **seven this session defers by name** (§10).
+
+**The third measurement decided the session's shape.** `REL-STAGE-001` couples a
+release to a deployment: a host sweep asserts each project's deployed document
+carries the tree's `template_version`. ADR 0209 couples a release to its own
+documentation. D1033/D1388 is the class where a release's documentation lands
+one commit past its own tag — **three occurrences, twice in one day, the third
+inside the release built to stop it**. Those three facts are only jointly
+satisfiable if **the bump, the deploy and the tag happen in one trip** (D1425).
+This session therefore bumps and does not tag; Session 29 deploys, sweeps, and
+cuts `1.7.0` on the commit it deployed. That is not a scheduling preference. It
+is the only arrangement in which ADR 0209's guard and D1401's obligation are
+both true at the moment the tag exists.
+
+**What this session is not.** It builds no plane, opens no surface, and adds no
+verifier. It performs no rotation — the rotation is **rehearsed** in Run 8 and
+**performed** in Session 29, which is what the audit means by *its own rehearsal
+and its own run*.
+
+---
+
+## 1. The divergence table
+
+D1406–D1425, all measured during planning, on `ad96673`. Rows marked
+**answered** are closed by writing down what the tree already does; rows marked
+**recorded** are not repaired here and say why. Runs allocate from **D1426**.
+
+| D | Said | Measured or read | This session | Why it matters | ADR |
+|---|---|---|---|---|---|
+| **D1406** | The brief: *"Tier 1 is 31 rows."* | **36.** Counted by walking the audit's three sub-tables: 1a 6, 1b 19, 1c 11. The page itself says 36 and carries the note that its own first draft said 31 — *"written by the same hand that wrote this page's own instruction to measure rather than recall"*. The brief inherited the draft's number. | **The plan is written against 36**, and §10 names every row it does not take. | A plan built on the smaller number drops five rows without anyone deciding to, which is exactly the failure the brief's own instruction forbids. The count was already corrected on the page; the brief is where the stale one survived. | — |
+| **D1407** | Audit 1b: *"`requirements-dev.in` **pins nothing**"*, closing act *"`bin/lock-dev-deps.sh --update`, committed separately."* | **It pins twenty-one packages with `==`**, and the six it leaves floating are a recorded decision with its reason in the file: `ruff==0.16.3` *("the only tool here that is … pinning the formatter makes 'the tree is formatted' a statement about a specific formatter")*, then the auth service's nine, the R2 adapter's two, and the agent framework's, every one tied to `versions.in.yaml` by `test_the_development_environment_installs_the_locked_service_versions`. Floating: `pytest`, `pytest-timeout`, `pytest-xdist`, `PyYAML`, `jsonschema`, `httpx` — *"left floating deliberately rather than by omission: none has ever produced a red gate … Recorded as a decision so the next reader does not read the inconsistency as an oversight."* | **Answered.** Run 1 strikes the row and records the six. No edit to the file. | The row asks for the command that would re-resolve a file whose author already answered it in prose at the point of the decision. Running `--update` here would move twenty-one pins for a row that was never true. | — |
+| **D1408** | Audit 1b: *"The completion script is bash's. zsh and fish users have `--list` and `--help`"*, closing act *"One `case` arm, **or a stated decision**."* | **The stated decision is already in the command.** `bin/completion.sh:52`: *"Only bash is supported. zsh's `bashcompinit` can usually source a script of this…"*, and the refusal at `:127` is *"unsupported shell: $1. The one this command speaks is bash."* `scope-closure.md` §14 carries the same decision with its reason (*"writing one to be unused is not a decision this session took"*). | **Answered.** Run 1 strikes it. | Two of the row's two closing acts; one of them was performed in Session 25 and the audit did not read the command's own help. | — |
+| **D1409** | Audit 1b: *"No Python client … A second emitter, **or a stated decision not to**."* | **`docs/generated-clients.md` §7 carries it verbatim**: *"There is no Python client. The intermediate representation is language-neutral and a second emitter is one module over it, but building one to be deleted is not a decision this session took (D1205)"*, and the `node:crypto` boundary beside it. | **Answered.** Run 1 strikes it and §10 keeps D1205 as Stage 4's inheritance, which is where `scope-closure.md` §14 already puts it. | Same shape as D1408: the alternative the row offers is already taken, on the page the row's own subject documents. | — |
+| **D1410** | Audit 1b: *"`MAX_SERIALIZED_BYTES` was **chosen, not measured**"*, closing act *"Measure both."* | **True, and the code says so at the definition**: `services/auth-api/app/mcp_tools.py:136` — *"1 MiB, chosen not measured, and said so where it is defined."* `MCP_MEMORY_LIMIT_MB = 384` carries the same honesty at `rendering.py:1889` (*"inherited, not…"*). And `schemas/capabilities.schema.json` already carries the usage measurements the row asks for: a metadata response is 288–683 bytes, a write's 8–12 KB, `query_resource` over `notes` reaches the ceiling at 42 rows of 4 KiB columns. | **Answered as stated**, and the residue is recorded: the *ceiling* is a choice with its consequences measured, not an unmeasured number. Run 1 adds one sentence to §7 of `docs/product-contract.md`'s neighbouring text only if Run 1's reading finds the two statements disagree. | The row reads as *nobody looked*. Somebody looked, wrote what they found next to the constant, and declined to derive a bound from it. That is ADR 0195's posture and the row asks to undo it. | — |
+| **D1411** | Findings F-013 and audit 1a: *"The project-set lint forbids `{{app_runtime}}`, which the release's **own migration `0003`** uses. An adopter who copies the platform's example domain writes a set the release will not lint"*, closing act *"An ADR (it is a security boundary), then **roughly one line**."* | **The grant `0003` makes is inert three migrations later, and `0006`'s own comment measures it.** Only two released templates grant to `{{app_runtime}}` (`0001` schema `USAGE`, `0003` `SELECT, INSERT, UPDATE, DELETE ON app.notes, app.tasks`). `0006-app-runtime-least-privilege.sql` then issues `REVOKE ALL ON SCHEMA app FROM {{app_runtime}}` and its header records the measurement: `has_table_privilege(app_runtime,'app.notes','SELECT')` → **true**, and `SET ROLE app_runtime; SELECT * FROM app.notes` → **denied**. *"THE SCHEMA REVOKE IS THE ONE THAT HOLDS."* So an adopter copying `0003` writes a grant that grants nothing reachable. | **ADR 0211 in Run 2**, and it is not a widening. The measured position is that the lint's allowlist is **right** and the release's own example is what misleads. The decision is between (a) the allowlist stands and the refusal names `0006`, (b) `0003`'s dead grant is removed by a fix-forward migration, (c) the allowlist admits `app_runtime` — which `CLAUDE.md` §6 calls weakening and which would grant an adopter something the release itself revokes. | **The closing act as written would have widened a security boundary to match a dead line of SQL.** The finding is real — the adopter was misled — and the thing that misled them is the example, not the lint. This is the reassuring-direction premise (D930, D957) aimed at the one lint whose docstring says *"Every refusal here is a boundary, not a style rule."* | 0211 |
+| **D1412** | Findings F-012 and audit 1a: *"`freeze-lock` refuses a project set authored against an earlier release … 1.6.2 repaired the *message*; the refusal stands"*, closing act *"A way to declare or derive the real `follows_release_version`."* | **Since ADR 0206 the refusal guards nothing a cluster would refuse, and the function's own docstring says so in as many words**: *"**This no longer prevents anything the cluster would refuse** (ADR 0206, D1288) … Since ADR 0206 a project set renders to its own directory and applies against `app_private.project_schema_migrations`, and **each set is ordered against its own applied set only** … **So what survives here is a record, not a guard.**"* And: *"**What it should do when a set was frozen against an EARLIER release is undecided, and it is the on-ramp session's.**"* | **ADR 0210 in Run 2**, and the measurement changes what the ADR is about. It is not *how do we safely relax a guard*; it is *who writes a record, and from what*. Three candidates: the operator declares it (`freeze-lock --project … --follows <version>`), it is derived from the installed deployed document, or the refusal is removed as a released guard that ADR 0206 deliberately left standing. | The audit prices this as a flag. It is a decision about whether a released refusal that protects nothing should be satisfiable by declaration, and ADR 0206 explicitly did not take it — *"removing a released guard is a separate decision from the one that ADR took."* Pricing it as a flag is how a released guard gets removed by an implementation detail. | 0210 |
+| **D1413** | Audit 1b: *"`mcp_tracing.configure()` **has no caller**. No span leaves the process"*, closing act *"A caller, or delete it."* | **`configure()` has no product caller; `span()` has one.** `services/auth-api/app/mcp_tools.py:55` imports the module and `:773` opens `mcp_tracing.span("agent.tool_call", tool=tool, resource=resource)` around every tool call. The only callers of `configure()` are `tests/contract/test_mcp_tracing.py:141,148`. So **the plane creates a span per tool call into a tracer nobody configured**, which is not the same defect as dead code: deleting the module removes a working instrumentation point, and adding a caller starts emitting. | **Run 4 decides which**, measured rather than assumed, and the decision is a network question before it is a code question (`scope-closure.md`: *"scraping a project's services must answer the network question first"*). The row's two options are not symmetric and this session may take neither — but it may not leave the row reading as *dead code*. | A row that says *no caller* about a module with a caller sends the next reader at `git rm`. The spans are the part that already works. | 0195 |
+| **D1414** | Audit 1b: *"Session 9's live proofs check `"error"` and not `isError`, so they **pass on a refused write**. Session 16's `refused()` helper reads both"*, closing act *"Move the old proofs onto the helper."* | **The refusal assertions in `test_session9_agent_writes.py` already read both**, at `:910`, `:929`, `:1013`, `:1029`, `:1263`, `:1270` — `"error" in result or result.get("result", {}).get("isError")`. What still reads one key is the **success** direction: `:265`, `:961`, `:1233`, `:1240` assert `"error" not in result` alone, so a tool answering `isError: true` passes as a successful write. Four assertions, one direction, and the direction left is the one that is silently green. | **Run 5**, in the Tier 1c run, with the module's own `refused()` shape. The repair is four assertions and a battery that mutates a success into an `isError` refusal and asserts `FAILED` rather than `ERROR`. | The row is half repaired and the repaired half is the loud one. §7 question 5 in a module: a decision reached six call sites and not the four next to them. | — |
+| **D1415** | Audit 1c: *"D340 — Every service role reaches the `postgres` catalog"*, closing act *"A decision."* | **A passing test asserts the current state.** Session 7's plan: *"`test_the_maintenance_database_is_reachable_by_every_service_role` asserts the CURRENT state, so a later session that closes it turns the test red and the fix is to invert it."* The exposure measured there is catalog metadata — database and role names — and never project data, which a separate proof covers against a database that exists. | **Recorded, deferred, §10.** Closing it changes every role in every session and inverts a passing contract test, which `CLAUDE.md` §6 permits only with an ADR. It is not a soundness repair; it is a role-model change. | The row's closing act is right and its cost is a session. Naming the cost is what keeps it from being attempted in a run that has four other things to do. | — |
+| **D1416** | Audit 1b: D1275 *"A `project_admin` cannot use the schema or query views … A decision, then a grant or a narrowed surface"*, and D1274 *"Studio's capability view shows the checkout's lock, never the plane's … Ask the deployment."* | **Both already carry their decision, under ADR 0195, at the code.** `studio.py:464`'s docstring: the capabilities view is *"**Separate from `schema_view` because it answers a different question** (D1274)"* — no request Studio makes confirms the lock, so *"gating it on one would report a REST document's staleness as though it were the lock's, and that is ADR 0195's folded third outcome"*, and `CAPABILITIES_NOTE` travels with the payload so the caveat cannot come apart from the data. D1275 is documented in `docs/studio.md` §2 with its measurement, and `scope-closure.md` §13 says what is actually undecided: *"whether a human should ever hold both an administrative scope set and a data role"*. | **Answered for what the rows say; recorded for what is open.** Run 1 strikes both rows and §10 carries the one live question — the role model — to Stage 4, where `scope-closure.md` already puts it. | D1274's closing act (*"Ask the deployment, as `list_resources` already does"*) would undo a decision taken under ADR 0195 for a stated reason. This is the row most likely to be implemented by a reader who trusts the audit over the docstring. | 0195 |
+| **D1417** | Audit 1b: *"The apt pin `pgbackrest=2.59.1-1.pgdg12+1` expires … A pinning policy."* | **Accepted, stated, diarised at the pin, and it fails closed.** D533: *"an unresolvable pin exits **100** and produces no image — the build **fails closed** … Nothing moves silently."* ADR 0144 carries it; `scope-closure.md` §5 says the note *"now sits **at the pin** in `versions.in.yaml` with the one command that answers 'is it still there'"*. D99's `PYTHON_RUNTIME_IMAGE` is the genuinely different one — a rolling minor tag that can drift into a *different* build rather than into none. | **Answered for the apt pin; D99 recorded.** Run 1 strikes the apt half and §10 keeps the rolling-tag half, which is a real unpinned surface and not the one the row names. | The row bundles a loud fail-closed risk with a quiet drift risk and prices them as one policy. They are opposite defects and only one of them is silent. | — |
+| **D1418** | Findings F-026 and audit 1a: *"`bin/doctor.sh` checks the interpreter on a workstation only"*, closing act *"then the interpreter check on the host."* | **Adding it to deployed mode crosses ADR 0158's split, which is load-bearing.** `bin/doctor.sh:3-14`: *"Two modes, split by argument and never run together (ADR 0158) … **The split is what keeps the bare `python` below correct.** Workstation mode … so `--project` runs the deployed checks ONLY, and never reaches it."* Deployed mode needs root and reads the deployed document; workstation mode reads the toolchain. The host's interpreter is a property of *neither* mode as they are drawn. | **ADR 0212's neighbour, taken in Run 3 as a third reading or not at all.** The measured options: a `--host` reading that is explicitly neither mode; `provision-host.sh --check` reporting the interpreter it found (it already runs there and already reports); or the release states that the host interpreter is unchecked and says why. `provision-host.sh --apply` **installing** an interpreter is a change to what this product does to a machine and stays out (Session 27 §9's rule, unchanged). | The one-line closing act lands inside a split whose own comment says the split is what keeps another check correct. This is the §7 question-5 shape in a *reader*: which mode gets the decision, and does adding it to one break the other. | 0158 |
+| **D1419** | The on-ramp: *"How a fork made **before** `projects/<slug>/` existed converts to it is undecided"* — `scope-closure.md` §15's first row, and the audit's *"A decision, then a documented procedure."* | **The fork is reproducible offline, so the decision can be measured rather than argued.** `git ls-tree -r --name-only 1.0.0 -- projects/` returns **nothing** over 802 tracked paths: tag `1.0.0` has no `projects/` at all. A synthesized pre-ADR-0198 fork — a checkout of `1.0.0` with a tenant table in `migrations/templates/`, a row in the release's `manifest.json` and `released.lock.json`, and operations in the shared reviewed surface — is buildable from the tag in a throwaway clone. | **Rig 28a in Run 2**, and **ADR 0212** decides from what it measures. The ADR is permitted to decide that **no conversion exists** — re-homing an applied migration is what D912 forbids, and an honest *"a fork at 1.0.0 does not convert; here is what it does instead"* is a decision, not a failure to reach one. | The question has been called a product decision by two sessions and deferred by both, and the reason given each time was that there is no fork to try it on. There is one, and it is `git`'s. | 0212 |
+| **D1420** | Audit 1b: D1203 *"Two serializers that agree only while the document is ASCII — One canonicalizer"*, and D930 *"Two fields named `capabilities_sha256` — Rename one."* | **The tree already prices both as a later session's, with the reason.** D1203, `scope-closure.md` §12: *"The client never compares that digest, **which is why this is a decision for a session that versions that snapshot rather than a defect now**."* D930: renaming the field in the rendered document moves the outputs schema (v18 → v19) and owes a migrator, which is a schema session's act. | **Deferred, §10, and the cheap halves taken in Run 5**: a test asserting the two `capabilities_sha256` are different quantities (so the day somebody unifies them it goes red for the right reason), and a test asserting `app-openapi.canonical.json` is ASCII — which is the premise the agreement rests on and which nothing currently reads. | Both rows' closing acts are correct and both cost a schema move. Taking the premise-assertions instead converts a silent future disagreement into a loud one for the price of two tests. This is D1282's shape applied twice. | — |
+| **D1421** | Audit 1c: *"D1240 — Four modules collect 0 under every marker-selected sweep … They have never run in any gate."* | **Confirmed, and the shape of the fix is not uniform.** `tests/contract/test_database_function_signatures.py`, `test_storage_client.py`, `test_storage_endpoint.py`, `test_storage_endpoints.py` carry no `pytestmark`. The sweeps select on 136 `[contract, p0]`, 31 `[contract, p0, security]`, and smaller sets. **`test_storage_client` imports `from app.storage_client import …`** and `test_storage_endpoints` imports `httpx` — these are service-tree modules, not repository-tree ones, and giving them a contract marker puts them in a sweep whose environment may not have the service package importable. | **Run 5**, per module and measured: `--setup-plan` under each sweep's own selector **before** the marker is added, then after. D1242's sweep-selector guard is in the run's targeted list, which `CLAUDE.md` §1 requires of any run that adds a module to a sweep. | *"Give them markers, or say why not"* is right and treats four modules as one. Two of them may be a genuine *why not*, and the difference is measurable in a minute and invisible from the audit. | — |
+| **D1422** | Audit 1c: D464 *"`dx_record.documented_commands` is a **text scan** … A parser, or a stated limit with a test"*, and the neighbouring row *"Both documentation scans match a command line **by its first word**, so a flag on a `\`-continuation line is unchecked."* | **One regex, and it is the same one for both rows.** `dx_record.py:132`: `_COMMAND = re.compile(r"(?:^|[\s\`(])(\./deploy\.sh\|bin/apg\.sh\s+[a-z][a-z0-9-]*\|bin/[a-z0-9-]+\.(?:sh\|py))")`. It captures the script and, for `apg.sh`, one verb. It reads no flags at all, so *"a flag on a continuation line is unchecked"* understates it: **no flag on any line is checked**, continuation or not. `scope-closure.md` §14 already records the direction — an unmatched *documented* command makes a walker's honest use look unnamed, which is the safe direction. | **Run 5 takes the stated limit with a test**, not a parser. The test asserts what `_COMMAND` can and cannot see, against fixtures that include a continuation line and a flag, so the limit is a measured property rather than a sentence in a ledger. A parser is §10's. | The second row describes a narrower defect than the first row's subject actually has, and both were written about the same regex. A repair aimed at continuations would have left the scan reading no flags and looked like progress. | — |
+| **D1423** | Findings F-020 and audit 1a: *"A host checkout one commit behind the workstation is invisible: `upgrade check` compares versions and digests, never commits"*, closing act *"Report the commit. Small."* | **`source_commit` does not appear in `upgrade_plan.py` or `bin/upgrade.py` at all.** The payload carries `verdict`, `installed_version`, `release_version` and the leaf comparison; the commit is a field of the **deployed document** and of nothing the upgrade reader touches. So the repair is not *print a field it has* — it is *read a document it does not currently read on the candidate side*. | **Run 3**, and the reading is stated in ADR 0195's three outcomes: the installed commit, the candidate commit, **or *I could not determine it***, which is the case for a checkout that is not a git working tree — a case an adopter's tarball fork is actually in. | *"Small"* is right about the printing and wrong about the reading. The third outcome is the one an adopter hits, and a reader that folds it into "they match" is the defect the finding is about, one level up. | 0195 |
+| **D1424** | Audit 1c, the row that asks for a `D` number: *"A release's documentation landing one commit past its own tag. It has now happened three times, twice of them on one day … ADR 0209's guard caught none of them, correctly … **the habit around it is what fails**."* | **Measured on this tree.** `git tag` → `1.0.0 1.0.1 1.6.0 1.6.1 1.6.2`. `git ls-tree -r --name-only 1.6.0 -- docs/` carries neither release page; `1.6.2` carries both. Between `1.6.1` and `1.6.2`: two product repairs and a reply page, landed past the tag, caught by a reading rather than by a reader. **Nothing in the tree lists what is about to be tagged, and nothing lists what has landed since the last tag.** `grep` for `git tag` and `ls-tree` across `bin/` returns nothing. | **ADR 0214 in Run 7**, deciding **command or checklist** — the question the audit poses and answers with a warning: D1033's row says a checklist already existed in prose and the session that wrote it did not follow it. The measured argument for a command is that a checklist has now failed three times; the argument against is that nothing a command prints can make somebody run it. **The ADR takes a position and Run 9 is where it is first used.** | This is the class that has cost two patch releases. A test cannot see a tag cut after CI is green and ADR 0209 says so; what is missing is the question being asked out loud at the moment it is answerable. | 0214 |
+| **D1425** | `REL-STAGE-001` (a host sweep asserts each deployed document carries the tree's `template_version`), ADR 0209 (each release page states its release, checked against `template_version()`), and D1401 (*"the tree is two patches ahead of the deployment"* — an obligation, not a defect). | **The three are only jointly satisfiable inside one trip.** A session that bumps and tags without deploying leaves `stage_release`'s live half red until the next trip — which is D1401, now on its third occurrence (Sessions 22, 23, 27). A session that bumps, deploys and then discovers a documentation defect cuts a second patch — which is `1.6.2`. **The arrangement in which neither happens is: bump offline, deploy, sweep, then tag the commit that was deployed.** | **This session bumps in Run 9 and does not tag.** Session 29 deploys the bump commit, sweeps, and cuts `1.7.0` on it after ADR 0214's reading. §4 records that this session has **no** irreversible operation, which is the first time that is true of a session that moves `VERSION`. | Three sessions have met D1401 and each named it as an obligation the next trip inherits. It is not an obligation; it is a consequence of tagging and deploying in different sessions, and the release that stops doing that stops meeting it. | 0214 |
+
+---
+
+## 2. What the session adds to `tests/acceptance-registry.yaml`
+
+**It adds requirements and claims, and that is what moves `CURRENT_SESSION`.**
+Session 27 added nothing and moved `VERSION` alone; this session lands a released
+migration, a declaration an operator makes, and a reading before a tag — each of
+which is a property somebody outside could check, so each earns a requirement,
+and each new requirement gets its own claim (ADR 0089, D697).
+
+**`CURRENT_SESSION` moves 25 → 28.** 26 and 27 have no session number in the
+evidence model and never will, the way 19 has none — the skip is the record
+(D1063), and the constant's own comment is where it is written. Every gate
+selector and `claims_through_session(28)` inherits the cumulative set.
+
+Four requirements, four claims, and the exact ids are Run 9's to register
+against the file rather than this plan's to invent (D1347's lesson: a count in a
+plan's prose is not a count of the file):
+
+| Subject | Requirement | Claim | Mode |
+|---|---|---|---|
+| The record a project set carries of the release it was frozen against (ADR 0210) | one `DX-*` | its own | **offline**, declared in `OFFLINE_CLAIMS` (ADR 0202) — it is a property of a checkout and no deployment confirms it |
+| What the agent record keeps, and for how long (ADR 0213) | one `SEC-*` or `AGENT-*` | its own | **host**, `not_run` until Session 29 applies the migration. The offline half proves the function and the refusals; the live half proves the prune against a cluster with history |
+| The reading before a tag (ADR 0214) | one `REL-*` | its own | **offline** |
+| The host interpreter, if Run 3's ADR 0158 reading takes a third mode (D1418) | one `DX-*` | its own | **host**, `not_run` until Session 29 |
+
+**No new claim for the rotation**, and this is worth saying because it is the
+session's headline act. `bootstrap_identity`, `api_authorization` and
+`credential_rotation_planes` already exist and are `not_run`. Session 29's trip
+moves them to `passed` by **running the proofs that are already registered**.
+A claim added for a rotation would be a claim about the rotation having been
+planned, which is the thing ADR 0163 exists to refuse.
+
+**`bin/session-28-check.sh` is owed**, in Run 9, with the three modes
+(`offline`, `host`, `external`) and Session 25's shape. Its `--kit-dir` **stays
+on `kit-2026-09-11`** — D1282, re-read and still true, and Run 5 is where the
+proof is made to state its own premise so the trap cannot be sprung silently.
+
+---
+
+## 4. Irreversible operations
+
+**None. This session has no irreversible act, and that is a decision rather than
+an accident** (D1425).
+
+- **No tag.** `1.7.0` is cut in Session 29, on the commit that was deployed,
+  after ADR 0214's reading. A tag can be deleted and cannot be un-published, and
+  the three occurrences of D1033's class all begin with a tag cut at the wrong
+  moment.
+- **No deploy, no migration applied anywhere.** Run 6 writes a released
+  migration; nothing applies it here. Rig 28b applies it to a throwaway cluster
+  with history and destroys it.
+- **No rotation.** Run 8 **rehearses** it and writes Session 29's sheet. The
+  rehearsal runs against `apg dev` and a rig, never against a deployment.
+- **No provider write.** `bin/rotate-signing-key.sh`'s own help is explicit that
+  no command in it sets a provider value (D249); the rehearsal does not either.
+
+**The one irreversible act this session prepares** is `promote`, in Session 29:
+each project publishes exactly one verification key (ADR 0170), a key cutover
+recreates all four verifiers (ADR 0155), and `bin/rotate-signing-key.sh`'s help
+says *"After promotion there is no way back — the recovery is to complete
+forward."* It is a human at a TTY, as root, and Run 8's sheet is what they hold.
+
+Everything this session does is reversible by `git`.
+
+---
+
+## 5. Build order, run by run
+
+Each run ends `**Done.**` with what it measured. **A targeted list is derived
+from the diff, not copied from this plan**, and CI is the full check. The gate
+runs once, in Run 9, on a clean tree. Runs allocate `D` numbers from **D1426**.
+
+### Run 1 — what the audit says is open and the tree says is decided
+
+Re-measure all 36 Tier 1 rows against `ad96673`, in both directions, and write
+§1's table. The thirteen rows D1407–D1418 and D1420 are the ones planning already
+found; **the run's job is to find the rest, and to be wrong out loud where
+planning was wrong.**
+
+For each row, three questions in order: *does the subject exist as the row
+describes it*; *does the tree already carry the row's own alternative*; *is the
+row's closing act the one the measurement supports*. A row that fails the third
+question is the expensive kind — D1411 would have widened a security boundary
+and D1416 would have undone an ADR 0195 decision.
+
+Then write the rows down where a reader will meet them: each struck row gets its
+sentence in `docs/scope-closure.md` §16 (this session's section) with the command
+that shows it, and `docs/pre-stage-4-audit.md` gains a dated note at its head
+saying which rows this session struck and why — the page says of itself that it
+*"does not track the current release and is not held to it by a test"*, so the
+note is how it stops being read as current.
+
+**Nothing runs before the push** (documentation only), and the push reads its own
+commit's CI verdict by full SHA.
+
+### Run 2 — the on-ramp, decided: three ADRs and the fork that proves them
+
+**Rig 28a: a synthesized pre-ADR-0198 fork.** A throwaway clone at tag `1.0.0`
+(measured in D1419 to have no `projects/`), given a tenant table in
+`migrations/templates/`, a row in the release's `manifest.json` and
+`released.lock.json`, and operations in the shared reviewed surface — the fork
+the adopter actually built, reproduced from the tag rather than described. It is
+a rig and a control: the same clone with the tenant objects in
+`projects/<slug>/` at `1.6.2`, which is the end state ADR 0198 describes.
+
+Three ADRs, each deciding something different, and none of them the same
+question:
+
+- **ADR 0210 — the record a project set carries of the release it was frozen
+  against.** What `follows_release_version` is *for*, now that ADR 0206 has made
+  it a record rather than a guard (D1412), and who may write it. Alternatives to
+  weigh with the rig: the operator declares it; it is derived from the installed
+  deployed document; the refusal is removed. **It is not a flag decision.** The
+  ADR states which of the three it takes and what a set that declares a false
+  record can do — because a record nobody can check is a record that reads as
+  measured.
+- **ADR 0211 — which platform identities a project's SQL may name.** D1411's
+  measurement is the whole input: `0003` grants to `app_runtime` and `0006`'s
+  schema revoke makes the grant unreachable, so the lint's allowlist is correct
+  and the release's own example is what misleads. The ADR decides between
+  leaving the allowlist alone and repairing the refusal's message and the
+  README's pointer; removing `0003`'s dead grant by fix-forward; or admitting
+  `app_runtime`, which `CLAUDE.md` §6 calls weakening and which the ADR must
+  refuse in writing if it refuses it at all.
+- **ADR 0212 — how a fork made before `projects/<slug>/` enters it, or that it
+  does not.** Two halves. The **conversion**: measured on rig 28a, what happens
+  when a tenant's applied migrations are re-homed — D912 forbids amending them,
+  and ADR 0206's one-time ledger move matches rows **by version**. The
+  **merge-conflict rule**: the nine conflicted files the one recorded upgrade
+  produced, sorted into classes, with a rule for which side wins each — and two
+  of them are generated artefacts carrying digests, where *resolve by hand* and
+  *a released migration is never amended* pull opposite ways. **The ADR is
+  permitted to decide that no conversion exists** and to say what a 1.0.0-era
+  fork does instead.
+
+ADRs and the index only; no product code. `docs/decisions/README.md` gains three
+entries. Nothing runs before the push.
+
+### Run 3 — the on-ramp, built, and the two readings an adopter is missing
+
+What ADR 0210 and ADR 0211 decided, in the code, plus the two adopter-facing
+readings the findings file left open:
+
+- **ADR 0210's declaration**, in `migrations.py` and `bin/migrate.sh`'s usage,
+  with the refusal's message rewritten from the decision rather than from the
+  old rationale. Session 27 Run 3 already replaced the refuted rationale in three
+  places (the docstring, `--help`, and the refusal text); **all three move
+  again**, and `grep` for the moved TEXT as well as the moved name (D1187).
+- **ADR 0211's refusal**, naming `0006` and what it revokes, so an adopter who
+  meets it learns why the grant they copied would not have worked.
+- **F-020 / D1423**: `upgrade check` reports the commit, with ADR 0195's third
+  outcome for a checkout that is not a git working tree — which is the case an
+  adopter's tarball fork is actually in.
+- **F-022's paragraph**: what an adopter does about a fork that can deploy and
+  cannot pass the gate. Writable now that ADR 0211 and ADR 0212 exist, and not
+  before — the findings reply says so (*"causes 1 and 2 persist only while the
+  domain is in the release's files, and F-012 and F-013 are why it cannot leave
+  them"*).
+- **D1418**, only if ADR 0158's split admits a third reading. If it does not,
+  the row is recorded in §10 with the split as its reason and nothing is edited.
+
+**`docs/on-ramp.md`** is the new page: ADR 0212's procedure, or its statement
+that no conversion exists and what to do instead. **`docs/README.md` gains its
+line** — `test_documentation_index` goes red otherwise, which is the constraint
+working. Targeted: the migration modules, `test_cli_contract` (a `bin/` command's
+usage moves), `test_documentation_index`.
+
+### Run 4 — the readers that report a file event as a domain event
+
+ADR 0195's class, in three product readers, with the rule that **a decision may
+fail closed and a report may not**:
+
+- **D1374** — `render-jwks` prints *"the key set CHANGED: every verifier must be
+  RECREATED"* from a test of the **file's bytes**. Measured on both projects at
+  the Session 25 trip: the kid and the key-set digest were identical before and
+  after, so it reported a rotation that did not happen. **It is repaired before
+  Session 29 rotates**, because the rotation's step 2 is the one place this
+  sentence is read for a decision. The repair compares the key set; the proof is
+  a rewrite that changes no key.
+- **D1045** — `ControlPlane._call` in `bin/bootstrap-providers.py` discards a
+  provider body that said *identity limit reached*. A security judgement thrown
+  away in a credential path. The run decides: report the body, report that a
+  body was discarded and why, or state in the code why neither. The third is a
+  real answer if the body can carry a secret — and whether it can is a
+  measurement, not a guess.
+- **D387** — the REST document observation does not retry, and Session 7's row
+  names the consequence precisely: *"a lost race makes the deployed document
+  understate a working deployment — and a claim computed from it would be wrong
+  in the safe-looking direction."* `routes.app` and `routes.storage` already
+  retry through `observation.await_observation`; this one reader does not. The
+  run either gives it the two-stage convergence its neighbours have, or
+  distinguishes *the service cannot serve its document* from *the edge had not
+  finished attaching* — which the field three away already does.
+
+**D1413** is decided here too: a caller for `mcp_tracing.configure()`, or its
+deletion, or the network question written down as the reason for neither. The
+spans at `mcp_tools.py:773` are what the decision is actually about.
+
+Targeted: the modules the diff touches, once, at the close.
+
+### Run 5 — Tier 1c, and it gets the run to itself
+
+**The category `CLAUDE.md` §7 says this project keeps producing: a value that
+looked measured and was not.** Scattering these across the other runs is how the
+class survives, so they are one run and each is asked §7's first question —
+*what would have to break for this to go red* — before anything is written.
+
+- **D1421 / D1240** — the four unswept modules, per module and measured:
+  `--setup-plan` under each sweep's own selector before and after. Two of them
+  import from the service tree and may be a genuine *why not*. D1242's
+  sweep-selector guard is in the targeted list, and every module that gains a
+  marker carries `pytestmark` before its first test (D1240's own rule).
+- **`test_honest_readers`' `sudo -u` re-entry branch**, which has still never
+  run. `tests/contract/checkout_owner.py` is where the decision lives and both
+  modules import it; D1310 is the precedent for showing it offline in a
+  container running as uid 0, which is the identity the gate has. Running it is
+  the point — this is the thirteenth-never-executed-proof position and twelve of
+  the first twelve failed on first execution.
+- **D1422 / D464** — the stated limit with a test: what `_COMMAND` can and
+  cannot see, against fixtures carrying a flag and a backslash continuation.
+  **Not a parser.**
+- **D1282** — the kit trap. `REC-KIT-003`'s proof `pytest.fail`s on the version
+  gap, so aiming `--kit-dir` at the newest kit destroys the proof **without
+  failing**. The repair is the proof stating its own premise, so that a kit at
+  the tree's own outputs version makes it go red rather than green.
+- **D1414** — Session 9's four success assertions, onto the module's `refused()`
+  shape.
+- **D1420's two premise assertions** — the two `capabilities_sha256` are
+  different quantities; `app-openapi.canonical.json` is ASCII.
+- **D942** — ADR 0175's two blind spots, both measured by a host trip and
+  neither guarded: an HTTP body naming an RPC's parameters, and a
+  `GRANT … ON FUNCTION` signature. Widened against the definition rather than
+  against the two instances (D600, D918, D926).
+- **D297 / D201** — recorded, with what each would cost. The environment
+  verified against the lock is a gate change; a lock verifying what it does not
+  dereference is ADR 0077's subject.
+- **The uncached first run of `apg dev up`** — recorded, with `scope-closure.md`
+  §11's reason restated: measuring it here means evicting the image the whole
+  contract suite shares, and CI already times it on a fresh runner. **The row
+  asks for it to be measured where it is claimed, and the envelope's
+  `UNMEASURED` list is where it is claimed.** If that reading holds, the row
+  closes by saying so; if it does not, it is §10's.
+
+**Every test written in this run gets a battery** — `PYTHONDONTWRITEBYTECODE=1`,
+caches cleared first, anchors pre-flighted to match exactly once with a miss
+fatal (D269), a paired control the mutation cannot reach and green in the same
+invocation (D499), and `FAILED` asserted rather than `ERROR` (D386). Restore by
+copy and `cmp`, never `git checkout --`. `test_acceptance_registry` runs because
+test functions are added and renamed (D1119).
+
+### Run 6 — what the agent record keeps, and for how long
+
+**One released migration, and it is the only schema this session moves.**
+`app_private.agent_audit` and `app_private.agent_idempotency` grow without bound
+and three migrations say so about themselves — `0020`: *"What is NOT here:
+retention. Nothing prunes `app_private.agent_audit`"*; `0032` repeats it;
+`0028`'s quota table solved its own case by `ON DELETE CASCADE` and wrote down
+why that does not generalise.
+
+**ADR 0213 decides the policy, and the policy is not a timer.** The shape to
+weigh first, because it is the one that adds no new authority: a SECURITY
+DEFINER prune function granted to nobody the caller can reach, plus the counts
+in `bin/doctor.sh`'s deployed mode so an operator can see the growth — rather
+than an automatic deletion nothing asked for. A migration that silently deletes
+an audit record is a migration that destroys the evidence ADR 0135 exists to
+keep, and the ADR says which it is choosing and what an operator must do to make
+a row disappear.
+
+**Rig 28b: a cluster with history.** D940's rule — *a migration over a table
+with history must be proved against a cluster with history* — so the rig seeds
+both tables across the shapes the plane actually writes (a served call, a
+refused call carrying `denial_reason`, a claimed idempotency key) and applies the
+migration over them. `bin/migrate.sh freeze-lock` after, and the ledger read
+rather than the migrator's line (D941).
+
+Targeted: the migration modules, `test_database_function_signatures` (its subject
+moves, and D1421 may have just given it a marker), the agent-plane contract
+modules. **Nothing is applied to a deployment.**
+
+### Run 7 — the reading before a tag
+
+**ADR 0214**, deciding command or checklist (D1424). The measured argument is on
+the page: a checklist existed in prose at `1.0.0` and the session that wrote it
+did not follow it; a test cannot see a tag cut after CI is green and ADR 0209
+says so. What is missing is the question asked out loud at the moment it is
+answerable — *is this commit the one the tag goes on*, and *what has landed since
+the last tag*.
+
+If the ADR takes a command, it is a `bin/` verb that lists what is about to be
+tagged and what has landed since the last tag, importing only
+`agentic_postgres` and `yaml` (ADR 0093), and `test_cli_contract` runs with the
+command `git add`ed first (D1014, D1188). If it takes a checklist, the ADR says
+why a command would not have been followed either, and the checklist lands where
+Session 29 will actually be standing — in this plan's §5 Run 9 and in
+`docs/operator-guide.md`.
+
+**Either way the requirement and the claim are registered in Run 9**, and the
+first use is Session 29's tag.
+
+### Run 8 — the rotation, rehearsed, and Session 29's sheet
+
+**The rotation gets its own run because it is the one credential path in this
+product that has been built, tested and never run.** Offered and declined at four
+trips; decided on 2026-09-16; performed in Session 29.
+
+Walk `bin/rotate-signing-key.sh`'s seven steps end to end against something that
+is not production, and write down what each one printed:
+
+1. The new key at `APG_AUTH_JWT_PREPARED_KEY` **by hand** — no command here
+   writes a provider value (D249).
+2. Redeploy; `render-jwks.py` publishes the prepared key's public half beside the
+   active one. **This is where Run 4's D1374 repair is first read for a
+   decision**, so the rehearsal is also that repair's live proof.
+3. Down and up, so every verifier is **recreated**. A restart is not enough — a
+   running PostgREST never re-reads its key set, and after the file is replaced a
+   restart is measured to leave the container unable to start at all (ADR 0155,
+   `jwt_keys.py:316`).
+4. `acknowledge` — what each verifier actually holds, from its **running
+   container**.
+5. `promote` — refused unless step 4 came back clean. **Irreversible.**
+6. Move the promoted key to `APG_AUTH_JWT_SIGNING_KEY`, clear the prepared slot,
+   redeploy.
+7. After the deadline, `retire`, then redeploy and recreate.
+
+**What the rehearsal is for**: the three `not_run` claims —
+`bootstrap_identity`, `api_authorization`, `credential_rotation_planes` — have
+proofs already registered, and a rehearsal that does not run them is a rehearsal
+of the commands rather than of the evidence. Run them against the rig and record
+which passed, so Session 29 knows what a red one means.
+
+**The deliverable is Session 29's numbered sheet**, in this plan's §5 as a Run 9
+appendix entry and in `docs/operator-guide.md`: the `op`-side steps the agent
+runs over SSH, and the `sudo` lines a human at a TTY runs, in order, with the
+timing nobody has ever measured (the cutover, ADR 0122's rotation repairs, and
+the agent plane's round trip — all named in Tier 2 as never timed). **Alpha
+first, then beta**, and the sheet says what to do if alpha's `acknowledge` comes
+back dirty.
+
+### Run 9 — the bump, the registry, the gate, and the close. No tag.
+
+`VERSION` **1.7.0** and `CURRENT_SESSION` **28**, in one commit with everything
+the bump owes:
+
+- **ADR 0162 prices the class.** A minor: a released migration that is additive,
+  a new declaration on `freeze-lock`, a new `bin/` verb if ADR 0214 took one.
+  If `upgrade plan` prices it above `patch`-or-`minor`, the class is re-decided
+  before the commit, not after.
+- **Both release pages' tables gain a row for `1.7.0`, in the bump's own
+  commit** — ADR 0209's guard is what makes this red otherwise, and ADR 0208's
+  *Consequences* named the gap that ADR 0209 closed. `docs/upgrade-guide.md` and
+  `docs/operator-guide.md` are `RELEASE_PAGES`.
+- **`apg generate` regenerated and committed in the same commit** (D1238): the
+  client's `templateVersion` is derived from the release, so every bump owes it.
+- **`bin/session-28-check.sh`**, three modes, Session 25's shape, `--kit-dir` on
+  `kit-2026-09-11` (D1282) with the flag's help still saying so.
+- The registry's four requirements and four claims (§2), the offline claims
+  **declared** in `OFFLINE_CLAIMS` and never inferred (ADR 0202).
+- Derived documents regenerated: the acceptance matrix, the bounds doc, the MCP
+  catalog, the evaluation report, `bin/app-contract.sh --check`,
+  `bin/mcp-contract.sh check`, `bin/migrate.sh freeze-lock`.
+- `docs/scope-closure.md` §16 — what Session 28 left open — and `CLAUDE.md` §2's
+  Session 28 block.
+
+**`bin/session-01-check.sh` runs once, on a clean tree, before the push**, and
+`bin/session-28-check.sh --mode offline` writes `evidence/session-28-offline.json`.
+Then `git diff --stat` against this plan's list, one line each, **before** the
+push — a commit message is not evidence that the diff contains what it says
+(D1116). Then CI's verdict on that commit by full SHA.
+
+**And then nothing.** No tag. Session 29 deploys this commit, sweeps, and tags it.
+
+---
+
+## 7. Evidence
+
+**One half, and it is the offline one.** `bin/session-28-check.sh --mode offline`
+writes `evidence/session-28-offline.json` at Run 9's commit, carrying this
+session's offline claims and the cumulative set through 28.
+
+**The host half is Session 29's**, and the claims it will move are named now so
+the trip is not surprised:
+
+| Claim | Now | After Session 29's trip |
+|---|---|---|
+| `bootstrap_identity` | `not_run` | **passed**, by the rotation performed |
+| `api_authorization` | `not_run` | **passed**, by the rotation performed |
+| `credential_rotation_planes` | `not_run` | **passed**, by the rotation performed |
+| `deployment_convergence` | `not_run` | depends on what the trip exercises |
+| `port_allocation` | `not_run` | depends on what the trip exercises |
+| `stage_release` | **passed offline, red live until the deploy** | passed, because the trip deploys before it sweeps |
+| `documented_path` | **failed** | **still failed.** Tier 3 |
+| `replacement_host_restore` | `not_run` | **still `not_run`.** By decision (D1028) |
+| the new `agent_record_retention` claim | — | `not_run` here, passed there |
+
+**`stage_release`'s live half is red for the whole gap between Run 9 and Session
+29's deploy, and that is by construction** (D1425). It is the third occurrence of
+D1401 and the last one that should happen, because the tag now waits for the
+deploy.
+
+**`documented_path` stays `failed`, and Session 28 must not make it look
+otherwise.** It is the only `failed` claim this project has ever written, and the
+audit's own closing line is the rule: *a session that repairs what the readers
+found and then declares victory without a third reader has not closed it — it has
+gone back to the state where the status had never been emitted at all.* This
+session repairs documentation the walks touched. **It does not re-run
+`dx-record check` against its own prose and call the result a walk.**
+
+---
+
+## 8. Security invariants this session touches
+
+**Three, and two of them are the reason ADR 0211 exists.**
+
+1. **A project's SQL names no platform identity but the request roles and its own
+   database.** `PROJECT_PLACEHOLDER_SOURCES` is seven entries and the lint's
+   docstring is the standard: *"Every refusal here is a boundary, not a style
+   rule … A lint that could be configured is a lint an adopter would configure."*
+   **ADR 0211 may not widen it to admit `app_runtime`** — `CLAUDE.md` §6 calls
+   loosening an allowlist to a subset check weakening, and D1411 measured that
+   the grant an adopter would gain is one `0006` makes unreachable anyway.
+2. **A released guard is removed by a decision, not by an implementation.**
+   ADR 0206 left `_assert_follows_release_version` standing deliberately. ADR
+   0210 may remove it, keep it, or make it declarable — and it says which, in
+   writing, with what a false declaration can do.
+3. **The audit record is evidence, and a migration that deletes it silently is a
+   migration that destroys evidence** (ADR 0135, ADR 0142). ADR 0213 states what
+   makes a row disappear and who can make it happen; the grant goes to
+   `auth_service` or to nobody, on `0020`'s reasoning, and never to a request
+   role.
+
+**Carried and not touched:** F-022's residual — a fork whose relations are in the
+release's **shared** reviewed surface thereby puts `<relation>:read` and
+`<relation>:write` into the scope vocabulary the release offers **every**
+project, because ADR 0200 derives the vocabulary from that surface. Nothing
+grants those scopes and nothing is reachable, and the repair is the on-ramp
+rather than a lint. ADR 0212 is where it is named.
+
+**What this session must not do**, repeated in §9: widen the project-set lint,
+loosen any surface equality, weaken a contract test to make a fork's tree pass,
+or re-stamp an applied migration.
+
+---
+
+## 9. Stop conditions
+
+- **No host trip, no deploy, no rotation performed.** If a repair turns out to
+  need one, it moves to Session 29 rather than growing this session.
+- **No tag.** Not on the bump commit, not at the close, not "so the release
+  exists". D1425 is the whole reason the session is shaped this way, and cutting
+  one here reproduces the class three times over.
+- **No applied migration is re-stamped, and nothing this session writes advises
+  one** (D912). ADR 0212 may decide that a conversion requiring it does not
+  exist; it may not decide to do it.
+- **No contract test is weakened.** If a proof would have to be loosened to admit
+  a fork's tree or a page, stop — that is an ADR and the subject is what moves.
+  Widening an allowlist to a **measured** set is not weakening; loosening it to a
+  subset check is.
+- **A measurement that contradicts this plan changes the plan.** Planning already
+  found thirteen rows where the audit's closing act is not the one the
+  measurement supports; Run 1 will find more, and two of the thirteen would have
+  been active harm.
+- **If Run 2's rig says the on-ramp needs a cluster with history to decide**, ADR
+  0212 splits to Session 29 or 30 and Runs 3–9 proceed without it. ADR 0210 and
+  ADR 0211 do not depend on it, and F-022's paragraph is written from those two.
+  **Say so in §10 rather than shipping a procedure nobody measured.**
+- **If ADR 0213's rig cannot seed a cluster with history**, the migration does not
+  ship. A retention migration proved against an empty table is D940 exactly.
+- **If `bin/session-01-check.sh` is not exit 0 on a clean tree at Run 9**, the
+  bump does not land. The gate's last lines are its least executed code (D1199).
+- **The rehearsal in Run 8 runs the three claims' proofs, not just the
+  commands.** A rehearsal of the commands is not evidence that the evidence works.
+
+---
+
+## 10. Open items this session carries and creates
+
+### Deferred by name, with the reason — seven rows
+
+Each of these is a Tier 1 row this session does **not** close. The brief's rule
+is that a plan which silently drops rows is worse than one that names them.
+
+1. **D1203 — one canonicalizer for `app-openapi.canonical.json`.** The tree's own
+   position: *"a decision for a session that versions that snapshot rather than a
+   defect now."* Run 5 takes the premise assertion (the document is ASCII) so the
+   day it stops being true is loud.
+2. **D930 — the two fields named `capabilities_sha256`.** Renaming the one in the
+   rendered document moves the outputs schema to v19 and owes a migrator. A
+   schema session's act. Run 5 takes the premise assertion (they are different
+   quantities).
+3. **D1248 — `GET /admin/audit`'s window, outcome filter and cursor.** New
+   capability, not a defect, and it moves a released function's arity in a
+   session whose purpose is soundness — which is exactly what `0032` declined to
+   do, with its reasons written down. Stage 4's.
+4. **D340 — every service role reaches the `postgres` catalog.** Closing it
+   inverts a passing contract test and touches every role in every session
+   (D1415). The exposure is catalog metadata and never project data, proved
+   separately.
+5. **D1275 / D1274 — Studio's role model.** Both rows' *stated* subjects are
+   answered in the code under ADR 0195 (D1416). What is open is whether a human
+   should ever hold both an administrative scope set and a data role, which is a
+   question about the project's role model and is Stage 4's.
+6. **`tests/deployment/conftest.py` at 2,101 lines.** A mechanical split, and the
+   act most likely to create another module outside every sweep — which is
+   D1240, the row two rows above it in the same table. It is taken in a session
+   that can afford `--setup-plan` across every selector afterwards.
+7. **D99 — `PYTHON_RUNTIME_IMAGE` is a rolling minor tag.** The genuinely
+   unpinned surface that D1417's row bundles with the fail-closed apt pin. A
+   pinning policy, and a decision about digest-pinning a base image.
+
+### Created here, for Session 29 — the trip
+
+- **The rotation, performed.** Run 8's sheet, alpha then beta, `promote`
+  irreversible, and the three claims' proofs run in the same sweep.
+- **The deploy that moves both projects to `1.7.0`**, before the sweep, which
+  every trip already does — and which is what makes `stage_release` green and the
+  tag cuttable.
+- **`1.7.0` tagged**, on the deployed commit, after ADR 0214's reading.
+- **The migration from Run 6 applied**, with the ledger read rather than the
+  migrator's line (D941), and the counts recorded.
+- **The rest of Tier 2, which only a host answers**: D1375 (`op` cannot reach the
+  Docker socket, so the host's offline half cannot be produced there — a control,
+  never an input); the host's `systemctl is-system-running` = **DEGRADED**, never
+  investigated; the kernel restart and `--after-reboot`, never performed, 38+
+  days up; the database container reaching the internet (ADR 0147's residual);
+  D688 (the IPv6 scan has nothing to scan); D771 (the OOM history is unknown);
+  D976 (Infisical's intermittent hangs); the Infisical control-plane identity
+  holding org admin; **D1189 — the example project's grant repair
+  `20260914120002` has never been applied on beta.**
+
+### Tier 3 — what this session cannot close, and who must act
+
+**The audit's honest headline stands and this plan does not soften it.** Session
+28 makes every one of these *ready* and closes none of them. Each needs a person
+at a keyboard or a decision the operator takes.
+
+| What is open | Who must act, and why no session substitutes |
+|---|---|
+| **`documented_path` is `failed`, and closing it needs a THIRD reader** | A reader who has not seen the repository. `docs/second-walk.md` carries the task statement between fixed markers so a person can be handed the same words. Two *models* have walked it; a person has not. **This session repairs prose the walks found and does not re-walk its own writing.** |
+| **The operator guide has never been read cold** | The *upgrade* guide was, and produced 34 findings and two releases. Only a reader who did not write it can do this, and **no test reads prose for truth** (ADR 0209's *Consequences*). The operator is arranging it; its findings are the evidence. |
+| **Studio has never been opened in a browser by a person** (D1303) | The sweep has driven it. A person has not. |
+| **`replacement_host_restore` is `not_run` BY DECISION** (D1028) | Reversing the decision means building a replacement host. The decision is the operator's. |
+| **The public-endpoint decision** (D1084) | Stage 4's first ADR. `runtime_override.publication()` still raises, and `docs/stage-4-decision-report.md` §6 says nothing measured in Stage 3 argues for or against it. |
+| **Template, or managed control plane?** | The question Stage 4 exists to answer. `scope-closure.md` §6; ADR 0185 drew the inventory's line without resolving it. |
+| **The 21 unclaimed requirements** | Reportable one DECLARATION at a time under ADR 0202. Each is a decision, and a session that declared them in a batch would be inferring rather than declaring. |
+| **`1.3.0`–`1.5.0` have no tag, by decision** (D1311) | Tagging them retroactively would be a record that looks measured and was not. |
+
+**What the operator must decide before Session 29 runs**, in order:
+
+1. **That the rotation is still on.** It was decided 2026-09-16 after four
+   declines. Run 8's rehearsal is built on that decision and `promote` cannot be
+   undone.
+2. **ADR 0213's retention policy** — what makes an audit row disappear, and
+   whether anything automatic is acceptable at all. The ADR proposes; the
+   operator owns the answer, because it is the evidence ADR 0135 keeps.
+3. **Whether a person is available for the operator guide's cold reading and for
+   `documented_path`'s third walk.** If not, both stay open and the plan says so
+   rather than substituting another model.
+
+### Carried in, unchanged
+
+The public-endpoint decision (D1084); a person's walk; the four unswept storage
+modules if Run 5 finds two of them are a genuine *why not*;
+`docs/stage-4-decision-report.md` §6, which is still what a Stage 4 plan starts
+from.
+
+---
+
+## Appendix — what to consult, and how a run is executed here
+
+**Read before Run 1**, in this order: this plan's §1; `docs/pre-stage-4-audit.md`
+whole, **and its note that its own Tier 1 count was wrong by four in the first
+draft** — the page is a record dated 2026-09-16 and is not held to the tree by a
+test; `docs/scope-closure.md` §14 and §15; `docs/plans/session-27-implementation-
+plan.md` §1 (D1388–D1405) and §10; `docs/upgrade-findings-response.md`, which maps
+all 34 of the adopter's findings and whose **five Open rows are F-008, F-012,
+F-013, F-020 and F-022** — the whole of Tier 1a's adopter half.
+
+**ADRs this session is built on**: **0195** (three outcomes, the third reported;
+a decision may fail closed, a report may not) before writing any check, status
+line or reader; **0206** (the ordering space, and the paragraph it refutes)
+before ADR 0210; **0198** and **0200** before ADR 0212; **0135**, **0142** and
+**0178** before ADR 0213; **0209** (what holds a release to its documentation,
+and what a test cannot assert) and **0162** (what a minor promises) before Run 9;
+**0158** (the doctor's two modes, and why the split is load-bearing) before
+D1418; **0088** and **0170** before Run 8; **0093** (what a `bin/` command may
+import) before any new verb.
+
+**Do not read the audit as measurement.** It says so of itself — *"Everything
+here is drawn from documents already in this repository … Where a row says
+*measured*, a command produced it"* — and thirteen of its rows were found in
+planning to be answered, differently shaped, or pointed at a repair the
+measurement does not support. **Two of the thirteen would have caused harm if
+implemented as written**: D1411 would have widened a security boundary to match a
+dead grant, and D1416 would have undone a decision taken under ADR 0195.
+
+**How a run is executed here** is `CLAUDE.md` §5. Four of its rules are
+load-bearing for this session in particular:
+
+- **Documentation only runs nothing before push.** Runs 1 and 2 are documentation
+  and ADRs; they push and read CI and run no suite.
+- **A run that adds a page owes `test_documentation_index`** (Run 3's
+  `docs/on-ramp.md`, and `docs/README.md` must carry its line); **a run that adds
+  or renames a test function owes `test_acceptance_registry`** (D1119, Runs 5, 6
+  and 9); **a run that adds or moves a `bin/` command owes `test_cli_contract`
+  with the command `git add`ed first** (D1014, D1188, Runs 3 and 7); **a run that
+  adds a `document[...]` read to a `bin/` command owes `test_container_selectors`**
+  (D1184).
+- **Every run that writes a test writes a battery**, and Run 5 is nothing but
+  tests. Caches cleared, `PYTHONDONTWRITEBYTECODE=1`, anchors pre-flighted to
+  match exactly once with a miss fatal, a paired control the mutation cannot
+  reach and green in the same invocation, `FAILED` asserted rather than `ERROR`,
+  and the tree restored by copy and `cmp`.
+- **A commit message is not evidence that the diff contains what it says**
+  (D1116). `git diff --stat` against this plan's list, one line each, before every
+  push.
+
+**The gate runs once**, in Run 9, on a clean tree, and `bin/session-01-check.sh`
+step 2 reaches PyPI — which cannot run from WSL when outbound TCP is lost
+(D1239). Run that one step inside the pinned Python image and say so.
+
+**Rigs this session builds**, each a throwaway with a control (ADR 0065/0066):
+
+| Rig | What it is | Which run |
+|---|---|---|
+| **28a** | A synthesized pre-ADR-0198 fork from tag `1.0.0` — measured to have no `projects/` (D1419) — with the same clone at `1.6.2` as its control | Run 2 |
+| **28b** | A cluster with history: both agent tables seeded across the shapes the plane writes, then the retention migration applied over them (D940) | Run 6 |
+| **28c** | The rotation walked end to end against `apg dev` and a rig, running the three `not_run` claims' proofs rather than only the commands | Run 8 |
+
+**The scratchpad** carries Session 26's `--help` capture and release-table reader
+under `s26-scripts/`, and this session's planning measurements as
+`s28-m1.sh`–`s28-m5.sh`. WSL's `/tmp` does not survive `wsl --shutdown`; those
+copies do.
