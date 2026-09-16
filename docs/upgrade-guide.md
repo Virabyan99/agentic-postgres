@@ -624,13 +624,20 @@ docker ps --filter "name=apg-alpha-dev-" --format '{{.Names}}\t{{.Status}}'
   and `storage` were seconds old on both projects and seven containers were
   not, because the deploy materialised a new secret generation and those three
   mount it.
-- **`render-jwks` prints *the key set CHANGED: every verifier must be
-  RECREATED*** on every deploy that materialises a new generation, and it is
-  reporting that the **file's bytes** moved, not that a key did (D1374,
-  measured on both projects 2026-09-15: same `active_kid`, same
-  `public_jwks_sha256` before and after). Nothing rotated unless you rotated
-  it. The advice is conservative and every verifier was recreated anyway;
-  read `jwt.active_kid` in the deployed document if you need to be sure.
+- **`render-jwks` used to print *the key set CHANGED: every verifier must be
+  RECREATED* on every deploy, and from 1.7.0 it does not.** Measured on both
+  projects 2026-09-15 with the same `active_kid` and the same
+  `public_jwks_sha256` before and after (D1374): the sentence was reporting
+  that the **file's bytes** moved, and they always do, because the deploy
+  replaces the whole rendered directory before this step so there is never a
+  previous copy to compare against (D1427). It now says which of **three**
+  things happened — it wrote against a copy that was here, it confirmed one
+  byte-identical, or **there was no previous copy and it cannot tell**. Only
+  the first carries the recreate sentence. On an ordinary deploy you will see
+  the third, and it names the reading that does answer:
+  `sudo bin/rotate-signing-key.sh --outputs <outputs.json> acknowledge`.
+  On a release **below 1.7.0** the old sentence is what you get, and the note
+  above it applies: nothing rotated unless you rotated it.
 
 ### Step 8 — The op-owned copies and the kit, again
 
@@ -783,7 +790,8 @@ not been decided since.
 | the deploy exits 5 at step 7 refusing its own document | the plane did not confirm what the file says (D1286 once, 2026-09-13, repaired the same day) | read the doctor's *capability drift* line; the plane is up, the document was not written; each attempt materialised a generation, harmlessly |
 | the deploy prints nothing and never returns | process state `T+`: a redirect or pipe gave a child a terminal (D972); or a backgrounded `sudo` whose timestamp expired (D1376) | `kill -CONT` the stopped parents, or `kill %1`; `sudo -v` in the foreground; run it again unredirected |
 | `TimeoutError` reading Infisical | a transient in the provider (D976; the client retries idempotent calls three times, and a reconverge still failed four times in five on 2026-09-05) | run the deploy again |
-| `render-jwks` says *the key set CHANGED* | the file's bytes moved with the generation (D1374) | nothing rotated; compare `jwt.active_kid` if in doubt |
+| `render-jwks` says *the key set CHANGED* | **below 1.7.0**: the file's bytes moved with the generation, which they always do (D1374). **From 1.7.0**: this file's bytes moved against a copy that was actually here | below 1.7.0, nothing rotated unless you rotated it — compare `jwt.active_kid`. From 1.7.0 the sentence means what it says |
+| `render-jwks` says *cannot be told from here* | from 1.7.0, and it is the normal case: no previous copy at that path, because the deploy replaced the rendered directory first | neither evidence of a rotation nor against one; `sudo bin/rotate-signing-key.sh --outputs <outputs.json> acknowledge` |
 | the doctor reports a `PROBLEM` you do not believe | read `--verbose` and the **route** the probe took before the subject it names (D673, D680, D682) | three of Session 11's defects were probes that could not have succeeded |
 | `.generated/<key>` root-owned after the day | a root render, a `sudo pytest` or a real root login (D1110); a `sudo ./deploy.sh` hands it back | `sudo chown -R op:op .generated` |
 | `scp` of the bundle refused, `Permission denied` on `/tmp/apg-…` | a file of that name owned by another account (D504); or `/tmp` without its sticky bit (D1301, 2026-09-13) | a per-commit name never collides; `chmod 1777 /tmp` was the repair for the second |

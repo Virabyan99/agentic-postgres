@@ -1546,3 +1546,104 @@ def test_a_project_without_one_is_given_no_such_mount() -> None:
     assert runtime_override.MIGRATION_SERVICE in document["services"], (
         "the release's mount must be there either way"
     )
+
+
+# ---------------------------------------------------------------------------
+# What `render-jwks` says about whether the key set changed (D1374, D1427)
+# ---------------------------------------------------------------------------
+
+
+def _render_jwks_module():
+    """`bin/render-jwks.py`, loaded as a module.
+
+    The reading is a module-level function rather than a branch inside `main()`
+    precisely so this can run in a checkout: `main()` refuses a non-root caller
+    before it reaches anything, and a proof that needed root to read a sentence
+    would never run in the suite that matters.
+    """
+    import importlib.util
+
+    specification = importlib.util.spec_from_file_location("apg_render_jwks_reading", RENDER_JWKS)
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def test_the_key_set_reading_has_three_outcomes_and_only_one_says_recreate() -> None:
+    """ADR 0195 in the sentence an operator reads during a cutover.
+
+    **This printed *the key set CHANGED* on every deploy** and the Session 25
+    trip measured it on both projects with an identical `kid` and an identical
+    key-set digest on both sides (D1374). The cause was not `write()`, which
+    byte-compares deliberately -- the file's mtime is the only signal a reader
+    has that a rotation happened. It is that `rendering.publish` swaps the whole
+    rendered directory into place first, so there is never a previous copy at
+    that path, so `write()` always wrote, so the caller always said CHANGED
+    (D1427).
+
+    All three arms, and the two that must not be confused are the first and the
+    third: *no previous copy* is not *nothing changed*, and it is not *recreate
+    every verifier* either.
+    """
+    module = _render_jwks_module()
+
+    verb, sentence = module.key_set_reading(had_previous=True, changed=True)
+    assert verb == module.WROTE
+    assert "CHANGED" in sentence and "RECREATED" in sentence
+
+    verb, sentence = module.key_set_reading(had_previous=True, changed=False)
+    assert verb == module.CONFIRMED
+    assert "byte-identical" in sentence
+    assert "RECREATED" not in sentence
+
+    verb, sentence = module.key_set_reading(had_previous=False, changed=True)
+    assert verb == module.PUBLISHED
+    assert "cannot be told from here" in sentence, sentence
+    assert "RECREATED" not in sentence, (
+        "the third outcome tells an operator to recreate every verifier on a "
+        "reading that establishes nothing, which is D1374 restored"
+    )
+    assert "acknowledge" in sentence, (
+        "the third outcome reports that it cannot tell and does not name the "
+        "reading that can, which leaves an operator where D1374 left them"
+    )
+
+    # The verbs are distinct, so the first line of the output distinguishes the
+    # three as well as the sentence does.
+    verbs = {
+        module.key_set_reading(had_previous=had, changed=moved)[0]
+        for had, moved in ((True, True), (True, False), (False, True))
+    }
+    assert len(verbs) == 3, verbs
+
+
+def test_write_still_byte_compares_and_was_not_repaired_instead() -> None:
+    """The repair the audit asks for would destroy the property `write()` protects.
+
+    Comparing the KEY SET rather than the file's bytes makes a deploy rewrite an
+    identical file, and the mtime is the only signal a reader has that a
+    rotation happened. The control is the pair: an identical payload returns
+    False and leaves the file alone; a different one returns True.
+    """
+    module = _render_jwks_module()
+    import json as _json
+    import tempfile
+
+    document = {"keys": [{"kid": "a", "kty": "RSA", "n": "x", "e": "AQAB"}]}
+    with tempfile.TemporaryDirectory() as tmp:
+        destination = Path(tmp) / "jwks.json"
+
+        assert module.write(document, destination) is True
+        first = destination.stat().st_mtime_ns
+
+        assert module.write(document, destination) is False, (
+            "an identical key set was rewritten; the mtime a reader uses to see a "
+            "rotation is destroyed on every deploy"
+        )
+        assert destination.stat().st_mtime_ns == first
+
+        # The control, in the same invocation: a genuinely different set.
+        moved = _json.loads(_json.dumps(document))
+        moved["keys"][0]["kid"] = "b"
+        assert module.write(moved, destination) is True

@@ -9,9 +9,9 @@ Then `docs/scope-closure.md` §15 and `docs/plans/session-27-implementation-plan
 and the tag does not. **Session 29 is the trip**, and Run 8 writes its sheet.
 **Product version at close:** `VERSION` **1.7.0**, `CURRENT_SESSION` moves
 **25 → 28**. 26 and 27 are skipped the way 19 is, and the skip is the record.
-**Next free:** D1444, ADR 0215. *(Run 1 added D1426–D1433; Run 2 added
+**Next free:** D1447, ADR 0215. *(Run 1 added D1426–D1433; Run 2 added
 D1434–D1439 and wrote ADRs 0210, 0211 and 0212; Run 3 added D1440–D1443 and
-built them.)*
+built them; Run 4 added D1444–D1446.)*
 
 ---
 
@@ -79,9 +79,10 @@ and its own run*.
 D1406–D1443. **D1406–D1425 were measured during planning on `ad96673`; D1426–D1433
 are Run 1's**, from the nine rows planning had not measured; **D1434–D1439 are Run
 2's**, measured on rig 28a and on a pinned PostgreSQL 18.4; **D1440–D1443 are Run
-3's**, from building what Run 2 decided. Rows marked
+3's**, from building what Run 2 decided; **D1444–D1446 are Run 4's**, from the
+three readers that report a file event as a domain event. Rows marked
 **answered** are closed by writing down what the tree already does; rows marked
-**recorded** are not repaired here and say why. Runs allocate from **D1444**.
+**recorded** are not repaired here and say why. Runs allocate from **D1447**.
 
 **Run 1's eight rows changed four of this plan's own run descriptions**, and the
 changes are in §5 rather than only here: D1426 makes D1045 a fourteenth answered
@@ -129,6 +130,9 @@ the same finding, and D1430 revives a deferral whose stated reason has expired.
 | **D1441** | Audit 1a and D1418: *"`bin/doctor.sh` checks the interpreter on a workstation only"*, closing act *"then the interpreter check on the host."* Run 3's instruction: take it **only if ADR 0158's split admits a third reading**. | **It does not, and the reason is structural.** Workstation mode checks a developer's own interpreter and is unprivileged; deployed mode checks seven live things about ONE PROJECT and needs root. The host's interpreter is a property of the machine and of no project. Adding it to deployed mode puts a bare `python` resolution back under `sudo`, which is the exact failure the split's own comment says the split exists to prevent. The only host-wide checker is `provision-host.sh --check`, which runs as root on production — and **no session has measured which interpreter versions this product requires on a host**: `.python-version` is the workstation pin, and the cold reader's host ran every `bin/*.sh` under 3.14 against a pin of 3.12.13 and worked. | **Stated, not repaired**, at the split itself in `bin/doctor.sh`'s header — where a reader asking *does this check the host's interpreter?* actually looks — and in `scope-closure.md` §15. **No requirement and no claim**, so §2's conditional row resolves to *no*. | A check added on an unmeasured footing, to the one command that runs as root on production, in a session with no host trip, could fail a host that works. Stating the gap is the act ADR 0195 asks for; inventing a threshold would be the folded third outcome. | 0158 |
 | **D1442** | Findings F-022 and audit 1a: *"A fork whose domain is in the release's files **can deploy and cannot pass the gate**"*, with *47 failures and 49 errors*. D1433 refused to carry the number forward and named rig 28a as the only instrument. | **Reproduced, and the number is close enough to trust while the SHAPE is the finding.** The release's own `contract and p0` sweep against rig 28a at the merged pre-conversion state: **52 failed, 5,692 passed, 3 skipped, 49 errors** — the errors identical to the adopter's, the failures within five. **The control is the same command on the unforked checkout in the same session: 5,800 passed, 3 skipped, nothing red** (D499), which is also a full contract sweep of Run 3's own code. And they are not spread: they are almost entirely the reviewed-surface family — `test_api_surface_contract`, `test_api_contract_command`, `test_client_ir`, `test_generate_command`, `test_generated_client_runtime`, `test_scope_registry`, `test_scope_vocabulary`, `test_studio_*`. **`test_migrations` passes.** The fork's MIGRATIONS are not what the gate objects to; its relation in `contracts/postgrest-api-surface.yaml` is. | **F-022's paragraph is written from this**, in `docs/on-ramp.md` and the findings reply: the gate's objection is the shared reviewed surface, the conversion moves that relation into `projects/<slug>/contracts/`, and that is why the answer to F-022 is the on-ramp rather than a gate change. | *"The gate cannot pass on this fork"* priced as one defect is a number. Measured, it is one cause with a large blast radius, and knowing which cause is the difference between *convert* and *we cannot say*. The failure families outside that one are not analysed and this row says so. | 0212 |
 | **D1443** | Nothing said it. `docs/on-ramp.md`'s first draft ended with `sudo bin/apg-diag.sh --project <key> catalog`. | **That flag does not exist and `catalog` takes two positional arguments.** `apg-diag`'s own usage is `sudo apg-diag catalog <project> <query>`, with four queries. The error was caught not by reading the page but by **measuring it against `dx_record.documented_commands` before adding it to `DOCUMENT_ROOTS`**: the measurement printed `bin/apg-diag.sh` as newly documented, which is only possible if the page names it — and the page had no business naming it that way. | Corrected to the spelling its own `--help` prints (ADR 0208 §3), which also made adding the page to the scan a **measured no-op**: every command it names was already documented elsewhere, so the documented set moved by nothing. | The live reader doubles as a spell-checker for a new page and nobody had used it that way. It is the cheapest available check on a page full of commands, it runs offline in a second, and it found a wrong invocation on the first page it was pointed at. | 0208 |
+| **D1444** | `docs/scope-closure.md` and `CLAUDE.md` §9 on D1413: *"No span leaves the process; the collector is on `edge` only … `mcp_tracing.configure()` has no caller; **scraping a project's services must answer the network question first**."* Run 4's instruction: a caller, its deletion, or the network question written down as the reason for neither. | **The stated reason is about the wrong direction and does not survive measurement.** Scraping is a collector reaching a service; `mcp_tracing` is a **push**. Measured in the tree: `compose.yaml`'s `mcp` service is on `internal` AND `edge`; the collector (`metrics`) is on `edge`; and `naming.py:1120` derives the edge network per project — `apg-<key>-edge` — so a runtime pushing OTLP reaches its own project's collector and no other's. The exporter is already in the image: `OTEL_EXPORTER_OTLP_HTTP_VERSION` is a pinned build argument on that service. **Nothing about the network blocks a caller.** | **Neither, and the true reason written at `configure()`** — where a reader reaching for `git rm` is — plus a test that goes red if a caller appears or if `span`'s caller disappears. What is actually undecided: a caller starts a new outbound flow from the container that handles a caller's credential, and `SPAN_ATTRIBUTES` stops being an internal enumeration the canary checks and becomes a published surface. That is a security review and ADR 0164's plane, so Stage 4's. | The ledger gave a reason that reads as a blocker and is not one, so the row has been deferred three times against a constraint that does not exist. A wrong reason is worse than no reason: it stops the question being asked. | 0164 |
+| **D1445** | Run 4's own D1045 clause, as first written: *"`exc.length` is the Content-Length header, and a header is not a body."* | **`exc.length` is not a property of the response.** `HTTPError.__getattr__` delegates unknown attributes to the underlying file object, so whether `length` exists depends on what `urllib` happened to wrap. Measured by the proof on its first execution: an `HTTPError` raised around a `BytesIO` gives `AttributeError: '_io.BytesIO' object has no attribute 'length'`. The reading is `exc.headers.get("Content-Length")`. | **Repaired before the commit, and the clause gained a third answer with it.** A response that declares no `Content-Length` is chunked or omitted the header, and the only way to find out whether it carried an explanation would be to read the body — the one thing the clause exists not to do. So it reports *cannot be told from here* rather than folding into *nothing was sent*. | A run repairing ADR 0195's class produced an instance of it in its own first draft: a two-valued reading of a three-valued question, folded in the reassuring direction. The proof caught it on first execution, which is the fourteenth time a never-executed proof has failed the first time it ran. | 0195 |
+| **D1446** | The audit and `CLAUDE.md` §9 on D387: *"the REST observation does not retry."* Session 7's row: *"a lost race makes the deployed document understate a working deployment — and a claim computed from it would be wrong in the safe-looking direction."* | **It is one reading among six, and the only one outside a window.** `bin/deploy-project.py`'s step 7 wraps tls, health, docs, app_docs, app and storage in `observation.await_observation`; `observe_served_document` is called once, immediately, and returns `None` on any failure. And `None` folds two states that are not alike: a documentation token that cannot be minted is **deterministic**, while a router Traefik has not wired yet **converges** — which is the note every neighbouring block already carries. | **Run 4 gives it the window its neighbours have, and only for the state that can change.** `ServedDocument` carries the digest, which of three outcomes it is, and the detail; `settled` is false for `unreachable` alone, so a terminal failure does not spend ninety seconds being retried thirty times. The two failures print different sentences because they send an operator to different places. | Retrying everything would have been the obvious repair and would have made a missing signing key cost the full observation window on every deploy, with the same line printed on each poll. The row says *retry*; the measurement says *retry one of the three*. | 0195 |
 
 ---
 
@@ -504,6 +508,54 @@ deletion, or the network question written down as the reason for neither. The
 spans at `mcp_tools.py:773` are what the decision is actually about.
 
 Targeted: the modules the diff touches, once, at the close.
+
+**Done.** 2026-09-17, on `873bdfd`. Four readers repaired or decided, **seven
+mutations, seven kills, no survivors**, every control green in the same
+invocation. **D1444–D1446.**
+
+*`render-jwks` (D1374, D1427).* Three readings, in the caller, from a
+module-level `key_set_reading()` rather than a branch inside `main()` — because
+`main()` refuses a non-root caller before it reaches anything, and a proof that
+needed root to read a sentence would never run in the suite that matters.
+`had_previous` is read **before** the write, which is the only moment the answer
+exists. **`write()` is untouched**, and a proof asserts that it still
+byte-compares: the repair the audit asks for — compare the key set, not the file
+— destroys the property its docstring protects, because the file's mtime is the
+only signal a reader has that a rotation happened. The third outcome names the
+reading that does answer (`rotate-signing-key.sh … acknowledge`) rather than
+reporting nothing, and the operator guide and the upgrade guide both moved,
+each saying which release the old sentence belongs to.
+
+*The provider refusal (D1045, D1426), and Run 4 produced ADR 0195's own class
+in its first draft* (D1445). The clause reads `Content-Length` and has **three**
+answers: explained, not explained, and *cannot be told from here* — a response
+declaring no length is chunked, and finding out would mean reading the body,
+which is the thing the clause exists not to do. The first draft used
+`exc.length`, which is not a property of the response at all but a delegation
+through `HTTPError.__getattr__`; **the proof caught it on first execution**. No
+body appears in any arm and the proof asserts that on all three.
+
+*The served document (D387, D1446).* `observe_served_document` returns a
+`ServedDocument` instead of `None`, and the deploy wraps it in
+`await_observation` as it already does for its five neighbours. **Only
+`unreachable` is unsettled**: a documentation token that cannot be minted is
+deterministic, and retrying it would spend the window and print one line thirty
+times. The two failures print different sentences.
+
+*`mcp_tracing.configure()` (D1413, D1444), and the ledger's stated reason is
+refuted.* *"Scraping a project's services must answer the network question
+first"* is about a collector reaching a service; this is a push. Measured: `mcp`
+is on `internal` and `edge`, the collector is on `edge`, `edge` is per project
+(`apg-<key>-edge`), and the exporter is already a pinned build argument on the
+service. Nothing about the network blocks a caller. **Neither a caller nor a
+deletion**, with the true reason at the function and a test that goes red if a
+caller appears **or** if `span`'s caller disappears.
+
+*Ran before the push*, once: `test_runtime_override`, `test_secret_origin`,
+`test_observation`, `test_mcp_tracing`, `test_deploy_command`,
+`test_jwt_keys`, `test_rotate_signing_key`, `test_verifier_key_sets`,
+`test_cli_contract`, `test_acceptance_registry` (D1119 — this run adds test
+functions), `test_mcp_catalog`. Plus the battery. CI is the full check.
 
 ### Run 5 — Tier 1c, and it gets the run to itself
 

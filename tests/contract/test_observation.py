@@ -156,3 +156,80 @@ def test_the_deploy_waits_for_both_observations(code_only) -> None:
     body = code_only((REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8"))
     assert "await_observation" in body, "the deploy observes once and records the race"
     assert body.count("await_observation") >= 2, "both tls and health must wait"
+
+
+# ---------------------------------------------------------------------------
+# The served document waits like its neighbours, and says which failure (D387)
+# ---------------------------------------------------------------------------
+
+
+def _deploy_module():
+    """`bin/deploy-project.py`, loaded as a module, for `ServedDocument` alone."""
+    import importlib.util
+
+    from agentic_postgres import REPO_ROOT
+
+    specification = importlib.util.spec_from_file_location(
+        "apg_deploy_served_document", REPO_ROOT / "bin" / "deploy-project.py"
+    )
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def test_only_an_unreachable_route_is_worth_waiting_for() -> None:
+    """D387, and the half that keeps the window from being spent on nothing.
+
+    Session 7's row named the consequence precisely: *a lost race makes the
+    deployed document understate a working deployment -- and a claim computed
+    from it would be wrong in the safe-looking direction.* The repair is the
+    two-stage convergence every neighbouring observation in step 7 already has.
+
+    But the three failures are not the same kind. A route that has not been
+    wired yet converges; a documentation token that cannot be minted does not,
+    and retrying it would spend ninety seconds on a deterministic failure and
+    print the same line thirty times. So `settled` is false for exactly one of
+    them, which is what `await_observation` waits on.
+    """
+    module = _deploy_module()
+
+    served = module.ServedDocument("abc123", "served", "")
+    unreachable = module.ServedDocument(None, "unreachable", "connection refused")
+    no_token = module.ServedDocument(None, "no_token", "signing key absent")
+
+    assert served.settled, "a successful reading would be retried until the deadline"
+    assert not unreachable.settled, (
+        "the one state that can change is treated as final, which is D387 unrepaired"
+    )
+    assert no_token.settled, (
+        "a deterministic failure is retried, which spends the observation window "
+        "and prints the same line on every poll"
+    )
+
+    # The two failures are distinguishable, which is the other half of the row:
+    # a service that cannot serve its document and an edge that had not finished
+    # attaching send an operator to different places.
+    assert unreachable.outcome != no_token.outcome
+    assert unreachable.detail and no_token.detail
+
+
+def test_the_served_document_reading_is_one_of_the_deploys_waits(code_only) -> None:
+    """The wiring, guarded against being dropped while the type survives.
+
+    Asserted against the deploy's source for the reason the test above this
+    file's own neighbour gives: the alternative is a live deployment, which this
+    suite must not perform.
+    """
+    from agentic_postgres import REPO_ROOT
+
+    body = code_only((REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8"))
+    assert "observe_served_document" in body
+    index = body.index("observe_served_document(")
+    window = body[max(0, index - 400) : index]
+    assert "await_observation" in window, (
+        "the served-document reading is called outside an observation window, so a "
+        "router that had not been wired yet still records api.status unavailable "
+        "for a route that answers seconds later (D387)"
+    )
+    assert body.count("await_observation") >= 3, "tls, health and the served document must all wait"

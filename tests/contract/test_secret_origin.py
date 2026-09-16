@@ -702,3 +702,83 @@ def test_the_two_fixtures_disagree_about_every_storage_variable() -> None:
             f"both fixtures render {variable}={alpha[variable]}, so a constant in the "
             "renderer would satisfy every test that reads it (D332)"
         )
+
+
+# ---------------------------------------------------------------------------
+# What a provider's refusal says, and what it never repeats (D1045, D1426)
+# ---------------------------------------------------------------------------
+
+
+def test_a_provider_refusal_says_whether_it_was_explained_and_never_repeats_it() -> None:
+    """The body stays out of the message, and the operator stops guessing.
+
+    **The withholding is a decision and it does not move**: on identity
+    endpoints a response body can echo the request, and this message reaches a
+    log. What moves is that an operator could not tell *the provider explained
+    itself and we refused to repeat it* from *the provider said nothing*, and
+    those two send them to different places -- the provider's own console, or
+    the network.
+
+    **Three arms, not two** (ADR 0195). The reading is `Content-Length`, and a
+    response that declares none is chunked or omitted it: the only way to find
+    out would be to read the body, which is the one thing this clause exists not
+    to do. So the third arm says it cannot tell, rather than folding into
+    *nothing was sent* -- which is the reassuring direction and the shape D930
+    and D957 record.
+
+    The assertion that matters is the negative one, and it is made on all three:
+    no byte of the body appears in any message.
+    """
+    import io
+    import urllib.error
+    import urllib.request
+
+    module = bootstrap_module()
+    plane = module.ControlPlane.__new__(module.ControlPlane)
+    plane._base = "https://provider.invalid"
+    plane._token = "not-a-real-token"  # noqa: S105
+    plane._context = None
+
+    secret_shaped = b'{"message":"identity limit reached for org acme-prod"}'
+
+    def refusing(headers: dict[str, str]):
+        def opener(*_args: object, **_kwargs: object):
+            raise urllib.error.HTTPError(
+                "https://provider.invalid/api/v1/identities",
+                403,
+                "Forbidden",
+                headers,  # type: ignore[arg-type]
+                io.BytesIO(secret_shaped),
+            )
+
+        return opener
+
+    def message_for(headers: dict[str, str]) -> str:
+        original = urllib.request.urlopen
+        urllib.request.urlopen = refusing(headers)  # type: ignore[assignment]
+        try:
+            with pytest.raises(module.BootstrapStateError) as raised:
+                plane._call("POST", "/api/v1/identities")
+        finally:
+            urllib.request.urlopen = original  # type: ignore[assignment]
+        return str(raised.value)
+
+    explained = message_for({"Content-Length": str(len(secret_shaped))})
+    silent = message_for({"Content-Length": "0"})
+    unknown = message_for({})
+
+    for message in (explained, silent, unknown):
+        assert "HTTP 403" in message, message
+        # The whole point, and it is asserted on every arm.
+        assert "identity limit" not in message, message
+        assert "acme-prod" not in message, message
+        assert secret_shaped.decode() not in message, message
+
+    assert "DELIBERATELY not" in explained, explained
+    assert "provider's own console" in explained, explained
+    assert "sent no explanation" in silent, silent
+    assert "cannot be told from here" in unknown, unknown
+
+    # The three are distinguishable, which is the finding: before this they were
+    # one sentence.
+    assert len({explained, silent, unknown}) == 3

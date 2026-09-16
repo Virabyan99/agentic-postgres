@@ -270,3 +270,55 @@ def test_a_real_span_carries_only_the_attributes_it_was_given(
     attributes = dict(captured[0].attributes or {})
     assert set(attributes) == {"tool", "outcome", "row_count"}
     assert set(attributes) <= set(mcp_tracing.SPAN_ATTRIBUTES)
+
+
+# ---------------------------------------------------------------------------
+# One half has a caller and one half does not, and that is a decision (D1413)
+# ---------------------------------------------------------------------------
+
+
+def test_span_has_a_product_caller_and_configure_deliberately_does_not() -> None:
+    """The audit reads this module as dead code and it is not (D1413, D1444).
+
+    `span()` is called around every tool call. `configure()` is called by
+    nothing but this file's own tests. So the plane opens a span per tool call
+    into a tracer nobody configured -- a carrier with no transport, which is a
+    different thing from dead code and has a different repair.
+
+    **Deleting `configure` removes a working instrumentation point; adding a
+    caller starts a new outbound flow out of the container that handles a
+    caller's credential.** The second is a security review and a decision about
+    what the telemetry plane is for, and it is recorded in `configure`'s own
+    docstring rather than left for a reader to rediscover. This test is what
+    makes either change loud: it goes red if the caller appears, and it goes red
+    if `span`'s caller disappears.
+    """
+    from agentic_postgres import REPO_ROOT
+
+    service = REPO_ROOT / "services" / "auth-api" / "app"
+    sources = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in service.glob("*.py")
+        if path.name != "mcp_tracing.py"
+    }
+
+    with_span = sorted(name for name, text in sources.items() if "mcp_tracing.span(" in text)
+    with_configure = sorted(
+        name for name, text in sources.items() if "mcp_tracing.configure(" in text
+    )
+
+    assert with_span, (
+        "nothing opens a span any more, so deleting this module would now cost "
+        "nothing -- which is a different decision from the one recorded"
+    )
+    assert with_configure == [], (
+        f"{with_configure} configures a tracer, so spans now LEAVE the process. That "
+        "is a new outbound flow from the container that handles a caller's "
+        "credential, and mcp_tracing.configure's docstring says it is Stage 4's "
+        "decision (D1413, D1444). Take the decision, then move this assertion."
+    )
+
+    # And the reason is written where the reader who reaches for `git rm` is.
+    docstring = mcp_tracing.configure.__doc__ or ""
+    assert "STANDING DECISION" in docstring, docstring[:400]
+    assert "D1413" in docstring

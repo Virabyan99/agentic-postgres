@@ -282,6 +282,62 @@ def write(document: dict[str, Any], destination: Path) -> bool:
     return True
 
 
+#: The three readings this command can make of *did the key set change?*, and
+#: the sentence each one prints. ADR 0195: a reader has three outcomes and the
+#: third is REPORTED rather than folded into one of the other two.
+#:
+#: **The sentence used to be printed on `changed` alone and it meant nothing**
+#: (D1374, measured on both projects at the Session 25 trip: identical `kid` and
+#: identical key-set digest before and after). The cause is not in `write()`.
+#: `rendering.publish` swaps the WHOLE rendered directory into place -- the
+#: previous one is moved aside and deleted -- so by the time this command runs
+#: there is no earlier copy of the key set at this path, `write()` correctly
+#: reports that it wrote, and the caller read that as *the key set changed*.
+#: A two-valued answer to a three-valued question (D1427).
+#:
+#: `write()` is deliberately NOT changed. Comparing the key set instead of the
+#: file's bytes -- the obvious repair, and the one the audit asks for --
+#: destroys the property its own docstring protects: the file's mtime is the
+#: only signal a reader has that a rotation happened, and a deploy that rewrote
+#: an identical file every run would erase it.
+PUBLISHED = "published"
+WROTE = "wrote"
+CONFIRMED = "confirmed"
+
+
+def key_set_reading(*, had_previous: bool, changed: bool) -> tuple[str, str]:
+    """Which of the three outcomes this run is, and what it says about it.
+
+    `had_previous` is read by the caller BEFORE the write, because that is the
+    only moment the answer exists.
+    """
+    if not had_previous:
+        # NOT "nothing changed" and NOT "everything must be recreated": this
+        # file cannot answer, and what can is what each verifier is HOLDING.
+        return PUBLISHED, (
+            "  whether the key set CHANGED cannot be told from here: there was no "
+            "previous copy at this path to compare against.\n"
+            "  That is the NORMAL case -- a deploy replaces the whole rendered "
+            "directory before this step -- so it is neither evidence of a\n"
+            "  rotation nor evidence against one. What answers it is what each "
+            "verifier is HOLDING:\n"
+            "    sudo bin/rotate-signing-key.sh --outputs <outputs.json> acknowledge"
+        )
+    if changed:
+        # The one sentence an operator needs and would otherwise learn from a
+        # 401 -- now printed only when this file's bytes moved against a copy
+        # that was actually here. A running PostgREST reads this file at startup
+        # and never again: measured, a rewritten set left it refusing the new
+        # key while still accepting the old one (ADR 0088). And the deploy
+        # replaces this file rather than rewriting it, so a container bound to
+        # the old inode cannot even be restarted into the new one.
+        return WROTE, (
+            "  the key set CHANGED: every verifier must be RECREATED, not restarted, "
+            "before it holds this set"
+        )
+    return CONFIRMED, "  the key set is byte-identical to the copy that was already here"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="render-jwks",
@@ -306,26 +362,22 @@ def main(argv: list[str] | None = None) -> int:
 
         document, keys = build(arguments.project_key, arguments.generation)
         destination = arguments.rendered_dir / JWKS_FILENAME
+        # Read BEFORE the write, because it is the only moment the answer
+        # exists. `write()` returns two values for a three-valued question and
+        # it is right to: it reports what IT did. Whether that means the key set
+        # moved depends on whether there was anything here to move from, and
+        # only the caller is in a position to know (ADR 0195, D1374, D1427).
+        had_previous = destination.is_file()
         changed = write(document, destination)
     except JwksError as error:
         print(f"render-jwks: {error}", file=sys.stderr)
         return error.code
 
-    verb = "wrote" if changed else "confirmed"
+    verb, sentence = key_set_reading(had_previous=had_previous, changed=changed)
     print(f"render-jwks: {verb} {destination} ({JWKS_MODE:04o}), {len(keys)} key(s)")
     for jwk in keys:
         print(f"  kid {jwk['kid']}")
-    if changed:
-        # The one sentence an operator needs and would otherwise learn from a
-        # 401. A running PostgREST reads this file at startup and never again --
-        # measured, a rewritten set left it refusing the new key while still
-        # accepting the old one (ADR 0088). And the deploy replaces this file
-        # rather than rewriting it, so a container bound to the old inode cannot
-        # even be restarted into the new one.
-        print(
-            "  the key set CHANGED: every verifier must be RECREATED, not restarted, "
-            "before it holds this set"
-        )
+    print(sentence)
     return 0
 
 

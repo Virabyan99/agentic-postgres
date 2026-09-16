@@ -173,6 +173,33 @@ def configure(*, endpoint: str | None, service_name: str) -> Any | None:
     The endpoint is a URL and not a credential. That distinction is the reason
     it may be an ordinary setting at all -- a bearer token for a collector would
     be a credential, and the MCP runtime holds none.
+
+    **NOTHING IN THIS PRODUCT CALLS THIS, AND THAT IS A STANDING DECISION
+    RATHER THAN AN OVERSIGHT** (D1413, D1444). Said here because a reader who
+    finds an uncalled function reaches for `git rm`, and deleting this would
+    remove a working instrumentation point: `span()` -- the other half of this
+    module -- HAS a caller, at `mcp_tools.py`, around every tool call. The plane
+    opens a span per tool call into a tracer nobody configured. That is not dead
+    code; it is a carrier with no transport attached.
+
+    **The reason recorded in `docs/scope-closure.md` was that the network
+    question had to be answered first, and that reason does not survive
+    measurement.** It is about SCRAPING -- a collector reaching a service --
+    and this is a PUSH. Measured in the compose file and in `naming.py`: the
+    `mcp` service is on `internal` AND `edge`; the collector is on `edge`; and
+    `edge` is per project (`apg-<key>-edge`), so a runtime pushing OTLP reaches
+    its own project's collector and no other project's. The exporter package is
+    already in the image -- `OTEL_EXPORTER_OTLP_HTTP_VERSION` is a pinned build
+    argument on this service. Nothing about the network blocks a caller.
+
+    **What is actually undecided is whether this deployment should emit spans at
+    all.** A caller starts a new outbound flow out of the container that handles
+    a caller's credential, and the attribute set below stops being an internal
+    enumeration the canary checks and becomes a published surface somebody
+    outside can read. That is a security review and a decision about what the
+    telemetry plane is for -- ADR 0164's, one plane over -- and it is Stage 4's,
+    not a repair. Until it is taken, this function stays, uncalled, with this
+    paragraph.
     """
     global _TRACER
     if not endpoint:

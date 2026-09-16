@@ -623,7 +623,8 @@ with the row that measured it.
 | the doctor says `PROBLEM` on a subject you can see is fine | the probe's route, not the subject (D673, D680, D682) | `--verbose`, read the route |
 | `upgrade check` says `undetermined` | no readable installed document | exit 3 owner and `chown`; exit 4 never deployed here |
 | the document says seven tools and an agent sees six | the plane is behind the file — **only possible before 2026-09-11** (D1152) | since then the doctor's tenth check and `list_resources` read the plane; if they disagree with the file, `project-runtime.sh … down` and deploy |
-| `render-jwks`: *the key set CHANGED* | the file's bytes moved with the generation (D1374) | nothing rotated; compare `jwt.active_kid` |
+| `render-jwks`: *the key set CHANGED* | this file's bytes moved **against a copy that was here** | from 1.7.0 this is printed only then, so it means what it says: recreate every verifier |
+| `render-jwks`: *whether the key set CHANGED cannot be told from here* | there was no previous copy at that path — the normal case, because a deploy replaces the whole rendered directory first (D1374, D1427) | it is neither evidence of a rotation nor evidence against one; `sudo bin/rotate-signing-key.sh --outputs <outputs.json> acknowledge` reads what each verifier is holding |
 | a rotation proof: *the value declared as pre-rotation is the active one* | nothing was rotated: the provider did not take the edit, or materialization did not run | confirm at the provider, materialize, deploy again |
 | a rotation proof fails `401 PT401` | a bootstrap-minted token missing `credential_version`, `authz_version` or the scope array (D298, D675) | repair the identity, not the thing the proof names |
 | PostgREST crash-loops after a credential rotation, route 502 | a container holding a stale generation (D253) | `project-runtime.sh … --through-session 25 down`, then deploy |

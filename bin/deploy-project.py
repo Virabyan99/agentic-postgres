@@ -45,7 +45,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -2421,17 +2421,42 @@ def main(argv: list[str] | None = None) -> int:
         # document below is the evidence of. Claiming `ready` because a container
         # is healthy would be a record about a process rather than about a route
         # -- and D145 measured `--ready` returning 0 while every request 404'd.
-        served = observe_served_document(
-            rest_url,
-            jwt_block,
-            {
-                "project": {"key": key},
-                "secrets": secrets,
-                "database": {"roles": rendered["database"]["roles"]},
-            },
+        # **D387: the two-stage convergence its neighbours in step 7 already
+        # have.** This read once, and a router that was not yet wired made the
+        # deployed document record `api.status: unavailable` for a route that
+        # answered seconds later -- which is the same race the block below
+        # describes for tls, health, docs, app and storage, in the one reading
+        # that did not wait. A terminal failure (no token) does not wait: it is
+        # `settled` immediately, so the window is spent only on the state that
+        # can change.
+        reading = observation.await_observation(
+            lambda: observe_served_document(
+                rest_url,
+                jwt_block,
+                {
+                    "project": {"key": key},
+                    "secrets": secrets,
+                    "database": {"roles": rendered["database"]["roles"]},
+                },
+            ),
+            lambda observed: observed.settled,
         )
+        served = reading.digest
         if served is not None:
             rest_status = "ready"
+        else:
+            # Which of the two, said once, because they send an operator to
+            # different places: a service that cannot serve its document, or an
+            # edge that had not finished attaching by the deadline.
+            if reading.outcome == "no_token":
+                print(f"  no served document: {reading.detail}")
+            else:
+                print(
+                    f"  no served document after the observation window: {reading.detail}\n"
+                    "  This is the route not answering, not the service refusing -- "
+                    "`api.status` records\n"
+                    "  `unavailable`, which is a reading and not a verdict."
+                )
         api_block = observe_api(deployed_output.rendered_path(key), served)
 
     step("7. Observe and publish")
@@ -2895,17 +2920,54 @@ def observe_jwt(
     }
 
 
-def observe_served_document(rest_url: str, jwt_block: dict[str, Any], document: dict[str, Any]):
-    """The digest of what the route is serving, or `None` with the reason printed.
+class ServedDocument(NamedTuple):
+    """What one reading of the REST route's own document found (D387).
+
+    `digest` is the fingerprint when there is one. `outcome` says which of three
+    things happened, and it is the field that exists because `None` did not
+    distinguish them:
+
+    * ``served`` -- the route answered and the document parsed.
+    * ``unreachable`` -- the fetch failed. **This is the one that can be a
+      race**: Traefik's Docker provider polls, so a router for a container that
+      has only just started is not wired at the instant `compose up --wait`
+      returns, which is the note every neighbouring observation in step 7
+      carries. Session 7's row named the consequence exactly: *a lost race makes
+      the deployed document understate a working deployment -- and a claim
+      computed from it would be wrong in the safe-looking direction.*
+    * ``no_token`` -- a documentation token could not be minted. **Terminal**:
+      nothing about it converges, and retrying it would spend the observation
+      window on a deterministic failure and print the same line thirty times.
+
+    `settled` is what `observation.await_observation` waits on, so the race
+    retries and the deterministic failure does not.
+    """
+
+    digest: str | None
+    outcome: str
+    detail: str
+
+    @property
+    def settled(self) -> bool:
+        return self.outcome != "unreachable"
+
+
+def observe_served_document(
+    rest_url: str, jwt_block: dict[str, Any], document: dict[str, Any]
+) -> ServedDocument:
+    """One reading of the digest of what the route is serving.
 
     Fetched as the **documentation role**, because `follow-privileges` means the
     served document depends on the caller's grants and the one the snapshot is
     reviewed against is that role's (ADR 0050).
 
-    `None` rather than an exception on any failure: a deploy that cannot read its
-    own document has published something it cannot describe, and the honest
+    A reading rather than an exception on any failure: a deploy that cannot read
+    its own document has published something it cannot describe, and the honest
     record of that is `api.status: unavailable` rather than a failed deploy that
     leaves the service running and the document absent.
+
+    **Prints nothing.** It is called repeatedly now, and the caller says once
+    what the last reading found.
     """
     dev_token = _load_command("dev-token.py", "apg_deploy_dev_token")
     api_contract = _load_command("api-contract.py", "apg_deploy_api_contract")
@@ -2923,24 +2985,26 @@ def observe_served_document(rest_url: str, jwt_block: dict[str, Any], document: 
             document={"jwt": jwt_block},
         )
     except Exception as error:
-        print(f"  no served document: could not mint a documentation token ({error})")
-        return None
+        return ServedDocument(None, "no_token", f"could not mint a documentation token ({error})")
 
     previous = os.environ.get(api_contract.TOKEN_VARIABLE)
     os.environ[api_contract.TOKEN_VARIABLE] = token
     try:
         raw = api_contract.fetch_live(rest_url)
     except Exception as error:
-        print(f"  no served document: {error}")
-        return None
+        return ServedDocument(None, "unreachable", str(error))
     finally:
         if previous is None:
             os.environ.pop(api_contract.TOKEN_VARIABLE, None)
         else:
             os.environ[api_contract.TOKEN_VARIABLE] = previous
 
-    return openapi_normalize.fingerprint(
-        openapi_normalize.sort_maps(openapi_normalize.load_document(raw))
+    return ServedDocument(
+        openapi_normalize.fingerprint(
+            openapi_normalize.sort_maps(openapi_normalize.load_document(raw))
+        ),
+        "served",
+        "",
     )
 
 

@@ -368,9 +368,49 @@ class ControlPlane:
             ) as response:
                 return json.loads(response.read())
         except urllib.error.HTTPError as exc:
-            # The body is not included: on identity endpoints it can echo the
-            # request, and this message reaches a log.
-            raise BootstrapStateError(f"{method} {path} failed with HTTP {exc.code}") from None
+            # **The body is not included and this is a decision, not an
+            # omission** (D1045, D1426): on identity endpoints it can echo the
+            # request, and this message reaches a log. Nothing about that moves.
+            #
+            # What moves is that an operator could not tell *the provider
+            # explained itself and we refused to repeat it* from *the provider
+            # said nothing at all*, and those send them to different places --
+            # the provider's own console, or the network.
+            #
+            # **Read from the HEADER, and it has three answers, not two**
+            # (ADR 0195). `Content-Length` present and non-zero means there is
+            # an explanation; zero means there is not; ABSENT means the response
+            # is chunked or the header was omitted, and the only way to find out
+            # would be to read the body -- which is the one thing this clause
+            # exists not to do. So the third case says it cannot tell, rather
+            # than folding into *nothing was sent*, which is the reassuring
+            # direction (D930, D957).
+            #
+            # The header rather than `exc.length`: that attribute reaches the
+            # underlying file object through `HTTPError.__getattr__`, so whether
+            # it exists depends on what urllib happened to wrap rather than on
+            # the response. Measured -- a proof that raised `HTTPError` around a
+            # `BytesIO` got `AttributeError` from it.
+            declared = exc.headers.get("Content-Length") if exc.headers else None
+            if declared is None:
+                explanation = (
+                    "Whether the provider explained itself cannot be told from here: "
+                    "the response declared no Content-Length, and reading the body to "
+                    "find out is the thing this message exists not to do. Look in the "
+                    "provider's own console."
+                )
+            elif declared.strip() in ("", "0"):
+                explanation = "The provider sent no explanation with it."
+            else:
+                explanation = (
+                    "The provider sent an explanation and it is DELIBERATELY not "
+                    "reproduced here: on identity endpoints a response body can echo "
+                    "the request, and this message reaches a log. Read it in the "
+                    "provider's own console."
+                )
+            raise BootstrapStateError(
+                f"{method} {path} failed with HTTP {exc.code}. {explanation}"
+            ) from None
         except urllib.error.URLError as exc:
             raise BootstrapStateError(
                 f"{method} {path} could not reach Infisical: {exc.reason}"
