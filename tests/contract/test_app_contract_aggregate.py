@@ -253,3 +253,44 @@ def test_the_snapshot_is_named_for_what_it_holds(command: Any) -> None:
     label this repository keeps finding attached to a value nobody re-read.
     """
     assert command.SNAPSHOT_PATH.name == "app-openapi.canonical.json"
+
+
+# ---------------------------------------------------------------------------
+# D1203's premise: the canonical form is ASCII (D1420)
+# ---------------------------------------------------------------------------
+
+
+def test_the_app_snapshot_is_ascii_which_is_the_premise_d1203_rests_on() -> None:
+    """D1203, as a PREMISE rather than as a repair (D1420).
+
+    `contracts/app-openapi.canonical.json`'s canonical form is
+    `bin/app-contract.py`'s, not `openapi_normalize`'s. **Two serializers agree
+    only while the document is ASCII**: they differ on how a non-ASCII character
+    is written -- escaped or literal -- so the day one arrives, two readers of
+    the same document compute two digests and nothing says which is right.
+
+    Unifying them is a session that versions this snapshot, and this run does
+    not take it. It takes the premise, so that the day the premise stops holding
+    a reader is told rather than left to discover it through a digest mismatch
+    with no cause attached.
+
+    **What would have to break for this to go red**: one non-ASCII byte in the
+    published surface -- a description, a title, an enum label. That is not
+    exotic; it is one em dash away, and it arrives through a migration's
+    `COMMENT ON`, which is a place nobody would look for a serializer bug.
+    """
+    from agentic_postgres import REPO_ROOT
+
+    snapshot = REPO_ROOT / "contracts" / "app-openapi.canonical.json"
+    raw = snapshot.read_bytes()
+    assert raw, f"{snapshot} is empty"
+
+    offending = [index for index, byte in enumerate(raw) if byte > 127]
+    assert not offending, (
+        f"{snapshot.name} carries {len(offending)} non-ASCII byte(s), first at offset "
+        f"{offending[0]}: {raw[max(0, offending[0] - 40) : offending[0] + 40]!r}.\n"
+        "D1203's premise has stopped holding: this file has TWO canonicalizers -- "
+        "bin/app-contract.py's and openapi_normalize's -- and they agree only on "
+        "ASCII. Two readers of this document now compute two digests. Unify them, or "
+        "decide which one the snapshot is, before the next release."
+    )

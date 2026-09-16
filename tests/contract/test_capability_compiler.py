@@ -1021,3 +1021,92 @@ def test_a_tool_takes_the_narrowest_bound_of_its_capabilities(
         f"{[e['max_response_bytes'] for e in backing.values()]}"
     )
     assert grouped["max_concurrent_calls"] == 1
+
+
+# ---------------------------------------------------------------------------
+# D930's premise: `capabilities_sha256` is provenance, not input (D1420)
+# ---------------------------------------------------------------------------
+
+
+def test_the_recorded_capabilities_digest_is_provenance_and_decides_nothing(
+    canonical: dict[str, Any],
+) -> None:
+    """D930, as a PREMISE rather than as a repair (D1420).
+
+    Two fields in this product are named `capabilities_sha256` and they are not
+    the same quantity: the rendered document's digests the file the OPERATOR
+    passed to `--capabilities`, and the lock's digests the file whoever compiled
+    the lock passed to the same flag. They are equal only while those are the
+    same file, and on this workstation they are -- which is why the collision has
+    survived, invisible to a checkout that cannot tell them apart by value.
+
+    **What makes the collision harmless today is a third fact, and it is the one
+    worth guarding**: the lock's TOOLS come from the committed canonical
+    contract and not from the file whose digest it records. `CLAUDE.md` states
+    it as *"the host's `capabilities.yaml` does not decide the deployed lock;
+    the lock is compiled from the committed canonical contract."* So the
+    recorded digest is provenance of a review, and a reader who confuses the two
+    fields is confused about a label rather than about a surface.
+
+    Renaming either field moves the outputs schema to v19 and owes a migrator,
+    so this session does not take it. It takes the premise: compile the same
+    canonical contract twice with DIFFERENT recorded digests and the compiled
+    surface must be byte-identical.
+
+    **What would have to break for this to go red**: the compiler starting to
+    read the file it records -- which is exactly the change that would make one
+    name over two quantities dangerous instead of merely untidy.
+    """
+    import hashlib
+
+    def lock_with(digest: str) -> dict[str, Any]:
+        return capability_compiler.compile_lock(
+            canonical=canonical,
+            project_key="fixture-alpha-dev",
+            upstream="https://fixture-alpha-dev.test/api/rest",
+            sources={
+                "capabilities_sha256": digest,
+                "api_surface_sha256": "b" * 64,
+                "canonical_openapi_sha256": "c" * 64,
+            },
+            vocabulary=scope_registry.vocabulary_block(),
+        )
+
+    first = lock_with("a" * 64)
+    second = lock_with("d" * 64)
+
+    assert first["compiled_from"]["capabilities_sha256"] == "a" * 64
+    assert second["compiled_from"]["capabilities_sha256"] == "d" * 64, (
+        "the recorded digest is not recorded verbatim, so it is not provenance"
+    )
+
+    assert first["tools"] == second["tools"], (
+        "the compiled tools moved with the recorded capabilities digest, so the lock "
+        "now READS the file it records. The two fields named capabilities_sha256 have "
+        "stopped being a naming collision and become a correctness one (D930)"
+    )
+    assert first["tools_sha256"] == second["tools_sha256"]
+    assert first["canonical_sha256"] == second["canonical_sha256"]
+
+    # The control: the compiled surface DOES move when the thing it is actually
+    # compiled from moves, so the equality above is a property rather than an
+    # artefact of a compiler that ignores everything (D173, D260).
+    moved = dict(canonical)
+    moved["tools"] = list(canonical["tools"])[:-1]
+    assert moved["tools"] != canonical["tools"], "the fixture has too few tools to narrow"
+    narrowed = capability_compiler.compile_lock(
+        canonical=moved,
+        project_key="fixture-alpha-dev",
+        upstream="https://fixture-alpha-dev.test/api/rest",
+        sources={
+            "capabilities_sha256": "a" * 64,
+            "api_surface_sha256": "b" * 64,
+            "canonical_openapi_sha256": "c" * 64,
+        },
+        vocabulary=scope_registry.vocabulary_block(),
+    )
+    assert narrowed["tools_sha256"] != first["tools_sha256"]
+    assert (
+        narrowed["canonical_sha256"]
+        == hashlib.sha256(capability_compiler.canonical_bytes(moved)).hexdigest()
+    )

@@ -37,6 +37,14 @@ from app.storage_client import (
     redact,
 )
 
+#: `contract` only, and the absence of `p0` is the measured half: no registry
+#: entry names this module, and `p0` selects the OFFLINE CLAIM sweep. A p0 mark
+#: here would put proofs into a sweep no claim reads, which is D697's rule from
+#: the other side. Whether the storage plane's contract modules earn
+#: requirements is the storage plane's decision (D1240) and this run does not
+#: invent one -- it stops them being collected by nothing at all (D1447).
+pytestmark = [pytest.mark.contract]
+
 ACCOUNT = "0123456789abcdef0123456789abcdef"
 ENDPOINT = f"https://{ACCOUNT}.r2.cloudflarestorage.com"
 

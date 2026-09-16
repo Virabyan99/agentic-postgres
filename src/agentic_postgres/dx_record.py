@@ -135,6 +135,22 @@ GUIDE_GLOB = "session-*-operator-guide.md"
 
 #: A command as the documentation and the record spell it. Both spellings of the
 #: same script are captured here and reduced to one by :func:`normalise`.
+#:
+#: **THE LIMIT, STATED RATHER THAN DISCOVERED** (D464, D1422). This is a text
+#: scan and it captures the script, plus one verb for `bin/apg.sh`. It reads no
+#: flags -- not on a continuation line, and not on the same line either, which
+#: is wider than the ledger's older wording ("a flag on a backslash-continuation
+#: line is unchecked") implies. It does not know whether the command was inside
+#: a fenced block, a sentence or a comment; it matches `bin/x.sh` in prose
+#: exactly as it matches it in a shell block.
+#:
+#: The limit is not a defect to be repaired with a parser, and
+#: `test_dx_record.py` asserts what it can and cannot see so the statement is a
+#: measured property rather than a sentence in a ledger. The direction matters
+#: and it is the safe one: an unmatched *documented* command makes a walker's
+#: honest use look undocumented, which over-reports gaps rather than hiding
+#: them. A parser is a later session's, and it would be a second reader of the
+#: documentation with its own idea of what a command is.
 _COMMAND = re.compile(
     r"(?:^|[\s`(])(\./deploy\.sh|bin/apg\.sh\s+[a-z][a-z0-9-]*|bin/[a-z0-9-]+\.(?:sh|py))"
 )

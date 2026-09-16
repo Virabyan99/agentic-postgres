@@ -33,6 +33,12 @@ from app.storage_client import R2Adapter, StorageConfig, StorageError
 from app.storage_models import UploadIntentRequest
 from app.storage_service import StorageService
 
+#: `contract` and `security`, and no `p0`. The security mark is the subject's:
+#: every route's scope check and what the surface refuses to disclose. No
+#: registry entry names this module, so `p0` -- which selects the offline CLAIM
+#: sweep -- would put proofs into a sweep no claim reads (D1240, D1447).
+pytestmark = [pytest.mark.contract, pytest.mark.security]
+
 ACCOUNT = "0123456789abcdef0123456789abcdef"
 PREFIX = "objects/alpha-dev/"
 OWNER = UUID("11111111-1111-4111-8111-111111111111")

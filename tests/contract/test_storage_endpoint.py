@@ -17,6 +17,11 @@ from agentic_postgres import config, naming, rendering
 from agentic_postgres.config import ManifestError
 from agentic_postgres.naming import NamingError
 
+#: `contract` only, for the reason `test_storage_client.py` states: no registry
+#: entry names this module, so `p0` would put it in a claim sweep no claim reads
+#: (D1240, D1447).
+pytestmark = [pytest.mark.contract]
+
 ALPHA = "0123456789abcdef0123456789abcdef"
 BETA = "fedcba9876543210fedcba9876543210"
 

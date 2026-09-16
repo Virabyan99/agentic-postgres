@@ -34,7 +34,17 @@ from __future__ import annotations
 
 import re
 
-from agentic_postgres import REPO_ROOT
+import pytest
+
+from agentic_postgres import REPO_ROOT, sql_surface
+
+#: `contract` and `p0`, and the p0 is not decoration: this module's one test is a
+#: REGISTERED proof of `AGT-AUDIT-002` (P0) and carried no marker at all, so the
+#: only thing that ever ran it was the gate's explicit claim-proof run in HOST
+#: mode -- present in `evidence/session-25-host-claims.xml`, absent from
+#: `session-25-offline-tests.xml`. A session that takes no trip ran it nowhere,
+#: and what it compares is two files in a checkout (D1240, D1447).
+pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 #: **Both released schemas, and `api` was missing until Session 16 Run 3**
 #: (D889). The guard read `app_private.` alone, and the two functions the
@@ -96,7 +106,20 @@ def _arguments(text: str, open_paren: int) -> list[str] | None:
     index = open_paren
     in_sql_string = False
 
-    while index < len(text):
+    # **An argument list that does not close within this many characters is not
+    # a call** (D1450). `_is_a_call`'s three rules all read the argument list,
+    # so an occurrence whose paren never closes nearby -- a docstring example
+    # ending mid-signature, which this module's own `_is_a_call` docstring
+    # contains -- is parsed by running forward through whatever happens to
+    # follow it. That makes the verdict depend on UNRELATED TEXT BELOW: adding
+    # a function to this file flipped that example from *not a call* to *a call
+    # with 14 arguments*, measured. The bound is generous by two orders of
+    # magnitude against every real call in the tree (the longest is 84
+    # characters) and `checked > 100` below is what says it did not narrow the
+    # scan.
+    limit = open_paren + 400
+
+    while index < len(text) and index < limit:
         char = text[index]
 
         if in_sql_string:
@@ -239,6 +262,264 @@ def _is_a_call(text: str, match: re.Match[str], arguments: list[str]) -> bool:
     quotes = [char for char in text[line_start : match.start()] if char in "\"'"]
     after = text[match.end() : match.end() + 1]
     return not (quotes and after == quotes[-1])
+
+
+#: The bodies that are SUPPOSED to name a parameter no declaration has.
+#:
+#: `DELIBERATE_RETIRED_CALLS`' shape one blind spot over, and for its reason: a
+#: guard that refused these would be refusing the proofs that the surface
+#: refuses them. Both were found by this guard's first execution (D1449).
+#:
+#: * `owner_id` -- posted to prove a caller-supplied owner is IGNORED and the
+#:   row lands under the request identity. The whole subject is a key the
+#:   function does not declare.
+#: * `nope` -- posted to prove an unknown RPC argument is refused without the
+#:   refusal disclosing a role, a token or the database name.
+#:
+#: Named per (file, function, key) rather than per file, so it cannot quietly
+#: widen to every body in that module.
+DELIBERATE_UNDECLARED_KEYS = {
+    ("tests/deployment/test_session5_rest_surface.py", "create_note", "owner_id"),
+    ("tests/deployment/test_session5_rest_surface.py", "create_note", "nope"),
+}
+
+#: Keys a request body carries that are NOT the function's parameters.
+#:
+#: A proof posts the whole envelope in one dict in places -- a JSON-RPC frame
+#: around an MCP call, for instance -- and those keys belong to the transport.
+#: Enumerated rather than pattern-matched, so a key added here is a decision
+#: somebody made rather than a prefix that quietly swallowed a typo.
+_NOT_A_PARAMETER = frozenset({"jsonrpc", "id", "method", "params", "name", "arguments"})
+
+
+#: A released signature named somewhere that is NOT a `CREATE` or a `DROP`.
+#:
+#: **ADR 0175's first blind spot, and it has 153 live instances** (D942, D1448).
+#: `GRANT EXECUTE ON FUNCTION api.create_task(text, uuid)`,
+#: `REVOKE ALL ON FUNCTION ...`, `COMMENT ON FUNCTION ...` and
+#: `ALTER FUNCTION ...` each name a signature by its ARGUMENT TYPES. When a
+#: released function's signature moves, every one of these is a place that can
+#: be left naming the old one -- and the guard above never saw them, because
+#: `SCANNED` is Python and these are SQL.
+#:
+#: Matched within one statement over comment-stripped SQL, so a sentence in a
+#: `--` block that happens to contain both words cannot pair them -- **and the
+#: gap may not contain a `CREATE`**, which is not a refinement but the thing
+#: that makes the pattern correct. Measured on its first execution: without it,
+#: a `GRANT` several statements above paired with the next
+#: `CREATE FUNCTION app_private.storage_create_upload_intent(` in `0014` and the
+#: guard reported a declaration as a stale reference to itself (D1448).
+SQL_SIGNATURE = re.compile(
+    rf"\b(?:GRANT|REVOKE|COMMENT\s+ON|ALTER)\b(?:(?!\bCREATE\b)[^;])*?\bFUNCTION\s+"
+    rf"(?:IF\s+EXISTS\s+)?{_QUALIFIED}\.(\w+)\s*\(",
+    re.IGNORECASE | re.DOTALL,
+)
+
+#: An HTTP body posted to an RPC, in the two spellings this repository uses.
+#:
+#: **ADR 0175's second blind spot.** PostgREST takes an RPC's arguments as JSON
+#: keys, so `{"p_title": "x"}` posted to `/rpc/create_note` names the
+#: declaration's parameters as surely as a SQL call does -- and by NAME rather
+#: than by position, which is the half a count can never catch.
+#: **No leading quote.** The first draft required one and read ZERO bodies: the
+#: deployment proofs build the URL as `f"{base}/rpc/create_note"`, so the
+#: character before the path is a brace. A guard that measures nothing passes
+#: (D1449).
+RPC_PATH = re.compile(r"/rpc/(\w+)")
+
+
+def released_parameter_names() -> dict[str, set[str]]:
+    """Every released function's declared parameter names, by the same walk.
+
+    The same ordering rule `released_signatures` states and for the same reason:
+    a `DROP` retires the declaration it names before a later `CREATE` in the
+    same file replaces it. Names rather than counts, because an HTTP body names
+    parameters and a positional count cannot see a renamed one.
+    """
+    live: dict[str, dict[int, set[str]]] = {}
+    for path in sorted((REPO_ROOT / "migrations" / "templates").glob("*.sql")):
+        text = path.read_text(encoding="utf-8")
+        events = [(match.start(), "drop", match) for match in DROP.finditer(text)]
+        events += [(match.start(), "create", match) for match in CREATE.finditer(text)]
+        for _, kind, match in sorted(events, key=lambda event: event[0]):
+            arguments = _arguments(text, match.end() - 1)
+            if arguments is None:
+                continue
+            declarations = live.setdefault(match.group(1), {})
+            if kind == "drop":
+                declarations.pop(len(arguments), None)
+                continue
+            names = set()
+            for argument in arguments:
+                parts = argument.strip().split()
+                # `p_title text DEFAULT ''` -- the name is the first token, and
+                # a declaration with no name at all (`text`) contributes none.
+                if len(parts) >= 2 and re.fullmatch(r"[a-z_][a-z0-9_]*", parts[0], re.I):
+                    names.add(parts[0])
+            declarations[len(arguments)] = names
+
+    return {
+        name: {parameter for names in declarations.values() for parameter in names}
+        for name, declarations in live.items()
+        if declarations
+    }
+
+
+def test_every_sql_signature_names_a_declaration_that_is_live_at_that_point() -> None:
+    """ADR 0175's first blind spot, widened against the DEFINITION (D942, D1448).
+
+    The rule the guard above enforces is *nothing may name a released
+    function's signature except the released one*. It enforced that for Python
+    call sites only, and a `GRANT EXECUTE ON FUNCTION api.f(text, uuid)` names a
+    signature exactly as surely -- by argument types, which is stricter than a
+    count.
+
+    **Checked against the declaration in force AT THAT MIGRATION, not against
+    the newest.** A grant in `0007` names the function as `0007` found it, and
+    `0032` changing that function later does not make `0007` wrong: `0007` ran,
+    and D912 freezes it. So this walks the templates in version order, applying
+    `DROP` and `CREATE` at the position each appears, and asks of each
+    reference whether the arity it spells was live *then*. That is D940's rule
+    for a proof rather than for a migration -- a thing with history is checked
+    against its history.
+
+    Measured when it was written: **140 such references across 34 templates**,
+    and every one of them names a live declaration. A guard that found nothing
+    on the day it was built would be a guard nobody could tell from a broken
+    one, so the count is asserted too.
+
+    The first draft counted 153 and thirteen of those were the pattern pairing a
+    `GRANT` with a later `CREATE` across intervening statements. The count moved
+    because the pattern was repaired, and it is written down here with that
+    reason so the next reader does not "restore" it (D1448).
+    """
+    live: dict[str, dict[int, set[int]]] = {}
+    checked = 0
+    stale: list[str] = []
+
+    for path in sorted((REPO_ROOT / "migrations" / "templates").glob("*.sql")):
+        text = sql_surface.sql_only(path.read_text(encoding="utf-8"))
+        events = [(match.start(), "drop", match) for match in DROP.finditer(text)]
+        events += [(match.start(), "create", match) for match in CREATE.finditer(text)]
+        events += [(match.start(), "named", match) for match in SQL_SIGNATURE.finditer(text)]
+
+        for _, kind, match in sorted(events, key=lambda event: event[0]):
+            arguments = _arguments(text, match.end() - 1)
+            if arguments is None:
+                continue
+            name = match.group(1)
+            declarations = live.setdefault(name, {})
+
+            if kind == "drop":
+                declarations.pop(len(arguments), None)
+            elif kind == "create":
+                declarations[len(arguments)] = _callable_arities(arguments)
+            else:
+                checked += 1
+                if len(arguments) not in declarations:
+                    stale.append(
+                        f"{path.name}: {name}({', '.join(arguments)}) spells "
+                        f"{len(arguments)} argument(s); the declarations live at that "
+                        f"point are {sorted(declarations) or 'none'}"
+                    )
+
+    assert not stale, "a SQL statement names a signature no declaration had:\n" + "\n".join(stale)
+    assert checked >= 135, (
+        f"only {checked} SQL signatures were checked. This was 140 when the guard was "
+        "written; a collapse to zero is what a broken pattern looks like, and it would "
+        "pass the assertion above (D173, D260)"
+    )
+
+
+def test_an_rpc_body_names_only_parameters_the_declaration_has() -> None:
+    """ADR 0175's second blind spot, and the half a count cannot see (D942, D1449).
+
+    PostgREST takes an RPC's arguments as JSON keys, so a body posted to
+    `/rpc/create_note` names the declaration's parameters **by name**. A
+    renamed parameter leaves every such body naming one that no longer exists,
+    and the arity guard above sees nothing at all: there is no
+    `schema.function(` anywhere in the request.
+
+    **The stated limit, because this is a text scan and not an interpreter**
+    (D464's rule applied to a second scan): a body is read only when a literal
+    `{...}` follows a `body=` or `json=` within 600 characters of the path, and
+    only its top-level string keys are read. A body built from a variable, a
+    loop or a helper is invisible here, and this docstring is where that is
+    written down rather than discovered. The direction is the safe one -- an
+    unread body is not asserted against, so this under-reports rather than
+    inventing a failure.
+
+    **`body=` is required and that requirement was measured** (D1449). Taking
+    the next literal dict instead matched the OpenAPI *schema* documents that
+    `test_client_ir.py` and `test_openapi_normalize.py` build beside a
+    `/rpc/create_note` path -- `properties`, `required`, `type`, `in` -- and
+    reported four failures against a guard that had found nothing real. A scan
+    whose first execution produces only false positives gets deleted, which is
+    how a guard dies a session after it is built.
+
+    Functions the migrations do not declare are skipped on purpose: the suite
+    posts to `/rpc/rpc_probe`, `/rpc/e_28000` and a dozen other names that exist
+    only inside a fixture's own cluster, and a guard that demanded a released
+    declaration for those would be refusing the proofs that probe an
+    unreleased surface.
+    """
+    declared = released_parameter_names()
+    assert declared, "no released parameter names were read at all"
+
+    key = re.compile(r"[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']\s*:")
+    wrong: list[str] = []
+    bodies = 0
+
+    for directory in ("tests", "bin", "services", "src"):
+        for path in sorted((REPO_ROOT / directory).rglob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            for match in RPC_PATH.finditer(text):
+                name = match.group(1)
+                if name not in declared:
+                    continue
+                window = text[match.end() : match.end() + 600]
+                assigned = max(window.find("body="), window.find("json="))
+                if assigned == -1:
+                    continue
+                start = window.find("{", assigned)
+                if start == -1:
+                    continue
+                depth = 0
+                end = -1
+                for index in range(start, len(window)):
+                    if window[index] == "{":
+                        depth += 1
+                    elif window[index] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end = index
+                            break
+                if end == -1:
+                    continue
+                body = window[start : end + 1]
+                keys = {found.group(1) for found in key.finditer(body)}
+                if not keys:
+                    continue
+                bodies += 1
+                relative = str(path.relative_to(REPO_ROOT))
+                unknown = sorted(
+                    key
+                    for key in keys - declared[name] - _NOT_A_PARAMETER
+                    if (relative, name, key) not in DELIBERATE_UNDECLARED_KEYS
+                )
+                if unknown:
+                    wrong.append(
+                        f"{path.relative_to(REPO_ROOT)}: a body posted to /rpc/{name} names "
+                        f"{unknown}, which {name} does not declare "
+                        f"(it declares {sorted(declared[name])})"
+                    )
+
+    assert not wrong, "an RPC body names a parameter no declaration has:\n" + "\n".join(wrong)
+    assert bodies >= 1, (
+        "no literal RPC body was read at all, so this guard is measuring nothing. "
+        "Either the scan broke or the suite stopped posting literal bodies; both are "
+        "worth knowing and neither is caught by the assertion above"
+    )
 
 
 def test_every_call_to_a_released_function_uses_a_released_arity() -> None:

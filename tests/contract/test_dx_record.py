@@ -346,3 +346,65 @@ def test_a_failed_walk_must_say_where_it_stopped() -> None:
     contradictory = a_record(blocked_by="step 9 refused me")
     problems = dx_record.blocked_by_problems(contradictory)
     assert problems and "success criterion was reached" in problems[0], problems
+
+
+# ---------------------------------------------------------------------------
+# What the command scan can and cannot see (D464, D1422)
+# ---------------------------------------------------------------------------
+
+
+def test_the_command_scan_reads_a_script_and_never_a_flag() -> None:
+    """The stated limit, measured, so it is a property rather than a sentence.
+
+    `dx_record._COMMAND` is a text scan. The ledger has carried two descriptions
+    of what it misses -- *"a text scan rather than a parser"* (D464) and *"a
+    flag on a backslash-continuation line is unchecked"* -- and the second
+    understates it: **no flag on any line is read**, continuation or not. A
+    repair aimed at continuations would have left the scan reading no flags and
+    looked like progress (D1422).
+
+    So the limit is asserted in both directions. What it MUST see is every
+    spelling the documentation actually uses; what it must be known NOT to see
+    is every flag, because a caller who believes otherwise will write a proof
+    that compares a flag against nothing.
+
+    **Not a parser.** The direction of this limit is the safe one: an unmatched
+    documented command makes a walker's honest use look undocumented, which
+    over-reports gaps rather than hiding them.
+    """
+    seen = dx_record._commands_in
+
+    # Seen: the three spellings, in the four shapes the documentation uses.
+    assert seen("Run `bin/migrate.sh` first.") == {"bin/migrate.sh"}
+    assert seen("```bash\n./deploy.sh --render-only\n```") == {"deploy.sh"}
+    assert seen("bin/apg.sh dev up") == {"bin/dev.sh"}
+    assert seen("(bin/render-jwks.py)") == {"bin/render-jwks.py"}
+    assert seen("  sudo bin/doctor.sh --project x") == {"bin/doctor.sh"}
+
+    # `bin/apg.sh deploy` reduces to the script the release actually ships.
+    assert seen("bin/apg.sh deploy") == {"deploy.sh"}
+
+    # NOT seen, and each of these is a thing a caller might assume:
+    #   a flag, on the same line as its command
+    assert seen("bin/migrate.sh --project p freeze-lock --follows 20260904120030") == {
+        "bin/migrate.sh"
+    }
+    #   a flag on a backslash continuation -- the ledger's narrower claim
+    assert seen("bin/upgrade.sh check \\\n  --project alpha \\\n  --json") == {"bin/upgrade.sh"}
+    #   a verb that is not `apg.sh`'s
+    assert seen("bin/migrate.sh freeze-lock") == {"bin/migrate.sh"}
+    #   a bare command with no `bin/` prefix and no `./`
+    assert seen("deploy.sh --render-only") == set()
+    assert seen("apg-diag catalog alpha migration-ledger") == set()
+    #   an environment variable in front of it
+    assert seen("APG_PROJECT=alpha bin/apg.sh dev up") == {"bin/dev.sh"}
+
+    # And it cannot tell prose from a shell block: the same string matches in
+    # both, which is what makes a mention anywhere count as documentation.
+    assert seen("The `bin/backup.sh` command is not run by hand.") == {"bin/backup.sh"}
+
+    # The one thing the scan is allowed to be strict about: an unknown verb
+    # after `apg.sh` reduces to a script, and that script is compared against
+    # what the release ships -- so a verb the documentation invents has nowhere
+    # to hide (`normalise`'s own docstring, D1305/D1323).
+    assert dx_record.normalise("bin/apg.sh no-such-verb") == "bin/no-such-verb.sh"

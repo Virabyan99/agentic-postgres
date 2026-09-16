@@ -88,6 +88,27 @@ def _write_arguments(title: str, content: str) -> dict[str, Any]:
     }
 
 
+def refused(result: dict[str, Any]) -> bool:
+    """Whether the plane refused this call, read BOTH ways (D509, D1414).
+
+    A JSON-RPC transport error arrives as a top-level ``error``; a **tool**
+    failure arrives as ``{"result": {"content": [...], "isError": true}}`` and
+    carries no ``error`` at all. Session 16 gave this shape a name and four
+    modules carry it; Session 9's proofs predate it, and four of them --
+    every one of them a SUCCESS assertion -- read ``"error" not in result``
+    alone.
+
+    **The direction is what makes it worth repairing.** The REFUSAL assertions
+    in this module already read both, at six sites, so a refused call is
+    correctly seen as refused. It is the successes that were wrong: a tool
+    failure carrying ``isError`` and no ``error`` satisfied *the write was not
+    refused* and the proof went green on a refused write. That is the silent
+    direction, and a proof that cannot fail on the thing it is about measures
+    nothing (D173, D260).
+    """
+    return "error" in result or bool(result.get("result", {}).get("isError"))
+
+
 def sse_result(body: str) -> dict[str, Any] | None:
     """The JSON-RPC message out of an SSE response (D458).
 
@@ -262,7 +283,7 @@ def test_a_write_agent_creates_one_note_through_the_agent_plane(
     )
     assert answer.status == 200, f"the write failed: {answer.body[:300]}"
     result = sse_result(answer.body)
-    assert result is not None and "error" not in result, f"the write was refused: {result}"
+    assert result is not None and not refused(result), f"the write was refused: {result}"
 
     payload = json.loads(result["result"]["content"][0]["text"])
     assert payload["row_count"] == 1, f"a bounded write reported {payload['row_count']} rows"
@@ -958,7 +979,7 @@ def test_a_write_whose_audit_record_cannot_be_opened_does_not_happen(
         recovered = write(f"{AUDITFAIL_TITLE}-recovered")
         assert recovered.status == 200, recovered.body[:300]
         recovered_result = sse_result(recovered.body)
-        assert recovered_result is not None and "error" not in recovered_result, (
+        assert recovered_result is not None and not refused(recovered_result), (
             f"writes are still failing after the grant was restored: {recovered_result}"
         )
     finally:
@@ -1230,14 +1251,14 @@ def test_a_revoked_token_fails_its_next_read_write_and_direct_request(
     read_before = mcp_read()
     assert read_before.status == 200, f"the MCP read control failed: {read_before.body[:300]}"
     read_result = sse_result(read_before.body)
-    assert read_result is not None and "error" not in read_result, (
+    assert read_result is not None and not refused(read_result), (
         f"the MCP read was refused while the agent was ACTIVE: {read_result}"
     )
 
     write_before = mcp_write(f"{REVOKED_TITLE}-before")
     assert write_before.status == 200, f"the MCP write control failed: {write_before.body[:300]}"
     write_result = sse_result(write_before.body)
-    assert write_result is not None and "error" not in write_result, (
+    assert write_result is not None and not refused(write_result), (
         f"the MCP write was refused while the agent was ACTIVE: {write_result}"
     )
 
