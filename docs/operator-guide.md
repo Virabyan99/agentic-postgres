@@ -235,7 +235,11 @@ project is the same steps from 4.
 
 [The upgrade guide](upgrade-guide.md): what is installed, the release table,
 the checkout half, the host sequence, skipped releases, a `major`, and what to
-do when a step refuses. One sentence here so the shape is not lost: transport
+do when a step refuses. **Read its §1.0 first if the deployment you are
+upgrading forked before 1.1.0** — a fork made when `projects/<slug>/` did not
+exist has its domain inside the release's own files, §1 is not written for it,
+and how such a fork converts is undecided. One sentence here so the shape is
+not lost: transport
 and check out as `op`, `provision-host.sh --check`, render **with the host's
 `capabilities.yaml`** as `op`, `upgrade check` and `plan` as root, deploy
 alpha then beta unredirected, read the ledger and the doctor and `upgrade
@@ -657,5 +661,39 @@ Named so nothing on this page reads as measured when it is not.
   sessions of a model have walked it, and `documented_path` is `failed` on the
   second's record.
 - **This page, read cold.** It was written by the session that read the
-  material, not by someone following it; the operator is arranging a cold
-  reading, and its findings are what will make it right.
+  material, not by someone following it. The *upgrade* guide has now been read
+  cold and repaired; this one has not.
+
+### What HAS now been performed, elsewhere, by someone who did not build this
+
+Recorded here because it is the first end-to-end reading of the operator's path
+this project has, and because it changes what several rows above claim.
+
+On **2026-09-16** an outside agent upgraded a real adopter's deployment from
+**1.0.0 to 1.6.0** holding only this repository's documentation — six releases
+in one hop, on a host this project does not administer. It converged: exit 0 on
+the deploy, **10 ok / 0 problem**, `upgrade verify` matching, and a second pass
+for the snapshot. It produced **eighteen findings**, all against the pages
+rather than the product, and Session 27 is the session that answers them
+(`docs/plans/session-27-implementation-plan.md` §1, D1388–D1405).
+
+What that reading establishes, as distinct from what this deployment has done:
+
+- **A hop across six releases works**, including a fork whose manifest is
+  schema 4 and which therefore declares no set of its own. §4 above and the
+  upgrade guide's §4 no longer rest only on this project's own trips.
+- **A fork made before `projects/<slug>/` existed is a case the release had
+  never met**, and the upgrade guide's §1.0 is what that reading produced.
+- **`ssh -tt` is how the unredirected deploy is run from anywhere but a
+  keyboard** — worked out by the reader from D972's stated cause, because no
+  page said it. It now does.
+- **The refusals in this product are its best part.** The reader's own words:
+  every refusal named what was wrong, the schema version or release that
+  introduced it, and the command to run instead. Where they were left guessing
+  it was about what to do next — a documentation gap, not a product one. That
+  is worth keeping in view when reading the eighteen findings as a list of
+  faults.
+
+It does **not** establish anything about this host: it was a different
+deployment, a different fork and a different operator. Every row above still
+stands.

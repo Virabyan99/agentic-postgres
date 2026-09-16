@@ -90,8 +90,25 @@ The second line is not decoration. `bin/session-01-check.sh` needs **both**:
 - `.venv/bin` — `python`, `ruff`, `pytest`; reached only by activating
 
 `bash -lc` alone fails on the bare `python`; activating alone fails on
-`uv is not installed`. It has always worked by hand because an operator's
-interactive shell already has both.
+`uv is not installed`.
+
+**Neither path is created by `provision-host.sh`, and this page used to imply
+it was** (D1396). `grep -ci "uv\|astral\|pip install" bin/provision-host.sh`
+returns **0**: nothing in this product installs `uv`, and `.venv` is made by
+whoever first ran `uv sync` in the checkout. The sentence that stood here — *it
+has always worked by hand because an operator's interactive shell already has
+both* — was a description of the maintainer's host presented as the baseline. A
+host provisioned by this product and no more has neither, which an adopter met
+on 2026-09-16: every `bin/*.sh` ran under the distribution's Python 3.14
+against a `.python-version` of `3.12.13`, unchecked, because `bin/doctor.sh`
+enforces the interpreter on a workstation and nothing enforces it on the machine
+that runs every deploy.
+
+**Making `--apply` install them is not taken here**: it changes what this
+product does to a machine, and it belongs with the interpreter question rather
+than with a sentence. Until it is decided, treat both paths as an operator
+prerequisite — install `uv` and create the venv by hand — and see the upgrade
+guide's §3 step 1 for how to tell whether a given hop needs the sync at all.
 
 Run it as the operator, not as root: the gate is non-mutating, and running it
 under `sudo` leaves root-owned artifacts in a checkout that `op` has to keep

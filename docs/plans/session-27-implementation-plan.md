@@ -554,7 +554,95 @@ this, which is the first end-to-end operator-path reading this project has.
 
 **Targeted:** nothing. Documentation only, per §5's table.
 
-**Done.**
+**Done.** 2026-09-16. Twelve findings answered on `docs/upgrade-guide.md`, two
+sections on `docs/operator-guide.md`, two sentences on `README.md` and one
+paragraph on `docs/host-baseline.md`. The guide grows from 580 lines to 794.
+
+**The new §1.0 is the one that matters, and it is the finding the brief did not
+have a row for** (F-008). §1 assumes the reader owns `projects/<slug>/`, a
+mechanism that arrives at 1.1.0 and is completed at 1.2.0. A fork made at 1.0.0
+had no such thing and was obliged to put its domain **inside the release's own
+files** — its migrations in `migrations/templates/`, its rows in the release's
+`manifest.json` and `released.lock.json`, its operations in the release's
+reviewed surface. §1.0 says so, says that `git merge` produced **nine
+conflicted files** for the one fork that tried it, says that it nonetheless
+converged and doctors 10 ok, and says plainly that **how such a fork converts to
+`projects/<slug>/` is undecided** — ADR 0198 and ADR 0206 create the mechanism
+and neither says how an existing fork enters it, and entering would mean
+re-homing applied migrations, which D912 forbids. It records what the one
+operator did about the conflicts as *what happened*, not as instruction,
+because no rule for it exists to cite.
+
+**D1389/D1404 are answered with the measured table rather than the count.** §1
+now carries which of the six checks refuse a schema-4 manifest — **two, not
+four** — each with its `--project`-less alternative and its exit code, and says
+both refusals are correct rather than a blocker. `generate --check`'s two
+different refusals are separated, and the one an adopter actually meets is the
+one whose remedy the page used to get wrong: a project with no set of its own
+has no client of its own to regenerate, and the directory the page would have
+had them create is one the release does not track.
+
+**D1392's repair is a standing sentence plus per-step notes.** §2 opens by
+saying every command in it runs from the release ALREADY INSTALLED, that the
+page describes each as 1.6.0 performs it, and that a step whose behaviour was
+measured on a later release says so. §2 step 2 carries the 1.0.0 hand-over by
+hand: `_hand_to_operator` arrives in **1.0.1**, so at 1.0.0 the kit stays
+`root:root 0700` and the operator can neither verify it nor copy it off.
+
+**D1398 is repaired by naming both kits.** §2 step 2 exports `-pre`, §3 step 8
+exports `-post`, each step names the other, and the guard that refuses an
+existing directory is untouched — the page was guaranteeing the case its own
+guard refuses, and two suffixes cost nothing.
+
+**F-031's table is the shape the finding asked for.** §3 step 9's return trip
+now names **step 3** as well as step 1, with a nine-row table saying which
+steps the second pass runs and why the others are skipped. The reason step 3
+matters is stated: the render on the host is from the previous commit, and a
+second deploy over it republishes the digest it was meant to replace, at exit 0.
+
+**F-028** gets `ssh -tt` and `script(1)` by name, with why each satisfies D972
+rather than works around it. **D1396** makes the sync conditional with the
+one-line diff that decides it, says nothing installs `uv`, and says what to do
+on a host that has none; `host-baseline.md` stops describing the maintainer's
+shell as the baseline. **D1391** replaces the ownership check with one that can
+see a dotfile. **D1399** drops the six-session-stale advice to move a manifest
+out of the checkout and names the `.gitignore` glob that replaced it.
+**D1393**, **D1394** and **D1397** say what the repaired commands now print and
+what an earlier release prints instead. **D1400** repairs the README's gate
+sentence — twenty-four gates, 01–18 and 20–25, with the Session 19 hole
+explained — and puts `bin/upgrade.sh`'s three verbs in the operating menu they
+were missing from.
+
+**The operator guide's §13 gains a second half**, and it is the first
+end-to-end reading of the operator's path this project has: what an outside
+agent established on 2026-09-16 by upgrading a real deployment from 1.0.0 to
+1.6.0 on a host this project does not administer. It includes the reader's own
+positive finding, that the refusals are this product's best part and that where
+they were stuck it was about what to do NEXT — which is the difference between
+eighteen documentation findings and eighteen product faults.
+
+**SIX FORWARD REFERENCES, and Run 6 owes each one a reading.** The page says
+*"since 1.6.1"* at `upgrade-guide.md` lines 253, 321, 460, 472, 474 and 537 —
+`check`'s worded answer, the named-owner refusal on every render directory, the
+three-way leaf rendering, `--also` in the usage, and `deploy.sh --help`'s
+session number. Every one is a repair Run 2 made and none of them is true of a
+release that has not been bumped. **Run 6's checklist gains: grep the page for
+`1.6.1` and confirm each claim against the bumped tree.**
+
+**§1's version cells are deliberately NOT edited here.** ADR 0209 §3 makes the
+release statement the bump commit's job, and pre-editing it would leave the
+tree carrying a page that names a release the tree does not. Run 6 moves them.
+
+**Checked with Session 26's self-check** as the plan says (the interim until
+Run 5 makes it a test): every `bin/*.sh` named on either page exists and is
+executable, every `--session`/`--through-session` equals `CURRENT_SESSION`, and
+every flag written on a command line appears in that command's own `--help` —
+**19 usages, 0 problems**. Its one blind spot is worth recording: it matches a
+command line by its first word, so a flag on a `\`-continuation line is not
+checked. Run 5's test inherits that and should not.
+
+`test_documentation_index` and `test_session12_documented_path`: **28 passed**
+(run because the README moved, not because this run needed them).
 
 ### Run 5 — the pages become checkable, and ADR 0209's guard
 

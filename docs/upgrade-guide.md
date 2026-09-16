@@ -94,6 +94,53 @@ upgrade, and §3 step 4 says why.
 
 ---
 
+## 1.0 What this page does not cover: a fork made before `projects/<slug>/`
+
+**Read this before §1.** §1 assumes your domain lives in `projects/<slug>/`,
+which the release tracks as *yours* and never touches. That mechanism arrived
+at **1.1.0** (`migrations.set`, project manifest schema 5) and was completed at
+**1.2.0** (`mcp.capabilities`, schema 6). If you forked at **1.0.0 or earlier**,
+it did not exist, and the only thing the release offered was to put your domain
+**inside the release's own files** — your migrations in `migrations/templates/`,
+your operations in `contracts/postgrest-api-surface.yaml`, your rows in
+`migrations/manifest.json` and `migrations/released.lock.json`.
+
+**If that is your fork, §1 is not written for you and it will not come out
+clean.** This is measured, not anticipated: an adopter who forked at 1.0.0 ran
+§1's first command against 1.6.0 on 2026-09-16 and `git merge` produced **nine
+conflicted files**, every one of them a file the release owns and the fork had
+amended. Two of them — `migrations/released.lock.json` and
+`contracts/postgrest-openapi.canonical.json` — are generated artefacts carrying
+digests, where *resolve by hand* and **a released migration is never amended**
+(D912) pull in opposite directions. And the collision is structural rather than
+bad luck: the release occupies `0031` at 1.1.0 and `0032` at 1.5.0 in the same
+template directory a 1.0.0-era fork was obliged to write into.
+
+**What this release does and does not say about it.**
+
+- **It works.** The same adopter completed the upgrade to 1.6.0 and the
+  deployment doctors 10 ok. A fork whose manifest is `schema_version: 4`
+  declares no set of its own, so its migrations stay in the release's directory
+  and sort below the release's new ones, and ADR 0206's split never engages.
+  The release table's own note applies: a project manifest below the newest
+  schema still deploys.
+- **Two of §1's six checks refuse such a fork, and that is correct** — see §1's
+  table below, which says which two and what the refusal means.
+- **How a pre-1.1.0 fork CONVERTS to `projects/<slug>/` is undecided.** ADR
+  0198 and ADR 0206 create the mechanism; neither says how an existing fork
+  moves into it, and moving would mean re-homing applied migrations, which D912
+  forbids. It is tracked in `docs/scope-closure.md` and is the on-ramp
+  session's, not this page's. **Do not read §1 as describing a conversion it
+  does not describe.**
+- **Which side wins each merge conflict is not written down anywhere**, and
+  this page will not invent a rule it has not measured. What the one recorded
+  upgrade did: took the release's side in every file the release owns and
+  re-applied the fork's rows on top, then re-froze the lock. That is one
+  operator's judgement on one fork, recorded here as what happened rather than
+  as instruction.
+
+---
+
 ## 1. The checkout half — an adopter's fork, before any host is touched
 
 An adopter's project is a directory the release checkout tracks (ADR 0198):
@@ -130,14 +177,40 @@ What each check answers, from its own `--help`:
 - **`mcp-contract.sh check --project`** compiles your capability manifest
   against the merged surface and your snapshot, and compares your committed
   contract byte for byte (ADR 0201).
-- **`generate --check`** exits 5 after **every** bump, because the client's
-  `templateVersion` is derived from the release (D1238). Regenerate and commit
-  it in the same change: `bin/apg.sh generate --project project.yaml`.
+- **`generate --check`** refuses for **two different reasons**, and the remedy
+  differs. If your project has a set of its own, it exits 5 after every bump
+  because the client's `templateVersion` is derived from the release (D1238):
+  regenerate and commit it in the same change, `bin/apg.sh generate --project
+  project.yaml`. **If your manifest is schema 4** it exits 5 saying
+  *"clients/typescript/README.md is missing; the client has not been generated
+  from this contract"* — the default output for a project with no set is
+  `clients/typescript` under the checkout root, **and the release tracks no such
+  directory**. Regenerating is not the remedy there; a project with no set of
+  its own has no client of its own to regenerate. Measured 2026-09-16 (D1404).
 - **`--render-only`** is the whole of what a checkout runs; the gate's step 2
   and `apg dev up` both refuse a project this checkout has not rendered.
 - **`dev reset`** rebuilds the local cluster from the new render, applying
   both sets as the migration user — a migration of yours that the new release
   refuses fails here in ten seconds rather than in step 6 of a deploy.
+
+**Which of the six refuse a manifest with no set of its own, measured
+2026-09-16** against a valid schema-4 manifest on this checkout:
+
+| Check | schema 4 | Why |
+|---|---|---|
+| `migrate verify-lock --project` | **refuses, exit 5** | *"declares no `migrations.set`, so it has no lock of its own"* |
+| `api-contract --check --project` | **refuses, exit 2** | the same: there is no project-owned snapshot to compare |
+| `mcp-contract check --project` | exits 0 | compiles the release's own six tools |
+| `--render-only` | exits 0 | |
+| `apg dev status --project` | exits 4 | about cluster state, not about the manifest |
+| `generate --check --project` | exits 5 | D1404 above, not the `templateVersion` reason |
+
+**The two refusals are correct and they are not a blocker.** Both name a lock
+and a snapshot that a project with no set of its own does not have. Run the
+`--project`-less forms instead — `bin/migrate.sh verify-lock` and
+`bin/api-contract.sh --check`, which each exited 0 in the same reading — and
+read the release table's note: a project manifest below the newest schema still
+deploys.
 
 Then the gate, on a clean tree: `bin/session-01-check.sh`.
 
@@ -156,32 +229,65 @@ itself is git's.
 Hold these, in this order, and do not start §3 without them. Each is a thing
 that a trip found it needed after the fact.
 
+> **Every command in this section runs from the release that is ALREADY
+> INSTALLED on the host, not from the one you are upgrading to** — §3 step 1 is
+> where the new release arrives. That matters more than it reads: this page was
+> written from a 1.6.0 checkout and describes each command as 1.6.0 performs
+> it. Where a step's behaviour was measured on a release later than the one you
+> are running, the step says so and gives the older behaviour (D1392). The
+> release table's *what an upgrade meets* column is about what the DEPLOY
+> meets, and says nothing about which release executes this preparation.
+
 1. **Read what is installed.** As root, per project:
    ```bash
    sudo bin/upgrade.sh check --project alpha-dev
    sudo bin/doctor.sh --project alpha-dev
    sudo bin/fleet.sh
    ```
-   `check` reports the installed release and whether a comparison can be
-   made; `undetermined` blocks and is not *no changes*. The doctor reads
-   **10 ok** on a well deployment (2026-09-15, both projects). Anything else
-   is repaired before the upgrade, because a failed upgrade over a sick
-   project leaves you unable to say which caused what.
+   **`check` reads no candidate and prices nothing.** Its question is whether
+   a comparison can be made at all: was the installed document readable, and is
+   it the same kind of document this release renders. Run here — from the
+   host's own checkout, before §3 step 1 fetches the new release — **both
+   versions it prints are the installed one**, and it will say so cheerfully on
+   a host about to take a release six minors ahead. That is not a verdict on
+   your upgrade; the pricing is §3 step 4's `plan --candidate`. Since 1.6.1 the
+   command says which question it answered in words; on an earlier release it
+   prints `verdict OK`, which is the same answer to the same question (D1393).
+   `undetermined` blocks and is not *no changes*.
+
+   The doctor reads **10 ok** on a well deployment (2026-09-15, both projects).
+   Anything else is repaired before the upgrade, because a failed upgrade over a
+   sick project leaves you unable to say which caused what.
 2. **Export the kit and take it off the host.** The kit is what you hold if
    the upgrade takes the host with it (ADR 0189, `docs/node-loss-runbook.md`
    §0). As root:
    ```bash
    sudo bin/dr-kit.sh export --host host.yaml --capabilities capabilities.yaml \
-        --output /home/op/kit-$(date -u +%Y-%m-%d) \
+        --output /home/op/kit-$(date -u +%Y-%m-%d)-pre \
         --project project.alpha.yaml --project project.beta.yaml
-   bin/dr-kit.sh verify /home/op/kit-<date>
+   bin/dr-kit.sh verify /home/op/kit-<date>-pre
    ```
-   `export` refuses a directory that exists (the day is in the name so two
-   exports on one day collide on purpose), hands the kit to the operator user,
-   and `verify` takes no `--project` (D1316). Copy it off to an ext4 filesystem
+   **The `-pre` suffix is not decoration.** `export` refuses a directory that
+   already exists, deliberately, and **§3 step 8 has you export again after the
+   upgrade** — so an upgrade performed in one sitting exports twice on one day
+   and a bare `kit-$(date)` name makes the second export refuse. Name them
+   `-pre` and `-post`; step 8 uses the second (D1398). The guard is right and is
+   not being worked around: the two kits describe two different deployments and
+   should not share a name.
+
+   `verify` takes no `--project` (D1316). Copy the kit off to an ext4 filesystem
    — the `0700`/`0600` modes do not survive a Windows drive — and `verify` it
    there from a checkout. Measured 2026-09-15 (`s25-kit.sh`, kit-2026-09-15,
    verified on the host and again in `~/dr-kits/`).
+
+   **If the release you are running is 1.0.0 or earlier, `export` does not hand
+   the kit over** and you must do it yourself. `_hand_to_operator` arrives in
+   **1.0.1** (`git show 1.0.0:bin/dr-kit.py | grep -c _hand_to_operator` → 0; at
+   `1.0.1` → 2), so at 1.0.0 the kit stays `root:root 0700`, the operator can
+   neither `verify` it nor copy it off, and the remedy is one line as root:
+   ```bash
+   sudo chown -R op:op /home/op/kit-<date>-pre
+   ```
 3. **Confirm a full backup exists and the archiver is well.**
    ```bash
    sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json info
@@ -193,14 +299,30 @@ that a trip found it needed after the fact.
    cluster (`bin/restore-test.sh --help`), and the doctor's disk check reads
    headroom in copies. Nothing else checks it for you.
 5. **The checkout on the host is clean and owned by `op`.** The deploy's step
-   3 refuses a dirty checkout (`assert_clean`); a third manifest inside it is
-   untracked and makes every deploy refuse (D971), so it lives at
-   `/home/op/<name>.yaml`. And `.generated/<key>` can be root-owned after a
-   root `--render-only`, a `sudo pytest` or a deploy from a real root login
-   (D1110): as op, `stat -c %U .generated/*`, and if any is not `op`,
-   `sudo chown -R op:op .generated` first. A render into a root-owned
-   directory dies on a permission error rather than a sentence (D1151;
-   `render_project` names the owner and the remedy since 1.3.0).
+   3 refuses a dirty checkout (`assert_clean`). **A project manifest may live
+   inside the checkout since 1.0.1**: `.gitignore` carries `/project.yaml` and
+   `/project.*.yaml`, added by D1034 with the reason written beside it, so a
+   third manifest at the checkout root is ignored and `git status --porcelain`
+   stays empty. D971's refusal — an untracked file dirties the release and every
+   deploy refuses — still applies to a manifest that does **not** match that
+   glob; those live at `/home/op/<name>.yaml`. Confirm with `git status
+   --porcelain` rather than by moving a file that did not need moving (D1399).
+
+   And `.generated/<key>` can be root-owned after a root `--render-only`, a
+   `sudo pytest` or a deploy from a real root login (D1110). **Check it with a
+   command that can see a dotfile** — the render's staging and lock directories
+   are `.generated/.staging` and `.generated/.locks`, and a shell glob does not
+   match a leading dot, so `stat -c %U .generated/*` reports a clean tree and
+   the render then dies inside one of them (D1391, measured by a cold reader):
+   ```bash
+   stat -c '%U %n' .generated .generated/.staging .generated/.locks .generated/* 2>/dev/null
+   sudo chown -R op:op .generated     # if any line is not op
+   ```
+   Since **1.6.1** every directory the render creates names its owner, the
+   remedy and the whole `.generated` root when it cannot create one; on an
+   earlier release the first of them arrives as a `PermissionError` traceback
+   and **exit 1, which is not one of the ten codes the README publishes**
+   (D1151/D1391).
 6. **Know which manifests move with this release, and plan to move them
    separately** (§3 step 4).
 7. **Read the previous trips' *if something goes wrong* before the day**
@@ -243,8 +365,32 @@ git status --porcelain | wc -l    # 0
 
 Confirm `FETCH_HEAD` before the checkout, never the `release` line the deploy
 prints after it. Measured 2026-09-15 (`/home/op/s25-checkout.sh`, Session 25
-Run 7). `uv pip sync` reaches PyPI; five earlier trips paid for skipping the
-sync (D384, D297).
+Run 7).
+
+**The `uv pip sync` line is conditional, and nothing installs `uv` for you.**
+Five earlier trips paid for skipping a sync that was needed (D384, D297), and a
+sync that is not needed reaches PyPI for nothing — which on a host with no
+outbound HTTPS is a failure rather than a no-op. One line tells you which you
+are in:
+
+```bash
+git diff --stat <installed source_commit>..HEAD -- requirements-dev.txt requirements-dev.in .python-version
+```
+
+Empty output means the hop moves no dependency and the sync is a no-op; skip
+it. (It was empty for `1.0.0..1.6.0` — the whole of Stage 3 — confirmed
+2026-09-16.) Non-empty means run it.
+
+**And if the host has no `~/.local/bin/uv`**: nothing in this product installs
+one. `bin/provision-host.sh` never mentions `uv`, `astral` or `pip install`
+(`grep -ci` → 0), and `docs/host-baseline.md` describes both `~/.local/bin` and
+`.venv/bin` as things an operator's interactive shell already has — which is a
+description of the maintainer's host, not of what `--apply` creates (D1396).
+On a host without them, run the `bin/*.sh` commands with whatever interpreter
+the distribution provides and **read `python3 --version` against
+`.python-version` before you trust a render**: the release pins 3.12 and
+enforces it on a workstation through `bin/doctor.sh`, and the machine that runs
+every deploy is unchecked.
 
 ### Step 2 — The host's own units and the edge, as root
 
@@ -310,13 +456,23 @@ before any mutation and performs none. The `--json` form carries `bump`,
 Exit codes are the command's own: 0 the plan may proceed, 4 never deployed
 here, 6 blocked or could not be computed.
 
-**Two things the plan cannot see, and both are printed by the parser rather
-than by `--help`.** `bin/upgrade.sh <verb> --help` prints an argparse usage
-line carrying `--also {migration_added, api_operation_added,
-api_operation_removed, api_operation_changed, secret_optional_added,
-document_schema_migratable, document_schema_needs_operator_input,
-operator_manifest_invalidated}`, and `bin/upgrade.sh --help` does not mention
-it (D1381). `migration_added` is the one that matters: a rendered document
+**How to read a leaf that differs.** `plan`'s human-readable form prints each
+leaf as `installed -> candidate`, and since **1.6.1** the three cases are
+spelled apart: `(no such key)` means the installed document does not carry the
+key at all — a schema addition, the safest class there is — `null` means it
+carries it with a JSON null, and anything else is the JSON value. On an earlier
+release both of the first two print as Python repr (`'<absent>'` and `None`),
+which read as each other: on a real 1.0.0 → 1.6.0 hop two of seven leaves said
+*the v18 schema added this key* in a form indistinguishable from *a value went
+away* (D1394). The classification is right either way; only the reading was
+ambiguous.
+
+**What the plan cannot see, and must be told.** `--also` declares a change class
+no pair of rendered documents can establish. `bin/upgrade.sh --help` names all
+eight of them since **1.6.1**; before that only the argparse usage line printed
+by `bin/upgrade.sh <verb> --help` carried them (D1381), and on releases before
+1.6.1 that form exits 2 rather than printing anything, so read them from
+`bin/upgrade.py::DECLARABLE` instead. `migration_added` is the one that matters: a rendered document
 records no migration count and the checkout's lock describes the checkout, so
 **whether the release adds a migration cannot be derived by the plan** (D743)
 and is an operator's declaration. Read it yourself from the release table
@@ -358,6 +514,35 @@ Nothing after it: no `> file`, no `| tee`. `sudo`'s pty puts a command whose
 streams are not all terminals in the background, the first `docker exec -i`
 stops on `SIGTTIN`, and the deploy waits forever (D972; `deploy.sh` now refuses
 that shape with exit 2). The terminal is the log.
+
+**How to satisfy that from anywhere but a keyboard at the machine**, which is
+how every other step on this page is run:
+
+- **Over SSH, use `ssh -tt`.** It allocates a pty on the REMOTE side, so the
+  deploy's three streams are all terminals and D972's refusal does not fire —
+  whatever the local end does with the output. A plain `ssh host 'sudo
+  ./deploy.sh …'` has no pty and is the shape that hangs. Measured by an
+  adopter on 2026-09-16, who worked it out from D972's stated cause because
+  this page did not say it.
+- **For a transcript, use `script(1)`, not a redirect.** `script -q
+  /home/op/deploy-$(date -u +%FT%H%M).log -c 'sudo ./deploy.sh …'` keeps the
+  command's streams attached to a pty and records them. `tmux` with its own
+  logging works for the same reason. *The terminal is the log* and *record the
+  upgrade* (§7) are not in tension; a redirect is what is refused, not a
+  recording.
+
+**Where `--through-session`'s number comes from.** It is `CURRENT_SESSION` in
+`src/agentic_postgres/__init__.py` of the release you just checked out — not
+`VERSION`, and not something you carry over from the last upgrade. Since
+**1.6.1** `./deploy.sh --help` prints it. On an earlier release, read it:
+```bash
+grep -n 'CURRENT_SESSION' src/agentic_postgres/__init__.py
+```
+The release table's *Session* column carries it for every release listed, and
+for a release the table does not list, the file is the only source. **Get it
+wrong low and nothing tells you**: `deploy.sh` accepts any number below
+`CURRENT_SESSION` silently and exits 0 having deployed less than the release
+(D59).
 
 What happens, in the deploy's own step numbers: **0** preflight reads
 everything and changes nothing — an absent prerequisite lists every absent one
@@ -424,9 +609,17 @@ sudo install -o op -g op -m 0600 /etc/agentic-postgres/projects/alpha-dev/output
 
 The gate's external mode and every off-host reader take these copies; a
 stale copy measures the previous release silently (`CLAUDE.md` §2 records a
-pair from 2026-08-23 that did exactly that). Then **re-export the kit** (§2
-step 2) — the one you exported before the upgrade describes a deployment that
-no longer exists — copy it off, and verify it. **Do not point the gate's
+pair from 2026-08-23 that did exactly that). Then **re-export the kit** — the
+`-pre` one from §2 step 2 describes a deployment that no longer exists — into
+the `-post` name, copy it off, and verify it:
+```bash
+sudo bin/dr-kit.sh export --host host.yaml --capabilities capabilities.yaml \
+     --output /home/op/kit-$(date -u +%Y-%m-%d)-post \
+     --project project.alpha.yaml --project project.beta.yaml
+```
+Both kits are kept. `export` refuses a directory that exists, which is why §2
+step 2's name carries `-pre` — without the two suffixes an upgrade done in one
+sitting cannot follow both steps as written (D1398). **Do not point the gate's
 `--kit-dir` at it** (D1282): `REC-KIT-003`'s claim *is* the version gap
 between a stored kit and the tree, its proof `pytest.fail`s when no stored
 document is older than the tree, and the flag's own help says which kit to
@@ -449,10 +642,31 @@ sudo bin/dev-token.sh --project-outputs /etc/agentic-postgres/projects/beta-dev/
 `--update` streams the candidate and, with `--project`, prints on stderr the
 path it belongs at inside `projects/<slug>/contracts/`. Copy it to the
 workstation, review the diff against the committed snapshot, commit, CI, and
-transport the commit back (step 1) for one more deploy. Then `apg generate`
-against the new snapshot in the checkout (§1). Until the redeploy, `upgrade
-verify` and the release proof compare against a document that names the old
-digest.
+transport the commit back for one more deploy.
+
+**The return trip is step 1, then step 3, then step 6 — and step 3 is the one
+this page used to leave out** (F-031, measured by an adopter on 2026-09-16).
+`deploy.sh --through-session` deploys from a render, and the render sitting on
+the host is the one made from the PREVIOUS commit. Step 1's checkout moves
+`contracts/postgrest-openapi.canonical.json`, which feeds
+`api.canonical_openapi_sha256` — so a second deploy over the old render
+republishes the digest it was supposed to replace, and exits 0.
+
+| Step | Second pass |
+|---|---|
+| 1 transport and check out | **yes** |
+| 2 host units and edge | no — the baseline has not moved |
+| 3 render the candidate | **yes, and this is the one that is easy to miss** |
+| 4 price it | no — it would compare this release against itself |
+| 5 rotations | no |
+| 6 deploy | **yes** |
+| 7 read what it left | **yes** |
+| 8 op-owned copies and the kit | no — step 8's copies are taken after the last deploy |
+| 9 the snapshot | no — this pass is what step 9 asked for |
+
+Then `apg generate` against the new snapshot in the checkout (§1). Until the
+redeploy, `upgrade verify` and the release proof compare against a document
+that names the old digest.
 
 ---
 

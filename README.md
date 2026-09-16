@@ -703,6 +703,18 @@ sudo bin/rehearse.sh <scenario> --outputs <outputs.json> [--plan]
 sudo bin/rehearse.sh reverse                  # replay an interrupted rehearsal's reversal
                                               # (docs/recovery-operations.md)
 
+# What a new release would do to this project, before anything is mutated.
+# Every verb reads; none of them changes anything, ever. docs/upgrade-guide.md
+# is the whole sequence these three sit inside.
+sudo bin/upgrade.sh check  --project <key>           # can a comparison be made at all?
+sudo bin/upgrade.sh plan   --project <key> --candidate <outputs.json>
+                                                     # every leaf that differs, the bump
+                                                     # proposed, the bump required, and
+                                                     # whether the first covers the second
+sudo bin/upgrade.sh verify --project <key> --candidate <outputs.json>
+                                                     # after the deploy: is what is
+                                                     # installed what this checkout renders
+
 sudo bin/migrate.sh --project project.yaml status    # applied and pending
 sudo bin/backup.sh  --outputs <outputs.json> info --json
 sudo bin/backup.sh  --outputs <outputs.json> schedule status  # both timers enabled? 0 if so
@@ -753,12 +765,19 @@ seconds-long confidence check. Run a single module while you work:
 python -m pytest tests/contract/test_preflight.py -q
 ```
 
-Each session has its own gate, `bin/session-01-check.sh` through
-`bin/session-10-check.sh`. Most run in more than one mode: `offline` in a
-checkout, `host` on the deployment host, and `external` from a different network
-— because a port scan run on the host traverses its own routing table and can
-report "closed" for a port the world can reach. A session document cannot be
-written from one half alone.
+Each session has its own gate. This release carries **twenty-four** of them,
+`bin/session-01-check.sh` through `bin/session-18-check.sh` and
+`bin/session-20-check.sh` through `bin/session-25-check.sh`. **There is no
+`session-19-check.sh`**, and that is not a gap in the tree: Session 19 was a
+repair session that registered no requirement of its own, so it has no claims to
+gate. Read the newest one for the release you are on; the older ones still run
+and still guard what they were written for.
+
+Most run in more than one mode: `offline` in a checkout, `host` on the
+deployment host, and `external` from a different network — because a port scan
+run on the host traverses its own routing table and can report "closed" for a
+port the world can reach. A session document cannot be written from one half
+alone.
 
 **The gate is a release control, not a save button.** It re-runs the whole suite.
 
