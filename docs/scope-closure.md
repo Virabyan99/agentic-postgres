@@ -533,3 +533,60 @@ release.
 | **Seventeen of the format table's twenty-one entries had never matched a served format** | D1390, and the repair is shipped: the table is 44 entries, measured against a running PostgREST for every type and every array form, with the measurement committed as `RIG_27B_SERVED`. What remains open is the shape of the lesson — **a table written from SQL type names rather than from what the server emits looks correct and is untestable by the documents the release happens to carry.** The two committed snapshots between them serve five formats and one enum. |
 | **The self-check's blind spot, inherited by the guard that replaced it** | Session 26's self-check matched a command line by its first word, so a flag on a backslash-continuation line went unchecked. Run 5's proofs read the pages through the two real scans instead, which is stricter — but neither scan reads a continuation line either. Written down so the first false pass is read as this. |
 | **Everything Stage 4 already inherited** | §14's last row is unchanged by this session: the public-endpoint decision, the rotation performed before any credential travels, a retention policy for `agent_audit` and `agent_idempotency`, the two fields named `capabilities_sha256`, the Python client, the four unswept storage modules, the audit filters, and **a person's walk**. Session 27 adds the on-ramp question at the top of that list. |
+
+---
+
+## 16. What Session 28's Run 1 struck, and what it found instead
+
+Session 28 was planned against `docs/pre-stage-4-audit.md`, one inventory of
+everything this project knows is wrong with itself. Run 1's job was to measure
+all **36** of its Tier 1 rows against the tree in both directions before any of
+them was worked — `CLAUDE.md` §4's rule, that a row describing what already
+exists prices a free property as a session.
+
+**Fourteen of the thirty-six are already answered in this tree.** Each is struck
+below with the command that shows it. **Three of the fourteen would have caused
+harm implemented as the audit writes them**, which is the reason the measurement
+was a run rather than a paragraph.
+
+> A struck row is not a row somebody decided to skip. It is a row where the
+> audit's closing act is not the act the tree needs, and §6's rule applies: a
+> conflict between a record and the code is a divergence with a number, never a
+> silent reconciliation. All fourteen carry one — D1407–D1418, D1420, D1426 in
+> `docs/plans/session-28-implementation-plan.md` §1.
+
+### The three that would have done damage
+
+| Row | What the audit says | What the tree says |
+|---|---|---|
+| **F-013** (D1411) | *"The lint forbids `{{app_runtime}}`, which the release's own migration `0003` uses"* — closing act *"roughly one line"* | `grep -n 'TO {{app_runtime}}' migrations/templates/*.sql` finds `0001` and `0003` only, and `0006-app-runtime-least-privilege.sql` then issues `REVOKE ALL ON SCHEMA app FROM {{app_runtime}}` — with the measurement in its own header: `has_table_privilege(app_runtime,'app.notes','SELECT')` → **true**, `SET ROLE app_runtime; SELECT * FROM app.notes` → **denied**, *"THE SCHEMA REVOKE IS THE ONE THAT HOLDS."* **The lint is correct and the release's own example is what misleads.** The one line would have widened a security boundary to match a grant that grants nothing. ADR **0211** is the decision. |
+| **D1274** (D1416) | *"Studio's capability view shows the checkout's lock, never the plane's … Ask the deployment, as `list_resources` already does"* | `src/agentic_postgres/studio.py:464` decides it under ADR 0195: no request Studio makes confirms the lock, so *"gating it on one would report a REST document's staleness as though it were the lock's, and that is ADR 0195's folded third outcome"* — and `CAPABILITIES_NOTE` travels with the payload so the caveat cannot come apart from the data. The closing act would have undone a recorded decision. |
+| **D1045** (D1426) | *"`ControlPlane._call` discards a provider body that said *identity limit reached* — a security judgement thrown away in a credential path"* — closing act *"Report the body, or say why not"* | `sed -n '370,373p' bin/bootstrap-providers.py` **says why not, at the discard**: *"The body is not included: on identity endpoints it can echo the request, and this message reaches a log."* That is §6's own non-negotiable. The status is reported. **This is the row most likely to be "fixed" into a secret in a log.** The residue is the silence — an operator cannot tell *the provider explained itself and we refused to repeat it* from *the provider said nothing* — and that is one clause, in Run 4, printing no body. |
+
+### The other eleven, each with its command
+
+| Row | Struck because | Shown by |
+|---|---|---|
+| `requirements-dev.in` **pins nothing** (D1407) | It pins **twenty-one** packages with `==`, and the six it leaves floating are a recorded decision with its reason in the file | `grep -c '==' requirements-dev.in` |
+| The completion script is bash's (D1408) | The stated decision the row offers as an alternative is already in the command's own help and in its refusal | `bin/apg.sh completion --help`, and `bin/completion.sh:52,127` |
+| No Python client (D1409) | *"a stated decision not to"* exists verbatim, on the page the row's subject documents | `docs/generated-clients.md` §7 |
+| `MAX_SERIALIZED_BYTES` chosen not measured (D1410) | The code says *"1 MiB, chosen not measured, and said so where it is defined"* at the constant, and the capability schema carries the usage measurements | `services/auth-api/app/mcp_tools.py:125-137` |
+| F-012's refusal (D1412) | It is a **record, not a guard**, since ADR 0206 — *"This no longer prevents anything the cluster would refuse"* — so the decision is about who writes a record, not about relaxing safety | `src/agentic_postgres/migrations.py::_assert_follows_release_version` |
+| `mcp_tracing.configure()` has no caller (D1413) | True of `configure()` and **false of the module**: `span()` is called on every tool call, so the plane emits spans into an unconfigured tracer. Deleting it removes working instrumentation | `services/auth-api/app/mcp_tools.py:55,773` |
+| Session 9's proofs read `"error"` and not `isError` (D1414) | The **refusal** assertions already read both, at six sites. Four **success** assertions do not, and that is the direction that is silently green | `grep -n isError tests/deployment/test_session9_agent_writes.py` |
+| D340 (D1415) | A passing test asserts the current state, so closing it inverts one — which `CLAUDE.md` §6 permits only with an ADR | `test_the_maintenance_database_is_reachable_by_every_service_role` |
+| The apt pin expires (D1417) | Accepted, stated, diarised **at the pin**, and it fails closed at exit 100. D99's rolling minor tag is the genuinely silent one and is a different row | `versions.in.yaml`, ADR 0144, D533 |
+| F-026's interpreter check (D1418) | Adding it to `bin/doctor.sh --project` crosses ADR 0158's mode split, whose own comment says *"The split is what keeps the bare `python` below correct"* | `sed -n '1,20p' bin/doctor.sh` |
+| D1203 and D930 (D1420) | Both are priced by this ledger itself as a later session's — one needs a snapshot version, the other an outputs-schema move and a migrator. Session 28 takes the **premise assertions** instead, so the day either premise stops holding it is loud rather than quiet | §12 and §14 above |
+
+### What Run 1 found that the audit does not say
+
+| Found | Position |
+|---|---|
+| **`render-jwks`'s closing act would have removed a deliberate property** (D1427) | The audit says *"compare the key set, not the file."* `write()` byte-compares **because** the file's mtime is the only signal a reader has that a rotation happened — its docstring says so. The defect is that `main()` reads a two-valued answer (*did I touch the file*) as an answer to a three-valued question (*did the key set move*), and a render publishes into a directory that has just been created, so `changed` is True with no key having moved. The repair is ADR 0195's third outcome **in the caller**. It matters because the next session performs a cutover and this is the sentence read during it. |
+| **`apg-diag`'s three absent services are the three that handle a credential** (D1428) | `readonly SERVICES="postgres pgbouncer postgrest docs edge-probe dbmate"`. `auth` signs, `storage` presigns, `mcp` is the agent plane. The file explains every other thing it withholds and says nothing about these, so **a reader cannot tell a decision from an omission** — and the audit's *"widen the allowlist"* assumes the second. Left open with the ambiguity named. |
+| **The audit's D1276 row is two findings** (D1429) | D1276 is the CI fixture that assumed a published loopback port; it is repaired, and its mechanism is explicitly unestablished and reported rather than resolved (ADR 0195). *"Studio has no live half for the query view's RLS"* is a separate, unnumbered finding and is the half with work in it. A repaired row and an open row sharing a number is how the repaired one gets re-repaired. |
+| **D297's deferral was written as a *when* and has been read as a *whether*** (D1430) | Session 6 deferred the environment-versus-lock check because *"adding one in the run that is about to collect evidence is how a gate change gets attributed to the evidence."* That is a rule about timing. Nothing re-read it for twenty-two sessions, and the thing it deferred has killed a gate in collection three times (D297, D384, Session 6's host gate). Session 28 takes it in the run that collects no evidence. |
+| **D201's half of the same row carries a constraint the row drops** (D1431) | Resolving a `packages:` entry against its registry needs a network in a check built to have none. *"Verify both"* prices two rows as one act; one is a gate step and the other is a decision about what the version lock is for. |
+| **A secret generation is a provider write, not a migration** (D1432) | It sits beside `agent_audit` in the audit's table, closed with the same three words. `agent_audit` is a table this repository's migrations create; a generation is `{SECRET_ROOT}/{project_key}/generations/{generation_id}` at the provider, and nothing in `src/` or `bin/` prunes one. **Not taken in the rotation's run either — which is the run that creates the next generations.** |
+| **F-022's *47 failures and 49 errors* is not this tree's number** (D1433) | It is a reading of the adopter's fork on a host this project does not administer. Session 28 reproduces the fork from tag `1.0.0` — measured to carry no `projects/` at all — rather than carrying the arithmetic forward. D1389 is the precedent: a count copied from a brief aims the repair at the wrong thing. |

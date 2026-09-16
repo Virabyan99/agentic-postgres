@@ -9,7 +9,7 @@ Then `docs/scope-closure.md` §15 and `docs/plans/session-27-implementation-plan
 and the tag does not. **Session 29 is the trip**, and Run 8 writes its sheet.
 **Product version at close:** `VERSION` **1.7.0**, `CURRENT_SESSION` moves
 **25 → 28**. 26 and 27 are skipped the way 19 is, and the skip is the record.
-**Next free:** D1426, ADR 0215.
+**Next free:** D1434, ADR 0215. *(Run 1 added D1426–D1433.)*
 
 ---
 
@@ -29,19 +29,29 @@ silently dropped five rows, which is the thing the brief itself says is worse
 than naming them.
 
 **The second thing measured in planning matters more than the count.** Of those
-36 rows, **thirteen are already answered in the tree** — by a stated decision at
+36 rows, **fourteen are already answered in the tree** — by a stated decision at
 the definition, by a docstring that carries the alternatives, by a test that
 asserts the current state, or by a page that says the thing the row asks for.
 Session 27's own §4 rule is the one that catches this: *a brief that describes
-what already exists prices a free property as a session.* Those thirteen are
-D1407–D1418 and D1420 in §1, each with the command that shows it. They are not
-"skipped" — a row the audit calls open and the tree calls decided **is** a
+what already exists prices a free property as a session.* Those fourteen are
+D1407–D1418, D1420 and **D1426** in §1, each with the command that shows it. They
+are not "skipped" — a row the audit calls open and the tree calls decided **is** a
 divergence, and §6 of `CLAUDE.md` requires a row rather than a silent
 reconciliation.
 
-**So the honest size of Tier 1 is not 36.** It is thirteen rows that close by
-writing down what is already true, sixteen that are a repair or a decision this
-session takes, and **seven this session defers by name** (§10).
+**So the honest size of Tier 1 is not 36.** It is fourteen rows that close by
+writing down what is already true, fifteen that are a repair or a decision this
+session takes, and **seven this session defers by name** (§10). Run 1 measured
+the nine rows planning had not reached and moved three more into the deferred
+column (D1428, D1431, D1432), which is why §10's list is ten rows and not seven.
+
+**Three of the fourteen would have caused harm implemented as the audit writes
+them**, and they are the reason Run 1 exists as a run rather than as a paragraph:
+D1411 would have widened a security boundary to match a grant the release's own
+`0006` makes unreachable; D1416 would have undone a decision taken under ADR
+0195; and **D1426 would have put a provider's response body into a log** on an
+identity endpoint, against §6's own non-negotiable, to answer a row that reads as
+though nobody had decided.
 
 **The third measurement decided the session's shape.** `REL-STAGE-001` couples a
 release to a deployment: a host sweep asserts each project's deployed document
@@ -64,9 +74,16 @@ and its own run*.
 
 ## 1. The divergence table
 
-D1406–D1425, all measured during planning, on `ad96673`. Rows marked
+D1406–D1433. **D1406–D1425 were measured during planning on `ad96673`; D1426–D1433
+are Run 1's**, from the nine rows planning had not measured. Rows marked
 **answered** are closed by writing down what the tree already does; rows marked
-**recorded** are not repaired here and say why. Runs allocate from **D1426**.
+**recorded** are not repaired here and say why. Runs allocate from **D1434**.
+
+**Run 1's eight rows changed four of this plan's own run descriptions**, and the
+changes are in §5 rather than only here: D1426 makes D1045 a fourteenth answered
+row rather than a Run 4 decision, D1427 replaces what Run 4 repairs in
+`render-jwks`, D1429 splits the audit's D1276 row into two findings that are not
+the same finding, and D1430 revives a deferral whose stated reason has expired.
 
 | D | Said | Measured or read | This session | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -90,6 +107,14 @@ D1406–D1425, all measured during planning, on `ad96673`. Rows marked
 | **D1423** | Findings F-020 and audit 1a: *"A host checkout one commit behind the workstation is invisible: `upgrade check` compares versions and digests, never commits"*, closing act *"Report the commit. Small."* | **`source_commit` does not appear in `upgrade_plan.py` or `bin/upgrade.py` at all.** The payload carries `verdict`, `installed_version`, `release_version` and the leaf comparison; the commit is a field of the **deployed document** and of nothing the upgrade reader touches. So the repair is not *print a field it has* — it is *read a document it does not currently read on the candidate side*. | **Run 3**, and the reading is stated in ADR 0195's three outcomes: the installed commit, the candidate commit, **or *I could not determine it***, which is the case for a checkout that is not a git working tree — a case an adopter's tarball fork is actually in. | *"Small"* is right about the printing and wrong about the reading. The third outcome is the one an adopter hits, and a reader that folds it into "they match" is the defect the finding is about, one level up. | 0195 |
 | **D1424** | Audit 1c, the row that asks for a `D` number: *"A release's documentation landing one commit past its own tag. It has now happened three times, twice of them on one day … ADR 0209's guard caught none of them, correctly … **the habit around it is what fails**."* | **Measured on this tree.** `git tag` → `1.0.0 1.0.1 1.6.0 1.6.1 1.6.2`. `git ls-tree -r --name-only 1.6.0 -- docs/` carries neither release page; `1.6.2` carries both. Between `1.6.1` and `1.6.2`: two product repairs and a reply page, landed past the tag, caught by a reading rather than by a reader. **Nothing in the tree lists what is about to be tagged, and nothing lists what has landed since the last tag.** `grep` for `git tag` and `ls-tree` across `bin/` returns nothing. | **ADR 0214 in Run 7**, deciding **command or checklist** — the question the audit poses and answers with a warning: D1033's row says a checklist already existed in prose and the session that wrote it did not follow it. The measured argument for a command is that a checklist has now failed three times; the argument against is that nothing a command prints can make somebody run it. **The ADR takes a position and Run 9 is where it is first used.** | This is the class that has cost two patch releases. A test cannot see a tag cut after CI is green and ADR 0209 says so; what is missing is the question being asked out loud at the moment it is answerable. | 0214 |
 | **D1425** | `REL-STAGE-001` (a host sweep asserts each deployed document carries the tree's `template_version`), ADR 0209 (each release page states its release, checked against `template_version()`), and D1401 (*"the tree is two patches ahead of the deployment"* — an obligation, not a defect). | **The three are only jointly satisfiable inside one trip.** A session that bumps and tags without deploying leaves `stage_release`'s live half red until the next trip — which is D1401, now on its third occurrence (Sessions 22, 23, 27). A session that bumps, deploys and then discovers a documentation defect cuts a second patch — which is `1.6.2`. **The arrangement in which neither happens is: bump offline, deploy, sweep, then tag the commit that was deployed.** | **This session bumps in Run 9 and does not tag.** Session 29 deploys the bump commit, sweeps, and cuts `1.7.0` on it after ADR 0214's reading. §4 records that this session has **no** irreversible operation, which is the first time that is true of a session that moves `VERSION`. | Three sessions have met D1401 and each named it as an obligation the next trip inherits. It is not an obligation; it is a consequence of tagging and deploying in different sessions, and the release that stops doing that stops meeting it. | 0214 |
+| **D1426** | Audit 1b: *"D1045 — `ControlPlane._call` discards a provider body that said *identity limit reached* — a security judgement thrown away in a credential path"*, closing act *"Report the body, **or say why not**."* | **It says why not, at the discard, and the reason is the product's own non-negotiable.** `bin/bootstrap-providers.py:370-373`: `except urllib.error.HTTPError as exc:` — *"# The body is not included: on identity endpoints it can echo the request, and this message reaches a log."* — `raise BootstrapStateError(f"{method} {path} failed with HTTP {exc.code}") from None`. A provider body on an identity endpoint can carry the identity name and the request payload, and §6's rule is *never log a URL, key, token or caller value*. The status **is** reported. | **Answered — the fourteenth.** Run 1 strikes it. **The residue is the silence, not the discard**: an operator sees `HTTP 400` and is not told a body was read and dropped, so *the provider explained itself and we refused to repeat it* is indistinguishable from *the provider said nothing*. Run 4 adds that one clause and does not print the body. | The audit's row calls it *thrown away*, which reads as an oversight in a credential path and sends the next reader at a `print`. It was weighed, decided, and written at the line. **This is the row most likely to be "fixed" into a secret in a log.** | 0195 |
+| **D1427** | Audit 1b, and `scope-closure.md` §14: *"D1374 — `render-jwks` prints *'the key set CHANGED'* from a test of the **file's bytes** … **It reports a rotation that did not happen***", closing act *"Compare the key set, not the file."* | **The byte comparison is correct and the SENTENCE is the defect.** `bin/render-jwks.py:264` — `write()` byte-compares deliberately and its docstring gives the reason: *"the file's mtime is the only signal a reader has that a rotation happened, and a deploy that rewrote an identical file on every run would destroy it."* So `changed` is a true answer to *did this process touch the file*. `main()` at `:325` then reads it as an answer to *did the key set move*. **And a render makes the two come apart by construction**: `render_project` publishes into `.generated/<key>` through a staging directory (`rendering.py:2273 publish`, `:2438 render_project`), so the destination is a directory that has just been created — `destination.is_file()` is False, `changed` is True, and the sentence prints with no key having moved. That is precisely what the Session 25 trip measured on both projects. | **Run 4, and the repair is not the audit's.** Comparing the key set instead of the file would destroy the mtime signal the docstring protects. The repair is **ADR 0195's third outcome in the caller**: `wrote` / `confirmed` / *there was nothing here to compare against*, and the recreate sentence prints only for the first. `write()` is not touched. | A row whose closing act would have removed a deliberate property to fix a sentence, on the one output an operator reads during a cutover — which **Session 29 performs**. The reader is two-valued and the question has three answers; ADR 0195 is that sentence. | 0195 |
+| **D1428** | Audit 1b: *"D380 — `apg-diag`'s log allowlist covers neither `auth`, `storage` nor `mcp`"*, closing act *"Widen the allowlist."* | **Measured: `bin/apg-diag.sh:65` — `readonly SERVICES="postgres pgbouncer postgrest docs edge-probe dbmate"`.** The three absent services are exactly the three that handle a credential: `auth` signs, `storage` presigns, `mcp` is the agent plane. **The file explains every other thing it withholds** — *"What it deliberately cannot show: a secret value, a container's environment, or `docker inspect` output beyond labels. `logs` passes its output through a redaction filter, which is belt to the braces of those services not logging credentials in the first place"* — **and says nothing about why those three are not in `SERVICES`.** | **Recorded, §10.** Widening it is a decision about whether the redaction filter is trusted to carry the three services whose logs could contain a token, made for a surface reached by a read-only agent through a sudoers rule (ADR 0071). It is not a list edit, and Run 1 does not take it. What Run 1 records is that **the absence is unexplained in a file that explains everything else**, which is the state in which somebody widens it believing it was an omission. | The only unexplained boundary in a script whose entire design is explained boundaries. Either it is a decision nobody wrote down, or it is an omission — and the file's own standard means a reader cannot tell which. | 0071 |
+| **D1429** | Audit 1c: *"**D1276** — Studio has **no live half** for the query view's RLS off this workstation, **and** a rig that reaches a published loopback port assumes a daemon"*, closing act *"A live half that runs where the gate runs."* | **Two findings under one number, and only the second is D1276.** D1276 (Session 24 §1) is the CI fixture that reached `apg dev up`'s published loopback port: seventeen `PoolTimeout`s while `docker exec` against the same container succeeded. **It is repaired** — `cluster_address()` proves an address before building on one and reports which answered — and its *mechanism* is explicitly unestablished and reported rather than resolved (ADR 0195). The first half is a different, **unnumbered** finding: `tests/deployment/test_session24_studio.py` does carry live proofs (`pytestmark` with `requires_environment("APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS")`; revocation through Studio, and the deployed audit read carrying a real refusal's boundary) — and **none of them is the query view's RLS.** | **Split in Run 5.** The query view's RLS live half is the row with work in it; D1276 itself is closed and its residual is a stated unknown, which ADR 0195 permits and a session may not close by asserting a mechanism. | A repaired row and an open row sharing a number is how the repaired one gets re-repaired and the open one stays open. The audit joined them with *"and"*, and the closing act it gives fits only the half that is not D1276. | 0195 |
+| **D1430** | Audit 1c: *"D297 / D201 — The environment is not verified against the lock; a lock verifies only what it dereferences"*, closing act *"Verify both."* | **D297's deferral has a stated reason and the reason has expired.** Session 6 §1: the check is *"**recorded rather than built**: a gate step that compares installed distributions against the lock's pins … is a new authority over the environment, and adding one in the run that is about to collect evidence is how a gate change gets attributed to the evidence."* That is a rule about **when**, not whether. And it has since cost a gate run **twice more** — D297 on the host in Session 6 (four `ModuleNotFoundError`s, killing `session-01-check`) and **D384 in Session 7** (`boto3`, four modules, `3421 deselected, 4 errors`). Three occurrences, one per session that added a dependency. | **Run 5 takes it**, which is the run that collects no evidence — Run 9 is. The check compares installed distributions against the lock's pins and **fails with the install command**, which is the half both failures lacked: `No module named 'cryptography'` sends a reader at the test, the release or the host's Python, and the answer was a venv nobody re-synced. | The deferral was right and was written as a *when*. Nothing re-read it, so it has been read as a *whether* for twenty-two sessions, and the thing it deferred has failed three times. | — |
+| **D1431** | The same audit row's second half: *"a lock verifies only what it dereferences"* (D201). | **The general repair is stated and carries a constraint the row's closing act ignores.** Session 5 §1: *"resolve package versions against their registry the way images are resolved against theirs — is Run 10's to weigh, **because it needs network access in a check that deliberately has none**."* `bin/verify-versions.sh` resolves every `images:` entry to its recorded digest; a `packages:` entry is a string nothing dereferences, which is how `SCALAR_VERSION: "1.36.4"` — a release that has never existed — survived four sessions. | **Recorded, §10, and separated from D1430.** *"Verify both"* prices two rows as one act; one is a gate step this session can write and the other needs a network in a check built to have none, which is a decision about what the version lock is for. | The two halves of one audit row have different closing acts, different costs, and one of them has a constraint that is the whole reason it was not done. Bundling them is how the cheap half waits for the expensive one. | — |
+| **D1432** | Audit 1b: *"Secret generations accumulate with nothing pruning them"*, listed beside D1255 (*"`agent_audit` and `agent_idempotency` grow without bound"*) and closed the same way — *"A retention rule."* | **They are not the same kind of act.** `agent_audit` and `agent_idempotency` are tables this repository's own migrations create, so a retention policy is a released migration (ADR 0213, Run 6). A secret generation is a path at the **provider** — `secrets_contract.generation_directory()` at `:283`, `{SECRET_ROOT}/{project_key}/generations/{generation_id}` — and nothing in `src/` or `bin/` prunes one. **Pruning a generation is a provider WRITE**, on the surface whose rule is that no command in this product sets a provider value by itself (D249, and `rotate-signing-key.sh`'s own help). | **Recorded, §10.** Not taken in Run 6, and not taken in the rotation's run either — **which is the run that creates the next generations.** The decision is what makes a superseded generation disappear and who performs it, and the answer may be *an operator, by hand, with a documented reading of which generations are live*. | Two rows in one table, closed with the same three words, where one is a migration and the other is a mutation of the credential store. A session that read the table as uniform would have written a migration for a thing that has no table. | 0249 |
+| **D1433** | Audit 1a: *"F-022 — A fork whose domain is in the release's files **can deploy and cannot pass the gate**"*, with the measurement *47 failures and 49 errors* from Session 27 §10. | **Not re-measurable in this checkout, and Run 1 says so rather than repeating the number.** The reading is of the adopter's fork on a host this project does not administer; this tree has no fork, and `projects/example/` is the state ADR 0198 describes rather than the one F-022 is about. The number is a record of one measurement on one tree at one commit. | **Rig 28a, in Run 2**, is the only instrument that reproduces it, and it is built for ADR 0212 anyway. **Run 1 does not carry the number forward as though it were this tree's.** F-022's paragraph (Run 3) is written from what rig 28a measures, not from the findings file's arithmetic. | Session 27 §1's own D1389 is the precedent: the findings file's *"four of §1's six checks"* was about a different set than the page it addressed, and the repair had to be aimed by measurement. A count copied from a brief into a plan is the same failure one document later. | — |
 
 ---
 
@@ -187,6 +212,49 @@ note is how it stops being read as current.
 **Nothing runs before the push** (documentation only), and the push reads its own
 commit's CI verdict by full SHA.
 
+**Done.** 2026-09-16, on `9bd5ed8`. All 36 Tier 1 rows measured in both
+directions; the nine planning had not reached produced **D1426–D1433**, and four
+of the eight changed a later run's description rather than only this table.
+
+*What the run measured, and what changed because of it:*
+
+- **A fourteenth row is already answered, and it is the dangerous one.** D1045's
+  closing act is *"report the body, or say why not"*; the code says why not at
+  the discard — `bin/bootstrap-providers.py:370-373`, *"on identity endpoints it
+  can echo the request, and this message reaches a log"* — which is §6's own
+  non-negotiable. **Run 4 no longer decides this**; it adds one clause saying a
+  body was read and dropped, and prints no body (D1426).
+- **D1374's closing act was wrong and would have removed a deliberate
+  property.** `write()` byte-compares *because* the mtime is the only rotation
+  signal a reader has; the defect is that `main()` reads a two-valued answer as
+  an answer to a three-valued question, and a fresh render makes `changed`
+  always true. **Run 4's repair is now the caller's third outcome, not the
+  comparison** (D1427). This matters to Session 29, which reads that sentence
+  during the cutover.
+- **The audit's D1276 row is two findings** (D1429). D1276 is repaired and its
+  mechanism is a stated unknown; the query view's RLS having no live half is
+  unnumbered and is the half with work in it. Run 5 takes the second only.
+- **D297's deferral was written as a *when* and has been read as a *whether***
+  for twenty-two sessions, while failing three times (D297, D384, and Session 6's
+  host gate). **Run 5 takes it** — Run 5 collects no evidence, which is the
+  condition the deferral named (D1430).
+- **Three rows moved to §10 rather than into a run**: D1428 (`apg-diag`'s three
+  absent services are the three that handle a credential, and the absence is the
+  only unexplained boundary in a file of explained boundaries), D1431 (D201's
+  repair needs a network in a check built to have none), D1432 (a secret
+  generation is a provider write, not a migration — it was sitting beside D1255
+  and closed with the same three words).
+- **F-022's *47 failures and 49 errors* is not this tree's number** (D1433) and
+  is not carried forward as though it were. Rig 28a is the instrument.
+
+*Written where a reader meets it*: `docs/scope-closure.md` §16, one sentence per
+struck row **with the command that shows it**; and a dated note at the head of
+`docs/pre-stage-4-audit.md` naming what Session 28 struck, because the page says
+of itself that it is not held to the tree by a test and would otherwise keep
+being read as current.
+
+*Nothing ran before the push.* Documentation only.
+
 ### Run 2 — the on-ramp, decided: three ADRs and the fork that proves them
 
 **Rig 28a: a synthesized pre-ADR-0198 fork.** A throwaway clone at tag `1.0.0`
@@ -264,19 +332,27 @@ usage moves), `test_documentation_index`.
 ADR 0195's class, in three product readers, with the rule that **a decision may
 fail closed and a report may not**:
 
-- **D1374** — `render-jwks` prints *"the key set CHANGED: every verifier must be
-  RECREATED"* from a test of the **file's bytes**. Measured on both projects at
-  the Session 25 trip: the kid and the key-set digest were identical before and
-  after, so it reported a rotation that did not happen. **It is repaired before
-  Session 29 rotates**, because the rotation's step 2 is the one place this
-  sentence is read for a decision. The repair compares the key set; the proof is
-  a rewrite that changes no key.
-- **D1045** — `ControlPlane._call` in `bin/bootstrap-providers.py` discards a
-  provider body that said *identity limit reached*. A security judgement thrown
-  away in a credential path. The run decides: report the body, report that a
-  body was discarded and why, or state in the code why neither. The third is a
-  real answer if the body can carry a secret — and whether it can is a
-  measurement, not a guess.
+- **D1374, as D1427 measured it and NOT as the audit writes it.** `render-jwks`
+  prints *"the key set CHANGED: every verifier must be RECREATED"* whenever
+  `write()` returns `True` — and `write()` byte-compares **deliberately**, because
+  the file's mtime is the only signal a reader has that a rotation happened.
+  A render publishes into a directory that has just been created, so
+  `destination.is_file()` is False and `changed` is True with no key having
+  moved; that is what the Session 25 trip measured on both projects. **The
+  repair is ADR 0195's third outcome in the caller** — `wrote` / `confirmed` /
+  *there was nothing here to compare against* — with the recreate sentence on the
+  first alone. **`write()` is not touched**: comparing the key set instead of the
+  file, which is what the audit asks for, destroys the property its docstring
+  protects. The proof is a render into a fresh directory with an unchanged key,
+  and a control that is a genuine key change. **It lands before Session 29
+  rotates**, because step 2 of the cutover is the one place this sentence is read
+  for a decision.
+- **D1045 is answered and this run adds a clause, not a decision** (D1426).
+  `bin/bootstrap-providers.py:370-373` already says why the body is not
+  included — *"on identity endpoints it can echo the request, and this message
+  reaches a log"* — and the status is reported. The residue is that an operator
+  cannot tell *the provider explained itself and we refused to repeat it* from
+  *the provider said nothing*. One clause, and **no body is printed**.
 - **D387** — the REST document observation does not retry, and Session 7's row
   names the consequence precisely: *"a lost race makes the deployed document
   understate a working deployment — and a claim computed from it would be wrong
@@ -325,9 +401,22 @@ class survives, so they are one run and each is asked §7's first question —
   neither guarded: an HTTP body naming an RPC's parameters, and a
   `GRANT … ON FUNCTION` signature. Widened against the definition rather than
   against the two instances (D600, D918, D926).
-- **D297 / D201** — recorded, with what each would cost. The environment
-  verified against the lock is a gate change; a lock verifying what it does not
-  dereference is ADR 0077's subject.
+- **D1430 / D297 — taken, not recorded, and Run 5 is where the deferral said to
+  take it.** The check compares installed distributions against the lock's pins
+  and **fails with the install command**. The deferral's stated reason was that
+  a new authority over the environment must not be added *in the run that is
+  about to collect evidence*; Run 9 is that run and Run 5 is not. It has cost a
+  gate run three times (D297, D384, Session 6's host gate), each time in
+  collection, each time naming neither cause nor remedy.
+- **D1431 / D201 — recorded, §10, and separated from D1430.** Resolving a
+  `packages:` entry against its registry needs a network in a check built to
+  have none. That constraint is why it was deferred and the audit's *"verify
+  both"* does not carry it.
+- **D1429's live half** — the query view's RLS, which `test_session24_studio.py`
+  does not prove although it carries live proofs for revocation and the audit
+  read. **D1276 itself is closed** and its mechanism is a stated unknown that
+  ADR 0195 permits; this run does not re-repair it and does not assert a
+  mechanism for it.
 - **The uncached first run of `apg dev up`** — recorded, with `scope-closure.md`
   §11's reason restated: measuring it here means evicting the image the whole
   contract suite shares, and CI already times it on a fresh runner. **The row
@@ -568,10 +657,13 @@ or re-stamp an applied migration.
 
 ## 10. Open items this session carries and creates
 
-### Deferred by name, with the reason — seven rows
+### Deferred by name, with the reason — ten rows
 
 Each of these is a Tier 1 row this session does **not** close. The brief's rule
 is that a plan which silently drops rows is worse than one that names them.
+**Seven were named at planning; Run 1's measurements added three more** (8–10),
+and each of those three was deferred for a reason the audit's row does not
+carry.
 
 1. **D1203 — one canonicalizer for `app-openapi.canonical.json`.** The tree's own
    position: *"a decision for a session that versions that snapshot rather than a
@@ -600,6 +692,26 @@ is that a plan which silently drops rows is worse than one that names them.
 7. **D99 — `PYTHON_RUNTIME_IMAGE` is a rolling minor tag.** The genuinely
    unpinned surface that D1417's row bundles with the fail-closed apt pin. A
    pinning policy, and a decision about digest-pinning a base image.
+8. **D1428 — `apg-diag`'s `SERVICES` excludes `auth`, `storage` and `mcp`.**
+   Measured: those are exactly the three services that handle a credential, and
+   the absence is **the only unexplained boundary in a file that explains every
+   other thing it withholds**. Widening it is a decision about whether the
+   redaction filter is trusted to carry them on a surface a read-only agent
+   reaches through a sudoers rule (ADR 0071) — not the list edit the audit
+   prices. Left open **with the ambiguity named**, so the next reader does not
+   widen it believing it was an omission.
+9. **D1431 — resolving a `packages:` entry against its registry** (D201's general
+   repair). It needs network access in a check that deliberately has none, which
+   is the reason it was deferred in Session 5 and which the audit's *"verify
+   both"* does not carry. D1430's half is taken in Run 5; this half is a decision
+   about what the version lock is for.
+10. **D1432 — secret generations accumulate.** Sitting beside D1255 in the audit
+    and closed with the same three words, and it is a different kind of act: a
+    generation is a path at the **provider**, so pruning one is a provider write
+    on the surface whose rule is that no command in this product sets a provider
+    value by itself (D249). **Not taken in the rotation's run either — which is
+    the run that creates the next generations**, and the trip should know that it
+    adds to a set nothing prunes.
 
 ### Created here, for Session 29 — the trip
 

@@ -4,6 +4,39 @@
 > the current release and is not held to it by a test. It exists so that Session
 > 28 can be planned against one list instead of six.
 
+> ## ⚠ Read this before working any row below
+>
+> **Session 28's Run 1 measured all 36 Tier 1 rows against the tree, in both
+> directions, on 2026-09-16 at `9bd5ed8`. Fourteen of them are already answered
+> in the tree, and three of those fourteen would have caused harm implemented as
+> this page writes them.** The measurements, each with the command that shows it,
+> are in **`docs/scope-closure.md` §16**, and every one carries a divergence
+> number in `docs/plans/session-28-implementation-plan.md` §1 (D1406–D1433).
+>
+> The three to know before touching anything:
+>
+> * **F-013** — *"the lint forbids `{{app_runtime}}`, which the release's own
+>   `0003` uses — roughly one line."* Migration `0006` revokes schema `app` from
+>   `app_runtime` three migrations later, and its own header measures the result:
+>   the grant in `0003` reaches nothing. **The lint is correct.** The one line
+>   would widen a security boundary to match a dead grant.
+> * **D1274** — *"ask the deployment."* `studio.py:464` already decided this
+>   under ADR 0195, because no request Studio makes confirms the lock.
+> * **D1045** — *"report the body."* The body is withheld on purpose and the code
+>   says so at the discard: on identity endpoints it can echo the request, and
+>   the message reaches a log. **Reporting it puts a provider's response into a
+>   log on a credential path.**
+>
+> Run 1 also found seven things this page does not say — among them that
+> `render-jwks`'s closing act would remove a deliberate property, that the D1276
+> row is two findings under one number, and that *47 failures and 49 errors* is a
+> reading of somebody else's fork rather than of this tree. Those are D1427–D1433.
+>
+> **This page is still the right inventory**, and the tier a row sits in is
+> sound. What it is not is a work list: the *closing act* column was written from
+> the documents rather than from the code, and that is exactly the difference §16
+> records.
+
 **Why this page exists.** The operator asked for a single inventory of what is
 broken, what works but not as it should, and what is claimed but unproven,
 before Stage 4 is planned. Everything here is drawn from documents already in
