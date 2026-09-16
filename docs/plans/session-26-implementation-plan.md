@@ -138,12 +138,17 @@ failed, 62 s**. No gate, no full suite, no host (`CLAUDE.md` §5's table:
 documentation only runs nothing before push; the index test is what an added
 page owes).
 
-### Run 4 — The close
+### Run 4 — The close. **Done.** 2026-09-16
 
-Commit with `-F`, push through the Windows git, read the commit's CI verdict
-by full SHA; `CLAUDE.md` §2 in the launch folder (copied to the scratchpad
-first) gains a `SESSION 26 COMPLETE` block; memory updated; this run's *Done*
-lands in a documentation-only commit after the one it describes.
+Committed as **`c5ad14d`** on `main` with the message written to a file and
+`-F`; pushed through the Windows git (WSL's outbound TCP was not needed and
+not probed). **CI on `c5ad14d`: run `35067565362`, all three jobs `success`**
+— Session 1 gate, Session 2 offline contract, P0 inventory — read by full
+SHA. `CLAUDE.md` §2 in the launch folder carries a `SESSION 26 COMPLETE`
+block (the file copied to the scratchpad first, its own rule) and §9 a row
+for the two unverified pages; memory updated. This paragraph lands in a
+documentation-only commit after the one it describes, as Session 25's Run 8
+did.
 
 ---
 
