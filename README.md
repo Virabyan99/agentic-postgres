@@ -4,7 +4,7 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 25 implemented**, at `template_version` **1.6.0**.
+**Status: Session 25 implemented**, at `template_version` **1.6.1**.
 
 Session 25 hardens what the last four sessions built and hands it to somebody who did not build it. The three developer surfaces — `apg dev`,
 `apg generate`, `apg studio` — are held against every security invariant
@@ -114,15 +114,25 @@ application on 1.0.0, on a host that started empty (see
 [its plan](docs/plans/session-19-implementation-plan.md) and
 [scope closure](docs/scope-closure.md) §8) — and it moved `VERSION` alone, to
 `1.0.1`, the only time in this project's history the two numbers have come
-apart. **Adopt `1.6.0`**, and it is the first version since `1.0.1` that a tag
-names. `1.3.0`, `1.4.0` and `1.5.0` were session closes rather than stage
-closes: each moved `VERSION`, each was deployed, and none was tagged. They are
+apart — **and `1.6.1` is the second, for the same reason.** Session 27 built no
+plane either: it repaired eighteen defects an outside agent found upgrading a
+real application from `1.0.0` to `1.6.0` on this repository's documentation
+alone, and the product defects that reading exposed. **Adopt `1.6.1`.**
+`1.3.0`, `1.4.0` and `1.5.0` were session closes rather than stage closes: each
+moved `VERSION`, each was deployed, and none was tagged. They are
 not being tagged retroactively — a tag is the promise the compatibility
 sentence beside it made at the moment it was cut, and dating one to a commit
 nobody tagged then is a record that looks measured and was not (D1311). Reach
 them by SHA through the session plans if you need them.
 
-`1.6.0` is a minor over `1.5.0` and ADR 0162 prices it:
+`1.6.1` is a patch over `1.6.0` and ADR 0162 prices it: a generator that can
+type what PostgREST serves, refusals that name the owner and the remedy at four
+more sites, `--help` answered by every verb that documents one, two readers that
+say which question they answered, and a command about to refuse that no longer
+prints success first. **No manifest, outputs, capability, lock or secret schema
+moves and no released migration is added**; the two pages an operator holds are
+release artefacts from here on, held to the release by test (ADR 0209).
+`1.6.0` before it was a minor over `1.5.0` and ADR 0162 prices it:
 two new operator commands (`apg completion`, `apg dx-record`), one environment
 variable the dispatcher reads (`APG_PROJECT`), and one optional generated
 document per project (`projects/<slug>/docs/mcp-tool-catalog.md`, written only

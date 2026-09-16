@@ -757,7 +757,55 @@ One commit (D690). In this order, because the order is enforced:
 **Then the gate**, once, on a clean tree: `bin/session-01-check.sh`, which is
 what §5's table asks of a run whose generated artefacts could drift.
 
-**Done.**
+**Done.** 2026-09-16. `VERSION` **1.6.0 → 1.6.1**, `CURRENT_SESSION` **25**,
+one commit.
+
+**The constant's paragraph took two attempts and both were the guard doing its
+job.** `test_the_constants_comment_states_the_class_it_proposes` reads the
+**final** `#:` paragraph, not the comment block: the first draft put *"ADR 0162
+prices it a PATCH"* in an earlier paragraph and a closing one after it, so the
+guard found **zero** priced classes. The second draft moved the pricing into
+the final paragraph and still failed, because the guard reads the raw comment
+including its `#: ` prefixes and *"…or secret schema\n#: moves…"* does not
+contain the string `schema moves`. Reflowed, not reworded. Both failures are
+worth recording: the guard is stricter than it reads, and a paragraph that
+*says* the right thing in the wrong place is exactly what it exists to catch.
+
+**The three assertions Run 5 armed all fired as designed.** Moving `VERSION`
+with the pages untouched fails `test_the_operator_pages_exist_and_name_the_release_they_describe`
+on both pages and `test_the_upgrade_guides_release_table_has_a_row_for_this_release`.
+They were satisfied by moving the two release statements and adding the
+**1.6.1 row** to the release table — the row an operator upgrading TO this
+release reads — and the operator guide's §1 version cell, which now says why
+the two numbers have come apart for only the second time.
+
+**The six forward references Run 4 wrote get their reading, and all six hold**
+(21 assertions, run against the bumped tree):
+
+| Page says *since 1.6.1* | Measured |
+|---|---|
+| `check` says which question it answered | prints *a comparison CAN be made* and *no candidate was read* |
+| every directory a render creates names its owner | **five** `make_directory` sites; the message carries the owner, the caller, `chown -R` and the whole `.generated` root |
+| a leaf prints `(no such key)`, `null` and a JSON value apart | all three, and `<absent>` reaches no terminal |
+| `--also` and its eight classes are in `bin/upgrade.sh --help` | all eight, by name |
+| the verb-level `--help` no longer exits 2 | `check`, `plan`, `verify` each exit 0 |
+| `deploy.sh --help` names the session | *implements session 25*, and `CURRENT_SESSION` as its source |
+
+**Two of those twenty-one first read as failures and were my probe's fault**, a
+`grep -A 12` window too short for `_cannot_create`'s docstring. Re-measured by
+calling the function and reading the sentence it produces, which is the only
+form of that reading worth having.
+
+**The derived artefacts.** `apg generate` moved `templateVersion` to `1.6.1`
+in the committed client and reported *version 1.0.0 (no contract change)* —
+the client's own version does not move, because no contract moved (D1238's
+point exactly). `render-config --bounds-doc`, `render-mcp-catalog` and
+`render-evaluation-report` each reported **already current**, which is the
+expected reading for a patch that moves no schema and no tool, and
+`render-acceptance-matrix` had already been written in Run 5. `chmod 755
+bin/*` before `git add`.
+
+**The gate** runs after this commit, on the clean tree it leaves.
 
 ### Run 7 — the close, and the tag
 

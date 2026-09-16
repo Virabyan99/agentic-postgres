@@ -14,7 +14,7 @@ upgrade surface the product has is `bin/upgrade.sh` (`check`, `plan`,
 `verify`) and `./deploy.sh --through-session N`; what follows is what a person
 does around them.
 
-> **This page is part of release `1.6.0`.** It describes the commands that
+> **This page is part of release `1.6.1`.** It describes the commands that
 > release ships and the sequence a trip on that release executed. A release
 > that moves `VERSION` and does not move this line is a release whose upgrade
 > procedure describes a release that no longer exists, which is what happened
@@ -91,6 +91,7 @@ schema versions that release accepts.
 | 1.4.0 | 23 | 2026-09-12 | 31 | v18 | 1–6 | `apg generate`; `versions.env` moved, so images move |
 | 1.5.0 | 24 | 2026-09-13 | 32 | v18 | 1–6 | migration 0032; **a project's set gets its own directory and ledger table** (ADR 0206) — see §4 |
 | 1.6.0 | 25 | 2026-09-14 | 32 | v18 | 1–6 | `apg completion`, `apg dx-record`, `APG_PROJECT`. One leaf differs, `template_version` |
+| 1.6.1 | 25 | 2026-09-16 | 32 | v18 | 1–6 | eighteen documentation repairs from an adopter's 1.0.0→1.6.0 upgrade, and the product defects it exposed. **A patch**: no schema moves, no migration is added, no command gains a verb. `CURRENT_SESSION` stays 25 |
 
 A row's *what an upgrade meets* is what the trip that deployed it recorded in
 its plan's §5 *Done* paragraph. **A project manifest below the newest schema

@@ -275,9 +275,48 @@ from pathlib import Path
 #: **No manifest, outputs, capability, lock or secret schema moves, and no
 #: released migration is added.** A project that adopts this release and sets
 #: no `APG_PROJECT` renders byte-identical artefacts and deploys the same
-#: containers. Proposed here; Run 7's `upgrade plan` on the host is what
-#: confirms it, and a `major` required there is a stop condition rather than a
-#: number to write down.
+#: containers. Proposed at 1.6.0; Session 25's Run 7 `upgrade plan` on the host
+#: returned `minor` on both projects with exactly one leaf differing, which is
+#: what confirmed it.
+#:
+#: **Session 27 moves `VERSION` to `1.6.1`, and `CURRENT_SESSION` stays 25.**
+#: The second time the two numbers have come apart, and for the same reason as
+#: the first (1.0.1, Session 19): this session builds no plane, registers no
+#: requirement and writes no evidence document. It repairs eighteen defects an
+#: outside agent found while upgrading a real application from 1.0.0 to 1.6.0
+#: holding only this repository's documentation, plus the defects that reading
+#: exposed in the product underneath it.
+#:
+#: The pages are the other half of it. `docs/upgrade-guide.md` and
+#: `docs/operator-guide.md` are release artefacts held by test from this
+#: release on (ADR 0209): each states the release it is part of, the upgrade
+#: guide's release table carries a row for it, and both are inside the two
+#: documentation scans they were outside of. That decision exists because
+#: **neither page is in tag `1.6.0`** -- they land one commit past it, which is
+#: D1033's failure a second time, seven sessions later, committed by the
+#: session that had read the first.
+#:
+#: **ADR 0162 prices it a PATCH.** What moved: `client_ir.FORMAT_TYPES` gained
+#: the spellings PostgREST actually serves, measured against a running one
+#: (`int32`, `int64` and every array form -- the table could not type an
+#: `integer` anywhere, as a column or an argument); four `mkdir` sites in
+#: `rendering.py` name the owner and the remedy the way `publish` already did;
+#: `--help` is answered anywhere in the arguments by three wrappers that used
+#: to dispatch the verb first; `bin/upgrade.sh`'s usage names `--also` and its
+#: eight classes; two readers say which question they answered and tell an
+#: absent key from a null; `deploy.sh --help` names the session this release
+#: implements; and a command that is going to refuse no longer prints a success
+#: sentence first. **No manifest, outputs, capability, lock or secret
+#: schema moves, no released migration is added, and no command gains or
+#: loses a verb.** Every change is a refusal that arrives better, a spelling the
+#: generator already should have had, or a sentence that was false. **This
+#: session takes no host trip**, so nothing here has been priced against a
+#: deployment: the next trip's `upgrade plan` is what confirms the class, and a
+#: `major` required there is a stop condition rather than a number to write
+#: down. That trip also inherits D1401 -- both projects are deployed at `1.6.0`
+#: and the tree now reads `1.6.1`, so `stage_release`'s live half fails until
+#: it deploys before it sweeps, which is an obligation rather than a defect and
+#: is stated here because a reader of this constant is who meets it.
 CURRENT_SESSION = 25
 
 #: Repository root, resolved from this file rather than the caller's cwd so

@@ -303,7 +303,7 @@
       "path": "/rpc/update_task_status"
     }
   ],
-  "template_version": "1.6.0",
+  "template_version": "1.6.1",
   "tools": [
     {
       "arguments": [
