@@ -843,7 +843,57 @@ the WSL process alive for the duration, it completed normally. The advice in
 7. This run's `Done.` in a documentation-only commit after the tagged one — a
    record cannot be inside the commit it describes.
 
-**Done.**
+**Done.** 2026-09-16. **Tagged `1.6.1` at `9b2fc3a`**, the fourth tag this
+repository has (1.0.0, 1.0.1, 1.6.0, 1.6.1).
+
+**CI on the tagged commit: `contract`, completed, success**, read by full SHA
+`9b2fc3a663f9088f5fd28c2ad7040b7d431c1bed`. The tag was cut on that commit and
+on no other, after the verdict and not before it — D1311's rule, that a tag is
+the promise the compatibility sentence beside it made at the moment it was cut.
+
+**The reading that closes D1388**, which is this session's whole point and is a
+reading rather than an intention:
+
+```
+$ git ls-tree -r --name-only 1.6.1 -- docs/ | grep -E "upgrade-guide|operator-guide"
+docs/operator-guide.md
+docs/session-02-operator-guide.md
+...
+docs/session-11-operator-guide.md
+docs/upgrade-guide.md
+
+$ git ls-tree -r --name-only 1.6.0 -- docs/ | grep -E "^docs/(upgrade|operator)-guide"
+   (no such path in that tag)
+```
+
+Twelve paths in `1.6.1` where `1.6.0` has ten, and the two that are new are the
+two an operator holds. **And they say so from inside the tag**: `git show
+1.6.1:docs/upgrade-guide.md` and `…:docs/operator-guide.md` each print *This
+page is part of release `1.6.1`*, and `git show 1.6.1:VERSION` prints `1.6.1`.
+That is ADR 0209's property demonstrated on the artefact it was written for,
+rather than asserted about the working tree.
+
+**`docs/scope-closure.md` §15** is written: eleven rows, and **the first is the
+on-ramp question** — how a fork made before `projects/<slug>/` existed converts
+to it. ADR 0198 and ADR 0206 create the mechanism and neither says how an
+existing fork enters it, and entering means re-homing applied migrations, which
+D912 forbids. It is a product decision before it is a page, and the upgrade
+guide's §1.0 says so rather than pretending §1 covers it.
+
+**`CLAUDE.md` §2** carries a `SESSION 27` block, the `CURRENT_SESSION` block now
+records that **the tree and the deployment disagree by one patch** (D1401), and
+§9's row for the two pages is replaced: the half that closed, and the half that
+did not — **the operator guide has still not been read cold.** The pre-session
+copy is in the scratchpad as `CLAUDE.md.pre-session-27`, which is that file's
+own rule.
+
+**What this session did not do, stated so nothing reads as measured.** No host
+trip, no evidence document, no claim moved, no requirement registered, no
+migration added, no schema moved. The class `1.6.1` proposes is priced by ADR
+0162 and **confirmed by nothing yet**: the next trip's `upgrade plan` is what
+prices it against a running deployment, and that trip inherits D1401.
+
+**Next free: D1406, ADR 0210.**
 
 ---
 

@@ -495,3 +495,41 @@ appeared in the first minute of doing what the documentation says.
 | **A count in a name, twice in one session** | D1349 and the two names Run 5b repaired. `dx-record`'s usage said four readings while the command printed five; a test was called `..._the_eight_declared_claims_...` while eleven were declared. Both were created by a correct change that moved a count and not the sentence about it. The general repair is not available — nothing can hold every English number in the tree to a Python one — so what is written down is the habit: when a change moves a count, grep for the count. |
 | **The gate-modes guard read its gate's prose for four sessions** | D1350, found by a battery and repaired in all four modules. The near miss is what makes it worth carrying: the helper that fixes it was already in each file, added by an earlier run for the same reason, three assertions further down. A repair that reaches one caller and not the next is §7 question 5, and it is the class this project produces most. |
 | **What Stage 4 inherits, named so no session inherits it silently** | The public-endpoint decision as its first ADR (D1084), with `runtime_override.publication()` still raising; the rotation performed before any credential travels; a retention policy for `agent_audit` and `agent_idempotency` before any hosted reading (D1255); the two fields named `capabilities_sha256` (D930); the Python client (D1205); the four unswept storage modules (D1240); the audit filters (D1248); a person's walk. `docs/stage-4-decision-report.md` §4 prices the first of these against the tree. |
+
+---
+
+## 15. What Session 27 left open
+
+Session 27 built no plane and registered no requirement. It is the second
+release where `VERSION` and `CURRENT_SESSION` come apart (1.0.1 was the first),
+and for the same reason: an outsider found defects in a shipped release and a
+session repaired them. `VERSION` moves to **1.6.1**, `CURRENT_SESSION` stays
+**25**.
+
+**What produced it.** An outside agent upgraded a real adopter's deployment
+from **1.0.0 to 1.6.0** on 2026-09-16, holding only this repository's
+documentation, on a host this project does not administer. It converged — exit
+0, 10 ok / 0 problem, `upgrade verify` matching — and wrote eighteen findings.
+Session 27's §1 carries them as D1388–D1405, of which **four were opened by the
+session's own measurements and are not in the reader's file**.
+
+**The finding that makes the others unreachable, and it is closed.** D1388:
+`docs/upgrade-guide.md` and `docs/operator-guide.md` were not in tag `1.6.0` —
+they land one commit past it. That is D1033's failure a second time, seven
+sessions later, committed by the session that had read the first. ADR 0209
+decides what a test can hold and what it cannot, and the guard ships in this
+release.
+
+| Item | Position |
+|---|---|
+| **How a fork made before `projects/<slug>/` existed converts to it** | **The largest thing this release does not answer.** A fork at 1.0.0 was obliged to put its domain inside the release's own files — migrations in `migrations/templates/`, rows in the release's `manifest.json` and `released.lock.json`, operations in the reviewed surface. ADR 0198 and ADR 0206 create the mechanism and **neither says how an existing fork enters it**; entering would mean re-homing applied migrations, which D912 forbids. The upgrade guide's new §1.0 says so plainly rather than pretending §1 covers it, and records what the one operator did about the nine merge conflicts as *what happened*, not as instruction. **It is the on-ramp session's first question**, and it is a product decision before it is a page. |
+| **Which side wins each merge conflict is written down nowhere** | Nine conflicted files on the one recorded upgrade, two of them generated artefacts carrying digests where *resolve by hand* and *a released migration is never amended* pull in opposite directions. A rule for this is a decision, not a paragraph. |
+| **`generate --check` refuses every project with no set of its own** | D1404. The default output for such a project is `clients/typescript` under the checkout root and **the release tracks no such directory**, so the refusal is permanent and the page's old remedy would have had a reader create something the release does not carry. Run 4 says which of the two refusals a reader is looking at. **Whether the release should track a root-level client, or whether `generate` should refuse a setless project by name, is undecided** — it is a question about what `apg generate` is for. |
+| **`follows_release_version` when a set was frozen against an EARLIER release** | Run 3 replaced the refuted rationale in `migrations.py`, `bin/migrate.sh --help` and the refusal message itself, and the docstring now ends by saying this is undecided. Today re-freezing the project lock is the only way forward; nothing has decided whether that is the intended workflow or a leftover of the ordering space ADR 0206 removed. |
+| **`provision-host.sh` installs neither `uv` nor the venv** | D1396. A grep of that script for `uv`, `astral` or `pip install` returns **0**, and `host-baseline.md` described the maintainer's interactive shell as the baseline. Run 4 corrected the page and made the sync conditional. **Making `--apply` install them is not taken**: it changes what this product does to a machine. It belongs with the interpreter question below. |
+| **The interpreter on the deployment host is unchecked** | The release pins 3.12 and `bin/doctor.sh` enforces it on a WORKSTATION. The machine that runs every deploy is unchecked, and the cold reader's host ran every `bin/*.sh` under the distribution's Python 3.14 against a `.python-version` of `3.12.13`. Recorded rather than repaired: it is the same decision as the row above. |
+| **`stage_release`'s live half fails until the next trip deploys** | D1401, an obligation rather than a defect. The tree reads `1.6.1` and both projects are deployed at `1.6.0`. Every trip deploys before it sweeps; this is named so the trip that inherits it is not surprised by a red claim it did not cause. |
+| **The operator guide has not been read cold** | The *upgrade* guide has, and eighteen findings came out of it. The operator guide was written by the session that read the material, and §13 says so. Its own cold reading is the instrument, and nothing substitutes for it — no test reads prose for truth (ADR 0209's *Consequences*). |
+| **Seventeen of the format table's twenty-one entries had never matched a served format** | D1390, and the repair is shipped: the table is 44 entries, measured against a running PostgREST for every type and every array form, with the measurement committed as `RIG_27B_SERVED`. What remains open is the shape of the lesson — **a table written from SQL type names rather than from what the server emits looks correct and is untestable by the documents the release happens to carry.** The two committed snapshots between them serve five formats and one enum. |
+| **The self-check's blind spot, inherited by the guard that replaced it** | Session 26's self-check matched a command line by its first word, so a flag on a backslash-continuation line went unchecked. Run 5's proofs read the pages through the two real scans instead, which is stricter — but neither scan reads a continuation line either. Written down so the first false pass is read as this. |
+| **Everything Stage 4 already inherited** | §14's last row is unchanged by this session: the public-endpoint decision, the rotation performed before any credential travels, a retention policy for `agent_audit` and `agent_idempotency`, the two fields named `capabilities_sha256`, the Python client, the four unswept storage modules, the audit filters, and **a person's walk**. Session 27 adds the on-ramp question at the top of that list. |
