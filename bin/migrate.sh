@@ -40,6 +40,7 @@ readonly RENDERED_ROOT="/var/lib/agentic-postgres/rendered"
 
 SUBCOMMAND=""
 PROJECT_MANIFEST=""
+DECLARED_FOLLOWS=""
 RUNTIME=0
 
 die() { local code="$1"; shift; printf 'migrate: %s\n' "$*" >&2; exit "${code}"; }
@@ -56,15 +57,21 @@ Subcommands:
                 the RELEASE's: migrations/released.lock.json. With --project,
                 that project's own: projects/<slug>/migrations/
                 released.lock.json, and the release's is not touched.
+                --follows VERSION declares which release the set was frozen
+                against, instead of computing it from this checkout.
   verify-lock   Check the release's committed lock against the manifest and
                 templates. With --project, check that project's own lock too,
                 and lint the set -- the release's is always checked, because a
                 project verb that could leave it unverified would be the one
                 way to render an unlocked platform migration.
 
-  --project FILE  Path to a project manifest (non-secret).
-  --runtime       Read the installed rendered document under /var/lib.
-  --help          Show this message.
+  --project FILE   Path to a project manifest (non-secret).
+  --follows VERSION  With `freeze-lock --project` only: the 14-digit release
+                   migration version this set was frozen against. Checked
+                   against this release's own manifest, which lists every
+                   release version this product has shipped.
+  --runtime        Read the installed rendered document under /var/lib.
+  --help           Show this message.
 
 `render` and `verify-lock` need no root and no cluster: they report what this
 release would apply. `status` and `up` both run dbmate in a container against
@@ -89,8 +96,19 @@ different schemas. Since ADR 0206 each set has its own directory and its own
 table and is ordered against its own applied set only, so
 follows_release_version no longer prevents anything a cluster would refuse: it
 RECORDS which release the set was reviewed against, and freeze-lock refuses a
-set that disagrees with its own record. What it should do when a set was frozen
-against an earlier release is undecided (D1288).
+set that disagrees with its own record.
+
+Without --follows the record is COMPUTED from this checkout's newest release
+version, which is right for a set authored against the release in hand. A set
+authored against an EARLIER release cannot produce the truth that way -- the
+freeze runs on the later checkout by construction -- so --follows DECLARES it
+(ADR 0210). The lock records which of the two it holds, in
+follows_release_version_source, so a reader can tell a computed record from an
+asserted one. Declaring changes no refusal and no ordering: the value is a
+record, and a wrong one produces a wrong record and no wrong SQL.
+
+A fork whose domain was inside the release's own files converts by the
+procedure in docs/on-ramp.md (ADR 0212), and this flag is its fifth step.
 
 Never pass a secret value as a command-line argument.
 USAGE
@@ -104,6 +122,9 @@ parse_args() {
       --project)
         [ "$#" -ge 2 ] || die 2 "--project requires a value."
         PROJECT_MANIFEST="$2"; shift 2 ;;
+      --follows)
+        [ "$#" -ge 2 ] || die 2 "--follows requires a value."
+        DECLARED_FOLLOWS="$2"; shift 2 ;;
       status|up|render|freeze-lock|verify-lock)
         [ -z "${SUBCOMMAND}" ] || die 2 "one subcommand at a time."
         SUBCOMMAND="$1"; shift ;;
@@ -125,6 +146,17 @@ parse_args() {
   # per project, which is exactly what it is not". That is still true of the
   # release's lock and no longer true of every lock, which is why the flag is
   # optional and its two meanings are spelled out in the usage above.
+  # --follows declares a PROJECT set's ordering record, so it means nothing
+  # without a set and nothing on any other verb. Refused rather than ignored: a
+  # flag silently dropped is how an operator comes to believe a record was
+  # written that was not (ADR 0210).
+  if [ -n "${DECLARED_FOLLOWS}" ]; then
+    [ "${SUBCOMMAND}" = "freeze-lock" ] || \
+      die 2 "--follows is only meaningful with freeze-lock; '${SUBCOMMAND}' writes no lock."
+    [ -n "${PROJECT_MANIFEST}" ] || \
+      die 2 "--follows declares the release a PROJECT set was frozen against, so it needs --project. The release's own lock has no such record."
+  fi
+
   case "${SUBCOMMAND}" in
     freeze-lock|verify-lock)
       # Optional, but not unchecked: a path that does not exist must not read
@@ -165,8 +197,13 @@ main() {
   case "${SUBCOMMAND}" in
     freeze-lock)
       if [ -n "${PROJECT_MANIFEST}" ]; then
-        "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode freeze-lock \
-          --project "${PROJECT_MANIFEST}"
+        if [ -n "${DECLARED_FOLLOWS}" ]; then
+          "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode freeze-lock \
+            --project "${PROJECT_MANIFEST}" --follows "${DECLARED_FOLLOWS}"
+        else
+          "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode freeze-lock \
+            --project "${PROJECT_MANIFEST}"
+        fi
       else
         "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode freeze-lock
       fi ;;

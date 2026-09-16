@@ -33,15 +33,21 @@ look"* reports "no changes detected" for a left-hand side nobody read.
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-from agentic_postgres import compatibility
+from agentic_postgres import REPO_ROOT, compatibility
 
 __all__ = [
     "BLOCKED",
+    "COMMIT_GIT_UNAVAILABLE",
+    "COMMIT_NOT_A_WORKING_TREE",
+    "COMMIT_READ",
     "OK",
     "UNDETERMINED",
+    "CommitReading",
     "Difference",
     "Plan",
     "UpgradePlanError",
@@ -49,6 +55,7 @@ __all__ = [
     "classify_document_changes",
     "differences",
     "leaves",
+    "read_checkout_commit",
 ]
 
 
@@ -63,6 +70,82 @@ BLOCKED = "blocked"
 #: Nobody looked. **Blocks exactly as BLOCKED does** -- a plan cannot proceed on
 #: a comparison that was never made, which is ADR 0157's whole point.
 UNDETERMINED = "undetermined"
+
+
+#: The commit was read from the checkout.
+COMMIT_READ = "read"
+#: There is a `git`, and this directory is not a working tree of one. **An
+#: adopter's tarball fork is in exactly this state**, and so is a checkout
+#: copied to a host with `scp` or unpacked from a `git bundle`'s worktree
+#: export -- which is not a rare case here, it is how this product's own
+#: transport works (D504).
+COMMIT_NOT_A_WORKING_TREE = "not_a_git_working_tree"
+#: No `git` on PATH at all. A deployed host is not obliged to have one.
+COMMIT_GIT_UNAVAILABLE = "git_unavailable"
+
+
+@dataclass(frozen=True)
+class CommitReading:
+    """Which commit a checkout is, or why that could not be determined.
+
+    **ADR 0195 in a dataclass.** The question has three answers and the third
+    is reported rather than folded: a reader that returned `None` for both *not
+    a working tree* and *no git* would make an adopter's tarball fork
+    indistinguishable from a broken environment, and a reader that returned the
+    empty string would make either indistinguishable from a match.
+
+    This exists because of F-020 (D1423): `upgrade check` compared versions and
+    digests and never commits, so a host checkout one commit behind the
+    workstation read as identical. Reporting the commit is the repair; reporting
+    *I could not determine it* is the half that makes the repair honest for the
+    checkout an adopter actually has.
+    """
+
+    commit: str | None
+    outcome: str
+
+    @property
+    def determined(self) -> bool:
+        return self.outcome == COMMIT_READ
+
+    def render(self) -> str:
+        """One line for a human, never a bare `None` (D600, D1394)."""
+        if self.determined and self.commit:
+            return self.commit
+        if self.outcome == COMMIT_NOT_A_WORKING_TREE:
+            return "(undetermined: this checkout is not a git working tree)"
+        return "(undetermined: no git available here)"
+
+
+def read_checkout_commit(root: Path = REPO_ROOT) -> CommitReading:
+    """The commit this checkout is at, with the third outcome (ADR 0195).
+
+    S607 suppressed for the reason `evidence.git_output` gives and no other:
+    the arguments are literals from this module and never operator input. S603
+    is NOT suppressed here and the neighbouring reader does suppress it --
+    ruff does not raise it for this call and an unused directive is an error,
+    so the difference is ruff's rather than a judgement of mine.
+
+    `check=False` with the outcome derived from the return code, because a
+    non-zero `rev-parse` is the ANSWER here rather than an error: it is how a
+    directory says it is not a working tree.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],  # noqa: S607
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return CommitReading(commit=None, outcome=COMMIT_GIT_UNAVAILABLE)
+    if result.returncode != 0:
+        return CommitReading(commit=None, outcome=COMMIT_NOT_A_WORKING_TREE)
+    commit = result.stdout.strip()
+    if not commit:
+        return CommitReading(commit=None, outcome=COMMIT_NOT_A_WORKING_TREE)
+    return CommitReading(commit=commit, outcome=COMMIT_READ)
 
 
 def leaves(node: Any, path: str = "") -> dict[str, Any]:

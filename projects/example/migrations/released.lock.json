@@ -1,5 +1,6 @@
 {
   "follows_release_version": "20260912120031",
+  "follows_release_version_source": "computed",
   "migrations": [
     {
       "canonical_render_sha256": "a757664826f2e6ff9762359195f2fbd686b49a468f15776b9b59c30c919b90e7",
@@ -28,5 +29,5 @@
       "version": "20260914120002"
     }
   ],
-  "schema_version": 2
+  "schema_version": 3
 }

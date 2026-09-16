@@ -40,7 +40,7 @@ readonly ROOT_DIR
 
 usage() {
   cat <<'USAGE'
-Usage: bin/upgrade.sh check  --project KEY [--installed FILE] [--json]
+Usage: bin/upgrade.sh check  --project KEY [--installed FILE] [--deployed FILE] [--json]
        bin/upgrade.sh plan   --project KEY --candidate FILE [--installed FILE] [--json]
        bin/upgrade.sh verify --project KEY --candidate FILE [--installed FILE] [--json]
        bin/upgrade.sh --help
@@ -54,6 +54,13 @@ Verbs:
              this release is, and whether the two can be compared. A missing or
              unreadable installed document is `undetermined`, which blocks --
              it is not "no changes detected" (ADR 0162).
+             It also reports the COMMITS: the one the deployed document says
+             this project was deployed from, and the one this checkout is at.
+             Two checkouts carry one template_version, so matching versions are
+             not a matching release (F-020). Either side can be undetermined --
+             a checkout unpacked from a tarball or a git bundle is not a git
+             working tree, and the deployed document is root-owned -- and an
+             undetermined side is reported as such, never as agreement.
 
   plan       Requires --candidate. The full comparison: every leaf that differs,
              the change classes
@@ -69,6 +76,11 @@ Options:
   --project KEY     The project to plan for. Required.
   --installed FILE  Read the installed rendered document from here instead of
                     the project state root. For a checkout, and for rehearsal.
+  --deployed FILE   Read the DEPLOYED document from here instead of the project
+                    state root. A different document from --installed: the
+                    rendered one carries no source_commit and the deployed one
+                    does, which is why `check` reads both. Same reason as
+                    --installed -- for a checkout, and for rehearsal.
   --candidate FILE  The candidate rendered document. REQUIRED by `plan` and
                     `verify`: this command renders nothing, because it writes
                     nothing. Run ./deploy.sh --project ... --render-only

@@ -122,6 +122,12 @@ DOCUMENT_ROOTS = (
     # the half of that decision the live reader keeps.
     "docs/operator-guide.md",
     "docs/upgrade-guide.md",
+    # The on-ramp page (ADR 0212) is operator-facing for exactly one audience
+    # and is in the scan for D1383's reason, not because it names anything new:
+    # measured when it was added, every command on it was already documented
+    # elsewhere, so this changed the documented set by nothing. It is here so
+    # that the FIRST command named only there is seen.
+    "docs/on-ramp.md",
 )
 
 #: The operator guides, which name commands the four pages above do not.

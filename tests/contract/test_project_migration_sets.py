@@ -149,12 +149,22 @@ def test_the_project_lock_is_frozen_and_verified_apart_from_the_release_lock(
     project_lock = example.load_lock()
 
     assert release_lock["schema_version"] == 1
-    assert project_lock["schema_version"] == 2
-    assert "follows_release_version" not in release_lock, (
-        "the release lock grew a project field, so the version rule would apply "
-        "to the release's own migrations"
+    assert project_lock["schema_version"] == migrations.PROJECT_LOCK_SCHEMA_VERSION == 3
+    for field_name in ("follows_release_version", "follows_release_version_source"):
+        assert field_name not in release_lock, (
+            f"the release lock grew {field_name}, a project field, so the version "
+            "rule would apply to the release's own migrations"
+        )
+        assert field_name in project_lock, (
+            f"the project lock is schema {project_lock['schema_version']} and does not "
+            f"carry {field_name}; from schema 3 the record says how it was obtained "
+            "(ADR 0210)"
+        )
+    assert project_lock["follows_release_version_source"] == migrations.FOLLOWS_COMPUTED, (
+        "the committed example lock was written by a freeze on this checkout, so its "
+        "record is computed; a `declared` value here would be an unexplained assertion "
+        "in the release's own example"
     )
-    assert "follows_release_version" in project_lock
 
     release_versions = {entry["version"] for entry in release_lock["migrations"]}
     project_versions = {entry["version"] for entry in project_lock["migrations"]}
@@ -165,6 +175,163 @@ def test_the_project_lock_is_frozen_and_verified_apart_from_the_release_lock(
     # that would go red if either lock were stale.
     migrations.verify_lock(release.load_manifest(), release_lock, release.root)
     migrations.verify_lock(example.load_manifest(), project_lock, example.root)
+
+
+def test_the_record_can_be_declared_and_the_lock_says_it_was(copied: Path) -> None:
+    """ADR 0210. The record a set frozen against an EARLIER release needs.
+
+    **The default does not move and that is half the assertion.** A lock built
+    without a source reads `computed`, which is what every lock written before
+    ADR 0210 is; one built with `declared` says so. The two are the same file
+    shape and differ in one field, which is the whole point: a reader can tell
+    a measured record from an asserted one, and before this they could not
+    (D600 -- the class this project produces most).
+
+    The control is in the same invocation (D499): the SAME manifest and the
+    SAME version, frozen both ways, so a difference here can only be the field.
+    """
+    candidate = migrations.MigrationSet(label="project", root=copied / "migrations")
+    manifest = candidate.load_manifest()
+    follows = migrations.newest_release_version()
+
+    computed = migrations.build_lock(manifest, candidate.root, follows_release_version=follows)
+    declared = migrations.build_lock(
+        manifest,
+        candidate.root,
+        follows_release_version=follows,
+        follows_release_version_source=migrations.FOLLOWS_DECLARED,
+    )
+
+    assert computed["follows_release_version_source"] == migrations.FOLLOWS_COMPUTED
+    assert declared["follows_release_version_source"] == migrations.FOLLOWS_DECLARED
+    assert computed["schema_version"] == declared["schema_version"] == 3
+    assert computed["migrations"] == declared["migrations"], (
+        "declaring the record changed a digest, so it is not only a record"
+    )
+
+    # A third provenance is refused rather than written: the field's value is
+    # what a reader trusts, and an unknown one would read as neither.
+    with pytest.raises(migrations.ProjectSetError, match="follows_release_version_source"):
+        migrations.build_lock(
+            manifest,
+            candidate.root,
+            follows_release_version=follows,
+            follows_release_version_source="measured",
+        )
+
+
+def test_a_schema_2_lock_reads_as_computed_and_a_schema_3_lock_may_not_omit_it() -> None:
+    """The backward-compatible read, and the boundary it stops at (ADR 0210).
+
+    Every project lock written before ADR 0210 came from
+    `newest_release_version()` on the checkout doing the freeze, because that
+    was the only way to write one -- so `computed` is a statement about those
+    files and not a fallback. A lock AT schema 3 that omits the field is
+    refused, because there the absence means something was lost rather than
+    something predates the field.
+    """
+    entries: list[dict[str, object]] = []
+
+    old = {"schema_version": 2, "follows_release_version": "20260904120030", "migrations": entries}
+    assert migrations.follows_record(old) == ("20260904120030", migrations.FOLLOWS_COMPUTED)
+
+    new = dict(old, schema_version=3)
+    with pytest.raises(migrations.ProjectSetError, match="follows_release_version_source"):
+        migrations.follows_record(new)
+
+    declared = dict(new, follows_release_version_source=migrations.FOLLOWS_DECLARED)
+    assert migrations.follows_record(declared) == (
+        "20260904120030",
+        migrations.FOLLOWS_DECLARED,
+    )
+
+    # The control: the RELEASE lock has no record at all and must not acquire
+    # one by default (D499 -- a reader that returned a tuple unconditionally
+    # would satisfy every assertion above).
+    assert migrations.follows_record({"schema_version": 1, "migrations": entries}) is None
+
+
+def test_a_declared_record_must_name_a_release_version_this_release_knows() -> None:
+    """What a checkout CAN check about a declaration, and what it cannot (ADR 0210).
+
+    The release's manifest is append-only, so every release version this
+    product has shipped is in the checkout doing the freeze. A declared value
+    must name one. That is a plausibility check and not a proof: it refuses a
+    typo, a fabricated stamp and a value from another product, and it cannot
+    establish that this set was frozen against that release -- which is why the
+    lock records that the value was DECLARED.
+
+    Both arms in one test, because "refuses everything" and "accepts
+    everything" satisfy one arm each.
+    """
+    versions = [
+        entry["version"]
+        for entry in migrations.load_manifest(migrations.MIGRATIONS_ROOT / "manifest.json")[
+            "migrations"
+        ]
+    ]
+
+    # The control, first: a real release version, including the OLDEST one --
+    # which is the case an on-ramp actually declares.
+    migrations.assert_declarable_release_version(min(versions))
+    migrations.assert_declarable_release_version(max(versions))
+
+    with pytest.raises(migrations.ProjectSetError, match="14-digit"):
+        migrations.assert_declarable_release_version("1.0.0")
+
+    with pytest.raises(migrations.ProjectSetError, match="not a version this release"):
+        migrations.assert_declarable_release_version("20260904999999")
+
+
+def test_the_app_runtime_refusal_says_why_the_copied_grant_is_dead(copied: Path) -> None:
+    """ADR 0211. The refusal acts on the belief, not only on the file.
+
+    An adopter meets this refusal because they copied the release's own `0003`,
+    whose grant `0006` makes unreachable -- measured on the pinned PostgreSQL
+    18.4 with a control, for a table created AFTER the revoke as well as before
+    (D1058, D1411, D1437). Listing the allowlist answers *what is permitted*
+    and leaves *why does the release do it then?* unanswered, which is the
+    question that sent the finding.
+
+    **The control is a different forbidden source in the same test**: the
+    sentence must be keyed on `app_runtime` rather than appended to every
+    placeholder refusal, or it would be noise on six other messages.
+    """
+    manifest_path = copied / MANIFEST
+
+    def refuse_with(name: str, source: str) -> str:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["placeholders"][name] = {
+            "type": "identifier",
+            "source": source,
+            "description": "added by the proof",
+        }
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        candidate = migrations.MigrationSet(label="project", root=copied / "migrations")
+        with pytest.raises(migrations.ProjectSetError) as raised:
+            migrations.lint_project_set(candidate)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["placeholders"].pop(name)
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        return str(raised.value)
+
+    message = refuse_with("app_runtime", "database.roles.app_runtime")
+    assert "0006" in message, message
+    assert "REVOKE ALL ON SCHEMA" in message, message
+    assert "reaches nothing" in message, message
+    assert "changes nothing your cluster does" in message, message
+
+    control = refuse_with("migration_user", "database.roles.migration_user")
+    assert "database.roles.migration_user" in control
+    assert "0006" not in control, (
+        "the app_runtime explanation is appended to every placeholder refusal, so it "
+        "is noise rather than an answer to the question that was asked"
+    )
+
+    # And the real set still passes, in the same invocation (D499).
+    migrations.lint_project_set(
+        migrations.MigrationSet(label="project", root=EXAMPLE / "migrations")
+    )
 
 
 def test_a_project_version_older_than_the_release_lock_is_refused(copied: Path) -> None:

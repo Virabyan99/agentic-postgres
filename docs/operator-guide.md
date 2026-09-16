@@ -242,8 +242,9 @@ project is the same steps from 4.
 the checkout half, the host sequence, skipped releases, a `major`, and what to
 do when a step refuses. **Read its §1.0 first if the deployment you are
 upgrading forked before 1.1.0** — a fork made when `projects/<slug>/` did not
-exist has its domain inside the release's own files, §1 is not written for it,
-and how such a fork converts is undecided. One sentence here so the shape is
+exist has its domain inside the release's own files and §1 is not written for
+it. How such a fork converts is decided and is
+[its own page](on-ramp.md) (ADR 0212). One sentence here so the shape is
 not lost: transport
 and check out as `op`, `provision-host.sh --check`, render **with the host's
 `capabilities.yaml`** as `op`, `upgrade check` and `plan` as root, deploy

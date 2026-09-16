@@ -36,6 +36,16 @@
 > sound. What it is not is a work list: the *closing act* column was written from
 > the documents rather than from the code, and that is exactly the difference §16
 > records.
+>
+> ### Closed since this page was written
+>
+> Runs 2 and 3 of Session 28 closed the on-ramp rows. **F-008, F-012, F-013,
+> F-020 and F-022 are answered**, by ADR 0210, ADR 0211 and ADR 0212 and the
+> code in Run 3; the procedure is **`docs/on-ramp.md`**, which did not exist
+> when this page was written. **D1418** (the interpreter on the host) is
+> answered *no* with its reason at `bin/doctor.sh`'s own split (D1441) — no
+> check was added. Do not work those rows from this page; work them from
+> `docs/scope-closure.md` §15, which now marks them closed and says by what.
 
 **Why this page exists.** The operator asked for a single inventory of what is
 broken, what works but not as it should, and what is claimed but unproven,

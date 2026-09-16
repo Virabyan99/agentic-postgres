@@ -30,7 +30,15 @@ is not gone:
 
 ---
 
-## The two that block a pre-1.1.0 fork, and they are still open
+> **Superseded in part by 1.7.0.** This page is 1.6.1's reply and is kept as
+> the record of it. The two findings below were open when it was written and
+> **both are answered in 1.7.0**: F-012 by ADR 0210 (`freeze-lock --project
+> --follows`) and F-013 by ADR 0211 (the allowlist stands, refused in writing,
+> and the refusal now says why the copied grant is dead). The conversion they
+> blocked is `docs/on-ramp.md` (ADR 0212). Read that page, not this section,
+> for what to do; read this section for what was true at 1.6.1.
+
+## The two that block a pre-1.1.0 fork, and they were still open at 1.6.1
 
 **If you forked at 1.0.0 or earlier and your domain lives inside the release's
 own files, `projects/<slug>/` is still not reachable for you.** The upgrade
@@ -48,9 +56,13 @@ works — that is measured — but the layout the release documents does not.
   release's own migration `0003` uses. An adopter who models a table on the
   platform's example domain writes a set the release will not lint.
 
-Both are named in `docs/scope-closure.md` §15 as the **on-ramp question**, and
-they are a product decision before they are a page. `docs/upgrade-guide.md`
-§1.0 says so rather than pretending §1 covers it.
+Both were named in `docs/scope-closure.md` §15 as the **on-ramp question**, and
+they were a product decision before they were a page. **1.7.0 took both
+decisions.** F-013's own repair — *add the source to the allowlist* — was
+refused, and the measurement is why: the grant an adopter copies from `0003` is
+made unreachable by `0006`'s schema revoke, so the lint was right and the
+release's example is what misled. F-012's refusal is unchanged byte for byte;
+what it gained is a way to satisfy it truthfully.
 
 ---
 
@@ -66,21 +78,21 @@ they are a product decision before they are a page. `docs/upgrade-guide.md`
 | F-005 | The README's gate sentence says 01–10 | Fixed | README *Checks*: twenty-four gates, 01–18 and 20–25, **and why there is no 19** |
 | F-006 | Upgrading is documented only in ADR 0162 | Documented | `docs/upgrade-guide.md` is the page; ADR 0209 makes it part of the release |
 | F-007 | Nothing documents how a **fork** takes a release | Documented | Upgrade guide §1.0. What is written is the shape of the problem and what one operator did, not a rule that does not exist |
-| F-008 | §1 describes an adopter this fork is not | **Documented, not solved** | §1.0. **How a pre-1.1.0 fork converts is undecided** — scope-closure §15, first row |
+| F-008 | §1 describes an adopter this fork is not | **Documented at 1.6.1; SOLVED at 1.7.0** | §1.0 points at `docs/on-ramp.md`, which is the conversion (ADR 0212), measured on a fork rebuilt from tag `1.0.0` |
 | F-009 | `git merge` produced nine conflicts; the page said "the merge itself is git's" | Documented | §1.0 records the nine conflicts and that **no rule exists** for which side wins. It records what the one operator did as *what happened* |
 | F-010 | Four conflicts were the release absorbing 1.0.1's repairs | No action | A positive |
 | F-011 | Contract tests hard-code the platform domain as the whole surface | **No action — and you answered it yourself** | Your own resolution is the right one and the release agrees with it in code: at 1.6.0 those equalities are **deliberately not loosened**, because a project's objects live in `projects/<slug>/` and are read by a different set (`test_api_migrations.py` says so at the assertion, D1089). The conflict existed because the fork had loosened them at 1.0.0. Nothing to fix here |
 | F-012 | `freeze-lock` refuses a set authored against an earlier release; its remedy would corrupt the deployment | **Open — refusal unchanged, message repaired** | See above. `src/agentic_postgres/migrations.py::_assert_follows_release_version` |
-| F-013 | The lint forbids `{{app_runtime}}`, which the release's own `0003` uses | **Open** | Untouched in 1.6.1 |
+| F-013 | The lint forbids `{{app_runtime}}`, which the release's own `0003` uses | **Answered at 1.7.0, and NOT the way this finding proposes** | ADR 0211. The allowlist stands: `0006` revokes schema `app` from `app_runtime`, so the copied grant reaches nothing — measured on PostgreSQL 18.4 with a control, for a table created after the revoke as well as before (D1437). The refusal now names `0006` and says removing the line changes nothing the cluster does. Widening the allowlist would have matched a security boundary to a dead line of SQL |
 | F-014 | "Four of §1's six checks refuse a schema-4 manifest" | Fixed, **and the count was wrong** | **Two**, not four, measured 2026-09-16: `migrate verify-lock --project` (exit 5) and `api-contract --check --project` (exit 2). §1 carries the measured table with the `--project`-less form beside each |
 | F-015 | The two checks that should go red did | No action | A positive |
 | F-016 | `upgrade check` says `OK` where the release was expected | Fixed | `check` now says *a comparison CAN be made … no candidate was read*, or *nothing is installed, so nobody looked*. **No JSON key moved** |
 | F-017 | §2 step 1 demands "10 ok" absolutely | Fixed | §2 step 1 sorts the doctor's verdicts into stop / stop-for-backups / note-and-proceed, and tells you to write the pre-upgrade reading down |
 | F-018 | The host has no `uv` and no `.venv`, which two pages assume | Fixed | §3 step 1's sync is conditional with the one-line diff that decides it; `docs/host-baseline.md` no longer describes the maintainer's shell as the baseline |
 | F-019 | Two drifts in §2 step 5 | Fixed | The `.gitignore` glob has covered a manifest in the checkout since 1.0.1; the ownership check now sees dotfiles |
-| F-020 | The host checkout was a commit behind and nothing noticed | **Open** | Untouched in 1.6.1 |
+| F-020 | The host checkout was a commit behind and nothing noticed | **Fixed at 1.7.0** | D1423. `upgrade check` reports both commits — the one the DEPLOYED document records and the one this checkout is at. It is not a field this verb had: a rendered document carries no `source_commit`, so `check` now reads the deployed document too. Either side can be undetermined (a tarball fork is not a git working tree; the deployed document is root-owned) and an undetermined side reads as UNDETERMINED, never as agreement (ADR 0195) |
 | F-021 | §2 runs the **old** release's commands while describing the new one's behaviour | Fixed | §2 opens with a standing sentence saying exactly that, and step 2 carries the 1.0.0 kit hand-over by hand (`_hand_to_operator` arrives in 1.0.1) |
-| F-022 | The gate cannot pass on this fork | **Open, and it is downstream** | Not an independent defect: causes 1 and 2 persist only while the domain is in the release's files, and **F-012 and F-013 are why it cannot leave them**. The residual that is genuinely ours is your last sentence — *no page says what an adopter does about that* — and it is still unwritten. A green gate is not a deploy precondition, so the upgrade proceeds; what cannot be satisfied is §7's *an upgrade without a sweep is deployed, not measured* |
+| F-022 | The gate cannot pass on this fork | **Answered at 1.7.0, and the page that was missing now exists** | `docs/on-ramp.md` §4a. Reproduced on a fork rebuilt from tag `1.0.0` rather than quoted: **52 failed, 5,692 passed, 49 errors**, against your 47 and 49 — with the unforked checkout as the control in the same session, **5,800 passed and nothing red**. The shape is the answer — the failures are almost entirely the proofs that read `contracts/postgrest-api-surface.yaml` as the release's own, and **`test_migrations` passes**. The gate objects to your RELATION in the shared reviewed surface, not to your migrations, and converting moves it to `projects/<slug>/contracts/`. Your last sentence — *no page says what an adopter does about that* — is what §4a is (D1442) |
 | F-023 | `--through-session` takes a number with no documented source | Fixed | `./deploy.sh --help` prints it, derived from `CURRENT_SESSION`, and names the file; §3 step 6 says where to read it on an older release |
 | F-024 | The `.generated` ownership check misses the directory that matters | Fixed | `.staging` and `.locks` are dotfiles a glob cannot match. §2 step 5 names them |
 | F-025 | The named-owner refusal did not appear; a traceback did | Fixed | Four `mkdir` sites now name the owner, the caller and the `chown`, and raise the convention's exit code instead of exit 1 |

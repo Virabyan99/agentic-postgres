@@ -13,6 +13,22 @@
 # activated venv invisible and that check would report a false failure on every
 # host — so `--project` runs the deployed checks ONLY, and never reaches it.
 #
+# **So THE HOST'S OWN INTERPRETER IS CHECKED BY NEITHER MODE, and that is a
+# consequence of the split rather than an oversight** (F-026, D1418, D1441).
+# Workstation mode checks a developer's interpreter and is unprivileged;
+# deployed mode checks seven live things about ONE PROJECT and needs root. The
+# host's interpreter is a property of the machine and of no project, so it
+# belongs to neither question as they are drawn, and adding it to deployed mode
+# would put a bare `python` resolution back under `sudo` -- which is the exact
+# failure the split exists to prevent.
+#
+# It is stated here rather than repaired because the repair is not free: the
+# only command that asks host-wide questions is `bin/provision-host.sh --check`,
+# which runs as root on production, and no session has measured which
+# interpreter versions this product actually requires on a host --
+# `.python-version` is the WORKSTATION pin. A check added on that footing could
+# fail a host that works. Session 28 records the reading and does not take it.
+#
 # This command reports tool presence, versions, paths and live health. It never
 # prints the environment (runbook §2, §9 check 7) and never reads a secret.
 #

@@ -97,6 +97,27 @@ PROJECT_PLACEHOLDER_SOURCES = frozenset(
     }
 )
 
+#: The schema version a PROJECT lock is written at. ADR 0210 moved it 2 -> 3
+#: to carry `follows_release_version_source`; a schema-2 lock still loads and
+#: reads as `computed`, which is what every lock written before ADR 0210 is.
+#: The RELEASE lock stays schema 1 and has no ordering record at all.
+PROJECT_LOCK_SCHEMA_VERSION = 3
+
+#: The record came from `newest_release_version()` on the checkout that froze.
+FOLLOWS_COMPUTED = "computed"
+
+#: The record was stated by the operator with `freeze-lock --project --follows`.
+#: A set frozen against an EARLIER release cannot produce the true value any
+#: other way: the freeze runs on the checkout in hand and that checkout is the
+#: later one (ADR 0210, D1436).
+FOLLOWS_DECLARED = "declared"
+
+#: Both, and nothing else. The point of the field is that a reader can tell a
+#: measured record from an asserted one, which a third value nobody defines
+#: would destroy (ADR 0195 -- a reader has three outcomes and the third is
+#: REPORTED; here the report is the field itself).
+FOLLOWS_SOURCES = frozenset({FOLLOWS_COMPUTED, FOLLOWS_DECLARED})
+
 #: The one role preamble a project template may set. `SET LOCAL ROLE` and not
 #: `SET ROLE`: local is scoped to the transaction dbmate wraps the migration in,
 #: so a template that forgot to `RESET ROLE` cannot leak the owner's authority
@@ -439,6 +460,7 @@ def build_lock(
     root: Path = MIGRATIONS_ROOT,
     *,
     follows_release_version: str | None = None,
+    follows_release_version_source: str | None = None,
 ) -> dict[str, Any]:
     """Produce the lock's content. `bin/migrate.sh freeze-lock` writes it.
 
@@ -453,6 +475,14 @@ def build_lock(
     the release's CURRENT newest would invalidate every project lock the day a
     platform migration shipped. What the rule actually needs is that the freeze
     was done under it, and the recorded value is that evidence (ADR 0198).
+
+    ``follows_release_version_source`` says HOW that value was obtained --
+    ``computed`` from this checkout, or ``declared`` by an operator (ADR 0210).
+    It defaults to ``computed`` because that is what every caller before ADR
+    0210 did, and it travels WITH the value rather than beside it: a record
+    that is sometimes measured and sometimes asserted, with no way to tell
+    which, is a `null` that looks measured (D600), and that class is the one
+    this project produces most.
     """
     canonical = canonical_outputs(manifest)
     entries = []
@@ -475,11 +505,88 @@ def build_lock(
         )
     if follows_release_version is None:
         return {"schema_version": 1, "migrations": entries}
+    source = follows_release_version_source or FOLLOWS_COMPUTED
+    if source not in FOLLOWS_SOURCES:
+        raise ProjectSetError(
+            f"follows_release_version_source is {source!r}; it is one of "
+            f"{sorted(FOLLOWS_SOURCES)}. The field records how the record was obtained, "
+            "and a third value would be a provenance nothing in this release defines."
+        )
     return {
-        "schema_version": 2,
+        "schema_version": PROJECT_LOCK_SCHEMA_VERSION,
         "follows_release_version": follows_release_version,
+        "follows_release_version_source": source,
         "migrations": entries,
     }
+
+
+def follows_record(lock: dict[str, Any]) -> tuple[str, str] | None:
+    """A project lock's ordering record and how it was obtained, or `None`.
+
+    `None` for the release's lock, which has no such record and must not grow
+    one: the rule is about what a PROJECT may author.
+
+    **A `schema_version: 2` lock reads as `computed`, and that is a statement
+    about those files rather than a fallback.** Every project lock written
+    before ADR 0210 came from `newest_release_version()` on the checkout doing
+    the freeze, because that was the only way to write one. A lock at schema 3
+    that omits the field is REFUSED rather than assumed -- the default exists
+    for locks that predate the field, not for locks that lost it.
+    """
+    follows = lock.get("follows_release_version")
+    if follows is None:
+        return None
+    if int(lock.get("schema_version", 2)) < PROJECT_LOCK_SCHEMA_VERSION:
+        return follows, FOLLOWS_COMPUTED
+    source = lock.get("follows_release_version_source")
+    if source not in FOLLOWS_SOURCES:
+        raise ProjectSetError(
+            f"this project lock is schema {lock.get('schema_version')!r} and its "
+            f"follows_release_version_source is {source!r}, which is not one of "
+            f"{sorted(FOLLOWS_SOURCES)}. From schema {PROJECT_LOCK_SCHEMA_VERSION} the "
+            "field is required: the lock says whether the release version it records was "
+            "computed from a checkout or declared by an operator, and a lock that omits "
+            "it states a record whose provenance nobody can read (ADR 0210)."
+        )
+    return follows, source
+
+
+def assert_declarable_release_version(follows: str, root: Path = MIGRATIONS_ROOT) -> None:
+    """Refuse a declared record the release's own manifest does not know (ADR 0210).
+
+    **What a checkout can check, and what it cannot, said where it is
+    enforced.** The release's manifest is append-only -- `20260904120030`, the
+    newest version at tag `1.0.0`, is still in it at `1.6.2` -- so every release
+    version this product has shipped is in the checkout doing the freeze. A
+    declared value must name one of them.
+
+    That proves the value is a release migration version of THIS product. It
+    does not prove the set was frozen against it, and nothing in a checkout
+    can: the freeze is the only event that knew, and it has happened. So this
+    refuses a typo, a fabricated stamp and a value from somewhere else, and the
+    lock carries `follows_release_version_source` because the stronger claim is
+    the one a reader would otherwise assume.
+    """
+    if not re.fullmatch(r"[0-9]{14}", follows):
+        raise ProjectSetError(
+            f"--follows is not a 14-digit version stamp: {follows!r}. It names a release "
+            "migration version, in the form the manifest and the ledger use."
+        )
+    versions = sorted(
+        entry["version"] for entry in load_manifest(root / "manifest.json")["migrations"]
+    )
+    if follows in versions:
+        return
+    below = [version for version in versions if version < follows]
+    above = [version for version in versions if version > follows]
+    raise ProjectSetError(
+        f"--follows {follows} is not a version this release's own migration manifest "
+        f"declares. The nearest below is {below[-1] if below else '(none)'} and the "
+        f"nearest above is {above[0] if above else '(none)'}. The record names the "
+        "release version your set was reviewed against, so it is one of this product's "
+        "own release migration versions -- read it out of the manifest of the release "
+        "you froze against, or out of your set's existing lock if it has one."
+    )
 
 
 def load_lock(path: Path = LOCK_PATH) -> dict[str, Any]:
@@ -502,8 +609,14 @@ def verify_lock(
     being rewritten, and a changed canonical digest with an unchanged template
     means the *renderer* moved under a set of templates nobody touched.
     """
-    follows = lock.get("follows_release_version")
-    expected = build_lock(manifest, root, follows_release_version=follows)
+    record = follows_record(lock)
+    follows = None if record is None else record[0]
+    expected = build_lock(
+        manifest,
+        root,
+        follows_release_version=follows,
+        follows_release_version_source=None if record is None else record[1],
+    )
 
     if follows is not None:
         _assert_follows_release_version(manifest, follows)
@@ -567,12 +680,20 @@ def _assert_follows_release_version(manifest: dict[str, Any], follows: str) -> N
     own record. ADR 0206 kept it deliberately: removing a released guard is a
     separate decision from the one that ADR took.
 
-    **What it should do when a set was frozen against an EARLIER release is
-    undecided, and it is the on-ramp session's.** Today the only way forward is
-    to re-freeze the project lock, which moves `follows_release_version` to the
-    release in hand; nothing has decided whether that is the intended workflow
-    or a leftover of the ordering space ADR 0206 removed. Said here because a
-    reader who meets the refusal has no other place to find it.
+    **A set frozen against an EARLIER release DECLARES the record it was frozen
+    against, and ADR 0210 is where that was decided.** This function is
+    unchanged by that decision and deliberately so: it still refuses a set whose
+    versions do not sort above its own record, whichever way the record was
+    obtained. What moved is that `freeze-lock --project --follows <version>` can
+    now write a record that is true, where before the only writable value was
+    `newest_release_version()` of the checkout in hand -- which for such a set is
+    the wrong release by construction (D1436). The lock says which kind of
+    record it holds (`follows_release_version_source`), because a value that is
+    sometimes measured and sometimes asserted, indistinguishably, is worse than
+    either.
+
+    The refusal below is the first step of the conversion in `docs/on-ramp.md`,
+    not a dead end, and it says so to the reader who meets it.
     """
     if not re.fullmatch(r"[0-9]{14}", follows):
         raise ProjectSetError(
@@ -592,16 +713,22 @@ def _assert_follows_release_version(manifest: dict[str, Any], follows: str) -> N
             "If these migrations are NOT yet applied anywhere, re-stamp them above "
             f"{follows} and freeze again.\n\n"
             "If they ARE applied -- a set authored against an EARLIER release -- then "
-            "there is no supported way forward today, and this refusal is the product "
-            "being honest rather than helpful. Re-freezing does not help: "
-            "`freeze-lock --project` records THIS checkout's newest release version, so "
-            "it would compute the same floor and refuse again. Re-stamping is worse: it "
-            "amends applied migrations (D912 forbids it), and ADR 0206's one-time ledger "
-            "move matches rows BY VERSION, so re-stamped versions would move nothing and "
-            "the deploy would then re-apply SQL against objects that already exist. "
-            "Nothing in this release lets a set declare the release it was actually "
-            "frozen against. That gap is recorded in docs/scope-closure.md as the "
-            "on-ramp question and is a product decision, not an operator error (D1288)."
+            "DECLARE the release you were actually frozen against:\n\n"
+            "    bin/migrate.sh --project <manifest> freeze-lock --follows <version>\n\n"
+            "The record is what this refusal reads, and declaring it is the supported "
+            "way to satisfy it without touching a migration (ADR 0210). The value is "
+            "one of this release's own migration versions and is checked against the "
+            "manifest; the lock records that it was declared rather than computed.\n\n"
+            "Re-freezing WITHOUT --follows does not help: it records THIS checkout's "
+            "newest release version, so it would compute the same floor and refuse "
+            "again. Re-stamping is worse: it amends applied migrations (D912 forbids "
+            "it), and ADR 0206's one-time ledger move matches rows BY VERSION, so "
+            "re-stamped versions would move nothing and the deploy would then re-apply "
+            "SQL against objects that already exist.\n\n"
+            "If your domain was inside the release's own files -- a fork made before "
+            "projects/<slug>/ existed -- this refusal is step 5 of the conversion in "
+            "docs/on-ramp.md (ADR 0212), and the steps before it are what make the "
+            "declaration true."
         )
 
 
@@ -636,11 +763,28 @@ def lint_project_set(project: MigrationSet, release: MigrationSet | None = None)
     for name, specification in manifest["placeholders"].items():
         source = specification["source"]
         if source not in PROJECT_PLACEHOLDER_SOURCES:
+            detail = ""
+            if source == "database.roles.app_runtime":
+                # ADR 0211. The adopter who meets this copied the grant from the
+                # release's own `0003`, so the allowlist alone answers a
+                # question they did not ask. What they need to know is that the
+                # line they copied grants nothing: measured on the pinned
+                # PostgreSQL 18.4 with a control, `has_table_privilege` answers
+                # true and the SELECT is denied, for a table created AFTER the
+                # revoke as well as before it (D1058, D1411, D1437).
+                detail = (
+                    " app_runtime in particular: the release's 0003 grants to it and its "
+                    "0006-app-runtime-least-privilege.sql then issues REVOKE ALL ON SCHEMA "
+                    "app FROM app_runtime, so that grant -- and any grant a project copies "
+                    "from it -- reaches nothing. has_table_privilege still answers true and "
+                    "the SELECT is still denied; the schema revoke is the one that holds. "
+                    "Removing the line changes nothing your cluster does."
+                )
             raise ProjectSetError(
                 f"{project.root}: placeholder {name!r} reads {source!r}, which a project set "
                 f"may not read. Allowed: {sorted(PROJECT_PLACEHOLDER_SOURCES)}. A project's "
                 "SQL names the request roles and its own database, and none of the platform's "
-                "other identities."
+                f"other identities.{detail}"
             )
 
     release_surface = sql_surface.final_surface(release.load_manifest(), release.root)
@@ -717,17 +861,23 @@ def lint_project_set(project: MigrationSet, release: MigrationSet | None = None)
 
 
 __all__ = [
+    "FOLLOWS_COMPUTED",
+    "FOLLOWS_DECLARED",
+    "FOLLOWS_SOURCES",
     "LOCK_PATH",
     "MANIFEST_PATH",
     "MIGRATIONS_ROOT",
+    "PROJECT_LOCK_SCHEMA_VERSION",
     "PROJECT_PLACEHOLDER_SOURCES",
     "PROJECT_SETS_DIRECTORY",
     "MigrationError",
     "MigrationSet",
     "ProjectSetError",
+    "assert_declarable_release_version",
     "build_lock",
     "canonical_outputs",
     "digest",
+    "follows_record",
     "lint_project_set",
     "load_lock",
     "load_manifest",

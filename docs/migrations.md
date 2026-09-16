@@ -145,14 +145,28 @@ bin/migrate.sh --project project.yaml verify-lock # both; the release's always
 ```
 
 A project lock also records `follows_release_version` — the release version its
-migrations must all sort **after**. dbmate is handed a directory and orders the
-whole of it by filename, so the two sets interleave by version stamp. Measured
-on the pinned dbmate 2.34.1, with a control: a pending migration whose version
-is older than an applied one makes `up --strict` exit 2 having applied
-**nothing**, naming both versions; the same pair on a *fresh* cluster applies in
-filename order and exits 0. One set, two schemas. `freeze-lock --project`
-refuses at freeze so that never reaches a host, and dbmate's own refusal is the
-backstop behind it.
+migrations must all sort **after** — and `follows_release_version_source`,
+saying whether that record was **computed** from the checkout that froze or
+**declared** by an operator (ADR 0210, project lock schema 3).
+
+**It is a record, not a guard, and this paragraph said otherwise for four
+sessions** (D1440). The rule was written when both sets rendered into one
+directory and applied through one dbmate invocation against one migrations
+table: there they interleaved by version stamp, and it was measured on the
+pinned dbmate 2.34.1 with a control — a pending migration older than an applied
+one makes `up --strict` exit 2 having applied **nothing**, naming both versions,
+while the same pair on a *fresh* cluster applies in filename order and exits 0.
+One set, two schemas. **ADR 0206 removed that ordering space**: each set renders
+to its own directory and applies against its own table, so a project version
+below an applied release version is no longer an ordering a cluster would
+refuse. What survives is the record of which release a set was reviewed against,
+and `freeze-lock --project` refusing a set whose versions disagree with it.
+
+Without `--follows`, that record is computed from this checkout's newest release
+version. A set frozen against an EARLIER release cannot produce the truth that
+way — the freeze runs on the later checkout — so `--follows <version>` declares
+it, checked against the release's own append-only manifest. That is the on-ramp
+(ADR 0212), and it has [its own page](on-ramp.md).
 
 **What a project's set may not contain**, refused before it is rendered:
 
@@ -162,7 +176,7 @@ backstop behind it.
 | `CREATE`/`ALTER`/`DROP ROLE`, `SCHEMA`, `EXTENSION`; `ALTER DEFAULT PRIVILEGES` | the bootstrap plane owns roles; the migration plane owns objects |
 | any `SET ROLE` but `SET LOCAL ROLE {{object_owner}}` | LOCAL, so the authority cannot outlive the transaction dbmate wraps the migration in |
 | dropping an object the release publishes | a project adds to the published surface and never removes from it |
-| a placeholder outside the six request roles and `database.name` | a project's SQL names its own database and the request roles, not the platform's identities |
+| a placeholder outside the six request roles and `database.name` | a project's SQL names its own database and the request roles, not the platform's identities. **`app_runtime` is the one adopters reach for**, because the release's own `0003` grants to it — and `0006` then revokes schema `app` from it, so that grant reaches nothing. The allowlist stands and the refusal says so (ADR 0211) |
 | a table in `app` without `FORCE ROW LEVEL SECURITY` | FORCE is what makes the policies apply to the table's **owner**, and every write function here is `SECURITY DEFINER` running as that owner |
 | a `down` block that does not raise `AP900` | this plane is fix-forward; a working rollback is one `dbmate down` from dropping a tenant's table |
 

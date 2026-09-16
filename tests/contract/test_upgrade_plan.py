@@ -8,6 +8,7 @@ wrote is a differ proved against its author's idea of the shape (question 6).
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from rendered_fixtures import (  # type: ignore[import-not-found]
@@ -317,3 +318,53 @@ def test_the_plan_handles_the_real_rendered_shape() -> None:
     assert plan.differences == ()
     assert plan.verdict == up.BLOCKED
     assert "not ahead" in plan.reasons[0]
+
+
+# ---------------------------------------------------------------------------
+# Which commit a checkout is (F-020, D1423)
+# ---------------------------------------------------------------------------
+
+
+def test_the_checkout_commit_has_three_outcomes_and_the_third_is_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR 0195 in the reader F-020 asked for.
+
+    `upgrade check` compared versions and digests and never commits, so a host
+    checkout one commit behind the workstation read as identical. Reporting the
+    commit is the repair; the half that makes the repair honest is that a
+    checkout which is NOT a git working tree says so instead of reporting
+    nothing -- an adopter's tarball fork is in exactly that state, and so is
+    anything unpacked from this product's own `git bundle` transport (D504).
+
+    All three arms, because a reader that returned `None` for two of them would
+    make an adopter's ordinary checkout indistinguishable from a broken
+    environment.
+    """
+    here = up.read_checkout_commit()
+    assert here.determined, here
+    assert here.outcome == up.COMMIT_READ
+    assert here.commit and len(here.commit) == 40, here
+    assert here.render() == here.commit
+
+    # `tmp_path` is under /tmp, which is not a working tree of anything.
+    outside = up.read_checkout_commit(tmp_path)
+    assert not outside.determined
+    assert outside.outcome == up.COMMIT_NOT_A_WORKING_TREE
+    assert outside.commit is None
+    assert "not a git working tree" in outside.render()
+
+    def no_git(*_args: object, **_kwargs: object) -> None:
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(up.subprocess, "run", no_git)
+    missing = up.read_checkout_commit()
+    assert missing.outcome == up.COMMIT_GIT_UNAVAILABLE
+    assert "no git available" in missing.render()
+
+    # None of the three renders as a bare `None` or an empty string, which is
+    # what put D600's shape into the only output the upgrade guide tells an
+    # operator to read before an irreversible step.
+    for reading in (here, outside, missing):
+        assert reading.render().strip()
+        assert "None" not in reading.render()

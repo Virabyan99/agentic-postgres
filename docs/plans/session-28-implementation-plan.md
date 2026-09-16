@@ -9,8 +9,9 @@ Then `docs/scope-closure.md` §15 and `docs/plans/session-27-implementation-plan
 and the tag does not. **Session 29 is the trip**, and Run 8 writes its sheet.
 **Product version at close:** `VERSION` **1.7.0**, `CURRENT_SESSION` moves
 **25 → 28**. 26 and 27 are skipped the way 19 is, and the skip is the record.
-**Next free:** D1440, ADR 0215. *(Run 1 added D1426–D1433; Run 2 added
-D1434–D1439 and wrote ADRs 0210, 0211 and 0212.)*
+**Next free:** D1444, ADR 0215. *(Run 1 added D1426–D1433; Run 2 added
+D1434–D1439 and wrote ADRs 0210, 0211 and 0212; Run 3 added D1440–D1443 and
+built them.)*
 
 ---
 
@@ -75,11 +76,12 @@ and its own run*.
 
 ## 1. The divergence table
 
-D1406–D1439. **D1406–D1425 were measured during planning on `ad96673`; D1426–D1433
+D1406–D1443. **D1406–D1425 were measured during planning on `ad96673`; D1426–D1433
 are Run 1's**, from the nine rows planning had not measured; **D1434–D1439 are Run
-2's**, measured on rig 28a and on a pinned PostgreSQL 18.4. Rows marked
+2's**, measured on rig 28a and on a pinned PostgreSQL 18.4; **D1440–D1443 are Run
+3's**, from building what Run 2 decided. Rows marked
 **answered** are closed by writing down what the tree already does; rows marked
-**recorded** are not repaired here and say why. Runs allocate from **D1440**.
+**recorded** are not repaired here and say why. Runs allocate from **D1444**.
 
 **Run 1's eight rows changed four of this plan's own run descriptions**, and the
 changes are in §5 rather than only here: D1426 makes D1045 a fourteenth answered
@@ -123,6 +125,10 @@ the same finding, and D1430 revives a deferral whose stated reason has expired.
 | **D1437** | `0006-app-runtime-least-privilege.sql`'s header measurement, which ADR 0211's whole argument rests on: `has_table_privilege(app_runtime,'app.notes','SELECT')` → **true**, `SET ROLE app_runtime; SELECT * FROM app.notes` → **denied**. | **It measures a table that existed BEFORE the revoke, and F-013 is about a fork's table created after it.** Re-measured on the pinned `pgvector/pgvector:pg18` (**18.4**, the deployment's own version) with a control the revoke cannot reach: `app.notes` (before) **denied**, `app.invoices` (created and granted AFTER the revoke) **denied**, `tenant_control.invoices` (schema never revoked) **0 rows, permitted**. `has_table_privilege` answers `true` for all three. | **ADR 0211** carries the table. The refusal of F-013's one-line widening rests on a measurement of the case the finding is actually about, not on an extrapolation from the release's own. | The argument that declines to widen a security boundary is the last argument that should rest on *it probably works the same way*. The control coming out green in the same invocation is what makes the two denials evidence (D499). | 0211 |
 | **D1438** | Nothing said it. D1096: *"the ledger is the only record of which bytes ran."* | **A conversion that changes a template's bytes is invisible to the ledger.** `ledger_insert_statement` writes `ON CONFLICT (version) DO NOTHING`, so the row for an already-applied version keeps the `rendered_sha256` of the bytes that ran. Grepped every reader: `bin/doctor.py` counts rows, `bin/apg-diag.sh` lists version and name, `test_dev_environment_cluster` compares digests on a **fresh** cluster it built itself. **Nothing on a deployed host compares a ledger row against the tree**, and after a conversion no checkout contains those bytes. | **ADR 0212 §4**: the operator records the divergence in the project manifest entry's `description` — which line was removed, and why it could not alter the cluster — because the ledger cannot carry it and is right not to. | The ledger is correct as history and stops being checkable as a record, silently, which is the D600 shape: a value that looks measured. ADR 0212 permits the byte change in exactly two cases and this row is why each one has to be written down. | 0212 |
 | **D1439** | `docs/upgrade-guide.md` §1.0: *"the collision is structural rather than bad luck: the release occupies `0031` at 1.1.0 and `0032` at 1.5.0 in the same template directory a 1.0.0-era fork was obliged to write into."* | **The collision is not on the filename.** Measured: `0031-create-task.sql` and `0031-tenant-invoices.sql` coexist in one directory after the merge and `git` never conflicts on either — different names, nothing to merge. What is actually unique across sets is the **version**: `rendering.assert_migration_order` refuses a shared version and nothing else, because `app_private.migration_ledger` keys on the version alone and is written `ON CONFLICT (version) DO NOTHING`, so two sets sharing one would apply both and record one (D1096). | **ADR 0212 §3's fourth class**: template bytes do not conflict, and the check is for a shared version rather than a shared number. | A reader repairing a *filename collision* renumbers templates — which moves no version, fixes nothing, and changes the bytes of applied migrations to do it. The sentence describes the right problem in the wrong units. | 0212 |
+| **D1440** | `docs/migrations.md`: *"dbmate is handed a directory and orders the whole of it by filename, so the two sets interleave by version stamp … `freeze-lock --project` refuses at freeze so that never reaches a host."* | **The rationale ADR 0206 refuted, in a fourth place nobody grepped.** Session 27 Run 3 replaced it in three — the docstring, `bin/migrate.sh --help`, and the refusal message — and this page kept it. It is not merely stale: it states the two sets share an ordering space, which is the thing ADR 0206 removed, and it credits the freeze-time refusal with preventing a cluster failure it no longer prevents. Found by D1187's rule applied on purpose: grep the moved TEXT, not the moved name. | **Rewritten in Run 3**, with the measurement kept (it is still true of the release that had one directory) and its scope stated, plus the new record, its provenance field and a pointer to `docs/on-ramp.md`. | Session 27's own §4 repaired three readers of one rationale and a fourth survived, which is question 5 exactly — *when a decision is implemented, which of its callers got it?* A page is a caller. | 0206 |
+| **D1441** | Audit 1a and D1418: *"`bin/doctor.sh` checks the interpreter on a workstation only"*, closing act *"then the interpreter check on the host."* Run 3's instruction: take it **only if ADR 0158's split admits a third reading**. | **It does not, and the reason is structural.** Workstation mode checks a developer's own interpreter and is unprivileged; deployed mode checks seven live things about ONE PROJECT and needs root. The host's interpreter is a property of the machine and of no project. Adding it to deployed mode puts a bare `python` resolution back under `sudo`, which is the exact failure the split's own comment says the split exists to prevent. The only host-wide checker is `provision-host.sh --check`, which runs as root on production — and **no session has measured which interpreter versions this product requires on a host**: `.python-version` is the workstation pin, and the cold reader's host ran every `bin/*.sh` under 3.14 against a pin of 3.12.13 and worked. | **Stated, not repaired**, at the split itself in `bin/doctor.sh`'s header — where a reader asking *does this check the host's interpreter?* actually looks — and in `scope-closure.md` §15. **No requirement and no claim**, so §2's conditional row resolves to *no*. | A check added on an unmeasured footing, to the one command that runs as root on production, in a session with no host trip, could fail a host that works. Stating the gap is the act ADR 0195 asks for; inventing a threshold would be the folded third outcome. | 0158 |
+| **D1442** | Findings F-022 and audit 1a: *"A fork whose domain is in the release's files **can deploy and cannot pass the gate**"*, with *47 failures and 49 errors*. D1433 refused to carry the number forward and named rig 28a as the only instrument. | **Reproduced, and the number is close enough to trust while the SHAPE is the finding.** The release's own `contract and p0` sweep against rig 28a at the merged pre-conversion state: **52 failed, 5,692 passed, 3 skipped, 49 errors** — the errors identical to the adopter's, the failures within five. **The control is the same command on the unforked checkout in the same session: 5,800 passed, 3 skipped, nothing red** (D499), which is also a full contract sweep of Run 3's own code. And they are not spread: they are almost entirely the reviewed-surface family — `test_api_surface_contract`, `test_api_contract_command`, `test_client_ir`, `test_generate_command`, `test_generated_client_runtime`, `test_scope_registry`, `test_scope_vocabulary`, `test_studio_*`. **`test_migrations` passes.** The fork's MIGRATIONS are not what the gate objects to; its relation in `contracts/postgrest-api-surface.yaml` is. | **F-022's paragraph is written from this**, in `docs/on-ramp.md` and the findings reply: the gate's objection is the shared reviewed surface, the conversion moves that relation into `projects/<slug>/contracts/`, and that is why the answer to F-022 is the on-ramp rather than a gate change. | *"The gate cannot pass on this fork"* priced as one defect is a number. Measured, it is one cause with a large blast radius, and knowing which cause is the difference between *convert* and *we cannot say*. The failure families outside that one are not analysed and this row says so. | 0212 |
+| **D1443** | Nothing said it. `docs/on-ramp.md`'s first draft ended with `sudo bin/apg-diag.sh --project <key> catalog`. | **That flag does not exist and `catalog` takes two positional arguments.** `apg-diag`'s own usage is `sudo apg-diag catalog <project> <query>`, with four queries. The error was caught not by reading the page but by **measuring it against `dx_record.documented_commands` before adding it to `DOCUMENT_ROOTS`**: the measurement printed `bin/apg-diag.sh` as newly documented, which is only possible if the page names it — and the page had no business naming it that way. | Corrected to the spelling its own `--help` prints (ADR 0208 §3), which also made adding the page to the scan a **measured no-op**: every command it names was already documented elsewhere, so the documented set moved by nothing. | The live reader doubles as a spell-checker for a new page and nobody had used it that way. It is the cheapest available check on a page full of commands, it runs offline in a second, and it found a wrong invocation on the first page it was pointed at. | 0208 |
 
 ---
 
@@ -139,7 +145,8 @@ evidence model and never will, the way 19 has none — the skip is the record
 (D1063), and the constant's own comment is where it is written. Every gate
 selector and `claims_through_session(28)` inherits the cumulative set.
 
-Four requirements, four claims, and the exact ids are Run 9's to register
+Four requirements, four claims — **three after Run 3 resolved the fourth to
+*no*** — and the exact ids are Run 9's to register
 against the file rather than this plan's to invent (D1347's lesson: a count in a
 plan's prose is not a count of the file):
 
@@ -148,7 +155,7 @@ plan's prose is not a count of the file):
 | The record a project set carries of the release it was frozen against (ADR 0210) | one `DX-*` | its own | **offline**, declared in `OFFLINE_CLAIMS` (ADR 0202) — it is a property of a checkout and no deployment confirms it |
 | What the agent record keeps, and for how long (ADR 0213) | one `SEC-*` or `AGENT-*` | its own | **host**, `not_run` until Session 29 applies the migration. The offline half proves the function and the refusals; the live half proves the prune against a cluster with history |
 | The reading before a tag (ADR 0214) | one `REL-*` | its own | **offline** |
-| The host interpreter, if Run 3's ADR 0158 reading takes a third mode (D1418) | one `DX-*` | its own | **host**, `not_run` until Session 29 |
+| ~~The host interpreter, if Run 3's ADR 0158 reading takes a third mode (D1418)~~ | — | — | **RESOLVED `no` in Run 3.** The split admits no third reading (D1441): the host's interpreter is a property of the machine and of no project, and adding it to deployed mode puts a bare `python` resolution back under `sudo`. Stated at the split, no check added, **no requirement and no claim**. §10 row 11. |
 
 **No new claim for the rotation**, and this is worth saying because it is the
 session's headline act. `bootstrap_identity`, `api_authorization` and
@@ -383,6 +390,79 @@ that no conversion exists and what to do instead. **`docs/README.md` gains its
 line** — `test_documentation_index` goes red otherwise, which is the constraint
 working. Targeted: the migration modules, `test_cli_contract` (a `bin/` command's
 usage moves), `test_documentation_index`.
+
+**Done.** 2026-09-16, on `3c1e48f`. ADR 0210 and ADR 0211 built, F-020 closed,
+D1418 answered *no*, `docs/on-ramp.md` written, and **D1440–D1443**. Six
+mutations, six kills, no survivors, every control green in the same invocation.
+
+*ADR 0210, in the code.* `build_lock` carries
+`follows_release_version_source`; `follows_record` reads it, treating a
+schema-2 lock as `computed` (which is what every lock written before ADR 0210
+is) and **refusing a schema-3 lock that omits it**, because there the absence
+means something was lost rather than something predates the field.
+`assert_declarable_release_version` checks a declaration against the release's
+append-only manifest and says at its own definition what that proves and what
+it does not. `bin/migrate.sh --project <manifest> freeze-lock --follows
+<version>` is the operator surface; `--follows` on any other verb, or without
+`--project`, is **refused rather than ignored** (exit 2, both in the shell and
+again in the Python — a flag silently dropped is how an operator comes to
+believe a record was written that was not). **The refusal is unchanged byte for
+byte**; its remedy is not, and `bin/migrate.sh --help` moved with it.
+
+- **The project lock schema moves 2 → 3, and Run 9's bump note owes that
+  sentence.** `projects/example/migrations/released.lock.json` was moved to 3
+  **surgically rather than by re-freezing**: a re-freeze recomputes
+  `follows_release_version` from this checkout, which would have moved the
+  example's record from `20260912120031` to `20260912120032` — a different
+  statement about when that set was reviewed, made by accident. Measured both
+  ways before choosing.
+
+*ADR 0211, in the refusal.* The allowlist is byte-for-byte what it was. The
+message now names `0006`, states that the copied grant reaches nothing, and
+ends *"removing the line changes nothing your cluster does"* — and the detail is
+**keyed on the source**, so the other six forbidden sources get the message they
+always had. Both arms are asserted, because a sentence appended to every
+placeholder refusal would be noise rather than an answer.
+
+*F-020 / D1423, and the finding's own prediction was right.* *"Report the
+commit"* was not printing a field this verb had: a **rendered** document carries
+no `source_commit` at all — the field belongs to the **deployed** document,
+which `upgrade check` never read. It reads it now, through `--deployed FILE` for
+a checkout the way `--installed` already worked. `upgrade_plan.read_checkout_commit`
+answers the other side with three outcomes and a `CommitReading` that renders
+each of them as a sentence: a checkout that is not a git working tree — which is
+what an adopter's tarball fork and this product's own `git bundle` transport
+both produce — says so. **`commits_agree` is `null` unless both sides were
+read**, and the human line says UNDETERMINED rather than THE SAME.
+
+*D1418, answered `no`, and §2's conditional row resolves with it.* ADR 0158's
+split admits no third reading (D1441). Stated at the split in `bin/doctor.sh`'s
+own header and in `scope-closure.md` §15; **no check added, no requirement, no
+claim.**
+
+*F-022, reproduced rather than quoted* (D1442). The release's own `contract and
+p0` sweep against rig 28a at the merged pre-conversion state: **52 failed, 5,692
+passed, 3 skipped, 49 errors** against the adopter's *47 failures and 49
+errors*, with the unforked checkout as the control in the same session — **5,800
+passed, nothing red**. The shape is the finding: the failures are almost entirely the
+reviewed-surface family, and **`test_migrations` passes**. The gate does not
+object to the fork's migrations; it objects to the fork's relation sitting in
+`contracts/postgrest-api-surface.yaml`. That is why F-022's answer is the
+conversion and not a gate change.
+
+*What Run 3 did NOT do.* No released migration and no bump — Run 9 owns
+`VERSION`, `CURRENT_SESSION` and the registry, and the project lock schema move
+is on its bill. **No conversion performed against a cluster with history**
+(D940); `docs/on-ramp.md` names step 7 as the step a checkout cannot prove and
+tells the adopter to read their own ledger on a copy first.
+
+*Ran before the push*, once: `test_project_migration_sets`, `test_migrations`,
+`test_migration_ledger`, `test_rendered_migrations`, `test_upgrade_plan`,
+`test_upgrade_command`, `test_cli_contract`, `test_dx_record`,
+`test_documentation_index`, `test_session12_documented_path`,
+`test_acceptance_registry` (D1119 — this run adds test functions),
+`test_mcp_catalog` (it reads `docs/plans/*.md`). Plus the battery. CI is the
+full check.
 
 ### Run 4 — the readers that report a file event as a domain event
 
@@ -714,13 +794,14 @@ or re-stamp an applied migration.
 
 ## 10. Open items this session carries and creates
 
-### Deferred by name, with the reason — ten rows
+### Deferred by name, with the reason — eleven rows
 
 Each of these is a Tier 1 row this session does **not** close. The brief's rule
 is that a plan which silently drops rows is worse than one that names them.
 **Seven were named at planning; Run 1's measurements added three more** (8–10),
 and each of those three was deferred for a reason the audit's row does not
-carry.
+carry. **Run 3 added the eleventh**, which its own plan text anticipated: D1418
+is deferred only if ADR 0158's split admits no third reading, and it does not.
 
 1. **D1203 — one canonicalizer for `app-openapi.canonical.json`.** The tree's own
    position: *"a decision for a session that versions that snapshot rather than a
@@ -769,6 +850,22 @@ carry.
     value by itself (D249). **Not taken in the rotation's run either — which is
     the run that creates the next generations**, and the trip should know that it
     adds to a set nothing prunes.
+
+11. **D1418 / F-026 — the interpreter on the deployment host is unchecked, and
+    it is a consequence of ADR 0158's split** (D1441, measured in Run 3).
+    Workstation mode checks a developer's own interpreter and is unprivileged;
+    deployed mode checks seven live things about one PROJECT and needs root. The
+    host's interpreter is a property of the machine and of no project, so it
+    belongs to neither question as they are drawn, and adding it to deployed
+    mode puts a bare `python` resolution back under `sudo` — the exact failure
+    the split's own comment says the split prevents. The only host-wide checker
+    is `provision-host.sh --check`, which runs **as root on production**, and no
+    session has measured which interpreter versions this product requires on a
+    host: `.python-version` is the workstation pin, and the cold reader's host
+    ran every `bin/*.sh` under 3.14 against a pin of 3.12.13 and worked. A check
+    added on that footing could fail a host that works, in a session with no
+    trip to measure it on. **Stated at the split rather than repaired**, and
+    §2's conditional requirement row resolves to *no requirement, no claim*.
 
 ### Created here, for Session 29 — the trip
 

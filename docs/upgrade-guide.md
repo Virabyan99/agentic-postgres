@@ -135,18 +135,22 @@ template directory a 1.0.0-era fork was obliged to write into.
   schema still deploys.
 - **Two of §1's six checks refuse such a fork, and that is correct** — see §1's
   table below, which says which two and what the refusal means.
-- **How a pre-1.1.0 fork CONVERTS to `projects/<slug>/` is undecided.** ADR
-  0198 and ADR 0206 create the mechanism; neither says how an existing fork
-  moves into it, and moving would mean re-homing applied migrations, which D912
-  forbids. It is tracked in `docs/scope-closure.md` and is the on-ramp
-  session's, not this page's. **Do not read §1 as describing a conversion it
-  does not describe.**
-- **Which side wins each merge conflict is not written down anywhere**, and
-  this page will not invent a rule it has not measured. What the one recorded
-  upgrade did: took the release's side in every file the release owns and
-  re-applied the fork's rows on top, then re-froze the lock. That is one
-  operator's judgement on one fork, recorded here as what happened rather than
-  as instruction.
+- **How a pre-1.1.0 fork CONVERTS to `projects/<slug>/` is DECIDED, and it is
+  [`docs/on-ramp.md`](on-ramp.md)** (ADR 0212). It was undecided in 1.6.2 and
+  this page said so; what was actually missing was one flag. Re-homing moves no
+  bytes and no version, so D912 is not engaged by it; ADR 0206's ledger move
+  already relocates a re-homed version by stamp; and the one thing the product
+  had to grow is `freeze-lock --project --follows`, which records the release a
+  set was really frozen against (ADR 0210, from **1.7.0**). **Do not read §1 as
+  describing that conversion** — §1 assumes it has already happened.
+- **Which side wins each merge conflict is four classes, on the on-ramp page**,
+  measured on a fork rebuilt from tag `1.0.0` rather than reasoned. The count
+  is not fixed: that adopter amended nine release-owned files and got nine
+  conflicts, and a rebuilt fork amending four got two. The class worth knowing
+  before you merge is the third: `contracts/postgrest-api-surface.yaml`
+  **auto-merges**, so a tenant relation can end up inside the release's
+  reviewed contract with no conflict marker and no review. Diff it against the
+  release's own copy after every merge, conflict or not.
 
 ---
 

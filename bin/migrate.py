@@ -354,7 +354,7 @@ def project_set_from_manifest(project_path: str) -> migrations.MigrationSet:
     return migrations.MigrationSet(label="project", root=REPO_ROOT / named / "migrations")
 
 
-def freeze_project_lock(project_path: str) -> int:
+def freeze_project_lock(project_path: str, declared_follows: str | None = None) -> int:
     """Freeze the project's own lock. The release's is never touched.
 
     `follows_release_version` is computed here, at the freeze, from the release
@@ -363,11 +363,35 @@ def freeze_project_lock(project_path: str) -> int:
     compared against the release's CURRENT newest would invalidate every project
     lock the day a platform migration shipped. What the rule needs is that the
     freeze was done under it, and the recorded value is that evidence.
+
+    **`--follows` declares the record instead (ADR 0210), and for a set frozen
+    against an EARLIER release it is the only way to record the truth.** This
+    freeze runs on the checkout in hand, and for such a set that checkout is a
+    later release by construction -- so the computed value is wrong, the
+    refusal fires, and re-freezing computes the same wrong value again (D1436).
+    The declared value is checked against the release's own append-only
+    manifest, and the lock records that it was DECLARED, because a record that
+    is sometimes measured and sometimes asserted with no way to tell which is a
+    `null` that looks measured (D600).
     """
     migration_set = project_set_from_manifest(project_path)
     manifest = migration_set.load_manifest()
-    follows = migrations.newest_release_version()
-    lock = migrations.build_lock(manifest, migration_set.root, follows_release_version=follows)
+    if declared_follows is None:
+        follows = migrations.newest_release_version()
+        source = migrations.FOLLOWS_COMPUTED
+    else:
+        # Before anything else this command does: an unusable declaration must
+        # not be reported alongside a set the freeze then refuses for its own
+        # reasons, because the operator would repair the wrong one.
+        migrations.assert_declarable_release_version(declared_follows)
+        follows = declared_follows
+        source = migrations.FOLLOWS_DECLARED
+    lock = migrations.build_lock(
+        manifest,
+        migration_set.root,
+        follows_release_version=follows,
+        follows_release_version_source=source,
+    )
 
     # Refuse before writing. A freeze that wrote a lock recording a rule it
     # breaks would make `verify-lock` the first thing to notice, which is one
@@ -379,7 +403,7 @@ def freeze_project_lock(project_path: str) -> int:
         json.dumps(lock, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     print(f"migrate: wrote {migration_set.lock_path} ({len(lock['migrations'])} migrations)")
-    print(f"  follows_release_version {follows}; the release lock was not touched.")
+    print(f"  follows_release_version {follows}, {source}; the release lock was not touched.")
     print("  Review and commit it before the gate runs.")
     return 0
 
@@ -397,11 +421,22 @@ def verify_project_lock(project_path: str) -> str:
     """
     migration_set = project_set_from_manifest(project_path)
     manifest = migration_set.load_manifest()
-    migrations.verify_lock(manifest, migration_set.load_lock(), migration_set.root)
+    lock = migration_set.load_lock()
+    migrations.verify_lock(manifest, lock, migration_set.root)
     migrations.lint_project_set(migration_set)
+
+    # The record AND its provenance, because the sentence is what an operator
+    # reads before a deploy and "which release was this reviewed against" has
+    # two different answers depending on who wrote it (ADR 0210).
+    record = migrations.follows_record(lock)
+    recorded = (
+        "no ordering record"
+        if record is None
+        else f"follows_release_version {record[0]}, {record[1]}"
+    )
     return (
         f"migrate: {migration_set.root} agrees with its own lock, and the set is "
-        "within what a project may contain"
+        f"within what a project may contain ({recorded})"
     )
 
 
@@ -411,12 +446,37 @@ def main() -> int:
     parser.add_argument("--outputs")
     parser.add_argument("--rendered-dir")
     parser.add_argument("--project")
+    parser.add_argument("--follows")
     arguments = parser.parse_args()
+
+    # A declaration about a project set's ordering record, so it means nothing
+    # without a set. Refused rather than ignored: a flag silently dropped is how
+    # an operator comes to believe a record was written that was not.
+    if arguments.follows and not (arguments.mode == "freeze-lock" and arguments.project):
+        print(
+            "migrate: --follows declares the release version a PROJECT set was frozen "
+            "against, so it is only meaningful with `freeze-lock --project` (ADR 0210). "
+            "The release's own lock has no such record.",
+            file=sys.stderr,
+        )
+        return 2
+
+    if arguments.follows:
+        # Checked HERE as well as inside the freeze, and the two are not
+        # redundant: the function refuses whoever calls it, and this maps the
+        # refusal to exit 2 -- a value an operator typed is invalid operator
+        # input, not the contract drift EXIT_CONTRACT means (rig 25m's reading
+        # of what each code tells a reader).
+        try:
+            migrations.assert_declarable_release_version(arguments.follows)
+        except migrations.ProjectSetError as error:
+            print(f"migrate: {error}", file=sys.stderr)
+            return 2
 
     try:
         if arguments.mode == "freeze-lock":
             if arguments.project:
-                return freeze_project_lock(arguments.project)
+                return freeze_project_lock(arguments.project, arguments.follows)
             manifest = migrations.load_manifest()
             lock = migrations.build_lock(manifest)
             migrations.LOCK_PATH.write_text(

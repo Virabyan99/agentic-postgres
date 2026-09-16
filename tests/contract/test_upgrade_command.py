@@ -406,3 +406,119 @@ def test_the_command_is_reached_the_way_an_operator_reaches_it() -> None:
     assert COMMAND.name.endswith(".sh")
     assert COMMAND.is_file()
     assert run("--help").returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# The commits (F-020, D1423)
+# ---------------------------------------------------------------------------
+
+
+def deployed(commit: str | None) -> dict:
+    """A DEPLOYED document -- a different kind from `rendered()` above.
+
+    That difference is the finding rather than a fixture detail: a rendered
+    document carries no `source_commit` at all, so "report the commit" meant
+    reading a document this command did not read.
+    """
+    document: dict = {"document_kind": "deployed", "schema_version": 13}
+    if commit is not None:
+        document["source_commit"] = commit
+    return document
+
+
+def test_check_reports_both_commits_and_never_calls_an_unknown_one_agreement(
+    tmp_path: Path,
+) -> None:
+    """F-020: a host checkout one commit behind read as identical.
+
+    Four states, because an operator does something different about each and
+    three of them are ways of not knowing. The one that must never appear is
+    agreement from an undetermined side -- which is the defect the finding is
+    about, one level up (ADR 0195).
+    """
+    installed = write(tmp_path / "installed.json", rendered())
+    this_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    def check(deployed_document: Path | str) -> dict:
+        result = refuses_without_writing(
+            "check",
+            "--project",
+            "alpha",
+            "--installed",
+            str(installed),
+            "--deployed",
+            str(deployed_document),
+            "--json",
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return json.loads(result.stdout)
+
+    same = check(write(tmp_path / "same.json", deployed(this_commit)))
+    assert same["installed_commit"] == this_commit
+    assert same["checkout_commit"] == this_commit
+    assert same["commits_agree"] is True
+
+    other = check(write(tmp_path / "other.json", deployed("0" * 40)))
+    assert other["installed_commit"] == "0" * 40
+    assert other["commits_agree"] is False, (
+        "two different commits were reported as agreeing, which is F-020 exactly"
+    )
+
+    # Neither side is guessed. A deployed document without the field, and no
+    # deployed document at all, are different answers and neither is `False`.
+    no_field = check(write(tmp_path / "old.json", deployed(None)))
+    assert no_field["installed_commit"] is None
+    assert no_field["commits_agree"] is None
+    assert no_field["deployed_document_presence"] == "no_field"
+
+    absent = check(tmp_path / "nothing-here.json")
+    assert absent["commits_agree"] is None
+    assert absent["deployed_document_presence"] == "absent"
+
+
+def test_the_human_readable_check_distinguishes_the_three_ways_of_not_knowing(
+    tmp_path: Path,
+) -> None:
+    """The sentences, not the JSON -- an operator reads these before a deploy.
+
+    D1394's rule one command over: `(no such key)` and `null` were both printed
+    through `!r` and read as each other. Here the three non-answers have
+    different remedies -- no deployed document, one that cannot be read, and one
+    that predates the field -- so they are three different sentences, and none
+    of them is blank.
+    """
+    installed = write(tmp_path / "installed.json", rendered())
+
+    def text_of(deployed_document: Path | str) -> str:
+        result = refuses_without_writing(
+            "check",
+            "--project",
+            "alpha",
+            "--installed",
+            str(installed),
+            "--deployed",
+            str(deployed_document),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result.stdout
+
+    absent = text_of(tmp_path / "nothing-here.json")
+    assert "no deployed document" in absent, absent
+    assert "UNDETERMINED" in absent, absent
+    assert "THE SAME" not in absent, absent
+
+    old = text_of(write(tmp_path / "old.json", deployed(None)))
+    assert "records no source_commit" in old, old
+
+    differs = text_of(write(tmp_path / "other.json", deployed("0" * 40)))
+    assert "DIFFERENT" in differs, differs
+    assert "matching version above is not a matching release" in differs, (
+        "the line reports the difference and not what it means; matching "
+        "template_versions across two commits is the whole of F-020"
+    )

@@ -63,6 +63,37 @@ def installed_path(project_key: str) -> Path:
     return deployed_output.rendered_path(project_key) / "outputs.json"
 
 
+def deployed_commit(project_key: str, override: Path | None = None) -> tuple[str | None, str]:
+    """Which commit the DEPLOYED document says this project was deployed from.
+
+    **A different document from the one every other reading here uses, and that
+    is the finding rather than an implementation detail** (F-020, D1423). This
+    command compares RENDERED documents, and a rendered document carries no
+    `source_commit` at all -- the commit is written by
+    `deployed_output.build_deployed_document` into the DEPLOYED document, which
+    nothing in this command read. So "report the commit" was never a matter of
+    printing a field this verb already had.
+
+    Three outcomes, and the third is returned rather than folded into `None`
+    (ADR 0195): read, absent, or `could not look` -- the project state root is
+    root-owned, so an unprivileged `check` in a checkout gets `PermissionError`
+    from `is_file()` and that is not the same as this project never having been
+    deployed here. `look_for` is the same reader the installed side uses.
+    """
+    path = override or deployed_output.deployed_path(project_key)
+    presence = "present" if override is not None else look_for(path)
+    if override is not None and not path.is_file():
+        presence = "absent"
+    if presence != "present":
+        return None, presence
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None, "undetermined"
+    commit = document.get("source_commit")
+    return (commit, "present") if isinstance(commit, str) and commit else (None, "no_field")
+
+
 def look_for(path: Path) -> str:
     """Is it there? -- with the third answer, because `exists()` does not have it.
 
@@ -105,6 +136,21 @@ DECLARABLE = (
     "document_schema_needs_operator_input",
     "operator_manifest_invalidated",
 )
+
+
+def _no_commit(presence: str) -> str:
+    """Why the deployed commit is not here, in the reader's own words.
+
+    Four different states read as "no commit" and an operator does something
+    different about each, so none of them is printed as a blank (D600).
+    """
+    return {
+        "absent": "(undetermined: no deployed document for this project here)",
+        "undetermined": "(undetermined: the deployed document could not be read -- "
+        "it is root-owned, so run this under sudo on a host)",
+        "no_field": "(undetermined: the deployed document records no source_commit; "
+        "it predates the field)",
+    }.get(presence, "(undetermined)")
 
 
 def render_leaf_value(value: Any) -> str:
@@ -189,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("verb", choices=["check", "plan", "verify"])
     parser.add_argument("--project", required=True)
     parser.add_argument("--installed", type=Path, default=None)
+    parser.add_argument("--deployed", type=Path, default=None)
     parser.add_argument("--candidate", type=Path, default=None)
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
@@ -226,12 +273,35 @@ def main(argv: list[str] | None = None) -> int:
         # has an answer with no candidate document: what is installed, what this
         # release is, and whether the two are the same kind of thing. Requiring a
         # render here would make the cheapest verb the one with a prerequisite.
+        # **F-020 / D1423: the commits, which nothing here read before.** A host
+        # checkout one commit behind the workstation carries the same
+        # `template_version` and the same digests, so every reading this verb
+        # had was identical for a deployment that was a release behind in
+        # everything but its version file. `source_commit` is a field of the
+        # DEPLOYED document; the checkout's own commit is not a field of
+        # anything, so it is READ, with the third outcome (ADR 0195).
+        checkout = upgrade_plan.read_checkout_commit()
+        installed_commit, deployed_document_presence = deployed_commit(
+            project_key, arguments.deployed
+        )
         payload = {
             "project": project_key,
             "verdict": upgrade_plan.UNDETERMINED if installed is None else upgrade_plan.OK,
             "installed_version": (installed or {}).get("template_version"),
             "installed_document": str(source),
             "installed_kind": (installed or {}).get("document_kind"),
+            "installed_commit": installed_commit,
+            "deployed_document": str(
+                arguments.deployed or deployed_output.deployed_path(project_key)
+            ),
+            "deployed_document_presence": deployed_document_presence,
+            "checkout_commit": checkout.commit,
+            "checkout_commit_outcome": checkout.outcome,
+            "commits_agree": (
+                None
+                if (installed_commit is None or not checkout.determined)
+                else installed_commit == checkout.commit
+            ),
             "release_version": template_version(),
             "reasons": []
             if installed is not None
@@ -246,6 +316,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"upgrade check for {project_key}")
             print(f"  installed   {payload['installed_version']}  ({payload['installed_kind']})")
             print(f"  this release {payload['release_version']}")
+            print(f"  deployed from {installed_commit or _no_commit(deployed_document_presence)}")
+            print(f"  this checkout {checkout.render()}")
+            if payload["commits_agree"] is True:
+                print("  commits     THE SAME: this checkout is the one that rendered")
+                print("              what is installed.")
+            elif payload["commits_agree"] is False:
+                print("  commits     DIFFERENT: what is installed was rendered from another")
+                print("              commit. Two checkouts can carry one template_version,")
+                print("              so a matching version above is not a matching release.")
+            else:
+                # Neither "the same" nor "different" (ADR 0195). Which of the two
+                # sides is missing decides what an operator does next, so the
+                # line says which.
+                print("  commits     UNDETERMINED: not compared, which is not 'the same'.")
             # **The word, not the code** (D1393). This printed
             # `verdict     OK`, which is accurate about the question `check`
             # asks and reads as a verdict on the upgrade -- and an operator
