@@ -9,9 +9,10 @@ Then `docs/scope-closure.md` §15 and `docs/plans/session-27-implementation-plan
 and the tag does not. **Session 29 is the trip**, and Run 8 writes its sheet.
 **Product version at close:** `VERSION` **1.7.0**, `CURRENT_SESSION` moves
 **25 → 28**. 26 and 27 are skipped the way 19 is, and the skip is the record.
-**Next free:** D1457, ADR 0215. *(Run 1 added D1426–D1433; Run 2 added
+**Next free:** D1463, ADR 0215. *(Run 1 added D1426–D1433; Run 2 added
 D1434–D1439 and wrote ADRs 0210, 0211 and 0212; Run 3 added D1440–D1443 and
-built them; Run 4 added D1444–D1446; Run 5 added D1447–D1456.)*
+built them; Run 4 added D1444–D1446; Run 5 added D1447–D1456; Run 6 added
+D1457–D1462 and wrote ADR 0213.)*
 
 ---
 
@@ -84,7 +85,7 @@ three readers that report a file event as a domain event; **D1447–D1456 are Ru
 5's**, and all but two came from a proof's FIRST EXECUTION or from the run's own
 mutation battery. Rows marked
 **answered** are closed by writing down what the tree already does; rows marked
-**recorded** are not repaired here and say why. Runs allocate from **D1457**.
+**recorded** are not repaired here and say why. Runs allocate from **D1463**.
 
 **Run 1's eight rows changed four of this plan's own run descriptions**, and the
 changes are in §5 rather than only here: D1426 makes D1045 a fourteenth answered
@@ -145,6 +146,12 @@ the same finding, and D1430 revives a deferral whose stated reason has expired.
 | **D1454** | Run 5's own SQL-signature guard, after it went green: *"140 such references across 34 templates, and every one of them names a live declaration."* | **The assertion is vacuous on a healthy tree, and the run's own battery proved it.** A mutation that removed the comparison — `if False:` in place of the staleness test — **SURVIVED**, green, because `stale` is empty whether the walk compares or not when nothing is stale. `checked >= 135` says the guard LOOKED; nothing said it COMPARED. That is D173/D260's shape in a guard written this very run, four hours old. | The walk is extracted as `_stale_sql_signatures` and given a **positive control**: three synthetic templates in version order — a declaration, a grant that matches it (which must NOT be reported), a revoke that does not (which must), and a reference standing before the declaration it names. The battery re-run kills it. | A survivor is evidence (CLAUDE.md §1), and this one says *weak test* rather than *uninformative mutation*. It is also the argument for running the battery over a run's whole output rather than over the tests that felt risky: this guard was the one that had just been measured most carefully. | — |
 | **D1455** | `docs/scope-closure.md`: *"`test_honest_readers`' `sudo -u` prefix has still never run … the prefix itself waits for a gate that runs as root."* CLAUDE.md §7: twelve never-executed proofs have failed on first execution. | **It ran, and it passed** — rig 28c, 2026-09-17: `ubuntu:24.04` as **uid 0**, the checkout bind-mounted at its own path so `REPO_ROOT` resolves and still owned by `1000:1000`, the uv interpreter mounted beside it, the owner uid created inside so `sudo -n -u '#1000'` has somebody to become. `euid: 0`, `sudo -n -u` answers `uid=1000`, and **24 passed, 0 skipped** — including `test_an_unreadable_document_is_unreadable_and_never_absent` and `test_the_reading_the_root_branch_makes_gives_the_same_answer`, the two that carry the re-entry. | **Recorded as executed.** The row comes off `scope-closure.md`'s open list, and the rig is a throwaway rebuilt from its script. | **It is the thirteenth never-executed proof and the first not to fail.** The reason is worth more than the result: D1165, D1300, D1301, D1302, D1330 and D1332 each repaired this pair in response to a first execution **elsewhere** — root's `0700` temp directory, the `/tmp` chmod that took the sticky bit off a host, a fixture the re-entered child could not own. Six repairs had already been applied to it from adjacent evidence before it ever ran. | — |
 | **D1456** | Audit 1c: *"the uncached first run of `apg dev up` is measured in CI and nowhere else"*, closing act *"measure it where it is claimed."* | **It is already claimed in the one place the row asks for.** `capacity.UNMEASURED` carries the entry verbatim — the subject, the reason (`docker rmi` of the image the whole contract suite shares, and the number obtained would be this machine's link speed), and `unblocked_by: "nothing that should be run mid-session; the CI row is the measurement"`. `scope-closure.md` §11 carries the same. A test asserts `UNMEASURED` is non-empty for as long as anything is. | **Closed by saying so**, and by nothing else. Measuring it here would evict the image six cluster fixtures share, cost every later test in the session a pull, and produce a number about this machine's link. | The row's closing act is already performed, which is the fourteenth instance of Session 28's own §0 finding: the audit's *closing act* column was written from the documents rather than from the code. Here it was written from neither — the claim is in the envelope the row names. | 0203 |
+| **D1457** | Four proofs asserting ONE ascending version order across both migration sets — `test_a_declared_set_renders_after_the_release_set_in_version_order` (*"dbmate is handed a DIRECTORY and orders the whole of it by filename"*), two assertions in `test_the_rendered_manifest_names_the_set_of_every_file`, and the same file's *"every project version sorts after every release version, which is the rule `freeze-lock --project` records as `follows_release_version`"*. | **ADR 0206 removed that rule and the product's own code says so.** *"A project's migration set is rendered into its own directory and applied against its own migrations table … Each set is then ordered against its own applied set only"*, and `_assert_follows_release_version`'s docstring calls what survives *"a record, not a guard"*. The four proofs were still enforcing the single ordering space whose collapse took beta's deploy down at Session 24 (D1288) — **the rule that failure produced.** They stayed green because **no release added a migration between ADR 0206 and this run**: Sessions 25, 26 and 27 added none. Run 6's `20260917120033` is the first, it sorts above the example project set's `20260914120001`, and all four went red on first execution. The fourth also conflated the lock's RECORD with the checkout's newest release, which is D1436 one proof over: since ADR 0210 `follows_release_version` may be a declared earlier release. | **All four repaired to assert what ADR 0206 guarantees**, which is the thing that would have to break for D1098 to come back: each set ascends **within itself**, the two sets have different roots, `migrations_subdir` and `migrations_table` differ for the two labels, and no set's payloads are spread across directories. The fourth reads the project lock's own `follows_release_version`. A mutation returning one subdirectory for both labels kills the repaired proof. | A guard can only fire when its subject moves, and this one's subject had not moved in four sessions — so *the release adds a migration* was a path no proof had taken since the ADR that changed what it means. Repairing them is implementing a released decision, not weakening a guard: the replacement asserts the mechanism rather than a side effect of the mechanism it replaced. | 0206 |
+| **D1458** | `test_a_project_version_older_than_the_release_lock_is_refused`, whose *equal* arm sets the example project manifest's FIRST migration to `newest_release_version()` and expects `verify_lock` to refuse it. | **It depended on an accident between two unrelated stamps.** The arm only reached `verify_lock` while the release's newest version sorted BELOW the project set's second migration; with `20260917120033` in the manifest the fixture reads `['20260917120033', '20260914120002']` and `load_manifest` refuses it for being out of order — so the proof failed on its own scaffolding rather than on its subject, with a message about a manifest a reviewer would not recognise. | **Every entry is restamped from the candidate upward** (`version + index`), so the fixture stays ascending whatever the release's newest stamp is, and both boundaries still reach the refusal they are about. The control in the same invocation is unchanged. | A proof that fails for a reason other than the one it is named for costs the reader the time it takes to work out which. It is also the cheap half of the same class as D1457: both were written when the two sets shared one ordering space, and both encoded that as an assumption about numbers rather than as a statement about the mechanism. | — |
+| **D1459** | `bin/doctor.sh`'s header and usage: *"deployed: seven live checks against one project on this host"*, twice — and quoted a third time in D1441's own argument this session, and a fourth in ADR 0158's table. | **There were ten, and the file has said seven since Session 18.** `diagnose()` appends containers, the health route, TLS, the cluster and pooler, migrations, the backup repository, the WAL archiver, the backup mirror, disk headroom and capability drift. The operator guide says *ten checks* on the same page that quotes this command's help, so the two documents an operator reads disagreed with each other and one of them was the command itself. | **Both places in `bin/doctor.sh` now say eleven**, which is what this run makes true. **ADR 0158's table is left alone**: an ADR is a record of a decision at a date, and the count is not the decision it took. D1441's row and `scope-closure.md` §15 quote the pre-repair text and are marked as quoting it. | A count in a command's own `--help` is the number an operator compares their reading against, and it was three short. Session 26's ADR 0208 §3 binds every command in the operator guide to its own `--help`; this is the first case where the `--help` was the wrong one, and it was found by adding to the thing it counts. | 0158 |
+| **D1460** | `docs/scope-closure.md`, `CLAUDE.md` §9 and the pre-Stage-4 audit, all three treating one row: *"`agent_audit` and `agent_idempotency` grow without bound. Nothing prunes either"* — closed the same way, *"a retention rule."* | **They are not one question, and rig 28b measured the difference with its control in the same run.** Pruning an audit row loses history and nothing else: neither table carries a foreign key (the only one among the three agent tables is `agent_quota.agent_id`), and no live behaviour depends on a row being present. Pruning an idempotency claim **re-arms its key silently**: a write replayed while its claim is present is deduplicated and `app.notes` stays at one row; the same write replayed after the claim is deleted writes a SECOND row and reports success, with no error on either side. At-most-once becomes at-least-once for every key past the horizon — the failure 0029 exists to prevent. **And there is no safe subset**: the obvious candidate, the claims of agents that are no longer active, dies on its own measurement, because `auth_rotate_agent_secret` (0025) clears a revocation and returns the SAME agent id to `active`, so a revoked agent's keys are dormant and not dead. | **ADR 0213 splits the row and migration `20260917120033` ships both prunes with different comments.** The idempotency prune carries its consequence in its own `COMMENT ON FUNCTION`, in the words an operator reads while deciding, and a proof holds the consequence measured — with the unpruned replay as the control in the same test. | Two rows closed with the same three words, where one is a disk decision and the other is a change to a guarantee this product advertises. A session reading the table as uniform would have shipped a default horizon and quietly downgraded every caller's at-most-once, and the audit's own closing act invited exactly that. | 0213 |
+| **D1461** | This migration's own first draft: *"`p_limit` is the answer to the lock instead of an index"*, written before the rig ran and implying the bounded prune is the cheaper one. | **It is not the faster one.** On a cluster carrying 20,004 audit rows spread over fourteen days, the unbounded prune removed 9,921 in **141 ms** and a bounded one removed 500 in **147 ms** — the `ctid` subquery pays for itself. Both plans are `Seq Scan`s: 0019's two indexes are `(owner_id, started_at DESC)` and `(agent_id, started_at DESC)`, neither leading with the timestamp, and `agent_idempotency` has only its primary key. | **The rationale is corrected in the file to what was measured**: `p_limit` bounds how many rows one transaction touches and holds locks on until it commits, not how long it takes, so a table nobody has pruned since the deployment was created can be taken in passes whose size the operator chose. **No index is added** — 0019 wrote that its two exist for one reader and neither is speculative, and a third would be paid on every write to buy a scan for an operation performed by hand. | A rationale written before the measurement, in a file that ships, is a sentence a later reader will believe. This one was wrong in the direction that produces work: an operator reading it would batch a prune to make it faster and get a slower one. | 0213 |
+| **D1462** | Run 6's plan: *"plus the counts in `bin/doctor.sh`'s deployed mode so an operator can see the growth."* | **A count is a reading and not a verdict, and this session already found what inventing the verdict costs.** Nobody has measured a row count at which a deployment is unwell. D1441, three runs earlier, struck the host-interpreter check for exactly this: *"a check added on an unmeasured footing, to the one command that runs as root on production, in a session with no host trip, could fail a host that works."* The same argument arrives a second time, in the same command, in the same session. | **The eleventh check reports the two counts and the date the record starts, and has no threshold** — ADR 0195's three outcomes, where the third is *I could not read it*. A test asserts the absence across five row counts from 0 to 10⁹, so adding a threshold means deleting the test that carries the argument. **And the probe reads the two TABLES rather than migration 0033's functions**, so the count follows the CHECKOUT and not the cluster: a 1.7.0 checkout reads eleven against a deployment at any release, and Session 29's pre-upgrade reading is not disturbed by a tree that is ahead of it. | The deployment is two patches behind the tree already (D1401), and Session 29's first act is a doctor reading taken from the host's own checkout. A check that went `unknown` against an un-upgraded cluster would have made that reading exit 6 for a reason the operator did not cause — which is the shape of the surprise this session exists to avoid. | 0213 |
 
 ---
 
@@ -712,6 +719,69 @@ rather than the migrator's line (D941).
 Targeted: the migration modules, `test_database_function_signatures` (its subject
 moves, and D1421 may have just given it a marker), the agent-plane contract
 modules. **Nothing is applied to a deployment.**
+
+**Done.** 2026-09-17. **D1457–D1462**, ADR **0213**, migration
+`20260917120033` — the only schema this session moves. Eleven mutations,
+**eleven kills, zero survivors**, every control green in the same invocation and
+all four mutated files restored byte-identical.
+
+**Rig 28b decided the ADR, and the finding is that this was never one question.**
+A cluster carrying every released migration and the example project's set, built
+by the product's own bootstrap statements and applied as `migration_user` over
+TCP, with history seeded in both tables across the shapes the plane writes.
+Six measurements, before a line of the migration was written:
+
+1. **Nothing reachable can delete a row today** — the ACL on both tables is the
+   object owner's alone, and a `DELETE` by `SET ROLE` into `auth_service`,
+   `agent_writer`, `agent_reader` and `authenticated` is *permission denied* in
+   all four. So **granting the prunes to nobody preserves the posture rather
+   than narrowing it**, which is what makes that the cheap answer rather than
+   the cautious one.
+2. **Neither table carries a foreign key.** The only one among the three agent
+   tables is `agent_quota.agent_id`, 0028's own `ON DELETE CASCADE`.
+3. **Both prunes are `Seq Scan`s**, and no index is added (D1461).
+4. **Pruning an idempotency claim re-arms its key, silently** — with the control
+   in the same run (D1460). The two tables are a record of the past and a
+   promise about the future, and three documents closed them with one sentence.
+5. **There is no safe subset of that table**: `auth_rotate_agent_secret` returns
+   a revoked agent to `active` with the same id, so a revoked agent's keys are
+   dormant, not dead. **This was the alternative this run expected to take.**
+6. **20,004 rows, fourteen days**: unbounded removed 9,921 in 141 ms, bounded
+   removed 500 in 147 ms. The bounded form is not the faster one, which is the
+   opposite of what the file said before the rig ran (D1461).
+
+*What shipped:* three functions in `app_private` and **no scheduled anything** —
+`agent_audit_prune` and `agent_idempotency_prune`, granted to nobody, each
+refusing a missing horizon, a future horizon and a bound below one; and
+`agent_record_size()`, granted to the record's existing reader because it adds
+no audience and no fact. A proof scans `src/`, `bin/`, `services/` and the
+templates for a caller of either prune, so *nothing deletes an agent record on
+its own* is structural rather than remembered.
+
+*The doctor's eleventh check* (D1462) reports the two counts and the date the
+record starts and **has no threshold**, because D1441 — three runs earlier, in
+this command — is the argument against inventing one. It reads the two tables
+and not the new functions, so the count follows the checkout: a 1.7.0 checkout
+reads eleven against a deployment at any release, and Session 29's pre-upgrade
+reading is untouched.
+
+*Found on the way in, and both are first executions.* **D1457**: four proofs
+still asserted the single cross-set ordering space ADR 0206 replaced — the rule
+whose collapse took beta's deploy down at Session 24 — green for four sessions
+because no release had added a migration since that ADR. **D1459**:
+`bin/doctor.sh` has said *seven live checks* since Session 18 while `diagnose()`
+appended ten, and the operator guide on the same page said ten. **D1458** is the
+cheap half of D1457: a fixture that only reached its subject while two unrelated
+stamps happened to sort a particular way.
+
+*Ran before the push*, once: the agent-plane module whole (62), the migration
+and ledger modules, `test_diagnosis`, `test_doctor_redaction`,
+`test_migrations_apply_as_the_migration_user`,
+`test_database_function_signatures`, `test_acceptance_registry` (D1119 — a test
+was renamed and the registry's node id moved with it), `test_rehearsal`,
+`test_backup_mirror`, `test_fleet`, `test_diagnostic_surface`,
+`test_cli_contract`, `test_documentation_index`, `test_repository_contract`.
+Both fixtures re-rendered. CI is the full check.
 
 ### Run 7 — the reading before a tag
 

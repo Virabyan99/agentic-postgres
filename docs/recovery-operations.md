@@ -127,9 +127,13 @@ step the trip repeats.
 
 ## 5. The doctor's two rehearsed readers
 
-`sudo bin/doctor.sh --project <key>` reports ten checks since Session 18: the
+`sudo bin/doctor.sh --project <key>` reports **eleven** checks since 1.7.0: the
 ninth is the mirror (§1), the tenth is `capability drift`, the live SHA-256
-of the lock on disk against the digest the deployed document recorded. Three
+of the lock on disk against the digest the deployed document recorded, and the
+eleventh is `agent record` — the two agent tables' counts and the date the
+record starts, with **no threshold** (ADR 0213). It reads the tables rather
+than migration 0033's functions, so it answers the same against a deployment
+that has not applied the retention migration. Three
 flags exist for the rehearsals and are carried in the evidence so an
 injected reading is never mistaken for the host's:
 

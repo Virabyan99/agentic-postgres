@@ -4,7 +4,7 @@
 #
 #   bin/doctor.sh                          workstation: tools, interpreter,
 #                                          repository shape, locks. Unprivileged.
-#   sudo bin/doctor.sh --project <key>      deployed: seven live checks against
+#   sudo bin/doctor.sh --project <key>      deployed: eleven live checks against
 #                                          one project on this host. Needs root.
 #
 # **The split is what keeps the bare `python` below correct.** Workstation mode
@@ -16,7 +16,7 @@
 # **So THE HOST'S OWN INTERPRETER IS CHECKED BY NEITHER MODE, and that is a
 # consequence of the split rather than an oversight** (F-026, D1418, D1441).
 # Workstation mode checks a developer's interpreter and is unprivileged;
-# deployed mode checks seven live things about ONE PROJECT and needs root. The
+# deployed mode checks eleven live things about ONE PROJECT and needs root. The
 # host's interpreter is a property of the machine and of no project, so it
 # belongs to neither question as they are drawn, and adding it to deployed mode
 # would put a bare `python` resolution back under `sudo` -- which is the exact
@@ -59,7 +59,8 @@ Usage: bin/doctor.sh [--verbose] [--help]
                      containers, the health route, TLS expiry, the cluster and
                      the pooler, migrations, the backup repository, the WAL
                      archiver, the backup mirror, disk headroom for a restore,
-                     and the capability lock against the deployed document.
+                     the capability lock against the deployed document, and how
+                     much agent record the deployment is carrying.
                      Needs root, because the deployed document is 0600 root.
 
   --disk-warn-copies N, --disk-problem-copies N, --lock-file PATH
@@ -83,6 +84,13 @@ Deployed mode reads the deployed document for identities only. Every verdict
 comes from a live read: that document records what was true when it was
 written, and a project whose archiver died yesterday still publishes the
 status it had at its last deploy (ADR 0158).
+
+The agent record check reports two counts and the date the record starts, and
+NO threshold: nobody has measured a row count at which a deployment is unwell,
+and a threshold invented in the one command that runs as root on production
+could fail a host that works. It reads the two tables rather than migration
+0033's functions, so it answers the same on a deployment that has not applied
+the retention migration (ADR 0213, ADR 0195, D1441).
 
 Prints no environment variables and reads no secret material. --verbose adds
 resolution, never a third party's bytes: no subprocess output, no environment,

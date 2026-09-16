@@ -187,6 +187,14 @@ def poisoned_run(monkeypatch: pytest.MonkeyPatch, doctor: Any) -> None:
             stdout = "1\n"
         elif "migration_ledger" in joined:
             stdout = "21\n"
+        elif "agent_audit" in joined:
+            # Four fields, pipe-separated, the shape `AGENT_RECORD_QUERY` asks
+            # for -- so the probe reaches its parsing path rather than taking
+            # the early return the control below would catch. The timestamps
+            # carry the canary in the one position a cluster value reaches the
+            # report, which is what `test_a_cluster_timestamp_that_is_not_one`
+            # measures.
+            stdout = f"1204|2026-08-01 00:00:00+00|88|{SUBPROCESS}\n"
         elif "pg_stat_archiver" in joined:
             stdout = "5|2026-08-27 00:00:00+00|0||\n"
         elif "du" in command:
@@ -254,6 +262,10 @@ def render(doctor: Any, *, mode: str) -> str:
     # the probe reporting UNKNOWN on a workstation whose rendered root exists
     # and is root-owned.
     checks.append(doctor.probe_capability_drift(doc, lock_file=REPO_ROOT / "VERSION"))
+    # The one probe that repeats a value the CLUSTER produced -- the date the
+    # agent record starts. Everything else here is a number this program parsed
+    # or an enum it chose, so this is the probe the timestamp scan is for.
+    checks.append(doctor.probe_agent_record(doc))
     if mode == "json":
         return diagnosis.render_json(
             tuple(checks), project_key="apg-canary-dev", observed_at="2026-09-04T12:00:00Z"
@@ -669,3 +681,60 @@ def test_no_probe_can_consume_the_callers_stdin(doctor: Any) -> None:
         "the bytes but it did disturb the descriptor, which is the same defect one "
         "layer down"
     )
+
+
+def test_a_cluster_timestamp_that_is_not_one_is_dropped_rather_than_printed(
+    doctor: Any,
+) -> None:
+    """The agent record check repeats one value the cluster produced, and this is
+    the guard on it (ADR 0213, ADR 0159).
+
+    Every other probe reports a number it parsed or an enum it chose. The date
+    the record starts is a `timestamptz::text` from the cluster, so it is
+    admitted only when it looks like the thing that was asked for.
+
+    **The control is the well-formed value in the first assertion**: a
+    `_timestamp` that rejected everything would satisfy the three refusals and
+    fail that one, which is what stops "it refuses" from standing in for "it
+    discriminates".
+    """
+    assert doctor._timestamp("2026-08-01 00:00:00+00") == "2026-08-01 00:00:00+00"
+    assert doctor._timestamp(SUBPROCESS) is None
+    assert doctor._timestamp("") is None
+    assert doctor._timestamp("2026-08-01 00:00:00+00; DROP") is None
+
+
+@pytest.mark.usefixtures("poisoned_run")
+def test_the_agent_record_probe_reports_counts_when_the_cluster_answers(
+    doctor: Any,
+) -> None:
+    """The rig's reading, parsed. Without this the probe could be returning
+    UNKNOWN for every mode above and the leak scans would be scanning a refusal.
+    """
+    check = doctor.probe_agent_record(document())
+    assert check.verdict == diagnosis.OK, check.detail
+    assert dict(check.evidence)["audit_rows"] == "1204"
+    assert dict(check.evidence)["idempotency_rows"] == "88"
+    # The canary field was dropped, and the well-formed one beside it was kept.
+    assert dict(check.evidence)["idempotency_oldest"] == "null"
+    assert dict(check.evidence)["audit_oldest"] == "2026-08-01 00:00:00+00"
+
+
+def test_the_agent_record_probe_reports_a_cluster_that_did_not_answer(
+    doctor: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The third outcome, reached the way production reaches it: a `docker exec`
+    that did not complete. Reported, not folded into zero rows (ADR 0195, D600).
+    """
+    monkeypatch.setattr(doctor, "run", lambda *a, **k: None)
+    check = doctor.probe_agent_record(document())
+    assert check.verdict == diagnosis.UNKNOWN
+    assert "could not be read" in check.detail
+
+
+def test_the_agent_record_probe_reports_a_document_with_no_container(doctor: Any) -> None:
+    doc = document()
+    doc["database"] = {}
+    check = doctor.probe_agent_record(doc)
+    assert check.verdict == diagnosis.UNKNOWN
+    assert "names no container" in check.detail

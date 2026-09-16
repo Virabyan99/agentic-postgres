@@ -100,21 +100,34 @@ PREAMBLE = "SET LOCAL ROLE {{object_owner}};"
 # ---------------------------------------------------------------------------
 
 
-def test_a_declared_set_renders_after_the_release_set_in_version_order(
+def test_each_declared_set_is_ordered_within_itself_and_lands_in_its_own_space(
     document: dict[str, Any], setless_document: dict[str, Any]
 ) -> None:
-    """The release's set, then the project's, in one directory.
+    """The release's set, then the project's, **each in its own ordering space**.
 
-    dbmate is handed a DIRECTORY and orders the whole of it by filename, which
-    is why this is asserted about versions rather than about the order
-    `sets_for` returns. Rig 20a measured what the difference costs: with an
-    out-of-order pending migration, `up --strict` exits 2 having applied nothing
-    on a deployed cluster, while a fresh cluster applies the same pair silently
-    -- one set producing two schemas (D1098).
+    This proof used to read `min(project) > max(release)` -- one ascending list
+    across both sets -- with dbmate being handed one directory as its reason.
+    **ADR 0206 removed that reason** and the product's own code says so:
+    `_assert_follows_release_version`'s docstring calls the cross-set rule *"a
+    record, not a guard"*, because each set now renders to its own directory and
+    applies against its own migrations table, ordered against its own applied set
+    only. The demand was never one-directional -- with one shared space the two
+    climb past each other indefinitely, which is what took beta's deploy down at
+    Session 24 (D1288) -- so a proof still asserting it was asserting the rule
+    that failure produced.
+
+    It stayed green because no release added a migration between ADR 0206 and
+    Session 28 Run 6: Sessions 25, 26 and 27 added none. The first release
+    migration after the ADR sorts above an applied project migration, which is
+    exactly what the ADR made legal, and this is where that was found (D1457).
+
+    What is asserted instead is what ADR 0206 actually guarantees, which is the
+    thing that would have to break for D1098 to come back: each set ascends
+    within itself, the two sets have different roots, and their tables differ.
 
     The setless project is the control, in the same test: it must render the
-    release's set alone, or "the release comes first" would be trivially true of
-    a list with one thing in it.
+    release's set alone, or every claim here would be true of a list with one
+    thing in it.
     """
     sets = migrations.sets_for(document)
     assert [migration_set.label for migration_set in sets] == ["release", "project"]
@@ -122,10 +135,15 @@ def test_a_declared_set_renders_after_the_release_set_in_version_order(
     release_versions = [entry["version"] for entry in sets[0].load_manifest()["migrations"]]
     project_versions = [entry["version"] for entry in sets[1].load_manifest()["migrations"]]
     assert release_versions and project_versions
-    assert min(project_versions) > max(release_versions), (
-        "a project migration sorts before a release migration, so dbmate would "
-        "apply them in a different order than sets_for describes"
+    assert release_versions == sorted(release_versions)
+    assert project_versions == sorted(project_versions)
+
+    assert sets[0].root != sets[1].root, (
+        "the two sets share a root, so dbmate would order them as one directory by "
+        "filename and the cross-set version order would matter again (ADR 0206)"
     )
+    assert rendering.migrations_subdir("release") != rendering.migrations_subdir("project")
+    assert rendering.migrations_table("release") != rendering.migrations_table("project")
 
     control = migrations.sets_for(setless_document)
     assert [migration_set.label for migration_set in control] == ["release"], (
@@ -351,7 +369,16 @@ def test_a_project_version_older_than_the_release_lock_is_refused(copied: Path) 
 
     for version, why in (("20260903000000", "older"), (follows, "equal")):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest["migrations"][0]["version"] = version
+        # **Every entry is restamped, from `version` upward.** Setting only the
+        # first one made this proof depend on an accident: the release's newest
+        # stamp happened to sort BELOW the example set's second migration, so a
+        # manifest with the first entry raised to it still read as ascending.
+        # Run 6's release migration is the first to sort above that set, and the
+        # manifest loader then refused the fixture before `verify_lock` could
+        # refuse the version -- a proof failing on its own scaffolding rather
+        # than on its subject (D1458).
+        for offset, entry in enumerate(manifest["migrations"]):
+            entry["version"] = str(int(version) + offset)
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
         candidate = migrations.MigrationSet(label="project", root=copied / "migrations")

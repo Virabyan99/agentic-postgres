@@ -100,11 +100,23 @@ def test_the_rendered_manifest_names_the_set_of_every_file(manifest: dict, docum
     migration is recorded as the release's, or if the release's set is empty --
     which would make every other assertion here hold against two empty sets.
 
-    The version order is asserted here rather than left to dbmate because dbmate
-    orders one directory by filename and rig 20a measured what that costs when
-    the order is wrong: `up --strict` exits 2 having applied nothing on a
-    deployed cluster, while a fresh cluster applies the same pair silently
-    (D1098). The render is where that is still cheap to catch.
+    **The version order is asserted PER SET, and D1457 is why it used to be
+    asserted across both.** dbmate orders one directory by filename and rig 20a
+    measured what a wrong order costs -- `up --strict` exits 2 having applied
+    nothing on a deployed cluster while a fresh one applies the same pair
+    silently (D1098). ADR 0206 answered that by giving each set its own
+    directory and its own migrations table, so there is no longer one list for
+    dbmate to order: `migrations/` and `migrations-project/` are two
+    invocations, and *each set is ordered against its own applied set only*.
+    A single ascending list across both was the rule ADR 0206 replaced, and it
+    stayed green for four sessions because no release added a migration after
+    that ADR. The first one that did lands in the window the ADR made legal.
+
+    So what is asserted is the property that makes cross-set order irrelevant:
+    each set ascends within itself, and the two sets are in different
+    directories bound for different tables. A render that put them back in one
+    directory fails here, which is the regression the old assertion was really
+    standing in front of.
     """
     labels = {entry["file"]: entry["set"] for entry in manifest["migrations"]}
     assert labels, "the rendered manifest names no migrations at all"
@@ -116,10 +128,28 @@ def test_the_rendered_manifest_names_the_set_of_every_file(manifest: dict, docum
     assert by_label["release"], "no migration is recorded as the release's"
     assert set(by_label) <= {"release", "project"}, f"unknown set labels: {sorted(by_label)}"
 
-    versions = [entry["version"] for entry in manifest["migrations"]]
-    assert versions == sorted(versions), (
-        f"the rendered set is not in ascending version order: {versions}"
+    for label, versions in by_label.items():
+        assert versions == sorted(versions), (
+            f"the rendered {label} set is not in ascending version order: {versions}"
+        )
+
+    directories = {entry["set"]: entry["dir"] for entry in manifest["migrations"]}
+    per_set = {entry["set"]: set() for entry in manifest["migrations"]}
+    for entry in manifest["migrations"]:
+        per_set[entry["set"]].add(entry["dir"])
+    assert all(len(dirs) == 1 for dirs in per_set.values()), (
+        f"a set's payloads are spread across directories: {per_set}"
     )
+    if len(directories) > 1:
+        assert len(set(directories.values())) == len(directories), (
+            f"two sets render into one directory: {directories}. ADR 0206's whole "
+            "mechanism is that they do not, and with one directory dbmate orders "
+            "both by filename and the cross-set order matters again"
+        )
+        assert manifest["migrations_table"] != manifest["project_migrations_table"], (
+            "both sets record into one migrations table; each set is ordered against "
+            "its own applied set only (ADR 0206)"
+        )
 
     declared = migrations.project_set_from(document)
     if declared is None:
@@ -130,9 +160,21 @@ def test_the_rendered_manifest_names_the_set_of_every_file(manifest: dict, docum
     else:
         assert by_label["project"], "the project declares a set and no payload came from it"
         assert manifest["project_set"]["count"] == len(by_label["project"])
-        # Every project version sorts after every release version, which is the
-        # rule `freeze-lock --project` records as `follows_release_version`.
-        assert min(by_label["project"]) > max(by_label["release"])
+        # **Against the set's OWN recorded release, not the checkout's newest.**
+        # This line read `min(project) > max(release)` and called that "the rule
+        # freeze-lock --project records as follows_release_version" -- which is
+        # the conflation D1436 found one caller over. The record is the release a
+        # set was REVIEWED against and may be an earlier one the operator
+        # declared (ADR 0210); the checkout's newest is whatever the release has
+        # added since, which after ADR 0206 may sort above the whole project set
+        # and legally so. Read the record, which is what the product enforces.
+        follows = declared.load_lock().get("follows_release_version")
+        assert follows, "the project lock records no release it follows"
+        assert min(by_label["project"]) > follows, (
+            f"a project version sorts at or below the release this set was frozen "
+            f"against ({follows}); that is the refusal _assert_follows_release_version "
+            "makes, and the render should not be able to produce it"
+        )
 
 
 def test_each_recorded_digest_is_the_digest_of_the_file(manifest: dict) -> None:

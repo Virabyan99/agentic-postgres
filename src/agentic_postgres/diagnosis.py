@@ -59,6 +59,7 @@ __all__ = [
     "UNKNOWN",
     "WARN",
     "Check",
+    "agent_record",
     "archiver",
     "capability_drift",
     "containers",
@@ -519,6 +520,60 @@ def capability_drift(
         OK,
         "the lock on disk is the one the deployed document recorded, and the one the "
         "running agent plane loaded",
+        facts,
+    )
+
+
+def agent_record(
+    *,
+    audit_rows: int | None,
+    audit_oldest: str | None,
+    idempotency_rows: int | None,
+    idempotency_oldest: str | None,
+    detail: str = "",
+) -> Check:
+    """How much agent record this deployment carries, and how far back it goes.
+
+    **A reading with no threshold, and the absence is the decision** (ADR 0213).
+    `app_private.agent_audit` and `app_private.agent_idempotency` grow without
+    bound and nothing prunes either unless an operator asks; what this check
+    adds is that the growth is a number an operator SEES rather than a sentence
+    in a migration comment they will never open.
+
+    There is no `WARN` at some row count because **nobody has measured a row
+    count at which this deployment is unwell**, and a threshold invented in the
+    one command that runs as root on production could fail a host that works --
+    D1441, found in Run 3 of the same session that built this check. What is
+    asked here is ADR 0195's question: the numbers, or *I could not read them*.
+
+    The probe reads the two TABLES and not migration 0033's functions, so this
+    check answers unchanged against a deployment that has not applied the
+    retention migration yet -- which every deployment is until Session 29.
+
+    `None` for either count means the reading did not come back. The two
+    `*_oldest` values are `None` on an empty table, which is a fact rather than
+    a failure: a deployment whose agent plane has never been called carries no
+    record, and saying `0 audit rows` with no date is the truthful rendering.
+    """
+    facts = _pairs(
+        audit_rows=audit_rows,
+        audit_oldest=audit_oldest,
+        idempotency_rows=idempotency_rows,
+        idempotency_oldest=idempotency_oldest,
+    )
+    if audit_rows is None or idempotency_rows is None:
+        return _check(
+            "agent record",
+            UNKNOWN,
+            f"the agent record could not be read{_tail(detail)}",
+            facts,
+        )
+    since = f" since {audit_oldest}" if audit_oldest else ""
+    return _check(
+        "agent record",
+        OK,
+        f"{audit_rows} audit rows{since}, {idempotency_rows} idempotency claims; "
+        "nothing prunes either unless an operator asks (ADR 0213)",
         facts,
     )
 

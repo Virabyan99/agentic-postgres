@@ -2733,7 +2733,7 @@
   priority: P0
   target_session: 20
   test_nodeids:
-    - tests/contract/test_project_migration_sets.py::test_a_declared_set_renders_after_the_release_set_in_version_order
+    - tests/contract/test_project_migration_sets.py::test_each_declared_set_is_ordered_within_itself_and_lands_in_its_own_space
     - tests/contract/test_project_migration_sets.py::test_the_project_lock_is_frozen_and_verified_apart_from_the_release_lock
     - tests/contract/test_project_migration_sets.py::test_a_project_version_older_than_the_release_lock_is_refused
     - tests/contract/test_project_migration_sets.py::test_the_release_lock_is_never_rewritten_by_a_project_freeze

@@ -655,6 +655,87 @@ def _first_int(text: str) -> int | None:
 # ---------------------------------------------------------------------------
 
 
+#: The agent record's size, in one round trip. Pipe-separated rather than four
+#: queries: the four numbers describe one moment, and four calls would describe
+#: four.
+AGENT_RECORD_QUERY = (
+    "SELECT (SELECT count(*) FROM app_private.agent_audit)::text || '|' || "
+    "coalesce((SELECT min(started_at) FROM app_private.agent_audit)::text, '') || '|' || "
+    "(SELECT count(*) FROM app_private.agent_idempotency)::text || '|' || "
+    "coalesce((SELECT min(created_at) FROM app_private.agent_idempotency)::text, '')"
+)
+
+#: What a timestamp read back from the cluster is allowed to look like before it
+#: is repeated in a report. Deliberately narrow: `YYYY-MM-DD HH:MM:SS` and
+#: whatever fraction and offset follow, every character from a fixed alphabet.
+#: The cluster is not a third party in the sense ADR 0159 means, but it is not
+#: this program either, and a value that does not look like what was asked for
+#: is dropped rather than printed.
+_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[0-9.:+-]*$")
+
+
+def _timestamp(text: str) -> str | None:
+    candidate = text.strip()
+    return candidate if _TIMESTAMP.match(candidate) else None
+
+
+def probe_agent_record(document: dict[str, Any]) -> diagnosis.Check:
+    """The two agent tables' counts, read from the cluster (ADR 0213).
+
+    One `psql` round trip over the container socket, as the superuser, the way
+    `probe_database` reaches it. **The query names the TABLES and not migration
+    0033's `agent_record_size()`**, so it answers on a deployment that has not
+    applied the retention migration.
+
+    Anything else -- no container in the document, a cluster that did not
+    answer, a deployment so old that the tables do not exist -- is the third
+    outcome, reported rather than folded into a healthy-looking zero (ADR 0195,
+    D600).
+    """
+    db = document.get("database") or {}
+    container = db.get("container")
+    name = db.get("name")
+    if not container or not name:
+        return diagnosis.agent_record(
+            audit_rows=None,
+            audit_oldest=None,
+            idempotency_rows=None,
+            idempotency_oldest=None,
+            detail="the document names no container",
+        )
+
+    read = run(
+        "docker", "exec", "-i", container, "psql", "-U", "postgres", "-d", name,
+        "-X", "-qtA", "-c", AGENT_RECORD_QUERY,
+        timeout=30,
+    )  # fmt: skip
+    if read is None or read.returncode != 0:
+        return diagnosis.agent_record(
+            audit_rows=None,
+            audit_oldest=None,
+            idempotency_rows=None,
+            idempotency_oldest=None,
+            detail="the cluster did not answer",
+        )
+
+    fields = (read.stdout.strip().splitlines() or [""])[0].split("|")
+    if len(fields) != 4:
+        return diagnosis.agent_record(
+            audit_rows=None,
+            audit_oldest=None,
+            idempotency_rows=None,
+            idempotency_oldest=None,
+            detail="the reading did not arrive in the shape it was asked for",
+        )
+    return diagnosis.agent_record(
+        audit_rows=_first_int(fields[0]),
+        audit_oldest=_timestamp(fields[1]),
+        idempotency_rows=_first_int(fields[2]),
+        idempotency_oldest=_timestamp(fields[3]),
+        detail="the reading did not arrive in the shape it was asked for",
+    )
+
+
 def diagnose(
     project_key: str,
     root: Path = deployed_output.PROJECT_STATE_ROOT,
@@ -674,6 +755,7 @@ def diagnose(
     checks.append(probe_mirror(project_key, document, root))
     checks.append(probe_disk(document, warn_copies=warn_copies, problem_copies=problem_copies))
     checks.append(probe_capability_drift(document, lock_file=lock_file))
+    checks.append(probe_agent_record(document))
     return tuple(checks)
 
 

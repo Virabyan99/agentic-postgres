@@ -2459,3 +2459,326 @@ def test_a_dry_run_of_a_transition_reports_the_conflict_the_real_call_would(
     )
     assert rehearsed.returncode != 0, "a rehearsal skipped the compare-and-swap"
     assert "AP409" in (rehearsed.stderr or ""), rehearsed.stderr
+
+
+# ---------------------------------------------------------------------------
+# Migration 0033: what the record keeps, and who can make a row disappear
+# (ADR 0213, D1255, D1457-D1462)
+# ---------------------------------------------------------------------------
+#
+# **Every prune below works in a window of the distant past**, and that is not
+# decoration. This cluster is module-scoped and shared, the fixture seeds a
+# historical refused row for D940, and a horizon at `now()` would delete every
+# row every other proof in this file wrote -- including, depending on the order
+# tests run in, rows a later one reads back. Seeding at 2019 and pruning at 2020
+# makes each of these proofs independent of the order and of the rest of the
+# module, which is the property the shared fixture costs and has to be bought
+# back deliberately (D943's shape, one table over).
+
+#: The window the retention proofs own. Far enough back that no live row can be
+#: in it, and stated once so a reader can see that the two constants bracket
+#: each other rather than being two dates that happen to sort.
+ANCIENT = "2019-01-01 00:00:00+00"
+LESS_ANCIENT = "2019-06-01 00:00:00+00"
+RETENTION_HORIZON = "2019-03-01 00:00:00+00"
+
+
+def _ancient_audit(cluster: dict[str, Any], agent: str, *, at: str, rows: int = 1) -> None:
+    """`rows` audit rows for `agent`, stamped at `at`. Seeded as the superuser.
+
+    The rows are history, not requests: `started_at` has a `DEFAULT now()` and no
+    caller-reachable way to set it, which is the property that makes the audit
+    record a record. A proof about pruning by time has to place rows in time, and
+    the only identity that can is the one that owns the table.
+    """
+    su(
+        cluster,
+        "INSERT INTO app_private.agent_audit "
+        "(source, agent_id, owner_id, tool, outcome, started_at) "
+        f"SELECT 'agent_plane', '{agent}', gen_random_uuid(), 'query_resource', "
+        f"'served', '{at}'::timestamptz FROM generate_series(1, {rows});",
+    )
+
+
+def _audit_rows(cluster: dict[str, Any], agent: str) -> int:
+    return int(
+        su(
+            cluster,
+            f"SELECT count(*) FROM app_private.agent_audit WHERE agent_id = '{agent}';",
+        ).stdout.strip()
+    )
+
+
+def test_neither_prune_is_granted_to_anybody(cluster: dict[str, Any]) -> None:
+    """ADR 0213's decision, read from the catalog and then attempted.
+
+    **A grant question and a reach question are different questions** (ADR 0134),
+    and this one needs both. The catalog says whose ACL entries exist; `SET ROLE`
+    says whether a role can actually call the thing. A function granted to nobody
+    would still be reachable by a role that owned it or inherited the owner, and
+    a catalog read alone would not notice.
+
+    The owner is subtracted from the grantees for `aclexplode`'s reason, the same
+    way the claim table's proof does it one section up.
+    """
+    for function in ("agent_audit_prune", "agent_idempotency_prune"):
+        grantees = su(
+            cluster,
+            "SELECT coalesce(string_agg(DISTINCT a.grantee::regrole::text, ','), '') "
+            "FROM pg_proc p, aclexplode(p.proacl) a "
+            f"WHERE p.pronamespace = 'app_private'::regnamespace AND p.proname = '{function}' "
+            "  AND a.grantee <> p.proowner;",
+        ).stdout.strip()
+        assert grantees == "", (
+            f"app_private.{function} is granted to {grantees}. ADR 0213 grants it to "
+            "nobody: a delete authority over the agent record behind a reachable "
+            "identity is 0020's refusal with one more function in front of it"
+        )
+
+    for role_key in ("auth_service", "agent_writer", "agent_reader", "authenticated"):
+        reached = as_role(
+            cluster,
+            role_key,
+            "SELECT app_private.agent_audit_prune(now() - interval '1 day');",
+        )
+        assert reached.returncode != 0, f"{role_key} reached agent_audit_prune"
+        assert "permission denied" in (reached.stderr or ""), reached.stderr
+
+
+def test_the_size_reading_is_granted_to_the_records_existing_reader_and_nobody_else(
+    cluster: dict[str, Any],
+) -> None:
+    """`agent_record_size` adds no audience: `auth_service` already reads whole
+    audit rows through `auth_list_agent_audit` (ADR 0142), so a count of the rows
+    it can page through tells it nothing new. Every other request role is refused.
+    """
+    grantees = su(
+        cluster,
+        "SELECT coalesce(string_agg(DISTINCT a.grantee::regrole::text, ','), '') "
+        "FROM pg_proc p, aclexplode(p.proacl) a "
+        "WHERE p.pronamespace = 'app_private'::regnamespace "
+        "  AND p.proname = 'agent_record_size' AND a.grantee <> p.proowner;",
+    ).stdout.strip()
+    assert grantees == cluster["roles"]["auth_service"], grantees
+
+    served = as_role(cluster, "auth_service", "SELECT * FROM app_private.agent_record_size();")
+    assert served.returncode == 0, served.stderr
+    assert served.stdout.strip().count("|") == 3, served.stdout
+
+    for role_key in ("agent_writer", "agent_reader", "authenticated"):
+        refused = as_role(cluster, role_key, "SELECT * FROM app_private.agent_record_size();")
+        assert refused.returncode != 0, f"{role_key} read the record's size"
+
+
+def test_a_prune_refuses_a_missing_horizon_a_future_one_and_a_bound_below_one(
+    cluster: dict[str, Any],
+) -> None:
+    """Three refusals, and the control is the same call with a horizon it accepts.
+
+    A `NULL` horizon compared with `<` matches nothing, so without the guard the
+    function returns 0 and an operator reads *there was nothing to prune* when
+    what happened is *you did not say from when* -- D600 at the call site. A
+    future horizon deletes rows written between the moment the intent was formed
+    and the moment the statement ran.
+
+    **Without the control arm, a function that refused everything would pass all
+    three** (D499).
+    """
+    for label, argument in (
+        ("a missing horizon", "NULL"),
+        ("a future horizon", "now() + interval '1 hour'"),
+        ("a bound below one", f"'{RETENTION_HORIZON}'::timestamptz, 0"),
+    ):
+        for function in ("agent_audit_prune", "agent_idempotency_prune"):
+            refused = su(cluster, f"SELECT app_private.{function}({argument});")
+            assert refused.returncode != 0, f"{function} accepted {label}"
+            assert "AP422" in (refused.stderr or ""), f"{function}, {label}: {refused.stderr}"
+
+    agent = str(uuid.uuid4())
+    _ancient_audit(cluster, agent, at=ANCIENT)
+    accepted = su(
+        cluster,
+        f"SELECT app_private.agent_audit_prune('{RETENTION_HORIZON}'::timestamptz);",
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert _audit_rows(cluster, agent) == 0, "the control arm's row survived a horizon above it"
+
+
+def test_an_audit_prune_removes_what_is_older_than_the_horizon_and_leaves_the_rest(
+    cluster: dict[str, Any],
+) -> None:
+    """The count it returns is the count it removed, and the newer rows stay.
+
+    Both halves are asserted because either alone admits a wrong implementation:
+    a function that deleted the whole table would satisfy *the old rows are gone*,
+    and one that deleted nothing would satisfy *the new rows are here*.
+    """
+    agent = str(uuid.uuid4())
+    _ancient_audit(cluster, agent, at=ANCIENT, rows=3)
+    _ancient_audit(cluster, agent, at=LESS_ANCIENT, rows=2)
+    assert _audit_rows(cluster, agent) == 5
+
+    removed = su(
+        cluster,
+        f"SELECT app_private.agent_audit_prune('{RETENTION_HORIZON}'::timestamptz);",
+    ).stdout.strip()
+    assert removed == "3", f"the prune reported {removed}, not the three rows below the horizon"
+
+    survived = su(
+        cluster,
+        "SELECT count(*) FROM app_private.agent_audit "
+        f"WHERE agent_id = '{agent}' AND started_at = '{LESS_ANCIENT}'::timestamptz;",
+    ).stdout.strip()
+    assert survived == "2", f"{survived} of the two rows above the horizon survived"
+    assert _audit_rows(cluster, agent) == 2
+
+
+def test_a_bounded_prune_removes_at_most_its_bound_and_is_called_again(
+    cluster: dict[str, Any],
+) -> None:
+    """*Call it again until it returns zero* is the procedure, so it is proved.
+
+    `p_limit` bounds how many rows one transaction touches and holds locks on
+    until it commits -- not how long it takes. Measured in rig 28b: on 20,004
+    rows the unbounded prune removed 9,921 in 141 ms and a bounded one removed
+    500 in 147 ms, so the bound is about the lock and not the clock (D1461).
+    """
+    agent = str(uuid.uuid4())
+    _ancient_audit(cluster, agent, at=ANCIENT, rows=5)
+
+    first = su(
+        cluster,
+        f"SELECT app_private.agent_audit_prune('{RETENTION_HORIZON}'::timestamptz, 2);",
+    ).stdout.strip()
+    assert first == "2", f"a bound of 2 removed {first}"
+    assert _audit_rows(cluster, agent) == 3
+
+    su(cluster, f"SELECT app_private.agent_audit_prune('{RETENTION_HORIZON}'::timestamptz, 2);")
+    last = su(
+        cluster,
+        f"SELECT app_private.agent_audit_prune('{RETENTION_HORIZON}'::timestamptz, 2);",
+    ).stdout.strip()
+    assert last == "1", f"the third pass removed {last}, not the one row left"
+    assert (
+        su(
+            cluster,
+            f"SELECT app_private.agent_audit_prune('{RETENTION_HORIZON}'::timestamptz, 2);",
+        ).stdout.strip()
+        == "0"
+    ), "a fourth pass over an emptied window did not return zero"
+
+
+def test_pruning_a_claim_re_arms_its_key_and_the_unpruned_replay_is_the_control(
+    cluster: dict[str, Any],
+) -> None:
+    """**The measurement ADR 0213 is built on, with its control in the same test.**
+
+    Rig 28b measured it and this keeps it measured: a write replayed while its
+    claim is present is deduplicated, and the same write replayed after the claim
+    is pruned writes a SECOND row and reports success -- no error on either side.
+    At-most-once becomes at-least-once for every key past the horizon.
+
+    This is not a defect being asserted into permanence. It is the CONSEQUENCE of
+    the act `agent_idempotency_prune` performs, and a proof of it is what keeps
+    the function's comment true: a future run that made the prune quietly refuse,
+    or made a replay after a prune fail, would move a documented guarantee
+    without moving the document.
+
+    The claim is backdated so the prune's horizon reaches it and nothing else.
+    """
+    agent, owner = _writing_agent(cluster)
+    key = "retention-rearm-01"
+
+    first = _returned(_note(cluster, agent, owner, key, title="retention"))
+    assert first, "the first write returned nothing"
+
+    # THE CONTROL: the same call again, claim still present.
+    replayed = _returned(_note(cluster, agent, owner, key, title="retention"))
+    assert replayed == first, f"the replay returned {replayed!r}, not {first!r}"
+    assert (
+        su(cluster, f"SELECT count(*) FROM app.notes WHERE owner_id = '{owner}';").stdout.strip()
+        == "1"
+    ), "the control arm wrote twice; this test cannot measure the prune"
+
+    su(
+        cluster,
+        "UPDATE app_private.agent_idempotency "
+        f"SET created_at = '{ANCIENT}'::timestamptz "
+        f"WHERE agent_id = '{agent}' AND idempotency_key = '{key}';",
+    )
+    removed = su(
+        cluster,
+        f"SELECT app_private.agent_idempotency_prune('{RETENTION_HORIZON}'::timestamptz);",
+    ).stdout.strip()
+    assert removed == "1", f"the prune removed {removed} claims, not the one backdated"
+
+    rearmed = _returned(_note(cluster, agent, owner, key, title="retention"))
+    assert rearmed and rearmed != first, (
+        "the write after the prune returned the original row; if a replay is still "
+        "deduplicated after its claim is gone, this function does not do what its "
+        "comment and ADR 0213 say it does"
+    )
+    assert (
+        su(cluster, f"SELECT count(*) FROM app.notes WHERE owner_id = '{owner}';").stdout.strip()
+        == "2"
+    ), "the pruned key did not re-arm"
+
+
+def test_the_size_reading_counts_the_two_tables_it_names(cluster: dict[str, Any]) -> None:
+    """Four values, and each is compared with the count it claims to be.
+
+    A reading that returned constants, or that counted one table twice, satisfies
+    "four numbers arrived". The doctor renders these without a threshold, so the
+    only thing standing between an operator and a wrong number is this.
+    """
+    agent = str(uuid.uuid4())
+    _ancient_audit(cluster, agent, at=ANCIENT, rows=4)
+
+    reported = su(cluster, "SELECT * FROM app_private.agent_record_size();").stdout.strip()
+    audit_rows, audit_oldest, claim_rows, _ = reported.split("|")
+
+    direct = su(cluster, "SELECT count(*) FROM app_private.agent_audit;").stdout.strip()
+    assert audit_rows == direct, (
+        f"the reading says {audit_rows} audit rows and the table has {direct}"
+    )
+    assert audit_oldest.startswith("2019-01-01"), (
+        f"the oldest audit row is reported as {audit_oldest!r}, and four rows were just "
+        f"seeded at {ANCIENT}"
+    )
+    claims = su(cluster, "SELECT count(*) FROM app_private.agent_idempotency;").stdout.strip()
+    assert claim_rows == claims, f"the reading says {claim_rows} claims and the table has {claims}"
+
+    su(cluster, f"SELECT app_private.agent_audit_prune('{RETENTION_HORIZON}'::timestamptz);")
+
+
+def test_nothing_in_this_release_calls_a_prune() -> None:
+    """ADR 0213's largest half, made structural rather than remembered.
+
+    *Nothing in this product deletes an agent record on its own.* A scheduled
+    call, a trigger, or a `bin/` command that pruned as a side effect would each
+    make that sentence false while every other proof in this file stayed green --
+    the functions would still be granted to nobody and would still refuse a bad
+    horizon.
+
+    The scan covers what this repository ships and runs: `src/`, `bin/`,
+    `services/` and the migration templates. `tests/` is excluded because the
+    proofs above call these functions, which is the point of them.
+    """
+    callers: list[str] = []
+    for root in ("src", "bin", "services", "migrations/templates"):
+        for path in sorted((REPO_ROOT / root).rglob("*")):
+            if not path.is_file() or path.suffix not in {".py", ".sh", ".sql", ".ts"}:
+                continue
+            body = path.read_text(encoding="utf-8", errors="replace")
+            for name in ("agent_audit_prune", "agent_idempotency_prune"):
+                if name not in body:
+                    continue
+                # The migration that CREATES them names them, and so does the
+                # doctor's usage prose. A call is what this looks for.
+                if path.name == "0033-agent-record-retention.sql":
+                    continue
+                callers.append(f"{path.relative_to(REPO_ROOT)}: {name}")
+    assert not callers, (
+        f"something in the release names a prune: {callers}. ADR 0213's decision is that "
+        "nothing deletes an agent record on its own; a caller here makes that false"
+    )

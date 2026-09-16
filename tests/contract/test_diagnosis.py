@@ -492,3 +492,76 @@ def test_capability_drift_reads_the_plane_and_reports_unknown_when_it_cannot() -
         assert (
             drift(recorded=False, present=False, matches=None, plane=plane).verdict == diagnosis.OK
         )
+
+
+# ---------------------------------------------------------------------------
+# The agent record (ADR 0213)
+# ---------------------------------------------------------------------------
+
+
+def test_the_agent_record_reading_is_ok_with_the_numbers_behind_it() -> None:
+    check = diagnosis.agent_record(
+        audit_rows=1204,
+        audit_oldest="2026-08-01 00:00:00+00",
+        idempotency_rows=88,
+        idempotency_oldest="2026-08-02 00:00:00+00",
+    )
+    assert check.verdict == diagnosis.OK
+    assert "1204" in check.detail and "88" in check.detail
+    assert dict(check.evidence)["audit_rows"] == "1204"
+
+
+def test_a_reading_that_did_not_come_back_is_unknown_and_not_zero() -> None:
+    """D600 in the check itself: `0 audit rows` and *I could not ask* are the two
+    answers a caller must not confuse, and only one of them is reassuring."""
+    check = diagnosis.agent_record(
+        audit_rows=None,
+        audit_oldest=None,
+        idempotency_rows=None,
+        idempotency_oldest=None,
+        detail="the cluster did not answer",
+    )
+    assert check.verdict == diagnosis.UNKNOWN
+    assert diagnosis.exit_code((check,)) == 6
+    assert dict(check.evidence)["audit_rows"] == "null"
+
+
+def test_half_a_reading_is_not_a_reading() -> None:
+    """One table answered and the other did not. Reporting the half that arrived
+    as a healthy check is the same fold with better manners."""
+    check = diagnosis.agent_record(
+        audit_rows=10, audit_oldest=None, idempotency_rows=None, idempotency_oldest=None
+    )
+    assert check.verdict == diagnosis.UNKNOWN
+
+
+def test_an_empty_agent_record_is_a_fact_and_not_a_failure() -> None:
+    """A deployment whose agent plane has never been called carries no record.
+    The oldest timestamps are `None` and the counts are real zeroes."""
+    check = diagnosis.agent_record(
+        audit_rows=0, audit_oldest=None, idempotency_rows=0, idempotency_oldest=None
+    )
+    assert check.verdict == diagnosis.OK
+    assert "0 audit rows" in check.detail
+    assert "since" not in check.detail
+
+
+def test_the_agent_record_check_has_no_threshold_anywhere() -> None:
+    """**The decision, asserted rather than trusted** (ADR 0213, D1441).
+
+    Nobody has measured a row count at which a deployment is unwell, so a
+    `WARN` here would be a number invented in the one command that runs as root
+    on production. A future edit adding one has to delete this test, which is
+    where the argument is.
+    """
+    for rows in (0, 1, 10**3, 10**6, 10**9):
+        check = diagnosis.agent_record(
+            audit_rows=rows,
+            audit_oldest="2020-01-01 00:00:00+00",
+            idempotency_rows=rows,
+            idempotency_oldest="2020-01-01 00:00:00+00",
+        )
+        assert check.verdict == diagnosis.OK, (
+            f"{rows} rows produced {check.verdict}. If a threshold is wanted, it is "
+            "measured first and ADR 0213 is amended -- it is not chosen here"
+        )

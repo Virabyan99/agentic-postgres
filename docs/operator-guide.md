@@ -38,10 +38,17 @@ plane, migrations — this page hands to it and does not repeat it.
 **What the doctor reads on a well project** is the best one-screen description
 of what runs: *containers, the health route, TLS expiry, the cluster and the
 pooler, migrations, the backup repository, the WAL archiver, the backup
-mirror, disk headroom for a restore, and the capability lock against the
-deployed document* — ten checks, **10 ok / 0 problem** on both projects at
-2026-09-15. The tenth reads the lock the **running** agent plane loaded, not
-the file on disk (D1152/D1153, repaired 2026-09-13).
+mirror, disk headroom for a restore, the capability lock against the deployed
+document, and how much agent record the deployment is carrying*. The reading
+of record is **10 ok / 0 problem** on both projects at 2026-09-15, taken with
+the ten checks that existed then. **Since 1.7.0 there are eleven**: `agent
+record` reports the two agent tables' counts and the date the record starts,
+with no threshold, because nobody has measured a row count at which a
+deployment is unwell (ADR 0213). It reads the tables and not migration 0033's
+functions, so **a 1.7.0 checkout reads eleven against a deployment at any
+release** — the count follows the checkout, not the cluster. The tenth reads
+the lock the **running** agent plane loaded, not the file on disk (D1152/D1153,
+repaired 2026-09-13).
 
 **Where things live on the host**, every path read from a command's `--help`
 or a trip's script:
@@ -263,7 +270,7 @@ archiver died yesterday still publishes the status it had then (ADR 0158).
 ```bash
 sudo bin/fleet.sh                       # every project: release, live health, backup timers, denials by boundary (24 h)
 sudo bin/fleet.sh --json --window 168   # the same, as a document, denials over a week
-sudo bin/doctor.sh --project alpha-dev            # the ten checks; 0 well, 6 a check failed or could not run
+sudo bin/doctor.sh --project alpha-dev            # the eleven checks; 0 well, 6 a check failed or could not run
 sudo bin/doctor.sh --project alpha-dev --verbose  # the numbers behind each verdict, no third party's bytes
 sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json info --json
 sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json schedule status

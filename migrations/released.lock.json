@@ -373,6 +373,17 @@
       "template": "templates/0032-agent-audit-reader-boundary.sql",
       "template_sha256": "859b9031e6d814e37ec1355a743e242355535e752b4afaf1019507f28eaa325d",
       "version": "20260912120032"
+    },
+    {
+      "canonical_render_sha256": "6cc472d57cf36b9c7802c1d3b7c256c755f6fee32b8a92b90d16e6b12adb1c10",
+      "name": "agent_record_retention",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0033-agent-record-retention.sql",
+      "template_sha256": "c5735e3b191b2e2200f70722fa256c3c6ba8c0b0c56f2fff9ba2994092a52b2b",
+      "version": "20260917120033"
     }
   ],
   "schema_version": 1
