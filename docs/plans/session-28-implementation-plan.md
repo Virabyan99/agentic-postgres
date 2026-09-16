@@ -9,7 +9,8 @@ Then `docs/scope-closure.md` §15 and `docs/plans/session-27-implementation-plan
 and the tag does not. **Session 29 is the trip**, and Run 8 writes its sheet.
 **Product version at close:** `VERSION` **1.7.0**, `CURRENT_SESSION` moves
 **25 → 28**. 26 and 27 are skipped the way 19 is, and the skip is the record.
-**Next free:** D1434, ADR 0215. *(Run 1 added D1426–D1433.)*
+**Next free:** D1440, ADR 0215. *(Run 1 added D1426–D1433; Run 2 added
+D1434–D1439 and wrote ADRs 0210, 0211 and 0212.)*
 
 ---
 
@@ -74,10 +75,11 @@ and its own run*.
 
 ## 1. The divergence table
 
-D1406–D1433. **D1406–D1425 were measured during planning on `ad96673`; D1426–D1433
-are Run 1's**, from the nine rows planning had not measured. Rows marked
+D1406–D1439. **D1406–D1425 were measured during planning on `ad96673`; D1426–D1433
+are Run 1's**, from the nine rows planning had not measured; **D1434–D1439 are Run
+2's**, measured on rig 28a and on a pinned PostgreSQL 18.4. Rows marked
 **answered** are closed by writing down what the tree already does; rows marked
-**recorded** are not repaired here and say why. Runs allocate from **D1434**.
+**recorded** are not repaired here and say why. Runs allocate from **D1440**.
 
 **Run 1's eight rows changed four of this plan's own run descriptions**, and the
 changes are in §5 rather than only here: D1426 makes D1045 a fourteenth answered
@@ -115,6 +117,12 @@ the same finding, and D1430 revives a deferral whose stated reason has expired.
 | **D1431** | The same audit row's second half: *"a lock verifies only what it dereferences"* (D201). | **The general repair is stated and carries a constraint the row's closing act ignores.** Session 5 §1: *"resolve package versions against their registry the way images are resolved against theirs — is Run 10's to weigh, **because it needs network access in a check that deliberately has none**."* `bin/verify-versions.sh` resolves every `images:` entry to its recorded digest; a `packages:` entry is a string nothing dereferences, which is how `SCALAR_VERSION: "1.36.4"` — a release that has never existed — survived four sessions. | **Recorded, §10, and separated from D1430.** *"Verify both"* prices two rows as one act; one is a gate step this session can write and the other needs a network in a check built to have none, which is a decision about what the version lock is for. | The two halves of one audit row have different closing acts, different costs, and one of them has a constraint that is the whole reason it was not done. Bundling them is how the cheap half waits for the expensive one. | — |
 | **D1432** | Audit 1b: *"Secret generations accumulate with nothing pruning them"*, listed beside D1255 (*"`agent_audit` and `agent_idempotency` grow without bound"*) and closed the same way — *"A retention rule."* | **They are not the same kind of act.** `agent_audit` and `agent_idempotency` are tables this repository's own migrations create, so a retention policy is a released migration (ADR 0213, Run 6). A secret generation is a path at the **provider** — `secrets_contract.generation_directory()` at `:283`, `{SECRET_ROOT}/{project_key}/generations/{generation_id}` — and nothing in `src/` or `bin/` prunes one. **Pruning a generation is a provider WRITE**, on the surface whose rule is that no command in this product sets a provider value by itself (D249, and `rotate-signing-key.sh`'s own help). | **Recorded, §10.** Not taken in Run 6, and not taken in the rotation's run either — **which is the run that creates the next generations.** The decision is what makes a superseded generation disappear and who performs it, and the answer may be *an operator, by hand, with a documented reading of which generations are live*. | Two rows in one table, closed with the same three words, where one is a migration and the other is a mutation of the credential store. A session that read the table as uniform would have written a migration for a thing that has no table. | 0249 |
 | **D1433** | Audit 1a: *"F-022 — A fork whose domain is in the release's files **can deploy and cannot pass the gate**"*, with the measurement *47 failures and 49 errors* from Session 27 §10. | **Not re-measurable in this checkout, and Run 1 says so rather than repeating the number.** The reading is of the adopter's fork on a host this project does not administer; this tree has no fork, and `projects/example/` is the state ADR 0198 describes rather than the one F-022 is about. The number is a record of one measurement on one tree at one commit. | **Rig 28a, in Run 2**, is the only instrument that reproduces it, and it is built for ADR 0212 anyway. **Run 1 does not carry the number forward as though it were this tree's.** F-022's paragraph (Run 3) is written from what rig 28a measures, not from the findings file's arithmetic. | Session 27 §1's own D1389 is the precedent: the findings file's *"four of §1's six checks"* was about a different set than the page it addressed, and the repair had to be aimed by measurement. A count copied from a brief into a plan is the same failure one document later. | — |
+| **D1434** | `docs/upgrade-guide.md` §1.0 and this plan's own Run 2: *"an adopter who forked at 1.0.0 ran §1's first command against 1.6.0 on 2026-09-16 and `git merge` produced **nine conflicted files**, every one of them a file the release owns and the fork had amended."* | **Nine is that fork's arithmetic, not the release's.** Rig 28a amended **four** release-owned files and `git merge 1.6.2` produced **two** conflicts — `migrations/manifest.json` and `migrations/released.lock.json`, the two that are append-structured and that both sides appended to. **And `contracts/postgrest-api-surface.yaml` did not conflict at all**: the release's `1.1.0` addition landed at a different point in the file, `git` auto-merged, and the fork's own relation survived inside the release's reviewed contract with no marker and no review. | **ADR 0212 §3** states four classes with four rules rather than a file count, and the reviewed-contract rule is the one the measurement forced: *diff against the release's own copy at the tag after every merge, whether or not `git` reported a conflict.* | A rule written as *nine files* is a rule about one adopter. And the file that most needed a rule is the one that produced no conflict — ADR 0050 exists because a contract produced from the thing it constrains cannot refuse it, and a contract that acquires a relation by three-way merge is that failure arriving by another route. | 0212 |
+| **D1435** | `docs/scope-closure.md` §15, the upgrade guide and two sessions: converting *"would mean re-homing applied migrations, which D912 forbids"* — the reason the question was deferred twice. | **ADR 0206's one-time ledger move already performs the conversion's cluster half.** `project_ledger_move_statement` is driven by the rendered manifest and matches **by version**. Handed a render in which the re-homed migration is declared `set: project`, it emits `INSERT … SELECT version FROM app_private.schema_migrations WHERE version IN ('20260905120031') … DELETE …` — and the control, the release's own `20260912120031`, does not appear. It was written re-runnable by construction, for D1288. | **ADR 0212 §1 step 7.** The conversion needs exactly one thing the product does not have (ADR 0210's `--follows`); the step everyone assumed was impossible needs nothing. | The mechanism that decides the question was built in Session 24 for a different reason and has been in the tree ever since, while two sessions deferred the question for want of it. *Grep every reader before deciding a thing cannot be done* is question 5 pointed the other way. | 0212 |
+| **D1436** | `_assert_follows_release_version`'s own refusal, shipped in 1.6.2: *"there is no supported way forward today, and this refusal is the product being honest rather than helpful … Nothing in this release lets a set declare the release it was actually frozen against."* | **The gap is one computed line wide.** `build_lock` has taken `follows_release_version` as a parameter since ADR 0198; `bin/migrate.py::freeze_project_lock` is its only caller and always passes `newest_release_version()` — the checkout in hand. Measured on rig 28a: the re-homed set is refused at floor `20260912120032`, and with the true record (`20260904120030`, tag `1.0.0`'s newest) `verify_lock` **PASSES** the same set unchanged. The release manifest is append-only, so a declared value is checkable against it. | **ADR 0210** takes the operator declaration, keeps the refusal byte-for-byte, and adds `follows_release_version_source` so a reader can tell a computed record from an asserted one (ADR 0195 applied to a field). | A refusal that says no way forward exists, about a gap that is a missing argument, reads as a design limit. And the sentence becomes **false** in the commit that adds the flag — Run 3 owes the message, not a follow-up (D1116). | 0210 |
+| **D1437** | `0006-app-runtime-least-privilege.sql`'s header measurement, which ADR 0211's whole argument rests on: `has_table_privilege(app_runtime,'app.notes','SELECT')` → **true**, `SET ROLE app_runtime; SELECT * FROM app.notes` → **denied**. | **It measures a table that existed BEFORE the revoke, and F-013 is about a fork's table created after it.** Re-measured on the pinned `pgvector/pgvector:pg18` (**18.4**, the deployment's own version) with a control the revoke cannot reach: `app.notes` (before) **denied**, `app.invoices` (created and granted AFTER the revoke) **denied**, `tenant_control.invoices` (schema never revoked) **0 rows, permitted**. `has_table_privilege` answers `true` for all three. | **ADR 0211** carries the table. The refusal of F-013's one-line widening rests on a measurement of the case the finding is actually about, not on an extrapolation from the release's own. | The argument that declines to widen a security boundary is the last argument that should rest on *it probably works the same way*. The control coming out green in the same invocation is what makes the two denials evidence (D499). | 0211 |
+| **D1438** | Nothing said it. D1096: *"the ledger is the only record of which bytes ran."* | **A conversion that changes a template's bytes is invisible to the ledger.** `ledger_insert_statement` writes `ON CONFLICT (version) DO NOTHING`, so the row for an already-applied version keeps the `rendered_sha256` of the bytes that ran. Grepped every reader: `bin/doctor.py` counts rows, `bin/apg-diag.sh` lists version and name, `test_dev_environment_cluster` compares digests on a **fresh** cluster it built itself. **Nothing on a deployed host compares a ledger row against the tree**, and after a conversion no checkout contains those bytes. | **ADR 0212 §4**: the operator records the divergence in the project manifest entry's `description` — which line was removed, and why it could not alter the cluster — because the ledger cannot carry it and is right not to. | The ledger is correct as history and stops being checkable as a record, silently, which is the D600 shape: a value that looks measured. ADR 0212 permits the byte change in exactly two cases and this row is why each one has to be written down. | 0212 |
+| **D1439** | `docs/upgrade-guide.md` §1.0: *"the collision is structural rather than bad luck: the release occupies `0031` at 1.1.0 and `0032` at 1.5.0 in the same template directory a 1.0.0-era fork was obliged to write into."* | **The collision is not on the filename.** Measured: `0031-create-task.sql` and `0031-tenant-invoices.sql` coexist in one directory after the merge and `git` never conflicts on either — different names, nothing to merge. What is actually unique across sets is the **version**: `rendering.assert_migration_order` refuses a shared version and nothing else, because `app_private.migration_ledger` keys on the version alone and is written `ON CONFLICT (version) DO NOTHING`, so two sets sharing one would apply both and record one (D1096). | **ADR 0212 §3's fourth class**: template bytes do not conflict, and the check is for a shared version rather than a shared number. | A reader repairing a *filename collision* renumbers templates — which moves no version, fixes nothing, and changes the bytes of applied migrations to do it. The sentence describes the right problem in the wrong units. | 0212 |
 
 ---
 
@@ -304,6 +312,48 @@ question:
 ADRs and the index only; no product code. `docs/decisions/README.md` gains three
 entries. **Nothing runs before the push and nothing waits on CI** — Run 1's rule,
 which this run is the second and last to be covered by.
+
+**Done.** 2026-09-16, on `2db97a5`. Rig 28a built and measured end to end;
+**ADR 0210, ADR 0211 and ADR 0212** written and indexed; **D1434–D1439**.
+
+*Rig 28a, built and what it measured.* A clone at tag `1.0.0` on a branch `fork`,
+given `migrations/templates/0031-tenant-invoices.sql` (copying `0003` faithfully,
+`{{app_runtime}}` grant included), a row in `migrations/manifest.json`, a row in
+`migrations/released.lock.json` written by the release's own `freeze-lock`, and a
+relation in `contracts/postgrest-api-surface.yaml` — the four places §1.0 says
+such a fork had to write. Then `git merge 1.6.2`, resolved the way the one
+recorded upgrade resolved it, then re-homed into `projects/tenant/`. Its control
+is the same clone's `1.6.2` side, where `projects/example/` is the end state ADR
+0198 describes. Rebuilt from `/tmp/r2-rig-a*.sh` (copied to the scratchpad); it is
+deterministic from the two tags and nothing about it is committed.
+
+- **The conversion exists, and the blocker everyone named is not the blocker.**
+  Re-homing moves no bytes (`git mv`, *1 file changed, 0 insertions, 0 deletions*)
+  and no version, so D912 is not engaged by it. What blocks it is one computed
+  line in `freeze_project_lock` (D1436) — and ADR 0206's ledger move already does
+  the cluster half, by version, for free (D1435).
+- **What the lint forces is the real boundary.** A 1.0.0-era set that copied
+  `{{app_runtime}}` cannot pass `lint_project_set`, and satisfying it moves
+  `template_sha256` and `canonical_render_sha256` of a migration that has already
+  run. ADR 0212 decides that case by what the change would do to a **cluster**:
+  two byte changes that provably cannot alter one are permitted in place and
+  recorded; everything else is a new migration; a set that can reach neither does
+  not convert, and staying a fork stays supported.
+- **F-013's one line is refused in writing** (ADR 0211), on a measurement of the
+  case the finding is about rather than the release's own (D1437).
+- **The merge rule is four classes, not a file count** (D1434), and the class that
+  needed it most produced no conflict at all.
+
+*What Run 2 deliberately did NOT do.* No product code, no test, no edit to
+`docs/scope-closure.md` §15 or to `docs/upgrade-guide.md` §1.0 — both become false
+only when ADR 0210's flag exists, and Run 3 owns the flag, the refusal message
+`_assert_follows_release_version` still ends with, and both pages in one commit.
+**No conversion was performed against a cluster carrying a fork's history** (D940);
+ADR 0212 names step 7 as the step a checkout cannot prove.
+
+*Nothing ran before the push.* Documentation only — `test_acceptance_registry`
+and `test_documentation_index` are run because three ADR files and an index row
+are what they read, and nothing waits on CI.
 
 ### Run 3 — the on-ramp, built, and the two readings an adopter is missing
 
