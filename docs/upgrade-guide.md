@@ -264,8 +264,26 @@ that a trip found it needed after the fact.
    `undetermined` blocks and is not *no changes*.
 
    The doctor reads **10 ok** on a well deployment (2026-09-15, both projects).
-   Anything else is repaired before the upgrade, because a failed upgrade over a
-   sick project leaves you unable to say which caused what.
+   **Not every warning is a reason to stop, and this page used to say it was.**
+   A cold reader met a deployment reading *9 ok, 1 warning* — the backup mirror
+   had never been enabled — and the page's absolute *"anything else is repaired
+   before the upgrade"* gave them no way to tell a pre-existing condition from a
+   blocker. Sort what the doctor reports:
+
+   | Verdict | Before the upgrade |
+   |---|---|
+   | any `problem` | **stop.** Repair it first, whatever it is |
+   | `migrations`, `capability drift`, `containers`, `cluster`, `pooler` in warning | **stop.** These are the planes the upgrade moves, and a warning here becomes unreadable once the deploy has run |
+   | `backup repository`, `WAL archiver`, `disk headroom` in warning | **stop**, and for a different reason: step 2's whole purpose is to have a restorable copy before anything mutates. A warning here means you may not have one |
+   | `backup mirror`, `TLS expiry`, `health route` in warning | **note it and proceed.** These do not affect what the deploy does, and repairing them is not made easier by doing it now. Record the reading so the post-upgrade doctor is compared against it and not against 10 |
+
+   Whatever you decide, **write the pre-upgrade reading down**. A deployment
+   that read 9 ok before will read 9 ok after, and an operator who does not know
+   that reads step 7 as the upgrade having broken something (D1391's family: a
+   page that spends a reader's trust before the failure arrives).
+
+   Anything genuinely broken is repaired before the upgrade, because a failed
+   upgrade over a sick project leaves you unable to say which caused what.
 2. **Export the kit and take it off the host.** The kit is what you hold if
    the upgrade takes the host with it (ADR 0189, `docs/node-loss-runbook.md`
    §0). As root:
