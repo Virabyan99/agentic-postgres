@@ -805,7 +805,22 @@ expected reading for a patch that moves no schema and no tool, and
 `render-acceptance-matrix` had already been written in Run 5. `chmod 755
 bin/*` before `git add`.
 
-**The gate** runs after this commit, on the clean tree it leaves.
+**The gate**, once, on the clean tree this commit left:
+`bin/session-01-check.sh` → **exit 0, `session-01-check: PASSED`**, 14m42s.
+**5,809 passed, 0 failed, 3 skipped, 0 errors**, 6,265 P0 nodes collected, 0
+future placeholders, 0 identity collisions, 0 floating image refs, both fixtures
+rendered, no container running. `source commit ce2f42fd18a8`, and a skip count
+of 3 is the healthy reading for a contract run on this workstation (CLAUDE.md
+§5). Step 6 confirms the derived documentation is current in all four
+renderers, which is the half of D1238 a bump can get wrong silently.
+
+**One apparatus note, because it cost ten minutes.** The gate was first
+launched with `setsid nohup … &` from a `wsl bash -lc` invocation, which
+CLAUDE.md §1 recommends — and **it never ran**: the WSL session ends when the
+wrapper's command exits and took the detached child with it, leaving no log
+and no exit-code file. Re-run as a harness-tracked background task, which keeps
+the WSL process alive for the duration, it completed normally. The advice in
+§1 assumes something holds the session open; a bare `wsl bash -lc` does not.
 
 ### Run 7 — the close, and the tag
 
