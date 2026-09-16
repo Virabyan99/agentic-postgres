@@ -1,6 +1,6 @@
 # What release 1.6.1 did about an adopter's upgrade findings
 
-> **A record of what release `1.6.1` did, dated 2026-09-16.** Unlike
+> **A record of what releases `1.6.1` and `1.6.2` did, dated 2026-09-16.** Unlike
 > `docs/upgrade-guide.md` and `docs/operator-guide.md`, this page does NOT
 > track the current release and is not held to it by a test (ADR 0209): it
 > describes one release answering one reader, and it stays true by staying

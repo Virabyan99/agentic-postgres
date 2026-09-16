@@ -317,6 +317,32 @@ from pathlib import Path
 #: and the tree now reads `1.6.1`, so `stage_release`'s live half fails until
 #: it deploys before it sweeps, which is an obligation rather than a defect and
 #: is stated here because a reader of this constant is who meets it.
+#:
+#: **`1.6.2` follows within the hour, and the reason is worth more than the
+#: release.** Auditing 1.6.1 against the findings file it answers turned up two
+#: repairs and produced a reply page -- and all three landed ONE COMMIT PAST
+#: tag `1.6.1`. That is D1033's shape a third time, in the release built to
+#: stop it. It was caught by a reading rather than by a reader this time, which
+#: is the only difference, and the precedent for the fix is exact: `1.0.0` ->
+#: `1.0.1` was the same thing for the same reason.
+#:
+#: **`VERSION` moves to `1.6.2`, and ADR 0162 prices it a PATCH.** What moved:
+#: the refusal in `_assert_follows_release_version` had its REMEDY repaired --
+#: 1.6.1's version told an operator to re-freeze the project lock, and
+#: `freeze_project_lock` recomputes the floor from the current checkout, so
+#: that instruction sends a set authored against an earlier release around a
+#: loop. It now splits the two cases and says, for the one that matters, that
+#: there is no supported way forward today and why re-stamping is worse. The
+#: upgrade guide's first precondition stopped being absolute: *anything that is
+#: not 10 ok is repaired* gave a reader no way to tell a disabled backup mirror
+#: from a broken migration plane, and the step now sorts the doctor's verdicts.
+#: And `docs/upgrade-findings-response.md` maps all thirty-four of the reader's
+#: findings to Fixed, Documented, Open or No action, leading with the two that
+#: are still open. **No manifest, outputs, capability, lock or secret
+#: schema moves, no released migration is added, and no command gains or loses
+#: a verb** -- the enforcement `_assert_follows_release_version` performs is
+#: byte-for-byte what it was. Still no host trip, so the next trip's
+#: `upgrade plan` is what confirms the class, and it still inherits D1401.
 CURRENT_SESSION = 25
 
 #: Repository root, resolved from this file rather than the caller's cwd so

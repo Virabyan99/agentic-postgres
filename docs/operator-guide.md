@@ -19,14 +19,14 @@ plane, migrations — this page hands to it and does not repeat it.
 
 ## 1. The release you are operating, in one screen
 
-> **This page is part of release `1.6.1`.** It describes that release as it
+> **This page is part of release `1.6.2`.** It describes that release as it
 > runs on this deployment. A release that moves `VERSION` and does not move
 > this line, and the table below it, is a release documented by a page about a
 > different one (ADR 0209, D1388).
 
 | | |
 |---|---|
-| `template_version` / `CURRENT_SESSION` | **1.6.1** / **25** — the second release where the two numbers come apart (1.0.1 was the first). `1.3.0`–`1.5.0` were releases without tags (D1311) |
+| `template_version` / `CURRENT_SESSION` | **1.6.2** / **25** — the two numbers have come apart three times now (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane. `1.3.0`–`1.5.0` were releases without tags (D1311) |
 | Released migrations | **32**, fix-forward; every down block raises `AP900` (D912) |
 | Deployed document | outputs schema **v18**; `document_kind: deployed` |
 | Project manifest | schema versions **1–6** accepted; 5 adds `migrations.set`, 6 adds `mcp.capabilities` |

@@ -4,7 +4,7 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 25 implemented**, at `template_version` **1.6.1**.
+**Status: Session 25 implemented**, at `template_version` **1.6.2**.
 
 Session 25 hardens what the last four sessions built and hands it to somebody who did not build it. The three developer surfaces — `apg dev`,
 `apg generate`, `apg studio` — are held against every security invariant
@@ -117,7 +117,10 @@ application on 1.0.0, on a host that started empty (see
 apart — **and `1.6.1` is the second, for the same reason.** Session 27 built no
 plane either: it repaired eighteen defects an outside agent found upgrading a
 real application from `1.0.0` to `1.6.0` on this repository's documentation
-alone, and the product defects that reading exposed. **Adopt `1.6.1`.**
+alone, and the product defects that reading exposed. **Adopt `1.6.2`**, which
+carries two repairs and the reply page that landed one commit past `1.6.1`'s
+tag — the same failure `1.0.1` was cut for, caught by a reading this time
+rather than by a reader.
 `1.3.0`, `1.4.0` and `1.5.0` were session closes rather than stage closes: each
 moved `VERSION`, each was deployed, and none was tagged. They are
 not being tagged retroactively — a tag is the promise the compatibility
@@ -125,7 +128,12 @@ sentence beside it made at the moment it was cut, and dating one to a commit
 nobody tagged then is a record that looks measured and was not (D1311). Reach
 them by SHA through the session plans if you need them.
 
-`1.6.1` is a patch over `1.6.0` and ADR 0162 prices it: a generator that can
+`1.6.2` is a patch over `1.6.1` and ADR 0162 prices it: `freeze-lock`'s refusal
+stops printing a remedy that loops, the upgrade guide's *10 ok* precondition
+stops being absolute, and `docs/upgrade-findings-response.md` answers all
+thirty-four of an adopter's findings with what is fixed, what is only
+documented and **what is still open**. No schema moves and no migration is
+added. `1.6.1` before it was a patch over `1.6.0` and ADR 0162 prices it: a generator that can
 type what PostgREST serves, refusals that name the owner and the remedy at four
 more sites, `--help` answered by every verb that documents one, two readers that
 say which question they answered, and a command about to refuse that no longer
