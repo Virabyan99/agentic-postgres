@@ -90,6 +90,17 @@ def broken(root: Path, target: str, anchor: str, replacement: str) -> migrations
     return migrations.MigrationSet(label="project", root=root / "migrations")
 
 
+def _migrate(*arguments: str) -> subprocess.CompletedProcess[str]:
+    """`bin/migrate.sh`, as an operator runs it, returning rather than judging."""
+    return subprocess.run(
+        [str(REPO_ROOT / "bin" / "migrate.sh"), *arguments],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 TEMPLATE = "migrations/templates/0001-note-embeddings.sql"
 MANIFEST = "migrations/manifest.json"
 PREAMBLE = "SET LOCAL ROLE {{object_owner}};"
@@ -267,6 +278,82 @@ def test_a_schema_2_lock_reads_as_computed_and_a_schema_3_lock_may_not_omit_it()
     # one by default (D499 -- a reader that returned a tuple unconditionally
     # would satisfy every assertion above).
     assert migrations.follows_record({"schema_version": 1, "migrations": entries}) is None
+
+
+def test_the_flag_that_declares_the_record_is_refused_rather_than_ignored_off_its_verb() -> None:
+    """ADR 0210's operator surface, which had no reader until Run 9 (D1480).
+
+    `--follows` declares a record. A flag that declares something and is
+    silently dropped is how an operator comes to believe a record was written
+    that was not -- D600 at the command line -- so both wrong shapes refuse
+    rather than ignore: on a verb that writes no lock, and without `--project`,
+    where the release's own lock has no such record to carry.
+
+    **Two refusals and two controls, in one invocation** (D499). Without the
+    control arms a wrapper that refused `--follows` unconditionally, or refused
+    every invocation, would pass both refusal arms. The first control is the
+    same verb with no flag; the second is the ACCEPTED shape -- `--project` and
+    `freeze-lock` together -- pointed at a manifest that does not load, which
+    gets past the flag check and refuses for the manifest's own reason. That is
+    what says the flag was taken rather than merely tolerated.
+
+    Run as the operator runs it, through `bin/migrate.sh` (D1114), because the
+    refusal lives in the wrapper and a call to the Python half would measure a
+    different program.
+    """
+    version = migrations.newest_release_version()
+
+    off_its_verb = _migrate("status", "--follows", version)
+    assert off_its_verb.returncode == 2, off_its_verb.stdout + off_its_verb.stderr
+    assert "only meaningful with freeze-lock" in off_its_verb.stdout + off_its_verb.stderr
+
+    without_a_project = _migrate("--follows", version, "freeze-lock")
+    assert without_a_project.returncode == 2, without_a_project.stdout + without_a_project.stderr
+    assert "needs --project" in without_a_project.stdout + without_a_project.stderr
+
+    #: Control one: the same verb, no flag. A wrapper that refused everything
+    #: at exit 2 would satisfy both arms above and fails here.
+    unflagged = _migrate("status")
+    assert "only meaningful with freeze-lock" not in unflagged.stdout + unflagged.stderr, (
+        "`migrate.sh status` refuses --follows when --follows was not passed, so the "
+        "refusal above is not about the flag"
+    )
+
+
+def test_the_flag_is_accepted_where_it_belongs_and_the_refusal_after_it_is_the_manifests(
+    tmp_path: Path,
+) -> None:
+    """Control two, and it is the arm that makes the pair mean anything.
+
+    `--project MANIFEST freeze-lock --follows VERSION` is the one shape ADR
+    0210 defines. Pointed at a manifest that does not load, it must refuse for
+    the MANIFEST -- which proves the flag was parsed and accepted, and that the
+    two refusals beside it are about where the flag was, not about the flag
+    existing.
+
+    It is pointed at an unloadable manifest rather than a real one on purpose:
+    the accepted shape WRITES a project lock, and a contract test that froze
+    the committed example set would rewrite a file the tree holds (D1352's
+    manifest is reused here for exactly that reason).
+    """
+    manifest = tmp_path / "project.yaml"
+    manifest.write_text(
+        (REPO_ROOT / "project.example.yaml")
+        .read_text(encoding="utf-8")
+        .replace("projects/example", "projects/no-such-project"),
+        encoding="utf-8",
+    )
+    version = migrations.newest_release_version()
+
+    accepted = _migrate("--project", str(manifest), "freeze-lock", "--follows", version)
+    combined = accepted.stdout + accepted.stderr
+    assert "only meaningful with freeze-lock" not in combined, combined
+    assert "needs --project" not in combined, combined
+    assert "Traceback (most recent call last)" not in combined, combined
+    assert "projects/no-such-project" in combined or "manifest" in combined, (
+        "the accepted shape refused for a reason that is not the manifest's, so what it "
+        f"refused is unclear:\n{combined}"
+    )
 
 
 def test_a_declared_record_must_name_a_release_version_this_release_knows() -> None:

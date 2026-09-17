@@ -343,7 +343,64 @@ from pathlib import Path
 #: a verb** -- the enforcement `_assert_follows_release_version` performs is
 #: byte-for-byte what it was. Still no host trip, so the next trip's
 #: `upgrade plan` is what confirms the class, and it still inherits D1401.
-CURRENT_SESSION = 25
+#:
+#: **Session 28 moves it to 28, and 26 and 27 are skipped the way 19 is**
+#: (D1063). Neither built a plane, registered a requirement nor wrote an
+#: evidence document; the skip is the record, and `claims_through_session(28)`
+#: inherits every earlier session's claims unchanged. Three requirements and
+#: three claims: `DX-FOLLOWS-001` and `REL-READ-001` declared offline, and
+#: `AGT-RETAIN-001` deliberately not -- what two tables on a nine-session-old
+#: cluster are carrying, and whether a prune removes a row of it, is a fact
+#: about a deployment and `not_run` until Session 29 sweeps.
+#:
+#: What the session ships is an AUDIT ACTED ON, not a plane.
+#: `docs/pre-stage-4-audit.md` was its single input -- thirty-six rows this
+#: project already knew were wrong with itself -- and the first run re-measured
+#: all of them against the tree in both directions, finding fourteen already
+#: answered and **three whose closing act would have done damage as written**.
+#: What came out of the rest: the pre-`projects/<slug>/` fork's on-ramp decided
+#: and documented (ADR 0210, 0211, 0212, `docs/on-ramp.md`); four readers that
+#: reported a file event as a domain event repaired under ADR 0195; the four
+#: modules that collected zero under every sweep selector brought inside one;
+#: the installed distributions checked against the lock's pins by the gate, a
+#: deferral written as a *when* in Session 6 and read as a *whether* for
+#: twenty-two sessions while it cost three gate runs; what the agent record
+#: keeps and for how long (ADR 0213); the reading before a tag (ADR 0214); and
+#: the signing-key rotation rehearsed end to end, which found that the step
+#: guarding the one irreversible act in this product could not see what a
+#: verifier was holding (ADR 0215).
+#:
+#: **`VERSION` moves to `1.7.0`, and ADR 0162 prices it a MINOR.** One new
+#: released migration (`20260917120033`: two prune functions granted to nobody,
+#: a size reading granted to the record's existing reader, no schedule and no
+#: caller), one new operator command (`apg release-reading`), and **the project
+#: lock schema moves 2 -> 3** -- a set's lock now records whether its
+#: `follows_release_version` was computed or declared, a schema-2 lock reads as
+#: `computed`, and nothing an operator holds has to move for it. **No manifest,
+#: outputs, capability or secret schema moves**, no API operation is added,
+#: removed or changed, and the one migration is additive over two tables no
+#: reachable identity can delete from. A project that adopts this release and
+#: declares nothing new deploys the same containers with one more migration
+#: applied. **The class was priced HERE rather than deferred, by the product's
+#: own command** (D1481): rig 28l rendered the example project from `72cb2de`,
+#: the 1.6.2 checkout, and from this one, and ran `upgrade plan --also
+#: migration_added` between the two documents -- `bump minor`, `requires
+#: minor`, verdict `ok`, no blocking reason, and **exactly one leaf differs,
+#: `template_version`**. The control in the same run is what makes that mean
+#: something: without the declaration the same pair requires only a `patch`, so
+#: the `minor` is the migration rather than the version string. Every release
+#: since 1.3.0 wrote *the trip's `upgrade plan` is what confirms the class* and
+#: left the number unpriced until the trip, and ADR 0162's rule is decidable
+#: from two RENDERED documents, which need no host and no root. **This session
+#: takes no host trip and cuts no tag**, so nothing here is priced against a
+#: DEPLOYMENT -- an installed document is not a render of the same manifest,
+#: and only it can say what an operator would have to supply -- so Session 29's
+#: `upgrade plan` still confirms the price against the running release, and a
+#: `major` required there is a stop condition rather than a number to write
+#: down. It does not inherit D1401, and that is the first time in four
+#: releases: the tag now waits for the deploy rather than the deploy for the
+#: tag (D1425).
+CURRENT_SESSION = 28
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

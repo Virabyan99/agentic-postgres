@@ -147,6 +147,13 @@ SHELL_COMMANDS = (
     # declared offline -- and its host mode answers for this session alone,
     # because Session 24's trip paid 22, 23 and 24 from one sweep (D1244).
     "bin/session-25-check.sh",
+    # Session 28 (ADR 0210, ADR 0213, ADR 0214). Derived from 25's by diff.
+    # 26 and 27 have no gate and never will: neither registered a requirement,
+    # so neither has a half to write, and the number goes 25 -> 28 the way it
+    # went 18 -> 20 (D1063). Its offline mode writes a half reporting TWO
+    # claims; its host mode is Session 29's, because the migration this release
+    # adds is applied by the deploy that trip performs.
+    "bin/session-28-check.sh",
     "bin/smoke-test.sh",
     # Session 24 (ADR 0205). A loopback client of a deployment's own
     # surfaces, holding the human's token in one process and handing the

@@ -3939,3 +3939,104 @@
     prices that candidate at the class the constant's comment proposes, requires
     no larger class, and returns an `ok` verdict with no blocking reason —
     neither command changing the deployment.
+
+- id: DX-FOLLOWS-001
+  priority: P0
+  target_session: 28
+  test_nodeids:
+    - tests/contract/test_project_migration_sets.py::test_the_record_can_be_declared_and_the_lock_says_it_was
+    - tests/contract/test_project_migration_sets.py::test_a_schema_2_lock_reads_as_computed_and_a_schema_3_lock_may_not_omit_it
+    - tests/contract/test_project_migration_sets.py::test_a_declared_record_must_name_a_release_version_this_release_knows
+    - tests/contract/test_project_migration_sets.py::test_the_flag_that_declares_the_record_is_refused_rather_than_ignored_off_its_verb
+    - tests/contract/test_project_migration_sets.py::test_the_flag_is_accepted_where_it_belongs_and_the_refusal_after_it_is_the_manifests
+  description: >-
+    A project's migration set records which release it was frozen against, and
+    whether that record was measured or asserted (ADR 0210). The project lock
+    carries `follows_release_version_source`: a lock built without one reads
+    `computed`, which is what every lock written before this release is, and a
+    schema-3 lock that omits the field is REFUSED rather than defaulted —
+    there, the absence means something was lost rather than something predates
+    the field. A declaration is checked against the release's own append-only
+    manifest, so a version this release does not know is refused; a third
+    provenance is refused rather than written, because the field's value is
+    what a reader trusts and an unknown one reads as neither. The operator
+    surface is `bin/migrate.sh --project MANIFEST freeze-lock --follows
+    VERSION`, and the flag is REFUSED rather than ignored in both wrong shapes
+    — on a verb that writes no lock, and without `--project`, where the
+    release's own lock has no such record to carry. Declaring the record
+    changes no digest in the lock, which is what makes it a record rather than
+    a second authority over the set.
+
+- id: AGT-RETAIN-001
+  priority: P0
+  target_session: 28
+  test_nodeids:
+    - tests/contract/test_agent_audit_plane.py::test_neither_prune_is_granted_to_anybody
+    - tests/contract/test_agent_audit_plane.py::test_the_size_reading_is_granted_to_the_records_existing_reader_and_nobody_else
+    - tests/contract/test_agent_audit_plane.py::test_a_prune_refuses_a_missing_horizon_a_future_one_and_a_bound_below_one
+    - tests/contract/test_agent_audit_plane.py::test_an_audit_prune_removes_what_is_older_than_the_horizon_and_leaves_the_rest
+    - tests/contract/test_agent_audit_plane.py::test_a_bounded_prune_removes_at_most_its_bound_and_is_called_again
+    - tests/contract/test_agent_audit_plane.py::test_pruning_a_claim_re_arms_its_key_and_the_unpruned_replay_is_the_control
+    - tests/contract/test_agent_audit_plane.py::test_the_size_reading_counts_the_two_tables_it_names
+    - tests/contract/test_agent_audit_plane.py::test_nothing_in_this_release_calls_a_prune
+    - tests/deployment/test_session28_retention.py::test_both_projects_carry_the_three_retention_functions
+    - tests/deployment/test_session28_retention.py::test_neither_prune_is_reachable_by_any_request_role_on_the_deployment
+    - tests/deployment/test_session28_retention.py::test_the_record_reading_answers_on_a_cluster_with_history
+    - tests/deployment/test_session28_retention.py::test_a_prune_against_the_real_record_is_measured_inside_a_transaction_that_is_rolled_back
+    - tests/deployment/test_session28_retention.py::test_the_doctors_agent_record_check_reports_this_deployments_numbers
+    - tests/deployment/test_session28_retention.py::test_the_doctors_numbers_are_the_clusters_numbers
+  description: >-
+    The agent record is removed by an operator who states a horizon, and by
+    nothing else (ADR 0213). `app_private.agent_audit_prune` and
+    `app_private.agent_idempotency_prune` refuse a missing horizon, a horizon
+    in the future and a bound below one; each returns the count it removed and
+    leaves everything newer; and both are granted to NOBODY — not to
+    `auth_service`, which already reads whole audit rows, nor to any request
+    role — so no reachable identity can delete a row. `agent_record_size()`
+    reports four numbers and no verdict, and is granted only to the record's
+    existing reader, adding no audience and no fact. Nothing in this release
+    calls either prune: there is no schedule, no timer and no caller in `src/`,
+    `bin/`, `services/` or the templates, so the record grows until somebody
+    asks for it not to. Pruning an idempotency claim RE-ARMS its key, which the
+    function's own comment states because its result cannot show it. On the
+    deployment: both projects carry the three functions with the identity
+    argument lists this release creates, neither prune is reachable by any
+    request role, the size reading answers on a cluster whose history was
+    written by the deployed plane rather than by the proof reading it, a
+    bounded prune against that real record is measured inside a transaction the
+    proof rolls back and the record is unchanged afterwards, and the doctor's
+    agent-record check reports that deployment's own numbers with no threshold
+    anywhere.
+
+- id: REL-READ-001
+  priority: P0
+  target_session: 28
+  test_nodeids:
+    - tests/contract/test_release_reading.py::test_a_clone_without_tags_is_refused_rather_than_reported_clean
+    - tests/contract/test_release_reading.py::test_the_four_outcomes_are_distinct_and_every_declared_one_is_reachable
+    - tests/contract/test_release_reading.py::test_the_window_named_in_the_sentence_is_the_one_the_count_was_measured_from
+    - tests/contract/test_release_reading.py::test_the_three_questions_carry_the_release_and_are_asked_not_answered
+    - tests/contract/test_release_reading.py::test_a_reading_that_could_not_be_taken_asks_nothing
+    - tests/contract/test_release_reading.py::test_the_reading_prints_no_instruction_about_the_tag
+    - tests/contract/test_release_reading.py::test_a_count_that_could_not_be_read_prints_as_unknown_and_never_as_zero
+    - tests/contract/test_release_reading.py::test_the_command_finds_the_tag_that_carries_the_version_not_the_one_on_head
+    - tests/contract/test_release_reading.py::test_a_clone_with_no_tags_produces_the_third_outcome_through_the_command
+    - tests/contract/test_release_reading.py::test_the_command_takes_no_arguments_and_says_so
+    - tests/contract/test_release_reading.py::test_the_exit_code_follows_whether_this_clone_holds_tags
+  description: >-
+    Before a tag is cut, one command states the facts and names the judgement
+    it cannot make (ADR 0214). `apg release-reading` reports which tag carries
+    the release `VERSION` names, how many commits and which paths have landed
+    since that tag and since the bump commit, and which of four outcomes the
+    checkout is in — a tag is owed, the tag does not contain these, there is
+    nothing to decide, or THERE ARE NO TAGS IN THIS CLONE, which is the third
+    outcome reported rather than folded into a clean reading (ADR 0195) and is
+    what a depth-1 clone produces. It prints three questions carrying the
+    release's own name and answers none of them, and it prints no instruction
+    about the tag: the discriminator between an ordinary release and one whose
+    documentation landed past its tag was MEASURED across every tag this
+    repository holds and does not separate them, so a verdict would be a guess
+    in the one place a guess has cost two patch releases. A count that could
+    not be read prints as unknown and never as zero (D600). The reading is
+    taken by a person at a workstation with a full clone and is deliberately
+    NOT in any gate, because the gate runs where there are no tags.

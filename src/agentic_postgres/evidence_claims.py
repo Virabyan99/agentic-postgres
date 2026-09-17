@@ -126,6 +126,25 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "dx_context",
         "dx_walk_instrument",
         "dx_hardening",
+        # Session 28 (ADR 0210, ADR 0214). Two, and the line runs where
+        # Session 23's did. `project_set_release_record` is about what a
+        # CHECKOUT'S lock file records and what the command that writes it
+        # refuses: a deployment holds no project lock -- the lock is compiled
+        # into the release and the record is a statement about the checkout
+        # that froze the set -- so there is nothing a running system could
+        # answer differently. `release_reading` is about a command that reads
+        # `git` in a clone and prints; its subject IS the checkout, and the one
+        # place it could be run against something else is CI, where there are
+        # no tags (D1466) and the reading is therefore the third outcome.
+        #
+        # The session's THIRD claim is deliberately not here.
+        # `agent_record_retention` is about two tables on a cluster that has
+        # been written to for nine sessions, and a checkout cannot say what the
+        # deployment is carrying nor that a prune removes a row of it. It is
+        # `not_run` until Session 29 applies migration 0033 and sweeps, which
+        # is the honest verdict rather than the convenient one.
+        "project_set_release_record",
+        "release_reading",
     }
 )
 
@@ -299,6 +318,27 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "dx_walk_instrument": ("DX-WALK-001", "DX-DOC-001"),
     "dx_hardening": ("SEC-DX-001",),
     "stage_release": ("REL-STAGE-001",),
+    # Session 28 (ADR 0210, ADR 0213, ADR 0214). Three claims, one per
+    # requirement, which is ADR 0089's rule and not a shape chosen here.
+    #
+    # **Two offline and one host, and the split is the session's own
+    # argument.** A project set's record of the release it was frozen against
+    # is a property of a lock file in a checkout; the reading before a tag is a
+    # property of a clone and of `git`. The agent record is a property of a
+    # cluster that nine sessions of trips have written to, and the one thing
+    # this session's rig could not supply is history nobody arranged (D940).
+    #
+    # **No claim is added for the rotation**, although it is this session's
+    # headline act. `bootstrap_identity`, `api_authorization` and
+    # `credential_rotation_planes` already exist and are `not_run`; Session
+    # 29's trip moves them by running proofs that are already registered. A
+    # claim about a rotation having been REHEARSED would be a claim about the
+    # planning, which is what ADR 0163 exists to refuse -- and D1469 measured
+    # that the cutover alone moves none of the three anyway, because each needs
+    # four rotations and nine node ids.
+    "project_set_release_record": ("DX-FOLLOWS-001",),
+    "agent_record_retention": ("AGT-RETAIN-001",),
+    "release_reading": ("REL-READ-001",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

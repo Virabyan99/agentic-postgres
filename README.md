@@ -4,7 +4,26 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 25 implemented**, at `template_version` **1.6.2**.
+**Status: Session 28 implemented**, at `template_version` **1.7.0**.
+
+Session 28 is an audit acted on rather than a plane built.
+[`docs/pre-stage-4-audit.md`](docs/pre-stage-4-audit.md) is one inventory of
+everything this project knows is wrong with itself, sorted by what kind of act
+closes each row; this session re-measured all thirty-six of the rows a session
+could close, in both directions, and found fourteen already answered and three
+whose closing act would have done damage as written. What came out of the rest:
+a fork made before `projects/<slug>/` existed now has a documented way in
+([`docs/on-ramp.md`](docs/on-ramp.md)), and a project's migration set records
+whether the release it was frozen against was measured or declared; four readers
+that reported a file event as a domain event were repaired; the four test
+modules that collected zero under every sweep selector were brought inside one,
+and the gate now checks the installed distributions against the lock's pins;
+migration 0033 gives an operator a way to remove agent records by stating a
+horizon, granted to nobody and called by nothing; `apg release-reading` states
+the facts before a tag is cut and names the judgement it cannot make; and the
+signing-key rotation was rehearsed end to end, which is how the step guarding
+this product's one irreversible act was found unable to see what a verifier was
+holding.
 
 Session 25 hardens what the last four sessions built and hands it to somebody who did not build it. The three developer surfaces — `apg dev`,
 `apg generate`, `apg studio` — are held against every security invariant
@@ -117,10 +136,12 @@ application on 1.0.0, on a host that started empty (see
 apart — **and `1.6.1` is the second, for the same reason.** Session 27 built no
 plane either: it repaired eighteen defects an outside agent found upgrading a
 real application from `1.0.0` to `1.6.0` on this repository's documentation
-alone, and the product defects that reading exposed. **Adopt `1.6.2`**, which
-carries two repairs and the reply page that landed one commit past `1.6.1`'s
-tag — the same failure `1.0.1` was cut for, caught by a reading this time
-rather than by a reader.
+alone, and the product defects that reading exposed. **Sessions 26 and 27 are skipped in the registry for the
+same reason**, so `CURRENT_SESSION` goes 25 → 28 and the gap is the record.
+**Adopt `1.7.0`.** `1.6.2` carried two repairs and the reply page that landed
+one commit past `1.6.1`'s tag — the same failure `1.0.1` was cut for, caught by
+a reading this time rather than by a reader, and the reason `apg release-reading`
+now exists.
 `1.3.0`, `1.4.0` and `1.5.0` were session closes rather than stage closes: each
 moved `VERSION`, each was deployed, and none was tagged. They are
 not being tagged retroactively — a tag is the promise the compatibility
@@ -682,9 +703,9 @@ there), and **create the operator user named by `ssh.operator_user`**.
 sudo bin/provision-host.sh      --host host.yaml                  # once per host
 sudo bin/edge.sh                --host host.yaml up               # once per host
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
-sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 25
+sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 28
 sudo ./deploy.sh --host host.yaml --project project.yaml \
-     --capabilities capabilities.yaml --through-session 25
+     --capabilities capabilities.yaml --through-session 28
 ```
 
 `deploy.sh --through-session` **refuses before it changes anything** when a

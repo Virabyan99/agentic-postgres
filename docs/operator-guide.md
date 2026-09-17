@@ -19,20 +19,20 @@ plane, migrations — this page hands to it and does not repeat it.
 
 ## 1. The release you are operating, in one screen
 
-> **This page is part of release `1.6.2`.** It describes that release as it
+> **This page is part of release `1.7.0`.** It describes that release as it
 > runs on this deployment. A release that moves `VERSION` and does not move
 > this line, and the table below it, is a release documented by a page about a
 > different one (ADR 0209, D1388).
 
 | | |
 |---|---|
-| `template_version` / `CURRENT_SESSION` | **1.6.2** / **25** — the two numbers have come apart three times now (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane. `1.3.0`–`1.5.0` were releases without tags (D1311) |
-| Released migrations | **32**, fix-forward; every down block raises `AP900` (D912) |
+| `template_version` / `CURRENT_SESSION` | **1.7.0** / **28** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26 and 27 are skipped in the registry the way 19 is, so the session number goes 25 → 28. `1.3.0`–`1.5.0` were releases without tags (D1311) |
+| Released migrations | **33**, fix-forward; every down block raises `AP900` (D912). 0033 adds two prune functions granted to nobody and a size reading (ADR 0213) — nothing removes an agent record unless an operator asks |
 | Deployed document | outputs schema **v18**; `document_kind: deployed` |
 | Project manifest | schema versions **1–6** accepted; 5 adds `migrations.set`, 6 adds `mcp.capabilities` |
 | Capability manifest / lock | schema **4** / **4** (vocabulary + `tools_sha256`) |
 | Verifiers | **four** — PostgREST, `auth`, `storage`, the agent plane — reading one published key set; only `auth` signs (ADR 0170) |
-| Migration sets | the release's, and a project's own under `projects/<slug>/`, each in its own directory and its own ledger table (ADR 0198, 0206) |
+| Migration sets | the release's, and a project's own under `projects/<slug>/`, each in its own directory and its own ledger table (ADR 0198, 0206). A project's lock is schema **3**: it records whether `follows_release_version` was computed or declared (ADR 0210) |
 | Backups | pgBackRest to R2 per project, weekly full and nightly incremental timers, a nightly mirror copy to B2 by a host unit (ADR 0188); a DR kit that names every secret and holds none (ADR 0189) |
 
 **What the doctor reads on a well project** is the best one-screen description
@@ -191,12 +191,12 @@ it.
    that is missing:
    ```bash
    sudo bin/materialize-secrets.sh --project project.alpha.yaml \
-        --requirements secrets.required.yaml --session 25
+        --requirements secrets.required.yaml --session 28
    ```
 6. **Deploy, unredirected, at the terminal:**
    ```bash
    sudo ./deploy.sh --host host.yaml --project project.alpha.yaml \
-        --capabilities capabilities.yaml --through-session 25
+        --capabilities capabilities.yaml --through-session 28
    ```
    The first pass of a new project records the two loopback ports and the
    app route `unavailable` — the documented first-deploy state, not a failure
@@ -474,7 +474,7 @@ place.
 measured sequence and its traps for the three the API plane holds: capture
 the pre-rotation value to a root-only file first (a proof you cannot admit
 skips), replace it at the provider by hand and confirm it saved, **`project-runtime.sh
-… --through-session 25 down` for a credential a container mounts** (D253:
+… --through-session 28 down` for a credential a container mounts** (D253:
 `resume` runs `compose up` without `--force-recreate`, and PostgREST kept a
 generation two rotations stale and crash-looped), materialize, deploy,
 declare it to the gate with the matching `--rotated-*-from-file`. Performed
@@ -585,11 +585,11 @@ mode stops being something a host is asked to run.
 **The merge**, from a checkout at the branch head:
 
 ```bash
-python bin/write-session-evidence.py --session 25 \
-  --host-input evidence/session-25-host.json \
-  --external-input evidence/session-25-external.json \
-  --offline-input evidence/session-25-offline.json \
-  --output evidence/session-25.json
+python bin/write-session-evidence.py --session 28 \
+  --host-input evidence/session-28-host.json \
+  --external-input evidence/session-28-external.json \
+  --offline-input evidence/session-28-offline.json \
+  --output evidence/session-28.json
 ```
 
 `--offline-input` is required for a session with an offline claim and refused
@@ -636,7 +636,7 @@ with the row that measured it.
 | `render-jwks`: *whether the key set CHANGED cannot be told from here* | there was no previous copy at that path — the normal case, because a deploy replaces the whole rendered directory first (D1374, D1427) | it is neither evidence of a rotation nor evidence against one; `sudo bin/rotate-signing-key.sh --outputs <outputs.json> acknowledge` reads what each verifier is holding |
 | a rotation proof: *the value declared as pre-rotation is the active one* | nothing was rotated: the provider did not take the edit, or materialization did not run | confirm at the provider, materialize, deploy again |
 | a rotation proof fails `401 PT401` | a bootstrap-minted token missing `credential_version`, `authz_version` or the scope array (D298, D675) | repair the identity, not the thing the proof names |
-| PostgREST crash-loops after a credential rotation, route 502 | a container holding a stale generation (D253) | `project-runtime.sh … --through-session 25 down`, then deploy |
+| PostgREST crash-loops after a credential rotation, route 502 | a container holding a stale generation (D253) | `project-runtime.sh … --through-session 28 down`, then deploy |
 | the edge answers 502 on a project route after a deploy | the deploy leaves the previous document until step 7; or the edge is not attached | `bin/edge-network.sh status --project-key <key>`; `reconcile` |
 | `edge.sh status` says `staging` after a promotion | before 1.0.1 it could never say `production` as `op` (D1050) | since: `unknown` when it cannot read; read as root |
 | `TimeoutError` reading Infisical | a transient (D976) | run the command again |

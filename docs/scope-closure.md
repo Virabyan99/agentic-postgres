@@ -693,3 +693,73 @@ decision, and D1468–D1478 are in the plan's §1.
 | **A redeploy between `promote` and the provider move restores the pre-promotion record** (D1474) | `active_kid` is re-derived from the key set file's first key on every deploy, while `retire_after` is carried forward. A code reading, not a measurement: it needs a deploy. One line in the sheet forbids it. |
 | **`auth_jwt_signing_key` reads as replaceable** (D1471) | `bin/rotate-secret.sh` prints `ROTATES` for it beside the eighteen that genuinely are, and rig 28e measured what that path publishes: a set with **zero overlap** with the previous one, which is the gap ADR 0088 exists to close. Recorded, not repaired: the repair is a note field on a contract file. |
 
+---
+
+## 21. What Session 28 closed, what it left, and what Session 29 inherits
+
+**Session 28 is an audit acted on.** `docs/pre-stage-4-audit.md` was its single
+input; Run 1 re-measured all thirty-six Tier 1 rows against the tree in both
+directions and found **fourteen already answered and three whose closing act
+would have done damage as written**. `VERSION` moves to **1.7.0**,
+`CURRENT_SESSION` to **28** — 26 and 27 registered nothing and are skipped the
+way 19 is (D1063) — and **no tag is cut**. Sections 16 to 20 are the runs'
+records; the plan's §1 carries **D1406–D1485**, eighty rows.
+
+### What this session added to the registry
+
+| Requirement | Claim | Mode | Where it stands at the close |
+|---|---|---|---|
+| `DX-FOLLOWS-001` — a project set's record of the release it was frozen against, and the flag that declares it (ADR 0210) | `project_set_release_record` | **offline**, declared | Reported by `bin/session-28-check.sh --mode offline`. Its operator surface had no proof at all until this run (D1480). |
+| `AGT-RETAIN-001` — what the agent record keeps and for how long (ADR 0213) | `agent_record_retention` | **host** | **`not_run`, by design.** Migration `20260917120033` is in this release's set and nothing applies it here. Session 29 deploys, then sweeps. |
+| `REL-READ-001` — the reading before a tag (ADR 0214) | `release_reading` | **offline**, declared | Reported by the offline half. Deliberately not in any gate (D1467). |
+
+**No claim was added for the rotation**, although it is the session's headline
+act, and D1469 is why that is not modesty: the three `not_run` claims it is
+supposed to close need **four** rotations between them and the cutover moves one
+of nine node ids. A claim about a rotation having been rehearsed is a claim
+about the planning, which is what ADR 0163 refuses.
+
+### The rows this session closed
+
+| Row | How |
+|---|---|
+| **How a fork made before `projects/<slug>/` existed converts to it** — §15's first row, and the audit's on-ramp question | **Closed.** ADR 0212 decides that it converts by re-homing and that only a RECORD has to change; ADR 0210 gives the record (`follows_release_version_source`) and `bin/migrate.sh --project M freeze-lock --follows V` writes it; ADR 0211 makes the refusal an adopter meets say why the grant they copied is dead. `docs/on-ramp.md` is the procedure, and its step 7 says plainly which step a checkout cannot prove. **No applied migration is re-stamped and nothing here advises one** (D912). |
+| **D1424 — nothing in the tree lists what is about to be tagged** | **Closed by ADR 0214 and `apg release-reading`**, which states the facts and names the judgement it cannot make. The verdict was refused on a measurement, not on taste: the records-vs-release-bytes discriminator was measured across all five tags and does not separate the two defective releases from the three ordinary ones. |
+| **D1430 — the environment is not verified against the lock** | **Closed in Run 5.** Session 6 deferred it with a reason written as a *when*; it was read as a *whether* for twenty-two sessions and cost three gate runs. The check compares installed distributions against the lock's pins and fails with the install command. |
+| **D1240's four modules outside every sweep** | **Closed in Run 5.** They collect 0 under no selector now. |
+| **`agent_audit` and `agent_idempotency` grow without bound** | **Closed as a decision, not as a schedule** (ADR 0213). Two prune functions granted to NOBODY, a size reading granted to the record's existing reader, and a proof that nothing in this release calls either. The doctor's eleventh check reports the two counts and the date the record starts, with **no threshold** — D1441's argument, three runs earlier in the same command. |
+| **The gate's help said four verifiers where the roster is three** (D1472) | **Closed in `bin/session-28-check.sh`**, with ADR 0098's reason written into the flag's help: `auth` is the issuer. |
+
+### What it did NOT close, and the reason on each
+
+| Row | Reason |
+|---|---|
+| **`documented_path` is `failed`** | **Left failed, deliberately.** The audit's own closing line is the rule: a session that repairs what the readers found and then declares victory without a THIRD reader has not closed it — it has gone back to the state where the status had never been emitted at all. This session did not re-run `dx-record check` against its own prose and call the result a walk. |
+| **`bootstrap_identity`, `api_authorization`, `credential_rotation_planes`** | **Still `not_run`, and the premise is now correct.** Rehearsed end to end (§20); performed on nothing. Four rotations, nine node ids, all `live_host`. |
+| **`replacement_host_restore`** | `not_run` by decision (D1028). Unchanged. |
+| **The operator guide has not been read cold** | Unchanged, and no test reads prose for truth. The cold reading is a person's, and §20's rehearsal is the closest this session came to one — it read the pages by executing them. |
+| **`--kit-dir` stays on `kit-2026-09-11`** | D1282, re-read and still true. `bin/session-28-check.sh`'s flag help says so and says why: REC-KIT-003's claim IS the version gap, and aiming the flag at the newest kit destroys the proof **without failing**. |
+| **D1471, `auth_jwt_signing_key` reads as replaceable** | Recorded in §20, not repaired: the repair is a note field on a contract file and belongs with the rotation. |
+| **D1473, the rotation's `down`/up may be three sessions stale** | Kept and turned into a free measurement on the trip, rather than removed on a code reading. |
+| **D1485, a rig that deleted a render fixture the checkout already held** | Recorded this run. Two proofs in one module hard-fail on a missing render fixture while five skip on the same precondition. |
+
+### What Session 29 inherits, in order
+
+1. **Deploy this commit**, both projects, `--through-session 28`. It applies
+   `20260917120033` — the first ledger move in four sessions.
+2. **Then sweep.** `bin/session-28-check.sh --mode host` and `--mode external`,
+   merged with the offline half this session wrote. `stage_release` goes green
+   because the trip deployed before it swept, which ends **D1401's third and
+   last occurrence** — the arrangement is the point (D1425).
+3. **Then take the reading and cut `1.7.0`** on the commit that was deployed.
+   `apg release-reading` is what to run first, and its third question —
+   *is a tag being cut on this commit?* — is the one this session answered *no*.
+4. **The rotation, if the operator wants it**, from the plan's **Appendix R** and
+   `docs/operator-guide.md` §15. Its pre-flight is `sudo docker inspect -f
+   '{{.State.Pid}}' <container>` printing a non-zero number **before** the
+   window opens (D1477). If it is performed, the sweep goes **after** step 7
+   (D1470).
+
+**The one thing this session must not be read as having done is tagging.** It
+did not, and the tree between this commit and Session 29's tag is a release that
+exists and is not yet promised to anybody.

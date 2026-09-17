@@ -1086,6 +1086,13 @@ CLAIM_INTRODUCED_IN = {
     "dx_walk_instrument": 25,
     "dx_hardening": 25,
     "stage_release": 25,
+    # Session 28 (ADR 0210, ADR 0213, ADR 0214). Two offline and one host, and
+    # 26 and 27 are absent from this table the way 19 is: neither registered a
+    # requirement, so neither has a claim to introduce and the gap is the
+    # record (D1063).
+    "project_set_release_record": 28,
+    "agent_record_retention": 28,
+    "release_reading": 28,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer
