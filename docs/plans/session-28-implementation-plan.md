@@ -9,10 +9,10 @@ Then `docs/scope-closure.md` §15 and `docs/plans/session-27-implementation-plan
 and the tag does not. **Session 29 is the trip**, and Run 8 writes its sheet.
 **Product version at close:** `VERSION` **1.7.0**, `CURRENT_SESSION` moves
 **25 → 28**. 26 and 27 are skipped the way 19 is, and the skip is the record.
-**Next free:** D1463, ADR 0215. *(Run 1 added D1426–D1433; Run 2 added
+**Next free:** D1468, ADR 0215. *(Run 1 added D1426–D1433; Run 2 added
 D1434–D1439 and wrote ADRs 0210, 0211 and 0212; Run 3 added D1440–D1443 and
 built them; Run 4 added D1444–D1446; Run 5 added D1447–D1456; Run 6 added
-D1457–D1462 and wrote ADR 0213.)*
+D1457–D1462 and wrote ADR 0213; Run 7 added D1463–D1467 and wrote ADR 0214.)*
 
 ---
 
@@ -152,6 +152,11 @@ the same finding, and D1430 revives a deferral whose stated reason has expired.
 | **D1460** | `docs/scope-closure.md`, `CLAUDE.md` §9 and the pre-Stage-4 audit, all three treating one row: *"`agent_audit` and `agent_idempotency` grow without bound. Nothing prunes either"* — closed the same way, *"a retention rule."* | **They are not one question, and rig 28b measured the difference with its control in the same run.** Pruning an audit row loses history and nothing else: neither table carries a foreign key (the only one among the three agent tables is `agent_quota.agent_id`), and no live behaviour depends on a row being present. Pruning an idempotency claim **re-arms its key silently**: a write replayed while its claim is present is deduplicated and `app.notes` stays at one row; the same write replayed after the claim is deleted writes a SECOND row and reports success, with no error on either side. At-most-once becomes at-least-once for every key past the horizon — the failure 0029 exists to prevent. **And there is no safe subset**: the obvious candidate, the claims of agents that are no longer active, dies on its own measurement, because `auth_rotate_agent_secret` (0025) clears a revocation and returns the SAME agent id to `active`, so a revoked agent's keys are dormant and not dead. | **ADR 0213 splits the row and migration `20260917120033` ships both prunes with different comments.** The idempotency prune carries its consequence in its own `COMMENT ON FUNCTION`, in the words an operator reads while deciding, and a proof holds the consequence measured — with the unpruned replay as the control in the same test. | Two rows closed with the same three words, where one is a disk decision and the other is a change to a guarantee this product advertises. A session reading the table as uniform would have shipped a default horizon and quietly downgraded every caller's at-most-once, and the audit's own closing act invited exactly that. | 0213 |
 | **D1461** | This migration's own first draft: *"`p_limit` is the answer to the lock instead of an index"*, written before the rig ran and implying the bounded prune is the cheaper one. | **It is not the faster one.** On a cluster carrying 20,004 audit rows spread over fourteen days, the unbounded prune removed 9,921 in **141 ms** and a bounded one removed 500 in **147 ms** — the `ctid` subquery pays for itself. Both plans are `Seq Scan`s: 0019's two indexes are `(owner_id, started_at DESC)` and `(agent_id, started_at DESC)`, neither leading with the timestamp, and `agent_idempotency` has only its primary key. | **The rationale is corrected in the file to what was measured**: `p_limit` bounds how many rows one transaction touches and holds locks on until it commits, not how long it takes, so a table nobody has pruned since the deployment was created can be taken in passes whose size the operator chose. **No index is added** — 0019 wrote that its two exist for one reader and neither is speculative, and a third would be paid on every write to buy a scan for an operation performed by hand. | A rationale written before the measurement, in a file that ships, is a sentence a later reader will believe. This one was wrong in the direction that produces work: an operator reading it would batch a prune to make it faster and get a slower one. | 0213 |
 | **D1462** | Run 6's plan: *"plus the counts in `bin/doctor.sh`'s deployed mode so an operator can see the growth."* | **A count is a reading and not a verdict, and this session already found what inventing the verdict costs.** Nobody has measured a row count at which a deployment is unwell. D1441, three runs earlier, struck the host-interpreter check for exactly this: *"a check added on an unmeasured footing, to the one command that runs as root on production, in a session with no host trip, could fail a host that works."* The same argument arrives a second time, in the same command, in the same session. | **The eleventh check reports the two counts and the date the record starts, and has no threshold** — ADR 0195's three outcomes, where the third is *I could not read it*. A test asserts the absence across five row counts from 0 to 10⁹, so adding a threshold means deleting the test that carries the argument. **And the probe reads the two TABLES rather than migration 0033's functions**, so the count follows the CHECKOUT and not the cluster: a 1.7.0 checkout reads eleven against a deployment at any release, and Session 29's pre-upgrade reading is not disturbed by a tree that is ahead of it. | The deployment is two patches behind the tree already (D1401), and Session 29's first act is a doctor reading taken from the host's own checkout. A check that went `unknown` against an un-upgraded cluster would have made that reading exit 6 for a reason the operator did not cause — which is the shape of the surprise this session exists to avoid. | 0213 |
+| **D1463** | D1424 and `docs/pre-stage-4-audit.md`: *"A release's documentation landing one commit past its own tag. **It has now happened three times**, twice of them on one day."* | **Five of five.** Rig 28c walked every tag on `main` and the commits that follow it up to the next `VERSION` change. `1.0.0` → `b60814b` (`bin/bootstrap-providers.py` and a test); `1.0.1` → `a0d853f`; `1.6.0` → `d1a6db0`; `1.6.1` → `f97075d`; `1.6.2` → `ad96673`. Every tag this repository has, without exception. **And the first one is not documentation at all** — `1.0.0`'s next commit is a product repair in `bin/`, which is the shape the row does not describe. | **ADR 0214 §Context.** The count is corrected on the page and the class is widened from *documentation* to *release bytes*, because a repair landing past a tag is the same defect and a worse one. | Three is a habit; five of five is the arrangement. The row's number was what made a checklist sound sufficient. | 0214 |
+| **D1464** | Run 7's own first design, and the obvious one: classify each path past a tag as a RECORD (a plan, the ledger, an audit, an evidence document) or as RELEASE BYTES, and report the first release-byte commit — so the reading fires on the defect and stays quiet otherwise. | **Measured over all five tags, twelve commits deep each, and it does not separate them.** `1.0.0` → release bytes at +1, a defect. `1.0.1` → records at +1..+3, release bytes at **+4**, and that one is Session 20 starting the next release. `1.6.0` → release bytes at +2 (Session 26's guides). `1.6.1` → release bytes at +2, a defect. `1.6.2` → release bytes at **+5**, and that one is this session. **The defect and the ordinary between-releases state are the same shape.** | **The command decides nothing**, and `test_the_reading_prints_no_instruction_about_the_tag` is where the argument is kept: adding a verdict means deleting the test. ADR 0214 §Decision 3 and its Alternatives. | What separates *work that belonged inside the release* from *the next release's work* is intent, and **intent is not in the tree**. A verdict here would be D1441's mistake — a threshold on an unmeasured footing — struck earlier in this same session. | 0214 |
+| **D1465** | The naive reading a command would print: *is the tree's `VERSION` already tagged, and have commits landed since?* | **Replayed against all 147 commits from `1.0.0` forward: 45 of them answer yes.** Nearly a third of this repository's history is *already tagged, N commits since*, because that is what a repository between releases looks like. | The reading states it as a fact and never as a warning, and the run-length is the reason the exit code stays `0` for it. A reading that shouts at a third of every history is a reading that gets skipped — **which is exactly how the prose checklist failed**. | The measurement that saved the command from becoming the thing it replaces. | 0214 |
+| **D1466** | ADR 0209: *"a test runs inside a commit"* and cannot see a tag — the whole reason its guard is not asked to. | **Right, and incomplete.** `.github/workflows/ci.yml` has three jobs and only the gate checks out with `fetch-depth: 0`; the job that runs the contract suite and the P0 inventory job take `actions/checkout`'s default. Measured against a control — a depth-1 clone of this repository beside a full clone of the same commit: `git tag` returns **zero names** and `git describe` is **fatal** in the first, and five names in the second. `--no-tags` at full depth reads identically. | ADR 0214 §Context 5, and `NO_TAGS_IN_THIS_CLONE` — the third outcome (ADR 0195), with exit **3**. A reading taken in CI would be clean by measuring nothing, which is D600's value exactly. | A second, independent reason for ADR 0209's line. The first is about what a test can see; this one is about whether the bytes are even in the checkout. | 0214 |
+| **D1467** | The natural next step for any new reading: put it in `bin/session-01-check.sh`, where it would run on every push. | **Refused on the measurement above.** The gate runs in CI, where the suite's job has no tags, so it would print *the reading cannot be taken here* on every run — and a line that is always the same is a line nobody reads. | **It is not in the gate.** It is run by a person at a workstation with a full clone, at the session close, and `docs/operator-guide.md` §14 and this plan's Run 9 say so. | The one place automation would have made it worse, named so a later session does not add it as an obvious improvement. | 0214 |
 
 ---
 
@@ -803,6 +808,57 @@ Session 29 will actually be standing — in this plan's §5 Run 9 and in
 **Either way the requirement and the claim are registered in Run 9**, and the
 first use is Session 29's tag.
 
+**Done.** 2026-09-17. **D1463–D1467**, ADR **0214**, one new operator command
+and one pure module. Eleven mutations, **eleven kills, zero survivors**, every
+control green in the same invocation, all three files restored byte-identical.
+
+**The ADR took the command — and the measurement changed what the command is
+allowed to say.** Rig 28c, five passes over this repository's own history, every
+number read from `git`:
+
+1. **Five of five.** Every tag has release bytes landing past it, and `1.0.0`'s
+   next commit is a product repair in `bin/` (D1463). D1424 said three times.
+2. **The obvious discriminator does not exist** (D1464). Records-versus-release-
+   bytes puts the two defects and the three ordinary cases in the same bucket:
+   release bytes land within one to five commits of every tag, always, because
+   the next session starts.
+3. **The naive verdict fires on 45 of 147 commits** (D1465) — a third of the
+   history, which is how the prose checklist earned its reputation.
+4. **The counts are the part a person cannot supply.** At `acb08e4`: 32 released
+   migrations at the tag against 33 in the tree, 209 ADRs against 213, 61 files,
+   ten commits, and `VERSION` unmoved. Nobody reconstructs that by hand.
+5. **A test could not take this reading in CI** (D1466). Only the gate job checks
+   out with `fetch-depth: 0`; the suite's job and the inventory job take
+   `actions/checkout`'s default, and a depth-1 clone measured beside a full clone
+   of the same commit reports **zero** tags and a fatal `git describe`.
+
+*So it is a command AND a checklist, and the split is decided by what is
+computable.* `bin/release-reading.sh` prints where HEAD stands, the last tag and
+the `VERSION` it carries, what has landed since, released migrations and ADRs at
+the tag against the tree, and the bump commit with everything after it — then
+three questions in the second person that it does not answer. **The checklist is
+inside the command rather than beside it**: a page can go stale, can be skipped
+by somebody who ran the command, and asks a person to gather the facts as well
+as judge them, which is the arrangement that failed five times.
+
+*Four outcomes, three of them ordinary and one of them ADR 0195's third*:
+`tag_is_owed`, `tag_does_not_contain_these`, `nothing_to_decide`, and
+`no_tags_in_this_clone` — the only one that is not exit `0`. **It never fails
+closed on a judgement, because it makes none**; it exits `3` when it could not
+take the reading at all, which is the opposite. And it is deliberately **not in
+the gate** (D1467).
+
+*The battery's one survivor, repaired*: a mutation that gave the untakeable
+reading the three questions anyway lived, because
+`test_a_reading_that_could_not_be_taken_asks_nothing` read only the rendered
+lines — and `render` returns early for that outcome. The test now asserts the
+`Reading` as well as the print. The re-run is eleven kills, zero survivors.
+
+*Ran before the push*, once: the new module (22), `test_cli_contract`,
+`test_acceptance_registry` (a module was added), `test_printed_commands`,
+`test_documentation_index`. **Nothing is applied to a deployment. No bump, no
+tag.**
+
 ### Run 8 — the rotation, rehearsed, and Session 29's sheet
 
 **The rotation gets its own run because it is the one credential path in this
@@ -866,6 +922,11 @@ the bump owes:
   `bin/mcp-contract.sh check`, `bin/migrate.sh freeze-lock`.
 - `docs/scope-closure.md` §16 — what Session 28 left open — and `CLAUDE.md` §2's
   Session 28 block.
+- **`bin/apg.sh release-reading`, run on the bump commit, and what it printed
+  quoted in this plan's Run 9 Done** (ADR 0214). It will read `tag_is_owed`:
+  `VERSION` `1.7.0` with no tag carrying it. **That is the reading's first use,
+  and Session 29 takes it again on the commit it actually tags** — this session
+  does not tag, so the answer to its third question here is *no*.
 
 **`bin/session-01-check.sh` runs once, on a clean tree, before the push**, and
 `bin/session-28-check.sh --mode offline` writes `evidence/session-28-offline.json`.

@@ -94,6 +94,11 @@ SHELL_COMMANDS = (
     "bin/project-runtime.sh",
     "bin/provision-host.sh",
     "bin/rehearse.sh",
+    # Session 28 (ADR 0214): the reading taken before a tag is cut. Listed here
+    # the run it landed and `git add`ed before this module runs, because
+    # `test_commands_are_executable_in_the_git_index` reads the INDEX's mode and
+    # not the working tree's (D1014, D1188).
+    "bin/release-reading.sh",
     "bin/restore.sh",
     "bin/restore-test.sh",
     "bin/rotate-secret.sh",
@@ -194,6 +199,9 @@ PYTHON_COMMANDS = (
     # is not asked the question in three shells that each decided for themselves
     # what the answer meant (D1060).
     "bin/rendered-document.py",
+    # Session 28 (ADR 0214). It runs `git` and nothing else, and it is the half
+    # that measures; every conclusion is in `agentic_postgres.release_reading`.
+    "bin/release-reading.py",
     "bin/restore.py",
     "bin/restore-test.py",
     "bin/rotate-secret.py",

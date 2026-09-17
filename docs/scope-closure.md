@@ -640,3 +640,26 @@ plan.md` §5 Run 6 is the record, and D1457–D1462 are in its §1.
 | **`bin/doctor.sh` said seven live checks and `diagnose()` appended ten** (D1459) | Since Session 18, in the command's own header and usage, while `docs/operator-guide.md` said *ten checks* on the page that quotes this command's `--help`. Repaired to eleven. **ADR 0158's table is left alone** — an ADR is a record of a decision at a date, and the count is not the decision it took; §15's D1441 row quotes the pre-repair text. |
 | **The migration's own rationale was wrong in the direction that produces work** (D1461) | It said `p_limit` is the answer to the lock *instead of an index*, implying the bounded prune is cheaper. Measured: 20,004 rows over fourteen days, unbounded removed 9,921 in **141 ms**, bounded removed 500 in **147 ms**. `p_limit` bounds the rows one transaction holds locks on, not the clock. Corrected in the file that ships. |
 
+---
+
+## 19. What Session 28's Run 7 decided about the tag, and what it refused to decide
+
+**One new operator command, `bin/release-reading.sh`, and no schema.** ADR 0214
+is the decision; `docs/plans/session-28-implementation-plan.md` §5 Run 7 is the
+record, and D1463–D1467 are in its §1.
+
+| Row | Closed how |
+|---|---|
+| **A release's documentation lands one commit past its own tag** (D1033, D1388, the pair that cost `1.6.2`, and D1424) | **Closed as far as a checkout can close it, and the page says how far that is.** `bin/apg.sh release-reading` prints, at the moment the question is answerable, what the last tag carries against what the tree carries — including the two counts nobody reconstructs by hand: released migrations and ADRs, at the tag against the tree. **It is not an enforcement and ADR 0214 does not claim one.** Somebody can still cut a tag without running it, exactly as somebody could ignore the prose checklist; what changed is that the question now costs one command. |
+| **Command, or checklist?** (D1424's open question) | **Both, and the split is decided by what is computable.** The command supplies every fact — a checklist cannot produce `32 -> 33`. The three questions it cannot answer are printed **by the command**, not kept on a page: a page can go stale, can be skipped by somebody who ran the command, and asks a person to gather the facts as well as judge them, which is the arrangement that failed at all five tags. |
+| **Whether a tag is owed** | **Refused, and the refusal is the measurement** (D1464). Records-versus-release-bytes does not separate the two defects from the three ordinary cases: release bytes land within one to five commits of every tag, always, because the next session starts. Intent is not in the tree, and a verdict would be D1441's mistake one run later. `test_the_reading_prints_no_instruction_about_the_tag` is where the argument is kept. |
+| **A test that reads the tags** | **Refused twice over.** ADR 0209's reason stands — a test runs inside a commit — and D1466 adds a second: two of CI's three jobs check out without tags, so the proof would be green by measuring nothing. The command's third outcome, `no_tags_in_this_clone`, exits **3** rather than reporting clean. |
+| **Putting the reading in the gate** | **Refused on the same measurement** (D1467). The gate runs where the tags are not, so it would print *cannot be taken* on every CI run, and a line that is always the same is a line nobody reads. It is run by a person, at a session close, in a full clone. |
+
+### What Run 7 corrected on the pages that asked for it
+
+| Found | Position |
+|---|---|
+| **D1424 said the class had happened three times** | **Five of five** (D1463). Every tag on `main` has release bytes landing past it, and `1.0.0`'s next commit is a product repair in `bin/` rather than documentation — so the class is release bytes, not prose. |
+| **The naive verdict fires on a third of the history** | 45 of the first 147 commits answer *already tagged, commits since* (D1465). It is the normal condition of a repository between releases, which is why the reading states it and never warns about it. |
+

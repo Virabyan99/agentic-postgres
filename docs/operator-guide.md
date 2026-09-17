@@ -711,3 +711,51 @@ What that reading establishes, as distinct from what this deployment has done:
 It does **not** establish anything about this host: it was a different
 deployment, a different fork and a different operator. Every row above still
 stands.
+
+
+---
+
+## 14. Before a tag
+
+**Not a host act.** This one is run in a full clone on the machine the release
+is cut from, at the session close, before `git tag -a` — and it is the only
+thing on this page that touches no deployment.
+
+```bash
+bin/apg.sh release-reading
+```
+
+It prints where `HEAD` stands, the last tag and the `VERSION` that tag carries,
+what has landed since as commits and paths, **released migrations and ADRs at
+the tag against the tree**, and the commit that last moved `VERSION` with
+everything that has landed after it. Then it prints three questions and does
+not answer them:
+
+```
+  Does everything in this window belong inside <VERSION>?
+  Is there anything you intended to be in <VERSION> that is not in this list?
+  Is this commit the one the tag goes on?
+```
+
+**It decides nothing, and that is the decision** (ADR 0214). Every one of this
+repository's five tags has release bytes landing past it, and the two that were
+defects — `1.0.0`, repaired by cutting `1.0.1`, and `1.6.1`, repaired by cutting
+`1.6.2` — are the same shape as the three that were the next session starting
+work. Nothing in the tree separates them, so a verdict would be invented. What
+the command supplies is the half a person cannot: at the last reading, 32
+released migrations at the tag against 33 in the tree and 209 ADRs against 213,
+with `VERSION` unmoved.
+
+**Four answers, and one of them is *I could not look*.** `tag_is_owed` — the
+tree's `VERSION` has no tag. `tag_does_not_contain_these` — it has one, and
+commits have landed since; this is the ordinary state between releases as well
+as the shape of both defects. `nothing_to_decide`. And
+`no_tags_in_this_clone`, which exits **3** rather than printing a clean answer
+it did not measure: a shallow checkout and `git clone --no-tags` both look
+exactly like a repository that has never been tagged.
+
+**It is not in any gate**, deliberately. The gate runs in CI, where the suite's
+job checks out without tags, so it would print *cannot be taken* on every run.
+
+The tag itself stays what it has always been — the operator's own annotated
+`git tag -a <version> -m "..."`, on a commit CI has already measured.
