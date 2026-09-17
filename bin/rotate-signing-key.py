@@ -52,12 +52,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import io
 import json
 import os
 import subprocess
 import sys
-import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
@@ -244,14 +242,51 @@ def container_for(project_key: str, service: str) -> str:
     return names[0]
 
 
-def read_command(container: str, jwks_path: str) -> list[str]:
-    """The command that reads one container's copy of the key set.
+def container_pid(container: str) -> int:
+    """The container's init pid, as this host sees it.
 
-    Built by a pure function so the shape is assertable offline. `-` streams the
-    archive to stdout, which is what keeps this a read with no temporary file to
-    clean up or to leave a key set lying in.
+    The handle to the container's own mount namespace, and the reason this
+    command needs root. A daemon that cannot give one -- Docker Desktop's Linux
+    VM reports `0`, because the process is not on this kernel -- is a daemon
+    whose containers this command cannot read, and that is reported rather than
+    worked around (ADR 0215, ADR 0195).
     """
-    return ["docker", "cp", f"{container}:{jwks_path}", "-"]
+    result = subprocess.run(
+        ["docker", "inspect", "-f", "{{.State.Pid}}", container],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        raise OperatorError(
+            EXIT_STATE,
+            f"could not inspect {container}: {result.stderr.strip()}",
+        )
+    text = result.stdout.strip()
+    if not text.isdigit() or int(text) == 0:
+        raise OperatorError(
+            EXIT_STATE,
+            f"{container} reports init pid {text or '(nothing)'}, so its key set cannot be "
+            "read through its own mount namespace -- which is the only reading that says "
+            "what the process HOLDS rather than what the deploy WROTE (ADR 0215). Check "
+            f"`docker inspect -f '{{{{.State.Pid}}}}' {container}` before opening a "
+            "rotation window; a daemon that does not run its containers on this kernel "
+            "cannot answer this question at all.",
+        )
+    return int(text)
+
+
+def read_path(pid: int, jwks_path: str) -> str:
+    """Where this container's copy of the key set is, from the host.
+
+    A pure function so the shape is assertable offline, which is what
+    `read_command` was for before ADR 0215 replaced the mechanism it built.
+    `/proc/<pid>/root` traverses the container's OWN mount namespace: it
+    resolves the MOUNT, where every path-shaped reader resolves the PATH and so
+    reads whatever the host currently has at it.
+    """
+    return f"/proc/{pid}/root{jwks_path}"
 
 
 def loaded_digest(container: str, jwks_path: str) -> str:
@@ -262,55 +297,36 @@ def loaded_digest(container: str, jwks_path: str) -> str:
     previous inode, so the host shows the new set and the process is verifying
     against the old one.
 
-    **`docker cp`, not `docker exec … cat`,** and that is a correction rather
-    than a preference (ADR 0122). Measured against the locked images: the
-    PostgREST image is distroless and has neither `cat` nor `sh` -- both exit
-    **127**, *"executable file not found in $PATH"* -- while `docker cp` on the
-    same image exits 0. The control is the `python:3.12-slim` the other two
-    verifiers run, where both binaries are present. So the previous
-    implementation could not read the digest of the only verifier it knew about,
-    and `acknowledge` could never unblock a promotion (D305, D411, D427).
+    **Through `/proc/<pid>/root`, not `docker cp`, and that is a correction
+    rather than a preference** (ADR 0215). Rig 28j measured `docker cp` against
+    a native `dockerd 27.5.1`, with both controls in the same run: before the
+    replace and after a recreate it agrees with the process, and **after an
+    atomic replace it returns the HOST's new bytes while the process is still
+    verifying against the unlinked inode**. It re-resolves the bind mount's
+    source path, so it is a path-shaped reader wearing a container's name --
+    which is the one thing the paragraph above says this must not be. Reading it
+    would have reported every verifier as current the moment the deploy wrote
+    the set, and `promote` would have unblocked on that.
 
-    `docker cp` streams a tar archive, so the member is extracted here. The
-    digest is of the FILE's bytes, which is what `published_digest` is a digest
-    of -- hashing the archive would be a stable, plausible, wrong number.
+    `docker exec … cat` is not the way back: the locked PostgREST image is
+    distroless and has neither `cat` nor `sh`, both exit **127**, re-measured on
+    today's image (ADR 0122, D305, D411, D427). `/proc/<pid>/root` needs nothing
+    inside the image at all.
+
+    The digest is of the FILE's bytes, which is what `published_digest` is a
+    digest of.
     """
-    result = subprocess.run(
-        read_command(container, jwks_path),
-        capture_output=True,
-        check=False,
-        timeout=60,
-    )
-    if result.returncode != 0:
+    path = Path(read_path(container_pid(container), jwks_path))
+    try:
+        payload = path.read_bytes()
+    except OSError as error:
         raise OperatorError(
             EXIT_STATE,
-            f"{container} could not read {jwks_path}: "
-            f"{result.stderr.decode('utf-8', 'replace').strip()}",
-        )
-    return hashlib.sha256(_only_member(result.stdout, container, jwks_path)).hexdigest()
-
-
-def _only_member(archive: bytes, container: str, jwks_path: str) -> bytes:
-    """The single file inside a `docker cp` stream.
-
-    Refuses anything other than exactly one regular file. A directory, or two
-    members, means the path named something other than the key set -- and
-    hashing the first member of a surprise would produce a digest that simply
-    never matches, which reads as "this verifier is behind" rather than as "this
-    command was pointed at the wrong thing".
-    """
-    with tarfile.open(fileobj=io.BytesIO(archive)) as bundle:
-        members = [member for member in bundle.getmembers() if member.isfile()]
-        if len(members) != 1:
-            raise OperatorError(
-                EXIT_STATE,
-                f"{container}:{jwks_path} is not a single file "
-                f"({len(members)} regular files in the copy)",
-            )
-        extracted = bundle.extractfile(members[0])
-        if extracted is None:  # pragma: no cover -- isfile() has already excluded this
-            raise OperatorError(EXIT_STATE, f"{container}:{jwks_path} could not be read")
-        return extracted.read()
+            f"{container} could not be read at {path}: {error.strerror or error}. "
+            "The container is running but its key set is not reachable through its "
+            "mount namespace; a rotation cannot be acknowledged from here (ADR 0215).",
+        ) from error
+    return hashlib.sha256(payload).hexdigest()
 
 
 def published_digest(document: dict) -> str:

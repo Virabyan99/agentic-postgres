@@ -278,3 +278,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0212](0212-a-pre-projects-fork-converts-by-re-homing-and-only-a-record-has-to-change.md) | A fork made before `projects/<slug>/` converts by re-homing without amending, and the merge has four classes with four rules | 28 | Accepted |
 | [0213](0213-the-agent-record-is-pruned-by-an-operator-who-states-a-horizon-and-by-nothing-else.md) | The agent record is pruned by an operator who states a horizon, and by nothing else | 28 | Accepted |
 | [0214](0214-the-reading-before-a-tag-states-facts-and-names-the-judgement-it-cannot-make.md) | The reading before a tag states the facts and names the one judgement it cannot make | 28 | Accepted |
+| [0215](0215-an-acknowledgement-is-read-through-the-containers-own-mount-namespace.md) | An acknowledgement is read through the container's own mount namespace, by pid, and never by a path the host resolves | 28 | Accepted |

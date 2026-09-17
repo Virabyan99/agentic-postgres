@@ -663,3 +663,33 @@ record, and D1463–D1467 are in its §1.
 | **D1424 said the class had happened three times** | **Five of five** (D1463). Every tag on `main` has release bytes landing past it, and `1.0.0`'s next commit is a product repair in `bin/` rather than documentation — so the class is release bytes, not prose. |
 | **The naive verdict fires on a third of the history** | 45 of the first 147 commits answer *already tagged, commits since* (D1465). It is the normal condition of a repository between releases, which is why the reading states it and never warns about it. |
 
+---
+
+## 20. What Session 28's Run 8 rehearsed, and what the rehearsal found out about the claim
+
+**A rehearsal is supposed to decide nothing and this one wrote an ADR**, which
+is the whole story of the run: executing the steps in order found a defect in
+the step that guards the irreversible one. `docs/plans/session-28-implementation-
+plan.md` §5 Run 8 is the record, **Appendix R** is Session 29's sheet,
+`docs/operator-guide.md` §15 is the operator's copy, **ADR 0215** is the
+decision, and D1468–D1478 are in the plan's §1.
+
+| Row | Where it stands now |
+|---|---|
+| **The signing-key rotation has been built, tested offline and never performed** (D860) | **Still never performed** — this session takes no trip. What changed is that every step of it has now been *executed* at least once: rig 28d ran `bin/rotate-signing-key.sh` through `status`, `acknowledge`, `promote`, `retire` and `abandon`, in order, against three real containers holding a real key set published by `bin/render-jwks.py`, including the refusals. The two steps that touch the provider are the two that were not rehearsed, and the sheet says so on each. |
+| **The rotation closes three `not_run` claims** | **It closes none of them on its own** (D1469), and that is the row's premise corrected rather than its work done. Between them the three claims need **four** rotations — the signing key, the authenticator password, the documentation Basic Auth password, and the application credential on both projects — and a claim is `not_run` unless every proof it lists ran and passed. The signing-key cutover moves exactly **one of nine** node ids. |
+| **The three claims' proofs, run against the rig** | **Impossible, measured** (D1468): all nine are `live_host` and demand `APG_LIVE_HOST` and a deployed document; `--setup-plan` with nothing set skips all nine. A claim is measured in one environment and this one's is the host. |
+| **The cutover's timing, never measured** (Tier 2) | Measured as a shape rather than as host numbers: every step is seconds, and the only thing that takes time is the deadline — `promote` plus **930 s** before `retire` is allowed. So the window is about sixteen minutes at its narrowest, twice. |
+| **The step that guards the irreversible one could not tell what a verifier held** | **Found by the rehearsal, repaired under ADR 0215** (D1476). `acknowledge` read each verifier's key set with `docker cp`, which resolves the bind mount's SOURCE PATH: measured on a native `dockerd 27.5.1` with both controls in one run, after the atomic replace `render-jwks` performs it returns the **host's** new bytes while the process is still on the unlinked inode. `loaded_digest`'s own docstring and its own test said a command written that way *"would report every verifier as current no matter what it held"* — and it was written that way since Session 8, when ADR 0122 fixed readability on a distroless image and silently replaced what was being read. The reader is now `/proc/<pid>/root/<path>`, the container's own mount namespace; a pid of `0` is reported and never folded. |
+| **D1374, `render-jwks` reporting a change it could not have seen** | **Read for a decision for the first time, and all three of its readings fired in one rig run**: `published` on a directory with no previous copy, `confirmed` on an unchanged re-render, `wrote … the key set CHANGED` when the prepared key joined the set. Run 4 built the three; Run 8 is the first caller that needed them. |
+
+### What the rehearsal found that nobody was looking for
+
+| Found | Position |
+|---|---|
+| **The signing-key proof is red between `promote` and `retire`, by design** (D1470) | It asserts the retired `kid` is absent from `verification_kids`, which is what `retire` does and what `promote` deliberately does not. A sweep taken in the overlap would report `SEC-BOOT-001` failed during the one window with an irreversible step in it. Never executed before; found by reading it rather than by running it at the wrong moment. |
+| **The gate's own help says FOUR verifiers and the command acknowledges THREE** (D1472) | `auth` is the issuer, and ADR 0098 is titled *the issuer's published set is not the verifier's set*. `compose.yaml` mounts the rendered key set into three services. The sheet says three; the help's repair belongs to Run 9's gate. |
+| **`down` and up may no longer be needed, and the instruction is three sessions older than the mechanism** (D1473) | D591's mount digests recreate exactly the services whose mounted content moved, and `jwks.json` is a bind mount of all three verifiers. **Not repaired** — the sheet keeps the step and adds a free reading before it, so a later session can retire it with evidence instead of with an argument. |
+| **A redeploy between `promote` and the provider move restores the pre-promotion record** (D1474) | `active_kid` is re-derived from the key set file's first key on every deploy, while `retire_after` is carried forward. A code reading, not a measurement: it needs a deploy. One line in the sheet forbids it. |
+| **`auth_jwt_signing_key` reads as replaceable** (D1471) | `bin/rotate-secret.sh` prints `ROTATES` for it beside the eighteen that genuinely are, and rig 28e measured what that path publishes: a set with **zero overlap** with the previous one, which is the gap ADR 0088 exists to close. Recorded, not repaired: the repair is a note field on a contract file. |
+

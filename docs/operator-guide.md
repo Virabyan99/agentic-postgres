@@ -492,6 +492,8 @@ after the file is replaced leaves the container unable to start), `acknowledge`,
 key moved to `APG_AUTH_JWT_SIGNING_KEY` and the prepared one cleared, redeploy,
 `retire` after the deadline. It was offered on the sheet and declined at four
 trips, most recently 2026-09-15, and is the first item on Stage 4's bill.
+**§15 is the numbered sheet**, rehearsed offline on 2026-09-17 with what each
+step was measured to print.
 
 **The R2 credential** is `bin/storage-admin.sh --help`'s six steps
 (`credential-digest`, then `verify-credential`, then `confirm-revoked` with
@@ -759,3 +761,135 @@ job checks out without tags, so it would print *cannot be taken* on every run.
 
 The tag itself stays what it has always been — the operator's own annotated
 `git tag -a <version> -m "..."`, on a commit CI has already measured.
+
+
+---
+
+## 15. The signing-key rotation, step by step
+
+**Rehearsed end to end offline on 2026-09-17** (rig 28d, Session 28 Run 8) and
+**never performed on this deployment** (D860). §9 says what it is; this says how
+it goes, in order, with what each step was measured to print.
+
+Every line here needs root — `rotate-signing-key` requires it for *every* step
+including `status`, because the deployed document and the secret generations are
+root-owned and reading a verifier's key set means reaching its container.
+`OUT` below is `/home/op/<key>-dev-outputs.json`, the current pair.
+
+**Alpha first, then beta.** Beta's window does not start until alpha reads
+`steady`.
+
+### Before you start
+
+1. **Capture the retiring key's JWK.** `cat` the project's rendered
+   `jwks.json` and keep the object whose `kid` is the active one. It is `0444`
+   by design, so this needs no root. After the last step it is not in the
+   published set, and `--rotated-jwt-from-file` wants exactly it.
+2. `sudo bin/rotate-signing-key.sh --outputs OUT status` — expect
+   `phase steady -- one key, nothing in flight`. **Anything else means a
+   rotation is already in flight; stop.**
+3. `sudo bin/doctor.sh --project <key>` — the reading the window is measured
+   against.
+4. **`sudo docker inspect -f '{{.State.Pid}}' <any container of this project>`
+   must print a non-zero number.** Step 4 below reads each verifier's key set
+   through `/proc/<pid>/root/…`, the container's own mount namespace, because
+   `docker cp` resolves the bind mount's source path and returns what the
+   deploy wrote rather than what the process holds (ADR 0215). A daemon that
+   does not run its containers on this kernel reports `0`, and `acknowledge`
+   refuses rather than reading another way. Ask this before the window, not
+   inside it.
+
+### The seven steps
+
+1. **The new key, by hand, at the provider.** Generate it the way the product
+   does — `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048
+   -outform PEM` — and put it at `APG_AUTH_JWT_PREPARED_KEY`, path `/auth`. No
+   command here writes a provider value (D249).
+2. **Redeploy.** `render-jwks` publishes the prepared key's public half beside
+   the active one and prints **`wrote … the key set CHANGED: every verifier
+   must be RECREATED, not restarted`**. If it prints `published … cannot be
+   told from here`, that is the normal case for a deploy that replaced the
+   whole rendered directory, and it is neither evidence of a rotation nor
+   evidence against one — what answers it is step 4.
+3. **Down and up**, so every verifier is recreated:
+   `sudo bin/project-runtime.sh --host host.yaml --project-key <key>
+   --through-session N down`, then redeploy. A restart is not enough, and after
+   the key set file has been replaced a restart is measured to leave the
+   container unable to start at all.
+   **Take `acknowledge` once before this, too** — since D591 the deploy labels
+   each service with a digest of its mounted content and Compose recreates the
+   ones whose content moved, and `jwks.json` is a bind mount of all three
+   verifiers, so step 2 may already have done it. That reading costs nothing,
+   and it is the evidence a later session needs to retire this step (D1473).
+4. `sudo bin/rotate-signing-key.sh --outputs OUT acknowledge` — **three lines,
+   not four** (D1472): `postgrest`, `storage`, `mcp`. `auth` is the issuer and
+   is not a verifier; an acknowledgement from it would be the issuer agreeing
+   with itself (ADR 0098). Each should say `holds the published set`.
+   **What this reads is the process's copy** (ADR 0215). Before Session 28 it
+   read the host's, which says `holds the published set` for a verifier that
+   was never recreated — and `promote` unblocks on it.
+5. `sudo bin/rotate-signing-key.sh --outputs OUT promote`. It prints `status`
+   first, then asks for the literal word `PROMOTE`. **Irreversible**, and
+   refused at exit 6 while any verifier is behind — measured both ways.
+6. **At the provider, then redeploy**: move the prepared key's value to
+   `APG_AUTH_JWT_SIGNING_KEY`, **clear** `APG_AUTH_JWT_PREPARED_KEY`, redeploy
+   and recreate. Until this is done the document says the new key signs and the
+   service is still using the old one, which is the one state the command
+   cannot detect — it says so itself.
+   **Nothing redeploys this project between step 5 and this step.** The deploy
+   re-derives `active_kid` from the key set file's first key, which is still
+   the old one until the value moves, so a redeploy in between quietly restores
+   the pre-promotion record while keeping the deadline (D1474).
+7. **Wait for the deadline, then retire.** `retire_after` is promotion plus
+   **930 seconds** — the longest token this issuer mints (900) plus the leeway
+   the verifier applies (30, D241's bisected measurement). `retire` before it
+   exits 6 and names the moment. Then redeploy and recreate, so the verifiers
+   stop accepting the retired key.
+
+### The window, in time
+
+Every step is seconds; the only thing that takes time is the deadline. **So the
+window is about sixteen minutes wide at its narrowest, and there are two of
+them.** Do not plan a sweep between `promote` and `retire`: the proof behind
+`SEC-BOOT-001` asserts the retired `kid` is **absent** from the document's
+`verification_kids`, which is exactly what `retire` does and what `promote`
+deliberately does not (D1470).
+
+### If `acknowledge` comes back dirty
+
+Nothing is broken — that is the refusal working, and the verifier named is still
+holding the previous key set.
+
+1. **Do not promote.** It refuses anyway, at exit 6, and names the services.
+2. Recreate that project's runtime — `down`, then redeploy — and take
+   `acknowledge` again.
+3. Still dirty? Compare what the container holds against the document:
+   `sudo docker ps --filter label=apg.project.key=<key>`, then the digest of
+   `jwks.json` inside it against `jwt.public_jwks_sha256`. A mismatch that
+   survives a recreate means the deploy did not republish the set — read step
+   2's `render-jwks` line, not the rotation.
+4. **`abandon` is available until `promote` and not after.** Before promotion
+   nothing signs with the incoming key, so withdrawing it costs nothing: clear
+   `APG_AUTH_JWT_PREPARED_KEY` and redeploy. After promotion there is no way
+   back and the recovery is to complete forward.
+
+### Two lines that look like faults and are not
+
+**At the end**, after a successful `retire`, `status` prints `phase steady` and
+then `promotion BLOCKED on ['mcp', 'postgrest', 'storage']` (D1475). Nothing is
+blocked: `retire` resets the acknowledgements to an empty object, which reads as
+*asked and unanswered* rather than as *nothing has been asked*.
+
+**At step 2**, `render-jwks` may print *whether the key set CHANGED cannot be
+told from here* instead of *the key set CHANGED*. That is the normal case for a
+deploy that replaced the whole rendered directory; what answers it is step 4.
+
+### What this rotation does not close
+
+**It moves one proof.** `bootstrap_identity`, `api_authorization` and
+`credential_rotation_planes` have been carried for four trips as *the rotation*,
+and between them they need **four** rotations: this one, the authenticator
+password, the documentation Basic Auth password, and the application credential
+on both projects. A claim is `not_run` unless every proof it lists ran and
+passed, so this window alone moves none of the three to `passed` (D1469). The
+node-id table is in `docs/plans/session-28-implementation-plan.md`, Appendix R.

@@ -9,10 +9,12 @@ Then `docs/scope-closure.md` §15 and `docs/plans/session-27-implementation-plan
 and the tag does not. **Session 29 is the trip**, and Run 8 writes its sheet.
 **Product version at close:** `VERSION` **1.7.0**, `CURRENT_SESSION` moves
 **25 → 28**. 26 and 27 are skipped the way 19 is, and the skip is the record.
-**Next free:** D1468, ADR 0215. *(Run 1 added D1426–D1433; Run 2 added
+**Next free:** D1479, ADR 0216. *(Run 1 added D1426–D1433; Run 2 added
 D1434–D1439 and wrote ADRs 0210, 0211 and 0212; Run 3 added D1440–D1443 and
 built them; Run 4 added D1444–D1446; Run 5 added D1447–D1456; Run 6 added
-D1457–D1462 and wrote ADR 0213; Run 7 added D1463–D1467 and wrote ADR 0214.)*
+D1457–D1462 and wrote ADR 0213; Run 7 added D1463–D1467 and wrote ADR 0214;
+Run 8 added D1468–D1478 and wrote **ADR 0215**, which a rehearsal is not
+supposed to need.)*
 
 ---
 
@@ -157,6 +159,17 @@ the same finding, and D1430 revives a deferral whose stated reason has expired.
 | **D1465** | The naive reading a command would print: *is the tree's `VERSION` already tagged, and have commits landed since?* | **Replayed against all 147 commits from `1.0.0` forward: 45 of them answer yes.** Nearly a third of this repository's history is *already tagged, N commits since*, because that is what a repository between releases looks like. | The reading states it as a fact and never as a warning, and the run-length is the reason the exit code stays `0` for it. A reading that shouts at a third of every history is a reading that gets skipped — **which is exactly how the prose checklist failed**. | The measurement that saved the command from becoming the thing it replaces. | 0214 |
 | **D1466** | ADR 0209: *"a test runs inside a commit"* and cannot see a tag — the whole reason its guard is not asked to. | **Right, and incomplete.** `.github/workflows/ci.yml` has three jobs and only the gate checks out with `fetch-depth: 0`; the job that runs the contract suite and the P0 inventory job take `actions/checkout`'s default. Measured against a control — a depth-1 clone of this repository beside a full clone of the same commit: `git tag` returns **zero names** and `git describe` is **fatal** in the first, and five names in the second. `--no-tags` at full depth reads identically. | ADR 0214 §Context 5, and `NO_TAGS_IN_THIS_CLONE` — the third outcome (ADR 0195), with exit **3**. A reading taken in CI would be clean by measuring nothing, which is D600's value exactly. | A second, independent reason for ADR 0209's line. The first is about what a test can see; this one is about whether the bytes are even in the checkout. | 0214 |
 | **D1467** | The natural next step for any new reading: put it in `bin/session-01-check.sh`, where it would run on every push. | **Refused on the measurement above.** The gate runs in CI, where the suite's job has no tags, so it would print *the reading cannot be taken here* on every run — and a line that is always the same is a line nobody reads. | **It is not in the gate.** It is run by a person at a workstation with a full clone, at the session close, and `docs/operator-guide.md` §14 and this plan's Run 9 say so. | The one place automation would have made it worse, named so a later session does not add it as an obvious improvement. | 0214 |
+| **D1468** | Run 8's own plan: *"the three `not_run` claims … have proofs already registered, and a rehearsal that does not run them is a rehearsal of the commands rather than of the evidence. **Run them against the rig** and record which passed."* | **No rig can run them.** All nine node ids behind the three claims are `live_host` and carry `requires_environment("APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS", …)`. `--setup-plan` on the nine, with nothing set: **9 skipped**, naming the absent variables. Four of the nine additionally demand a `*_FROM_FILE` declaration that only exists inside a rotation window on a deployment. | **The rehearsal proves the commands and the mechanism; the evidence stays Session 29's.** Rig 28d executes every step of the cutover against real containers holding a real key set, and the sheet says which steps were rehearsed and which were not, step by step. | The plan priced a rig as able to move a claim. A claim is measured in one environment (ADR 0089, `evidence_claims`'s own rule), and this one's is the host. | — |
+| **D1469** | Run 8's plan, and the Stage 4 bill: *"the rotation performed"* closes `bootstrap_identity`, `api_authorization` and `credential_rotation_planes`. | **Four rotations, not one — and the signing-key cutover moves ONE of the nine node ids.** `bootstrap_identity` also needs `APG_ROTATED_AUTHENTICATOR_FROM_FILE` (the authenticator password); `api_authorization`'s fifth node id needs `APG_ROTATED_DOCS_FROM_FILE` (the documentation Basic Auth password); `credential_rotation_planes` needs `APG_ROTATED_FROM_FILE` (the application credential, on **both** projects). None of those three is touched by `bin/rotate-signing-key.sh`. And a claim is `not_run` unless **every** node id it lists ran and passed — so performing the cutover alone moves **no claim at all**. | **Session 29's sheet says so on its face**, with the node-id table, and names the other three rotations as provider replacements plus a redeploy. `bin/rotate-secret.sh` is a planner and performs none of them. | Four trips have offered *the rotation* as if it were one act. The claim it was offered to close needs three more. | — |
+| **D1470** | The same plan's step 7: *"After the deadline, `retire`, then redeploy and recreate"* — with the sweep unplaced. | **The signing-key proof passes only after `retire`.** `test_a_rotated_signing_key_is_the_only_one_the_plane_accepts` asserts the retired `kid` is **absent** from the deployed document's `verification_kids` — *"a key still listed there is a key the plane still accepts … the second phase did not complete"*. Between `promote` and `retire` both keys are published **on purpose**, so the proof is red by design in that window. Measured in rig 28d: `retire_after` is `promote`'s clock **plus 930 seconds** (`MAX_TOKEN_TTL_SECONDS` 900 + `CLOCK_SKEW_SECONDS` 30, the 30 being D241's bisected reading of the locked PostgREST), and `retire` before it exits **6**. | **The sheet places the sweep after step 7** and prices the wait: the window is ~16 minutes at its narrowest, twice, and no sweep runs inside it. | A proof that has never executed, read for the first time by the run that would have run it at the wrong moment. The thirteenth such proof this project has found; this one was found before it cost a trip. | — |
+| **D1471** | `bin/rotate-secret.sh`: `auth_jwt_signing_key` prints **`ROTATES — replacing this value rotates it; every consumer below is re-materialized`**, and `secrets.required.yaml`'s twelve-line comment on that secret never mentions the cutover. Its own header says *"Two of the declared secrets cannot be rotated by replacing them, and both look exactly like the ones that can — that is what this exists to say."* | **Measured in rig 28e.** Replace `auth_jwt_signing_key` in place and render: the published set goes from one key to one key with **zero overlap** — the old `kid` is gone the moment the file changes. Every verifier still holding the previous set refuses every token the issuer now signs, until each is recreated. That gap is the whole reason ADR 0088 exists, and the planner's line is what an operator reads before a window. | **Recorded, not repaired.** The repair is a note field on the declaration, printed by the planner beside `ROTATES` — a schema move on a contract file, which is a decision rather than a run's tidy-up. `docs/operator-guide.md` §9 already sends a reader to the seven steps; the planner does not. | The third secret that looks exactly like the ones that can be replaced. The command exists to say that out loud and says it about two. | — |
+| **D1472** | `bin/session-25-check.sh --help`, on `--rotated-jwt-from-file`: *"There are **FOUR** verifiers now (ADR 0113, ADR 0122): the agent plane reads the same rendered `jwks.json` PostgREST and storage do, and every one is RECREATED."* | **Three.** `bin/rotate-signing-key.py`'s `VERIFIERS` table is `postgrest`, `storage`, `mcp`, and `acknowledge` prints three lines — measured in rig 28d, both when they were behind and when they were clean. `compose.yaml` mounts the rendered `jwks.json` into exactly those three services (lines 823, 1473, 1599). The fourth name is `auth`, which is the **issuer**: ADR 0098 is titled *the issuer's published set is not the verifier's set*, and an acknowledgement from it would be the issuer agreeing with itself. | **The sheet says THREE, with the reason.** The help text's repair belongs to Run 9's gate, which is derived from Session 25's by diff. | An operator counting acknowledgements against the number the gate's own help gave them would stop and look for a fourth that does not exist — in the middle of the one window with an irreversible step in it. | — |
+| **D1473** | ADR 0088, `bin/rotate-signing-key.sh`'s usage step 3, the `acknowledge` remedy and `docs/operator-guide.md` §9, all four: *"bring the project down and up so every verifier is RECREATED"*. | **The redeploy alone should already do it, and the mechanism is three sessions younger than the instruction.** Since D591, `bin/render-mount-digests.py` runs immediately before `compose up` and writes a label per service carrying the digest of everything it bind-mounts; Compose hashes labels into the config hash, so **a service whose mounted content changed is recreated and one whose content did not is left alone**. `runtime_override` mounts the rendered `jwks.json` into all three verifiers, and `mounted_paths_by_service` picks up every bind mount rather than a maintained list. So a redeploy after step 2 should recreate exactly the three verifiers. | **Not repaired, and turned into a measurement instead.** The sheet keeps the `down`/up and adds step **2b**: take `acknowledge` *before* it. If it reads clean, a later session can retire the instruction with evidence; if it does not, the instruction earned its place. Removing a safety step on an unrehearsed path on the strength of a code reading is the opposite of what this session is for. | Weakening a runbook step by argument is how a rotation becomes a 401 nobody can explain. Measuring it costs one command inside a window that is already open. | — |
+| **D1474** | The seven steps, read as a sequence with a redeploy in the middle of it. | **A redeploy between `promote` and the provider move rewrites `active_kid` back to the old key.** `bin/deploy-project.py` derives the jwt block from the key set **file**: `active_kid = kids[0]`, and `bin/render-jwks.py` publishes the auth service's key first and the prepared key last. `retire_after` and `verifier_acknowledgements` are carried forward deliberately; `active_kid` is not carried, it is re-derived. So until step 6 has moved the value at the provider, any deploy silently restores the pre-promotion record while keeping the deadline. | **One line in the sheet**: nothing redeploys that project between step 5 and step 6. Stated rather than guarded — the guard would be a deploy that reads the document it is about to replace, which is a decision. | A code reading, not a measurement: it needs a deploy, and this session has no host. Flagged as a reading so Session 29 can confirm it cheaply or catch it early. | — |
+| **D1475** | `bin/rotate-signing-key.sh status`, read at the end of a clean rotation. | **The steady phase reports `promotion BLOCKED on ['mcp', 'postgrest', 'storage']`.** Measured in rig 28d's final `status`, after a successful `retire`: `phase steady -- one key, nothing in flight`, then three lines of `has not acknowledged` and a blocked verdict. The cause is one literal: `retire_rotation` and `abandon_rotation` write `verifier_acknowledgements: {}` where `initial_key_state` writes `None` — and `jwt_keys`'s own docstring says the difference is real, *"an empty object says every verifier was asked and none has answered, and null says nothing has been asked"*. After a retire the second is what is true. | **Recorded, not repaired.** The change is one word in two functions, and `tests/contract/test_jwt_keys.py:468` asserts `{}` after a retire — so it moves a passing contract test and needs an ADR of its own. Session 29's sheet says the line is expected at the end of the window. | The end of a successful rotation looks like a fault, in the one window where an operator is watching for one. | — |
+| **D1476** | `loaded_digest`'s own docstring, since Session 8: *"A read of the container's filesystem, not of the host path. The two differ exactly when it matters."* And its test: *"a command written the second way would report every verifier as current no matter what it held."* | **`docker cp` is a command written the second way.** Rig 28j, native `dockerd 27.5.1`, both controls in the same run: before the replace and after a recreate, `docker cp` and `/proc/<pid>/root` agree; **after the atomic replace `render-jwks` performs, `docker cp` returns the HOST's new bytes while the process is still on the unlinked inode.** It re-resolves the bind mount's source path. So `acknowledge` would report every verifier clean the moment the deploy wrote the set, and `promote` — the irreversible step — would unblock on it. Never caught because no rig had ever replaced a key set under a running container: rig 28d made its own "behind" state by recreating onto a different file, which both readers report identically. | **ADR 0215 and the repair.** The reader is `/proc/<pid>/root/<path>`, which traverses the container's own mount namespace, needs no binary inside the image, and needs root — which every step already does. Nine mutations, nine kills. | **D276's symptom arriving through the step built to prevent it.** ADR 0122 chose `docker cp` for a true reason — the distroless PostgREST has no `cat`, exit 127, re-measured today — and fixed READABILITY while silently replacing WHAT WAS READ. Question 4 of §7, exactly: when a defect class was fixed, which side got the fix. | 0215 |
+| **D1477** | The obvious next step: measure the new reader on this workstation before shipping it. | **It cannot be measured here.** Docker Desktop runs containers in its own Linux VM, so `docker inspect -f '{{.State.Pid}}'` reports **0** and `/proc/0/root` does not exist; and on the same daemon `docker cp` after an atomic replace does not return the host's bytes either — it **fails at the daemon**, `mount …/docker-desktop-bind-mounts/…: no such file or directory`. Two daemons, two different wrong answers, neither of them the stale bytes the design needs. The measurement that decides the repair is from a native daemon in `dind`. | **The pid of `0` is the third outcome** (ADR 0195): reported, with the cause named, never folded into a reading. And the sheet's step 0 makes it a **pre-flight** — `sudo docker inspect -f '{{.State.Pid}}' <container>` must print a non-zero number before the window opens, not in the middle of it. | A repair verified on a daemon that is not the host's. The pre-flight is what converts that gap from a surprise into a check. | 0215 |
+| **D1478** | `test_the_command_prints_no_key_material`'s denylist: `("BEGIN RSA", "BEGIN PRIVATE", "read_bytes()", ".pem")`. | `read_bytes()` was a proxy for *touches a file*, chosen when the command touched none. The repaired reader reads exactly one file — the container's copy of the **public** key set — so the proxy now forbids the reading rather than the material. | **Replaced with a stricter assertion**, which is what an ADR authorises (CLAUDE.md §6): the test now walks the AST and requires that the only functions reading a file are `load_document` and `loaded_digest`. A second read site anywhere in the command fails it, which the string denylist never checked. | A denylist of method names is a proxy; the proxy outlived the shape it stood for. Naming the two legal read sites is narrower than banning a method. | 0215 |
 
 ---
 
@@ -897,6 +910,66 @@ timing nobody has ever measured (the cutover, ADR 0122's rotation repairs, and
 the agent plane's round trip — all named in Tier 2 as never timed). **Alpha
 first, then beta**, and the sheet says what to do if alpha's `acknowledge` comes
 back dirty.
+**Done.** 2026-09-17. **D1468–D1478**, and **ADR 0215** — which a rehearsal is
+not supposed to need. Nine mutations over the repair, **nine kills, zero
+survivors**, every control green in the same invocation, both files restored
+byte-identical. The sheet is **Appendix R**; `docs/operator-guide.md` §15 is the
+operator's copy.
+
+**Rig 28d ran the cutover end to end**, as root through a user namespace (the
+identity the gate has in CI, D1310), against three containers carrying the real
+Compose labels and the real container paths — `postgrest` being the **locked
+distroless image**, measured to stay up retrying a database that is not there,
+which is what makes it usable as a live verifier. Every step was
+`bin/rotate-signing-key.sh`, including `promote`'s typed confirmation:
+
+| | |
+|---|---|
+| `render-jwks`, three readings | `published` (no previous copy), `confirmed` (unchanged), `wrote … the key set CHANGED` — **D1374's repair, read for a decision for the first time** |
+| `acknowledge`, all three behind | three remedies printed, exit 0 |
+| `status` | `promotion BLOCKED on ['mcp', 'postgrest', 'storage']` |
+| `promote`, blocked | **exit 6**, naming the three |
+| `acknowledge`, after a recreate | three × `holds the published set` |
+| `promote` | accepted, `retire_after` set, the follow-up printed |
+| `retire`, early | **exit 6**, naming the moment |
+| `abandon`, after promotion | **exit 6**, *"complete it forward"* |
+| the wait | **930 s**, waited out rather than edited |
+| `retire` | accepted, one kid left, `retire_after` back to `None` |
+
+**Then the rehearsal found what it was for, and it is not in the seven steps.**
+Rig 28j, a native `dockerd 27.5.1`, both controls in one run: `docker cp` — the
+reader behind `acknowledge`, and therefore behind `promote`'s refusal —
+**returns the HOST's bytes after an atomic replace**, while the process is still
+on the unlinked inode (D1476). `loaded_digest`'s own docstring and its own test
+say that a command written that way *"would report every verifier as current no
+matter what it held"*. It was written that way. **ADR 0215** replaces the reader
+with `/proc/<pid>/root/<path>`, which traverses the container's own mount
+namespace and needs no binary inside a distroless image; a pid of `0` is the
+third outcome, reported, never folded (D1477), and the sheet turns it into a
+pre-flight.
+
+*What the rehearsal could not do*, measured rather than assumed: **no rig can
+run the three claims' proofs** (D1468) — all nine node ids are `live_host` and
+`--setup-plan` skips all nine. And **the three claims need four rotations**
+(D1469): the cutover moves one of the nine node ids, and a claim is `not_run`
+unless every one passed, so this window alone moves **no claim**. Four trips
+have offered *the rotation* as if it were one act.
+
+*Also found*: the signing-key proof is red between `promote` and `retire` by
+design, so the sweep goes after step 7 (D1470); `auth_jwt_signing_key` reads as
+replaceable and replacing it publishes a set with **zero overlap** (D1471, rig
+28e); the gate's help says four verifiers where the roster is three (D1472); the
+`down`/up may be three sessions out of date, and the sheet makes it a
+measurement rather than removing it (D1473); a redeploy between `promote` and
+the provider move restores the pre-promotion record (D1474); and the end of a
+clean rotation prints `promotion BLOCKED`, because `retire_rotation` writes `{}`
+where `initial_key_state` writes `None` (D1475).
+
+*Ran before the push*, once: `test_rotate_signing_key` (20), `test_jwt_keys`,
+`test_rotation_surface`, `test_cli_contract`, `test_acceptance_registry`,
+`test_documentation_index`, `test_repository_contract`. **Nothing is applied to
+a deployment. No bump, no tag.**
+
 
 ### Run 9 — the bump, the registry, the gate, and the close. No tag.
 
@@ -1243,3 +1316,129 @@ step 2 reaches PyPI — which cannot run from WSL when outbound TCP is lost
 under `s26-scripts/`, and this session's planning measurements as
 `s28-m1.sh`–`s28-m5.sh`. WSL's `/tmp` does not survive `wsl --shutdown`; those
 copies do.
+
+---
+
+## Appendix R — Session 29's signing-key rotation, numbered
+
+**Rehearsed offline in rig 28d on 2026-09-17** (Session 28 Run 8): every step
+below except the provider edits and the deploys was executed against real
+containers holding a real key set, with `bin/rotate-signing-key.sh` as the only
+operator command. What was *not* rehearsed is named in each step.
+
+**Alpha first, then beta.** Beta's window does not start until alpha's `status`
+reads `steady`.
+
+**Who does what.** The agent runs every `op`-side line over SSH. Every line
+below marked **[sudo]** is for the human at a TTY: `rotate-signing-key` requires
+root for *every* step including `status`, because the deployed document and the
+secret generations are root-owned and reading a verifier's key set means
+reaching its container.
+
+### Before the window
+
+| # | Who | What |
+|---|---|---|
+| 0.1 | agent | `ssh op@… 'cat /opt/agentic-postgres/rendered/<key>/jwks.json'` — **capture the retiring key's JWK now.** After step 7 it is not in the published set, and `--rotated-jwt-from-file` wants exactly this object. The file is `0444` by design, so `op` can read it without root. |
+| 0.2 | **[sudo]** | `sudo bin/rotate-signing-key.sh --outputs /home/op/<key>-dev-outputs.json status` — expect `phase steady -- one key, nothing in flight` and `acknowledged nothing has been asked`. **If it says anything else, stop**: a rotation is already in flight. |
+| 0.3 | **[sudo]** | `sudo bin/doctor.sh --project <key>` — the reading this window is measured against. Session 28's tree adds an eleventh check; a deployment at 1.6.x reads ten. |
+| 0.4 | **[sudo]** | **`sudo docker inspect -f '{{.State.Pid}}' <any container of this project>` must print a NON-ZERO number.** `acknowledge` reads each verifier's key set through `/proc/<pid>/root/…` — the container's own mount namespace — because `docker cp` resolves the bind mount's source path and returns what the deploy wrote rather than what the process holds (ADR 0215, D1476). A daemon that does not run its containers on this kernel reports `0`, and `acknowledge` refuses rather than reading another way. **Ask this before the window, not inside it.** |
+
+### The seven steps
+
+| # | Who | What | Rehearsed? |
+|---|---|---|---|
+| 1 | operator, at the provider | Generate the prepared key **the way the product does**: `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -outform PEM`. Paste it into `APG_AUTH_JWT_PREPARED_KEY` at `/auth` in this project's Infisical project. **No command here writes a provider value** (D249). | not rehearsed — a provider edit |
+| 2 | **[sudo]** | Redeploy. `render-jwks.py` sees the prepared key and publishes its public half beside the active one; it prints **`wrote … the key set CHANGED: every verifier must be RECREATED`**. | rehearsed: all three of `render-jwks`'s readings fired (D1374's repair, live) |
+| 2b | **[sudo]** | **`sudo bin/rotate-signing-key.sh --outputs … acknowledge` — before step 3, and this is a measurement rather than a step** (D1473). Since D591 the deploy labels each service with a digest of its mounted content and Compose recreates exactly the services whose content moved; `jwks.json` is a bind mount of all three verifiers, so the redeploy above should already have recreated them. If this reads clean, step 3 is unnecessary and a later session can say so with evidence. **Whatever it says, do step 3 anyway.** | the mechanism is read from the code; nothing has measured the deploy |
+| 3 | **[sudo]** | `sudo bin/project-runtime.sh --host host.yaml --project-key <key> --through-session N down`, then redeploy. **A restart is not enough.** | rehearsed as a recreate; `down` + redeploy on a host is not |
+| 4 | **[sudo]** | `sudo bin/rotate-signing-key.sh --outputs … acknowledge`. Expect three lines, each `holds the published set`. **THREE, not four** (D1472): `postgrest`, `storage`, `mcp`. `auth` is the issuer and is deliberately not a verifier — an acknowledgement from it would be the issuer agreeing with itself (ADR 0098). **What this reads is now the process's copy** (ADR 0215): before Session 28 it read the host's, which would have said `holds the published set` for a verifier that had never been recreated. | rehearsed, both ways: three behind, then three clean |
+| 5 | **[sudo]** | `sudo bin/rotate-signing-key.sh --outputs … promote`. It prints `status` first, then asks for the literal word `PROMOTE`. **Irreversible.** It refuses with exit 6 if any verifier is behind. | rehearsed, both ways: refused at exit 6, then accepted |
+| 6 | operator, at the provider, then **[sudo]** | Move the prepared key's value to `APG_AUTH_JWT_SIGNING_KEY`, **clear** `APG_AUTH_JWT_PREPARED_KEY`, redeploy, and recreate. Until this is done the document says the new key signs and the service still uses the old one — **the one state the command cannot detect**, and it says so in its own follow-up text. | not rehearsed — a provider edit |
+| 7 | **[sudo]** | Wait for the deadline, then `sudo bin/rotate-signing-key.sh --outputs … retire`, then redeploy and recreate. | rehearsed, both ways: refused before the deadline, accepted after |
+
+### The wait, measured
+
+`retire_after` is `promote`'s clock plus **930 seconds** — `MAX_TOKEN_TTL_SECONDS`
+900 plus `CLOCK_SKEW_SECONDS` 30, where the 30 is D241's bisected measurement of
+the locked PostgREST (30 s past `exp` served, 31 refused). Rig 28d waited it out
+rather than editing the document, because the deadline is the subject of the
+refusal and moving it would rehearse a document edit instead of a rotation.
+
+**So the window is ~16 minutes wide at its narrowest**, and alpha and beta are
+two of them. Do not plan a sweep between `promote` and `retire`.
+
+### What the sweep can and cannot collect
+
+**Performing this rotation moves no claim to `passed` on its own** (D1469), and
+that is not a defect — it is what the registry says. A claim is `not_run` unless
+**every** node id the registry lists for it ran and passed.
+
+| Claim | Node ids | What the signing-key rotation moves |
+|---|---|---|
+| `bootstrap_identity` (SEC-BOOT-001) | 3 | **one**: `test_a_rotated_signing_key_is_the_only_one_the_plane_accepts`. The other two need `APG_ROTATED_AUTHENTICATOR_FROM_FILE` — the **authenticator password**, a different rotation. |
+| `api_authorization` (SEC-ANON/PRIV/ROLE/DOCS-001) | 5 | **none.** Four need only a live host; the fifth needs `APG_ROTATED_DOCS_FROM_FILE` — the **documentation Basic Auth password**. |
+| `credential_rotation_planes` (SEC-DBX-004) | 1 | **none.** It needs `APG_ROTATED_FROM_FILE` — the **application credential**, on both projects. |
+
+**Four rotations, not one.** If Session 29 wants those three claims green it
+performs all four in the same window and passes all four `--rotated-*-from-file`
+flags to the gate. Each of the other three is a provider replacement plus a
+redeploy (`bin/rotate-secret.sh` is a **planner**: it reads
+`secrets.required.yaml` and changes nothing).
+
+**And the signing-key proof runs after step 7, not after step 5** (D1470). It
+asserts the retired `kid` is **absent** from the document's
+`verification_kids`, which is exactly what `retire` does and what `promote`
+deliberately does not: between them both keys are published on purpose.
+
+### If alpha's `acknowledge` comes back dirty
+
+It is not an error and nothing is broken: it is the refusal working. The
+verifier named is still holding the previous key set.
+
+1. **Do not promote.** `promote` refuses anyway, at exit 6, and the refusal
+   names the services.
+2. Recreate that project's runtime — `down`, then redeploy — and take
+   `acknowledge` again. A restart is not enough and, after the key set file has
+   been replaced, is measured to leave the container unable to start at all.
+3. If it is still dirty, read what the container actually holds:
+   `sudo docker ps --filter label=apg.project.key=<key>` and compare
+   `jwks.json`'s digest inside it against `jwt.public_jwks_sha256` in the
+   document. A mismatch that survives a recreate means the deploy did not
+   republish the set — look at step 2's `render-jwks` line, not at the
+   rotation.
+4. **`abandon` is available until `promote` and not after.** Before promotion
+   nothing signs with the incoming key, so withdrawing it costs nothing: clear
+   `APG_AUTH_JWT_PREPARED_KEY` at the provider and redeploy. After promotion
+   there is no way back and the recovery is to complete forward.
+5. **If it exits 5 naming an init pid**, the daemon is not giving this host a
+   usable handle on the container's mount namespace. That is step 0.4's
+   pre-flight failing late. Nothing is wrong with the rotation and nothing has
+   been promoted; the reading simply cannot be taken here, and the window
+   should be closed with `abandon` rather than carried on blind.
+
+### Two lines that look like faults and are not
+
+**At the end**, after a successful `retire`, `status` prints `phase steady` and
+then `promotion BLOCKED on ['mcp', 'postgrest', 'storage']` (D1475). Nothing is
+blocked: `retire` resets the acknowledgements to an empty object, which
+`describe` reports as *asked and unanswered* rather than as *nothing has been
+asked*. Expected, recorded, and not repaired in this session — the repair moves
+a passing contract test.
+
+**At step 2**, `render-jwks` may print *"whether the key set CHANGED cannot be
+told from here"* instead of *"the key set CHANGED"*. That is the normal case for
+a deploy that replaced the whole rendered directory, and it is neither evidence
+of a rotation nor evidence against one. What answers it is step 4.
+
+### Timings nobody had measured before this rehearsal
+
+Every step of the cutover completed in **under a second** in rig 28d —
+`render-jwks`, `acknowledge` across three containers, `status`, `promote`,
+`retire` — and the recreate of three containers took **3 to 5 seconds**. The one
+thing that takes time is the deadline, at **930 s**.
+
+These are rig timings on a workstation, not host timings, and the host's deploys
+are what dominate the window in practice. What they establish is the **shape**:
+nothing in the rotation itself is slow, so a step that hangs on the host is a
+step to look at rather than to wait out.

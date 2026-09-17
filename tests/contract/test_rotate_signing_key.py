@@ -18,6 +18,7 @@ would have been the acknowledgement step agreeing with the issuer.
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -189,7 +190,9 @@ def test_the_overlap_allows_for_the_verifiers_measured_leeway(command: Any) -> N
 # ---------------------------------------------------------------------------
 
 
-def test_the_digest_is_read_from_inside_the_container(command: Any) -> None:
+def test_the_digest_is_read_through_the_containers_own_mount_namespace(
+    command: Any,
+) -> None:
     """Asserted on the source, because this is the property the whole step is.
 
     A read of the CONTAINER reads what the process has. A read of the host path
@@ -197,21 +200,22 @@ def test_the_digest_is_read_from_inside_the_container(command: Any) -> None:
     different files -- so a command written the second way would report every
     verifier as current no matter what it held.
 
-    **Replaced by a stricter test in Session 8 Run 4 (ADR 0122).** The previous
-    version asserted `docker exec`, which was the right property named through
-    the wrong mechanism: the locked PostgREST image is distroless and has
-    neither `cat` nor `sh` -- both exit 127 -- so `acknowledge` could not read
-    the digest of the only verifier the roster then held, and promotion could
-    never be unblocked (D305, D411, D427). `docker cp` works on that image and
-    is measured to. The command is now asserted through `read_command`, a pure
-    function, so the shape is checked rather than an AST dump searched.
+    **Replaced by a stricter test twice, and the second time is ADR 0215.**
+    Session 8 Run 4 replaced `docker exec` with `docker cp`, because the locked
+    PostgREST image is distroless and has neither `cat` nor `sh` -- both exit
+    127 (D305, D411, D427). That fixed readability and silently replaced what
+    was being read: rig 28j measured `docker cp` against a native dockerd with
+    both controls in one run, and after an atomic replace it returns **the
+    host's new bytes** while the process is still on the unlinked inode. It
+    resolves the bind mount's source PATH.
+
+    So the mechanism is `/proc/<pid>/root/<path>`, which traverses the
+    container's own mount namespace, needs no binary inside the image, and needs
+    root -- which every step of this command already does. The forbidden list
+    below is the point of the test: each entry is a reader that has been tried
+    and measured to answer the wrong question.
     """
-    assert command.read_command("c1", "/etc/mcp/jwks.json") == [
-        "docker",
-        "cp",
-        "c1:/etc/mcp/jwks.json",
-        "-",
-    ]
+    assert command.read_path(4321, "/etc/mcp/jwks.json") == "/proc/4321/root/etc/mcp/jwks.json"
 
     tree = ast.parse(COMMAND.read_text(encoding="utf-8"))
     function = next(
@@ -223,10 +227,100 @@ def test_the_digest_is_read_from_inside_the_container(command: Any) -> None:
     assert "'exec'" not in body, (
         "`docker exec` cannot read a distroless verifier's key set; it exits 127"
     )
-    assert "read_bytes" not in body and "read_text" not in body, (
-        "the digest is read from the host's copy of the key set, which after an atomic "
-        "replace is not the file the verifier has open"
+    assert "'cp'" not in body, (
+        "`docker cp` resolves the bind mount's SOURCE PATH: after an atomic replace it "
+        "returns what the deploy wrote, not what the verifier holds (ADR 0215, rig 28j)"
     )
+    assert "read_path" in body, (
+        "the digest must be read through the container's own mount namespace, by pid"
+    )
+
+
+def test_a_container_with_no_visible_pid_is_refused_rather_than_read_another_way(
+    command: Any,
+) -> None:
+    """ADR 0195's third outcome, on the reader `promote` depends on.
+
+    Docker Desktop's Linux VM reports init pid `0`, because the process is not
+    on this kernel. A command that fell back to a path-shaped read there would
+    produce a clean acknowledgement in exactly the case it had just decided it
+    could not measure -- so the refusal names the cause and the pre-flight that
+    catches it before a window opens.
+    """
+    tree = ast.parse(COMMAND.read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "container_pid"
+    )
+    body = ast.dump(function)
+    assert "State.Pid" in body
+    assert "OperatorError" in body, "a pid that cannot be read is reported, never defaulted"
+    assert "'cp'" not in body and "'exec'" not in body, (
+        "there is no second reader to fall back to; a fallback here is the defect with a "
+        "retry in front of it"
+    )
+
+
+def test_the_pid_is_read_from_the_daemon_and_a_zero_is_refused(
+    command: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Behavioural, beside the source-level guard above.
+
+    A pid of `0` is what Docker Desktop's Linux VM reports, because the process
+    is not on this kernel. It is not an error from the daemon -- the call
+    succeeds -- so nothing but an explicit check separates it from a usable
+    answer, and the thing on the other side of that check is a promotion.
+    """
+
+    class Result:
+        def __init__(self, stdout: str, returncode: int = 0) -> None:
+            self.stdout = stdout
+            self.stderr = ""
+            self.returncode = returncode
+
+    answers = {"value": Result("441\n")}
+    monkeypatch.setattr(command.subprocess, "run", lambda *a, **k: answers["value"])
+    assert command.container_pid("c1") == 441
+
+    for refused in (Result("0\n"), Result("\n"), Result("not-a-number\n"), Result("", 1)):
+        answers["value"] = refused
+        with pytest.raises(command.OperatorError) as raised:
+            command.container_pid("c1")
+        assert raised.value.code == command.EXIT_STATE
+
+
+def test_the_digest_is_of_the_key_sets_bytes(
+    command: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The digest compared against `public_jwks_sha256` is of the FILE's bytes.
+
+    A digest of anything else -- the path, a tar stream, a listing -- is a
+    stable, plausible number that never matches, which reads as *this verifier
+    is behind* rather than as *this command is measuring the wrong thing*.
+    """
+    key_set = tmp_path / "jwks.json"
+    key_set.write_bytes(b'{"keys": []}\n')
+    monkeypatch.setattr(command, "container_pid", lambda container: 4321)
+    monkeypatch.setattr(command, "read_path", lambda pid, path: str(key_set))
+
+    expected = hashlib.sha256(key_set.read_bytes()).hexdigest()
+    assert command.loaded_digest("c1", "/etc/postgrest/jwks.json") == expected
+
+
+def test_a_key_set_that_cannot_be_read_is_refused_rather_than_digested(
+    command: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A verifier whose key set is unreachable has not acknowledged anything.
+
+    Reporting a digest of nothing would be a value that looks measured (D600),
+    and it would be compared against the published set by `promote`.
+    """
+    monkeypatch.setattr(command, "container_pid", lambda container: 4321)
+    monkeypatch.setattr(command, "read_path", lambda pid, path: str(tmp_path / "absent.json"))
+    with pytest.raises(command.OperatorError) as raised:
+        command.loaded_digest("c1", "/etc/postgrest/jwks.json")
+    assert raised.value.code == command.EXIT_STATE
 
 
 def test_the_container_is_found_by_label_rather_than_predicted(command: Any) -> None:
@@ -350,7 +444,34 @@ def test_no_step_writes_a_provider_value(command: Any) -> None:
 def test_the_command_prints_no_key_material(command: Any) -> None:
     """Every value this command handles is public -- kids and digests -- and it
     must stay that way even as messages grow. A `pem`, a `private` or a `-----
-    BEGIN` in an f-string is a signing key in a deploy log."""
+    BEGIN` in an f-string is a signing key in a deploy log.
+
+    **`read_bytes()` left this denylist under ADR 0215, and what replaced it is
+    stricter.** It was a proxy for *touches a file*, chosen when the command
+    touched none; the reader now reads exactly one, the container's copy of the
+    PUBLIC key set, through the container's own mount namespace. Banning the
+    method would have banned the reading rather than the material, so the test
+    below names the file instead: there is **one** read site in this command and
+    it is inside `loaded_digest`. A second one, anywhere, fails this.
+    """
     source = COMMAND.read_text(encoding="utf-8")
-    for forbidden in ("BEGIN RSA", "BEGIN PRIVATE", "read_bytes()", ".pem"):
+    for forbidden in ("BEGIN RSA", "BEGIN PRIVATE", ".pem"):
         assert forbidden not in source, f"the command handles private material via {forbidden!r}"
+
+    tree = ast.parse(source)
+    reads: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for inner in ast.walk(node):
+            if (
+                isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Attribute)
+                and inner.func.attr in {"read_bytes", "read_text", "open"}
+            ):
+                reads.append(node.name)
+    assert sorted(set(reads)) == ["load_document", "loaded_digest"], (
+        f"this command reads files in {sorted(set(reads))}; the only two it may read are "
+        "the deployed document, in `load_document`, and the container's copy of the "
+        "published key set, in `loaded_digest` (ADR 0215)"
+    )
