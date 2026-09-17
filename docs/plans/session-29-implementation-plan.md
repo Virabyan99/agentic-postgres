@@ -40,10 +40,10 @@ the release is not re-cut inside the window (§9).
 
 ## 1. Divergence — what the tree, the audit and the host say, measured
 
-Fourteen rows. Eight were written before a line of §5; **D1497 was written by
-pushing this document**; **D1498–D1500 by measuring Run 1's premises**; and
-**D1501–D1502 by executing Run 1**, which is what a pre-flight is for. Numbers
-from **D1489**; the remaining runs allocate from **D1503**.
+Fifteen rows. Eight were written before a line of §5; **D1497 was written by
+pushing this document**; **D1498–D1500 by measuring Run 1's premises**;
+**D1501–D1502 by executing Run 1**; and **D1503 by executing Run 2**. Numbers
+from **D1489**; the remaining runs allocate from **D1504**.
 
 | D | Said | Measured or read | This session | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -61,6 +61,7 @@ from **D1489**; the remaining runs allocate from **D1503**.
 | **D1500** | D1490, which read the marker and not its contents: *"`/var/run/reboot-required` present reading `*** System restart required ***`"*. | **`/var/run/reboot-required.pkgs` names five entries**: `linux-image-7.0.0-30-generic`, `linux-base`, `linux-image-7.0.0-31-generic`, `linux-base`, `libc6` — against a running kernel of `7.0.0-29-generic`. The pending restart is therefore a **two-release kernel hop, 29 → 31, skipping 30**, *and* **`libc6`**, which every running process is still mapped against. | **Run 2 gains the expected value it did not have**: after the reboot `uname -r` reads **`7.0.0-31-generic`**. If it still reads `7.0.0-29-generic` the restart did not take the kernel, and the trip stops there — before anything is transported. | A reboot with no expected value is a step that cannot fail, which is indistinguishable from one that was not performed. And `libc6` in that list is why *"both projects came back"* has to be read rather than assumed: the containers restart against a C library the host only finishes replacing at the boot this trip performs. | — |
 | **D1501** | `CLAUDE.md` §6 and `docs/upgrade-guide.md`, on **D972**: *"**Never redirect or pipe a sudo deploy**: the terminal is the log"* — scoped, everywhere it is written, to **the deploy**. | **The class is wider, and tonight it stopped a READ.** Run 1's sheet was handed to the operator as `bash ….sh 2>&1 \| tee …`. Lines 1–4 passed; **`sudo bin/backup.sh … info` stopped dead** — `ps` state **`Tl+`**, *stopped*, not slow — inside `docker exec -i apg-alpha-dev-postgres-1 psql … pg_stat_archiver`, for seven minutes; interrupted, it reached beta and stopped there identically. **The same sheet with no pipe, under `script -q -e -c`, did both projects and the journal in 14 seconds.** | **`script(1)`, never a pipe, for every remaining sheet in this session.** It gives stdout a real pty, so sudo is satisfied, *and* it writes the transcript — which is the only thing the pipe was wanted for. | D972 is stated as a property of *the deploy* and is really a property of **sudo's pty plus any child that wants the terminal**; `backup.sh` shells out to `docker exec -i`. Attaching the rule to the one command that first exhibited it reads as *deploys are special* and leaves every other sudo line looking safe to pipe. The failure is also the worst shape available: no error, no exit code, no output — just a command that never returns, on a host where *this one takes a while* is a plausible reading. | — |
 | **D1502** | This plan's Run 2 step 3: *"`systemctl is-system-running` is re-read — **if it is still `degraded` with the same unit, that is the answer to the audit's row**"*, and D1490, which named the unit but not what starts it. | **The unit is socket-activated and its failure is fifteen hours old, not forty days.** `cloud-init-hotplugd.service` is `TriggeredBy: cloud-init-hotplugd.socket`. It failed at **2026-09-17 04:38:48 UTC** with `RuntimeError: Failed to detect False in updated metadata` at `hotplug_hook.py:110`, having consumed 3.759 s CPU over 54.6 s wall. It runs **when a hotplug event arrives**, and one arrived this morning. | **Run 2 step 3 now reports three outcomes instead of two.** `degraded`, same unit → it recurred, and that *is* an answer. **`running` is not the opposite answer**: it means only that no hotplug event has arrived since boot, which is the expected state after a reboot whether or not anything is wrong. The audit's row closes on neither reading, and this session says so rather than banking the quiet one. | **ADR 0195**, in the exact shape this project keeps producing: a check with two branches over a world with three, where the reassuring branch is the one that is not measurable. Reading a clean `is-system-running` after a reboot as *the failed unit is fixed* closes a row with the absence of a trigger. | 0195 |
+| **D1503** | `CLAUDE.md` §2's HOST block and `docs/pre-stage-4-audit.md`, unchanged for three sessions: *"The host reports `systemctl is-system-running` = **DEGRADED** (some unit has failed); unrelated to the deployment, which doctors clean on both projects, and **not investigated**."* | **Investigated, and it is the informative branch of D1502.** `cloud-init-hotplugd.service` fails **at every boot**, not once forty days ago: observed at `04:38:48` on the old boot and again at **`20:18:59` on the new one — 2 min 42 s after `btime`** — having burned 3.547 s CPU over 55 s wall and 146 MB. Both times it is `hotplug_hook.py:110`, `RuntimeError: Failed to detect <id> in updated metadata`; **the id is a NIC MAC on this boot (`86:cf:15:33:67:0b`) and the literal `False` on the previous one**, which is a cloud-init defect in its own right. | **Recorded as answered and NOT repaired.** It is the provider's cloud-init reacting to a network-interface hotplug, it is not this product, and the deployment does not depend on it: both projects read **10 ok / 0 / 0 / 0** with the unit failed. `CLAUDE.md`'s *not investigated* is retired at the close. | Three sessions carried a one-line shrug about a `degraded` host into every trip's reading of `systemctl`. It cost one command to answer and the answer is *this is permanent, it is theirs, and it is harmless* — which is worth more than the uncertainty it replaces, because the next operator who sees `degraded` mid-deploy now knows whether it is new. | — |
 
 
 ---
@@ -124,7 +125,7 @@ in advance, what the operator types, and what each run must read before it
 proceeds. Every `sudo` line is the operator's at a TTY; every other line is the
 agent's over SSH as `op` (`docs/upgrade-guide.md` §3's two-account rule).
 
-Runs allocate `D` numbers from **D1503**.
+Runs allocate `D` numbers from **D1504**.
 
 ### Run 1 — the pre-flight, and the reading that everything after is compared against
 
@@ -264,7 +265,42 @@ The audit's row, taken in the order that keeps the evidence (D1490):
 transported and nothing deployed; if the host does not come back well, the
 deploy does not happen and the session becomes a repair session.
 
-**Done.** _to be written._
+**Done.** 2026-09-17. **The host rebooted, both projects came back by
+themselves, and the audit's oldest un-investigated line is answered.**
+
+**The reboot took, and onto the kernel D1500 named.** `boot_id`
+`a18931ab-…` → `3a3c6f7e-…`; `btime` 2026-08-08T12:13:42Z →
+**2026-09-17T20:16:17Z**; `uname -r` **`7.0.0-29-generic` →
+`7.0.0-31-generic`**, the two-release hop, skipping 30; and
+`/var/run/reboot-required` is **gone**. Forty days of uptime ended at 8 s of
+downtime — SSH answered on the second attempt.
+
+**Nothing was read until it had settled.** `systemctl is-system-running` said
+`starting` for **131 s**; the project units were `inactive`, then `activating`
+at 20 s, then **`active` at 71 s**. Reading at `up 0 min` would have found two
+inactive projects and meant nothing by it. One check the plan did not name was
+taken first and is why this was expected rather than hoped for: **all six units
+were `is-enabled=enabled`**, not merely active, along with `docker` and
+`containerd` — an active oneshot that is not enabled does not come back.
+
+**Both doctors are identical to Run 1's**, across the restart:
+`alpha-dev: 10 ok, 0 warning, 0 problem, 0 unknown` and `beta-dev` the same;
+all six timers `waiting` again; `fleet` reports both at 10 ok with
+`denials 0 in 24h`. Two things moved and both moved the right way: **disk
+headroom 23398 → 23878 MiB** (208.1x and 185.7x), and the **WAL archiver
+advanced** on both — alpha last archived `19:57:32`, beta `19:57:41`, against
+Run 1's `03:51` and `03:36`.
+
+**D1503 — the `degraded` reading is understood.** It is
+`cloud-init-hotplugd.service`, and **it fails at every boot**: 2 min 42 s after
+`btime` on this one, exactly as it did on the last. D1502 warned that a clean
+`running` would have told us nothing; we did not get that branch, we got the
+one that answers. It is the provider's cloud-init failing on a NIC hotplug
+event, it is not this product, and both projects doctor clean with it failed.
+
+**The trip proceeds.** Nothing is transported yet; `kit-2026-09-17-pre` is off
+the host and verified on ext4; the tree and the deployment still disagree by a
+minor, which is Run 3's business.
 
 ### Run 3 — transport, host units, render, price
 
