@@ -40,9 +40,10 @@ the release is not re-cut inside the window (§9).
 
 ## 1. Divergence — what the tree, the audit and the host say, measured
 
-Nine rows, every one measured against the host or the tree on 2026-09-17.
+Twelve rows, every one measured against the host or the tree on 2026-09-17.
 Eight were written before a line of §5; **D1497 was written by pushing this
-document**. Numbers from **D1489**; the runs allocate from **D1498**.
+document**; and **D1498–D1500 were written by executing Run 1**, which is what a
+pre-flight is for. Numbers from **D1489**; the runs allocate from **D1501**.
 
 | D | Said | Measured or read | This session | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -53,7 +54,11 @@ document**. Numbers from **D1489**; the runs allocate from **D1498**.
 | **D1493** | **D1375**, Tier 2: *"`op` on the host cannot reach the Docker socket, and Session 25 is the first release whose OFFLINE mode needs one. The group membership was deliberately not granted."* | **Still exactly true**, measured tonight: `docker ps` as `op` → *permission denied while trying to connect to the docker API at unix:///var/run/docker.sock*, and `id -nG` → `op sudo users`. No `docker` group. | **Unchanged, and the trip does not grant it.** Docker group membership is root-equivalent on a production host. The consequence is stated in §7: **the host cannot produce an offline half**, and the offline half this session merges is the one the workstation already wrote. | The row reads as a defect and is a decision. A trip that "fixed" it would hand a non-root account root on production to make a gate mode symmetrical. | — |
 | **D1494** | `CLAUDE.md` §2: *"the bare `/home/op/<key>-outputs.json` are STALE (2026-08-23) — reading those instead is a silent way to measure the wrong release."* | **Still there and still stale**, measured tonight: `alpha-outputs.json` and `beta-outputs.json` both read `template_version 0.1.0-dev`, `deployed_through_session 9`, `schema_version 12`, written 2026-08-23. The current pair are `alpha-dev-outputs.json` and `beta-dev-outputs.json` at `1.6.0` / session 25 / `de2aabf`, written 2026-09-15. | **Every flag in the sheet names the `-dev-` file explicitly**, and Run 6 refreshes those two and **leaves the stale pair alone** — renaming or deleting them is a change to the host this trip did not come to make. | Two of the five filenames under `/home/op` differ by four characters and one of them measures a release from four sessions ago. `--project-a-outputs` pointed at the wrong one produces a sweep that passes against the wrong deployment. | 0158 |
 | **D1495** | The plan's own first draft: *reboot, then deploy, then sweep* — with no reading of what `--after-reboot` actually asserts. | **The order is load-bearing and it survives, but only because `bound_at` does not move.** `test_the_reboot_restored_the_projects_from_their_documents` asserts `pg_postmaster_start_time() > btime` **and** `app_private.project_identity.bound_at < btime` — the processes postdate the boot and the data predates it. A deploy after the reboot recreates containers (still postdating) and does **not** re-bind identity, so both halves hold. The allocation check compares the port registry against the deployed document, and ADR 0042's allocation is host-global and stable across a deploy. | **Reboot in Run 2, BEFORE the deploy**, and the declaration is still true at sweep time. The reason for that order is not the proof: it is that a unit failing to come back on `1.6.0` is a different finding from one failing to come back on `1.7.0`, and doing both at once makes the failure unattributable. | The flag is a claim the operator makes and the assertions are what stop it being taken on trust. Ordering it by convenience rather than by what it asserts is how a declaration becomes a formality. | — |
-| **D1496** | `docs/pre-stage-4-audit.md` Tier 2, the D860 row: the rotation *"unblocks `bootstrap_identity`, `api_authorization` and `credential_rotation_planes`"*, and the audit's §*What perfect can mean* prices reading 2 as *"one host trip **with the rotation performed**"* which *"closes four of the seven unproven claims"*. | **The premise is wrong and Session 28 Run 8 measured it** (D1468, D1469). All nine of those claims' node ids are `live_host`; between them the three claims need **four** rotations — the signing key, the authenticator password, the documentation Basic Auth password, and the application credential on both projects — and a claim is `not_run` unless **every** node id it names passed. The signing-key cutover moves **one of nine** and therefore closes **no claim on its own**. | **The rotation is out of this trip** (§0), and the audit's row is annotated in `docs/scope-closure.md` rather than silently worked around. The three claims stay `not_run` and this session says so in §7 rather than implying the trip moved them. | Four trips have been offered "the rotation" as a single act that closes three claims. Performing it on that understanding would have produced an irreversible cutover, a fresh window, and three claims still `not_run` — which is the worst of both. | 0170 || **D1497** | This plan's own first draft, §5 Run 3: *"`git rev-parse FETCH_HEAD` confirmed to equal `f0c6674289…`"* — the commit the plan was written at. | **Pushing the plan moved `main` past it**, immediately and by construction. A trip plan that pins the SHA it will deploy is stale before anybody reads it, and the failure mode is the worst kind: the operator confirms `FETCH_HEAD` against a number that is *almost* right and transports a tree one commit behind the one the plan describes. | **The SHA is read on the day.** What is written down instead is what must be TRUE of it: `VERSION` 1.7.0, `CURRENT_SESSION` 28, and `git merge-base --is-ancestor f0c6674 HEAD` — the commit contains the bump and everything Session 28's gates passed on. Run 8 tags that commit. | D504 exists because a stale generic bundle name moved a host backwards with both commands exiting 0. This is the same shape one level up: a stale *expected value* rather than a stale file. A property is checkable on the day; a literal is a photograph of a moment. | — |
+| **D1496** | `docs/pre-stage-4-audit.md` Tier 2, the D860 row: the rotation *"unblocks `bootstrap_identity`, `api_authorization` and `credential_rotation_planes`"*, and the audit's §*What perfect can mean* prices reading 2 as *"one host trip **with the rotation performed**"* which *"closes four of the seven unproven claims"*. | **The premise is wrong and Session 28 Run 8 measured it** (D1468, D1469). All nine of those claims' node ids are `live_host`; between them the three claims need **four** rotations — the signing key, the authenticator password, the documentation Basic Auth password, and the application credential on both projects — and a claim is `not_run` unless **every** node id it names passed. The signing-key cutover moves **one of nine** and therefore closes **no claim on its own**. | **The rotation is out of this trip** (§0), and the audit's row is annotated in `docs/scope-closure.md` rather than silently worked around. The three claims stay `not_run` and this session says so in §7 rather than implying the trip moved them. | Four trips have been offered "the rotation" as a single act that closes three claims. Performing it on that understanding would have produced an irreversible cutover, a fresh window, and three claims still `not_run` — which is the worst of both. | 0170 |
+| **D1497** | This plan's own first draft, §5 Run 3: *"`git rev-parse FETCH_HEAD` confirmed to equal `f0c6674289…`"* — the commit the plan was written at. | **Pushing the plan moved `main` past it**, immediately and by construction. A trip plan that pins the SHA it will deploy is stale before anybody reads it, and the failure mode is the worst kind: the operator confirms `FETCH_HEAD` against a number that is *almost* right and transports a tree one commit behind the one the plan describes. | **The SHA is read on the day.** What is written down instead is what must be TRUE of it: `VERSION` 1.7.0, `CURRENT_SESSION` 28, and `git merge-base --is-ancestor f0c6674 HEAD` — the commit contains the bump and everything Session 28's gates passed on. Run 8 tags that commit. | D504 exists because a stale generic bundle name moved a host backwards with both commands exiting 0. This is the same shape one level up: a stale *expected value* rather than a stale file. A property is checkable on the day; a literal is a photograph of a moment. | — |
+| **D1498** | This plan, §5 Run 3 and Appendix lines 10–11: *"`bump minor`, `requires minor`, `verdict OK`, `reasons []`, **one leaf differing — `template_version`**. Anything else on either project is read against §9 before the deploy"* — taken from **D1481**, Session 28's offline pricing of the class. | **Alpha differs in TWO leaves and beta in THREE** (rig 29a: both project shapes rendered at the commit the host checkout is actually on and at `origin/main`, then priced by the product's own `upgrade_plan.build_plan`). Alpha: `template_version`, `migrations.release_lock_sha256`. Beta: those two plus `migrations.project_set.lock_sha256`. **Verdict, bump and requires are unchanged** — `ok`, `minor`, `minor` — and `operator_digests_moved` is **empty**, so D1107's split deploy does not apply. **D1481 is not wrong**: it priced `72cb2de`→HEAD, and by `72cb2de` *both* locks had already moved — `0033` at `acb08e4` (Run 6) and the project lock's schema 2→3 at `873bdfd` (Run 3) — so its pair spans only Run 9's bump and one leaf is the true answer **for that pair**. | **Run 3 and sheet lines 10–11 now name both counts and every leaf.** The control is in the same rig: without `--also migration_added` the identical pair requires only `patch`, so the declaration is load-bearing and its effect is visible rather than asserted. | This is the worst place in a trip to carry a wrong expected value — the last check before the irreversible half, written as a stop condition. An operator meeting three leaves where the plan promises one either abandons a sound deploy or stops believing the sheet, and the second is permanent. An offline pricing is only ever as good as the commit it called *installed*. | 0162 |
+| **D1499** | `docs/upgrade-guide.md` §2's preamble: *"Every command in this section runs from the release that is **ALREADY INSTALLED** on the host"* — and this plan's D1491 and D1492, which both measured that release as **`de2aabf`**, the `source_commit` the deployed documents record. | **The host's checkout is not on `de2aabf`.** `git rev-parse HEAD` in `~op/agentic-postgres` reads **`13c4b390`** — three commits later (`f653812`, `aef612d`, `13c4b39`; Session 25 Runs 7 and 7a) — with `VERSION` 1.6.0 and `git status --porcelain` empty. Session 25 closed on two sweeps and **D1378** records exactly this gap between `source_commit` and `offline_checkout_commit`; nothing since has closed it. | **Both premises re-measured from `13c4b390`, and both still hold**: the diff over `requirements-dev.txt`, `requirements-dev.in` and `.python-version` is empty (D1491), and the diff over `contracts/` and `projects/example/contracts/` is empty (D1492). Every `git diff <installed>..` in this trip names **`13c4b390`**. | *Installed* means two different commits on this host and they are not interchangeable: the document says what was **deployed**, the checkout says what a command **runs from**, and §2 asks the operator to run from the installed release without saying which of the two that is. Here the gap changed neither answer. It is the kind that changes everything exactly once. | 0158 |
+| **D1500** | D1490, which read the marker and not its contents: *"`/var/run/reboot-required` present reading `*** System restart required ***`"*. | **`/var/run/reboot-required.pkgs` names five entries**: `linux-image-7.0.0-30-generic`, `linux-base`, `linux-image-7.0.0-31-generic`, `linux-base`, `libc6` — against a running kernel of `7.0.0-29-generic`. The pending restart is therefore a **two-release kernel hop, 29 → 31, skipping 30**, *and* **`libc6`**, which every running process is still mapped against. | **Run 2 gains the expected value it did not have**: after the reboot `uname -r` reads **`7.0.0-31-generic`**. If it still reads `7.0.0-29-generic` the restart did not take the kernel, and the trip stops there — before anything is transported. | A reboot with no expected value is a step that cannot fail, which is indistinguishable from one that was not performed. And `libc6` in that list is why *"both projects came back"* has to be read rather than assumed: the containers restart against a C library the host only finishes replacing at the boot this trip performs. | — |
 
 
 ---
@@ -117,7 +122,7 @@ in advance, what the operator types, and what each run must read before it
 proceeds. Every `sudo` line is the operator's at a TTY; every other line is the
 agent's over SSH as `op` (`docs/upgrade-guide.md` §3's two-account rule).
 
-Runs allocate `D` numbers from **D1498**.
+Runs allocate `D` numbers from **D1501**.
 
 ### Run 1 — the pre-flight, and the reading that everything after is compared against
 
@@ -155,9 +160,15 @@ The audit's row, taken in the order that keeps the evidence (D1490):
 1. **Read the failed unit before restarting anything**: `systemctl status
    cloud-init-hotplugd.service` and `journalctl -u cloud-init-hotplugd.service
    --no-pager -n 100`. Record what it says. This is the only chance to see it.
-2. **Reboot.** Wait for the units to reach `active` before reading anything —
-   at `up 0 min` every failure means *still booting* and none of them means what
-   it says.
+2. **Reboot**, and it has an expected value (D1500). `/var/run/reboot-required.pkgs`
+   names `linux-image-7.0.0-30-generic`, `linux-image-7.0.0-31-generic`,
+   `linux-base` and **`libc6`**, against a running `7.0.0-29-generic`. So
+   afterwards **`uname -r` must read `7.0.0-31-generic`** — a two-release hop,
+   skipping 30. If it still reads 29 the restart did not take the kernel and the
+   trip stops here, before anything has been transported.
+
+   Wait for the units to reach `active` before reading anything — at `up 0 min`
+   every failure means *still booting* and none of them means what it says.
 3. **Confirm both projects came back by themselves**: the per-project unit
    `agentic-postgres-project@<key>.service` is `active`, the doctor is no worse
    than Run 1's reading, and `systemctl is-system-running` is re-read — if it is
@@ -195,10 +206,23 @@ deploy does not happen and the session becomes a repair session.
   `VERSION` before it is priced.
 - **`upgrade plan --also migration_added`**, because a rendered document records
   no migration count and the plan cannot derive it (D743). **What it must
-  print**, from rig 28l's offline measurement of the same pair in Session 28 Run
-  9: `bump minor`, `requires minor`, `verdict OK`, `reasons []`, **one leaf
-  differing — `template_version`**. Anything else on either project is read
-  against §9 before the deploy.
+  print**, from **rig 29a**'s measurement of the real installed side in Run 1
+  (D1498 — *not* rig 28l's, whose installed side was `72cb2de` and which
+  therefore saw one leaf where this hop has two and three):
+
+  | project | leaves that differ | which |
+  |---|---|---|
+  | **alpha-dev** | **two** | `template_version`, `migrations.release_lock_sha256` |
+  | **beta-dev** | **three** | those two, plus `migrations.project_set.lock_sha256` |
+
+  On **both**: `bump minor`, `requires minor`, `verdict OK`, `reasons []`, and
+  **`operator_digests_moved` empty** — so D1107's split deploy does not apply and
+  neither manifest has to move with this release. Beta's third leaf is ADR 0210's
+  doing: the project lock gained `follows_release_version_source` and went to
+  schema 3, which moves the bytes `project_set.lock_sha256` digests. The release
+  lock leaf is `0033`. **Anything beyond these** — a fourth leaf on beta, any
+  non-empty `reasons`, any `operator_digests_moved` — is read against §9
+  before the deploy.
 
 **Done.** _to be written, with both projects' `plan --json` quoted._
 
@@ -453,10 +477,10 @@ the expected output beside each. `sudo -n` is not available on this host
 | 5 | 1 | `sudo bin/backup.sh --outputs …/alpha-dev/outputs.json info` | a full backup exists; not `awaiting_first_backup` |
 | 6 | 1 | `sudo bin/dr-kit.sh export … --output /home/op/kit-<date>-pre …` | the kit, handed to `op` |
 | 7 | 2 | `journalctl -u cloud-init-hotplugd.service --no-pager -n 100` | **read before the reboot**, D1490 |
-| 8 | 2 | `sudo reboot` | — |
+| 8 | 2 | `sudo reboot` | afterwards `uname -r` = **`7.0.0-31-generic`**, not 29 (D1500) |
 | 9 | 3 | `sudo bin/provision-host.sh --host host.yaml --check` | no deviation, or the deviation to `--apply` |
-| 10 | 3 | `sudo bin/upgrade.sh plan --project alpha-dev --candidate …/.generated/alpha-dev/outputs.json --also migration_added --json` | `bump minor`, `requires minor`, `OK`, one leaf |
-| 11 | 3 | the same for `beta-dev` | the same |
+| 10 | 3 | `sudo bin/upgrade.sh plan --project alpha-dev --candidate …/.generated/alpha-dev/outputs.json --also migration_added --json` | `bump minor`, `requires minor`, `OK`, `reasons []`, **TWO** leaves: `template_version`, `migrations.release_lock_sha256` (D1498) |
+| 11 | 3 | the same for `beta-dev` | the same verdict, **THREE** leaves — those two plus `migrations.project_set.lock_sha256` (D1498) |
 | 12 | 4 | `sudo ./deploy.sh --host host.yaml --project project.alpha.yaml --capabilities capabilities.yaml --through-session 28` | **nothing after it** |
 | 13 | 4 | the same for `project.beta.yaml` | — |
 | 14 | 5 | `sudo bin/migrate.sh --project project.alpha.yaml --runtime status` | 33 `[X]`, `Pending: 0` |
