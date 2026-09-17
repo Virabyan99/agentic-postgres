@@ -40,11 +40,12 @@ the release is not re-cut inside the window (§9).
 
 ## 1. Divergence — what the tree, the audit and the host say, measured
 
-Seventeen rows. Eight were written before a line of §5; **D1497 was written by
+Eighteen rows. Eight were written before a line of §5; **D1497 was written by
 pushing this document**; **D1498–D1500 by measuring Run 1's premises**;
 **D1501–D1502 by executing Run 1**, **D1503 by executing Run 2**, **D1504 by
-preparing Run 4**, and **D1505 by executing Run 5 badly**. Numbers from **D1489**;
-the remaining runs allocate from **D1506**.
+preparing Run 4**, **D1505 by executing Run 5 badly**, and **D1506 by printing a
+directory listing in Run 6**. Numbers from **D1489**; the remaining runs allocate
+from **D1507**.
 
 | D | Said | Measured or read | This session | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -65,6 +66,7 @@ the remaining runs allocate from **D1506**.
 | **D1503** | `CLAUDE.md` §2's HOST block and `docs/pre-stage-4-audit.md`, unchanged for three sessions: *"The host reports `systemctl is-system-running` = **DEGRADED** (some unit has failed); unrelated to the deployment, which doctors clean on both projects, and **not investigated**."* | **Investigated, and it is the informative branch of D1502.** `cloud-init-hotplugd.service` fails **at every boot**, not once forty days ago: observed at `04:38:48` on the old boot and again at **`20:18:59` on the new one — 2 min 42 s after `btime`** — having burned 3.547 s CPU over 55 s wall and 146 MB. Both times it is `hotplug_hook.py:110`, `RuntimeError: Failed to detect <id> in updated metadata`; **the id is a NIC MAC on this boot (`86:cf:15:33:67:0b`) and the literal `False` on the previous one**, which is a cloud-init defect in its own right. | **Recorded as answered and NOT repaired.** It is the provider's cloud-init reacting to a network-interface hotplug, it is not this product, and the deployment does not depend on it: both projects read **10 ok / 0 / 0 / 0** with the unit failed. `CLAUDE.md`'s *not investigated* is retired at the close. | Three sessions carried a one-line shrug about a `degraded` host into every trip's reading of `systemctl`. It cost one command to answer and the answer is *this is permanent, it is theirs, and it is harmless* — which is worth more than the uncertainty it replaces, because the next operator who sees `degraded` mid-deploy now knows whether it is new. | — |
 | **D1504** | `docs/upgrade-guide.md` §3 step 6, stating the guard as a property of the deploy: *"`sudo`'s pty puts a command whose streams are not all terminals in the background, the first `docker exec -i` stops on `SIGTTIN` … **`deploy.sh` now refuses that shape with exit 2**"*. | **The guard is on one caller of a pattern that has fourteen, and there is no shared helper it could have been applied through once.** `[ -t 0 ] && { [ ! -t 1 ] \|\| [ ! -t 2 ]; }` occurs **exactly once in the tree**, at `deploy.sh:260`. Three shell entry points spell `docker exec -i` directly (`deploy.sh`, `bin/apg-diag.sh`, `bin/db.sh`) and eleven Python ones build it as an argv — `bin/{auth-admin,backup,deploy-project,dev,doctor,fleet,migrate,postgres-bootstrap,restore,restore-test,storage-admin}.py`; `backup.py` was read line by line (`"docker", "exec"` at 246 and 291) and the rest match by argv spelling. **Seven define their own `psql()` or `docker()`.** The tree's other three `isatty()` readers (`auth-admin`, `studio`, `dev`) are about interactive prompting, not this. | **Recorded, not repaired** (§9). D1501 is the consequence measured live: `bin/backup.sh … info` under a pipe stopped at `Tl+` for seven minutes, with no error and no exit, on both projects in turn. | `CLAUDE.md` §7 question 5 exactly — *when a decision is implemented, which of its callers got it?* — answered **one of fourteen**. And §7's other rule, *guard the class against the definition, never the field that failed*: with no shared exec helper there is nowhere for one guard to live, so the repair is **a helper first and the guard second**, which is why it is not a line of work for a deploy window. | — |
 | **D1505** | **D1501 and D1504**, written by this session at 20:20 and 20:40: the D972 hazard is undocumented outside the deploy and unguarded outside `deploy.sh`. | **The agent that wrote both rows reproduced the defect at 20:45**, in Run 5's own sheet, handed to the operator: `sudo bin/migrate.sh --project project.beta.yaml --runtime status 2>/dev/null \| grep …`. `migrate.sh` reaches dbmate through `docker exec -i`, stdout was a pipe, and it stopped — **twenty-five minutes after the row about it was committed.** | **The sheet builder now checks itself.** Every sheet is grepped for a piped, redirected or captured `sudo` product command before it is sent, and each sheet's header states the rule in the form an operator can apply: **`deploy.sh`, `migrate.sh`, `backup.sh`, `doctor.sh`, `db.sh` and the restore pair exec into a container and must never be captured; `docker ps` and `docker inspect` do not, and are safe.** | This is the evidence D1504 needs and could not otherwise have had: **the repair is a guard, not a sentence.** A rule that has to be remembered was forgotten inside half an hour by the party that had just written it down — while `deploy.sh`, which carries the guard, refused the identical shape with exit 2 an hour earlier and cost nobody anything. Documentation is not a control. | — |
+| **D1506** | **D1494**, this session's own row: *"the stale bare `/home/op/{alpha,beta}-outputs.json` … **Every flag in the sheet names the `-dev-` file explicitly**"* — the `-dev-` infix offered as the thing that separates the current copy from the stale one. | **There is a THIRD `-dev-outputs.json` under `/home/op`, and it describes a DIFFERENT MACHINE.** `snippets-dev-outputs.json`: `template_version` **1.0.0**, `deployed_through_session` **18**, schema 16, `source_commit 2cf76d7954`, **`host.id apg-snippets-01`, `public_ipv4 2.28.74.158`**, domain `snippets-db.agenticpostgresql.com`, mode **0644** where the current pair is 0600. It is the adopter's appliance document — D1370's, the one `fresh_host` passed on. `/etc/agentic-postgres/projects/` holds only `alpha-dev` and `beta-dev` and `fleet` reports 2 projects, so it is **not** a third project on this host. | **Every outputs flag in this trip names an ABSOLUTE PATH to one of exactly two files** — never a glob, and never the infix as a discriminator. Run 7's external mode takes `--project-a-outputs /home/op/alpha-dev-outputs.json` and `--project-b-outputs /home/op/beta-dev-outputs.json` literally. | D1494's harm is **measuring the wrong release**. This one's is **measuring the wrong host**, which is strictly worse and harder to see: the document is well-formed, current-looking, and matches the naming convention the *correct* pair uses. `/home/op/*-dev-outputs.json` matches three files and one of them is another machine. A rule that says *use the `-dev-` one* does not survive contact with this directory. | 0158 |
 
 
 ---
@@ -128,7 +130,7 @@ in advance, what the operator types, and what each run must read before it
 proceeds. Every `sudo` line is the operator's at a TTY; every other line is the
 agent's over SSH as `op` (`docs/upgrade-guide.md` §3's two-account rule).
 
-Runs allocate `D` numbers from **D1506**.
+Runs allocate `D` numbers from **D1507**.
 
 ### Run 1 — the pre-flight, and the reading that everything after is compared against
 
@@ -593,7 +595,44 @@ off the host. **Do not point the gate's `--kit-dir` at it** (D1282):
 `REC-KIT-003`'s claim *is* the version gap, its proof `pytest.fail`s on exactly
 that, and the flag stays on `kit-2026-09-11`.
 
-**Done.** _to be written._
+**Done.** 2026-09-17. **Both copies refreshed, the `-post` kit exported and
+verified twice, and a row written by a directory listing.**
+
+**The op-owned copies.** `sudo install -o op -g op -m 0600` on both, from
+`/etc/agentic-postgres/projects/<key>/outputs.json`. Read before and after so
+the swap is visible rather than asserted:
+
+```
+before                                after
+alpha-dev-outputs.json  1.6.0  s25     1.7.0  s28  36bd4d791798   (0600)
+beta-dev-outputs.json   1.6.0  s25     1.7.0  s28  36bd4d791798   (0600)
+alpha-outputs.json      0.1.0-dev s9   unchanged                  (0644)
+beta-outputs.json       0.1.0-dev s9   unchanged                  (0644)
+```
+
+**The stale bare pair was deliberately not touched** (D1494): renaming or
+deleting it is a change to the host this trip did not come to make.
+
+**The `-post` kit.** `kit-2026-09-17-post`, 10 artifacts for both projects,
+exported 2026-09-17T20:54:29Z **from release `36bd4d7917982285f036fbecab3d4f53af4cb9a9`**
+— the kit states the deployed commit itself. Handed to `op` at `0700`/`0600`,
+verified on the host, then **streamed off as a tar onto ext4** at
+`~/dr-kits/kit-2026-09-17-post`, where **11 files are byte-identical to the
+host's copy** and `verify` exits 0 from the checkout. Both of this trip's kits
+are now off the host, and **all six kits are kept**. The `-pre`/`-post` suffixes
+earned themselves exactly as D1398 said they would: `export` refuses a directory
+that exists, and this upgrade happened in one sitting.
+
+**The gate's `--kit-dir` stays on `kit-2026-09-11`** (D1282), and the sheet said
+so on the screen where the temptation is rather than only in the plan.
+
+**D1506 — and it came from printing a listing rather than a value.** Showing
+all five `outputs.json` files under `/home/op` instead of only the two being
+written surfaced a **third `-dev-outputs.json` describing a different machine**:
+`snippets-dev-outputs.json`, `host.id apg-snippets-01`, `public_ipv4
+2.28.74.158`. D1494 had offered the `-dev-` infix as the discriminator between
+the current copy and the stale one; it is not one. Every outputs flag from here
+names an absolute path to one of exactly two files.
 
 ### Run 7 — one sweep, and the flags it has never been given
 
