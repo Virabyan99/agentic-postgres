@@ -344,7 +344,80 @@ minor, which is Run 3's business.
   non-empty `reasons`, any `operator_digests_moved` — is read against §9
   before the deploy.
 
-**Done.** _to be written, with both projects' `plan --json` quoted._
+**Done.** 2026-09-17. **The release is on the host and both projects price
+clean. No new divergence row** — the first run of this trip to produce none,
+because Run 1's measurements were right.
+
+**The commit is `36bd4d7`, and it was chosen by its properties** (D1497), all
+four read on the day and none against a literal: `VERSION` **1.7.0**,
+`CURRENT_SESSION` **28**, `f0c6674` an ancestor five commits back, tree clean
+and equal to `origin/main`.
+
+**Transport (step 1).** `git bundle` at `/tmp/apg-36bd4d791798.bundle`, per-commit
+name (D504), `bundle verify` clean and a complete history. On the host, **the
+fetch was confirmed before the checkout** — `git rev-parse FETCH_HEAD` equal to
+the bundled SHA — and only then `git checkout -B main FETCH_HEAD`. **The
+checkout was DETACHED at `13c4b390` and is now on branch `main` at `36bd4d7`**,
+the second of the two forms §3 step 1 sanctions; that is a host state change
+this run made and it is recorded rather than left to be noticed. Afterwards:
+`VERSION` 1.7.0, `CURRENT_SESSION` 28, **33 released migrations**, project set
+**2**, porcelain 0, `0033-agent-record-retention.sql` present and no earlier
+template moved.
+
+**`uv pip sync` was not run, deliberately** (D1491), re-measured against
+`13c4b390` — the commit the host's checkout was actually on — rather than
+the document's `source_commit` (D1499).
+
+**The interpreter reading §3 step 1 asks for, taken and answered.** `python3`
+on the host is **3.14.4** against a pinned **3.12.13**, which is exactly
+D1396's hazard — but `deploy.sh` resolves through `python_bin()`, which
+prefers `.venv/bin/python`, and that venv is **3.12.13**, built by uv 0.12.1.
+The bare `python3` is a fallback never reached, and the script's own comment
+says it runs through the resolver rather than the shebang. **The warning is
+real and does not apply to this host.**
+
+**Step 2, line 9.** `provision-host --check` → *the host meets the Session 2
+baseline*, exit 0, every line `ok`: ssh snippet and six resolved sshd settings,
+five launchers, the sudoers rule naming one operator and one program, nine
+units and timers, the port registry, docker 29.7.1 with compose 5.4.0 and **no
+Docker TCP socket**, ufw active with the DOCKER-USER policy rendered, and
+**only 22, 80 and 443 listening publicly**. No deviation, so no `--apply`.
+
+**Step 3, the render.** Both candidates rendered **as `op`, never root**, with
+the **host's** `capabilities.yaml` — `inputs.capabilities_sha256` is
+`722ffa85…` on both, the host's file and not the example's (D1371) — and
+both carry `template_version` **1.7.0**, the precondition a stale render fails.
+`.generated` stayed `op`-owned on all eight entries (D1110).
+
+**Step 4, lines 10 and 11 — and rig 29a predicted both exactly.**
+
+```
+alpha-dev   bump minor, requires minor, verdict OK, reasons [], changes [migration_added]
+            2 leaves:  migrations.release_lock_sha256  febca7ed -> 9c56e9a0
+                       template_version                1.6.0    -> 1.7.0
+
+beta-dev    bump minor, requires minor, verdict OK, reasons [], changes [migration_added]
+            3 leaves:  migrations.project_set.lock_sha256  a99489e7 -> ad08d186
+                       migrations.release_lock_sha256      febca7ed -> 9c56e9a0
+                       template_version                    1.6.0    -> 1.7.0
+```
+
+`operator_digests_moved` is **empty on both**, so D1107's split deploy does not
+apply and neither manifest moves with this release. Both print *nothing blocks
+this upgrade*. Had the sheet still carried D1481's "one leaf", **every one of
+these five lines would have read as a stop condition.**
+
+**And the product already makes the distinction D1499 says the plan missed.**
+`upgrade check`, re-run after the checkout moved, prints `deployed from
+de2aabf…` and `this checkout 36bd4d7…` on separate lines and says
+**`commits DIFFERENT`** in its own words — *"Two checkouts can carry one
+template_version, so a matching version above is not a matching release."* The
+command has modelled *installed means two commits* since 1.6.1; the plan
+reasoned about it from one. That strengthens D1499 rather than retiring it: the
+gap is in the planning, not in the tool.
+
+**Nothing has mutated a deployment.** `--check` reports, `plan` refuses before
+any mutation and performs none. Run 4 is the first irreversible step.
 
 ### Run 4 — the deploy, alpha first, unredirected at a terminal
 
