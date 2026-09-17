@@ -40,10 +40,10 @@ the release is not re-cut inside the window (§9).
 
 ## 1. Divergence — what the tree, the audit and the host say, measured
 
-Twelve rows, every one measured against the host or the tree on 2026-09-17.
-Eight were written before a line of §5; **D1497 was written by pushing this
-document**; and **D1498–D1500 were written by executing Run 1**, which is what a
-pre-flight is for. Numbers from **D1489**; the runs allocate from **D1501**.
+Fourteen rows. Eight were written before a line of §5; **D1497 was written by
+pushing this document**; **D1498–D1500 by measuring Run 1's premises**; and
+**D1501–D1502 by executing Run 1**, which is what a pre-flight is for. Numbers
+from **D1489**; the remaining runs allocate from **D1503**.
 
 | D | Said | Measured or read | This session | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -59,6 +59,8 @@ pre-flight is for. Numbers from **D1489**; the runs allocate from **D1501**.
 | **D1498** | This plan, §5 Run 3 and Appendix lines 10–11: *"`bump minor`, `requires minor`, `verdict OK`, `reasons []`, **one leaf differing — `template_version`**. Anything else on either project is read against §9 before the deploy"* — taken from **D1481**, Session 28's offline pricing of the class. | **Alpha differs in TWO leaves and beta in THREE** (rig 29a: both project shapes rendered at the commit the host checkout is actually on and at `origin/main`, then priced by the product's own `upgrade_plan.build_plan`). Alpha: `template_version`, `migrations.release_lock_sha256`. Beta: those two plus `migrations.project_set.lock_sha256`. **Verdict, bump and requires are unchanged** — `ok`, `minor`, `minor` — and `operator_digests_moved` is **empty**, so D1107's split deploy does not apply. **D1481 is not wrong**: it priced `72cb2de`→HEAD, and by `72cb2de` *both* locks had already moved — `0033` at `acb08e4` (Run 6) and the project lock's schema 2→3 at `873bdfd` (Run 3) — so its pair spans only Run 9's bump and one leaf is the true answer **for that pair**. | **Run 3 and sheet lines 10–11 now name both counts and every leaf.** The control is in the same rig: without `--also migration_added` the identical pair requires only `patch`, so the declaration is load-bearing and its effect is visible rather than asserted. | This is the worst place in a trip to carry a wrong expected value — the last check before the irreversible half, written as a stop condition. An operator meeting three leaves where the plan promises one either abandons a sound deploy or stops believing the sheet, and the second is permanent. An offline pricing is only ever as good as the commit it called *installed*. | 0162 |
 | **D1499** | `docs/upgrade-guide.md` §2's preamble: *"Every command in this section runs from the release that is **ALREADY INSTALLED** on the host"* — and this plan's D1491 and D1492, which both measured that release as **`de2aabf`**, the `source_commit` the deployed documents record. | **The host's checkout is not on `de2aabf`.** `git rev-parse HEAD` in `~op/agentic-postgres` reads **`13c4b390`** — three commits later (`f653812`, `aef612d`, `13c4b39`; Session 25 Runs 7 and 7a) — with `VERSION` 1.6.0 and `git status --porcelain` empty. Session 25 closed on two sweeps and **D1378** records exactly this gap between `source_commit` and `offline_checkout_commit`; nothing since has closed it. | **Both premises re-measured from `13c4b390`, and both still hold**: the diff over `requirements-dev.txt`, `requirements-dev.in` and `.python-version` is empty (D1491), and the diff over `contracts/` and `projects/example/contracts/` is empty (D1492). Every `git diff <installed>..` in this trip names **`13c4b390`**. | *Installed* means two different commits on this host and they are not interchangeable: the document says what was **deployed**, the checkout says what a command **runs from**, and §2 asks the operator to run from the installed release without saying which of the two that is. Here the gap changed neither answer. It is the kind that changes everything exactly once. | 0158 |
 | **D1500** | D1490, which read the marker and not its contents: *"`/var/run/reboot-required` present reading `*** System restart required ***`"*. | **`/var/run/reboot-required.pkgs` names five entries**: `linux-image-7.0.0-30-generic`, `linux-base`, `linux-image-7.0.0-31-generic`, `linux-base`, `libc6` — against a running kernel of `7.0.0-29-generic`. The pending restart is therefore a **two-release kernel hop, 29 → 31, skipping 30**, *and* **`libc6`**, which every running process is still mapped against. | **Run 2 gains the expected value it did not have**: after the reboot `uname -r` reads **`7.0.0-31-generic`**. If it still reads `7.0.0-29-generic` the restart did not take the kernel, and the trip stops there — before anything is transported. | A reboot with no expected value is a step that cannot fail, which is indistinguishable from one that was not performed. And `libc6` in that list is why *"both projects came back"* has to be read rather than assumed: the containers restart against a C library the host only finishes replacing at the boot this trip performs. | — |
+| **D1501** | `CLAUDE.md` §6 and `docs/upgrade-guide.md`, on **D972**: *"**Never redirect or pipe a sudo deploy**: the terminal is the log"* — scoped, everywhere it is written, to **the deploy**. | **The class is wider, and tonight it stopped a READ.** Run 1's sheet was handed to the operator as `bash ….sh 2>&1 \| tee …`. Lines 1–4 passed; **`sudo bin/backup.sh … info` stopped dead** — `ps` state **`Tl+`**, *stopped*, not slow — inside `docker exec -i apg-alpha-dev-postgres-1 psql … pg_stat_archiver`, for seven minutes; interrupted, it reached beta and stopped there identically. **The same sheet with no pipe, under `script -q -e -c`, did both projects and the journal in 14 seconds.** | **`script(1)`, never a pipe, for every remaining sheet in this session.** It gives stdout a real pty, so sudo is satisfied, *and* it writes the transcript — which is the only thing the pipe was wanted for. | D972 is stated as a property of *the deploy* and is really a property of **sudo's pty plus any child that wants the terminal**; `backup.sh` shells out to `docker exec -i`. Attaching the rule to the one command that first exhibited it reads as *deploys are special* and leaves every other sudo line looking safe to pipe. The failure is also the worst shape available: no error, no exit code, no output — just a command that never returns, on a host where *this one takes a while* is a plausible reading. | — |
+| **D1502** | This plan's Run 2 step 3: *"`systemctl is-system-running` is re-read — **if it is still `degraded` with the same unit, that is the answer to the audit's row**"*, and D1490, which named the unit but not what starts it. | **The unit is socket-activated and its failure is fifteen hours old, not forty days.** `cloud-init-hotplugd.service` is `TriggeredBy: cloud-init-hotplugd.socket`. It failed at **2026-09-17 04:38:48 UTC** with `RuntimeError: Failed to detect False in updated metadata` at `hotplug_hook.py:110`, having consumed 3.759 s CPU over 54.6 s wall. It runs **when a hotplug event arrives**, and one arrived this morning. | **Run 2 step 3 now reports three outcomes instead of two.** `degraded`, same unit → it recurred, and that *is* an answer. **`running` is not the opposite answer**: it means only that no hotplug event has arrived since boot, which is the expected state after a reboot whether or not anything is wrong. The audit's row closes on neither reading, and this session says so rather than banking the quiet one. | **ADR 0195**, in the exact shape this project keeps producing: a check with two branches over a world with three, where the reassuring branch is the one that is not measurable. Reading a clean `is-system-running` after a reboot as *the failed unit is fixed* closes a row with the absence of a trigger. | 0195 |
 
 
 ---
@@ -122,7 +124,7 @@ in advance, what the operator types, and what each run must read before it
 proceeds. Every `sudo` line is the operator's at a TTY; every other line is the
 agent's over SSH as `op` (`docs/upgrade-guide.md` §3's two-account rule).
 
-Runs allocate `D` numbers from **D1501**.
+Runs allocate `D` numbers from **D1503**.
 
 ### Run 1 — the pre-flight, and the reading that everything after is compared against
 
@@ -150,8 +152,81 @@ most is the one that is easiest to skip:
   with no swap**; the doctor's disk check reads headroom in copies and is the
   authority.
 
-**Done.** _to be written, with the two pre-upgrade doctor readings quoted in
-full._
+**Done.** 2026-09-17. `docs/upgrade-guide.md` §2, all seven items, and **the
+trip is clear to proceed**. Five rows written, of which two came from executing
+the run rather than from planning it.
+
+**The pre-upgrade doctor reading, which is the half that is easiest to skip.**
+Both projects, root, from the installed release:
+
+```
+alpha-dev: 10 ok, 0 warning, 0 problem, 0 unknown
+  ok  containers       10/10 running, none unhealthy
+  ok  route health     https://alpha-db.agenticpostgresql.com/__apg/healthz answered 200
+  ok  tls              48d remaining (Nov  5 06:50:01 2026 GMT)
+  ok  database         cluster and pooler both answered
+  ok  migrations       all 32 released migrations applied
+  ok  backup repository last full backup 2026-09-13T02:22:00Z
+  ok  wal archiver     last archived 2026-09-17 03:51:46.984795+00
+  ok  backup mirror    last copied 2026-09-17T04:37:13Z
+  ok  disk headroom    23398 MiB free at /var/lib/postgresql/18/docker, cluster 114 MiB (203.9x)
+  ok  capability drift the lock on disk is the one the deployed document recorded,
+                       and the one the running agent plane loaded
+
+beta-dev: 10 ok, 0 warning, 0 problem, 0 unknown
+  ... identical shape; migrations all 34 applied (32 released + its own 2);
+  last full 2026-09-13T02:21:48Z; archived 03:36:52; mirror 04:46:51;
+  cluster 128 MiB (182.0x)
+```
+
+**There is no warning to carry forward on either project**, so §2's sort table
+selects nothing and step 7 is compared against **10 ok and 10 ok** — with the
+*eleventh* check appearing as the only expected change (D1459). `fleet` agrees
+and adds `denials 0 in 24h` on both, and reports both at `release de2aabf s25
+v1.6.0`, which is D1499 from the host's own mouth.
+
+**Backups (§2 item 3).** Both stanzas `status: ok`, cipher `aes-256-cbc`,
+neither `awaiting_first_backup`: alpha's last full is `20260913-021652F` with
+four incrementals through 2026-09-17T03:46:45Z, beta's `20260913-021620F`
+through 03:31:51Z. All six timers enabled. The archiver counts — alpha 674
+archived / 48 failed, beta 637 / 52 — are cumulative, and the command says so
+in its own output rather than letting a reader price 48 failures as 48 problems.
+D553 handled at the source.
+
+**The kit (§2 item 2).** `kit-2026-09-17-pre`, 10 artifacts for both projects,
+exported 2026-09-17T20:08:37Z, handed to `op` at `0700`/`0600`, verified on the
+host. **Then copied off and verified independently**, which is the half that
+matters: streamed as a tar so the modes survived, landed on **ext4** inside WSL
+at `~/dr-kits/kit-2026-09-17-pre`, **11 files byte-identical to the host's
+copy**, and `bin/dr-kit.sh verify` exits 0 there from a 1.7.0 checkout. Its own
+line reads *exported … from release `13c4b390…`* — the third independent
+statement of D1499.
+
+**The checkout (§2 item 5).** `13c4b390`, `VERSION` 1.6.0, `git status
+--porcelain` **empty**, and `.generated` `op`-owned on **all eight** entries
+*including* `.staging` and `.locks`, read with a command that can see a dotfile
+(D1391). **Headroom (§2 item 4):** 23 G free of 38 G, 19% inodes, and **3.7 G
+RAM with no swap** — the doctor's disk check reads 203.9x and 182.0x and is the
+authority.
+
+**Item 6, which manifests move with this release: none.** `schemas/`,
+`contracts/capabilities.canonical.yaml`, `capabilities.example.yaml`,
+`project.example.yaml` and `host.example.yaml` are all unchanged between the
+installed commit and `main`, and rig 29a confirms it from the other side —
+`operator_digests_moved` is empty on both project shapes, so D1107's split
+deploy does not apply and no manifest has to be moved separately.
+
+**The `--also migration_added` declaration is measured, not assumed**, the way
+§3 step 4 says to read it: `migrations/released.lock.json` moved and
+`migrations/templates/0033-agent-record-retention.sql` was added.
+
+**Item 7** (D977) read before the day: §6 and §7 of the upgrade guide,
+`docs/session-11-operator-guide.md` §6, `docs/node-loss-runbook.md` §7.
+
+**What this run changed about the rest of the trip:** Run 3's expected leaf
+counts (D1498 — two on alpha, three on beta, not one), Run 2's expected kernel
+(D1500 — `7.0.0-31-generic`), Run 2's third outcome (D1502), and every
+remaining sheet's invocation (D1501 — `script(1)`, never a pipe).
 
 ### Run 2 — the reboot, read first and then performed
 
@@ -170,10 +245,19 @@ The audit's row, taken in the order that keeps the evidence (D1490):
    Wait for the units to reach `active` before reading anything — at `up 0 min`
    every failure means *still booting* and none of them means what it says.
 3. **Confirm both projects came back by themselves**: the per-project unit
-   `agentic-postgres-project@<key>.service` is `active`, the doctor is no worse
-   than Run 1's reading, and `systemctl is-system-running` is re-read — if it is
-   still `degraded` with the same unit, that is the answer to the audit's row.
-4. The `--after-reboot` declaration is **not** made here; it is a flag on Run 7's
+   `agentic-postgres-project@<key>.service` is `active`, and the doctor reads **no
+   worse than 10 ok / 0 warning / 0 problem on each**, which is Run 1's reading.
+4. **Re-read `systemctl is-system-running`, and report three outcomes** (D1502,
+   ADR 0195). The unit is **socket-activated** and failed fifteen hours before this
+   trip, not at boot:
+
+   - **`degraded`, same unit** — it recurred across a reboot. That is an answer,
+     and it is the audit's row answered.
+   - **`running`** — **not the opposite answer.** It means no hotplug event has
+     arrived since boot, which is the expected state either way. Record it as
+     *undetermined*, not as repaired.
+   - **`degraded`, a different unit** — a finding of its own, read against §9.
+5. The `--after-reboot` declaration is **not** made here; it is a flag on Run 7's
    sweep, and D1495 is why the ordering survives.
 
 **This run is where the trip can be abandoned most cheaply.** Nothing has been
