@@ -41,6 +41,7 @@ from agentic_postgres import (
     dev_environment,
     evidence,
     migrations,
+    rendering,
     secrets_contract,
 )
 
@@ -442,11 +443,69 @@ def test_planned_migrations_are_the_rendered_files_in_manifest_order_and_a_moved
     directory -- one function, so a dev cluster and a deploy cannot disagree
     about which bytes are legitimate. The refusal is measured by editing a
     rendered file, which is exactly the accident the digest exists for.
+
+    **The ordering assertion was `versions == sorted(versions)` and ADR 0206
+    replaced the rule it encoded** (D1486). There are two sets and two ordering
+    spaces: the release's payloads are rendered into `migrations/` and recorded
+    in `app_private.schema_migrations`, a project's into `migrations-project/`
+    and its own table, and each is ordered against its own applied set only. One
+    ascending list across both is the single-space rule whose collapse took
+    beta's deploy down at Session 24 (D1288).
+
+    It stayed green for four sessions because **no release added a migration
+    between that ADR and Session 28**: the example project's stamps
+    (`20260914…`) happened to sort after the newest released one
+    (`20260912120032`), so the concatenation was ascending by accident. Run 6's
+    `20260917120033` sorts after both and ended the accident. D1457 repaired
+    four proofs of this shape and this is the fifth -- the reader nobody greped,
+    because it reaches the manifest through `apg dev` rather than through the
+    render (§7's question 5).
+
+    **What is asserted instead is what `bin/dev.py` actually needs**: each set
+    ascending within itself, the release's set planned entirely before any
+    project's -- a project's migrations reference objects the release creates --
+    and one directory per set, since the applier derives the directory and the
+    ledger table from each entry rather than from its position.
     """
     entries = dev_environment.planned_migrations(FIXTURE)
     versions = [entry["version"] for entry in entries]
-    assert versions == sorted(versions), "the planned order is not version order"
     assert len(versions) >= 32, f"only {len(versions)} migrations were planned"
+
+    labels = [entry.get("set") or "release" for entry in entries]
+    assert set(labels) <= {"release", "project"}, f"unknown set labels: {sorted(set(labels))}"
+    assert "release" in labels, "no planned migration is recorded as the release's"
+
+    by_label: dict[str, list[str]] = {}
+    directories: dict[str, set[str]] = {}
+    for entry, label in zip(entries, labels, strict=True):
+        by_label.setdefault(label, []).append(entry["version"])
+        directories.setdefault(label, set()).add(
+            entry.get("dir") or rendering.RELEASE_MIGRATIONS_SUBDIR
+        )
+
+    for label, group in by_label.items():
+        assert group == sorted(group), (
+            f"the planned {label} set is not in ascending version order: {group}. "
+            "dbmate orders one directory by filename, so this set would be applied "
+            "in a different order than the manifest describes"
+        )
+        assert len(directories[label]) == 1, (
+            f"the {label} set's payloads are spread across {sorted(directories[label])}; "
+            "the applier derives the directory from each entry, and a set in two of "
+            "them is a set with two ledgers"
+        )
+
+    if "project" in by_label:
+        assert directories["release"] != directories["project"], (
+            "both sets render into one directory, so `ON CONFLICT (version) DO NOTHING` "
+            "would apply both and record one (D1096)"
+        )
+        last_release = max(index for index, label in enumerate(labels) if label == "release")
+        first_project = min(index for index, label in enumerate(labels) if label == "project")
+        assert last_release < first_project, (
+            "a project migration is planned before the end of the release set; a "
+            "project's payloads reference objects the release creates"
+        )
 
     recorded = json.loads(
         (FIXTURE / "migrations" / "rendered-manifest.json").read_text(encoding="utf-8")

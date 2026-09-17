@@ -1178,8 +1178,25 @@ half that proves less than it appears to. Start Docker and run this again."
   # which was correct while offline mode wrote nothing.
   mkdir -p "${EVIDENCE_DIR}"
   step "3. Offline contract suite"
+  # **A failing proof does not stop the evidence being written** (D1373, D1487).
+  # Session 25 repaired this in BOTH LIVE MODES and left the offline one under
+  # `set -e` with a bare call, so any failing proof ended the run before step 9
+  # -- no half written, and an exit of 1, which is not a code this gate's header
+  # documents. That is D1373's own defect surviving in the mode it was not
+  # applied to, and it matters more here than anywhere: Session 28's ONLY half
+  # is the offline one, so a single red proof anywhere in the suite would close
+  # the session with no evidence document at all. Measured, not reasoned: the
+  # first run of this gate exited 1 with `session-28-offline-tests.xml` written
+  # and `session-28-offline.json` absent.
+  suite_status=0
   run_suite "p0 and not future and not live_host and not external" \
-    "${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-offline-tests.xml"
+    "${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-offline-tests.xml" || suite_status=$?
+  if [ "${suite_status}" -ne 0 ]; then
+    printf '\n\033[1m%s: the suite reported failures (pytest exit %s).\033[0m\n' \
+      "${PROGRAM}" "${suite_status}"
+    printf 'The evidence below is written anyway, from the JUnit it wrote: a claim whose\n'
+    printf 'proof failed is FAILED, which is a RESULT and not an absence of one.\n'
+  fi
 
   step "4. Environment-gated tests collect and skip"
   # A module that opened a socket at import time would break collection for the
@@ -1296,12 +1313,12 @@ Run bin/lock-versions.sh --check."
   "$(python_bin)" -m pytest -q tests/contract/test_studio_assets.py
 
   # Session 22 introduced this step (ADR 0202) and Session 28 keeps it. TWO of
-  # this session's four claims are declared offline -- `dx_context`,
-  # `dx_walk_instrument` and `dx_hardening` -- which is one more than any
-  # session has declared before, and the one that is not is the reason the
-  # declaration is worth having: a checkout cannot say whether a deployment RUNS
-  # the release the tree names, and folding `stage_release` in would let the
-  # tree grade its own release. The
+  # this session's THREE claims are declared offline -- `project_set_release_record`
+  # and `release_reading` -- and the one that is not is the reason the
+  # declaration is worth having: a checkout cannot say what two tables nine
+  # sessions of trips have written to are carrying, nor that a prune removes a
+  # row of that record, and folding `agent_record_retention` in would prove a
+  # retention claim against history the proof itself seeded (D940). The
   # half is written from step 3's JUnit -- the run that selected everything --
   # for the reason every other half is: a verdict computed from a
   # differently-selected run is a verdict about a different collection.
@@ -1312,13 +1329,28 @@ Run bin/lock-versions.sh --check."
   # measure the same tests twice and write a second JUnit saying so.
   step "9. Offline evidence"
   if evidence_is_supportable; then
-    write_evidence offline
+    # The writer's own status is the authority on 5, exactly as in the two live
+    # modes: it returns it when a claim's node ids did not all pass.
+    evidence_status=0
+    write_evidence offline || evidence_status=$?
+    if [ "${evidence_status}" -ne 0 ]; then
+      exit "${evidence_status}"
+    fi
     printf 'This is one half of three. Session %s also needs --mode host and\n' "${SESSION}"
-    printf -- '--mode external, which are this session'"'"'s trip; see --help.\n'
-    printf -- 'No session before this one is owed a half: Session 24'"'"'s trip paid\n'
-    printf -- '22, 23 and 24 from one sweep (D1244) and those merges are done.\n'
+    printf -- '--mode external, which are Session 29'"'"'s trip; see --help.\n'
+    printf -- 'No session before this one is owed a half: 26 and 27 registered\n'
+    printf -- 'nothing, and Session 24'"'"'s trip paid 22, 23 and 24 (D1244).\n'
   else
     announce_no_evidence
+  fi
+
+  # A red proof OUTSIDE every claim is still a red proof, and it is reported as
+  # exit 6 rather than swallowed -- the same sentence the host mode gives, for
+  # the same reason. The half is written first; the verdict comes after it.
+  if [ "${suite_status}" -ne 0 ]; then
+    die 6 "the evidence is written and every claim in it passed, but the suite \
+reported failures. A proof outside every claim went red; read \
+${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-offline-tests.xml."
   fi
 
   printf '\n\033[1m%s: offline PASSED\033[0m\n' "${PROGRAM}"
@@ -1415,11 +1447,12 @@ mode_host() {
   [ -n "${ROTATED_AUTHENTICATOR_FROM_FILE}" ] &&
     export APG_ROTATED_AUTHENTICATOR_FROM_FILE="${ROTATED_AUTHENTICATOR_FROM_FILE}"
   [ -n "${ROTATED_DOCS_FROM_FILE}" ] && export APG_ROTATED_DOCS_FROM_FILE="${ROTATED_DOCS_FROM_FILE}"
-  # D687. `deployment_convergence` is one of THIS session's four claims and
-  # the gate could not pass the flag that admits it: the variable was read
-  # only by the test, so both DEP-002 proofs skipped and the claim reported
-  # unproved in a run that had otherwise measured everything. Question 5,
-  # committed while writing the gate that records the claim.
+  # D687, and the sentence is about the session that found it rather than this
+  # one: `deployment_convergence` was one of ITS claims and the gate could not
+  # pass the flag that admits it -- the variable was read only by the test, so
+  # both DEP-002 proofs skipped and the claim reported unproved in a run that
+  # had otherwise measured everything. Question 5, committed while writing the
+  # gate that records the claim. It is not one of Session 28's three (D1488).
   [ -n "${REDEPLOY_BEFORE_FILE}" ] && export APG_REDEPLOY_BEFORE_FILE="${REDEPLOY_BEFORE_FILE}"
   [ -n "${FRESH_HOST_OUTPUTS}" ] && export APG_FRESH_HOST_OUTPUTS="${FRESH_HOST_OUTPUTS}"
   [ -n "${REMOVED_PROJECT_FILE}" ] && export APG_REMOVED_PROJECT_FILE="${REMOVED_PROJECT_FILE}"

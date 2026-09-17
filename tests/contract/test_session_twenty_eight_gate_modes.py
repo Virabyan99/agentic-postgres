@@ -798,30 +798,60 @@ def test_a_failing_suite_does_not_stop_the_evidence_being_written() -> None:
     each step does and the words this test looks for are in those sentences too
     (D277, D1197, D1350 -- the last one found in this very module).
 
-    Both live modes are checked. Repairing one caller of a decision and leaving
-    the other is §7's fifth question, and it is how D1302 survived three
-    sessions.
+    **ALL THREE modes are checked, and Session 25's version of this test checked
+    two** (D1487). It asserted the repair in `live_host` and `external`, pinned
+    `suite_status=0` at exactly **2**, and closed with *repairing one caller of a
+    decision and leaving the other is §7's fifth question* -- while leaving the
+    offline caller unrepaired and making the count a tripwire against repairing
+    it. The guard encoded the gap it warns about. Measured rather than reasoned:
+    `--mode offline` on `c14b0ef` exited **1**, wrote the JUnit and wrote no
+    half, and Session 28's ONLY half is the offline one.
+
+    **Derived rather than listed**, for the reason the pinned 2 is the lesson
+    about: the property is *every sweep that writes a JUnit captures its
+    status*, which stays true when a fourth mode arrives. Step 4's
+    `run_suite "live_host or external" ""` is deliberately excluded by that same
+    rule -- it writes no JUnit because it is a collection check and a
+    prerequisite, and a prerequisite SHOULD end the run.
     """
     source = code(SCRIPT.read_text(encoding="utf-8"))
 
-    for marker in ("live_host", "external"):
-        call = f'run_suite "{marker}"'
-        assert call in source, f"the gate no longer runs the {marker} suite"
-        line = next(entry for entry in source.splitlines() if call in entry)
-        assert "|| suite_status=$?" in line, (
-            f"the {marker} suite's failure is not captured: under `set -e` a failing "
-            f"proof ends the run before the evidence is written, and a claim that is "
-            f"genuinely false can then never be recorded as `failed` (D1373).\n  {line.strip()}"
+    #: Every `run_suite` call that is handed a JUnit path, as whole lines. The
+    #: call is written across two lines in the script, so the JUnit argument is
+    #: looked for on the line that follows.
+    lines = source.splitlines()
+    sweeps: list[tuple[int, str]] = []
+    for index, line in enumerate(lines):
+        if "run_suite " not in line:
+            continue
+        window = " ".join(lines[index : index + 2])
+        if "-tests.xml" in window:
+            sweeps.append((index, window))
+
+    assert len(sweeps) >= 3, (
+        f"only {len(sweeps)} sweeps write a JUnit; this gate has three modes and each "
+        "writes one, so the scan below is measuring something other than the sweeps"
+    )
+
+    for _, window in sweeps:
+        assert "|| suite_status=$?" in window, (
+            "a sweep that writes a JUnit does not capture its failure: under `set -e` a "
+            "failing proof ends the run before the evidence is written, and a claim that "
+            f"is genuinely false can then never be recorded as `failed` (D1373, D1487).\n"
+            f"  {window.strip()}"
         )
 
-    for mode in ("host", "external"):
+    for mode in claims.ALL_MODES:
         call = f"write_evidence {mode}"
         assert f"{call} || evidence_status=$?" in source, (
             f"the {mode} writer's own status is not captured, so the suite's status "
-            "can never be reported when the writer is content (D1373)"
+            "can never be reported when the writer is content (D1373, D1487)"
         )
 
-    assert source.count("suite_status=0") == 2, (
-        "both live modes must initialise the status they capture, or `set -u` ends "
-        f"the run on an unbound variable: found {source.count('suite_status=0')}"
+    #: Derived from the number of sweeps rather than pinned at a literal, which
+    #: is what made repairing the third mode go red instead of green.
+    assert source.count("suite_status=0") == len(sweeps), (
+        "every mode that captures a sweep's status must initialise it, or `set -u` "
+        f"ends the run on an unbound variable: {source.count('suite_status=0')} "
+        f"initialisations for {len(sweeps)} sweeps"
     )
