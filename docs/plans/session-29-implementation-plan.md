@@ -40,10 +40,11 @@ the release is not re-cut inside the window (§9).
 
 ## 1. Divergence — what the tree, the audit and the host say, measured
 
-Fifteen rows. Eight were written before a line of §5; **D1497 was written by
+Sixteen rows. Eight were written before a line of §5; **D1497 was written by
 pushing this document**; **D1498–D1500 by measuring Run 1's premises**;
-**D1501–D1502 by executing Run 1**; and **D1503 by executing Run 2**. Numbers
-from **D1489**; the remaining runs allocate from **D1504**.
+**D1501–D1502 by executing Run 1**, **D1503 by executing Run 2**, and **D1504 by
+preparing Run 4**. Numbers from **D1489**; the remaining runs allocate from
+**D1505**.
 
 | D | Said | Measured or read | This session | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -62,6 +63,7 @@ from **D1489**; the remaining runs allocate from **D1504**.
 | **D1501** | `CLAUDE.md` §6 and `docs/upgrade-guide.md`, on **D972**: *"**Never redirect or pipe a sudo deploy**: the terminal is the log"* — scoped, everywhere it is written, to **the deploy**. | **The class is wider, and tonight it stopped a READ.** Run 1's sheet was handed to the operator as `bash ….sh 2>&1 \| tee …`. Lines 1–4 passed; **`sudo bin/backup.sh … info` stopped dead** — `ps` state **`Tl+`**, *stopped*, not slow — inside `docker exec -i apg-alpha-dev-postgres-1 psql … pg_stat_archiver`, for seven minutes; interrupted, it reached beta and stopped there identically. **The same sheet with no pipe, under `script -q -e -c`, did both projects and the journal in 14 seconds.** | **`script(1)`, never a pipe, for every remaining sheet in this session.** It gives stdout a real pty, so sudo is satisfied, *and* it writes the transcript — which is the only thing the pipe was wanted for. | D972 is stated as a property of *the deploy* and is really a property of **sudo's pty plus any child that wants the terminal**; `backup.sh` shells out to `docker exec -i`. Attaching the rule to the one command that first exhibited it reads as *deploys are special* and leaves every other sudo line looking safe to pipe. The failure is also the worst shape available: no error, no exit code, no output — just a command that never returns, on a host where *this one takes a while* is a plausible reading. | — |
 | **D1502** | This plan's Run 2 step 3: *"`systemctl is-system-running` is re-read — **if it is still `degraded` with the same unit, that is the answer to the audit's row**"*, and D1490, which named the unit but not what starts it. | **The unit is socket-activated and its failure is fifteen hours old, not forty days.** `cloud-init-hotplugd.service` is `TriggeredBy: cloud-init-hotplugd.socket`. It failed at **2026-09-17 04:38:48 UTC** with `RuntimeError: Failed to detect False in updated metadata` at `hotplug_hook.py:110`, having consumed 3.759 s CPU over 54.6 s wall. It runs **when a hotplug event arrives**, and one arrived this morning. | **Run 2 step 3 now reports three outcomes instead of two.** `degraded`, same unit → it recurred, and that *is* an answer. **`running` is not the opposite answer**: it means only that no hotplug event has arrived since boot, which is the expected state after a reboot whether or not anything is wrong. The audit's row closes on neither reading, and this session says so rather than banking the quiet one. | **ADR 0195**, in the exact shape this project keeps producing: a check with two branches over a world with three, where the reassuring branch is the one that is not measurable. Reading a clean `is-system-running` after a reboot as *the failed unit is fixed* closes a row with the absence of a trigger. | 0195 |
 | **D1503** | `CLAUDE.md` §2's HOST block and `docs/pre-stage-4-audit.md`, unchanged for three sessions: *"The host reports `systemctl is-system-running` = **DEGRADED** (some unit has failed); unrelated to the deployment, which doctors clean on both projects, and **not investigated**."* | **Investigated, and it is the informative branch of D1502.** `cloud-init-hotplugd.service` fails **at every boot**, not once forty days ago: observed at `04:38:48` on the old boot and again at **`20:18:59` on the new one — 2 min 42 s after `btime`** — having burned 3.547 s CPU over 55 s wall and 146 MB. Both times it is `hotplug_hook.py:110`, `RuntimeError: Failed to detect <id> in updated metadata`; **the id is a NIC MAC on this boot (`86:cf:15:33:67:0b`) and the literal `False` on the previous one**, which is a cloud-init defect in its own right. | **Recorded as answered and NOT repaired.** It is the provider's cloud-init reacting to a network-interface hotplug, it is not this product, and the deployment does not depend on it: both projects read **10 ok / 0 / 0 / 0** with the unit failed. `CLAUDE.md`'s *not investigated* is retired at the close. | Three sessions carried a one-line shrug about a `degraded` host into every trip's reading of `systemctl`. It cost one command to answer and the answer is *this is permanent, it is theirs, and it is harmless* — which is worth more than the uncertainty it replaces, because the next operator who sees `degraded` mid-deploy now knows whether it is new. | — |
+| **D1504** | `docs/upgrade-guide.md` §3 step 6, stating the guard as a property of the deploy: *"`sudo`'s pty puts a command whose streams are not all terminals in the background, the first `docker exec -i` stops on `SIGTTIN` … **`deploy.sh` now refuses that shape with exit 2**"*. | **The guard is on one caller of a pattern that has fourteen, and there is no shared helper it could have been applied through once.** `[ -t 0 ] && { [ ! -t 1 ] \|\| [ ! -t 2 ]; }` occurs **exactly once in the tree**, at `deploy.sh:260`. Three shell entry points spell `docker exec -i` directly (`deploy.sh`, `bin/apg-diag.sh`, `bin/db.sh`) and eleven Python ones build it as an argv — `bin/{auth-admin,backup,deploy-project,dev,doctor,fleet,migrate,postgres-bootstrap,restore,restore-test,storage-admin}.py`; `backup.py` was read line by line (`"docker", "exec"` at 246 and 291) and the rest match by argv spelling. **Seven define their own `psql()` or `docker()`.** The tree's other three `isatty()` readers (`auth-admin`, `studio`, `dev`) are about interactive prompting, not this. | **Recorded, not repaired** (§9). D1501 is the consequence measured live: `bin/backup.sh … info` under a pipe stopped at `Tl+` for seven minutes, with no error and no exit, on both projects in turn. | `CLAUDE.md` §7 question 5 exactly — *when a decision is implemented, which of its callers got it?* — answered **one of fourteen**. And §7's other rule, *guard the class against the definition, never the field that failed*: with no shared exec helper there is nowhere for one guard to live, so the repair is **a helper first and the guard second**, which is why it is not a line of work for a deploy window. | — |
 
 
 ---
@@ -125,7 +127,7 @@ in advance, what the operator types, and what each run must read before it
 proceeds. Every `sudo` line is the operator's at a TTY; every other line is the
 agent's over SSH as `op` (`docs/upgrade-guide.md` §3's two-account rule).
 
-Runs allocate `D` numbers from **D1504**.
+Runs allocate `D` numbers from **D1505**.
 
 ### Run 1 — the pre-flight, and the reading that everything after is compared against
 
@@ -434,7 +436,56 @@ background and the deploy stops forever (D972, D1376).
 `20260917120033` on both projects and nothing else: one migration, additive,
 `app_private` only, granted to nobody.
 
-**Done.** _to be written._
+**Done.** 2026-09-17, 20:35:28 → 20:37:33 UTC. **Both projects deployed
+through session 28, both exit 0, and both converged in ONE pass.**
+
+**The transcript was taken with `script(1)`, which §3 step 6 sanctions in as
+many words** — *"a redirect is what is refused, not a recording"*. The sheet
+proved the precondition rather than assuming it: `fd0`, `fd1`, `fd2` all
+terminals, so `deploy.sh:260`'s refusal could not fire. `--through-session 28`
+was read from `CURRENT_SESSION` in the checkout **and** from
+`./deploy.sh --help`, never carried from the plan (D59).
+
+**Alpha — the control, no project set.** Preflight: all 4 prerequisites
+satisfied. Release installed at
+`/opt/agentic-postgres/releases/36bd4d7917982285f036fbecab3d4f53af4cb9a9`.
+Secrets materialised into a **new generation `626ce973b8eaf1dd`** (from
+`e284293935318e43`), 29 files, with mount digests re-rendered for 9 services —
+which is ADR 0155 recreating what changed.
+**`Applied: 20260917120033_agent_record_retention.sql in 20.487605ms`**, and
+`migrate: ledger recorded for 33 migrations`.
+
+**Beta — the example project set, two ordering spaces (ADR 0206).**
+**`Applied: 20260917120033 … in 25.16569ms`**; `migrate: project versions
+recorded in app_private.project_schema_migrations`; **both** dbmate invocations
+ran — `up dbmate as apg_beta_dev_migration_user` and `up dbmate-project as
+apg_beta_dev_migration_user` — and `migrate: ledger recorded for 35
+migrations`. 33 released plus its own 2, which is what §5 predicted.
+
+**Every route came back `ready` on both, first pass.** `tls issued
+(production)`, and `app`, `app docs`, `docs`, `health`, `mcp`, `metrics`,
+`rest`, `storage` all `ready`, `database observed`. Ports **available**: alpha
+`127.0.0.1:15432`/`15433`, beta `15434`/`15435`. **D326's second pass is not
+needed** — no route reported `unavailable`, which is the rare-on-an-upgrade
+case the guide describes. `6c` reported both stanzas present with archiving and
+repository reachable. The three `docs`/`metrics` routes each refuse without a
+credential with a 401 Basic challenge, on both projects, which is the expected
+shape and not a fault.
+
+**`.generated` came back `op`-owned on all eight entries** (D1110): a `sudo`
+deploy hands it back, and only a real root login, a `sudo pytest` or a root
+`--render-only` does not.
+
+**Two lines that are NOT evidence, and Run 5 is why.** `deploy: <key> deployed
+through session 28` is a summary line, and `migrate: ledger recorded for N
+migrations` is **the migrator's line, not the ledger** — dbmate prints
+`Applied` for a migration the cluster rolled back (D941). Run 5 reads
+`app_private.schema_migrations` and `app_private.project_schema_migrations`
+themselves.
+
+**D1504 was written while preparing this run**, from reading step 6 rather than
+from running it: the D972 refusal that protects the deploy protects **only** the
+deploy, and the pattern it guards has fourteen callers and no shared helper.
 
 ### Run 5 — read what the deploy left, never its summary line
 
