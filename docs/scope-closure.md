@@ -743,6 +743,21 @@ about the planning, which is what ADR 0163 refuses.
 | **D1473, the rotation's `down`/up may be three sessions stale** | Kept and turned into a free measurement on the trip, rather than removed on a code reading. |
 | **D1485, a rig that deleted a render fixture the checkout already held** | Recorded this run. Two proofs in one module hard-fail on a missing render fixture while five skip on the same precondition. |
 
+### What the gate found at the close, after every run had said Done
+
+**Three defects, none of them from the run that was closing.** The first pass of
+`bin/session-01-check.sh` on the bump commit came back `1 failed, 5999 passed`,
+and the second pass — after the repairs — came back **exit 0, `6000 passed`**.
+This is the argument for the gate in one paragraph: a targeted list derived from
+a diff cannot see a caller the diff does not touch, and this project does not
+read its CI verdict.
+
+| Found | What it was |
+|---|---|
+| **D1486 — the fifth reader of a rule ADR 0206 replaced** | `test_dev_environment.py` still asserted one ascending list across **both** migration sets. Run 6's *Done* says D1457 found four such proofs and repaired all four; there were five, and the fifth reaches the rendered manifest through `apg dev` rather than through the render. **Red since `acb08e4`, Run 6's own commit** — the concatenation was ascending by accident until Run 6's own migration ended the accident. Repaired under ADR 0206: each set ascending within itself, one directory per set, the release's set before any project's. |
+| **D1487 — D1373's repair never reached the third mode** | `--mode offline` exited **1** with the JUnit written and **no evidence half**. Session 25 repaired the failing-suite path in both live modes and left the offline one under `set -e`. Session 28's only half is the offline one, so this would have closed the first entirely-offline session with no evidence document at all. **And the guard against exactly this checked two of the three callers**, pinning the count at 2 so that repairing the third went red — a test whose docstring warns about repairing one caller and leaving the other. It is derived now, not listed. `bin/session-25-check.sh` is **not** edited: it owns its session and its evidence is written. |
+| **D1488 — the derivation lost a half of its prose, for the third time** | `bin/session-28-check.sh`'s header carries the warning (D853, D858) and scopes itself to the header and the usage block; two comments in the **body** survived naming Session 25's claims under this session's count. A rule that names the two places it applies to becomes a rule about those two places. |
+
 ### What Session 29 inherits, in order
 
 1. **Deploy this commit**, both projects, `--through-session 28`. It applies

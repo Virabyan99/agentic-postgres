@@ -1020,6 +1020,201 @@ push — a commit message is not evidence that the diff contains what it says
 
 **And then nothing.** No tag. Session 29 deploys this commit, sweeps, and tags it.
 
+**Done.** 2026-09-17, in three commits — `c14b0ef` (the bump), `1cde025` (three
+defects the gate found) and this one. **D1479–D1488**, three requirements, three
+claims, and **nineteen mutations with nineteen kills and zero survivors**, every
+control green in the same invocation and every mutated file restored
+byte-identical.
+
+**The run is three commits because the gate found three defects and one of them
+was in the gate this run wrote.** That is the shape of the close rather than an
+accident of it: `bin/session-01-check.sh` refuses a dirty tree, so the sequence
+is commit, gate, repair, commit, gate again — and the second pass is the one
+that counts.
+
+*The bump.* `VERSION` **1.6.2 → 1.7.0**, `CURRENT_SESSION` **25 → 28**, in one
+commit with the client regenerated (D1238 — `templateVersion` moved in
+`contract.ts` and `generated.json`, and `apg generate --check` exited 5 before
+it did), both release pages' tables carrying a `1.7.0` row, the acceptance
+matrix and the product contract regenerated from the registry, and
+`app-contract --check`, `mcp-contract check` and `apg generate --check` all 0.
+
+*The class was priced here, and four releases did not do that* (D1481). ADR
+0162's rule is decidable from two RENDERED documents and a render needs no host
+and no root, so rig 28l rendered the example project from `72cb2de` and from
+this commit and ran the product's own `upgrade plan --also migration_added`:
+**`bump minor`, `requires minor`, verdict `ok`, no blocking reason, and exactly
+one leaf differs — `template_version`.** The control in the same run is what
+makes that mean something: without the declaration the same pair requires only a
+`patch`, so the `minor` is the migration rather than the version string.
+
+*The registry.* `DX-FOLLOWS-001` → `project_set_release_record` (offline,
+declared), `AGT-RETAIN-001` → `agent_record_retention` (**host**, `not_run`),
+`REL-READ-001` → `release_reading` (offline, declared). **No claim for the
+rotation**, on D1469's measurement rather than on modesty.
+
+*Registering the first of them found that ADR 0210's whole operator surface was
+unproven* (D1480). Both `--follows` refusals work — exit 2, their own sentences,
+measured — and **no test read either of them**; Run 3 built the refusal and
+wrote no proof over `bin/migrate.sh`. Two proofs now do, run as an operator runs
+them, with two controls: the same verb with no flag, and the accepted shape
+refusing for the manifest's own reason. Three of the battery's mutations are
+theirs.
+
+*The live half is written and cannot be run here, which is the design* (D1483).
+Six proofs in `tests/deployment/test_session28_retention.py`, `live_host`, over
+both projects. **Nothing in it deletes a row of the agent record**: the one
+proof that runs a prune against the real record runs it inside a transaction it
+rolls back, with the row count before and after as the control — ADR 0182's
+shape applied to the one function in this release whose job is destructive. Rig
+28k measured the two readings it depends on **before it was written** (D1479):
+`pg_get_function_arguments` returns the parameter NAMES and the rendered default
+(`p_before timestamp with time zone, p_limit integer DEFAULT NULL::integer`),
+the identity form keeps the names and drops the default, and a zero-argument
+function answers the identity form with the **empty string** — so the first
+draft would have gone red on its first execution, on the host, inside Session
+29's window, for a reason about PostgreSQL's spelling.
+
+*The gate.* `bin/session-28-check.sh`, derived from 25's by diff with every
+substitution asserted to match exactly once, three modes, `--kit-dir` still on
+`kit-2026-09-11` with the flag's help still saying why (D1282), and **the
+four-verifier count repaired to three** with ADR 0098's reason written in
+(D1472). `apg release-reading` is deliberately not a step in it (D1467).
+`test_session_twenty_eight_gate_modes.py` carries **`SESSION_PREVIOUS_NUMBER`
+rather than `SESSION - 1`** (D1482): 26 and 27 have no gate, the subtraction was
+true for six derivations running, and a new proof kills a `bin/session-27-check.sh`
+appearing later — which is what would make the arithmetic look right again,
+quietly.
+
+*Found by a guard, late, and the plan's bill was short* (D1484). **Sixteen
+`--session 25` and `--through-session 25` in the commands a reader EXECUTES**,
+across `README.md`, the operator guide, the upgrade guide, `api-operations.md`
+and `pool-operations.md`. `deploy.sh` refuses a number above `CURRENT_SESSION`
+and accepts anything below it, so a reader following the page deploys Session 25
+on a Session 28 release and the command exits 0. D678's class, fifth occurrence,
+first one a test caught rather than a person.
+
+*Recorded, not repaired* (D1485): rig 28l's cleanup removed `.generated/fixture-alpha-dev`
+— a render fixture the checkout already held rather than one the rig created —
+and two proofs in `test_project_migration_sets.py` went red on its absence while
+five in the same module SKIP on the same missing precondition.
+
+*The reading, taken on the bump commit* (ADR 0214, D1424's close), quoted as
+`bin/apg.sh release-reading` printed it at `c14b0ef`:
+
+```
+  outcome: tag_is_owed
+  the tree says 1.7.0 and no tag carries it: a tag is owed, and what follows is what it would contain.
+
+  The last tag            1.6.2 at e2ba6e7f184b, 2026-09-16, VERSION at it 1.6.2
+  What has landed since   13 commits, 83 files
+                            25  tests/contract      15  bin        13  docs
+                             8  src/agentic_postgres 7  docs/decisions
+                             4  tests/deployment     3  projects/example
+  Counts a release moves and nobody remembers
+    released migrations        32 -> 33       <- moved
+    ADRs                      209 -> 215      <- moved
+  The bump                c14b0ef519b8, 21 file(s) moved with it, commits after it 0
+
+  What this command does not decide
+    - Does everything in this window belong inside 1.7.0?
+    - Is there anything you intended to be in 1.7.0 that is not in this list?
+    - Is this commit the one the tag goes on?
+```
+
+**The answer to its third question, here, is no**, and that is the whole shape
+of the session (D1425). It prints no instruction about the tag, which
+`test_the_reading_prints_no_instruction_about_the_tag` keeps honest, and both
+counts it flags as moved are this session's: migration `20260917120033` and ADRs
+0210–0215.
+
+*What the gate found, and it is the reason this run is two commits.* The first
+pass, on the clean tree at `c14b0ef`, came back **`1 failed, 5999 passed`** —
+and the failure was five runs old. `test_dev_environment.py` still asserted
+`versions == sorted(versions)` across **both** migration sets, the single
+ordering space ADR 0206 replaced; Run 6's *Done* says D1457 found four such
+proofs and repaired all four, and **there were five** (D1486). This one reaches
+the rendered manifest through `apg dev`'s `planned_migrations` rather than
+through the render, so a grep of the render's readers never saw it. It had been
+red since `acb08e4`, Run 6's own commit: the manifest lists the release's 33
+payloads then the project's 2, and the concatenation was ascending **by
+accident** while the example project's `20260914…` stamps sorted after the
+newest released one. Run 6's own `20260917120033` ended the accident. Repaired
+under ADR 0206 — each set ascending within itself, one directory per set, the
+two distinct (D1096), and the release's set planned entirely before any
+project's — with three mutations of `verify_rendered_directory` and three kills.
+
+*And the same pass found a defect in the gate this run wrote* (D1487).
+`--mode offline` exited **1** — a code the gate's own header does not document —
+with the JUnit written and **`evidence/session-28-offline.json` absent**. D1373
+repaired the failing-suite path in **both live modes** and left the offline one
+under `set -e` with a bare pytest call, so one red proof in a 6,008-test sweep
+ended the run before step 9. **Session 28's only half is the offline one**, so
+that defect would have closed the first session in this project's history whose
+evidence is entirely offline with no evidence document at all. Repaired in the
+third mode, the way the other two were.
+
+**The guard against exactly this checked two of the three callers.** Session
+25's `test_a_failing_suite_does_not_stop_the_evidence_being_written` asserts the
+repair in `live_host` and `external`, pins `suite_status=0` at **2**, and closes
+its own docstring with *repairing one caller of a decision and leaving the other
+is §7's fifth question* — while leaving the offline caller unrepaired and making
+the count a tripwire against repairing it. It is now derived rather than listed:
+every sweep that writes a JUnit captures its status, which stays true when a
+fourth mode arrives, and step 4's collection check is excluded by that same rule
+because it writes no JUnit and is a prerequisite that *should* end the run.
+Three more mutations, three kills. **Session 25's gate is not edited** — it owns
+its session and its evidence is written; the row is where a reader of that gate
+will find the defect.
+
+*The third one is this derivation's own* (D1488). The gate's header warns that
+two derivations have each missed a half of the prose (D853, D858) and says to
+read it line by line — and two comments **below the usage block the warning
+scopes itself to** survived unedited: step 9's named Session 25's three claims
+under this session's count, and a D687 note called `deployment_convergence`
+*"one of THIS session's four claims"*. A rule that names the two places it
+applies to becomes a rule about those two places.
+
+*The gates, on the clean tree at `1cde025`.* `bin/session-01-check.sh` **exit 0,
+PASSED** — `6000 passed, 0 failed, 3 skipped, 0 errors`, 6382 P0 collected, 0
+future placeholders, 0 identity collisions, 0 floating image refs.
+`bin/session-28-check.sh --mode offline` **exit 0, PASSED** — `6009 passed, 0
+failed, 3 skipped, 0 errors` — and it wrote `evidence/session-28-offline.json`
+carrying **thirteen claims, every one passed**, including this session's two:
+`project_set_release_record` and `release_reading`.
+`agent_record_retention` is not in it and must not be: it is a host claim and
+Session 29 collects it after the deploy that applies the migration.
+
+*The D1116 check*, against this section's own list rather than against the
+commit messages: `VERSION` 1.7.0 · the paragraph prices it once · both release
+pages state 1.7.0 and the upgrade guide's table has the row · 222 requirements
+with the three new ids present · the three claims resolving `offline`,
+`host`, `offline` at session 28 · 129 claims and 13 declared offline ·
+`bin/session-28-check.sh` `100755` in the index, `SESSION=28`, `kit-2026-09-11`
+kept, **three** verifiers and no *four*, three sweeps and three writers
+capturing their status · the live half's six proofs, one `live_host` mark and
+three `ROLLBACK`s · `templateVersion: "1.7.0"` in the committed client · 83
+divergence rows · **no tag on HEAD, `migrations/` untouched since `72cb2de`, no
+operator input and no evidence tracked**.
+
+**Nineteen mutations across the run, nineteen kills, zero survivors**, every
+control green in the same invocation and every mutated file restored
+byte-identical. Three of the first six were uninformative or reached their own
+control and were replaced rather than counted (D493, D499).
+
+
+*Ran before the push*, once: `test_project_migration_sets`,
+`test_release_contract`, `test_documentation_index`, `test_acceptance_registry`
+(D1119 — this run adds test functions and registry node ids),
+`test_evidence_claims`, `test_cli_contract` (D1014/D1188 —
+`bin/session-28-check.sh` was `git add`ed first), the new
+`test_session_twenty_eight_gate_modes`, `test_session_twenty_five_gate_modes`
+(a derivation must not edit what it derived from), `test_session12_documented_path`,
+`test_mcp_catalog`, `test_repository_contract`, `test_printed_commands`,
+`test_client_typescript`, `test_generate_command`, `test_dx_record`,
+`test_release_reading`, `test_rendered_migrations`, `test_migrations`. Plus the
+battery, rig 28k and rig 28l. CI is the full check.
+
 ---
 
 ## 7. Evidence
