@@ -40,8 +40,9 @@ the release is not re-cut inside the window (§9).
 
 ## 1. Divergence — what the tree, the audit and the host say, measured
 
-Eight rows, every one measured against the host or the tree on 2026-09-17,
-before a line of §5 was written. Numbers from **D1489**.
+Nine rows, every one measured against the host or the tree on 2026-09-17.
+Eight were written before a line of §5; **D1497 was written by pushing this
+document**. Numbers from **D1489**; the runs allocate from **D1498**.
 
 | D | Said | Measured or read | This session | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -52,7 +53,8 @@ before a line of §5 was written. Numbers from **D1489**.
 | **D1493** | **D1375**, Tier 2: *"`op` on the host cannot reach the Docker socket, and Session 25 is the first release whose OFFLINE mode needs one. The group membership was deliberately not granted."* | **Still exactly true**, measured tonight: `docker ps` as `op` → *permission denied while trying to connect to the docker API at unix:///var/run/docker.sock*, and `id -nG` → `op sudo users`. No `docker` group. | **Unchanged, and the trip does not grant it.** Docker group membership is root-equivalent on a production host. The consequence is stated in §7: **the host cannot produce an offline half**, and the offline half this session merges is the one the workstation already wrote. | The row reads as a defect and is a decision. A trip that "fixed" it would hand a non-root account root on production to make a gate mode symmetrical. | — |
 | **D1494** | `CLAUDE.md` §2: *"the bare `/home/op/<key>-outputs.json` are STALE (2026-08-23) — reading those instead is a silent way to measure the wrong release."* | **Still there and still stale**, measured tonight: `alpha-outputs.json` and `beta-outputs.json` both read `template_version 0.1.0-dev`, `deployed_through_session 9`, `schema_version 12`, written 2026-08-23. The current pair are `alpha-dev-outputs.json` and `beta-dev-outputs.json` at `1.6.0` / session 25 / `de2aabf`, written 2026-09-15. | **Every flag in the sheet names the `-dev-` file explicitly**, and Run 6 refreshes those two and **leaves the stale pair alone** — renaming or deleting them is a change to the host this trip did not come to make. | Two of the five filenames under `/home/op` differ by four characters and one of them measures a release from four sessions ago. `--project-a-outputs` pointed at the wrong one produces a sweep that passes against the wrong deployment. | 0158 |
 | **D1495** | The plan's own first draft: *reboot, then deploy, then sweep* — with no reading of what `--after-reboot` actually asserts. | **The order is load-bearing and it survives, but only because `bound_at` does not move.** `test_the_reboot_restored_the_projects_from_their_documents` asserts `pg_postmaster_start_time() > btime` **and** `app_private.project_identity.bound_at < btime` — the processes postdate the boot and the data predates it. A deploy after the reboot recreates containers (still postdating) and does **not** re-bind identity, so both halves hold. The allocation check compares the port registry against the deployed document, and ADR 0042's allocation is host-global and stable across a deploy. | **Reboot in Run 2, BEFORE the deploy**, and the declaration is still true at sweep time. The reason for that order is not the proof: it is that a unit failing to come back on `1.6.0` is a different finding from one failing to come back on `1.7.0`, and doing both at once makes the failure unattributable. | The flag is a claim the operator makes and the assertions are what stop it being taken on trust. Ordering it by convenience rather than by what it asserts is how a declaration becomes a formality. | — |
-| **D1496** | `docs/pre-stage-4-audit.md` Tier 2, the D860 row: the rotation *"unblocks `bootstrap_identity`, `api_authorization` and `credential_rotation_planes`"*, and the audit's §*What perfect can mean* prices reading 2 as *"one host trip **with the rotation performed**"* which *"closes four of the seven unproven claims"*. | **The premise is wrong and Session 28 Run 8 measured it** (D1468, D1469). All nine of those claims' node ids are `live_host`; between them the three claims need **four** rotations — the signing key, the authenticator password, the documentation Basic Auth password, and the application credential on both projects — and a claim is `not_run` unless **every** node id it names passed. The signing-key cutover moves **one of nine** and therefore closes **no claim on its own**. | **The rotation is out of this trip** (§0), and the audit's row is annotated in `docs/scope-closure.md` rather than silently worked around. The three claims stay `not_run` and this session says so in §7 rather than implying the trip moved them. | Four trips have been offered "the rotation" as a single act that closes three claims. Performing it on that understanding would have produced an irreversible cutover, a fresh window, and three claims still `not_run` — which is the worst of both. | 0170 |
+| **D1496** | `docs/pre-stage-4-audit.md` Tier 2, the D860 row: the rotation *"unblocks `bootstrap_identity`, `api_authorization` and `credential_rotation_planes`"*, and the audit's §*What perfect can mean* prices reading 2 as *"one host trip **with the rotation performed**"* which *"closes four of the seven unproven claims"*. | **The premise is wrong and Session 28 Run 8 measured it** (D1468, D1469). All nine of those claims' node ids are `live_host`; between them the three claims need **four** rotations — the signing key, the authenticator password, the documentation Basic Auth password, and the application credential on both projects — and a claim is `not_run` unless **every** node id it names passed. The signing-key cutover moves **one of nine** and therefore closes **no claim on its own**. | **The rotation is out of this trip** (§0), and the audit's row is annotated in `docs/scope-closure.md` rather than silently worked around. The three claims stay `not_run` and this session says so in §7 rather than implying the trip moved them. | Four trips have been offered "the rotation" as a single act that closes three claims. Performing it on that understanding would have produced an irreversible cutover, a fresh window, and three claims still `not_run` — which is the worst of both. | 0170 || **D1497** | This plan's own first draft, §5 Run 3: *"`git rev-parse FETCH_HEAD` confirmed to equal `f0c6674289…`"* — the commit the plan was written at. | **Pushing the plan moved `main` past it**, immediately and by construction. A trip plan that pins the SHA it will deploy is stale before anybody reads it, and the failure mode is the worst kind: the operator confirms `FETCH_HEAD` against a number that is *almost* right and transports a tree one commit behind the one the plan describes. | **The SHA is read on the day.** What is written down instead is what must be TRUE of it: `VERSION` 1.7.0, `CURRENT_SESSION` 28, and `git merge-base --is-ancestor f0c6674 HEAD` — the commit contains the bump and everything Session 28's gates passed on. Run 8 tags that commit. | D504 exists because a stale generic bundle name moved a host backwards with both commands exiting 0. This is the same shape one level up: a stale *expected value* rather than a stale file. A property is checkable on the day; a literal is a photograph of a moment. | — |
+
 
 ---
 
@@ -115,7 +117,7 @@ in advance, what the operator types, and what each run must read before it
 proceeds. Every `sudo` line is the operator's at a TTY; every other line is the
 agent's over SSH as `op` (`docs/upgrade-guide.md` §3's two-account rule).
 
-Runs allocate `D` numbers from **D1497**.
+Runs allocate `D` numbers from **D1498**.
 
 ### Run 1 — the pre-flight, and the reading that everything after is compared against
 
@@ -173,10 +175,19 @@ deploy does not happen and the session becomes a repair session.
 
 `docs/upgrade-guide.md` §3 steps 1–4, with three things settled in advance:
 
-- **`git bundle` under a per-commit name** — `/tmp/apg-f0c667428901.bundle` — and
-  `git rev-parse FETCH_HEAD` confirmed to equal `f0c6674289014fb6433bbade5cfe1f98f8ff74c0`
+- **`git bundle` under a per-commit name** — `/tmp/apg-<sha[0:12]>.bundle` — and
+  `git rev-parse FETCH_HEAD` confirmed to equal the SHA that was bundled
   **before** the checkout, never the `release` line the deploy prints after it
   (D504).
+
+  **The SHA is read on the day and is not written down here.** This plan was
+  written at `f0c6674` and pushing the plan itself moved `main` past it, which
+  is the whole of D1497: a plan that pins the commit it will be deployed from
+  is stale the moment it is committed. What the trip must confirm instead is
+  three properties of whatever `main` holds — `cat VERSION` is **1.7.0**,
+  `CURRENT_SESSION` is **28**, and `git merge-base --is-ancestor f0c6674 HEAD`
+  succeeds, so the commit being deployed contains the bump and everything
+  Session 28's gates passed on. The tag goes on **that** commit (Run 8).
 - **No `uv pip sync`** (D1491): the hop moves no dependency and the sync would
   reach PyPI for nothing.
 - **`--render-only` with the HOST's `capabilities.yaml`**, not the example file
@@ -281,10 +292,12 @@ exit code._
 ### Run 8 — the reading, and then the tag
 
 **`bin/apg.sh release-reading` on the deployed commit, before the tag** — ADR
-0214's first use for a tag actually being cut. On `f0c6674` it will read
-`tag_is_owed` with the bump commit `c14b0ef` behind it; the reading's third
-question, *is this commit the one the tag goes on?*, is the one this session
-answers **yes** to and Session 28 answered **no**.
+0214's first use for a tag actually being cut. It will read `tag_is_owed` with
+the bump commit `c14b0ef` behind it and whatever has landed since; the reading's
+third question, *is this commit the one the tag goes on?*, is the one this
+session answers **yes** to and Session 28 answered **no**. **Read its
+`commits after it` line**: the bump is not the tip, so that number is not zero
+and every commit it counts is one the tag will carry.
 
 ```
 git tag -a 1.7.0 <the deployed commit>
