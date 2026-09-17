@@ -40,11 +40,11 @@ the release is not re-cut inside the window (§9).
 
 ## 1. Divergence — what the tree, the audit and the host say, measured
 
-Sixteen rows. Eight were written before a line of §5; **D1497 was written by
+Seventeen rows. Eight were written before a line of §5; **D1497 was written by
 pushing this document**; **D1498–D1500 by measuring Run 1's premises**;
-**D1501–D1502 by executing Run 1**, **D1503 by executing Run 2**, and **D1504 by
-preparing Run 4**. Numbers from **D1489**; the remaining runs allocate from
-**D1505**.
+**D1501–D1502 by executing Run 1**, **D1503 by executing Run 2**, **D1504 by
+preparing Run 4**, and **D1505 by executing Run 5 badly**. Numbers from **D1489**;
+the remaining runs allocate from **D1506**.
 
 | D | Said | Measured or read | This session | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -64,6 +64,7 @@ preparing Run 4**. Numbers from **D1489**; the remaining runs allocate from
 | **D1502** | This plan's Run 2 step 3: *"`systemctl is-system-running` is re-read — **if it is still `degraded` with the same unit, that is the answer to the audit's row**"*, and D1490, which named the unit but not what starts it. | **The unit is socket-activated and its failure is fifteen hours old, not forty days.** `cloud-init-hotplugd.service` is `TriggeredBy: cloud-init-hotplugd.socket`. It failed at **2026-09-17 04:38:48 UTC** with `RuntimeError: Failed to detect False in updated metadata` at `hotplug_hook.py:110`, having consumed 3.759 s CPU over 54.6 s wall. It runs **when a hotplug event arrives**, and one arrived this morning. | **Run 2 step 3 now reports three outcomes instead of two.** `degraded`, same unit → it recurred, and that *is* an answer. **`running` is not the opposite answer**: it means only that no hotplug event has arrived since boot, which is the expected state after a reboot whether or not anything is wrong. The audit's row closes on neither reading, and this session says so rather than banking the quiet one. | **ADR 0195**, in the exact shape this project keeps producing: a check with two branches over a world with three, where the reassuring branch is the one that is not measurable. Reading a clean `is-system-running` after a reboot as *the failed unit is fixed* closes a row with the absence of a trigger. | 0195 |
 | **D1503** | `CLAUDE.md` §2's HOST block and `docs/pre-stage-4-audit.md`, unchanged for three sessions: *"The host reports `systemctl is-system-running` = **DEGRADED** (some unit has failed); unrelated to the deployment, which doctors clean on both projects, and **not investigated**."* | **Investigated, and it is the informative branch of D1502.** `cloud-init-hotplugd.service` fails **at every boot**, not once forty days ago: observed at `04:38:48` on the old boot and again at **`20:18:59` on the new one — 2 min 42 s after `btime`** — having burned 3.547 s CPU over 55 s wall and 146 MB. Both times it is `hotplug_hook.py:110`, `RuntimeError: Failed to detect <id> in updated metadata`; **the id is a NIC MAC on this boot (`86:cf:15:33:67:0b`) and the literal `False` on the previous one**, which is a cloud-init defect in its own right. | **Recorded as answered and NOT repaired.** It is the provider's cloud-init reacting to a network-interface hotplug, it is not this product, and the deployment does not depend on it: both projects read **10 ok / 0 / 0 / 0** with the unit failed. `CLAUDE.md`'s *not investigated* is retired at the close. | Three sessions carried a one-line shrug about a `degraded` host into every trip's reading of `systemctl`. It cost one command to answer and the answer is *this is permanent, it is theirs, and it is harmless* — which is worth more than the uncertainty it replaces, because the next operator who sees `degraded` mid-deploy now knows whether it is new. | — |
 | **D1504** | `docs/upgrade-guide.md` §3 step 6, stating the guard as a property of the deploy: *"`sudo`'s pty puts a command whose streams are not all terminals in the background, the first `docker exec -i` stops on `SIGTTIN` … **`deploy.sh` now refuses that shape with exit 2**"*. | **The guard is on one caller of a pattern that has fourteen, and there is no shared helper it could have been applied through once.** `[ -t 0 ] && { [ ! -t 1 ] \|\| [ ! -t 2 ]; }` occurs **exactly once in the tree**, at `deploy.sh:260`. Three shell entry points spell `docker exec -i` directly (`deploy.sh`, `bin/apg-diag.sh`, `bin/db.sh`) and eleven Python ones build it as an argv — `bin/{auth-admin,backup,deploy-project,dev,doctor,fleet,migrate,postgres-bootstrap,restore,restore-test,storage-admin}.py`; `backup.py` was read line by line (`"docker", "exec"` at 246 and 291) and the rest match by argv spelling. **Seven define their own `psql()` or `docker()`.** The tree's other three `isatty()` readers (`auth-admin`, `studio`, `dev`) are about interactive prompting, not this. | **Recorded, not repaired** (§9). D1501 is the consequence measured live: `bin/backup.sh … info` under a pipe stopped at `Tl+` for seven minutes, with no error and no exit, on both projects in turn. | `CLAUDE.md` §7 question 5 exactly — *when a decision is implemented, which of its callers got it?* — answered **one of fourteen**. And §7's other rule, *guard the class against the definition, never the field that failed*: with no shared exec helper there is nowhere for one guard to live, so the repair is **a helper first and the guard second**, which is why it is not a line of work for a deploy window. | — |
+| **D1505** | **D1501 and D1504**, written by this session at 20:20 and 20:40: the D972 hazard is undocumented outside the deploy and unguarded outside `deploy.sh`. | **The agent that wrote both rows reproduced the defect at 20:45**, in Run 5's own sheet, handed to the operator: `sudo bin/migrate.sh --project project.beta.yaml --runtime status 2>/dev/null \| grep …`. `migrate.sh` reaches dbmate through `docker exec -i`, stdout was a pipe, and it stopped — **twenty-five minutes after the row about it was committed.** | **The sheet builder now checks itself.** Every sheet is grepped for a piped, redirected or captured `sudo` product command before it is sent, and each sheet's header states the rule in the form an operator can apply: **`deploy.sh`, `migrate.sh`, `backup.sh`, `doctor.sh`, `db.sh` and the restore pair exec into a container and must never be captured; `docker ps` and `docker inspect` do not, and are safe.** | This is the evidence D1504 needs and could not otherwise have had: **the repair is a guard, not a sentence.** A rule that has to be remembered was forgotten inside half an hour by the party that had just written it down — while `deploy.sh`, which carries the guard, refused the identical shape with exit 2 an hour earlier and cost nobody anything. Documentation is not a control. | — |
 
 
 ---
@@ -127,7 +128,7 @@ in advance, what the operator types, and what each run must read before it
 proceeds. Every `sudo` line is the operator's at a TTY; every other line is the
 agent's over SSH as `op` (`docs/upgrade-guide.md` §3's two-account rule).
 
-Runs allocate `D` numbers from **D1505**.
+Runs allocate `D` numbers from **D1506**.
 
 ### Run 1 — the pre-flight, and the reading that everything after is compared against
 
@@ -508,8 +509,80 @@ deploy, and the pattern it guards has fourteen callers and no shared helper.
   evidence of a rotation nor against one. `upgrade verify` exit 0 and the
   container ages are what say what was recreated.
 
-**Done.** _to be written, with both ledgers, both doctors and the eleventh
-check's first live numbers._
+**Done.** 2026-09-17. **Both ledgers read, both doctors at ELEVEN ok, both
+`verify` exit 0, and two measurements taken that had never been taken
+anywhere.**
+
+**The ledgers, read as ledgers** (D941). Alpha: 33 rows `[X]`, ending
+`20260917120033_agent_record_retention.sql`, **`Applied: 33, Pending: 0`**.
+Beta: **`Applied: 33, Pending: 0`** from the release set and then
+**`Applied: 2, Pending: 0`** from the project set — `Pending: 0` printed
+**twice**, once per dbmate invocation, which is ADR 0206's two ordering spaces
+doing what they were built for. The doctor's own count agrees from the other
+side: *all 33 released migrations applied* on alpha, *all 35* on beta.
+
+**D1489 IS CLOSED, and by the ledger rather than the document.** Beta's project
+ledger prints `[X] 20260914120001_note_embeddings.sql` and **`[X]
+20260914120002_agent_grants.sql`**. The audit's Tier 2 row — *"the example
+project's grant repair has **never** been applied on beta"* — was true when
+Session 22 wrote it and was closed by ADR 0206's ledger move at Session 24's
+trip. Nobody had gone back to read it since.
+
+**THE ELEVENTH CHECK'S FIRST LIVE READING ANYWHERE** (ADR 0213, D1459):
+
+```
+alpha-dev  agent record - 1598 audit rows since 2026-08-22 21:36:29.925435+00,
+                          258 idempotency claims; nothing prunes either unless
+                          an operator asks (ADR 0213)
+beta-dev   agent record - 26 audit rows since 2026-09-11 13:13:20.027654+00,
+                          0 idempotency claims; ...
+```
+
+**Both projects: `11 ok, 0 warning, 0 problem, 0 unknown`**, against Run 1's
+ten. The check has **no threshold** and reports counts and a start date,
+because nobody has measured a row count at which this deployment is unwell
+(D1441) — and 1598 rows in 26 days is the first number anyone has to reason
+from.
+
+**`verify` exit 0 on both:** *"alpha-dev matches what this checkout renders"*,
+and the same for beta.
+
+**The container ages say exactly what ADR 0155 recreated.** Against a reboot at
+20:16 and a deploy at 20:35–20:37, read at 20:49: **`auth`, `mcp` and
+`storage` are 12–13 minutes old on both projects and the other seven are
+31–32** — the three that mount the new secret generation
+`626ce973b8eaf1dd`, and no others. That is the same three the guide recorded on
+2026-09-15, arrived at independently.
+
+**ADR 0215's pre-flight is SATISFIED, and this is the only place it could have
+been** (D1477). Session 28 Run 8 rewrote the `acknowledge` reader to go through
+`/proc/<pid>/root/<path>` and could not verify it, because Docker Desktop
+reports **pid 0** for every container and a pid of 0 is the third outcome the
+reader must report rather than fold. On this host **all ten alpha containers
+report a non-zero pid** — `auth` 55639, `mcp` 55480, `storage` 55644, and so
+on. The reader is usable here, and that is now known **before** anybody opens
+an irreversible window rather than during one.
+
+**The deployed documents**, published by step 7: both `document_kind deployed`,
+**`template_version 1.7.0`**, **`deployed_through_session 28`**,
+`schema_version 18`, **`source_commit 36bd4d7917982285f036fbecab3d4f53af4cb9a9`**.
+Beta carries `project_set {count 2, root projects/example, lock_sha256
+ad08d186…}` — the new lock, the third leaf Run 3 priced. `mcp.tool_count`
+is 6 on alpha and 7 on beta, the extra one being beta's own capability manifest
+(ADR 0201).
+
+**And `render-jwks` behaved as D1374's repair intended, on its first live
+deploy.** On both projects it printed *"whether the key set CHANGED cannot be
+told from here: there was no previous copy at this path to compare against"*,
+said that is the **normal** case because a deploy replaces the whole rendered
+directory first (D1427), said it is neither evidence of a rotation nor against
+one, and named the reading that does answer. At 1.6.0 that line said *the key
+set CHANGED: every verifier must be RECREATED* — on every deploy, from a test
+of the file's bytes. ADR 0195's third outcome, in production.
+
+**This run also cost a row by being executed badly.** See **D1505**: the sheet
+piped a `sudo` command that execs into a container, twenty-five minutes after
+this session committed the row saying not to.
 
 ### Run 6 — the op-owned copies and the kit, again
 
