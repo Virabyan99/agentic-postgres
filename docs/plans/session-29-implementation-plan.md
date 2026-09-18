@@ -46,8 +46,8 @@ executing it** — which is the more honest measure of what a trip is for.
 premises; **D1501–D1502** by executing Run 1; **D1503** by executing Run 2;
 **D1504** by preparing Run 4; **D1505** by executing Run 5 badly; **D1506** by
 printing a directory listing in Run 6; **D1507** by the gate refusing Run 7; and
-**D1508–D1512** by Run 7's three sweeps. Numbers from **D1489**; Runs 8 and 9
-allocate from **D1513**.
+**D1508–D1512** by Run 7's three sweeps; and **D1513** by taking the reading Run 8
+is built on. Numbers from **D1489**; Run 9 allocates from **D1514**.
 
 | D | Said | Measured or read | This session | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -75,6 +75,7 @@ allocate from **D1513**.
 | **D1510** | This session's own sheet discipline — the deploy sheet guards alpha→beta (*"stops dead if alpha does not exit 0"*) and was handed over **together with the command for the sweep that follows it**. | **The sweep ran BETWEEN two deploys, and the merge refused.** Alpha's redeploy died at step 6c on a provider blip; the launch line for the sweep was already in the operator's hands, so it ran against a half-deployed host. The host half recorded `source_commit 36bd4d7`, the external half — run after the deploys completed — recorded `8c61309`, and `write-session-evidence` **refused and wrote nothing**: *"the two halves describe different deployments … Re-run both halves against the same deployed commit."* | **A third host sweep**, after confirming the checkout and *both* documents named `8c61309`. The rule this leaves: **a sheet may not hand over a command whose precondition is the previous sheet's success.** One sheet, one outcome, read before the next is issued. | The guard inside the sheet was right and the guard **between** sheets did not exist. And the merge is stricter than the reasoning that would have excused it: `36bd4d7` and `8c61309` differ only in two test files, so the running code was identical — but the document's purpose is to say *what was measured where*, and it compares the commit each half measured, not whether the author thinks it mattered. It cost 17 minutes and it was right. | — |
 | **D1511** | `docs/upgrade-guide.md` §3 step 6's account of a deploy: step 6 migrates, 6b starts the deferred services, **6c checks the backup stanza**, 7 observes and publishes. | **6c can fail after the irreversible half has already run, and it did.** Alpha's redeploy reached 6c and exited **5**: `stanza-create failed (exit 49)`, `unable to connect to …r2.cloudflarestorage.com` — IPv6 *Network is unreachable* immediately, IPv4 **timing out** at 60 s. **The host itself reached R2 throughout**: measured minutes later, IPv4, IPv6 and by-name all `rc=0` in under a second. The overnight `backup-incr` units had **succeeded** at 03:32 and 03:36, and the sweep 5 minutes after the failure read *repository is ready, latest proven recoverable 2026-09-18T03:32:40Z*. A blip in the container's egress, not a wall. | **Retried, and it passed** — `backup: archiving and repository both reachable`. Recorded rather than repaired. | A deploy whose **last two steps depend on an external provider** can leave a project migrated, recreated and serving, with **step 7 never run** so the deployed document still names the previous commit. That state is not dangerous and it is not visible in the document — which is the thing worth knowing before it happens at 3am rather than after. | 0158 |
 | **D1512** | D1503, recorded this session: the host is `degraded` because of **one** unit, `cloud-init-hotplugd.service`. | **It now has three.** `agentic-postgres-backup-mirror@alpha-dev` and `@beta-dev` both entered `failed` on 2026-09-18 — alpha's run at 04:50, beta's at 04:38 — having last copied successfully on **2026-09-17** (3718 and 3329 objects). The B2 mirror is a **different provider** from the R2 primary, and the primary is healthy: both projects show a proven-recoverable point from this morning. | **Recorded, not repaired.** The guide's own table puts `backup mirror` in the *note it and proceed* column: it does not affect what a deploy does, and repairing it is not made easier by doing it inside a window. | D1503 answered *why is this host degraded* and the answer had a shelf life of eleven hours. `systemctl is-system-running` is a one-bit summary of a set, and a session that records the cause rather than the set has recorded a fact that stops being true the moment a second unit fails. | — |
+| **D1513** | **ADR 0214**, and this plan's Run 8: *"`bin/apg.sh release-reading` on the deployed commit, before the tag"* — the reading that states the facts a tag will carry. | **The command reads `HEAD` and takes no ref**, and under D1425 the tag does **not** go on `HEAD`. `release-reading --help`: *"Print the reading taken before a tag is cut, from this checkout alone"*, with no argument. Taken on the tip it reported `commits after it 14` and `26 commits since 1.6.2`; taken at the tag target it reported **13** and **26** — a different reading of a different commit, and the second is the one the tag carries. | **Read at the tag target through a throwaway worktree**, which shares `.git` and so sees the tags (a shallow or `--no-tags` clone looks like a repository that has never been tagged, and the command exits 3 there rather than reporting a clean window it measured nothing for). Both readings are in the Done. | The arrangement D1425 requires — deploy, sweep, **then** tag the commit that was deployed — guarantees the tag target is behind `HEAD` on any trip that commits its own records, which is every trip. So the one command written to be run *before a tag* cannot, by itself, read the commit the tag goes on. A `--ref` would close it; until then the worktree is the procedure and it belongs in the operator guide. | 0214 |
 
 
 ---
@@ -138,7 +139,7 @@ in advance, what the operator types, and what each run must read before it
 proceeds. Every `sudo` line is the operator's at a TTY; every other line is the
 agent's over SSH as `op` (`docs/upgrade-guide.md` §3's two-account rule).
 
-Runs allocate `D` numbers from **D1513**.
+Runs allocate `D` numbers from **D1514**.
 
 ### Run 1 — the pre-flight, and the reading that everything after is compared against
 
@@ -761,7 +762,60 @@ git ls-tree -r --name-only 1.7.0 -- docs/ | grep -E "upgrade-guide|operator-guid
 Both paths must print. That is D1388's check, run after the tag rather than
 before it, and it is the whole reason the tag waits for the deploy.
 
-**Done.** _to be written, with the reading and the `ls-tree` output quoted._
+**Done.** 2026-09-18. **`1.7.0` is cut and pushed, annotated, on
+`8c61309b6cf9602fc66752c8f2def804ccdc1acb` — the commit both projects record
+as deployed and both live evidence halves record as measured.** The sixth tag
+this repository has (1.0.0, 1.0.1, 1.6.0, 1.6.1, 1.6.2, 1.7.0).
+
+**The reading, at the tag target** (ADR 0214; D1513 is why it took a worktree):
+
+```
+outcome: tag_is_owed
+  the tree says 1.7.0 and no tag carries it
+
+HEAD        8c61309b6cf9   VERSION 1.7.0   tags on HEAD: (none)
+last tag    1.6.2 at e2ba6e7f184b, 2026-09-16T18:38:08+04:00
+since it    26 commits, 85 files
+            released migrations  32 -> 33    <- moved
+            ADRs                209 -> 215   <- moved
+the bump    c14b0ef519b8, 21 files, and 13 commits after it
+```
+
+**The three questions it refuses to answer, answered.** *Does everything in
+this window belong inside 1.7.0?* Yes — Session 28's nine runs, this trip's
+records, and the two test repairs. *Is anything missing?* **No product code**;
+Runs 7–9's own records land after the tag, and the only path differing
+between the tag target and the tip is `docs/plans/session-29-implementation-plan.md`.
+*Is this commit the one the tag goes on?* **Yes** — and Session 28 answered
+the same question **no**, which is the whole of D1425.
+
+**The tag's own proof, run AFTER the tag** (ADR 0209 §2 — a test runs inside
+a commit, so this cannot be one). `git ls-tree -r --name-only 1.7.0 -- docs/`
+prints **both** `docs/operator-guide.md` and `docs/upgrade-guide.md`. Run across
+every tag, it is a history of D1388:
+
+```
+1.0.0   upgrade-guide=0  operator-guide=0
+1.0.1   upgrade-guide=0  operator-guide=0
+1.6.0   upgrade-guide=0  operator-guide=0   <- D1388: both landed one commit past the tag
+1.6.1   upgrade-guide=1  operator-guide=1
+1.6.2   upgrade-guide=1  operator-guide=1
+1.7.0   upgrade-guide=1  operator-guide=1
+```
+
+**What the tag carries, read from the tag rather than the tree**: `VERSION`
+1.7.0, `CURRENT_SESSION` 28, **33 released migrations**,
+`0033-agent-record-retention.sql`, `docs/on-ramp.md`, and both halves of
+`release-reading`.
+
+**And on the remote, read back rather than assumed**: `refs/tags/1.7.0` is the
+annotated object `2fad2abd34d8`, dereferencing (`^{}`) to
+`8c61309b6cf9602fc66752c8f2def804ccdc1acb`.
+
+**D1401's third occurrence is over.** The tree and the deployment agreed before
+the sweep, the sweep proved it, and the tag went on the commit that was
+deployed. There is no fourth occurrence available: the tag now waits for the
+deploy by construction.
 
 ### Run 9 — the close
 
