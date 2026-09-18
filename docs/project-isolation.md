@@ -83,9 +83,12 @@ that only holds while both projects are healthy is not isolation.
 
 ## Identity collisions
 
-`evidence.collision_count` compares fifteen parsed semantic fields plus all
-thirteen derived role names, pairwise, across every rendered project. Never
-duplicate strings; never a digest.
+`evidence.collision_count` compares the **eighteen** JSON pointers in
+`evidence.ISOLATED_FIELDS` plus all **fourteen** derived role names, pairwise,
+across every rendered project. Never duplicate strings; never a digest. The
+constant is named here rather than the count repeated, because a number in
+prose is a number that goes stale silently — this sentence said *fifteen* and
+*thirteen* until Session 30 measured both (D1541, D1557).
 
 A pair where **both** values are `None` is not a collision
 ([ADR 0016](decisions/0016-absence-is-not-a-collision.md)). Every Session 2
@@ -93,7 +96,7 @@ project disables object storage (Session 7) and backups (Session 10), so four of
 the isolated fields are `null` for all of them. `null` means "this project has
 no bucket", and two projects that both have no bucket are not sharing one.
 
-Roles get no such exemption: `naming.derive` produces all thirteen
+Roles get no such exemption: `naming.derive` produces all fourteen
 unconditionally, so a `None` there is a bug rather than a disabled facility.
 
 ## What this does not claim

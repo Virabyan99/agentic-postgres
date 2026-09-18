@@ -107,3 +107,124 @@ def test_no_deployment_proof_calls_a_command_module_fixture() -> None:
         "raise TypeError the first time it runs — on a host, mid-trip, possibly after an "
         "irreversible step:\n  " + "\n  ".join(offences)
     )
+
+
+# ---------------------------------------------------------------------------
+# Every proof belongs to a requirement (D1542)
+# ---------------------------------------------------------------------------
+
+#: Deployment proofs that are node ids of no registry entry, each with the
+#: session that owes it a requirement. Compared for EQUALITY, not containment:
+#: a proof deleted from the tree has to leave this tuple too, and a proof added
+#: without a requirement cannot hide in it.
+#:
+#: Measured in Session 30 Run 2 (rig 30c). The plan expected one -- the Studio
+#: orphan -- and found twenty-three, several of them security proofs. They are
+#: frozen here rather than registered in a hurry: a requirement written to make
+#: a list shorter is a requirement nobody reviewed. Session 31 owns the triage
+#: (D1542, and the stage plan's open items).
+KNOWN_UNREGISTERED: tuple[str, ...] = (
+    # Session 30 registers this one as STU-QUERY-002 in Run 6's bump commit.
+    "tests/deployment/test_session24_studio.py::test_the_query_view_shows_the_human_their_own_rows_and_not_anothers",
+    # --- Session 31 owes these twenty-two a requirement each -----------------
+    "tests/deployment/test_session11_operations.py::test_a_malformed_request_id_header_does_not_destroy_the_write",
+    "tests/deployment/test_session12_isolation_matrix.py::test_the_classifier_can_tell_the_categories_apart",
+    "tests/deployment/test_session14_observability.py::test_the_deployed_document_reports_the_metrics_route_it_observed",
+    "tests/deployment/test_session20_tenant.py::test_alpha_declares_no_set_and_holds_none_of_betas_objects",
+    "tests/deployment/test_session2_edge.py::test_the_deployed_document_agrees_with_the_live_route",
+    "tests/deployment/test_session2_edge.py::test_hsts_is_present_on_the_https_response",
+    "tests/deployment/test_session2_edge.py::test_the_acme_state_file_matches_the_recorded_environment",
+    "tests/deployment/test_session2_edge.py::test_the_health_route_is_reachable_only_through_the_edge",
+    "tests/deployment/test_session2_host.py::test_sshd_limits_authentication_attempts",
+    "tests/deployment/test_session2_host.py::test_the_edge_publishes_exactly_eighty_and_four_four_three",
+    "tests/deployment/test_session2_host.py::test_the_docker_user_chain_is_reachable_from_forward",
+    "tests/deployment/test_session2_host.py::test_ufw_denies_incoming_by_default",
+    "tests/deployment/test_session2_host.py::test_the_daemon_runs_the_configuration_we_installed",
+    "tests/deployment/test_session2_isolation.py::test_the_two_projects_are_actually_distinct",
+    "tests/deployment/test_session2_isolation.py::test_an_unknown_hostname_is_not_served",
+    "tests/deployment/test_session2_isolation.py::test_the_recorded_networks_are_project_scoped",
+    "tests/deployment/test_session2_isolation.py::test_neither_project_joins_the_others_network",
+    "tests/deployment/test_session2_isolation.py::test_each_project_holds_only_its_own_secret_generation",
+    "tests/deployment/test_session8_agent_plane.py::test_a_read_only_agent_can_neither_discover_nor_invoke_a_write_on_the_deployment",
+    "tests/deployment/test_session9_agent_writes.py::test_a_get_against_the_deployed_audit_rpc_is_refused",
+    "tests/deployment/test_session9_agent_writes.py::test_the_get_that_was_refused_wrote_nothing",
+    "tests/deployment/test_session9_agent_writes.py::test_a_revoked_token_fails_its_next_read_write_and_direct_request",
+)
+
+
+def _registered_node_ids() -> set[str]:
+    import re
+
+    import yaml
+
+    registry = yaml.safe_load(
+        (REPO_ROOT / "tests" / "acceptance-registry.yaml").read_text(encoding="utf-8")
+    )
+    return {
+        re.sub(r"\[.*\]$", "", node_id)
+        for entry in registry
+        for node_id in (entry.get("test_nodeids") or [])
+    }
+
+
+def deployment_proofs() -> set[str]:
+    """Every `test_` function under `tests/deployment/`, by AST.
+
+    Parsed rather than collected, so a decorator, a `parametrize` or a skip
+    mark cannot hide one -- and so this runs without a host.
+    """
+    found: set[str] = set()
+    for path in sorted(DEPLOYMENT.glob("test_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(
+                "test_"
+            ):
+                found.add(f"tests/deployment/{path.name}::{node.name}")
+    return found
+
+
+def test_every_deployment_proof_is_a_node_id_of_some_requirement() -> None:
+    """The direction nothing checked (D1542).
+
+    A proof that belongs to no requirement contributes to no claim, so it can
+    error at setup forever while every claim over it reads `passed`. That is
+    not hypothetical: it is what `studio_*` did (D1236).
+    """
+    proofs = deployment_proofs()
+    assert len(proofs) > 200, f"the scan found {len(proofs)} proofs; it should be ~260"
+
+    orphans = proofs - _registered_node_ids()
+    unexpected = sorted(orphans - set(KNOWN_UNREGISTERED))
+    assert not unexpected, (
+        "these deployment proofs are node ids of no requirement, so no claim "
+        "reads them and nothing would notice if they never ran:\n" + "\n".join(unexpected)
+    )
+
+    # Equality, not containment: a proof that was registered or deleted must
+    # leave the tuple, or the tuple becomes a list nobody maintains.
+    stale = sorted(set(KNOWN_UNREGISTERED) - orphans)
+    assert not stale, (
+        "KNOWN_UNREGISTERED names proofs that are no longer orphans; remove them:\n"
+        + "\n".join(stale)
+    )
+
+
+def test_the_registration_scan_catches_a_synthetic_orphan(tmp_path) -> None:
+    """Anti-vacuity (D374): the scan must find a test nothing registers.
+
+    Without this, a scan that walked the wrong directory would report a fully
+    registered suite in exactly the words a registered suite uses.
+    """
+    module = tmp_path / "test_synthetic_orphan.py"
+    module.write_text("def test_nobody_registered_this() -> None:\n    assert True\n", "utf-8")
+
+    tree = ast.parse(module.read_text(encoding="utf-8"))
+    names = [
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test_")
+    ]
+    assert names == ["test_nobody_registered_this"]
+    assert f"tests/deployment/{module.name}::{names[0]}" not in _registered_node_ids()

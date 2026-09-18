@@ -713,6 +713,16 @@ def two_owners_one_relation(
     conditional on that endpoint, and rows left behind make the NEXT sweep's
     controls ambiguous.
     """
+    # The stranger holds ONE scope, not none. `ARRAY[]::text[]` is refused by
+    # migration 0011:116 (`CHECK (array_length(scopes, 1) IS NOT NULL)`), and
+    # this fixture carried it from the day it was written -- so the proof
+    # errored at setup, never reached its assertion, and belonged to no
+    # requirement, so no claim noticed (D1236, D1542, D1543).
+    #
+    # `notes:read` is also the stronger subject: a stranger who CAN read notes
+    # and still sees none of the auditor's rows says more than one who could
+    # not have read anything either way. Sorted by construction -- a one-element
+    # array is sorted -- which `is_scope_set` requires (D248).
     hashing = service_source.load("hashing")
     role_name = project_a["database"]["roles"]["project_admin"]
 
@@ -721,7 +731,7 @@ def two_owners_one_relation(
         project_a,
         "SELECT app_private.auth_create_user("
         f"'{STRANGER_USERNAME}', 'Session 24 studio stranger', '{role_name}', "
-        "ARRAY[]::text[], "
+        "ARRAY['notes:read']::text[], "
         f"'{hashing.Hasher().hash(STRANGER_PASSWORD)}');",
     )
     assert code == 0 and stranger_id.strip(), f"could not create the stranger: {error}"

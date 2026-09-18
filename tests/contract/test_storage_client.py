@@ -430,8 +430,8 @@ def test_a_cancelled_caller_does_not_leak_its_permit():
                 pass
             return {"key": key}
 
-    adapter = Blocking()
-    bounded = BoundedR2(adapter, concurrency=2)
+    blocking = Blocking()
+    bounded = BoundedR2(blocking, concurrency=2)
 
     async def drive() -> int:
         loop = asyncio.get_running_loop()
@@ -451,7 +451,7 @@ def test_a_cancelled_caller_does_not_leak_its_permit():
             with pytest.raises(asyncio.CancelledError):
                 await queued
 
-            adapter.release = True
+            blocking.release = True
             await running
 
             for _ in range(500):

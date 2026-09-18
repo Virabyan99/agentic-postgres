@@ -378,8 +378,14 @@ def test_the_command_takes_exactly_one_option_and_refuses_the_rest() -> None:
     assert no_value.returncode == 2
     assert "--ref requires a value" in no_value.stderr
 
+    # NOT `== 0`: a clone without tags exits 3 by design, and CI's contract
+    # job checks out without them. What this asserts is that `--ref HEAD` is
+    # not an ARGUMENT error -- the option is accepted.
     taken = run_command("--ref", "HEAD")
-    assert taken.returncode == 0, taken.stderr
+    assert taken.returncode != 2, taken.stderr
+    assert taken.returncode == run_command().returncode, (
+        "`--ref HEAD` reached a different outcome than no argument at all"
+    )
 
 
 def test_an_unresolvable_ref_is_refused_naming_it() -> None:
@@ -400,13 +406,16 @@ def test_the_reading_names_the_ref_it_read() -> None:
     reading nobody can check afterwards. With no ref the label is `HEAD` and
     the bytes are what they were."""
     with_ref = run_command("--ref", "HEAD")
-    assert with_ref.returncode == 0
-    assert "the ref HEAD" in with_ref.stdout
-
     without = run_command()
-    assert without.returncode == 0
-    assert "Where HEAD stands" in without.stdout
-    assert "the ref" not in without.stdout
+
+    # The relationship, not the code: both name the same commit, so both reach
+    # the same outcome whether or not this clone holds tags.
+    assert with_ref.returncode == without.returncode
+    assert with_ref.returncode != 2
+
+    assert "ref HEAD" in with_ref.stdout, with_ref.stdout
+    assert "ref HEAD" not in without.stdout, without.stdout
+    assert "HEAD" in without.stdout
 
 
 def test_a_ref_reads_the_tag_target_and_not_the_tip() -> None:

@@ -152,7 +152,7 @@ def release_canonical() -> dict[str, Any]:
 
 
 def tool_names(contract: dict[str, Any]) -> list[str]:
-    return [tool["name"] for tool in contract["tools"]]
+    return [entry["name"] for entry in contract["tools"]]
 
 
 def tool(contract: dict[str, Any], name: str) -> dict[str, Any]:

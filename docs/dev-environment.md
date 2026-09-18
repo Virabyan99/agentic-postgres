@@ -175,7 +175,11 @@ it.
 | `apg dev reset` | 10.07 s, 10.28 s | 6.19 s |
 
 33 migrations either way — the 31 released plus the example project's set of
-two. The left column is an 8 GB development machine under WSL2 with Docker
+two. **Those were the counts when these samples were taken**; the tree now
+carries 33 released and 3 in the example set, so a re-run would apply 36. The
+condition is left as measured rather than updated, because rewriting it would
+say the timing was sampled against a tree it was not (D1557). The left column
+is an 8 GB development machine under WSL2 with Docker
 server 29.5.2, two samples each; the right is one sample from a GitHub-hosted
 `ubuntu-latest` runner, read from the log of the push that added the round trip.
 

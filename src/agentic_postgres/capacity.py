@@ -257,7 +257,10 @@ ENVELOPE: tuple[Measurement, ...] = (
         conditions=(
             "an 8 GB development machine, WSL2, kernel 6.6.87.2-microsoft-standard-WSL2",
             "Docker server 29.5.2, the locked postgres image ALREADY CACHED",
-            "33 migrations: the 31 released, plus the example project's set of two",
+            "33 migrations: the 31 released, plus the example project's set of two "
+            "(what the tree held WHEN THIS WAS SAMPLED; it now carries 33 released "
+            "and 3 in the example set. The condition records the measurement, so it "
+            "is not rewritten to today's numbers -- D1541, D1557)",
             "no container of this project running and no state directory present",
         ),
         note=(

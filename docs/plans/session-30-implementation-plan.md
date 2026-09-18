@@ -7,11 +7,13 @@ the rigs and ADRs 0216–0220 (four of seven measurements came back different
 from the plan; D1542, D1544 and D1548 rewritten, D1550–D1552 opened). Run 3 the exec discipline: one helper, one
 sourced guard, the class at **0** unguarded sites, 11/11 mutations killed
 (D1553–D1554 opened); **Run 4** `release-reading --ref` and `compile --output`
-(D1555–D1556 opened; two registry entries deferred to Run 6). §1 is D1537–D1548 at planning, each read from the
+(D1555–D1556 opened; two registry entries deferred to Run 6); **Run 5** the two
+suite-shape guards, five shadows repaired, 23 orphans frozen, three counts
+(D1557–D1558 opened). §1 is D1537–D1548 at planning, each read from the
 tree at `f89b03a`. Run 1 measured D1546 and added **D1549**; Run 2 rewrote
 D1542, D1544 and D1548 and added **D1550–D1552**; Run 3 added **D1553–D1554**;
-Run 4 added **D1555–D1556**; **next free is D1557**, and the runs add theirs
-below.
+Run 4 added **D1555–D1556**; Run 5 added **D1557–D1558**; **next free is
+D1559**, and the runs add theirs below.
 ADRs **0216–0220** are this session's, all written in Run 2 and all Accepted;
 **0220 went to the mirror fold** (D1549/D1546), not to Run 4, because D1540's
 condition was not met (D1550). **0221 is reserved, conditionally, by Run 4.**
@@ -187,8 +189,8 @@ Six columns. Rows D1537–D1548 were read from the tree on 2026-09-18 at
 `f89b03a`; where a row's *Repository does* column says *measure*, Run 2 owns
 the measurement and rewrites the row with the numbers. **D1546 was rewritten by Run 1 with what it measured, and D1549 is Run 1's
 own. Run 2 rewrote D1542, D1544 and D1548 with what its rigs measured and
-added D1550–D1552. Run 3 added D1553–D1554, Run 4 D1555–D1556. Next free
-number after this table is D1557.**
+added D1550–D1552. Run 3 added D1553–D1554, Run 4 D1555–D1556, Run 5
+D1557–D1558. Next free number after this table is D1559.**
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -212,6 +214,8 @@ number after this table is D1557.**
 | **D1554** | This plan §0 and D1537: *"**Thirty-nine call sites** build a `docker exec` argv: four in shell… thirty-two in eleven `bin/*.py`… three in two `src/` modules… 39 sites, 15 files"*, and Run 3's heading *"thirty-nine sites"*. | **The AST scan counts 27, of which 14 were the hang class, and it is counting a different thing.** D1537 counted places that BUILD a docker argv, including those handed to an intermediary runner. The scan counts `subprocess.*` calls whose argv reaches `docker` or `compose.sh`, which is what the rule is about: a site that builds an argv and passes it to a runner which closes stdin cannot hang. Before Run 3: **27 direct sites, 14 unguarded, 0 in a helper.** The 14 span **nine files, five of which this plan never named** — `bin/auth-admin.py:246`, `bin/postgres-bootstrap.py:86` and `:900`, `bin/rotate-signing-key.py:218` and `:254`, `bin/storage-admin.py:165`, `src/agentic_postgres/access_broker.py:343`. **`rotate-signing-key.py` is the command Run 8 executes.** A second rule (a pass-through runner whose argv is its own parameter) found `deploy-project.py:185`'s generic `run()` with stdin open, which D1538 predicted, and confirmed `doctor.py:91`, `fleet.py:72`, `restore.py:104` and `rehearse.py:85` already closed theirs. | **After Run 3: 0 unguarded outside the helper**, measured by the same scan that becomes the guard. Four true `docker exec` sites go through `container_exec.run()`; `migrate.py`'s compose run goes through `compose_run()`; eight `docker ps`/`inspect` reads and two generic runners take `stdin=subprocess.DEVNULL` (those cannot hang — neither reads stdin — but an inherited terminal on a call nobody re-reads is how the next one arrives). The remaining pass-through runners are `git()` and tool-version readers, outside ADR 0218's scope and named here rather than silently excluded. | A count carried from a plan into a test is a count nobody measures twice (D1116's shape). The scan derives it, and it found five files the hand inventory missed — including the one Run 8 runs against production. | **0218** |
 | **D1555** | This plan §2: five requirements *"all `target_session: 30`"*, listed as this session's registry additions; and Run 4's step 2: *"its registry node id moved in the same commit"*. | **A `target_session: 30` entry cannot enter the registry before Run 6.** `test_acceptance_registry.py:163` asserts `1 <= target_session <= CURRENT_SESSION`, which is **28** until the bump, and moving `CURRENT_SESSION` is all-or-nothing (D690). Run 4 added `REL-READ-002` and `CAP-COMPILE-001`, regenerated the matrix, and three registry proofs went red on the session bound. §2 already puts the additions in Run 6; Run 4's own text reached for them early. | **The node-id REPLACEMENT stays in Run 4** — D1119 requires it in the same commit as the rename and `REL-READ-001`'s `target_session` is 28 — **and the two new entries are deferred to Run 6**, parked verbatim in §2 so that run pastes rather than rewrites them. The proofs exist and pass now; only their registration waits. Run 6 pastes, then `python bin/render-acceptance-matrix.py --write`. | A requirement is registered when the session that owns it is current, and the bump is the one edit that cannot be split. Landing the entries early would have meant either a red suite for three runs or moving `CURRENT_SESSION` outside the run that owns it. | — |
 | **D1556** | This plan §2's proposed test for `REL-READ-002`: *"`--ref HEAD` → the same bytes as no argument"*, and ADR 0219's decision 5: *"the first block's label reads `ref` when one was given"*. | **The two cannot both hold, and the label is the point.** `--ref HEAD` and no argument name the same commit and report the same facts, but the first block reads `Where the ref HEAD stands` against `Where HEAD stands`, and `tags on it` against `tags on HEAD`. D1513's whole complaint is that a reading which does not name its subject cannot be checked afterwards; a `--ref` that printed nothing to say it was given would reintroduce exactly that. | **The label wins.** `test_the_reading_names_the_ref_it_read` asserts `the ref HEAD` appears with a ref and does not without one; the no-argument form is unchanged byte for byte, which is what ADR 0219 actually promises. The plan's phrase *the same bytes as no argument* is replaced by *the same facts*. **A second reading of `unchanged` was also wrong**: anchoring the ranges to the resolved SHA left the output identical and changed the ARGV, and `test_the_command_finds_the_tag_that_carries_the_version_not_the_one_on_head` — which drives `observe()` through a fake git keyed on argument tuples — went red. With no ref the anchor is the literal `HEAD`, and `describe`/`log` take the ref only when there is one. | Two proposed assertions in one row, both true-sounding, both slightly wrong about what *unchanged* covers. The fake-git test caught the second within a minute of the change; nothing but reading caught the first. | **0219** |
+| **D1557** | D1541 (rewritten from D1536): *"Three edits in Run 5: both *31 released* → **33**, `docs/project-isolation.md:86-87` *fifteen parsed semantic fields plus all thirteen derived role names* → **eighteen JSON pointers***". | **None of the three is what the row describes.** (a) Both *31 released* occurrences are **measurement CONDITIONS**, not claims about today: `capacity.py:260` is the `conditions` tuple of the `apg dev up` timing and `dev-environment.md:177` is that measurement's prose. Rewriting either would state that a sample was taken against a tree it was not. (b) The arithmetic is wrong in **both** terms — the tree holds **33 released and 3** in the example set, so a re-run applies **36**, not 33. (c) `docs/capacity-envelope.md` is **generated** and says *Do not edit by hand*; the row implies editing it directly, which the next `render-capacity-envelope.py --write` would undo. (d) The isolation sentence is wrong in **both** halves: `ISOLATED_FIELDS` is **18** pointers and a rendered document carries **14** roles (measured in both fixtures), not fifteen and thirteen. (e) **`evidence.py:271`'s own docstring carries the stale thirteen** — a stale number in the code, which is the one place nobody was grepping. | The two measurement conditions are **annotated, never rewritten**: each now says what the counts were when sampled and what the tree holds now. `capacity.py` is the edit and the envelope is regenerated from it. `docs/project-isolation.md:86` says *eighteen* and *fourteen* and **names `evidence.ISOLATED_FIELDS`** rather than repeating a count, `:96` says fourteen, and `evidence.py:271` is corrected. | D954's direction, one turn further: a number in prose that a program stopped agreeing with is found by grepping the OLD number — and then each hit has to be **read**, because two of them were records of a measurement and one was a generated artefact. A row that says *change 31 to 33 in two places* is a row that has not opened the files. | — |
+| **D1558** | Run 5 step 2: *"the local `refused` → `answer` (and its three uses in the two asserts)"* — a rename described as bounded by the lines the plan had read. | **One of the five renames had a reader twenty lines out of view, and it hung the targeted run for ten minutes.** `test_storage_client.py`'s `test_a_cancelled_caller_does_not_leak_its_permit` binds a `Blocking` stub whose `head_object` **busy-waits** on `self.release`; the line that sets it, `adapter.release = True`, sits twenty lines below the binding inside a nested `async def`. Renaming the binding to `blocking` left that line naming a variable that no longer existed, so the loop never ended: pytest sat in state `Sl` with no child process, no container running and no output for 535 s until a `timeout` would have killed it. | Repaired; the module runs in **0.41 s**. Every one of the five renames was then re-grepped over its whole module rather than over the lines on screen, and the remaining `adapter` hits are the module-level helper at `:66` and its legitimate callers — which is the function that was being shadowed, so the rename is complete and correct. | **D979, broken by the executor in the act of applying it.** The rule is *grep every reader before repairing a name*, and the repair here was itself a renaming. A shadow repair is exactly the shape that hides a reader, because the name being renamed is one the module uses for something else. A hang with no output and no child process is also a reminder that a targeted run's silence is not progress. | — |
 
 ---
 
@@ -1197,9 +1201,93 @@ environment.md:170-185`; `src/agentic_postgres/evidence.py:36-68`.
 `test_acceptance_registry` (per step 5), plus `git grep -ln "test_session9_
 agent_writes\|test_session24_studio" -- tests/contract`. Push; read CI.
 
-**Done.** _(the shadow scan's count over the whole suite; the registration
-scan's count and the tuple's contents; the three edits' lines; the
-`--setup-plan` line for the orphan.)_
+**Done.** _(Run 5, 2026-09-18.)_
+
+**The shadow scan's count over the whole suite: five, and zero after the
+repair.** The guard reproduced rig 30d exactly — `test_api_contract_command.py:
+620` (`merged`), `test_deployed_output.py:1361` (`published`),
+`test_project_agent_surface.py:155` (`tool`), `test_storage_client.py:433`
+(`adapter`) and `test_session9_agent_writes.py:709` (`refused`, D1509's own
+survivor) — with both controls green. All five renamed, so
+`test_no_local_shadows_a_module_level_function` asserts **zero with no
+exemption list**. `test_session24_studio.py:211` defines a `refused` helper too
+and has no shadow, as rig 30d said.
+
+**The registration scan's count: 23 orphans, and the tuple holds all 23.**
+`KNOWN_UNREGISTERED` is compared for **equality**, so a proof that stops being
+an orphan must leave it — Run 6 removes the Studio entry when it registers
+`STU-QUERY-002`, and the remaining 22 are Session 31's triage, each named with
+the session that owes it. They are frozen rather than registered in a hurry: a
+requirement written to make a list shorter is a requirement nobody reviewed.
+
+**The three edits are not the three the row named** (D1557). D1541 said two
+*31 released* occurrences to change to 33, plus the isolation sentence:
+
+- **Both `31 released` occurrences are measurement CONDITIONS**, not claims
+  about today. `capacity.py:260` is the `conditions` tuple of the `apg dev up`
+  timing and `dev-environment.md:177` is that same measurement's prose.
+  Rewriting them would state that a measurement was taken against a tree it was
+  not. **Annotated, not edited**: the tree now holds 33 released and **3** in
+  the example set, so a re-run applies 36, not 33 — the row's arithmetic was
+  wrong in both terms.
+- `docs/capacity-envelope.md` is **generated** and says *Do not edit by hand*;
+  editing it directly, as the row implied, would have been undone by the next
+  render. The source is `capacity.py`, and the envelope was regenerated.
+- The isolation sentence was wrong in **both** halves: `ISOLATED_FIELDS` is
+  **18** pointers, not fifteen, and a rendered document carries **14** roles,
+  not thirteen — measured in both fixtures. `docs/project-isolation.md:86` and
+  `:96` now say eighteen and fourteen and name the constant; and
+  **`evidence.py:271`'s own docstring carried the stale thirteen**, which is a
+  stale number in the code that nobody was grepping for.
+
+**The `--setup-plan` line for the orphan.** With `APG_LIVE_HOST=1` and
+`APG_PROJECT_A_OUTPUTS` set, the repaired proof is **planned, not skipped**,
+with its whole fixture chain:
+
+```
+    SETUP    M two_owners_one_relation (fixtures used: api_call, app_base, auditor, project_a, psql, rest_base)
+        tests/deployment/test_session24_studio.py::test_the_query_view_shows_the_human_their_own_rows_and_not_anothers
+```
+
+`ARRAY[]::text[]` → `ARRAY['notes:read']::text[]`, with the fixture's comment
+now recording that `0011:116` refuses an empty scope set and that a stranger
+who *can* read notes and still sees none of the auditor's rows is the stronger
+subject. It cannot execute here; Run 7 is its first execution.
+
+**Battery: 6 mutations, 6 killed, restoration clean — after the first pass
+killed only 4, and both survivors were weak CONTROLS rather than weak guards.**
+
+1. Flipping the shadow scan from `Store` to `Load` context still found exactly
+   one hit, because the synthetic's `assert refused` is a *use* of the same
+   name. The control could not tell a binding from a use. It now asserts the
+   reported **line**, which only the assignment has.
+2. Deleting the parameter exclusion changed nothing, because every name the
+   pass-control rebound was a **fixture**, which `module_level_helpers`
+   excludes one step earlier — so the exclusion was never exercised. The
+   control now also rebinds a parameter sharing a plain helper's name, which is
+   the only shape that exclusion exists for.
+
+**A defect I introduced and the targeted run caught by hanging.** Renaming
+`adapter` → `blocking` in `test_storage_client.py` left `adapter.release = True`
+twenty lines below untouched. That test busy-waits on `Blocking.release`, so
+the loop never ended and the run sat for ten minutes with no container running
+and no output. **D979's rule, broken by me**: grep every reader before
+repairing a name — I renamed the two lines on screen. Repaired, and the module
+now runs in 0.41 s. The other four renames were checked the same way
+afterwards; only this one had a reader out of view.
+
+**Registry entries deferred to Run 6**, as D1555 already established for Run
+4's: `STU-QUERY-002` and `EVD-SHAPE-001` carry `target_session: 30`, which
+`test_every_entry_has_complete_metadata` refuses while `CURRENT_SESSION` is 28.
+`APG_ACCEPTANCE_SESSION` would let a *targeted* run pass at 30, but CI does not
+set it, so landing them now means a knowingly-red CI. The proofs exist and pass.
+
+**Targeted:** 363 passed across `test_suite_shape`,
+`test_deployment_suite_shape`, `test_deployment_module_shape`,
+`test_capacity_envelope`, `test_documentation_index`, `test_evidence_claims`,
+`test_acceptance_registry`, `test_api_contract_command`, `test_deployed_output`,
+`test_project_agent_surface`, `test_storage_client`, `test_render_isolation`.
+`ruff` clean over `bin src tests`.
 
 ### Run 6 — the bump, the registry, the gate, and the recipe the trip needs
 

@@ -706,19 +706,19 @@ def test_a_get_against_the_deployed_audit_rpc_is_refused(
         f"({control.body[:200]}). A 405 below would then say nothing about GET"
     )
 
-    refused = api_call(
+    answer = api_call(
         f"{base}/rpc/agent_audit_begin?p_tool=leaked&{AUDIT_BEGIN_QUERY}",
         method="GET",
         token=token,
     )
-    assert refused.status == 405, (
-        f"GET /rpc/agent_audit_begin answered {refused.status}, not 405. "
+    assert answer.status == 405, (
+        f"GET /rpc/agent_audit_begin answered {answer.status}, not 405. "
         "ADR 0136's category rests on a writing function being ineffective over GET, "
-        f"and nothing offline can tell a writing function from a reading one: {refused.body[:300]}"
+        f"and nothing offline can tell a writing function from a reading one: {answer.body[:300]}"
     )
-    assert "25006" in refused.body or "read-only" in refused.body, (
+    assert "25006" in answer.body or "read-only" in answer.body, (
         "the 405 did not come from the read-only transaction, so it is a different "
-        f"refusal than the one this category rests on: {refused.body[:300]}"
+        f"refusal than the one this category rests on: {answer.body[:300]}"
     )
 
 

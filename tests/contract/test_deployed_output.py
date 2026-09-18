@@ -1358,10 +1358,10 @@ def test_the_published_hash_verifies_against_its_own_password_and_no_other(
         runtime_image=image,
     )
 
-    published = yaml.safe_load(
+    middleware = yaml.safe_load(
         (dynamic / edge_credentials.middleware_file_name(project_key)).read_text(encoding="utf-8")
     )
-    (entry,) = published["http"]["middlewares"]["m"]["basicAuth"]["users"]
+    (entry,) = middleware["http"]["middlewares"]["m"]["basicAuth"]["users"]
     hashed = entry.partition(":")[2]
 
     def verifies(candidate: str) -> bool:

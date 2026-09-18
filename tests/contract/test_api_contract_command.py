@@ -617,9 +617,9 @@ def test_check_with_a_project_reads_the_projects_snapshot_path(api_contract) -> 
     )
     assert api_surface.project_snapshot_path(root) != api_contract.SNAPSHOT_PATH
 
-    merged = run("--check", "--project", str(REPO_ROOT / "project.example.yaml"))
-    assert merged.returncode == 0, merged.stdout + merged.stderr
-    assert "7 objects" in merged.stdout + merged.stderr, (
+    checked = run("--check", "--project", str(REPO_ROOT / "project.example.yaml"))
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    assert "7 objects" in checked.stdout + checked.stderr, (
         "`--check --project` did not compare the merged surface: 7 is the release's "
         "five published objects plus the example project's two, and any other number "
         "means one half of the pair was not loaded"

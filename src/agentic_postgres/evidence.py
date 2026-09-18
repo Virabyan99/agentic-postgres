@@ -268,7 +268,7 @@ def collision_count(rendered: dict[str, dict[str, Any]]) -> int:
     shared resource; absence is not a resource.
 
     Roles are deliberately not given the same exemption: ``naming.derive``
-    produces all thirteen unconditionally, so a ``None`` there would be a bug
+    produces all fourteen unconditionally, so a ``None`` there would be a bug
     rather than a disabled facility.
     """
     documents = list(rendered.values())
