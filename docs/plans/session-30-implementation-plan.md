@@ -1,8 +1,10 @@
 # Session 30 — Inheritance, the rotation, and the two decisions
 
-**Status:** **PLANNED 2026-09-18** at `f89b03a` (the Stage 4 plan commit) on
-`main`. No run has started. §1 is D1537–D1548 at planning, each read from the
-tree at `f89b03a`; **next free is D1549**, and the runs add theirs below.
+**Status:** **IN PROGRESS.** Planned 2026-09-18 at `f89b03a` (the Stage 4
+plan commit) on `main`; **Run 1 done 2026-09-18** (the mirror, diagnosed
+with root — a fourth outcome, D1546 rewritten and D1549 opened). §1 is D1537–D1548 at planning, each read from the
+tree at `f89b03a`. Run 1 measured D1546 and added **D1549**; **next free
+is D1550**, and the runs add theirs below.
 ADRs **0216, 0217, 0218, 0219** are this session's; next free after them 0220
 (0220 is reserved, conditionally, by Run 4 — see D1540).
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 30* whole (Builds (a)–(h) /
@@ -175,8 +177,8 @@ D1242, D1282, D1425, D1469–D1477, D1482, D1488, D1501, D1504–D1513.
 
 Six columns. Rows D1537–D1548 were read from the tree on 2026-09-18 at
 `f89b03a`; where a row's *Repository does* column says *measure*, Run 2 owns
-the measurement and rewrites the row with the numbers. **Next free number
-after this table is D1549.**
+the measurement and rewrites the row with the numbers. **D1546 was rewritten by Run 1 with what it measured, and D1549 is Run 1's
+own. Next free number after this table is D1550.**
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -189,9 +191,10 @@ after this table is D1549.**
 | **D1543** | Stage plan §5 *(f)*: the orphan *"registered to `studio_surface` in `tests/acceptance-registry.yaml`"*. | **`studio_surface` is in `OFFLINE_CLAIMS`** (`evidence_claims.py:66-130`) over five `STU-*` requirements whose node ids are all `tests/contract/…`, and `evidence_claims.py:1008-1026` refuses an offline claim whose proof carries a live marker. The orphan is `live_host`. Registering it there would make the claim un-writable in every mode. | **A new requirement `STU-QUERY-002` under a new HOST claim `studio_tenant_read`**, not declared offline, with exactly this proof as its node id, `target_session: 30`, and the session table in `tests/contract/test_evidence_claims.py` (`:1079`'s shape) gaining `"studio_tenant_read": 30`. The fixture at `:724` passes `ARRAY['notes:read']::text[]` (sorted, non-empty — `conftest.py:1447-1448`'s rule, `DEFAULT_PROBE_SCOPES` `:1482` is the vocabulary). | ADR 0089 and D1150: a new requirement gets a claim of its own and is never joined into an older one; ADR 0202: an offline claim is declared, and a live proof cannot hide under one. | 0089, 0202 |
 | **D1544** | D1505: *"`migrate.sh` reaches dbmate through `docker exec -i`, stdout was a pipe, and it stopped."* | **`migrate.py:137` `run_dbmate` reaches dbmate through `bin/compose.sh <rendered> --runtime --profile … run --rm dbmate`** (`compose.sh:235` `run_compose` → `docker compose … run`), with `subprocess.run(command, check=False)` and inherited stdio. `migrate.py`'s two genuine `docker exec -i` sites (`:235`, `:300`) both feed `input=`. The stop D1505 recorded is real; its mechanism is `docker compose run` allocating a pseudo-tty on a terminal stdin and reading it — a second shape of the same class. | `run_dbmate` passes `stdin=subprocess.DEVNULL` and adds `-T` after `run` (compose's *disable pseudo-tty allocation*). **Measured in rig 30b, Run 2**: `compose run` with a terminal on stdin and stdout redirected (subject) against `-T` + `stdin=DEVNULL` (control 1) and no terminal anywhere (control 2). The AST guard (D1538) names `compose.sh` beside `docker` for this reason. `docs/upgrade-guide.md:547-557` and `docs/operator-guide.md:101` gain the sentence that the class is *any child that reads the terminal*, citing ADR 0218. | A repair that covered only `docker exec` would leave the one hang the last trip actually reproduced. | **0218** |
 | **D1545** | Stage plan §5 *Already true*: *"`release-reading`'s eleven facts."* | `render()` (`release_reading.py:259-351`) prints **fifteen** labelled fact lines in four blocks (HEAD: commit, VERSION, tags on HEAD; the last tag: name, commit, date, VERSION at it; since it: commits, files; counts: released migrations, ADRs; the bump: commit, subject, moved with it, commits after it), then the three `CHECKLIST` questions. The word *eleven* occurs nowhere in `bin/` or `src/`. | Nothing changes; `--ref` prints the same fifteen lines for the resolved commit, with the first block's label reading **`ref`** instead of `HEAD` when one was given (so a transcript says which commit it read — D1513's whole point). `test_the_reading_names_the_ref_it_read` asserts the label. | A count in a plan that the tree does not carry is a count a cold executor would go looking for. | 0214 |
-| **D1546** | D1512: the mirror units failed on 2026-09-18 at 04:38 (beta) and 04:50 (alpha), *"never diagnosed beyond `exit-code`"*. | **Undiagnosed, and there is a product-side hypothesis to test first.** The Session 29 trip ran three host sweeps on 2026-09-17/18, each running the eight rehearsals; `rehearsal._wal_archiving_failure` (`rehearsal.py:485-577`) blocks the MIRROR's path by inserting `iptables -I DOCKER-USER -s <backup subnet> -d <mirror address> -p tcp --dport 443 -j REJECT … -m comment --comment apg-rehearsal-<id>` and deletes by comment on reversal. Both mirror timers (`04:30` + up to 20 min) fired a few hours after the last sweep, and both failed. **A residual rule is the first thing to read.** The other outcomes: the provider refused the key (a `401`/`403` in `mc`'s line — the owner's, at Backblaze), or a transient network error (the next timer completes it, D1001). `mirror-state.json` is written only after a copy exits 0 (`backup.py:645-700`), so the doctor's check will read `WARN … the nightly copy has missed` from 2026-09-19 (`MIRROR_STALE_AFTER_DAYS` 2). | **Run 1, Sheet 0, ~30 minutes with root, before anything else**: `systemctl list-units --failed`; the journal of both units since 2026-09-17; **`iptables -S DOCKER-USER`** read for `apg-rehearsal`; `mirror-state.json` read; a copy by hand at a TTY under `script(1)` and `mc`'s line read; then one of three actions named in Run 1. If it is a residual rule: a rehearsal that leaves a rule behind is a product defect, repaired offline in Run 3's neighbourhood with a proof, and this row is rewritten with the rule's text. | ADR 0195: three outcomes, and the reassuring one (*it was transient*) is the one that has to be measured rather than assumed — a second successful copy under a rule that is still there would be the copy of the day the rule was not. | 0188, 0193 |
+| **D1546** | D1512: the mirror units failed on 2026-09-18 at 04:38 (beta) and 04:50 (alpha), *"never diagnosed beyond `exit-code`"*; and this plan at planning: *"a residual rule is the first thing to read"*, with three outcomes (residual rule / the provider refused the key / transient). | **MEASURED IN RUN 1, 2026-09-18, AND IT IS A FOURTH OUTCOME NONE OF THE THREE COVERS: the copy succeeds and the verb still exits 5.** `mc mirror` transferred the whole pass and printed its summary table (alpha 7.21 MiB in 18 s; beta 5.78 MiB in 18 s) and exited **1**, because **exactly one object per pass** failed with `net/http: HTTP/1.x transport connection broken: http: ContentLength=<n> with Body length 0` — the body read from R2 came back empty while its `ContentLength` was advertised. Three occurrences in the retained journal, one per failing run, always a small `.gz`: `…20260914-034912I/pg_data/base/16384/17551.gz` (928), `…20260916-033142I/…/17498.gz` (1856), `…20260918-033212I/…/1249_fsm.gz` (272). `bin/backup.py:690` raises `EXIT_STATE` on any non-zero copy, so the unit fails and `mirror-state.json` is not written. Alpha alternates in the journal — complete 09-13, failed 09-14, complete 09-15, failed 09-16, complete 09-17, failed 09-18; beta completed five days running and failed once, on 09-18. **The other three outcomes are excluded on evidence, not assumption**: the host reached the endpoint (`curl https://s3.eu-central-003.backblazeb2.com/` → 403, connect 0.033 s), no `rehearsal-in-progress.json` existed, and a `REJECT` rule would have broken every object to that endpoint rather than one of ~3,700 — both hand copies completed over exactly that path. No `401`, `403`, `InvalidAccessKeyId` or `SignatureDoesNotMatch` anywhere in the journal. | **Run 1 restored the state and Run 3 owes the repair, which is D1549's.** By hand at a TTY under `script(1)`: alpha exit 0, 3893 objects at `2026-09-18T16:35:42Z`; beta exit 0, 3446 objects at `2026-09-18T16:38:15Z`; both `mirror-state.json` written; both units `reset-failed`; `systemctl list-units --failed` now lists `cloud-init-hotplugd.service` alone; `systemctl is-system-running` still `degraded`, which is D1503 and not this product's. **No iptables rule was deleted and none was found to delete** — Sheet 0a's `grep -c` reading was never obtained in a form that separated *absent* from *could not read*, and it is not needed: the flake's own text excludes the hypothesis. | ADR 0195, and the reassuring outcome was not the one that had to be measured — *transient* was nearly right and materially wrong. The copy is transient at the object level and the product's treatment of it is not transient at all: it is a fold, and folding is what D1549 names. A plan that enumerates three outcomes has to be read as three outcomes it thought of, never as the outcome set. | 0188, 0193, 0195 |
 | **D1547** | Stage plan §7: *"`deployment_convergence` — a redeploy declared; Session 30 or 31"*; `bin/session-28-check.sh:357`: *"`--redeploy-before-file`: opened before a redeploy: the generation and the sentinel row that must survive it."* | **The file's format is defined only by the proof that reads it**, `tests/deployment/test_session11_operations.py:355-376`: JSON with non-empty `sentinel_title` and `generation_id`; the proof then counts `app.notes WHERE title = '<sentinel_title>'` as root and expects **1**, and reads `/var/lib/agentic-postgres/secrets/<key>/active-secret-generation.json` expecting a **different** `generation_id` after the deploy. **No guide documents how the sentinel row is written** (`git grep -n "redeploy-before\|sentinel_title" docs/` finds nothing outside the gates' help). The flag has never been given (D1496's list). | **Run 6 owes the recipe** and writes it into Sheet A2 before the trip: read the proof whole, then `bin/api.sh --help` and `bin/dev-token.sh --help`, and write the exact commands that create one `app.notes` row with a unique title on alpha through the product's own surface (D1114) — or, if no product surface writes a note as an operator, as the cluster superuser through the new helper, saying so. The file is written by root to `/root/s30-redeploy-before.json` with `generation_id` read from `active-secret-generation.json` **before** the deploy. The row is swept after the sweep. | A flag never given is a proof never run; the fourteenth never-executed proof failed on first execution (D1508). Writing the recipe from the proof rather than from memory is the cheap half (D671). | — |
 | **D1548** | Stage plan §5 *Measures*: *"the mixed shape hanging through the helper's refusal path versus a fully detached invocation completing (the control)"* — a workstation rig. | **WSL's `sudo` has no `use_pty`** (`grep -r use_pty /etc/sudoers /etc/sudoers.d/` at planning: no hit) and **prompts for a password**, which the executor's shell tool cannot supply. D972's mechanism is sudo's `use_pty` backgrounding the command; without it the rig measures nothing. Docker 29.5.2 runs in WSL. | **Rig 30a is typed by the operator at a WSL terminal** (the `! <command>` form the harness offers), under `script(1)` for the transcript, after `echo 'Defaults use_pty' | sudo tee /etc/sudoers.d/apg-rig-30a` — a workstation-only, reversible change, removed by `sudo rm /etc/sudoers.d/apg-rig-30a` at the rig's end and its absence re-read. Both readings (with and without `use_pty`) are recorded in Run 2's Done. | A rig that cannot reproduce the production mechanism measures the workstation, not the class (ADR 0065/0066's reason). Saying which sudoers line was added and removed is what makes the rig a rig rather than a change. | — |
+| **D1549** | `services/backup-mirror/mirror.sh:36-39` and `bin/backup.py`'s `verb_mirror` docstring both state D1001 as the design: *"A pass may exit non-zero with objects behind and the next pass completes it (D1001); the exit code is the whole of what the verb reads."* `systemd/agentic-postgres-backup-mirror@.service:28-31` states the same intent: *"a pass that exits non-zero with objects behind is completed by the next pass (D1001), so a timeout here reads as one failed copy, not a lost mirror."* | **The code treats the case its own comments call normal as a hard failure, and the fold is operator-visible.** `bin/backup.py:688-695`: any non-zero `copy.returncode` raises `EXIT_STATE`, so (a) the verb exits 5, (b) the unit enters `failed` with no `Restart=`, (c) `systemctl is-system-running` reads `degraded`, (d) `mirror-state.json` is not written, and (e) `diagnosis.py:329-372` reports `WARN … the nightly copy has missed` once `MIRROR_STALE_AFTER_DAYS` (2) elapses — **while the mirror bucket is materially current**, one object behind out of ~3,700. Measured: D1546. An operator reading `list-units --failed`, the doctor, or the fleet inventory cannot distinguish *one object flaked and the next pass will take it* from *the mirror is broken*; only the journal's `mc: <ERROR>` line separates them, and `apg-diag`'s log allowlist does not cover this unit. **There are three outcomes — complete, partial, failed — and the verb reports two.** | **Run 3 owes an ADR and the repair; the ADR is written in Run 2 with the others.** The three candidates, to be decided there: (1) **one immediate retry pass in-process** before the verb judges — "the next pass completes it" made immediate, so a pass that is complete after the retry writes the record and exits 0, and `mirror-state.json` keeps meaning exactly what it means today; (2) **a record that distinguishes a complete copy from an attempt with N behind**, with `diagnosis.py` taught to read both — a record schema move and a doctor change; (3) **declare the present behaviour correct** and move the noise into the doctor's threshold, which leaves the failed unit and the `degraded` host. This plan recommends (1) and Run 2 decides. The proof is offline against a fake `compose_mirror` whose first pass returns 1 and whose second returns 0: the record is written, the verb exits 0, and the control is a fake whose both passes return 1 — the verb still exits 5 and writes nothing. **No change to `--remove`, to retention, or to the primary's path.** | CLAUDE.md §7's rule for the class produced most, and ADR 0195 in its exact words: a reader has three outcomes and the third is reported rather than folded. The comment that says *the exit code is the whole of what the verb reads* is the defect stated as a design — the exit code is one bit and the question has three answers. Also D1247's shape: a declared behaviour (D1001, in three files) with no reader that implements it is an unverified behaviour. | **(0220 or 0221, Run 2 assigns)** |
 
 ---
 
@@ -335,9 +338,66 @@ recorded. Then the sheet, one outcome at a time.
 because `cloud-init-hotplugd` fails at every boot (D1503). That is not this
 product's and the sheet says so beside the reading.
 
-**Done.** _(what the journal said, verbatim `mc` line; which of the three;
-the rule's text if any; both units' state after; both `last_copied_at`;
-whether Run 3 owes a repair.)_
+**Done.** _(Run 1, 2026-09-18, ~35 minutes. **The mirror was never broken; the
+verb's report of it was.**)_
+
+**What the journal said.** Both units failed with `status=5/NOTINSTALLED` —
+exit 5, which is `bin/backup.py`'s own `EXIT_STATE`, not `mc`'s. The message
+above each failure was `backup: the mirror copy exited 1; the copy record was
+not written and the next pass completes what this one left behind (D1001).`
+Below it, in every failing pass, `mc`'s own line, verbatim and the same shape
+each time:
+
+```
+mc: <ERROR> Failed to copy `https://<r2 account>.r2.cloudflarestorage.com/apg-alpha-dev-backup/pgbackrest/alpha-dev/backup/alpha-dev/20260913-021652F_20260918-033212I/pg_data/base/16384/1249_fsm.gz`. Put "https://s3.eu-central-003.backblazeb2.com/alpha-dev/pgbackrest/alpha-dev/backup/alpha-dev/20260913-021652F_20260918-033212I/pg_data/base/16384/1249_fsm.gz": net/http: HTTP/1.x transport connection broken: http: ContentLength=272 with Body length 0
+```
+
+Exactly one object per pass, always a small `.gz`: 928 bytes on 09-14, 1856 on
+09-16, 272 on 09-18. The rest of the pass transferred and `mc` printed its
+summary table (alpha 7.21 MiB / 18 s, beta 5.78 MiB / 18 s) before exiting 1.
+
+**Which of the three: none of them.** It is a fourth outcome — the copy
+succeeds and the verb still exits 5 — and both the plan's three and D1512's
+`exit-code` stopped one frame short of it. The three are excluded on evidence:
+the host reaches the provider (`curl` → 403, connect 0.033 s, the control
+named in Sheet 0 step 6); no `401`, `403`, `InvalidAccessKeyId` or
+`SignatureDoesNotMatch` in any retained journal line, so not the credential;
+and not a residual rule, because a `REJECT` on the endpoint's addresses blocks
+every object rather than one of ~3,700, and both hand copies completed over
+that same path minutes later.
+
+**The rule's text: there is none.** `/etc/agentic-postgres/rehearsal-in-progress.json`
+does not exist, so no rehearsal is recorded as un-reversed. Sheet 0a's step 4
+was issued first in a form whose exit code could not separate *no rule* from
+*could not read the chain* — `grep`'s exit 1 means both — and the corrected
+form was overtaken by the diagnosis. **Recorded as untested rather than
+clear**, and it is not load-bearing: D1546 excludes it on the flake's own text.
+
+**Both units' state after.** Alpha copied by hand under `script(1)`: exit 0,
+3893 objects at `2026-09-18T16:35:42Z`. Beta: exit 0, 3446 objects at
+`2026-09-18T16:38:15Z`. Both `mirror-state.json` written and re-read
+(`last_copied_at` matches both timestamps). Both units `reset-failed`;
+`systemctl list-units --failed` now lists `cloud-init-hotplugd.service` alone.
+`systemctl is-system-running` still reads `degraded` — D1503, not this
+product's, exactly as the plan said it would.
+
+**Whether Run 3 owes a repair: yes, and it is D1549's, not D1546's.** The
+repair is not to the mirror path, which works; it is to the verb's report of
+it. Three files state D1001 — *a pass may exit non-zero with objects behind
+and the next pass completes it* — as the design, and `bin/backup.py:688-695`
+treats exactly that case as a hard failure, costing a failed unit, a
+`degraded` host and, from 2026-09-19, a doctor `WARN … the nightly copy has
+missed` over a bucket that is one object behind. Complete, partial and failed
+are three outcomes and the verb reports two. **Run 2 writes the ADR** (the
+plan recommends an immediate second pass in-process, so that D1001's "next
+pass" is the retry and `mirror-state.json` keeps its present meaning) and Run
+3 implements it with the offline proof D1549 names.
+
+**One correction to this plan's own §0**, found while reading for Run 1 and
+owed to Run 2's inventory: §0 names `backup.py:246` and `:291` as inheriting
+the terminal, which stands, but `compose_mirror()` at `:616` passes
+`stdin=subprocess.DEVNULL` and `capture_output=True` and is not in the D1538
+class. The mirror path never hung; it reported.
 
 ### Run 2 — the measurements, and ADRs 0216–0219
 
@@ -1141,6 +1201,7 @@ redeploy, each its own sheet.
 | **The retired signing key's JWK is kept on the host and no sweep has read it** | `/home/op/s30-retired-<key>-jwk.json` after Run 8; the sweep that passes `--rotated-jwt-from-file` moves one node id and belongs to the session that performs the other three rotations. |
 | **An operator has no documented way to write a sentinel row** (if Run 6 finds none) | D1547's consequence; a `bin/api.sh` operation or a documented `db.sh` path is Session 31's if `deployment_convergence` is to be re-run on every trip. |
 | **`KNOWN_UNREGISTERED`** (if non-empty) | Each entry names its session; the tuple shrinks only. |
+| **The mirror's per-pass transport flake is upstream and no repair here removes it** | D1546: one object per pass fails `ContentLength=<n> with Body length 0` reading from R2, ~1 in 3,700, on roughly every other pass. D1549's repair makes the verb report it correctly; it does not stop it. If the rate rises, the reading is `mc`'s line in the unit's journal, which `apg-diag`'s allowlist does not cover (D380's neighbourhood). Nobody has asked Cloudflare or Backblaze which side truncates. |
 
 **Created here, for Session 31:** every container exec goes through
 `container_exec` — Session 31's `capacity_reading.py` reads `/proc/meminfo`
