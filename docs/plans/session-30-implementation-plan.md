@@ -1,13 +1,15 @@
 # Session 30 — Inheritance, the rotation, and the two decisions
 
 **Status:** **IN PROGRESS.** Planned 2026-09-18 at `f89b03a` (the Stage 4
-plan commit) on `main`; **Runs 1–2 done 2026-09-18** — Run 1 the mirror,
+plan commit) on `main`; **Runs 1–3 done 2026-09-18** — Run 1 the mirror,
 diagnosed with root (a fourth outcome; D1546 rewritten, D1549 opened); Run 2
 the rigs and ADRs 0216–0220 (four of seven measurements came back different
-from the plan; D1542, D1544 and D1548 rewritten, D1550–D1552 opened). §1 is D1537–D1548 at planning, each read from the
+from the plan; D1542, D1544 and D1548 rewritten, D1550–D1552 opened). Run 3 the exec discipline: one helper, one
+sourced guard, the class at **0** unguarded sites, 11/11 mutations killed
+(D1553–D1554 opened). §1 is D1537–D1548 at planning, each read from the
 tree at `f89b03a`. Run 1 measured D1546 and added **D1549**; Run 2 rewrote
-D1542, D1544 and D1548 and added **D1550–D1552**; **next free is D1553**, and
-the runs add theirs below.
+D1542, D1544 and D1548 and added **D1550–D1552**; Run 3 added **D1553–D1554**;
+**next free is D1555**, and the runs add theirs below.
 ADRs **0216–0220** are this session's, all written in Run 2 and all Accepted;
 **0220 went to the mirror fold** (D1549/D1546), not to Run 4, because D1540's
 condition was not met (D1550). **0221 is reserved, conditionally, by Run 4.**
@@ -183,7 +185,8 @@ Six columns. Rows D1537–D1548 were read from the tree on 2026-09-18 at
 `f89b03a`; where a row's *Repository does* column says *measure*, Run 2 owns
 the measurement and rewrites the row with the numbers. **D1546 was rewritten by Run 1 with what it measured, and D1549 is Run 1's
 own. Run 2 rewrote D1542, D1544 and D1548 with what its rigs measured and
-added D1550–D1552. Next free number after this table is D1553.**
+added D1550–D1552. Run 3 added D1553–D1554. Next free number after this table
+is D1555.**
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -203,6 +206,8 @@ added D1550–D1552. Next free number after this table is D1553.**
 | **D1550** | D1540: *"**Measure (Run 2): does any passing test assert `compile` has no output option or writes no file?** … at planning: no hit in a test body"*, with the rule *"if Run 2's grep finds a passing test asserting the old design, ADR 0220 authorises the replacement; otherwise the header rewrite and this row are the record."* | **No test asserts it for `compile` — and a passing test asserts exactly that design for its SIBLING command, with a security reason and an ADR behind it.** `tests/contract/test_api_contract_command.py:217` `test_update_names_no_output_path` asserts `"--output" not in help_text` **and** `'"--output"' not in source` for `bin/api-contract.py --update`, with the docstring: *"An `--output` option would put the file's ownership in the privileged process, which is precisely what ADR 0050's 'it writes no source file' is for: the reviewer has to be able to edit and commit what came out."* `tests/contract/test_api_commands.py:103-107` refuses `--output` on `api.sh` among flags *"that a token could reach"*. `bin/mcp-contract.sh` requires no root and has no `require_root`. | **Run 4 may not add `--output` to `compile` without answering the ownership argument**, in the ADR or in the row. The two candidate answers, to be decided in Run 4: (a) `mcp-contract.sh compile` is never run privileged — shown by its lack of a root check and by every documented and tested invocation — so ADR 0050's reason does not reach it, and the header cites this row; or (b) it can be, and `--output` writes as the invoking user with the `PATH.tmp.<pid>` + rename confined to the target's directory, stated in the ADR. **ADR 0221 is reserved for Run 4** if it takes (b) or otherwise needs to reconcile the two commands; ADR 0220 went to D1549's mirror fold. | A grep that answers its literal question and stops is how a decided principle gets contradicted one command at a time. The planning grep asked about `compile` and the tree's answer about `--output` lives under `api-contract`. CLAUDE.md §7 rule 5: grep every reader of a decision before implementing it for one. | 0050, (0221) |
 | **D1551** | Nothing. The production host's `sudo` configuration has never been read in any session plan; D972's mechanism (`use_pty` backgrounding the command) has been cited since 2026-09-04 without the setting being confirmed on the machine it matters on. | **The production host carries `Defaults use_pty` in `/etc/sudoers`** — read 2026-09-18 during Run 1's sheet: `/etc/sudoers:Defaults   use_pty`. It is Ubuntu's default and is not set by `provision-host.sh`. So **D972's mechanism is live on production by default**, and every one of the 39 call sites that inherits a terminal is exposed there, not only on a workstation that happens to be configured that way. | Recorded, and cited in ADR 0218's context as the reason the exec discipline is a production repair rather than a developer-ergonomics one. **Nothing is changed on the host**: the setting is correct and removing it would weaken `sudo`'s logging. Run 3's repair is what makes the setting harmless to this product. | The mechanism behind a defect class had been named in twelve rows across five sessions and never confirmed on the deployment. It was true — but it was true the way D930's and D957's premises were true, which is to say nobody had looked. | 0218 |
 | **D1552** | This plan §0: *"**One local still shadows a module-level function**: `tests/deployment/test_session9_agent_writes.py:709`"*, and rig 30d's *Expected: **exactly one***. | **Five, not one — and the raw scan says fifty, of which forty-five are not the class.** Measured over `tests/**/*.py` by AST (module-level function and imported names; the function's own arguments excluded). Of 50 hits, **45 shadow a pytest FIXTURE**, which is not the class: a fixture is reached by declaring it as a parameter, never by calling its name, so a local of the same name in a test that does not declare it collides with nothing. **Five shadow a plain module-level helper**: `test_api_contract_command.py:620` (`merged`), `test_deployed_output.py:1361` (`published`), `test_project_agent_surface.py:155` (`tool`), `test_storage_client.py:433` (`adapter`), and `test_session9_agent_writes.py:709` (`refused`). **In none of the five is the helper called by name inside that function**, so all five are latent rather than live; `refused` at `:709` is rebound to an `api_call` response whose `.status` and `.body` are then read, over `def refused(result) -> bool` at `:91`. Zero currently-broken instances. | **Better than planned: the guard needs no exemption list.** Run 5 repairs all five by renaming the local, then `test_no_local_shadows_a_module_level_function` asserts **zero** over `tests/**/*.py`, with the fixture exclusion stated in the test and proved by its two controls (a synthetic shadow it must catch; a rebound fixture parameter and a differently-named local it must pass). The plan budgeted a frozen tuple; none is needed. | A scan whose first answer is 50 and whose right answer is 5 is a scan that had not yet been told what the class is. Reporting the 50 as the finding would have produced either a 45-entry exemption list or a guard nobody could keep green — D1493's shape. The discriminator (fixture versus plain helper) is a property of the definition, not of the failing instance, which is CLAUDE.md §7 rule 5. | — |
+| **D1553** | This plan's Run 3 step 2: *"`bin/db.sh` and `bin/apg-diag.sh` also source and call it at the top of their `main` — **these two exec directly**, and closing stdin on the line (step 4) is the repair; the guard is the belt on the same two."* | **After step 4's repair those two commands cannot hang, so the guard would refuse shapes that work.** Rig 30a2 measured that the stop needs `-i` **and** a child that reads stdin. `db.sh`'s `status` and `identity` verbs and `apg-diag.sh`'s query now end `< /dev/null`, so their psql reads `/dev/null` and reaches end of file at once. Adding `refuse_mixed_terminal_shape` to them would refuse `sudo bin/db.sh status --project alpha-dev > out.txt` at a terminal — a correct invocation with no failure mode left. That is D1538's own finding (*a guard everywhere refuses working shapes*) and ADR 0218 forbids it in as many words: the refusal *"is **not** extended to commands whose children cannot read the terminal"*. | **Step 4 applied; step 2's `db.sh`/`apg-diag.sh` half NOT applied.** The guard is sourced and called by `deploy.sh` alone. `-i` is **kept** on all four shell sites, because `bin/db.sh:181-183` records a measurement — without `-i` stdin is not forwarded, psql reads nothing and exits 0 having executed nothing, a silent success indistinguishable from a real one — so the repair is to control what `-i` forwards, not to remove it. `db.sh`'s comment now says so. The shell half is guarded by `test_every_shell_docker_exec_closes_or_supplies_stdin`, which scans `bin/*.sh` **and** `deploy.sh` rather than the three named commands the older scan reads. | The plan was written before Run 2 measured the class, and its step 2 carries the pre-measurement belief that the guard is the repair. Applying both halves would have shipped a refusal for a hang that no longer exists — the shape CLAUDE.md §6 forbids silently reconciling. | **0218** |
+| **D1554** | This plan §0 and D1537: *"**Thirty-nine call sites** build a `docker exec` argv: four in shell… thirty-two in eleven `bin/*.py`… three in two `src/` modules… 39 sites, 15 files"*, and Run 3's heading *"thirty-nine sites"*. | **The AST scan counts 27, of which 14 were the hang class, and it is counting a different thing.** D1537 counted places that BUILD a docker argv, including those handed to an intermediary runner. The scan counts `subprocess.*` calls whose argv reaches `docker` or `compose.sh`, which is what the rule is about: a site that builds an argv and passes it to a runner which closes stdin cannot hang. Before Run 3: **27 direct sites, 14 unguarded, 0 in a helper.** The 14 span **nine files, five of which this plan never named** — `bin/auth-admin.py:246`, `bin/postgres-bootstrap.py:86` and `:900`, `bin/rotate-signing-key.py:218` and `:254`, `bin/storage-admin.py:165`, `src/agentic_postgres/access_broker.py:343`. **`rotate-signing-key.py` is the command Run 8 executes.** A second rule (a pass-through runner whose argv is its own parameter) found `deploy-project.py:185`'s generic `run()` with stdin open, which D1538 predicted, and confirmed `doctor.py:91`, `fleet.py:72`, `restore.py:104` and `rehearse.py:85` already closed theirs. | **After Run 3: 0 unguarded outside the helper**, measured by the same scan that becomes the guard. Four true `docker exec` sites go through `container_exec.run()`; `migrate.py`'s compose run goes through `compose_run()`; eight `docker ps`/`inspect` reads and two generic runners take `stdin=subprocess.DEVNULL` (those cannot hang — neither reads stdin — but an inherited terminal on a call nobody re-reads is how the next one arrives). The remaining pass-through runners are `git()` and tool-version readers, outside ADR 0218's scope and named here rather than silently excluded. | A count carried from a plan into a test is a count nobody measures twice (D1116's shape). The scan derives it, and it found five files the hand inventory missed — including the one Run 8 runs against production. | **0218** |
 
 ---
 
@@ -795,9 +800,101 @@ D1273); `tests/contract/test_cli_contract.py:42`, `:167`, `:323-331`
 names. Existence of each name is checked before it is run (D1104); the
 list is the grep's. Push; read CI.
 
-**Done.** _(the scan's before/after counts; the seven helpers' fate; the
-message bytes compared; the battery table; which module's proofs first
-came back ERROR rather than FAILED and why.)_
+**Done.** _(Run 3, 2026-09-18. **The class is at zero and the guard is a scan
+over the tree, not a list.**)_
+
+**The scan's before and after.** Measured by the AST scan that then became the
+guard, over `bin/*.py` and `src/agentic_postgres/**/*.py`:
+
+| | before | after |
+|---|---|---|
+| `subprocess.*` calls whose argv reaches `docker`/`compose.sh` | 27 | 22 |
+| of those, **unguarded outside the helper** | **14** | **0** |
+| pass-through runners with stdin open | 13 | 5 (all `git`/tool readers, out of scope) |
+
+**It is not the plan's 39, and it is counting a different thing** (D1554).
+D1537 counted argv-*building* sites; the rule is about `subprocess` calls,
+because a site that hands its argv to a runner which closes stdin cannot hang.
+The 14 spanned nine files and **five of them this plan never named** —
+`auth-admin.py:246`, `postgres-bootstrap.py:86` and `:900`,
+`rotate-signing-key.py:218` and `:254`, `storage-admin.py:165`,
+`access_broker.py:343`. **`rotate-signing-key.py` is the command Run 8 runs
+against production.**
+
+**The seven helpers' fate.** `doctor.py:91`, `fleet.py:72`, `restore.py:104`
+and `rehearse.py:85` already passed `stdin=DEVNULL` and were left alone —
+D1538 was right about them. `deploy-project.py:185`'s generic `run()` and
+`restore-test.py:120`'s `docker()` gained it, with a docstring saying why a
+pass-through runner must. `backup.py`'s `pgbackrest()` and `read_archiver()`
+and `postgres-bootstrap.py`'s `await_cluster()` now call `container_exec.run`.
+`migrate.py`'s `run_dbmate` calls `compose_run`.
+
+**The message bytes compared.** D972's refusal was moved into
+`bin/lib/tty-guard.sh` by a script that extracts the sentence from both files
+and **refuses to write if they differ**: identical, 173 characters. `deploy.sh`
+sources the library after `ROOT_DIR` and calls `refuse_mixed_terminal_shape
+"--through-session"` where the `if` was. The existing D972 proof
+(`test_printed_commands.py:107`) passes unchanged, including its control.
+
+**The battery: 11 mutations, 11 killed, every control green, restoration
+byte-identical.** Anchors pre-flighted (all 11 matched exactly once),
+`PYTHONDONTWRITEBYTECODE=1`, `__pycache__` cleared between every arm, restored
+by copy from a `/tmp` snapshot and `cmp`d back.
+
+**But the first run killed only 9, and both survivors were real weaknesses in
+the proofs** — which is the whole reason for a battery:
+
+1. **`run()` inherits stdin — survived.** `test_stdin_is_closed_when_no_input_
+   is_given` runs a real container and still passed with `stdin=DEVNULL`
+   deleted, because inside pytest this process's stdin is not a terminal, so
+   `cat` reaches end of file either way. **The behavioural proof asserts the
+   rule in the one environment where the mechanism cannot occur.** Repaired by
+   adding `test_run_closes_stdin_when_no_input_is_given`, which monkeypatches
+   `subprocess.run` and reads the argument directly (`test_storage_admin.py:
+   55`'s shape). The container proof is kept — it proves the argv works — but
+   it is no longer the only reader.
+2. **The guard tests stdout only — survived.** Weakening `[ -t 0 ] && { [ ! -t
+   1 ] || [ ! -t 2 ]; }` to `[ -t 0 ] && [ ! -t 1 ]` left the D972 proof green,
+   because that proof uses `capture_output=True`, which pipes **both** streams,
+   so `[ ! -t 1 ]` is true and the `|| [ ! -t 2 ]` half has never been executed
+   by a passing test. Repaired by
+   `test_the_guard_refuses_a_terminal_on_stdout_with_only_stderr_redirected`,
+   which puts stdin and stdout on the same pty and only stderr on a pipe. **A
+   passing test had been carrying half a condition since Session 17.**
+
+A third weakness was found before the battery and closed in the guard itself:
+nothing would have caught a scan that looked at **nothing**. The guard now
+asserts its own search — more than 80 modules, and three named files present —
+because a scan aimed at an empty list reports a clean tree in the same words a
+clean tree uses. The battery's *the scan looks at nothing* mutation confirms it.
+
+**Which proofs came back ERROR rather than FAILED: none.** All 11 mutations
+produced `failed`, so every one reached its assertion rather than breaking a
+fixture on the way (D386).
+
+**One half of the plan deliberately not applied** (D1553). Step 2 asks for the
+guard on `bin/db.sh` and `bin/apg-diag.sh` as well. After step 4's `< /dev/null`
+those two cannot hang, so the guard there would refuse `sudo bin/db.sh status
+--project alpha-dev > out.txt` at a terminal — a correct invocation with no
+failure mode left. That is D1538's own finding and ADR 0218 forbids it in as
+many words. Step 4 applied; step 2's other half not. `-i` is **kept** on every
+shell site, because `db.sh:181` records that without it psql reads nothing and
+exits 0 having executed nothing.
+
+**Also in this commit:** `bin/session-01-check.sh`'s shellcheck did not reach
+`bin/lib/` — its glob is `deploy.sh bin/*.sh libexec/*` — so `bin/lib/*.sh` was
+added to it. A library nothing lints is a library whose refusal nobody checks.
+`docs/upgrade-guide.md:545` and `docs/operator-guide.md:100` now say the class
+is any product child that reads the terminal, that since ADR 0218 none does,
+and that `deploy.sh` keeps its refusal as a belt rather than as the repair.
+
+**Targeted:** 973 passed across `test_container_exec`,
+`test_database_commands`, `test_printed_commands`, `test_cli_contract`,
+`test_repository_contract`, `test_documentation_index`, `test_deploy_command`,
+`test_storage_admin`; and 1389 passed across the full derived list
+(`git grep -ln` over the moved names and the moved text). `ruff format` and
+`ruff check` clean over `bin src tests`; `shellcheck` clean over
+`deploy.sh bin/*.sh bin/lib/*.sh libexec/*`.
 
 ### Run 4 — `release-reading --ref`, `compile --output`, and the two documented lines
 

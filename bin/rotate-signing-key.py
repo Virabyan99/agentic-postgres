@@ -226,6 +226,7 @@ def container_for(project_key: str, service: str) -> str:
             "--format",
             "{{.Names}}",
         ],
+        stdin=subprocess.DEVNULL,  # ADR 0218
         capture_output=True,
         text=True,
         check=False,
@@ -253,6 +254,7 @@ def container_pid(container: str) -> int:
     """
     result = subprocess.run(
         ["docker", "inspect", "-f", "{{.State.Pid}}", container],
+        stdin=subprocess.DEVNULL,  # ADR 0218
         capture_output=True,
         text=True,
         check=False,

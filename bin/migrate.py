@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from agentic_postgres import config, migrations, rendering, runtime_override
+from agentic_postgres import config, container_exec, migrations, rendering, runtime_override
 
 EXIT_CONTRACT = 5
 
@@ -161,7 +161,12 @@ def run_dbmate(mode: str, document: dict, rendered_dir: str, service: str = "dbm
         command.append("--strict")
 
     print(f"migrate: {mode} {service} as {document['database']['roles']['migration_user']}")
-    result = subprocess.run(command, check=False)
+    # Through the discipline (ADR 0218): stdin closed and `-T` after `run`.
+    # dbmate does not read stdin -- rig 30b2 measured that a non-reading child
+    # completes in the shape D1505 recorded -- so this is not what D1505 hit,
+    # and D1505's own cause is still not established (D1544). Closed anyway:
+    # nothing reads it, and a child that cannot reach a terminal cannot stop.
+    result = container_exec.compose_run(command[0], command[1], *command[3:], text=False)
     return result.returncode
 
 

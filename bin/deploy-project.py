@@ -57,6 +57,7 @@ from agentic_postgres import (
     api_surface,
     backup_report,
     config,
+    container_exec,
     database_observation,
     deployed_output,
     edge_credentials,
@@ -182,7 +183,20 @@ def step(text: str) -> None:
 
 
 def run(*command: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, capture_output=True, text=True, check=False)
+    """A general runner: it cannot know what it is running, so it closes stdin.
+
+    ADR 0218. This is the pass-through shape -- the argv is a parameter -- and
+    a pass-through runner with an inherited terminal hands one to whatever it
+    is given. `doctor.py`, `fleet.py`, `restore.py` and `rehearse.py` have
+    closed theirs since D673; this one had not.
+    """
+    return subprocess.run(
+        command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def _establish_directory(path: Path) -> Path:
@@ -489,6 +503,7 @@ def observe_prerequisites(
         # before it had done anything.
         probe = subprocess.run(
             ("docker", "ps", "--format", "{{.Names}}"),
+            stdin=subprocess.DEVNULL,  # ADR 0218
             capture_output=True,
             text=True,
             check=False,
@@ -1742,13 +1757,11 @@ def cluster_instance_uuid(container: str, database: str) -> str:
     whole time. It failed on the first host that ran it and could fail nowhere
     else -- there is no offline path through this function.
     """
-    result = subprocess.run(
-        [
-            "docker", "exec", "-i", container,
-            "psql", "-U", "postgres", "-d", database, "-X", "-qtA",
-            "-c", "SELECT instance_uuid FROM app_private.project_identity",
-        ],
-        capture_output=True, text=True, check=False, timeout=60,
+    result = container_exec.run(
+        container,
+        "psql", "-U", "postgres", "-d", database, "-X", "-qtA",
+        "-c", "SELECT instance_uuid FROM app_private.project_identity",
+        timeout=60,
     )  # fmt: skip
     if result.returncode != 0:
         fail(

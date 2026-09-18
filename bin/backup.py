@@ -64,6 +64,7 @@ from agentic_postgres import (  # noqa: E402
     backup_report,
     backup_schedule,
     config,
+    container_exec,
     deployed_output,
     fleet,
     naming,
@@ -212,7 +213,14 @@ def database_container(document: dict) -> str:
         arguments += ["--filter", value]
     arguments += ["--format", "{{.Names}}"]
 
-    result = subprocess.run(arguments, capture_output=True, text=True, check=False, timeout=60)
+    result = subprocess.run(
+        arguments,
+        stdin=subprocess.DEVNULL,  # ADR 0218
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
     names = [line for line in result.stdout.split() if line]
     if len(names) != 1:
         # A selector that matches nothing and a container that is genuinely down
@@ -242,17 +250,14 @@ def pgbackrest(
     the exec, which is why that is a property worth stating rather than a
     coincidence (D105).
     """
-    command = [
-        "docker",
-        "exec",
-        "-u",
-        POSTGRES_UID,
+    return container_exec.run(
         container,
         "pgbackrest",
         f"--stanza={stanza}",
         *arguments,
-    ]
-    return subprocess.run(command, capture_output=True, text=True, check=False, timeout=timeout)
+        user=POSTGRES_UID,
+        timeout=timeout,
+    )
 
 
 def _relay(result: subprocess.CompletedProcess) -> None:
@@ -286,27 +291,19 @@ def read_archiver(container: str, document: dict) -> dict | None:
     Returns None rather than raising: a repository report is still worth
     printing when the cluster will not answer a second question.
     """
-    result = subprocess.run(
-        [
-            "docker",
-            "exec",
-            "-i",
-            container,
-            "psql",
-            "-U",
-            "postgres",
-            "-d",
-            (document.get("database") or {}).get("name", "postgres"),
-            "-X",
-            "-qtA",
-            "-F",
-            backup_report.ARCHIVER_SEPARATOR,
-            "-c",
-            backup_report.ARCHIVER_QUERY,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
+    result = container_exec.run(
+        container,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        (document.get("database") or {}).get("name", "postgres"),
+        "-X",
+        "-qtA",
+        "-F",
+        backup_report.ARCHIVER_SEPARATOR,
+        "-c",
+        backup_report.ARCHIVER_QUERY,
         timeout=QUICK_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:

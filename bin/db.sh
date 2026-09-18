@@ -180,17 +180,22 @@ main() {
 
   # `docker exec -i`. Without -i stdin is not forwarded, psql reads nothing,
   # and the command exits 0 having executed nothing -- a silent success that
-  # looks identical to a real one.
+  # looks identical to a real one. So `-i` stays, and `< /dev/null` supplies
+  # what it forwards: rig 30a2 measured that the stop needs `-i` AND a child
+  # that reads stdin, and a child reading /dev/null reaches end of file at once
+  # (ADR 0218). The `sql` verb already redirects from the artifact.
   case "${SUBCOMMAND}" in
     status)
       docker exec -i "${container}" psql -U postgres -d "${database}" -X -qtA \
         -c "SELECT 'server ' || current_setting('server_version');" \
-        -c "SELECT 'extension ' || extname || ' ' || extversion FROM pg_extension ORDER BY extname;"
+        -c "SELECT 'extension ' || extname || ' ' || extversion FROM pg_extension ORDER BY extname;" \
+        < /dev/null
       ;;
     identity)
       docker exec -i "${container}" psql -U postgres -d "${database}" -X -qtA \
         -c "SELECT project_key || ' ' || database_name || ' ' || compose_project_name
-              || ' ' || instance_uuid FROM app_private.project_identity;"
+              || ' ' || instance_uuid FROM app_private.project_identity;" \
+        < /dev/null
       ;;
     sql)
       local artifact

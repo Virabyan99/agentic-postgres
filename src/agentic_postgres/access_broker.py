@@ -348,6 +348,7 @@ def container_address(container: str, network: str) -> str:
             f'{{{{ (index .NetworkSettings.Networks "{network}").IPAddress }}}}',
             container,
         ],
+        stdin=subprocess.DEVNULL,  # ADR 0218
         capture_output=True,
         text=True,
         check=False,

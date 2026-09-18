@@ -532,3 +532,55 @@ def test_docker_exec_forwards_stdin(command: Path) -> None:
     for line in source.splitlines():
         if "docker exec" in line and not line.strip().startswith("#"):
             assert "docker exec -i" in line, f"{command.name}: {line.strip()}"
+
+
+def test_every_shell_docker_exec_closes_or_supplies_stdin() -> None:
+    """ADR 0218's shell half, over EVERY shell command, not only these three.
+
+    `test_docker_exec_forwards_stdin` (above) asserts that `-i` is present,
+    because without it psql reads nothing and exits 0 having executed nothing.
+    This asserts the other half of the same line: what `-i` forwards must be a
+    file, never whatever the caller happened to have on stdin.
+
+    Rig 30a2 (Session 30 Run 2) measured that the stop needs BOTH `-i` and a
+    child that reads stdin. `-i` is required here for a measured reason, so the
+    redirect is the only remaining place to close the mechanism.
+
+    Scanned over `bin/*.sh` and `deploy.sh` rather than over a list, so a shell
+    command added later is covered without anybody remembering this rule
+    (D1486: a targeted list cannot see a caller it does not touch).
+    """
+    commands = [*sorted((REPO_ROOT / "bin").glob("*.sh")), REPO_ROOT / "deploy.sh"]
+    assert len(commands) > 10, f"the scan found {len(commands)} shell commands; it should be ~25"
+
+    problems: list[str] = []
+    scanned = 0
+    for command in commands:
+        lines = command.read_text(encoding="utf-8").splitlines()
+        for number, line in enumerate(lines, start=1):
+            if "docker exec" not in line or line.strip().startswith("#"):
+                continue
+            scanned += 1
+            # The statement's neighbourhood, not its backslash continuations:
+            # db.sh's `identity` verb carries a SQL string spanning a raw
+            # newline inside quotes, so the line before its redirect does
+            # not end with a backslash. Read to the end of the statement the
+            # way a person does.
+            terminators = (";;", "esac", "fi", "")
+            window = [line]
+            for follower in lines[number : number + 10]:
+                if follower.strip() in terminators:
+                    break
+                if "docker exec" in follower:
+                    break
+                window.append(follower)
+            block = "\n".join(window)
+            if "< /dev/null" in block or '<"' in block or '< "' in block:
+                continue
+            problems.append(f"{command.name}:{number}: {line.strip()[:90]}")
+
+    assert scanned >= 3, f"the scan matched {scanned} exec lines; it is aimed at nothing"
+    assert not problems, (
+        "these shell `docker exec` lines forward whatever the caller had on stdin "
+        "(ADR 0218):\n" + "\n".join(problems)
+    )

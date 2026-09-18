@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 # ONE authority over it. The alternative is a second literal beside
 # `OPERATIONAL_CONNECTION_HEADROOM` -- two arithmetics over one budget, which is
 # D327 and is the thing ADR 0148 exists to avoid repeating.
-from agentic_postgres import config, migrations, secrets_contract
+from agentic_postgres import config, container_exec, migrations, secrets_contract
 
 # The statements this plane issues are a pure function of the rendered
 # document, and `apg dev` applies the same ones to a disposable cluster (ADR
@@ -83,25 +83,17 @@ def await_cluster(container: str, database: str, *, attempts: int = 60, delay: f
     """
     consecutive = 0
     for _ in range(attempts):
-        probe = subprocess.run(
-            [
-                "docker",
-                "exec",
-                "-i",
-                container,
-                "psql",
-                "-U",
-                "postgres",
-                "-d",
-                database,
-                "-X",
-                "-qtA",
-                "-c",
-                "SELECT 1;",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        probe = container_exec.run(
+            container,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            database,
+            "-X",
+            "-qtA",
+            "-c",
+            "SELECT 1;",
             timeout=30,
         )
         if probe.returncode == 0 and probe.stdout.strip() == "1":
@@ -899,6 +891,7 @@ def main() -> int:
     if (
         subprocess.run(
             ["docker", "inspect", "--format", "{{.State.Running}}", container],
+            stdin=subprocess.DEVNULL,  # ADR 0218
             capture_output=True,
             text=True,
             check=False,

@@ -118,8 +118,18 @@ def require_root() -> None:
 
 
 def docker(*arguments: str, timeout: int = QUICK_TIMEOUT_SECONDS) -> subprocess.CompletedProcess:
+    """Any docker subcommand, with stdin closed (ADR 0218).
+
+    The argv is a parameter, so this cannot know whether it is about to run a
+    child that reads stdin. It closes it for all of them.
+    """
     return subprocess.run(
-        ["docker", *arguments], capture_output=True, text=True, check=False, timeout=timeout
+        ["docker", *arguments],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
     )
 
 

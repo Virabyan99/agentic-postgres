@@ -112,7 +112,10 @@ if [ "${shellcheck_version}" != "${SHELLCHECK_PINNED_VERSION}" ]; then
     "${shellcheck_version:-<none>}" "${SHELLCHECK_PINNED_VERSION}" >&2
   exit 3
 fi
-shellcheck deploy.sh bin/*.sh libexec/*
+# `bin/lib/*.sh` is sourced, not executed, and the glob above does not
+# reach it (Session 30 Run 3). A library nothing lints is a library
+# whose refusal nobody checks.
+shellcheck deploy.sh bin/*.sh bin/lib/*.sh libexec/*
 "$(python_bin)" -m ruff check src bin tests
 "$(python_bin)" -m ruff format --check src bin tests
 bin/lock-dev-deps.sh --check

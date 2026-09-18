@@ -243,7 +243,14 @@ def auth_container(project_key: str) -> str:
         arguments += ["--filter", value]
     arguments += ["--format", "{{.Names}}"]
 
-    result = subprocess.run(arguments, capture_output=True, text=True, check=False, timeout=60)
+    result = subprocess.run(
+        arguments,
+        stdin=subprocess.DEVNULL,  # ADR 0218
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
     names = [line for line in result.stdout.split() if line]
     if not names:
         # The filters are named in the message. A selector that matches nothing

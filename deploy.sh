@@ -18,6 +18,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# D972's refusal, as a sourced function (ADR 0218). Sourced rather than
+# spelled here so that the three commands that keep it print the same
+# sentence; a test compares the library's text to
+# `container_exec.MIXED_TERMINAL_SHAPE_MESSAGE`.
+# shellcheck source=bin/lib/tty-guard.sh
+. "${ROOT_DIR}/bin/lib/tty-guard.sh"
 readonly ROOT_DIR
 
 # The highest session this release can deploy, read from the package rather
@@ -257,9 +264,7 @@ main() {
     # T, nothing applied). Refused here, before root, so the operator learns it
     # from a sentence rather than from a deploy that never returns. Fully
     # non-interactive callers (no terminal anywhere) are not this shape.
-    if [ -t 0 ] && { [ ! -t 1 ] || [ ! -t 2 ]; }; then
-      die 2 "--through-session with stdin at a terminal and stdout or stderr redirected stops at the first docker exec -i under sudo (D972). Run it unredirected; the terminal is the log."
-    fi
+    refuse_mixed_terminal_shape "--through-session"
 
     [ "$(id -u)" -eq 0 ] || die 3 "--through-session requires root: it writes host state."
 

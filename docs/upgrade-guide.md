@@ -547,6 +547,15 @@ streams are not all terminals in the background, the first `docker exec -i`
 stops on `SIGTTIN`, and the deploy waits forever (D972; `deploy.sh` now refuses
 that shape with exit 2). The terminal is the log.
 
+**The class is any product child that reads the terminal** — measured on
+2026-09-18: a child stops only when it reads stdin *and* was handed one, and
+neither half alone does anything. **Since ADR 0218 no product child reads the
+terminal**: every `docker exec` the product runs is built by one helper that
+closes stdin unless it is feeding input, and every shell `docker exec` redirects
+from a file. `deploy.sh` keeps its refusal as a belt, not as the repair. So a
+redirected deploy is refused rather than hung, and a redirected `doctor`,
+`backup` or `db` command simply works.
+
 **How to satisfy that from anywhere but a keyboard at the machine**, which is
 how every other step on this page is run:
 

@@ -98,9 +98,13 @@ and **dropped by `sudo`** unless `--preserve-env=APG_PROJECT` is passed.
   socket** (D1375): the offline gate mode, `apg dev` and anything that runs a
   container are not `op`'s on this host, deliberately (§10).
 - **A human at a terminal runs every `sudo` line.** `sudo` needs a TTY here;
-  a deploy whose output is redirected or piped stops forever (D972), and a
-  `sudo` put in the background with an expired timestamp is stopped rather
-  than run (D1376) — `sudo -v` in the foreground first, then the line.
+  a deploy whose output is redirected or piped is **refused** with exit 2 and a
+  sentence (D972), and a `sudo` put in the background with an expired timestamp
+  is stopped rather than run (D1376) — `sudo -v` in the foreground first, then
+  the line. **Since ADR 0218 no product child reads the terminal**, so the
+  other commands on this page may be redirected freely; the refusal is kept on
+  `deploy.sh` because an operator is better served by a sentence than by a
+  command that works for a reason they cannot see.
 - **`apg-agent`** is the read-only diagnosis account (ADR 0071):
   ```bash
   ssh -i ~/.ssh/apg_agent_ed25519 apg-agent@<host> sudo apg-diag <verb>

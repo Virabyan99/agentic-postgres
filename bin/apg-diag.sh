@@ -332,7 +332,8 @@ print(json.load(open(sys.argv[1]))["database"]["name"])
       die 5 "'${query}' is not an allowlisted query." ;;
   esac
 
-  docker exec -i "${container}" psql -U postgres -d "${database}" -X -qA -c "${sql}"
+  docker exec -i "${container}" psql -U postgres -d "${database}" -X -qA -c "${sql}" \
+    < /dev/null
 }
 
 verb_generation() {
