@@ -145,6 +145,26 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         # is the honest verdict rather than the convenient one.
         "project_set_release_record",
         "release_reading",
+        # Session 30 (ADR 0218, ADR 0219). FOUR, which is one more than
+        # any session has declared, and each is a property of a CHECKOUT
+        # rather than of a running system. `exec_discipline` is an argv and
+        # an AST scan over this tree. `release_reading_ref` is a command
+        # that reads `git` in a clone and prints; its subject IS the
+        # checkout. `contract_compile_output` is what a command writes into
+        # a temporary directory and what two pages in this repository say.
+        # `suite_shape` is the shape of this suite, which no deployment has
+        # an opinion about. A deployment would answer none of the four
+        # differently, and a claim about them that waited for a trip would
+        # wait for a measurement nobody could take.
+        #
+        # The session's FIFTH claim is deliberately not here.
+        # `studio_tenant_read` is about whether a running plane keeps two
+        # subjects' rows apart through Studio's forwarder, and a checkout
+        # cannot say. It is `not_run` until the trip sweeps (D1543).
+        "exec_discipline",
+        "release_reading_ref",
+        "contract_compile_output",
+        "suite_shape",
     }
 )
 
@@ -339,6 +359,19 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "project_set_release_record": ("DX-FOLLOWS-001",),
     "agent_record_retention": ("AGT-RETAIN-001",),
     "release_reading": ("REL-READ-001",),
+    # Session 30 (ADR 0216-0220). Five claims, landing with the constant
+    # (D690), four offline and one host. No claim is added for the
+    # signing-key rotation this session PERFORMS for the first time:
+    # `bootstrap_identity`, `api_authorization` and
+    # `credential_rotation_planes` already exist, the cutover moves ONE of
+    # their nine node ids and closes none of them (D1469), and a claim
+    # about an act having been carried out would be a claim about the
+    # operator rather than about the system (ADR 0163).
+    "exec_discipline": ("OPS-EXEC-001",),
+    "release_reading_ref": ("REL-READ-002",),
+    "contract_compile_output": ("CAP-COMPILE-001",),
+    "suite_shape": ("EVD-SHAPE-001",),
+    "studio_tenant_read": ("STU-QUERY-002",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

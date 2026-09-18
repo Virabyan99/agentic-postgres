@@ -400,7 +400,77 @@ from pathlib import Path
 #: down. It does not inherit D1401, and that is the first time in four
 #: releases: the tag now waits for the deploy rather than the deploy for the
 #: tag (D1425).
-CURRENT_SESSION = 28
+#:
+#: **Session 30 moves it to 30, and 29 is skipped the way 19, 26 and 27 are**
+#: (D1063, D1514). That session took the trip that deployed 1.7.0, swept it and
+#: tagged it; it built no plane and registered no requirement, so it has no
+#: claim to introduce and the gap is the record.
+#: `claims_through_session(30)` inherits every earlier session's claims
+#: unchanged.
+#:
+#: **Five requirements and five claims**, and the split is four offline to one
+#: host. `OPS-EXEC-001` (`exec_discipline`): every `docker exec` and every
+#: `compose.sh run` this product performs is built by one function and runs
+#: with stdin closed unless input is supplied, and an AST scan over the tree
+#: finds no site outside it (ADR 0218). `REL-READ-002` (`release_reading_ref`):
+#: `apg release-reading --ref REF` reads the commit a ref resolves to rather
+#: than the working tree, which is what the tag procedure needs, because the
+#: commit a tag goes on is behind `HEAD` on every trip (D1425, ADR 0219).
+#: `CAP-COMPILE-001` (`contract_compile_output`): `mcp-contract.sh compile
+#: --output PATH` writes only after the compile succeeded, and no documented
+#: compile line redirects with a `>` that would truncate its target before the
+#: command ran (D1359, D1540). `EVD-SHAPE-001` (`suite_shape`): no local hides
+#: a module-level helper, and every deployment proof is a node id of some
+#: requirement or is named in a list compared for equality (D1509, D1236).
+#: Those four are DECLARED OFFLINE (ADR 0202): each is a property of this
+#: checkout -- an argv, a `git` read, a file this command writes, the shape of
+#: this suite -- and a deployment would answer none of them differently.
+#:
+#: **`STU-QUERY-002` is a HOST claim and is deliberately not declared**
+#: (`studio_tenant_read`). It registers a proof that has existed since Session
+#: 24, belonged to no requirement, and errored at setup on every sweep since:
+#: its fixture created a stranger with an empty scope array that migration 0011
+#: refuses. All three Studio claims read `passed` while it never ran, which is
+#: what a proof belonging to no claim costs (D386, D1236). Whether a human's
+#: rows and a stranger's stay apart through Studio's forwarder on a RUNNING
+#: deployment is not something a checkout can answer, so it is `not_run` until
+#: this session's trip sweeps -- and the trip is its first execution.
+#:
+#: **`VERSION` moves to `1.8.0`.** What moved: one new internal module
+#: (`container_exec`) and one sourced shell library (`bin/lib/tty-guard.sh`)
+#: through which every container exec in the product now runs; two new options
+#: on two existing commands, `release-reading --ref REF` and `mcp-contract.sh
+#: compile --output PATH`; two new contract modules that guard the suite's own
+#: shape; and a documentation repair that stops two pages telling an adopter to
+#: truncate their capability contract. **No manifest, outputs, capability, lock
+#: or secret schema moves, no released migration is added, and no command gains
+#: or loses a verb.** A project that adopts this release deploys the same
+#: containers with the same migrations applied, and an operator supplies
+#: nothing they did not supply for 1.7.0.
+#: **ADR 0162 prices it a MINOR, and this is the first release where that price
+#: is a judgement rather than a reading** (D1561). The product's own command was
+#: asked: rig 30e rendered `project.example.yaml` from `8c61309`, the deployed
+#: 1.7.0 commit, in a throwaway worktree and from this one, and ran `upgrade
+#: plan` between the two documents -- `bump minor`, **`requires patch`**,
+#: verdict `ok`, `reasons []`, `changes []`, and exactly one leaf differs,
+#: `template_version`. `requires patch` is correct and is not a disagreement:
+#: every one of ADR 0162's eight rows names something a RENDERED DOCUMENT shows
+#: -- a migration, an API operation, a capability, a secret, a document schema,
+#: an operator manifest -- and two new options on two existing commands show up
+#: in no document at all, so by the table this release is *implementation only*.
+#: What `requires` reports is the FLOOR: the smallest bump that permits the
+#: change, which is what an operator has to do to take it. Nothing.
+#: The minor is chosen above that floor, and the precedent is this project's
+#: own: `1.3.0` shipped `apg dev` and `1.6.0` shipped `apg completion` and `apg
+#: dx-record`, each priced a minor with the same one-leaf reading and the
+#: upgrade guide's own words -- *a minor a deployment cannot see*. A release
+#: that gives an operator something new to type is a minor even when no
+#: rendered document moves, and bumping above the floor never costs anybody
+#: anything. **This session takes a host trip**, so unlike 1.6.1, 1.6.2 and
+#: 1.7.0 the class is confirmed against a DEPLOYMENT in the same session: Run
+#: 7's `upgrade plan` on both projects, before the deploy, and a `major`
+#: required there is a stop condition rather than a number to write down.
+CURRENT_SESSION = 30
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

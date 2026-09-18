@@ -9,11 +9,13 @@ sourced guard, the class at **0** unguarded sites, 11/11 mutations killed
 (D1553–D1554 opened); **Run 4** `release-reading --ref` and `compile --output`
 (D1555–D1556 opened; two registry entries deferred to Run 6); **Run 5** the two
 suite-shape guards, five shadows repaired, 23 orphans frozen, three counts
-(D1557–D1558 opened). §1 is D1537–D1548 at planning, each read from the
+(D1557–D1558 opened); **Run 6** the bump — `VERSION` 1.8.0 and
+`CURRENT_SESSION` 30, five requirements and five claims, the Session 30
+gate, and the redeploy-before recipe the trip needs (D1559–D1562 opened). §1 is D1537–D1548 at planning, each read from the
 tree at `f89b03a`. Run 1 measured D1546 and added **D1549**; Run 2 rewrote
 D1542, D1544 and D1548 and added **D1550–D1552**; Run 3 added **D1553–D1554**;
-Run 4 added **D1555–D1556**; Run 5 added **D1557–D1558**; **next free is
-D1559**, and the runs add theirs below.
+Run 4 added **D1555–D1556**; Run 5 added **D1557–D1558**; Run 6 added
+**D1559–D1562**; **next free is D1563**, and the runs add theirs below.
 ADRs **0216–0220** are this session's, all written in Run 2 and all Accepted;
 **0220 went to the mirror fold** (D1549/D1546), not to Run 4, because D1540's
 condition was not met (D1550). **0221 is reserved, conditionally, by Run 4.**
@@ -190,7 +192,8 @@ Six columns. Rows D1537–D1548 were read from the tree on 2026-09-18 at
 the measurement and rewrites the row with the numbers. **D1546 was rewritten by Run 1 with what it measured, and D1549 is Run 1's
 own. Run 2 rewrote D1542, D1544 and D1548 with what its rigs measured and
 added D1550–D1552. Run 3 added D1553–D1554, Run 4 D1555–D1556, Run 5
-D1557–D1558. Next free number after this table is D1559.**
+D1557–D1558, Run 6 D1559–D1562. Next free number after this table is
+D1563.**
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -216,6 +219,10 @@ D1557–D1558. Next free number after this table is D1559.**
 | **D1556** | This plan §2's proposed test for `REL-READ-002`: *"`--ref HEAD` → the same bytes as no argument"*, and ADR 0219's decision 5: *"the first block's label reads `ref` when one was given"*. | **The two cannot both hold, and the label is the point.** `--ref HEAD` and no argument name the same commit and report the same facts, but the first block reads `Where the ref HEAD stands` against `Where HEAD stands`, and `tags on it` against `tags on HEAD`. D1513's whole complaint is that a reading which does not name its subject cannot be checked afterwards; a `--ref` that printed nothing to say it was given would reintroduce exactly that. | **The label wins.** `test_the_reading_names_the_ref_it_read` asserts `the ref HEAD` appears with a ref and does not without one; the no-argument form is unchanged byte for byte, which is what ADR 0219 actually promises. The plan's phrase *the same bytes as no argument* is replaced by *the same facts*. **A second reading of `unchanged` was also wrong**: anchoring the ranges to the resolved SHA left the output identical and changed the ARGV, and `test_the_command_finds_the_tag_that_carries_the_version_not_the_one_on_head` — which drives `observe()` through a fake git keyed on argument tuples — went red. With no ref the anchor is the literal `HEAD`, and `describe`/`log` take the ref only when there is one. | Two proposed assertions in one row, both true-sounding, both slightly wrong about what *unchanged* covers. The fake-git test caught the second within a minute of the change; nothing but reading caught the first. | **0219** |
 | **D1557** | D1541 (rewritten from D1536): *"Three edits in Run 5: both *31 released* → **33**, `docs/project-isolation.md:86-87` *fifteen parsed semantic fields plus all thirteen derived role names* → **eighteen JSON pointers***". | **None of the three is what the row describes.** (a) Both *31 released* occurrences are **measurement CONDITIONS**, not claims about today: `capacity.py:260` is the `conditions` tuple of the `apg dev up` timing and `dev-environment.md:177` is that measurement's prose. Rewriting either would state that a sample was taken against a tree it was not. (b) The arithmetic is wrong in **both** terms — the tree holds **33 released and 3** in the example set, so a re-run applies **36**, not 33. (c) `docs/capacity-envelope.md` is **generated** and says *Do not edit by hand*; the row implies editing it directly, which the next `render-capacity-envelope.py --write` would undo. (d) The isolation sentence is wrong in **both** halves: `ISOLATED_FIELDS` is **18** pointers and a rendered document carries **14** roles (measured in both fixtures), not fifteen and thirteen. (e) **`evidence.py:271`'s own docstring carries the stale thirteen** — a stale number in the code, which is the one place nobody was grepping. | The two measurement conditions are **annotated, never rewritten**: each now says what the counts were when sampled and what the tree holds now. `capacity.py` is the edit and the envelope is regenerated from it. `docs/project-isolation.md:86` says *eighteen* and *fourteen* and **names `evidence.ISOLATED_FIELDS`** rather than repeating a count, `:96` says fourteen, and `evidence.py:271` is corrected. | D954's direction, one turn further: a number in prose that a program stopped agreeing with is found by grepping the OLD number — and then each hit has to be **read**, because two of them were records of a measurement and one was a generated artefact. A row that says *change 31 to 33 in two places* is a row that has not opened the files. | — |
 | **D1558** | Run 5 step 2: *"the local `refused` → `answer` (and its three uses in the two asserts)"* — a rename described as bounded by the lines the plan had read. | **One of the five renames had a reader twenty lines out of view, and it hung the targeted run for ten minutes.** `test_storage_client.py`'s `test_a_cancelled_caller_does_not_leak_its_permit` binds a `Blocking` stub whose `head_object` **busy-waits** on `self.release`; the line that sets it, `adapter.release = True`, sits twenty lines below the binding inside a nested `async def`. Renaming the binding to `blocking` left that line naming a variable that no longer existed, so the loop never ended: pytest sat in state `Sl` with no child process, no container running and no output for 535 s until a `timeout` would have killed it. | Repaired; the module runs in **0.41 s**. Every one of the five renames was then re-grepped over its whole module rather than over the lines on screen, and the remaining `adapter` hits are the module-level helper at `:66` and its legitimate callers — which is the function that was being shadowed, so the rename is complete and correct. | **D979, broken by the executor in the act of applying it.** The rule is *grep every reader before repairing a name*, and the repair here was itself a renaming. A shadow repair is exactly the shape that hides a reader, because the name being renamed is one the module uses for something else. A hang with no output and no child process is also a reminder that a targeted run's silence is not progress. | — |
+| **D1559** | §2's `CAP-COMPILE-001` row names `test_session12_documented_path.py::test_no_documented_compile_line_redirects_its_output` as one of its node ids — *(new: no line matching `mcp-contract.sh compile` in `CURRENT_PATH_DOCUMENTS` is followed by a `>` on it or on its continuation)*. | **Run 4 repaired both documented lines and wrote no guard.** `README.md:551` and `docs/new-team-member.md:272` both pass `--output` now, and `git grep -n redirect tests/contract/test_session12_documented_path.py` finds nothing: the proof was proposed and never written. Registering the requirement as §2 words it would have registered a clause whose reader does not exist — a repair made in prose, held by nothing, in the documentation this project has repaired the same way twice (D1359 is itself the second occurrence). | **Written here, with its control, before the entry was registered.** The scan joins backslash continuations, because both lines are written over two physical lines and the redirect was on the SECOND — a scan reading physical lines would find no `>` on the line carrying the command and report both pages clean. A redirection is matched as an OPERATOR (`(?<![\w<])>>?\s`) and not as a character: both lines write `projects/<slug>/contracts/…`, and the first version of the control failed on its own placeholder, which is what an anti-vacuity control is for. Battery **4/4 killed**: the README's redirect restored, the guide's `--output` removed, the continuation joining disabled, and the command regex made to match nothing — each with `test_the_readme_sections_are_in_the_order_an_adopter_walks` green beside it as the control the mutations cannot reach. | D816 and D1247's shape in a plan rather than in the tree: a requirement's TEXT is a promise, and the run that lands the requirement is the last moment anybody compares it against what exists. A node id proposed in a plan is not a proof; it is a note that one is owed. | — |
+| **D1560** | §2's `OPS-EXEC-001` row names `test_printed_commands.py::test_a_deploy_with_a_terminal_on_stdin_and_redirected_output_is_refused` *(the existing D972 proof, `:107-152`, unchanged)* among its node ids, together with `test_cli_contract.py::test_every_command_in_bin_is_covered_by_this_module`. | **`tests/contract/test_printed_commands.py` is `p1`.** Its `pytestmark` is `[contract, p1]`, and the sweep that REPORTS every offline claim runs `-m "p0 and not future and not live_host and not external"`. Registering a p1 node id under a claim declared offline turns `test_every_offline_claims_proof_is_swept_by_the_gate_that_reports_it` red — which is **D1242 exactly**, the guard written because a P0 requirement's proof sat in a p1 module and no sweep collected it. The proof is real and it passes; what it is not is a node id an offline half can carry. | **Not registered, and the clause is not dropped.** `deploy.sh` refusing the mixed terminal shape is proved inside `OPS-EXEC-001` by two p0 proofs in `test_container_exec.py` — `test_the_shell_library_and_the_module_print_the_same_sentence` asserts the refusal's bytes are identical on both sides of the move, and `test_the_guard_refuses_a_terminal_on_stdout_with_only_stderr_redirected` drives the sourced guard itself. The D972 proof stays where it is, unchanged and still run by CI. The two general guards are also left out: neither is about this requirement, and a requirement that claims a suite-wide scan as its own proof reports on something it does not own. | A plan may name a node id; only the tree knows what MARK it carries, and the mark decides which sweep can report it. `--collect-only` answers *does this exist*; `--collect-only -m <the gate's selector>` answers *will the half that reports it see it*, and they are different questions (D1240, D1242). | — |
+| **D1561** | §5 Run 6: *"`bin/upgrade.sh plan … --json` → expect `bump minor`, `requires patch` or `minor`, `OK`, `reasons []`, **one leaf** (`template_version`). A `major` is §9's stop."* | **Measured, and the answer is `patch`.** Rendering `project.example.yaml` from `8c61309` in a throwaway worktree and from this bump: `bump minor`, `requires patch`, `verdict ok`, `reasons []`, `changes []`, `operator_digests_moved []`, **one leaf, `template_version`, `1.7.0 -> 1.8.0`**. No stop condition is met. But the reason `requires` is `patch` is worth more than the verdict: **ADR 0162's table has no row for a command gaining an OPTION.** Its eight rows price a migration, an API operation, a capability, a secret, a document schema and an operator manifest — every one of them something a rendered document shows — and `release-reading --ref` and `compile --output` show up in no document at all. By the table this release is *implementation only*, which is a **patch**. | **Reported, not reconciled.** `VERSION` moves to `1.8.0` as the plan fixes it: bumping ABOVE what is required is always permitted, and two new options an operator can type is new functionality, which is what a minor means everywhere outside this table. The number is therefore a **choice** and the plan's Done says so, rather than a computation the product performed. No ADR is written: 0162 decides what an upgrade COSTS AN OPERATOR, and the answer here — nothing — is correct. What is missing is a row saying that a command gaining an option is priced by hand, and §10 carries it for the session that next wants one. | The command answered the question it was asked, and the question was not the one the version number was about. `requires` is a floor, not a verdict on the release — and a run that reads a floor as agreement has folded two readings into one (ADR 0195). | 0162 |
+| **D1562** | §10: *"`--rotated-from-file` is accepted by the gate and undocumented in its usage block … The 30 gate inherits it; **Session 31's derivation adds the line**."* | **True, and the deferral was made without knowing which run would hold the file open.** `bin/session-30-check.sh:655` accepts the flag, `:1472` exports `APG_ROTATED_FROM_FILE` from it, and `:1412` requires the file to exist — and neither the synopsis nor the option list names it. Run 6 rewrote that usage block **whole**, which is the one act in this session that reads every line of it. | **Answered here, one session early.** The synopsis gains `[--rotated-from-file FILE]` and the option list gains its paragraph, which says what it admits and that every gate since Session 5 accepted it while no `--help` named it. Session 31's §10 row is closed rather than inherited. | A deferral is a bet on when the cost will be lowest, and the cost of this one was lowest at the exact moment the deferring plan did not model: the rewrite it ordered in the same run. **A flag the parser takes and `--help` does not name is a declaration with no reader** (D816, D1247) in the direction that costs a claim — an operator who HAS performed that rotation cannot learn the gate would read their file. | — |
 
 ---
 
@@ -1646,7 +1653,8 @@ redeploy, each its own sheet.
 | **`apg-diag` cannot read `auth`, `storage` or `mcp` logs** (D380) | The allowlist is six services. Session 34 widens it by one service with a test if the connector route's log must be readable by the agent account. |
 | **`--rotated-from-file` is accepted by the gate and undocumented in its usage block** | Found while reading `session-28-check.sh:627-631` against `:279-280`. The 30 gate inherits it; Session 31's derivation adds the line. |
 | **The retired signing key's JWK is kept on the host and no sweep has read it** | `/home/op/s30-retired-<key>-jwk.json` after Run 8; the sweep that passes `--rotated-jwt-from-file` moves one node id and belongs to the session that performs the other three rotations. |
-| **An operator has no documented way to write a sentinel row** (if Run 6 finds none) | D1547's consequence; a `bin/api.sh` operation or a documented `db.sh` path is Session 31's if `deployment_convergence` is to be re-run on every trip. |
+| **An operator CAN write a sentinel row and cannot remove one** | D1547, answered in Run 6 and half-open. `bin/dev-token.sh --role authenticated -- bin/api.sh create-note --title …` writes it through the product's own surface and is now Sheet A2's step 2. There is **no `delete-note`**, and a human may not run SQL through a product surface, so Sheet A4's cleanup is a root `docker exec … psql -c DELETE` — outside every product surface, on a production cluster, typed by a person. A trip that re-takes `deployment_convergence` every time leaves a row behind every time unless somebody does that. Session 31's, if the claim is to be routine. |
+| **ADR 0162 prices no row for a command gaining an option** | D1561. Its eight rows each name something a RENDERED DOCUMENT shows, so `release-reading --ref` and `compile --output` price as *implementation only* — a **patch** — and `upgrade plan` said exactly that while `VERSION` moved a minor. The verdict is right about what the upgrade costs an operator and silent about what the release added. A row saying an option is priced by hand, or a decision that it is always a patch, belongs to the session that next adds one. |
 | **`KNOWN_UNREGISTERED`** (if non-empty) | Each entry names its session; the tuple shrinks only. |
 | **The mirror's per-pass transport flake is upstream and no repair here removes it** | D1546: one object per pass fails `ContentLength=<n> with Body length 0` reading from R2, ~1 in 3,700, on roughly every other pass. D1549's repair makes the verb report it correctly; it does not stop it. If the rate rises, the reading is `mc`'s line in the unit's journal, which `apg-diag`'s allowlist does not cover (D380's neighbourhood). Nobody has asked Cloudflare or Backblaze which side truncates. |
 
@@ -1727,20 +1735,69 @@ mirror line reading today's copy; `bin/fleet.sh` → 2 projects; `bin/backup.sh
 /home/op/kit-<date>-pre …` (the exact line from `bin/dr-kit.sh --help` on the
 host, printed on the sheet by the agent).
 
-**A2 — the sentinel, then alpha** (`sudo`): _(Run 6 writes the sentinel
-recipe here — the exact commands that create one `app.notes` row on alpha
-with title `s30-redeploy-sentinel-<date>`, then)_ `sudo python3 -c "…"` that
-writes `/root/s30-redeploy-before.json` as `{"sentinel_title": "<that
-title>", "generation_id": "<from /var/lib/agentic-postgres/secrets/alpha-
-dev/active-secret-generation.json>"}` mode 0600 — the agent prints the exact
-`python3 -c` on the sheet; then `script -q -e -c "sudo ./deploy.sh --host
-host.yaml --project project.alpha.yaml --capabilities capabilities.yaml
---through-session 30" /home/op/s30-deploy-alpha.txt` → exit 0; `sudo
-bin/migrate.sh --project project.alpha.yaml --runtime status` **at the
-terminal, nothing after it** → 33 `[X]`, `Pending: 0`; `sudo docker ps
---format '{{.Names}} {{.Status}}' --filter label=apg.project.key=alpha-dev`
-→ **no container younger than the deploy except none** (ADR 0155: no mount
-moved); `sudo bin/doctor.sh --project alpha-dev` → 11 ok.
+**A2 — the sentinel, then alpha** (`sudo`). **Written in Run 6 from the
+proof that reads the file** (`tests/deployment/test_session11_operations.py:
+355-430`) **and the two `--help` pages it needs**, never from memory. Steps
+1–5 produce the file the sweep's `--redeploy-before-file` reads; step 6 is
+the deploy and **has nothing after it**. `OUT_A` below is
+`/etc/agentic-postgres/projects/alpha-dev/outputs.json`, typed in full.
+
+**If any of steps 1–5 does not print what it must, STOP and do not run step
+6.** The file is read at the SWEEP and not at the deploy, so a deploy taken
+without it cannot be turned into one that had it; the only repair is another
+deploy, and §9 says not to take one to make a claim move.
+
+1. **The title, chosen once and written on this sheet**, with the trip's own
+   date so that a second trip cannot count the first one's row:
+
+       s30-redeploy-sentinel-<YYYY-MM-DD>
+
+2. **The row, through the product's own surface** (D1114). `api.create_note`
+   derives ownership from the request identity, which is why it is an RPC and
+   not a table write; the token reaches `api.sh` through the environment and
+   through nothing else, and no option prints it:
+
+       sudo bin/dev-token.sh --project-outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json --role authenticated --ttl-seconds 120 -- bin/api.sh --project-outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json create-note --title s30-redeploy-sentinel-<YYYY-MM-DD>
+
+   Must print the created note as JSON carrying **that exact `title`**. The
+   proof counts `app.notes WHERE title = '<sentinel_title>'` and expects
+   **1**, so a second run of this line breaks the proof rather than helping
+   it.
+
+3. **The generation that is active NOW**, before the deploy:
+
+       sudo cat /var/lib/agentic-postgres/secrets/alpha-dev/active-secret-generation.json
+
+   Write the `generation_id` on the sheet. **This is the control's whole
+   subject**: a deploy that did nothing preserves every row perfectly, so the
+   proof that the redeploy RAN is that this id is *different* afterwards
+   (D509).
+
+4. **The file**, root-owned, 0600, with exactly the two fields the proof
+   reads — it asserts each is truthy and **fails the fixture rather than
+   skipping** when one is missing:
+
+       sudo python3 -c 'import json,pathlib; p=pathlib.Path("/root/s30-redeploy-before.json"); p.write_text(json.dumps({"sentinel_title":"s30-redeploy-sentinel-<YYYY-MM-DD>","generation_id":"<the id from step 3>"})); p.chmod(0o600)'
+
+5. **Read it back**, because step 4 wrote it and nothing has checked it:
+
+       sudo cat /root/s30-redeploy-before.json
+
+   Both fields present and non-empty, the title byte-for-byte the one step 2
+   printed.
+
+6. **The deploy**, at the terminal, **nothing after this line**:
+
+       script -q -e -c "sudo ./deploy.sh --host host.yaml --project project.alpha.yaml --capabilities capabilities.yaml --through-session 30" /home/op/s30-deploy-alpha.txt
+
+   → exit 0.
+
+Then the reads: `sudo bin/migrate.sh --project project.alpha.yaml --runtime
+status` **at the terminal, nothing after it** → 33 `[X]`, `Pending: 0`
+(**unchanged — this release adds no migration**); `sudo docker ps --format
+'{{.Names}} {{.Status}}' --filter label=apg.project.key=alpha-dev` → **no
+container younger than the deploy** (ADR 0155: no mount moved); `sudo
+bin/doctor.sh --project alpha-dev` → 11 ok.
 
 **A3 — beta** the same with `project.beta.yaml`; ledger 33 + 2, `Pending:
 0` twice.
@@ -1751,9 +1808,21 @@ and beta; the agent confirms both name the new `source_commit` **before**
 this line is issued (D1510): `setsid nohup bash /home/op/g30-host.sh
 > /dev/null 2>&1 < /dev/null &` (the script holds the full `session-30-
 check.sh --mode host` line from Run 7 step 6, every path absolute); ~15 min;
-`cat /home/op/g30-host.exit` → 0 or 5; then the sentinel row removed by the
-recipe's cleanup line; `bin/dr-kit.sh export … --output /home/op/kit-<date>-
-post`.
+`cat /home/op/g30-host.exit` → 0 or 5; then **the sentinel row removed**,
+which takes two lines because **no product surface deletes a note** —
+`bin/api.sh` has `create-note` and no counterpart, and a human may not run SQL
+through a product surface, so the removal is the superuser's, exactly as the
+proof's own `psql` fixture reads it (§10 carries the gap):
+
+    sudo python3 -c 'import json; d=json.load(open("/etc/agentic-postgres/projects/alpha-dev/outputs.json"))["database"]; print(d["container"], d["name"])'
+    sudo docker exec <container> psql -U postgres -d <name> -X -c "DELETE FROM app.notes WHERE title = 's30-redeploy-sentinel-<YYYY-MM-DD>'"
+
+**No `-i`** on that `docker exec`: the statement is in the argv, nothing is
+fed on stdin, and `-i` would leave the child holding the terminal — which is
+ADR 0218's whole subject. The names are read from the deployed document rather
+than derived from a label, because the document is what the proof reads
+(`document["database"]["container"]`). Expect `DELETE 1`. Then `bin/dr-kit.sh
+export … --output /home/op/kit-<date>-post`.
 
 ### Sheets B and C — Run 8, the rotation (alpha; then beta after alpha reads `steady`)
 

@@ -124,8 +124,6 @@ def test_no_deployment_proof_calls_a_command_module_fixture() -> None:
 #: a list shorter is a requirement nobody reviewed. Session 31 owns the triage
 #: (D1542, and the stage plan's open items).
 KNOWN_UNREGISTERED: tuple[str, ...] = (
-    # Session 30 registers this one as STU-QUERY-002 in Run 6's bump commit.
-    "tests/deployment/test_session24_studio.py::test_the_query_view_shows_the_human_their_own_rows_and_not_anothers",
     # --- Session 31 owes these twenty-two a requirement each -----------------
     "tests/deployment/test_session11_operations.py::test_a_malformed_request_id_header_does_not_destroy_the_write",
     "tests/deployment/test_session12_isolation_matrix.py::test_the_classifier_can_tell_the_categories_apart",

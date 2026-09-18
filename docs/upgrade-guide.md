@@ -14,7 +14,7 @@ upgrade surface the product has is `bin/upgrade.sh` (`check`, `plan`,
 `verify`) and `./deploy.sh --through-session N`; what follows is what a person
 does around them.
 
-> **This page is part of release `1.7.0`.** It describes the commands that
+> **This page is part of release `1.8.0`.** It describes the commands that
 > release ships and the sequence a trip on that release executed. A release
 > that moves `VERSION` and does not move this line is a release whose upgrade
 > procedure describes a release that no longer exists, which is what happened
@@ -94,6 +94,7 @@ schema versions that release accepts.
 | 1.6.1 | 25 | 2026-09-16 | 32 | v18 | 1–6 | documentation repairs from an adopter's 1.0.0→1.6.0 upgrade, and the product defects it exposed. **A patch**: no schema moves, no migration is added, no command gains a verb. `CURRENT_SESSION` stays 25 |
 | 1.6.2 | 25 | 2026-09-16 | 32 | v18 | 1–6 | what 1.6.1's tag missed by one commit: `freeze-lock`'s looping remedy, the *10 ok* precondition, and `docs/upgrade-findings-response.md`. **A patch**, `CURRENT_SESSION` stays 25 |
 | 1.7.0 | 28 | 2026-09-17 | 33 | v18 | 1–6 | migration 0033 (the agent record's two prunes and its size reading, granted to nobody and called by nothing); `apg release-reading`; **a project's lock moves to schema 3** and records whether its `follows_release_version` was computed or declared (ADR 0210) — a schema-2 lock still reads, as `computed`. `CURRENT_SESSION` goes 25 → 28; 26 and 27 registered nothing. **A minor**: no manifest, outputs, capability or secret schema moves, and `upgrade plan` between a 1.6.2 render and a 1.7.0 one shows **one leaf differing, `template_version`** |
+| 1.8.0 | 30 | 2026-09-19 | 33 | v18 | 1–6 | a container-exec discipline (ADR 0218): every `docker exec` and every `compose.sh run` the product performs is built by one function and runs with stdin closed unless input is supplied, so a `sudo` product command under a redirect cannot stop. `apg release-reading --ref REF` (ADR 0219) and `bin/mcp-contract.sh compile --output PATH`, which no longer asks you to truncate your own contract with a `>` (D1359). Two guards over the suite's shape. `CURRENT_SESSION` goes 28 → 30; 29 took the trip that tagged 1.7.0 and registered nothing. **No migration, no schema move, and no command gains or loses a verb**: a redeploy recreates nothing whose mounted content did not move (ADR 0155), so expect the ledger unchanged at 33 and the verifiers' containers to keep their ages |
 
 A row's *what an upgrade meets* is what the trip that deployed it recorded in
 its plan's §5 *Done* paragraph. **A project manifest below the newest schema
@@ -539,7 +540,7 @@ Its sequence is `bin/rotate-signing-key.sh --help`'s seven steps and its
 
 ```bash
 sudo ./deploy.sh --host host.yaml --project project.alpha.yaml \
-     --capabilities capabilities.yaml --through-session 28
+     --capabilities capabilities.yaml --through-session 30
 ```
 
 Nothing after it: no `> file`, no `| tee`. `sudo`'s pty puts a command whose
@@ -773,7 +774,7 @@ manifest that moved *with* an otherwise-minor release);
 a generated client's `init()` will answer `stale_contract` naming both
 digests, which is the client refusing to run against a surface it was not
 generated from, ADR 0204); a secret that gains a **required** member (put the
-value at the provider by hand, `materialize-secrets.sh --session 28`, and
+value at the provider by hand, `materialize-secrets.sh --session 30`, and
 plan again — no command in this repository writes a provider value, D249);
 `document_schema_needs_operator_input` (the deployed document's migrator
 needs a value only you hold; the plan says which).

@@ -16,7 +16,7 @@
 export const CONTRACT = {
   restContractId: "notes-tasks-v1+example-note-embeddings-v1",
   agentContractId: "notes-tasks-agent-v1+example-note-embeddings-agent-v1",
-  templateVersion: "1.7.0",
+  templateVersion: "1.8.0",
   clientVersion: "1.0.0",
   mergedSurfaceSha256: "4e10c7cc597057c08af690fb7e76394cbd9cf8a0e9e9d5098931714a880fdd40",
   restOpenapiSha256: "808ac715c09aeebc382dd5afc886c1680fe2ea9870e729b9d34a623dee8d18de",

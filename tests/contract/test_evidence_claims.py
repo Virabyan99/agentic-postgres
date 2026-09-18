@@ -1093,6 +1093,15 @@ CLAIM_INTRODUCED_IN = {
     "project_set_release_record": 28,
     "agent_record_retention": 28,
     "release_reading": 28,
+    # Session 30 (ADR 0216-0220). Four offline and one host, and 29 is
+    # absent from this table the way 19, 26 and 27 are: it took the trip
+    # that deployed, swept and tagged 1.7.0 and registered nothing, so it
+    # has no claim to introduce and the gap is the record (D1063).
+    "exec_discipline": 30,
+    "release_reading_ref": 30,
+    "contract_compile_output": 30,
+    "suite_shape": 30,
+    "studio_tenant_read": 30,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

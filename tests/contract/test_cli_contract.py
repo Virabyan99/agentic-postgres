@@ -154,6 +154,15 @@ SHELL_COMMANDS = (
     # claims; its host mode is Session 29's, because the migration this release
     # adds is applied by the deploy that trip performs.
     "bin/session-28-check.sh",
+    # Session 30 (ADR 0216-0220). Derived from 28's by diff. 29 has no gate
+    # and never will, and for a reason the earlier gaps do not carry: it
+    # took the trip that deployed, swept and tagged 1.7.0, and a trip writes
+    # the evidence of the session whose release it deploys rather than one
+    # of its own (D1063, D1514). Its offline mode writes a half reporting
+    # FOUR claims -- more than any session has declared -- and its host mode
+    # is this session's own trip, which passes `--redeploy-before-file` for
+    # the first time since Session 11 registered the claim it admits.
+    "bin/session-30-check.sh",
     "bin/smoke-test.sh",
     # Session 24 (ADR 0205). A loopback client of a deployment's own
     # surfaces, holding the human's token in one process and handing the

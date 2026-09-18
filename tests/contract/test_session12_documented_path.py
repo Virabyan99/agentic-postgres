@@ -464,3 +464,131 @@ def test_the_readme_sections_are_in_the_order_an_adopter_walks() -> None:
         f"a section that is not part of the adopter's path appears inside it: "
         f"{headings[: len(ADOPTER_WALK)]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# A documented compile line (D1359, D1540, D1559 -- CAP-COMPILE-001)
+# ---------------------------------------------------------------------------
+
+#: The command whose documented lines used to truncate their own target.
+#:
+#: `>` opens its target for writing BEFORE the command runs, so every refusal
+#: from `bin/mcp-contract.sh compile` left a 0-byte contract behind and the
+#: documentation then told the reader to delete it. Run 4 of Session 30 gave
+#: the command `--output PATH`, which writes through a temporary and renames
+#: only after the compile succeeded, and rewrote both documented lines to use
+#: it. **Nothing held them there**: the guard the requirement's own text names
+#: was proposed and not written, so the `>` form could return to either page
+#: the next time somebody wrote the line from memory. That is D1359's shape --
+#: a defect repaired in prose with no reader (D816, D1247).
+COMPILE_LINE = re.compile(r"bin/mcp-contract\.sh\s+compile\b")
+
+#: A shell redirection, which `<slug>` is not.
+#:
+#: Both documented compile lines write their destination as
+#: `projects/<slug>/contracts/...`, so `">" in line` flags the repaired
+#: form -- measured, by the control below, on its first execution. A
+#: redirection is a `>` or `>>` that no word character or `<` precedes and
+#: that whitespace follows, and it is looked for only AFTER the command.
+REDIRECT = re.compile(r"(?<![\w<])>>?\s")
+
+
+def redirects(line: str) -> bool:
+    """Whether this logical line sends the compiler's stdout to a file."""
+    match = COMPILE_LINE.search(line)
+    return match is not None and REDIRECT.search(line, match.end()) is not None
+
+
+def logical_lines(text: str) -> list[str]:
+    """Documented lines with their backslash continuations joined.
+
+    Both documented compile lines are written over two physical lines -- the
+    command and `--project` on the first, `--output PATH` on the second -- so a
+    scan reading one physical line at a time can see neither the redirect that
+    used to follow nor the option that replaced it.
+    """
+    joined: list[str] = []
+    pending = ""
+    for line in text.splitlines():
+        stripped = line.rstrip()
+        if stripped.endswith("\\"):
+            pending = f"{pending} {stripped[:-1].strip()}".strip()
+            continue
+        joined.append(f"{pending} {stripped.strip()}".strip() if pending else stripped)
+        pending = ""
+    if pending:
+        joined.append(pending)
+    return joined
+
+
+def compile_lines(text: str) -> list[str]:
+    """Every logical line in one document that invokes or names the compiler."""
+    return [line for line in logical_lines(text) if COMPILE_LINE.search(line)]
+
+
+def test_no_documented_compile_line_redirects_its_output() -> None:
+    """**D1359, D1540.** A `>` before a command that refuses leaves a 0-byte file.
+
+    Two documents show an adopter how to compile their capability contract, and
+    for six sessions both showed it with a shell redirect. `bin/mcp-contract.sh
+    compile` refuses an unbacked write, an unreviewed column and eight other
+    shapes at exit 5 -- and by then the redirect has already truncated the
+    contract the adopter was holding. `--output PATH` writes to
+    `PATH.tmp.<pid>` and renames only after the candidate exists.
+
+    Asserts three things about every logical line in the documented path that
+    names the compiler: none redirects, every RUNNABLE one carries `--output`,
+    and the scan found some at all. The third is the control (D374): a regex
+    that matched nothing would report both pages clean forever, which is the
+    failure this module exists to catch.
+    """
+    found = [(name, line) for name, text in _documents().items() for line in compile_lines(text)]
+    assert len(found) >= 2, (
+        "the compile-line scan found fewer than two lines across the documented "
+        f"path, so it is not reading the pages it is supposed to guard: {found}"
+    )
+
+    redirecting = [(name, line) for name, line in found if redirects(line)]
+    assert not redirecting, (
+        "these documented compile lines redirect their output. A `>` truncates "
+        "its target before the command runs, so every refusal leaves the "
+        "adopter a 0-byte contract (D1359). Use `--output PATH`, which writes "
+        f"through a temporary and renames only on success (D1540):\n{redirecting}"
+    )
+
+    runnable = [(name, line) for name, line in found if line.strip().startswith("bin/")]
+    assert runnable, "no documented line actually invokes the compiler"
+    without_output = [(name, line) for name, line in runnable if "--output" not in line]
+    assert not without_output, (
+        "these documented compile lines invoke the compiler and name no "
+        f"destination, so a reader has to invent one: {without_output}"
+    )
+
+
+def test_the_compile_scan_catches_a_synthetic_redirect() -> None:
+    """**Anti-vacuity.** A document the scan MUST flag, and one it must pass.
+
+    The synthetic carries the exact shape that was on both pages until Run 4 --
+    the command on one line, the redirect on its continuation -- because a scan
+    that read physical lines would pass it, find no `>` on the line carrying
+    the command, and report the page clean.
+    """
+    redirecting = (
+        "```bash\n"
+        "bin/mcp-contract.sh compile --project project.yaml \\\n"
+        "  > projects/<slug>/contracts/mcp-capabilities.canonical.json\n"
+        "```\n"
+    )
+    lines = compile_lines(redirecting)
+    assert len(lines) == 1, f"the scan did not join the continuation: {lines}"
+    assert redirects(lines[0]), f"the scan lost the redirect while joining: {lines[0]!r}"
+
+    # The pass-control, and it is the one that matters: the repaired form
+    # carries a `>` of its own inside `<slug>`, so a scan looking for the
+    # character rather than the operator flags the line it exists to allow.
+    repaired = redirecting.replace("  > ", "  --output ")
+    lines = compile_lines(repaired)
+    assert len(lines) == 1, f"the scan did not join the repaired form: {lines}"
+    assert ">" in lines[0], "the control lost the placeholder it is built around"
+    assert not redirects(lines[0]), f"the scan flags the repaired form: {lines[0]!r}"
+    assert "--output" in lines[0]
