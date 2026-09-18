@@ -1385,9 +1385,10 @@ Run bin/lock-versions.sh --check."
       exit "${evidence_status}"
     fi
     printf 'This is one half of three. Session %s also needs --mode host and\n' "${SESSION}"
-    printf -- '--mode external, which are Session 29'"'"'s trip; see --help.\n'
+    printf -- '--mode external, which are this session'"'"'s own trip; see --help.\n'
     printf -- 'No session before this one is owed a half: 26 and 27 registered\n'
-    printf -- 'nothing, and Session 24'"'"'s trip paid 22, 23 and 24 (D1244).\n'
+    printf -- 'nothing, 29 took the trip that paid 28'"'"'s, and Session 24'"'"'s\n'
+    printf -- 'trip paid 22, 23 and 24 (D1244).\n'
   else
     announce_no_evidence
   fi

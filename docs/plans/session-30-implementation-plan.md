@@ -11,11 +11,12 @@ sourced guard, the class at **0** unguarded sites, 11/11 mutations killed
 suite-shape guards, five shadows repaired, 23 orphans frozen, three counts
 (D1557–D1558 opened); **Run 6** the bump — `VERSION` 1.8.0 and
 `CURRENT_SESSION` 30, five requirements and five claims, the Session 30
-gate, and the redeploy-before recipe the trip needs (D1559–D1564 opened). §1 is D1537–D1548 at planning, each read from the
+gate, and the redeploy-before recipe the trip needs (D1559–D1565 opened).
+**Run 7 is next: the trip.** §1 is D1537–D1548 at planning, each read from the
 tree at `f89b03a`. Run 1 measured D1546 and added **D1549**; Run 2 rewrote
 D1542, D1544 and D1548 and added **D1550–D1552**; Run 3 added **D1553–D1554**;
 Run 4 added **D1555–D1556**; Run 5 added **D1557–D1558**; Run 6 added
-**D1559–D1564**; **next free is D1565**, and the runs add theirs below.
+**D1559–D1565**; **next free is D1566**, and the runs add theirs below.
 ADRs **0216–0220** are this session's, all written in Run 2 and all Accepted;
 **0220 went to the mirror fold** (D1549/D1546), not to Run 4, because D1540's
 condition was not met (D1550). **0221 is reserved, conditionally, by Run 4.**
@@ -192,8 +193,8 @@ Six columns. Rows D1537–D1548 were read from the tree on 2026-09-18 at
 the measurement and rewrites the row with the numbers. **D1546 was rewritten by Run 1 with what it measured, and D1549 is Run 1's
 own. Run 2 rewrote D1542, D1544 and D1548 with what its rigs measured and
 added D1550–D1552. Run 3 added D1553–D1554, Run 4 D1555–D1556, Run 5
-D1557–D1558, Run 6 D1559–D1564. Next free number after this table is
-D1565.**
+D1557–D1558, Run 6 D1559–D1565. Next free number after this table is
+D1566.**
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -225,6 +226,7 @@ D1565.**
 | **D1562** | §10: *"`--rotated-from-file` is accepted by the gate and undocumented in its usage block … The 30 gate inherits it; **Session 31's derivation adds the line**."* | **True, and the deferral was made without knowing which run would hold the file open.** `bin/session-30-check.sh:655` accepts the flag, `:1472` exports `APG_ROTATED_FROM_FILE` from it, and `:1412` requires the file to exist — and neither the synopsis nor the option list names it. Run 6 rewrote that usage block **whole**, which is the one act in this session that reads every line of it. | **Answered here, one session early.** The synopsis gains `[--rotated-from-file FILE]` and the option list gains its paragraph, which says what it admits and that every gate since Session 5 accepted it while no `--help` named it. Session 31's §10 row is closed rather than inherited. | A deferral is a bet on when the cost will be lowest, and the cost of this one was lowest at the exact moment the deferring plan did not model: the rewrite it ordered in the same run. **A flag the parser takes and `--help` does not name is a declaration with no reader** (D816, D1247) in the direction that costs a claim — an operator who HAS performed that rotation cannot learn the gate would read their file. | — |
 | **D1563** | Run 6's targeted list — 35 contract modules, derived from the tree: every module that reads `CURRENT_SESSION` or `template_version`, every module that reads the registry or the claim table, and every module this run edited. **1986 passed.** | **`bin/session-01-check.sh` on the committed tree exited 1**: `test_scope_vocabulary.py::test_no_data_scope_literal_survives_outside_the_schema_and_the_example_manifest`, on `bin/session-30-check.sh:341` — the sentence in the derived gate's `--mode host` paragraph naming the scope the Studio stranger is registered with. **The scan strips lines beginning with `#` from a `.sh` file, and it is right to**: a shell script's prose is its comments. A gate's usage block is not comments — it is a `cat <<'USAGE'` heredoc, so every line of it is a plain line of the script. The same sentence sits four lines from the top of the header as a `#` comment and is correctly ignored there. No targeted list derived from this diff would have named `test_scope_vocabulary`: nothing in the diff is about scopes. | **Reworded, not exempted.** The paragraph now says the stranger is registered with *a real read scope on the relation rather than an empty scope set*, which is what the sentence was about; naming the scope added nothing a reader of a gate's `--help` needs. `shellcheck -x` and `bash -n` clean after; the gate re-run on the repaired tree. | **D1486 exactly, and the second time this session** — Run 3's `test_fleet` docstring was the first. A per-run targeted list cannot see a caller the diff does not touch; the gate can. It is also D277's inverse: every scan over a shell script that strips comments to avoid reading prose will READ the one block of prose a gate prints about itself, and a derivation that rewrites that block whole is the act most likely to put something in it. | — |
 | **D1564** | Run 3's *Done*: the D972 refusal moved into `bin/lib/tty-guard.sh`, sourced by `deploy.sh:27`, with the message bytes asserted identical on both sides; `bin/session-01-check.sh` clean at that run's close. | **`bin/session-30-check.sh --mode offline` exited 1 at STEP 1**, before any claim was computed: `shellcheck deploy.sh bin/*.sh libexec/*` does not hold the sourced library among its inputs, so it emits `SC1091 (info): Not following: bin/lib/tty-guard.sh was not specified as input` and **exits 1** — an info-level finding is still a non-zero exit, and every gate runs under `set -e`. Measured both ways in one rig: the unrepaired form exits **1** with that message, the form carrying `bin/lib/*.sh` exits **0** with **0 bytes** of output. **Run 3 repaired ONE caller of twenty-six.** `grep -n 'shellcheck deploy.sh' bin/session-*-check.sh` returns 26 lines: `session-01-check.sh:118` carries `bin/lib/*.sh`, and **sessions 02–28 — all twenty-four of the remaining gates — do not**. Every one of them fails at step 1 today, on a checkout where nothing is wrong. | **Repaired in this session's gate, which is the one that has to pass**, with the reason in a comment beside it. The other twenty-four are **named and not edited**: each is the released artefact of the session that owns it, nothing in this run re-runs one, and silently rewriting twenty-four gates to make a number look better is the shape this project refuses. §10 carries it, and it is the operator's call whether a mechanical one-line sweep across them is worth taking. | **§7's question 5, and the largest instance this project has recorded**: *when a decision is implemented, which of its callers got it?* Run 3 greped the readers of the moved NAME and the moved TEXT, as D979 and D1187 require, and the caller it missed reads neither — it is a **glob** that silently stopped covering a directory the release gained. `bin/session-01-check.sh` was repaired because Run 3 ran it; the other twenty-five were not run, so nothing said anything. A gate nobody runs is a caller nobody greps. | — |
+| **D1565** | D1488: *"grep the derived file for every earlier session's claim names, requirement ids and release number, not only for its filename"* — the remedy written after the THIRD occurrence, in the derivation that carried the warning. | **A fourth occurrence, and the repaired gate PRINTED it.** `--mode offline` ran to completion and closed with two sentences belonging to the gate it was derived from: *"--mode host and --mode external, which are **Session 29's trip**"* — they are this session's own trip, Run 7 — and *"No session before this one is owed a half: **26 and 27** registered nothing"*, which is now 26, 27 and 29. Both are `printf` lines in the BODY, below the usage block the header's warning scopes itself to. | **Repaired**, and D1488's grep run afterwards over the whole file for every earlier session named outside a comment: **one line remains and is deliberate** — `:332`, *"Session 28's sweep with ONE flag added"*, which is the provenance sentence and is true. | The derivation greped for `session-28-check`, for the previous session's claim names and for `SESSION_TWENTY_EIGHT`, and D1488's remedy names exactly those. What it did not name is a bare session NUMBER inside a `printf` — a string the gate SAYS rather than a name it reads. **Running the gate to completion is what found it**, which is the instrument the three previous occurrences did not have: the first three were found by reading. | — |
 
 ---
 
@@ -1360,8 +1362,156 @@ this run's list, one line each, **before** the push (D1116). Then CI by full
 SHA. **And then nothing** — no tag. Run 7 deploys this commit, sweeps, and
 tags it (D1425).
 
-**Done.** _(the plan's verdict and leaf; the offline half's claim table;
-the gate's numbers; the recipe as written into Sheet A2; the reading.)_
+**Done.** _(Run 6, 2026-09-19, over four commits: the bump, and three repairs
+the gates found.)_
+
+**The plan's verdict and leaf, read not chosen** (D704, D1561). Rig 30e
+rendered `project.example.yaml` from `8c61309` — the deployed 1.7.0 commit —
+in a **throwaway worktree** and from this bump, then ran the product's own
+command between the two documents:
+
+```
+  bump        minor
+  requires    patch
+  verdict     OK
+  1 leaf/leaves differ
+    template_version   "1.7.0" -> "1.8.0"
+```
+
+`reasons []`, `changes []`, `operator_digests_moved []`. **No `major`, so §9's
+stop condition is not met.** The worktree is the D1485 repair: rig 28l rendered
+`fixture-alpha-dev` — the key the checkout's own fixtures use — and its cleanup
+destroyed workstation state two proofs depend on. `project.example.yaml`
+renders under exactly that key, so the OLD side was rendered in
+`/tmp/apg-8c61309` with its own `.generated/`, and the checkout's own render
+was kept rather than deleted, because the gate reads four renders and this is
+one of them.
+
+**`requires patch` is the reading worth more than the verdict** (D1561). Every
+one of ADR 0162's eight rows names something a RENDERED DOCUMENT shows, and two
+new options on two existing commands show up in no document at all — so by the
+table this release is *implementation only*, a patch. `requires` is the FLOOR:
+the smallest bump that permits the change, which is what an operator has to do
+to take it. Nothing. The minor is **chosen above that floor**, on this
+project's own precedent — `1.3.0` (`apg dev`) and `1.6.0` (`apg completion`,
+`apg dx-record`) were each priced a minor with the same one-leaf reading and
+the upgrade guide's own words, *a minor a deployment cannot see*. The
+constant's paragraph says the number is a judgement rather than a computation,
+because a paragraph that implied the product priced it would be the reassuring
+half of a two-part reading (ADR 0195).
+
+**The offline half: 17 claims, every one `passed`** — this session's four and
+the thirteen inherited — from `6071 passed, 0 failed, 3 skipped, 0 errors`:
+
+```
+  contract_compile_output  passed     exec_discipline             passed
+  release_reading_ref      passed     suite_shape                 passed
+  dev_churn                passed     dev_environment             passed
+  dev_isolation            passed     dx_context                  passed
+  dx_hardening             passed     dx_walk_instrument          passed
+  generated_client         passed     generated_client_toolchain  passed
+  offline_evidence         passed     project_set_release_record  passed
+  release_reading          passed     studio_boundary             passed
+  studio_surface           passed
+```
+
+`evidence/session-30-offline.json` written; `session-30-check: offline
+PASSED`, exit 0.
+
+**Five requirements, five claims, four declared offline** — one more than any
+session has declared. `OPS-EXEC-001`, `REL-READ-002`, `CAP-COMPILE-001` and
+`EVD-SHAPE-001` are each a property of a checkout; `STU-QUERY-002` is a HOST
+claim and is deliberately not declared (D1543), and the trip is its proof's
+**first execution anywhere**. It left `KNOWN_UNREGISTERED`, which is compared
+for equality, so the tuple shrank rather than being edited. Node ids were read
+out of the tree with `--collect-only` and not from the plan (D1236).
+
+**Three of the plan's proposed node ids did not survive contact with the tree.**
+`test_no_documented_compile_line_redirects_its_output` **did not exist** — Run
+4 repaired both documented lines and wrote no guard, so registering
+`CAP-COMPILE-001` as §2 words it would have registered a clause with no reader
+(D1559). Written here with its control, battery **4/4 killed**; the control
+caught the first version, which flagged the repaired form because
+`projects/<slug>/` ends in a `>`. And the D972 deploy proof could not be
+registered at all: its module is **p1**, and the sweep that reports every
+offline claim selects `p0` (D1560, D1242's own shape).
+
+**The gate.** `bin/session-30-check.sh`, derived from 28's by diff, header and
+usage block rewritten whole, `readonly SESSION=30` the only session literal,
+the offline sweep selector carried verbatim (D1242). `--rotated-from-file` is
+documented here rather than in Session 31 (D1562): the deferral was made
+without knowing which run would hold the file open, and this one rewrote that
+block whole. `tests/contract/test_session_thirty_gate_modes.py` derived from
+twenty_eight's, with `test_no_gate_exists_for_the_session_that_took_the_trip`
+rewritten for **one** session and a reason the earlier gaps do not carry: 29
+built nothing but was not idle — it deployed, swept and tagged 1.7.0, and a
+trip writes the evidence of the session whose release it deploys.
+
+**THREE DEFECTS, ALL FOUND BY A GATE AND NONE BY THE TARGETED LIST.** The
+targeted list was 35 modules derived from the tree — every contract module
+reading `CURRENT_SESSION` or `template_version`, every module reading the
+registry or the claim table, every module this run edited — and **1986
+passed**. Then:
+
+- **D1563.** `session-01-check.sh` exited 1 on `test_scope_vocabulary`: a data
+  scope literal at `bin/session-30-check.sh:341`. The scan strips `#` lines
+  from a `.sh` file and is right to — a shell script's prose is its comments —
+  but a gate's **usage block is a `cat <<'USAGE'` heredoc**, so every line of
+  it is a plain line of the script. The same sentence four lines from the top
+  of the header is correctly ignored. Reworded, not exempted.
+- **D1564, and it is the largest instance of §7's question 5 recorded here.**
+  The offline gate exited 1 **at step 1**, before a claim was computed:
+  `deploy.sh:27` has sourced `bin/lib/tty-guard.sh` since Run 3, and
+  `shellcheck deploy.sh bin/*.sh libexec/*` emits `SC1091` and **exits 1**
+  because the sourced file is not among its inputs. Measured both ways: the
+  unrepaired form exits 1 with that message, the form carrying `bin/lib/*.sh`
+  exits **0 with 0 bytes**. **Run 3 repaired one caller of twenty-six** —
+  `session-01-check.sh:118`, because Run 3 ran that gate. Sessions **02
+  through 28, all twenty-four**, still carry the unrepaired line and fail at
+  step 1 today. Repaired in this session's gate; the others named in §10 and
+  **not edited**, because each is its owner session's released artefact and
+  rewriting twenty-four of them to make a count look better is the shape this
+  project refuses.
+- **D1565.** The repaired offline gate then ran to completion and **printed**
+  two sentences belonging to the gate it was derived from: *"--mode host and
+  --mode external, which are Session 29's trip"* — they are this session's own
+  — and *"26 and 27 registered nothing"*, which is now 26, 27 and 29. D1488's
+  fourth occurrence, in the body, below the usage block the warning scopes
+  itself to.
+
+**The redeploy-before recipe (D1547), written into Sheet A2** from the proof
+that reads the file and the two `--help` pages, never from memory. An operator
+**can** write the sentinel through the product's own surface (D1114) —
+`dev-token.sh --role authenticated -- api.sh create-note --title …`, and
+`api.create_note` inserts into `app.notes(title)`, which is the row the proof
+counts. An operator **cannot remove one**: there is no `delete-note`, and a
+human may not run SQL through a product surface, so Sheet A4's cleanup is a
+root `docker exec … psql -c DELETE`, **with no `-i`** — the statement is in the
+argv, nothing is fed on stdin, and `-i` would leave the child holding the
+terminal, which is ADR 0218's whole subject. §10 carries the half that is
+still open.
+
+**The reading, taken with Run 4's own option on the bump commit** — its first
+use for the thing it was built for:
+
+```
+$ bin/apg.sh release-reading --ref 09540b9
+  outcome: tag_is_owed
+  the tree says 1.8.0 and no tag carries it: a tag is owed, and what follows
+  is what it would contain.
+
+  Where the ref 09540b9 stands        The last tag
+    commit   09540b987535               name           1.7.0
+    VERSION  1.8.0                      commit         8c61309b6cf9
+    tags on it (none)                   VERSION at it  1.7.0
+
+  What has landed since 1.7.0          Counts a release moves
+    commits 11, files 68                 released migrations  33 -> 33
+                                         ADRs                215 -> 220  <- moved
+```
+
+**And then nothing** — no tag. Run 7 deploys this commit, sweeps, and tags it
+(D1425).
 
 ### Run 7 — the trip: deploy, one sweep with the redeploy declared, the tag
 
