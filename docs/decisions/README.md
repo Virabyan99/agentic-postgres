@@ -279,3 +279,8 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0213](0213-the-agent-record-is-pruned-by-an-operator-who-states-a-horizon-and-by-nothing-else.md) | The agent record is pruned by an operator who states a horizon, and by nothing else | 28 | Accepted |
 | [0214](0214-the-reading-before-a-tag-states-facts-and-names-the-judgement-it-cannot-make.md) | The reading before a tag states the facts and names the one judgement it cannot make | 28 | Accepted |
 | [0215](0215-an-acknowledgement-is-read-through-the-containers-own-mount-namespace.md) | An acknowledgement is read through the container's own mount namespace, by pid, and never by a path the host resolves | 28 | Accepted |
+| [0216](0216-no-public-postgres-endpoint-in-stage-4-the-seam-stays-a-refusal.md) | No public Postgres endpoint in Stage 4; the seam stays a refusal, and the Stage 5 reading's preconditions are named | 30 | Accepted |
+| [0217](0217-stage-4s-boundary-nothing-may-require-a-hosted-trust-model-to-be-safe.md) | Stage 4's boundary: nothing built in Sessions 31-35 may require a hosted trust model to be safe | 30 | Accepted |
+| [0218](0218-no-product-child-reads-the-terminal.md) | No product child reads the terminal: one exec helper, stdin closed unless input is given, and the class guarded by a scan | 30 | Accepted |
+| [0219](0219-the-reading-before-a-tag-takes-a-ref.md) | The reading before a tag takes a ref, and reads VERSION from it rather than from the working tree | 30 | Accepted |
+| [0220](0220-a-mirror-pass-has-three-outcomes-and-the-verb-reports-three.md) | A mirror pass has three outcomes, and the verb reports three: one immediate second pass separates a flake from a failure | 30 | Accepted |
