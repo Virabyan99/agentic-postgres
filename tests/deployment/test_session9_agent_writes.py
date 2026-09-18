@@ -941,12 +941,14 @@ def test_a_write_whose_audit_record_cannot_be_opened_does_not_happen(
             )
             assert code == 0, f"could not withdraw the audit grant: {error}"
             try:
-                refused = write(AUDITFAIL_TITLE)
+                unauditable = write(AUDITFAIL_TITLE)
                 # A refusal reaches an MCP caller as a JSON-RPC error inside a
                 # 200, so the status alone says nothing (D458's neighbourhood).
-                assert refused.status == 200, refused.body[:300]
-                result = sse_result(refused.body)
-                assert result is not None, f"no JSON-RPC message came back: {refused.body[:300]}"
+                assert unauditable.status == 200, unauditable.body[:300]
+                result = sse_result(unauditable.body)
+                assert result is not None, (
+                    f"no JSON-RPC message came back: {unauditable.body[:300]}"
+                )
                 assert "error" in result or result.get("result", {}).get("isError"), (
                     "the write was SERVED while its audit record could not be opened: "
                     f"{str(result)[:400]}"

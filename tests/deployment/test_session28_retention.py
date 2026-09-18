@@ -179,7 +179,7 @@ def test_neither_prune_is_reachable_by_any_request_role_on_the_deployment(
     which runs against a cluster this suite may destroy.
     """
     for document in _projects(project_a, project_b):
-        roles = document["roles"]
+        roles = document["database"]["roles"]
         for name in ("agent_audit_prune", "agent_idempotency_prune"):
             grantees = _one(
                 psql,
