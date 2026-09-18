@@ -337,9 +337,13 @@ USAGE
                    human's rows and none of a second registered subject's -- and
                    the second subject's row is proved to EXIST by reading it as
                    that subject through the same surface, so an empty result is
-                   told apart from a filtered one (ADR 0195). The stranger holds
-                   `notes:read` rather than no scope at all, which is the
-                   stronger subject and is also what migration 0011 will accept.
+                   told apart from a filtered one (ADR 0195). The stranger is
+                   registered with a real read scope on the relation rather than
+                   an empty scope set -- which migration 0011 refuses, and which
+                   is why the proof had never run -- and that is also the
+                   stronger subject: a caller who CAN read the relation and
+                   still sees none of the auditor's rows says something a caller
+                   who can read nothing does not.
                    **That proof has never executed anywhere**: it belonged to no
                    requirement and errored at setup on every sweep since Session
                    24 while three Studio claims read `passed` (D386, D1236).
