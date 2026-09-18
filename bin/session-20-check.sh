@@ -872,7 +872,14 @@ PYTHON
 
 mode_offline() {
   step "1. Static quality"
-  shellcheck deploy.sh bin/*.sh libexec/*
+  # `bin/lib/*.sh` is SOURCED, not executed, so `bin/*.sh` does not reach
+  # it -- and a shellcheck run that does not hold a sourced file among its
+  # inputs emits SC1091 and exits non-zero, which under `set -e` ends this
+  # gate at step 1. `deploy.sh` has sourced `bin/lib/tty-guard.sh` since
+  # Session 30 Run 3, which added this glob to `bin/session-01-check.sh`
+  # and to no other caller (D1564). Added here in Session 30 Run 7 so that
+  # this gate still runs; nothing else about it moved.
+  shellcheck deploy.sh bin/*.sh bin/lib/*.sh libexec/*
   "$(python_bin)" -m ruff check src bin tests
   "$(python_bin)" -m ruff format --check src bin tests
   bin/lock-versions.sh --check
