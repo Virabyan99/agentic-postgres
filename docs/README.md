@@ -111,8 +111,17 @@ divergence table and is the point of the document**: every conflict between what
 a session was asked for and what was measurably true, with the decision and its
 reason. §5 is the run-by-run build order, each run carrying what it measured.
 
-Nothing indexes those measured facts (D1–D1513 at Session 29) by subject, so
-finding one is a `grep`.
+Nothing indexes those measured facts (D1–D1536 at the Stage 4 plan) by subject,
+so finding one is a `grep`.
+
+[`plans/stage-4-plan.md`](plans/stage-4-plan.md) sits above the six Stage 4
+session plans (30–35) the way the Stage 2 and Stage 3 plans sit above theirs.
+**Its §1 is the audit of the Stage 4 specification against this repository** —
+D1514–D1536 — and the record of the four decisions the operator took on
+2026-09-18: appliance first with hosting deferred, the OTel collector and
+Prometheus kept and bounded, PostgreSQL 18.4 kept, six sessions. §3 is the
+release structure, §5 each session's brief, §6 what a hosted reading would have
+to pay.
 
 [`plans/stage-2-plan.md`](plans/stage-2-plan.md) sits **above** the six Stage 2
 session plans and owns what all of them would otherwise repeat: where Stage 2
