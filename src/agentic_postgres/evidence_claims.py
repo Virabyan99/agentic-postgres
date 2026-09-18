@@ -165,6 +165,14 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "release_reading_ref",
         "contract_compile_output",
         "suite_shape",
+        # ADR 0220, added after Run 6 at the operator's instruction. The
+        # verb's retry is proved against a FAKE `compose_mirror` -- a first
+        # pass that fails and a second that does not, with the control
+        # being two that fail -- and neither proof touches a network or a
+        # container. What a production `mc` does with a flaked object is
+        # not what this claims; what it claims is that a pass which
+        # transferred what it could is completed before it is judged.
+        "mirror_retry",
     }
 )
 
@@ -372,6 +380,11 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "contract_compile_output": ("CAP-COMPILE-001",),
     "suite_shape": ("EVD-SHAPE-001",),
     "studio_tenant_read": ("STU-QUERY-002",),
+    # ADR 0220, after Run 6. Its own claim rather than a widening of an
+    # existing one (ADR 0089, D1150): `backup_schedule` is about which
+    # timers a project has and `disaster_kit` about what a kit holds, and
+    # neither is about what a pass does when one object flakes.
+    "mirror_retry": ("OPS-MIRROR-001",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

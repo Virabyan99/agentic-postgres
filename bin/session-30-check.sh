@@ -35,14 +35,25 @@
 # opposite of what the Session 28 gate said and the thing most likely to be
 # read past in a derivation.
 #
-# **FOUR of this session's five claims are declared offline** (ADR 0202), one
+# **FIVE of this session's six claims are declared offline** (ADR 0202), two
 # more than any session has declared, and each is a property of a CHECKOUT.
 # `exec_discipline` is an argv and an AST scan over this tree. `release_reading_
 # ref` is a command that reads `git` in a clone and prints. `contract_compile_
 # output` is what a command writes into a temporary directory and what two
 # pages in this repository say. `suite_shape` is the shape of this suite, which
-# no deployment has an opinion about. A deployment would answer none of the
-# four differently.
+# no deployment has an opinion about. `mirror_retry` is what the mirror verb
+# does with a pass that transferred what it could, proved against a fake
+# `compose_mirror` that never opens a socket (ADR 0220). A deployment would
+# answer none of the five differently.
+#
+# **`mirror_retry` arrived after this session's Run 6**, at the operator's
+# instruction and hours before the host's next timed pass. It is the repair for
+# the defect Run 1 diagnosed: on 2026-09-18 `mc` transferred a whole 3,700-
+# object bucket and exited 1 because ONE small object came back with an empty
+# body against an advertised `ContentLength`, and that one object cost a failed
+# unit, a `degraded` host, an unwritten record, and a doctor reporting a stale
+# mirror that was materially current (D1546). The flake is upstream and nothing
+# in this release removes it; what this removes is the fold.
 #
 # **`studio_tenant_read` is a HOST claim and is deliberately NOT declared.**
 # Whether a human's rows and a stranger's stay apart through Studio's forwarder
@@ -312,7 +323,7 @@ USAGE
             --project-a-outputs FILE --ssh-destination op@HOST \
             [--public-ipv6 ADDR] [--project-b-outputs FILE] [-k EXPRESSION]
 
-  --mode offline   Contracts, schemas and models, plus Session 30's own FOUR
+  --mode offline   Contracts, schemas and models, plus Session 30's own FIVE
                    offline halves: the exec discipline and the AST scan that
                    finds no docker or compose subprocess outside the helper;
                    the reading taken of a ref rather than of the working tree;
@@ -325,9 +336,9 @@ USAGE
                    the registry's documents; step 8b typechecks the client on
                    the pinned toolchain with no network; step 8c asserts Studio
                    ships no third-party code; step 9 WRITES A HALF --
-                   evidence/session-30-offline.json. The FOUR claims it reports
+                   evidence/session-30-offline.json. The FIVE claims it reports
                    are `exec_discipline`, `release_reading_ref`,
-                   `contract_compile_output` and `suite_shape`.
+                   `contract_compile_output`, `suite_shape` and `mirror_retry`.
                    Requires docker. No host, no root.
   --mode host      Session 28's sweep with ONE flag added, and it answers for
                    THIS SESSION ALONE: 29 took the trip that tagged 1.7.0 and
@@ -1232,7 +1243,7 @@ half that proves less than it appears to. Start Docker and run this again."
   # documents. That is D1373's own defect surviving in the mode it was not
   # applied to. **Measured, not reasoned, on the gate this one was derived
   # from**: its first run exited 1 with `session-28-offline-tests.xml` written
-  # and `session-28-offline.json` absent. FOUR of this session's five claims are
+  # and `session-28-offline.json` absent. FIVE of this session's six claims are
   # offline -- more than any session has declared -- so a single red proof
   # anywhere in the suite would close the session having reported none of
   # them.

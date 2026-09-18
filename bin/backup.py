@@ -658,12 +658,30 @@ def verb_mirror(arguments: argparse.Namespace) -> int:
     What the timer runs. The copy is `mc mirror --overwrite --remove` inside
     the `backup-mirror` container (measured, D1001: complete on a pass that
     exits 0; a pass that exits non-zero has left objects behind and the next
-    pass completes it). The record is written ONLY after a pass that exits 0
-    and a listing of the mirror bucket that parses, so a record always
-    describes a complete copy and the count that was read after it -- never a
-    count somebody assumed. A failed pass is this verb's non-zero exit, the
-    unit's failure, and the doctor's stale-copy warning; it is not a status
-    written anywhere.
+    pass completes it).
+
+    **A pass has three outcomes and this verb reports three** (ADR 0220). On a
+    non-zero exit the copy runs ONCE more, in this same invocation, before
+    anything is judged: D1001's *the next pass completes it* made immediate
+    rather than a day later. If the second pass exits 0 the pass is COMPLETE
+    and is recorded as it always was, with `retried` true. If the second also
+    exits non-zero the pass is FAILED, and that is this verb's exit 5, the
+    unit's failure and the doctor's stale-copy warning, exactly as before --
+    two consecutive failures are not a flake.
+
+    **Why, measured** (D1546, 2026-09-18, production): both projects' units had
+    been `failed` for days while `mc` was transferring the whole bucket and
+    exiting 1 because exactly ONE object of ~3,700 came back with an empty body
+    against an advertised `ContentLength`. One object cost a failed unit, a
+    `degraded` host, an unwritten record and a doctor reporting a stale mirror
+    that was materially current. The flake itself is upstream and nothing here
+    removes it; what this removes is the fold.
+
+    The record is written ONLY after a pass that exits 0 and a listing of the
+    mirror bucket that parses, so a record always describes a complete copy and
+    the count that was read after it -- never a count somebody assumed. That
+    guarantee is load-bearing in `diagnosis.mirror`'s five outcomes and is not
+    traded away here (ADR 0220 §4).
     """
     document = load_document(arguments.outputs)
     key = project_key(document)
@@ -684,11 +702,27 @@ def verb_mirror(arguments: argparse.Namespace) -> int:
 
     copy = compose_mirror(rendered, "copy", timeout=MIRROR_TIMEOUT_SECONDS)
     _relay(copy)
+    retried = False
+    if copy.returncode != 0:
+        # **One extra pass, here, now** (ADR 0220). No backoff, no loop, no
+        # schedule change: the question is whether a pass that left objects
+        # behind is a flake or a failure, and one more pass answers it. A pass
+        # over an already-copied bucket is cheap because `--overwrite` compares
+        # first -- the measured passes are 7-21 s against a 3600 s timeout.
+        print(
+            f"backup: the mirror copy exited {copy.returncode}; running the pass once more "
+            "before judging it (ADR 0220).",
+            file=sys.stderr,
+        )
+        retried = True
+        copy = compose_mirror(rendered, "copy", timeout=MIRROR_TIMEOUT_SECONDS)
+        _relay(copy)
     if copy.returncode != 0:
         raise OperatorError(
             EXIT_STATE,
-            f"the mirror copy exited {copy.returncode}; the copy record was not written and "
-            "the next pass completes what this one left behind (D1001).",
+            f"the mirror copy exited {copy.returncode} on both passes; the copy record was "
+            "not written and the next pass completes what these left behind (D1001). Two "
+            "consecutive failures are not a flake (ADR 0220).",
         )
 
     listing = compose_mirror(rendered, "count", timeout=QUICK_TIMEOUT_SECONDS)
@@ -700,9 +734,14 @@ def verb_mirror(arguments: argparse.Namespace) -> int:
             f"(exit {listing.returncode}); the copy record was not written.",
         )
 
-    record = backup_report.mirror_record(objects=objects, copied_at=datetime.now(UTC))
+    record = backup_report.mirror_record(
+        objects=objects, copied_at=datetime.now(UTC), retried=retried
+    )
     write_mirror_record(deployed_output.mirror_record_path(key, root=STATE_ROOT), record)
-    print(f"backup: mirror of {key} complete: {objects} object(s) at {record['last_copied_at']}")
+    print(
+        f"backup: mirror of {key} complete: {objects} object(s) at "
+        f"{record['last_copied_at']}{' (the first pass was retried)' if retried else ''}"
+    )
     return 0
 
 

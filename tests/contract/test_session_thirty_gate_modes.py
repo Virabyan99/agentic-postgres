@@ -23,11 +23,13 @@ would now look for `bin/session-29-check.sh`, which does not exist.
 
 **What is new is which claims the two modes carry, and the split is this
 session's own argument** -- which is why this module asserts it rather than
-deriving it. FOUR claims are declared offline, one MORE than any session has
+deriving it. FIVE claims are declared offline, two MORE than any session has
 declared, and each is a property of a checkout: an argv and an AST scan over
 this tree; a command that reads `git` in a clone; what a command writes into a
-temporary directory and what two pages in this repository say; and the shape of
-this suite. `studio_tenant_read` is not, because whether a human's rows and a
+temporary directory and what two pages in this repository say; the shape of
+this suite; and what the mirror verb does with a pass that transferred what it
+could, proved against a fake that never opens a socket (ADR 0220).
+`studio_tenant_read` is not, because whether a human's rows and a
 stranger's stay apart through Studio's forwarder is a property of a RUNNING
 plane and of PostgreSQL's policies on it, and a checkout declared able to
 answer it would grade the release against a rig the proof itself stood up.
@@ -114,6 +116,7 @@ SESSION_THIRTY_CLAIMS = {
         "release_reading_ref",
         "contract_compile_output",
         "suite_shape",
+        "mirror_retry",
     ),
     "host": ("studio_tenant_read",),
 }
@@ -685,10 +688,13 @@ def test_exactly_this_sessions_declared_claims_are_offline() -> None:
     claim the moment Session 23 did (D1237). Session 23's replacement was a
     SUBTRACTION against every EARLIER session, which was right for exactly as
     long as no LATER session declared one, and Session 24 is where that showed
-    (D1281). This is the sixth offline session; it declares FOUR, which is two
-    more than the session before, which itself declared one fewer than the one
-    before that -- and a guard shaped around the count moving in either
-    direction would have been the fourth version of this same mistake.
+    (D1281). This is the sixth offline session; it declares FIVE, which is
+    three more than the session before, which itself declared one fewer than the
+    one before that -- and a guard shaped around the count moving in either
+    direction would have been the fourth version of this same mistake. The fifth
+    arrived after this module was written, which is the case the shape is for:
+    ADR 0220's repair was implemented after Run 6 and the table had to be told,
+    rather than a count in a name going quietly stale.
 
     **The name carries no count, deliberately.** The derivation arrived here
     reading `..._the_eight_declared_claims_...` while eleven were declared, and

@@ -2,7 +2,9 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-18
-- **Session:** 30, Run 2 (D1546, D1549); implemented in Run 3
+- **Session:** 30, Run 2 (D1546, D1549); **implemented after Run 6**, at the
+  operator's instruction, with the host's next timed pass hours away. The plan
+  named no run for it (D1566)
 - **Affects:** `OPS-MIRROR-*` (Session 30 assigns), `bin/backup.py`'s
   `verb_mirror`, the copy record's document, `diagnosis.mirror`. No migration,
   no deployed-document field, no schema move at the project or host level.

@@ -1102,6 +1102,7 @@ CLAIM_INTRODUCED_IN = {
     "contract_compile_output": 30,
     "suite_shape": 30,
     "studio_tenant_read": 30,
+    "mirror_retry": 30,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

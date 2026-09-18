@@ -419,10 +419,22 @@ def test_the_record_round_trips_and_only_a_complete_record_parses() -> None:
         "status": "copied",
         "last_copied_at": "2026-09-05T04:41:07Z",
         "objects": 1234,
+        "retried": False,
     }
+    retried = backup_report.mirror_record(objects=1234, copied_at=now, retried=True)
+    assert retried["retried"] is True
     assert backup_report.parse_mirror_record(json.dumps(record)) == record
+    assert backup_report.parse_mirror_record(json.dumps(retried)) == retried
     with pytest.raises(ValueError):
         backup_report.mirror_record(objects=-1, copied_at=now)
+
+    # **A record written before ADR 0220 carries no `retried`, and `False` is
+    # what it meant**: that release could not retry. Every mirror record on
+    # every deployment today is this shape, so a parser that refused it would
+    # make the doctor report `unknown` on a mirror that is fine.
+    older = {k: v for k, v in record.items() if k != "retried"}
+    assert backup_report.parse_mirror_record(json.dumps(older)) == record
+
     refused = [
         "",
         "not json",
@@ -432,6 +444,13 @@ def test_the_record_round_trips_and_only_a_complete_record_parses() -> None:
         json.dumps({**record, "objects": "12"}),
         json.dumps({**record, "objects": True}),
         json.dumps({**record, "objects": -1}),
+        # A `retried` that is not a boolean was written by something this
+        # parser does not know. The honest answer is the third outcome -- the
+        # doctor reports `unknown` -- not a copy published from a record that
+        # was only partly read (ADR 0195).
+        json.dumps({**record, "retried": "yes"}),
+        json.dumps({**record, "retried": 1}),
+        json.dumps({**record, "retried": None}),
     ]
     for text in refused:
         assert backup_report.parse_mirror_record(text) is None, text
@@ -451,7 +470,25 @@ def test_the_reading_has_three_states_and_each_validates_against_the_schema() ->
         validator.validate(reading)
     assert readings["disabled"]["last_copied_at"] is None
     assert readings["never"]["objects"] is None
-    assert readings["copied"] == record
+    # **A reading is not a record, and this line used to assert it was.**
+    # `assert readings["copied"] == record` passed because the two documents'
+    # keys coincided, not because anybody decided they were the same thing. The
+    # reading is the mirror block of the DEPLOYED DOCUMENT, validated above
+    # against `mirrorState`; the record is a root-owned file on the host. ADR
+    # 0220 adds `retried` to the record and to nothing else -- *no
+    # deployed-document field, no schema move* -- and that promise is the
+    # property worth holding here.
+    assert readings["copied"] == {
+        "status": record["status"],
+        "last_copied_at": record["last_copied_at"],
+        "objects": record["objects"],
+    }
+    assert "retried" in record
+    assert "retried" not in readings["copied"], (
+        "the deployed document gained a field from the copy record. ADR 0220 moves "
+        "no deployed-document field and no schema, and `mirrorState` would have to "
+        "move with it"
+    )
     validator.validate(backup_report.MIRROR_NOT_OBSERVED)
     # A disabled reading given a record still says disabled: the manifest wins.
     assert backup_report.mirror_reading(enabled=False, record=record)["status"] == "disabled"
@@ -694,12 +731,35 @@ def test_the_container_is_the_mirror_profile_on_the_backup_network_only() -> Non
 
 
 class Compose:
-    """A recorded `bin/compose.sh … run backup-mirror <action>`."""
+    """A recorded `bin/compose.sh … run backup-mirror <action>`.
+
+    **`copy_exits` is a sequence, one entry per pass** (ADR 0220): the verb runs
+    the copy a second time when the first exits non-zero, so a fake with one
+    exit code cannot describe the case the ADR exists for. `copy_exit=` is the
+    one-pass spelling and is kept for every arm that only needs one; giving both
+    is refused, because a fake that accepted both would let an arm quietly
+    describe something other than what its name says.
+
+    Running off the end of `copy_exits` is an assertion rather than a repeat of
+    the last value: an arm that expected two passes and got three has measured
+    something it did not mean to, and a fake that padded silently would report
+    an unbounded retry loop as a pass.
+    """
 
     def __init__(
-        self, *, copy_exit: int = 0, listing: str = RECURSIVE_LISTING, count_exit: int = 0
+        self,
+        *,
+        copy_exit: int | None = None,
+        copy_exits: tuple[int, ...] | None = None,
+        listing: str = RECURSIVE_LISTING,
+        count_exit: int = 0,
     ):
-        self.copy_exit = copy_exit
+        assert copy_exit is None or copy_exits is None, (
+            "give copy_exit or copy_exits, not both: two spellings of one fact disagree"
+        )
+        if copy_exits is None:
+            copy_exits = (0 if copy_exit is None else copy_exit,)
+        self.copy_exits = copy_exits
         self.listing = listing
         self.count_exit = count_exit
         self.calls: list[str] = []
@@ -708,7 +768,14 @@ class Compose:
         self.calls.append(action)
         assert (rendered / "compose.env").is_file(), "the verb ran against no rendered output"
         if action == "copy":
-            return subprocess.CompletedProcess([], self.copy_exit, stdout="…\n", stderr="")
+            passes = self.calls.count("copy")
+            assert passes <= len(self.copy_exits), (
+                f"the verb ran {passes} copy passes and this fake describes "
+                f"{len(self.copy_exits)}. ADR 0220 bounds the retry at ONE extra pass"
+            )
+            return subprocess.CompletedProcess(
+                [], self.copy_exits[passes - 1], stdout="…\n", stderr=""
+            )
         if action == "count":
             return subprocess.CompletedProcess([], self.count_exit, stdout=self.listing, stderr="")
         raise AssertionError(action)
@@ -753,23 +820,81 @@ def test_the_verb_writes_the_record_only_after_a_clean_copy_and_a_parsed_listing
     copied_at = datetime.fromisoformat(record["last_copied_at"].replace("Z", "+00:00"))
     assert before <= copied_at <= datetime.now(UTC) + timedelta(seconds=1)
     assert oct(record_path.stat().st_mode & 0o777) == "0o600"
-    assert "2 object(s)" in capsys.readouterr().out
+    # **A pass that did not need a retry says so** (ADR 0220). The field is
+    # written on every record, not only on the ones that retried: a reader
+    # counting the flake rate needs a denominator, and a sometimes-absent field
+    # makes `false` and `nobody wrote this` the same reading (D600).
+    assert record["retried"] is False
+    printed = capsys.readouterr()
+    assert "2 object(s)" in printed.out
+    assert "retried" not in printed.out, (
+        "a copy that never retried announced a retry, so the sentence is not "
+        "reading the thing it names"
+    )
+    assert "once more" not in printed.err
 
 
-def test_a_copy_that_exits_non_zero_writes_no_record_and_lists_nothing(
+def test_a_flaked_pass_is_completed_by_an_immediate_second_and_recorded_as_retried(
     backup: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """D1001: a pass that exits 1 has left objects behind. The previous record,
-    if any, keeps describing the last COMPLETE copy."""
+    """**ADR 0220, and D1546 is the measurement it was written from.**
+
+    On production, `mc` transferred the whole bucket and exited 1 because ONE
+    object of ~3,700 came back with an empty body against an advertised
+    `ContentLength`. That one object cost a failed unit, a `degraded` host, an
+    unwritten record, and a doctor reporting a stale mirror that was materially
+    current. D1001 already said the next pass completes it; this makes the next
+    pass immediate.
+
+    Goes red if: the retry is removed, or the pass is judged before it runs.
+    """
+    compose = Compose(copy_exits=(1, 0))
+    monkeypatch.setattr(backup, "compose_mirror", compose)
+    assert backup.main(["--outputs", str(outputs_for(backup, mirror=True)), "mirror"]) == 0
+    assert compose.calls == ["copy", "copy", "count"], (
+        "the second pass did not run, or the listing was taken before it"
+    )
+
+    record_path = deployed_output.mirror_record_path(KEY, root=backup.TMP / "state")
+    record = backup_report.parse_mirror_record(record_path.read_text(encoding="utf-8"))
+    assert record is not None, "a completed pass wrote no record"
+    assert record["objects"] == 2
+    assert record["retried"] is True, (
+        "the record does not say the pass needed a second try. Once the flake is "
+        "corrected the exit code stops carrying its rate, and this field is the "
+        "only place a rising rate is visible (ADR 0220)"
+    )
+
+    printed = capsys.readouterr()
+    assert "once more" in printed.err, "the operator was not told a pass was re-run"
+    assert "ADR 0220" in printed.err
+
+
+def test_a_pass_that_fails_twice_is_a_failure_and_writes_nothing(
+    backup: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """**The control, and without it the proof above says only *the verb retries*.**
+
+    Two consecutive failures are not a flake (ADR 0220 §3). Everything the
+    previous behaviour did is still done: exit 5, no record written, and the
+    record that was already there keeps describing the last COMPLETE copy
+    (D1001). The retry is bounded at ONE extra pass -- the fake asserts it,
+    because a fake that padded its own sequence would report an unbounded loop
+    as a pass.
+    """
     record_path = deployed_output.mirror_record_path(KEY, root=backup.TMP / "state")
     previous = backup_report.mirror_record(objects=7, copied_at=datetime(2026, 9, 1, tzinfo=UTC))
     record_path.write_text(json.dumps(previous), encoding="utf-8")
-    compose = Compose(copy_exit=1)
+    compose = Compose(copy_exits=(1, 1))
     monkeypatch.setattr(backup, "compose_mirror", compose)
     assert backup.main(["--outputs", str(outputs_for(backup, mirror=True)), "mirror"]) == 5
-    assert compose.calls == ["copy"]
+    assert compose.calls == ["copy", "copy"], (
+        "a pass that failed twice either did not retry or retried more than once"
+    )
     assert json.loads(record_path.read_text(encoding="utf-8")) == previous
-    assert "D1001" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert "D1001" in error
+    assert "both passes" in error
 
 
 @pytest.mark.parametrize("listing, count_exit", [("mc: <ERROR> nope\n", 0), ("", 3)])
@@ -943,7 +1068,13 @@ def test_the_deploy_folds_the_mirror_into_every_branch_of_the_backup_state(
     record = backup_report.mirror_record(objects=3, copied_at=datetime.now(UTC))
     deployed_output.mirror_record_path(KEY, root=tmp_path).write_text(json.dumps(record))
     copied = deploy.read_mirror(KEY, mirrored["outputs"], root=tmp_path)
-    assert copied == record
+    # A reading, not the record it was built from -- see the schema proof above.
+    assert copied == {
+        "status": record["status"],
+        "last_copied_at": record["last_copied_at"],
+        "objects": record["objects"],
+    }
+    assert "retried" not in copied
 
     for enabled, credentialed in ((False, False), (True, False), (True, True)):
         state = deploy.observe_backup(enabled=enabled, credentialed=credentialed, mirror=copied)

@@ -341,9 +341,20 @@ MIRROR_STATUS_COPIED = "copied"
 MIRROR_RECORD_FILENAME = "mirror-state.json"
 
 
-def mirror_record(*, objects: int, copied_at: datetime) -> dict[str, Any]:
-    """What the verb writes: the status, when, and how many objects the mirror
-    bucket listed afterwards. Built here so the writer and the parser agree."""
+def mirror_record(*, objects: int, copied_at: datetime, retried: bool = False) -> dict[str, Any]:
+    """What the verb writes: the status, when, how many objects the mirror
+    bucket listed afterwards, and whether the pass needed a second try.
+
+    Built here so the writer and the parser agree.
+
+    **`retried` does not weaken what the record means** (ADR 0220 §4). A record
+    still describes a copy that COMPLETED and a count read after it; `retried`
+    says how many passes it took to complete, never that something is
+    outstanding. It exists because the flake it records is upstream and no
+    change here removes it (D1546): once a single flaked object is corrected by
+    an immediate second pass, the unit's exit code stops carrying the rate, and
+    this field is where a rising rate becomes visible instead.
+    """
     if objects < 0:
         raise ValueError("an object count cannot be negative")
     return {
@@ -353,6 +364,7 @@ def mirror_record(*, objects: int, copied_at: datetime) -> dict[str, Any]:
         .isoformat()
         .replace("+00:00", "Z"),
         "objects": objects,
+        "retried": bool(retried),
     }
 
 
@@ -375,7 +387,21 @@ def parse_mirror_record(text: str) -> dict[str, Any] | None:
         return None
     if not isinstance(objects, int) or isinstance(objects, bool) or objects < 0:
         return None
-    return {"status": MIRROR_STATUS_COPIED, "last_copied_at": copied_at, "objects": objects}
+    # **Absent means False, and anything else means this is not a record.** A
+    # record written before ADR 0220 carries no `retried`, and `False` is what
+    # it meant: that release could not retry. A `retried` that is not a boolean
+    # was written by something this parser does not know, and the honest answer
+    # is the third outcome -- the doctor reports `unknown` rather than
+    # publishing a copy it could not fully read (ADR 0195).
+    retried = loaded.get("retried", False)
+    if not isinstance(retried, bool):
+        return None
+    return {
+        "status": MIRROR_STATUS_COPIED,
+        "last_copied_at": copied_at,
+        "objects": objects,
+        "retried": retried,
+    }
 
 
 def mirror_reading(*, enabled: bool, record: dict[str, Any] | None) -> dict[str, Any]:
