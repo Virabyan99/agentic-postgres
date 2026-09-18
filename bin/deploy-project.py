@@ -187,8 +187,8 @@ def run(*command: str) -> subprocess.CompletedProcess[str]:
 
     ADR 0218. This is the pass-through shape -- the argv is a parameter -- and
     a pass-through runner with an inherited terminal hands one to whatever it
-    is given. `doctor.py`, `fleet.py`, `restore.py` and `rehearse.py` have
-    closed theirs since D673; this one had not.
+    is given. Four other commands have closed theirs since D673; this one had
+    not, and it is the runner a deploy makes most of its calls through.
     """
     return subprocess.run(
         command,

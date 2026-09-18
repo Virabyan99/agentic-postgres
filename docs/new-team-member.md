@@ -270,7 +270,7 @@ bin/agent.sh init --head > projects/<slug>/capabilities.yaml
 bin/agent.sh init --project project.yaml --operation <your view> \
   >> projects/<slug>/capabilities.yaml
 bin/mcp-contract.sh compile --project project.yaml \
-  > projects/<slug>/contracts/mcp-capabilities.canonical.json
+  --output projects/<slug>/contracts/mcp-capabilities.canonical.json
 bin/mcp-contract.sh check --project project.yaml
 bin/render-evaluation-report.py --write --project project.yaml
 ```

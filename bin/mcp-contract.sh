@@ -6,11 +6,22 @@
 # (ADR 0050): a gate that can approve its own subject is not a gate.
 #
 #   compile   Compile the capability manifest against the reviewed API surface
-#             and the approved OpenAPI snapshot, and STREAM the candidate to
-#             standard output. It writes no file. There is no output-path option
-#             and that is the design: the redirect happens in the caller's own
-#             shell, so a candidate lands where a human has to read it before
-#             committing it.
+#             and the approved OpenAPI snapshot. It streams the candidate to
+#             standard output, or writes it to --output PATH.
+#
+#             The design is that a candidate lands where a human has to read it
+#             before committing it, and that is unchanged. What changed is the
+#             mechanism (D1540): a shell `>` truncates the target BEFORE the
+#             compile runs, so a refused compile left a 0-byte file the reader
+#             had to delete by hand, and the documented lines told them to.
+#             --output writes to PATH.tmp.<pid> beside the target and renames
+#             over it only after the compile succeeded; a refusal leaves PATH
+#             untouched and no temporary behind.
+#
+#             ADR 0050 refuses --output on `api-contract --update` because it
+#             would put the file's ownership in a privileged process. This
+#             command needs no root and never runs as any, so that reason does
+#             not reach it (D1550).
 #
 #   check     Compare, and have no code path that writes a contract at all. It
 #             compiles the committed manifest and compares the result
@@ -109,6 +120,7 @@ main() {
   local capabilities=""
   local outputs=""
   local project=""
+  local output=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --help|-h)
@@ -130,6 +142,14 @@ main() {
         outputs="$2"
         shift 2
         ;;
+      --output)
+        # `compile` only. `check` writes nothing by design and `lock` writes
+        # through --outputs; accepting it for either would be a second way to
+        # produce a contract, and one of them would be the way nothing audits.
+        [ "$#" -ge 2 ] || die 2 "--output requires a path."
+        output="$2"
+        shift 2
+        ;;
       --project)
         [ "$#" -ge 2 ] || die 2 "--project requires a file."
         project="$2"
@@ -143,6 +163,10 @@ main() {
   done
 
   [ -n "${command}" ] || die 2 "one of check, compile or lock is required."
+
+  if [ -n "${output}" ] && [ "${command}" != "compile" ]; then
+    die 2 "--output belongs to compile; ${command} does not write a contract."
+  fi
   if [ "${command}" = "lock" ] && [ -z "${outputs}" ]; then
     die 2 "lock requires --outputs."
   fi
@@ -167,6 +191,9 @@ main() {
   if [ -n "${project}" ]; then
     [ -f "${project}" ] || die 2 "project manifest not found: ${project}"
     arguments+=(--project "${project}")
+  fi
+  if [ -n "${output}" ]; then
+    arguments+=(--output "${output}")
   fi
 
   exec "$(python_bin)" "${ROOT_DIR}/bin/mcp-contract.py" "${arguments[@]}"

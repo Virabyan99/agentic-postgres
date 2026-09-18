@@ -728,10 +728,20 @@ is cut from, at the session close, before `git tag -a` — and it is the only
 thing on this page that touches no deployment.
 
 ```bash
-bin/apg.sh release-reading
+bin/apg.sh release-reading --ref <the deployed commit>
 ```
 
-It prints where `HEAD` stands, the last tag and the `VERSION` that tag carries,
+**Name the commit the tag will go on.** The deploy, the sweep and the tag land
+on one commit in that order (D1425), so by the time the reading is taken the
+evidence commit has already landed and `HEAD` is ahead of the tag's target —
+D1513 measured 14 commits after the bump against 13 on the same day. `--ref`
+reads that commit's `VERSION`, its released lock and its ADR count, so the
+reading describes one commit rather than a mixture, and the first block names
+which (ADR 0219). Without it the reading is of `HEAD`, which is the right
+answer only when nothing has landed since the deploy. The throwaway worktree
+this used to need is retired.
+
+It prints where that commit stands, the last tag and the `VERSION` that tag carries,
 what has landed since as commits and paths, **released migrations and ADRs at
 the tag against the tree**, and the commit that last moved `VERSION` with
 everything that has landed after it. Then it prints three questions and does

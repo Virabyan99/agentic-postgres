@@ -23,6 +23,7 @@ nothing (D600, ADR 0195).
 from __future__ import annotations
 
 import importlib.util
+import re
 import subprocess
 from types import ModuleType
 from typing import Any
@@ -357,10 +358,120 @@ def run_command(*arguments: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_the_command_takes_no_arguments_and_says_so() -> None:
-    result = run_command("--since", "1.6.0")
+def test_the_command_takes_exactly_one_option_and_refuses_the_rest() -> None:
+    """ADR 0219 replaces `test_the_command_takes_no_arguments_and_says_so`.
+
+    Stricter, which is what CLAUDE.md section 6 requires of a replacement:
+    five refusals where there was one. `--since 1.6.0` is asserted by name so
+    that the surface cannot drift open one flag at a time -- a second option
+    would have to delete this line rather than merely not add a test.
+    """
+    refused = run_command("--since", "1.6.0")
+    assert refused.returncode == 2
+    assert "takes one option" in refused.stderr
+
+    positional = run_command("something-else")
+    assert positional.returncode == 2
+    assert "takes one option" in positional.stderr
+
+    no_value = run_command("--ref")
+    assert no_value.returncode == 2
+    assert "--ref requires a value" in no_value.stderr
+
+    taken = run_command("--ref", "HEAD")
+    assert taken.returncode == 0, taken.stderr
+
+
+def test_an_unresolvable_ref_is_refused_naming_it() -> None:
+    """The third outcome, reported rather than folded (ADR 0195).
+
+    A reading of the wrong commit is worse than no reading, because it looks
+    like one -- so a ref that resolves to nothing stops before any other read
+    is taken, and the message names what was typed.
+    """
+    result = run_command("--ref", "nonesuch-not-a-ref")
     assert result.returncode == 2
-    assert "takes no arguments" in result.stderr
+    assert "nonesuch-not-a-ref" in result.stderr
+    assert "does not name a commit" in result.stderr
+
+
+def test_the_reading_names_the_ref_it_read() -> None:
+    """D1513's whole point: a reading that does not name its subject is a
+    reading nobody can check afterwards. With no ref the label is `HEAD` and
+    the bytes are what they were."""
+    with_ref = run_command("--ref", "HEAD")
+    assert with_ref.returncode == 0
+    assert "the ref HEAD" in with_ref.stdout
+
+    without = run_command()
+    assert without.returncode == 0
+    assert "Where HEAD stands" in without.stdout
+    assert "the ref" not in without.stdout
+
+
+def test_a_ref_reads_the_tag_target_and_not_the_tip() -> None:
+    """The proof the option exists for (D1425, D1513).
+
+    Against this repository's own history rather than a throwaway one:
+    `bin/release-reading.py` pins `cwd=REPO_ROOT`, so a reading cannot be aimed
+    at another checkout, and a proof that tried would refuse an unknown SHA,
+    print nothing, and still "differ" from the tip -- passing having measured
+    nothing.
+
+    The last tag's commit is behind `HEAD` whenever anything has landed since,
+    which is every trip: the deploy, the sweep and the tag land in that order,
+    so the evidence commit is already in when the reading is taken. Reading
+    that commit must report a window of its own, not the tip's.
+    """
+    target = subprocess.run(
+        ["git", "rev-list", "-n1", "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert target.returncode == 0, "this is not a git checkout"
+
+    last_tag = subprocess.run(
+        ["git", "describe", "--tags", "--abbrev=0"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    if last_tag.returncode != 0 or not last_tag.stdout.strip():
+        pytest.skip("this clone holds no tags, so there is no tag target to read")
+
+    tag_commit = subprocess.run(
+        ["git", "rev-list", "-n1", last_tag.stdout.strip()],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    ).stdout.strip()
+
+    at_tag = run_command("--ref", tag_commit)
+    assert at_tag.returncode == 0, at_tag.stderr
+    assert tag_commit[:12] in at_tag.stdout, "the reading does not name the commit it read"
+
+    # The tag's own commit carries the tag, so its window is empty by
+    # construction. `commits 0` is the reading that a worktree used to be
+    # needed for.
+    window = re.search(r"What has landed since [^\n]*\n\s*commits\s+(\d+)", at_tag.stdout)
+    assert window is not None, f"no window block in the reading:\n{at_tag.stdout}"
+    assert window.group(1) == "0", (
+        f"reading the tag's own commit reports {window.group(1)} commits since it; "
+        "--ref is not reaching the range reads"
+    )
+
+
+def test_help_names_the_option() -> None:
+    result = run_command("--help")
+    assert result.returncode == 0
+    assert "--ref REF" in result.stdout
 
 
 @pytest.mark.parametrize("arguments", [("--help",), ("something", "--help")])

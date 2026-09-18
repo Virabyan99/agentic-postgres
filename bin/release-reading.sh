@@ -37,13 +37,18 @@ readonly ROOT_DIR
 
 usage() {
   cat <<'USAGE'
-Usage: bin/apg.sh release-reading
+Usage: bin/apg.sh release-reading [--ref REF]
 
 Print the reading taken before a tag is cut, from this checkout alone.
 
-  --help  Show this message.
+  --ref REF  Read the commit REF names instead of HEAD -- the deployed commit,
+             before the tag goes on it (D1425, ADR 0219). VERSION, the released
+             lock and the ADR count are read from that commit too, so the
+             reading describes one commit and not a mixture. A ref that names
+             no commit is refused with exit 2. Default HEAD.
+  --help     Show this message.
 
-What it prints, in order: where HEAD stands (commit, VERSION, any tag on it);
+What it prints, in order: where the commit stands (commit, VERSION, any tag on it);
 the last tag, its commit, its date and the VERSION it carries; what has landed
 since that tag, as commits, files and paths; released migrations and ADRs at
 the tag against the tree; the commit that last moved VERSION, what moved with
@@ -89,11 +94,31 @@ main() {
     esac
   done
 
-  if [ "$#" -gt 0 ]; then
-    usage >&2
-    die 2 "this command takes no arguments (got: $*)."
-  fi
+  # ADR 0219: exactly one option. Everything else is still exit 2 with the
+  # usage on stderr -- the surface does not drift open one flag at a time.
+  local ref=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --ref)
+        [ "$#" -ge 2 ] || { usage >&2; die 2 "--ref requires a value."; }
+        ref="$2"
+        shift 2
+        ;;
+      --ref=*)
+        ref="${1#--ref=}"
+        [ -n "${ref}" ] || { usage >&2; die 2 "--ref requires a value."; }
+        shift
+        ;;
+      *)
+        usage >&2
+        die 2 "this command takes one option, --ref REF (got: $*)."
+        ;;
+    esac
+  done
 
+  if [ -n "${ref}" ]; then
+    exec "$(python_bin)" "${ROOT_DIR}/bin/release-reading.py" --ref "${ref}"
+  fi
   exec "$(python_bin)" "${ROOT_DIR}/bin/release-reading.py"
 }
 

@@ -4021,7 +4021,7 @@
     - tests/contract/test_release_reading.py::test_a_count_that_could_not_be_read_prints_as_unknown_and_never_as_zero
     - tests/contract/test_release_reading.py::test_the_command_finds_the_tag_that_carries_the_version_not_the_one_on_head
     - tests/contract/test_release_reading.py::test_a_clone_with_no_tags_produces_the_third_outcome_through_the_command
-    - tests/contract/test_release_reading.py::test_the_command_takes_no_arguments_and_says_so
+    - tests/contract/test_release_reading.py::test_the_command_takes_exactly_one_option_and_refuses_the_rest
     - tests/contract/test_release_reading.py::test_the_exit_code_follows_whether_this_clone_holds_tags
   description: >-
     Before a tag is cut, one command states the facts and names the judgement

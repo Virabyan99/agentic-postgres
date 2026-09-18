@@ -6,10 +6,12 @@ diagnosed with root (a fourth outcome; D1546 rewritten, D1549 opened); Run 2
 the rigs and ADRs 0216–0220 (four of seven measurements came back different
 from the plan; D1542, D1544 and D1548 rewritten, D1550–D1552 opened). Run 3 the exec discipline: one helper, one
 sourced guard, the class at **0** unguarded sites, 11/11 mutations killed
-(D1553–D1554 opened). §1 is D1537–D1548 at planning, each read from the
+(D1553–D1554 opened); **Run 4** `release-reading --ref` and `compile --output`
+(D1555–D1556 opened; two registry entries deferred to Run 6). §1 is D1537–D1548 at planning, each read from the
 tree at `f89b03a`. Run 1 measured D1546 and added **D1549**; Run 2 rewrote
 D1542, D1544 and D1548 and added **D1550–D1552**; Run 3 added **D1553–D1554**;
-**next free is D1555**, and the runs add theirs below.
+Run 4 added **D1555–D1556**; **next free is D1557**, and the runs add theirs
+below.
 ADRs **0216–0220** are this session's, all written in Run 2 and all Accepted;
 **0220 went to the mirror fold** (D1549/D1546), not to Run 4, because D1540's
 condition was not met (D1550). **0221 is reserved, conditionally, by Run 4.**
@@ -185,8 +187,8 @@ Six columns. Rows D1537–D1548 were read from the tree on 2026-09-18 at
 `f89b03a`; where a row's *Repository does* column says *measure*, Run 2 owns
 the measurement and rewrites the row with the numbers. **D1546 was rewritten by Run 1 with what it measured, and D1549 is Run 1's
 own. Run 2 rewrote D1542, D1544 and D1548 with what its rigs measured and
-added D1550–D1552. Run 3 added D1553–D1554. Next free number after this table
-is D1555.**
+added D1550–D1552. Run 3 added D1553–D1554, Run 4 D1555–D1556. Next free
+number after this table is D1557.**
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -208,6 +210,8 @@ is D1555.**
 | **D1552** | This plan §0: *"**One local still shadows a module-level function**: `tests/deployment/test_session9_agent_writes.py:709`"*, and rig 30d's *Expected: **exactly one***. | **Five, not one — and the raw scan says fifty, of which forty-five are not the class.** Measured over `tests/**/*.py` by AST (module-level function and imported names; the function's own arguments excluded). Of 50 hits, **45 shadow a pytest FIXTURE**, which is not the class: a fixture is reached by declaring it as a parameter, never by calling its name, so a local of the same name in a test that does not declare it collides with nothing. **Five shadow a plain module-level helper**: `test_api_contract_command.py:620` (`merged`), `test_deployed_output.py:1361` (`published`), `test_project_agent_surface.py:155` (`tool`), `test_storage_client.py:433` (`adapter`), and `test_session9_agent_writes.py:709` (`refused`). **In none of the five is the helper called by name inside that function**, so all five are latent rather than live; `refused` at `:709` is rebound to an `api_call` response whose `.status` and `.body` are then read, over `def refused(result) -> bool` at `:91`. Zero currently-broken instances. | **Better than planned: the guard needs no exemption list.** Run 5 repairs all five by renaming the local, then `test_no_local_shadows_a_module_level_function` asserts **zero** over `tests/**/*.py`, with the fixture exclusion stated in the test and proved by its two controls (a synthetic shadow it must catch; a rebound fixture parameter and a differently-named local it must pass). The plan budgeted a frozen tuple; none is needed. | A scan whose first answer is 50 and whose right answer is 5 is a scan that had not yet been told what the class is. Reporting the 50 as the finding would have produced either a 45-entry exemption list or a guard nobody could keep green — D1493's shape. The discriminator (fixture versus plain helper) is a property of the definition, not of the failing instance, which is CLAUDE.md §7 rule 5. | — |
 | **D1553** | This plan's Run 3 step 2: *"`bin/db.sh` and `bin/apg-diag.sh` also source and call it at the top of their `main` — **these two exec directly**, and closing stdin on the line (step 4) is the repair; the guard is the belt on the same two."* | **After step 4's repair those two commands cannot hang, so the guard would refuse shapes that work.** Rig 30a2 measured that the stop needs `-i` **and** a child that reads stdin. `db.sh`'s `status` and `identity` verbs and `apg-diag.sh`'s query now end `< /dev/null`, so their psql reads `/dev/null` and reaches end of file at once. Adding `refuse_mixed_terminal_shape` to them would refuse `sudo bin/db.sh status --project alpha-dev > out.txt` at a terminal — a correct invocation with no failure mode left. That is D1538's own finding (*a guard everywhere refuses working shapes*) and ADR 0218 forbids it in as many words: the refusal *"is **not** extended to commands whose children cannot read the terminal"*. | **Step 4 applied; step 2's `db.sh`/`apg-diag.sh` half NOT applied.** The guard is sourced and called by `deploy.sh` alone. `-i` is **kept** on all four shell sites, because `bin/db.sh:181-183` records a measurement — without `-i` stdin is not forwarded, psql reads nothing and exits 0 having executed nothing, a silent success indistinguishable from a real one — so the repair is to control what `-i` forwards, not to remove it. `db.sh`'s comment now says so. The shell half is guarded by `test_every_shell_docker_exec_closes_or_supplies_stdin`, which scans `bin/*.sh` **and** `deploy.sh` rather than the three named commands the older scan reads. | The plan was written before Run 2 measured the class, and its step 2 carries the pre-measurement belief that the guard is the repair. Applying both halves would have shipped a refusal for a hang that no longer exists — the shape CLAUDE.md §6 forbids silently reconciling. | **0218** |
 | **D1554** | This plan §0 and D1537: *"**Thirty-nine call sites** build a `docker exec` argv: four in shell… thirty-two in eleven `bin/*.py`… three in two `src/` modules… 39 sites, 15 files"*, and Run 3's heading *"thirty-nine sites"*. | **The AST scan counts 27, of which 14 were the hang class, and it is counting a different thing.** D1537 counted places that BUILD a docker argv, including those handed to an intermediary runner. The scan counts `subprocess.*` calls whose argv reaches `docker` or `compose.sh`, which is what the rule is about: a site that builds an argv and passes it to a runner which closes stdin cannot hang. Before Run 3: **27 direct sites, 14 unguarded, 0 in a helper.** The 14 span **nine files, five of which this plan never named** — `bin/auth-admin.py:246`, `bin/postgres-bootstrap.py:86` and `:900`, `bin/rotate-signing-key.py:218` and `:254`, `bin/storage-admin.py:165`, `src/agentic_postgres/access_broker.py:343`. **`rotate-signing-key.py` is the command Run 8 executes.** A second rule (a pass-through runner whose argv is its own parameter) found `deploy-project.py:185`'s generic `run()` with stdin open, which D1538 predicted, and confirmed `doctor.py:91`, `fleet.py:72`, `restore.py:104` and `rehearse.py:85` already closed theirs. | **After Run 3: 0 unguarded outside the helper**, measured by the same scan that becomes the guard. Four true `docker exec` sites go through `container_exec.run()`; `migrate.py`'s compose run goes through `compose_run()`; eight `docker ps`/`inspect` reads and two generic runners take `stdin=subprocess.DEVNULL` (those cannot hang — neither reads stdin — but an inherited terminal on a call nobody re-reads is how the next one arrives). The remaining pass-through runners are `git()` and tool-version readers, outside ADR 0218's scope and named here rather than silently excluded. | A count carried from a plan into a test is a count nobody measures twice (D1116's shape). The scan derives it, and it found five files the hand inventory missed — including the one Run 8 runs against production. | **0218** |
+| **D1555** | This plan §2: five requirements *"all `target_session: 30`"*, listed as this session's registry additions; and Run 4's step 2: *"its registry node id moved in the same commit"*. | **A `target_session: 30` entry cannot enter the registry before Run 6.** `test_acceptance_registry.py:163` asserts `1 <= target_session <= CURRENT_SESSION`, which is **28** until the bump, and moving `CURRENT_SESSION` is all-or-nothing (D690). Run 4 added `REL-READ-002` and `CAP-COMPILE-001`, regenerated the matrix, and three registry proofs went red on the session bound. §2 already puts the additions in Run 6; Run 4's own text reached for them early. | **The node-id REPLACEMENT stays in Run 4** — D1119 requires it in the same commit as the rename and `REL-READ-001`'s `target_session` is 28 — **and the two new entries are deferred to Run 6**, parked verbatim in §2 so that run pastes rather than rewrites them. The proofs exist and pass now; only their registration waits. Run 6 pastes, then `python bin/render-acceptance-matrix.py --write`. | A requirement is registered when the session that owns it is current, and the bump is the one edit that cannot be split. Landing the entries early would have meant either a red suite for three runs or moving `CURRENT_SESSION` outside the run that owns it. | — |
+| **D1556** | This plan §2's proposed test for `REL-READ-002`: *"`--ref HEAD` → the same bytes as no argument"*, and ADR 0219's decision 5: *"the first block's label reads `ref` when one was given"*. | **The two cannot both hold, and the label is the point.** `--ref HEAD` and no argument name the same commit and report the same facts, but the first block reads `Where the ref HEAD stands` against `Where HEAD stands`, and `tags on it` against `tags on HEAD`. D1513's whole complaint is that a reading which does not name its subject cannot be checked afterwards; a `--ref` that printed nothing to say it was given would reintroduce exactly that. | **The label wins.** `test_the_reading_names_the_ref_it_read` asserts `the ref HEAD` appears with a ref and does not without one; the no-argument form is unchanged byte for byte, which is what ADR 0219 actually promises. The plan's phrase *the same bytes as no argument* is replaced by *the same facts*. **A second reading of `unchanged` was also wrong**: anchoring the ranges to the resolved SHA left the output identical and changed the ARGV, and `test_the_command_finds_the_tag_that_carries_the_version_not_the_one_on_head` — which drives `observe()` through a fake git keyed on argument tuples — went red. With no ref the anchor is the literal `HEAD`, and `describe`/`log` take the ref only when there is one. | Two proposed assertions in one row, both true-sounding, both slightly wrong about what *unchanged* covers. The fake-git test caught the second within a minute of the change; nothing but reading caught the first. | **0219** |
 
 ---
 
@@ -242,6 +246,60 @@ rows at 30.
 `test_the_command_takes_no_arguments_and_says_so` is replaced by
 `test_the_command_takes_exactly_one_option_and_refuses_the_rest` (D1539, ADR
 0219). No other existing entry moves.
+
+**Run 4 wrote two of these and Run 6 lands them** (D1555). `target_session:
+30` cannot enter the registry while `CURRENT_SESSION` is 28 —
+`test_every_entry_has_complete_metadata` asserts `target_session <=
+CURRENT_SESSION`, and moving it is all-or-nothing (D690). Run 4 built the
+proofs and they pass; the entries below are their final text, to be pasted
+into `tests/acceptance-registry.yaml` in Run 6's bump commit followed by
+`python bin/render-acceptance-matrix.py --write`.
+
+```yaml
+- id: REL-READ-002
+  priority: P0
+  target_session: 30
+  test_nodeids:
+    - tests/contract/test_release_reading.py::test_an_unresolvable_ref_is_refused_naming_it
+    - tests/contract/test_release_reading.py::test_the_reading_names_the_ref_it_read
+    - tests/contract/test_release_reading.py::test_a_ref_reads_the_tag_target_and_not_the_tip
+    - tests/contract/test_release_reading.py::test_help_names_the_option
+  description: >-
+    `apg release-reading` takes exactly one option, `--ref REF`, defaulting to
+    `HEAD` (ADR 0219). The reading is of the commit that ref resolves to --
+    including its `VERSION`, its released lock and its ADR count, so the
+    reading describes one commit and never a mixture of a ref's history with
+    the working tree's files. The first block names the ref it read, so a
+    transcript says which commit was measured. A ref that names no commit is
+    refused with exit 2 naming it, before any other read is taken; every other
+    argument is still exit 2. The deploy, the sweep and the tag land on one
+    commit in that order (D1425), so the commit a tag goes on is behind `HEAD`
+    on every trip and a reading of `HEAD` is a reading of the wrong commit.
+
+- id: CAP-COMPILE-001
+  priority: P0
+  target_session: 30
+  test_nodeids:
+    - tests/contract/test_capability_compiler.py::test_a_successful_compile_writes_the_bytes_it_would_have_streamed
+    - tests/contract/test_capability_compiler.py::test_a_refused_compile_leaves_no_file_and_no_temporary
+    - tests/contract/test_capability_compiler.py::test_check_and_lock_refuse_dash_dash_output
+  description: >-
+    `bin/mcp-contract.sh compile --output PATH` writes the candidate to PATH
+    only after the compile succeeded, atomically, and leaves PATH absent with
+    no temporary behind when the compile is refused. Without `--output` it
+    streams to stdout unchanged, and the bytes are the same either way.
+    `check` and `lock` refuse the flag: `check` writes nothing by design (ADR
+    0050) and `lock` writes through `--outputs`, and a second way to produce a
+    contract would be the way nothing audits. A shell `>` truncates its target
+    before the command runs, so the documented compile lines used to leave a
+    0-byte contract on every refusal and told the reader to delete it (D1359,
+    D1540). ADR 0050's reason for refusing an output path elsewhere -- that it
+    would put the file's ownership in a privileged process -- does not reach
+    this command, which needs no root (D1550).
+```
+
+**`REL-READ-001`'s node id was moved in Run 4**, not deferred: D1119 requires
+it in the same commit as the rename, and its `target_session` is 28.
 
 **No new gate variable.** `studio_tenant_read`'s proof reads `APG_LIVE_HOST`
 and `APG_PROJECT_A_OUTPUTS`, which the module already declares (`:59-64`).
@@ -973,10 +1031,98 @@ text is scanned by `test_no_command_documents_a_secret_argument`),
 changed), plus the grep's list for `release-reading\|release_reading\|
 mcp-contract`. Push; read CI.
 
-**Done.** _(the replaced test's name and its replacement; `--ref
-8c61309b6cf9` run on this checkout and its first block quoted — the first
-reading of the deployed commit without a worktree; the compile refusal's
-exit and the absence proved; whether 0220 was written.)_
+**Done.** _(Run 4, 2026-09-18.)_
+
+**The replaced test and its replacement.**
+`test_the_command_takes_no_arguments_and_says_so` →
+`test_the_command_takes_exactly_one_option_and_refuses_the_rest`, authorised by
+ADR 0219, stricter as CLAUDE.md §6 requires: four refusals in the one function
+(`--since 1.6.0`, a positional, `--ref` with no value, and `--ref HEAD`
+succeeding) where there was one. `--since 1.6.0` is asserted **by name** so a
+second option would have to delete that line rather than merely not add a test.
+Its node id was replaced in `REL-READ-001` in the same commit (D1119) and
+`test_acceptance_registry` ran.
+
+**`--ref 8c61309b6cf9` on this checkout — the first reading of the deployed
+commit without a worktree:**
+
+```
+  outcome: nothing_to_decide
+  the tree says 1.7.0, tag 1.7.0 carries it, and nothing has landed since:
+  there is nothing to decide.
+
+  Where the ref 8c61309b6cf9 stands
+    commit            8c61309b6cf9
+    VERSION           1.7.0
+    tags on it        1.7.0
+  ...
+  What has landed since 1.7.0
+    commits           0
+```
+
+The same checkout with no argument reads `Where HEAD stands / 86cfbc9efb92`
+and **8 commits since** — D1513's gap, in one screen.
+
+**Two things the plan did not have, both found by reading rather than by a
+test going red.**
+
+`bin/release-reading.py:100` reads `VERSION` from the **working tree**, and
+`:112` then searches the tags for the one carrying it. A `--ref` that resolved
+a commit and kept that read would marry the ref's commit to the checkout's
+`VERSION` — right on every occasion except the one the option exists for. The
+lock and the ADR count are the same shape. With a ref they are read as
+`git show REF:…` and `ls-tree REF`; **with no ref they are read exactly as
+before**, because ADR 0219 promises that form is unchanged.
+
+And *unchanged* had to mean the **argv**, not merely the rendered bytes.
+Anchoring every range to the resolved SHA turned `rev-list --count TAG..HEAD`
+into `rev-list --count TAG..<sha>` and
+`test_the_command_finds_the_tag_that_carries_the_version_not_the_one_on_head`
+went red — it drives `observe()` through a fake git keyed on the argument
+tuples. It was right to. With no ref the anchor is the literal `HEAD`, and
+`describe`/`log` take the ref as a positional so it is appended only when there
+is one.
+
+**The compile refusal's exit and the absence proved.** Exit **5**, `PATH`
+absent, `glob("*.tmp.*")` empty. The contrast is in the same rig: the old `>`
+shape truncated an 18-byte file to **0 bytes** on the same refusal. `--output`
+and the stream produce identical bytes (3015 on `project.example.yaml`), and
+`check`/`lock` refuse the flag with exit 2 — the guard moved ahead of their own
+argument requirements, because `lock --output X` was answering *lock requires
+--outputs*, which is the right exit and the wrong sentence.
+
+**Whether 0220 was written: it was, but not for this.** D1540's condition —
+a passing test asserting `compile` has no output option — was **not met**, so
+0220 was free and Run 2 gave it to the mirror fold. What the grep found instead
+is D1550: `test_api_contract_command.py:217` asserts exactly that design for
+the sibling `api-contract --update`, citing ADR 0050 and *an `--output` option
+would put the file's ownership in the privileged process*. **Answered rather
+than deferred, and no ADR needed:** `bin/mcp-contract.sh` has no `require_root`,
+no `id -u` check and no privileged invocation anywhere documented or tested, so
+the file is created by the invoking user exactly as the shell redirect created
+it. ADR 0050's reason does not reach this command, and the header now says so
+and cites the row. **0221 stays free.**
+
+**Two registry entries deferred to Run 6** (D1555). `REL-READ-002` and
+`CAP-COMPILE-001` carry `target_session: 30`, which
+`test_every_entry_has_complete_metadata` refuses while `CURRENT_SESSION` is 28;
+moving it is all-or-nothing (D690) and Run 6 owns it. The proofs exist and pass
+now; the entries are parked verbatim in §2 for Run 6 to paste.
+
+**A Run 3 defect that only CI could see.** Run 3's commit failed CI on
+`test_fleet.py::test_nothing_in_the_release_reads_the_inventory`: the new
+`run()` docstring in `bin/deploy-project.py` named `fleet.py`, and that scan
+strips `#` comments but not docstrings. 6014 tests passed and one did not; no
+targeted list derived from that diff would have named `test_fleet`, which is
+D1486 and the reason CI is the full check. The sentence is reworded rather than
+the rule weakened. **Fixed in this commit.**
+
+**Targeted:** 820 passed across `test_release_reading`,
+`test_capability_compiler`, `test_capability_profile`,
+`test_project_agent_surface`, `test_mcp_catalog`, `test_documentation_index`,
+`test_session12_documented_path`, `test_cli_contract`,
+`test_acceptance_registry`, `test_printed_commands`, `test_fleet`,
+`test_generate_command`. `ruff` clean over `bin src tests`; `shellcheck` clean.
 
 ### Run 5 — the two suite-shape guards, the orphan repaired, three counts
 

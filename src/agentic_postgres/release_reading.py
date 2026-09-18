@@ -256,8 +256,14 @@ def _count_line(label: str, at_tag: int | None, in_tree: int | None) -> str:
     return f"    {label:<22} {left:>6} -> {right:<6}{moved}"
 
 
-def render(reading: Reading) -> tuple[str, ...]:
+def render(reading: Reading, *, ref: str | None = None) -> tuple[str, ...]:
     """The reading as lines, for a terminal.
+
+    ``ref`` is what the operator typed, not the resolved SHA, and it changes
+    exactly one thing: the first block says which commit was read. A transcript
+    of a reading taken before a tag has to name its subject, or nobody can
+    check afterwards that the right commit was read (D1513, ADR 0219). With no
+    ref every byte is what it was.
 
     Facts first, then the questions. Nothing here is coloured, indented by
     guesswork or abbreviated: the two counts at the end are the ones a person
@@ -278,7 +284,7 @@ def render(reading: Reading) -> tuple[str, ...]:
                 "  Run it in a full clone. `git fetch --tags` in this one, or",
                 "  `actions/checkout` with `fetch-depth: 0`, is what it is missing.",
                 "",
-                f"  HEAD     {observation.head[:12] or '(unknown)'}",
+                f"  {'ref ' + ref if ref else 'HEAD'}     {observation.head[:12] or '(unknown)'}",
                 f"  VERSION  {observation.version or '(unreadable)'}",
             ]
         )
@@ -287,10 +293,10 @@ def render(reading: Reading) -> tuple[str, ...]:
     on_head = ", ".join(observation.tags_on_head) if observation.tags_on_head else "(none)"
     lines.extend(
         [
-            "  Where HEAD stands",
+            f"  Where {('the ref ' + ref) if ref else 'HEAD'} stands",
             f"    commit            {observation.head[:12] or '(unknown)'}",
             f"    VERSION           {observation.version or '(unreadable)'}",
-            f"    tags on HEAD      {on_head}",
+            f"    {('tags on it' if ref else 'tags on HEAD'):<18}{on_head}",
             "",
             "  The last tag",
             f"    name              {observation.last_tag or '(none reachable)'}",

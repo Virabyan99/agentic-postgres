@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from hashlib import sha256
 from pathlib import Path
@@ -180,7 +181,25 @@ def command_compile(arguments: argparse.Namespace) -> int:
                     "of its own to compile; `compile` without --project is the release's",
                 )
             candidate = _project_contract(inputs)
-        sys.stdout.write(candidate.decode("utf-8"))
+        if getattr(arguments, "output", None) is not None:
+            # Written only now: `candidate` exists, so the compile succeeded.
+            # Beside the target rather than in /tmp, so the rename is on one
+            # filesystem and cannot half-succeed; `os.replace` is atomic there.
+            output = Path(arguments.output)
+            staging = output.with_name(f"{output.name}.tmp.{os.getpid()}")
+            try:
+                staging.write_bytes(candidate)
+                os.replace(staging, output)
+            except OSError as exc:
+                staging.unlink(missing_ok=True)
+                return fail(EXIT_PREREQUISITE, f"could not write {output}: {exc}")
+            print(
+                f"mcp-contract: wrote {output}. Read it before committing it -- a contract "
+                "compiled and approved in one step is a surface nobody read (ADR 0050).",
+                file=sys.stderr,
+            )
+        else:
+            sys.stdout.write(candidate.decode("utf-8"))
         if arguments.project is not None:
             # The same hook the capture prints (D1208, ADR 0204): the tools a
             # project publishes are half of what a generated client is a claim
@@ -410,6 +429,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     compile_ = commands.add_parser("compile", help="compile a candidate contract to stdout")
+    compile_.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="write the candidate to this path instead of streaming it, atomically and "
+        "only after the compile succeeded; a refused compile leaves it untouched (D1540)",
+    )
     compile_.add_argument(
         "--project",
         type=Path,

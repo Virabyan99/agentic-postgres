@@ -1110,3 +1110,75 @@ def test_the_recorded_capabilities_digest_is_provenance_and_decides_nothing(
         narrowed["canonical_sha256"]
         == hashlib.sha256(capability_compiler.canonical_bytes(moved)).hexdigest()
     )
+
+
+# ---------------------------------------------------------------------------
+# `compile --output PATH` (D1540, ADR 0050's reason answered in D1550)
+# ---------------------------------------------------------------------------
+
+
+def _contract_cli(*arguments: str, cwd: Path | None = None):
+    return subprocess.run(
+        [str(REPO_ROOT / "bin" / "mcp-contract.sh"), *arguments],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+        cwd=cwd or REPO_ROOT,
+    )
+
+
+def test_a_successful_compile_writes_the_bytes_it_would_have_streamed(tmp_path: Path) -> None:
+    """The control: `--output` is the same candidate, in a file.
+
+    If these differed, the flag would be a second way to produce a contract --
+    and one of the two would be the way nothing audits.
+    """
+    streamed = _contract_cli("compile", "--project", "project.example.yaml")
+    assert streamed.returncode == 0, streamed.stderr
+
+    target = tmp_path / "candidate.json"
+    written = _contract_cli("compile", "--project", "project.example.yaml", "--output", str(target))
+    assert written.returncode == 0, written.stderr
+    assert target.is_file()
+    assert target.read_text(encoding="utf-8") == streamed.stdout
+    assert written.stdout == "", "--output streamed the candidate as well as writing it"
+
+
+def test_a_refused_compile_leaves_no_file_and_no_temporary(tmp_path: Path) -> None:
+    """The defect the flag exists to remove (D1359).
+
+    A shell `>` truncates its target BEFORE the command runs, so a refused
+    compile left a 0-byte contract behind and `README.md` told the reader to
+    delete it by hand. `--output` writes beside the target and renames over it
+    only after the compile returned a candidate, so a refusal leaves the path
+    absent and nothing to clean up.
+
+    The refusal is the adopter's own rather than a synthetic one (D1114): a
+    manifest the loader refuses.
+    """
+    manifest = tmp_path / "broken.yaml"
+    manifest.write_text("project:\n  slug: nosuchrig\n", encoding="utf-8")
+    target = tmp_path / "should-not-exist.json"
+
+    result = _contract_cli("compile", "--project", str(manifest), "--output", str(target))
+
+    assert result.returncode != 0, "a manifest the loader refuses compiled anyway"
+    left = target.stat().st_size if target.exists() else 0
+    assert not target.exists(), f"a refused compile wrote {target} ({left} bytes)"
+    assert list(tmp_path.glob("should-not-exist.json.tmp.*")) == [], (
+        "a refused compile left its temporary behind"
+    )
+
+
+def test_check_and_lock_refuse_dash_dash_output(tmp_path: Path) -> None:
+    """`--output` belongs to `compile` alone.
+
+    `check` writes nothing by design (ADR 0050) and `lock` writes through
+    `--outputs`; accepting it for either would be a second way to produce a
+    contract.
+    """
+    for command in ("check", "lock"):
+        result = _contract_cli(command, "--output", str(tmp_path / "x.json"))
+        assert result.returncode == 2, f"{command} accepted --output: {result.stderr}"
+        assert "--output belongs to compile" in result.stderr

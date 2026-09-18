@@ -549,17 +549,19 @@ Then compile, review and commit the contract, and render the report:
 
 ```bash
 bin/mcp-contract.sh compile --project project.yaml \
-  > projects/<slug>/contracts/mcp-capabilities.canonical.json
+  --output projects/<slug>/contracts/mcp-capabilities.canonical.json
 bin/mcp-contract.sh check --project project.yaml          # refuses a drift, exit 5
 bin/render-evaluation-report.py --write --project project.yaml
 bin/render-mcp-catalog.py --write --project project.yaml
 ```
 
 **All four wait on the snapshot in row 4 above**, so all four refuse with exit
-`5` until your project's first deploy has been captured. If you run the first
-line before then, delete the file the redirect left behind — `>` truncates the
-target before the command runs, so a refused compile still leaves a 0-byte
-contract there, and every reader of it will say so.
+`5` until your project's first deploy has been captured. Running the first line
+before then leaves **nothing** behind: `--output` writes the candidate beside
+the target and renames over it only after the compile succeeded, so a refused
+compile leaves the path untouched and no temporary file (D1540). It used to be
+a `>` redirect, which truncates the target *before* the command runs and left a
+0-byte contract every reader would then complain about.
 
 **The last line writes your tools a page of their own**, at
 `projects/<slug>/docs/mcp-tool-catalog.md`: every tool, the scopes each needs,
