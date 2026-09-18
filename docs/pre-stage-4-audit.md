@@ -172,16 +172,16 @@ the one most worth spending Session 28 on.**
 |---|---|
 | **D860** | **The signing-key rotation, and it is now DECIDED rather than offered.** Built, tested offline, declined at four trips, and the operator has reversed that on 2026-09-16: Session 28 performs it. It unblocks `bootstrap_identity`, `api_authorization` and `credential_rotation_planes`, and it is the first item on Stage 4's own bill. **Plan it with its own rehearsal**: `promote` is irreversible, each project publishes exactly one verification key (ADR 0170), and a key cutover recreates all four verifiers (ADR 0155). The one credential path in this product that has been built, tested and never run |
 | **D1375** | `op` on the host **cannot reach the Docker socket**, and Session 25 is the first release whose offline gate mode needs one. The group membership was deliberately not granted (root-equivalent on production) |
-| **D1401** | **The tree is two patches ahead of the deployment**: both projects run `1.6.0`, the tree reads `1.6.2`. `stage_release`'s live half fails until a trip deploys before it sweeps |
-| — | The host reports `systemctl is-system-running` = **DEGRADED**. Unrelated to the deployment, which doctors clean — and **never investigated** |
-| — | **The kernel restart and `--after-reboot` have never happened.** 38+ days up |
+| ~~**D1401**~~ | **CLOSED 2026-09-18 by Session 29.** Both projects deployed at `8c61309`, swept, then tagged **1.7.0** on that commit. `stage_release` passed. Structurally closed: the tag now waits for the deploy (D1425) |
+| ~~—~~ | **INVESTIGATED 2026-09-18 (D1503).** `cloud-init-hotplugd.service`, socket-activated, fails **at every boot** 2 min 42 s after `btime` on a NIC hotplug event (`hotplug_hook.py:110`). The provider's cloud-init, not this product; both projects doctor clean with it failed. **D1512:** two `backup-mirror` units joined it on 2026-09-18 |
+| ~~—~~ | **BOTH DONE 2026-09-17 (D1500).** `7.0.0-29` → `7.0.0-31`, skipping 30, plus `libc6`; 40 days of uptime ended in 8 s of downtime; both projects came back by themselves; `--after-reboot` declared and **`port_allocation` passed for the first time in twelve sessions** |
 | — | The signing-key cutover, ADR 0122's rotation repairs, and the agent plane's round trip on a host **have never been timed** |
 | — | The database container **can reach the internet** (ADR 0147's residual) |
 | **D688** | The IPv6 scan has nothing to scan |
 | **D771** | The host's OOM history is unknown |
 | **D976** | Infisical reads hang intermittently; the client retries idempotent calls three times |
 | — | The Infisical control-plane identity **holds org admin** |
-| **D1189** | The example project's grant repair (`20260914120002`) **has never been applied on beta** |
+| ~~**D1189**~~ | **ALREADY CLOSED, and this audit did not know it** (D1489). Beta's ledger prints `[X] 20260914120002_agent_grants.sql`, `Applied: 2, Pending: 0`. True when Session 22 wrote it; closed by ADR 0206's ledger move at Session 24's trip; unread for five sessions. Confirmed against the LEDGER, not the document (D941) |
 
 ---
 
@@ -206,10 +206,16 @@ Three readings of the operator's goal, priced:
 
 1. **Every Tier 1 row closed.** Achievable in one long session or two. It is the
    largest single improvement available and it needs no host and no person.
-2. **Tier 1 + Tier 2. THIS IS THE ONE THE OPERATOR CHOSE, 2026-09-16.** Adds
-   one host trip with **the rotation performed** — reversing four trips' worth of
-   declining it. That trip closes four of the seven unproven claims and moves the
-   deployment to the tree. What remains unproven afterwards is three claims, each
+2. **Tier 1 + Tier 2. THIS IS THE ONE THE OPERATOR CHOSE, 2026-09-16.**
+   **DONE 2026-09-18: Tier 1 by Session 28, Tier 2 by Session 29's trip.**
+   *The pricing below was wrong in one place and the correction is worth more
+   than the row:* it says the trip adds **the rotation performed** and that this
+   **closes four of the seven unproven claims**. D1469 measured otherwise — the
+   three rotation claims need **four** rotations between them and the signing-key
+   cutover moves **one of nine** node ids, closing **none** on its own. **The
+   rotation was therefore NOT performed** (D1496), and the trip still moved the
+   deployment to the tree, closed D1401 structurally and brought
+   `agent_record_retention` and `port_allocation` to `passed`. What remains unproven afterwards is three claims, each
    for a reason that names an event: `documented_path` until a third reader
    walks it, `replacement_host_restore` by a standing decision, and
    `deployment_convergence` or `port_allocation` depending on what the trip

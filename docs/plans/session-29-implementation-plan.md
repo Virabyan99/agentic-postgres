@@ -824,7 +824,50 @@ block, the audit's Tier 2 rows marked with what closed them, and the divergence
 rows this trip produced. **No code, unless the trip found a defect** — and if it
 did, §9 says where that goes.
 
-**Done.** _to be written._
+**Done.** 2026-09-18. **Session 29 is closed. `1.7.0` is deployed, swept and
+tagged at one commit — `8c61309b6cf9` — which this repository has never managed
+before.**
+
+**The trip did find a defect, and §9's rule was applied to the letter.** Two
+`live_host` proofs were broken; both were **instruments, not product**, and both
+were repaired in the window because the alternative was an evidence document
+asserting `failed` — *the system is wrong* — about a system that was not. No
+product code was touched, so the redeploy re-rendered identically. Every product
+defect this trip found was **recorded and left**: the missing guard on thirteen
+callers (D1504), the reading that cannot read its own tag target (D1513), the
+documented path's truncating redirect, the B2 mirror.
+
+**Twenty-five rows, `D1489`–`D1513`, and sixteen of them were written by
+executing the plan rather than by writing it.** That ratio is the honest
+argument for taking a trip at all: eight rows of planning found four expired
+premises and shrank the work; sixteen rows of doing found what no amount of
+reading would have.
+
+**What closed, in one line each:** D1401, structurally — the tag now waits for
+the deploy. D1189, by reading the ledger rather than the document, five sessions
+after it stopped being true. The host's `DEGRADED` line, investigated after
+three sessions of carrying a shrug. The kernel restart and `--after-reboot`,
+both first-evers, which brought `port_allocation` green for the first time in
+twelve sessions. And the agent record's unbounded growth, applied as a decision
+with no schedule and no caller.
+
+**What did not, and why it is not a failure:** the rotation was not performed,
+because D1469 measured that the audit's reason for performing it was false. What
+this trip bought instead is **ADR 0215's pre-flight discharged** — all ten alpha
+containers report a non-zero pid, which is the measurement Session 28 could not
+take. The sitting is now plannable for what it is rather than for what the audit
+believed.
+
+**`docs/scope-closure.md` §22** is the authoritative record of all three lists.
+The audit's Tier 2 rows are struck with what closed them, and its *"closes four
+of the seven unproven claims"* pricing carries the correction rather than being
+quietly worked around.
+
+**Three readings the next session should not have to re-take:** both
+pre-upgrade doctors at 10 ok and both post-upgrade at **11 ok**; the eleventh
+check's first live numbers (alpha **1598** audit rows since 2026-08-22, **258**
+idempotency claims; beta **26** and **0**); and the container ages proving ADR
+0155 recreated exactly `auth`, `mcp` and `storage` and nothing else.
 
 ---
 

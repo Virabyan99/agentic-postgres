@@ -111,7 +111,7 @@ divergence table and is the point of the document**: every conflict between what
 a session was asked for and what was measurably true, with the decision and its
 reason. §5 is the run-by-run build order, each run carrying what it measured.
 
-Nothing indexes those measured facts (D1–D1488 at Session 28) by subject, so
+Nothing indexes those measured facts (D1–D1513 at Session 29) by subject, so
 finding one is a `grep`.
 
 [`plans/stage-2-plan.md`](plans/stage-2-plan.md) sits **above** the six Stage 2

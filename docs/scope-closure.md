@@ -778,3 +778,55 @@ read its CI verdict.
 **The one thing this session must not be read as having done is tagging.** It
 did not, and the tree between this commit and Session 29's tag is a release that
 exists and is not yet promised to anybody.
+
+---
+
+## 22. What Session 29 closed, what it left, and what Stage 4 inherits
+
+**Session 29 was the trip, and it is the first session in this repository's
+history where the deployment, the evidence and the tag all name one commit.**
+`8c61309b6cf9`, tagged **1.7.0**. Nine runs, `D1489`–`D1513`, **twenty-five
+divergence rows of which sixteen were written by executing the plan rather than
+by writing it.**
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **D1401** — the tree two versions ahead of the deployment | **Closed, and structurally.** Deploy, sweep, tag, in that order (D1425). `stage_release` passed. There is no fourth occurrence available. |
+| **D1189** — beta never got the grant repair `20260914120002` | **Closed by reading the ledger** (D941), not the document: `[X] 20260914120002_agent_grants.sql`, `Applied: 2, Pending: 0`. True when Session 22 wrote it, closed by ADR 0206's ledger move at Session 24's trip, unread for five sessions (D1489). |
+| The host is `DEGRADED` and it was **never investigated** | **Closed as an answer, not a repair** (D1503): `cloud-init-hotplugd.service` fails **at every boot**, 2 min 42 s after `btime`, on a NIC hotplug event cloud-init cannot find in its refreshed metadata. It is the provider's, not this product's, and both projects doctor clean with it failed. |
+| The kernel restart and `--after-reboot` have **never happened** | **Both done** (D1500). `7.0.0-29` → **`7.0.0-31`**, a two-release hop skipping 30, plus `libc6`. Forty days of uptime ended in **eight seconds** of downtime, both projects came back by themselves, and `--after-reboot` was declared to the sweep. **`port_allocation` passed for the first time in twelve sessions.** |
+| `agent_audit` and `agent_idempotency` grow without bound | **Closed as a decision, now applied.** `20260917120033` is on both clusters; `agent_record_retention` **passed**; the doctor's eleventh check took its first live reading anywhere — alpha **1598 audit rows since 2026-08-22, 258 idempotency claims**; beta **26 since 2026-09-11, 0**. No threshold, by design (D1441). |
+| **D688** — the IPv6 scan has nothing to scan | **Confirmed rather than closed**: `host.yaml` declares `expected_public_ipv6: null`, and the external half skips 8 proofs naming `APG_PUBLIC_IPV6`. A skip that is declared is not a gap. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **D860** — the signing-key rotation | **Not performed, and the audit's reason for performing it was wrong.** The audit prices it as closing `bootstrap_identity`, `api_authorization` and `credential_rotation_planes`; D1469 measured that those three need **four** rotations between them and the cutover moves **one of nine** node ids, so it closes **none** on its own (D1496). What this trip did buy: **ADR 0215's reader is usable on this host** — all ten alpha containers report a non-zero pid, which Session 28 could not verify because Docker Desktop reports 0 (D1477). The pre-flight is discharged; the sitting is not. |
+| **D1375** — `op` cannot reach the Docker socket | **Unchanged deliberately** (D1493). Docker group membership is root-equivalent on production. The consequence is that the host produces no offline half, and the one merged is the workstation's. |
+| `documented_path` | **`failed`, and deliberately not `not_run`.** The record of the last walk was **declared** rather than withheld, so the claim reports what was measured. Its message is the finding: step 11's compile line uses `>`, which truncates the contract before the command refuses, leaving a 0-byte JSON that makes the next documented command die in an unhandled `JSONDecodeError`. |
+| `deployment_convergence`, `replacement_host_restore` | `not_run` for want of `--redeploy-before-file`, and by standing decision (D1028). |
+| The B2 mirror | **Failed on both projects since 2026-09-18 04:38** (D1512). The R2 primary is healthy with a proven-recoverable point from 03:32. The guide's own table puts this in *note it and proceed*. |
+
+### What Stage 4 inherits, in order
+
+1. **A guard, not a sentence** (D1504, D1505). `deploy.sh:260` refuses a
+   stdin-at-a-terminal-with-redirected-output invocation; **fourteen callers
+   reach a container the same way and none of the other thirteen has it**, and
+   there is no shared helper for one to live in. This session proved the cost
+   twice — once on a read that hung for seven minutes, and once **twenty-five
+   minutes after committing the row about it**. A rule that has to be remembered
+   is not a control.
+2. **`apg release-reading --ref`** (D1513). The one command written to be run
+   *before a tag* reads `HEAD`, and D1425 puts the tag on the deployed commit,
+   which is behind `HEAD` on every trip that records itself.
+3. **A third reader for the documented path.** Two models have walked it; a
+   person has not, and no test reads prose for truth.
+4. **A lint rule for a local shadowing a module-level function.** D1509 cost a
+   claim; the same module still binds a second `refused` that has not been bitten.
+5. **The rotation as its own sitting**, from Appendix R and
+   `docs/operator-guide.md` §15 — with the knowledge that it closes no claim by
+   itself, so it should be planned for what it actually is.
+
