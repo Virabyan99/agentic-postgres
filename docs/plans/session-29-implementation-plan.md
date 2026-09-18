@@ -40,12 +40,14 @@ the release is not re-cut inside the window (§9).
 
 ## 1. Divergence — what the tree, the audit and the host say, measured
 
-Nineteen rows. Eight were written before a line of §5 and eleven by executing it:
-**D1497** by pushing this document, **D1498–D1500** by measuring Run 1's
-premises, **D1501–D1502** by executing Run 1, **D1503** by executing Run 2,
-**D1504** by preparing Run 4, **D1505** by executing Run 5 badly, **D1506** by
-printing a directory listing in Run 6, and **D1507** by the gate refusing Run 7.
-Numbers from **D1489**; the remaining runs allocate from **D1508**.
+**Twenty-four rows. Eight were written before a line of §5 and sixteen by
+executing it** — which is the more honest measure of what a trip is for.
+**D1497** by pushing this document; **D1498–D1500** by measuring Run 1's
+premises; **D1501–D1502** by executing Run 1; **D1503** by executing Run 2;
+**D1504** by preparing Run 4; **D1505** by executing Run 5 badly; **D1506** by
+printing a directory listing in Run 6; **D1507** by the gate refusing Run 7; and
+**D1508–D1512** by Run 7's three sweeps. Numbers from **D1489**; Runs 8 and 9
+allocate from **D1513**.
 
 | D | Said | Measured or read | This session | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -68,6 +70,11 @@ Numbers from **D1489**; the remaining runs allocate from **D1508**.
 | **D1505** | **D1501 and D1504**, written by this session at 20:20 and 20:40: the D972 hazard is undocumented outside the deploy and unguarded outside `deploy.sh`. | **The agent that wrote both rows reproduced the defect at 20:45**, in Run 5's own sheet, handed to the operator: `sudo bin/migrate.sh --project project.beta.yaml --runtime status 2>/dev/null \| grep …`. `migrate.sh` reaches dbmate through `docker exec -i`, stdout was a pipe, and it stopped — **twenty-five minutes after the row about it was committed.** | **The sheet builder now checks itself.** Every sheet is grepped for a piped, redirected or captured `sudo` product command before it is sent, and each sheet's header states the rule in the form an operator can apply: **`deploy.sh`, `migrate.sh`, `backup.sh`, `doctor.sh`, `db.sh` and the restore pair exec into a container and must never be captured; `docker ps` and `docker inspect` do not, and are safe.** | This is the evidence D1504 needs and could not otherwise have had: **the repair is a guard, not a sentence.** A rule that has to be remembered was forgotten inside half an hour by the party that had just written it down — while `deploy.sh`, which carries the guard, refused the identical shape with exit 2 an hour earlier and cost nobody anything. Documentation is not a control. | — |
 | **D1506** | **D1494**, this session's own row: *"the stale bare `/home/op/{alpha,beta}-outputs.json` … **Every flag in the sheet names the `-dev-` file explicitly**"* — the `-dev-` infix offered as the thing that separates the current copy from the stale one. | **There is a THIRD `-dev-outputs.json` under `/home/op`, and it describes a DIFFERENT MACHINE.** `snippets-dev-outputs.json`: `template_version` **1.0.0**, `deployed_through_session` **18**, schema 16, `source_commit 2cf76d7954`, **`host.id apg-snippets-01`, `public_ipv4 2.28.74.158`**, domain `snippets-db.agenticpostgresql.com`, mode **0644** where the current pair is 0600. It is the adopter's appliance document — D1370's, the one `fresh_host` passed on. `/etc/agentic-postgres/projects/` holds only `alpha-dev` and `beta-dev` and `fleet` reports 2 projects, so it is **not** a third project on this host. | **Every outputs flag in this trip names an ABSOLUTE PATH to one of exactly two files** — never a glob, and never the infix as a discriminator. Run 7's external mode takes `--project-a-outputs /home/op/alpha-dev-outputs.json` and `--project-b-outputs /home/op/beta-dev-outputs.json` literally. | D1494's harm is **measuring the wrong release**. This one's is **measuring the wrong host**, which is strictly worse and harder to see: the document is well-formed, current-looking, and matches the naming convention the *correct* pair uses. `/home/op/*-dev-outputs.json` matches three files and one of them is another machine. A rule that says *use the `-dev-` one* does not survive contact with this directory. | 0158 |
 | **D1507** | `docs/upgrade-guide.md` §3 step 3, and this plan's Run 3 following it, naming what to render: `./deploy.sh --project project.alpha.yaml … --render-only` and the same for beta — **the deployment's two projects**. | **The gate reads FOUR renders, not two**, and refused to sweep until the other two were current: *"rendered fixtures are stale: fixture-alpha-dev's release set is 32 rendered against 33 released; absent from the render: 20260917120033"*, **exit 6 in about ten seconds**. `project.example.yaml` and `project.second.example.yaml` render `fixture-alpha-dev` and `fixture-alpine-dev`, which the compose-model proofs read. Session 25's `/home/op/s25-renders.sh` rendered **all four** and says so in its own header — *"the host's two and the two example fixtures the gate's fixture check reads"* — and neither the guide nor this plan carried that forward. | **Both fixtures re-rendered as `op` before the sweep**, `--render-only`, no root. `rendered_fixtures.STATE` now reads **`current`**, `DETAIL` *both fixtures at v18, release set of 33*, and all four renders carry `release_lock 9c56e9a0`. Run 3's text gains the other two manifests. | A trip plan derived from the operator guide inherits the guide's **audience**: that page is written for somebody upgrading a deployment, and the gate's fixtures are not part of a deployment. **It cost ten seconds rather than an hour because D1284 had already sharpened the check from the outputs version to the release set** — before that repair it compared versions only, called a stale render *current*, and sent the offline suite red on a P0 ledger proof with `assert 31 == 32` and nothing in the message naming the cause. Naming the missing migration and printing the two commands is the whole difference. | — |
+| **D1508** | Session 28 Run 9's `test_session28_retention.py`, six `live_host` proofs that *"cannot run here by design"*. | **`agent_record_retention` came back `failed` on a wrong dict key.** `test_neither_prune_is_reachable_by_any_request_role_on_the_deployment` read `document["roles"]`; the deployed document carries them under **`document["database"]["roles"]`**, which is how this module's own siblings and `test_session9_agent_writes` both reach them. `KeyError` at line 182, **before the first assertion**. Measured against both deployed documents before repairing: no top-level `roles`, and `database.roles` carries 14 entries including all four `REQUEST_ROLES`. **Five of the module's six proofs PASSED on first execution** — the catalog reading, the reading on a cluster with history, the bounded prune measured inside a transaction the proof rolls back, and both doctor readings. | **One line, repaired in the window** (test-only, no product code) and the claim came back **passed**. | ADR 0163 says `failed` means *the system is wrong*. It was not: one key path stood between five green proofs and the claim this whole trip exists to collect. The fourteenth never-executed proof to fail on first execution — and rig 28k's measurement of `pg_get_function_identity_arguments` is why only one of six did. | 0213 |
+| **D1509** | `CLAUDE.md` §9, carried for thirteen sessions: *"Session 9's live proofs check `"error"` and not `isError`; Session 16's `refused()` helper reads both; the older proofs pass on a refused write."* Session 28 Run 5 (`edc3b41`) repaired it. | **The repair regressed `agent_audit_fails_closed` from `passed` to not proved**, and nothing could have caught it. It changed the last assertion to `not refused(recovered_result)` — inside a function that already binds a local **`refused`** to an `ApiResponse`. `TypeError: 'ApiResponse' object is not callable` at line 982. **The proof is `live_host`, and both of Session 28's gates were offline**: 6000 and 6009 passing tests, neither able to execute the line being repaired. | **The local renamed to `unauditable`**; the helper is reachable again and no node id moves. Claim back to **passed**. | **The product passed everything that matters in that test.** The crash is the LAST assertion; before it the unauditable write was refused, `note_count == 0` held — ADR 0141's actual requirement — the grant was restored and the restoration was checked. A correct repair to a thirteen-session-old defect, invisible to every gate that could run. | — |
+| **D1510** | This session's own sheet discipline — the deploy sheet guards alpha→beta (*"stops dead if alpha does not exit 0"*) and was handed over **together with the command for the sweep that follows it**. | **The sweep ran BETWEEN two deploys, and the merge refused.** Alpha's redeploy died at step 6c on a provider blip; the launch line for the sweep was already in the operator's hands, so it ran against a half-deployed host. The host half recorded `source_commit 36bd4d7`, the external half — run after the deploys completed — recorded `8c61309`, and `write-session-evidence` **refused and wrote nothing**: *"the two halves describe different deployments … Re-run both halves against the same deployed commit."* | **A third host sweep**, after confirming the checkout and *both* documents named `8c61309`. The rule this leaves: **a sheet may not hand over a command whose precondition is the previous sheet's success.** One sheet, one outcome, read before the next is issued. | The guard inside the sheet was right and the guard **between** sheets did not exist. And the merge is stricter than the reasoning that would have excused it: `36bd4d7` and `8c61309` differ only in two test files, so the running code was identical — but the document's purpose is to say *what was measured where*, and it compares the commit each half measured, not whether the author thinks it mattered. It cost 17 minutes and it was right. | — |
+| **D1511** | `docs/upgrade-guide.md` §3 step 6's account of a deploy: step 6 migrates, 6b starts the deferred services, **6c checks the backup stanza**, 7 observes and publishes. | **6c can fail after the irreversible half has already run, and it did.** Alpha's redeploy reached 6c and exited **5**: `stanza-create failed (exit 49)`, `unable to connect to …r2.cloudflarestorage.com` — IPv6 *Network is unreachable* immediately, IPv4 **timing out** at 60 s. **The host itself reached R2 throughout**: measured minutes later, IPv4, IPv6 and by-name all `rc=0` in under a second. The overnight `backup-incr` units had **succeeded** at 03:32 and 03:36, and the sweep 5 minutes after the failure read *repository is ready, latest proven recoverable 2026-09-18T03:32:40Z*. A blip in the container's egress, not a wall. | **Retried, and it passed** — `backup: archiving and repository both reachable`. Recorded rather than repaired. | A deploy whose **last two steps depend on an external provider** can leave a project migrated, recreated and serving, with **step 7 never run** so the deployed document still names the previous commit. That state is not dangerous and it is not visible in the document — which is the thing worth knowing before it happens at 3am rather than after. | 0158 |
+| **D1512** | D1503, recorded this session: the host is `degraded` because of **one** unit, `cloud-init-hotplugd.service`. | **It now has three.** `agentic-postgres-backup-mirror@alpha-dev` and `@beta-dev` both entered `failed` on 2026-09-18 — alpha's run at 04:50, beta's at 04:38 — having last copied successfully on **2026-09-17** (3718 and 3329 objects). The B2 mirror is a **different provider** from the R2 primary, and the primary is healthy: both projects show a proven-recoverable point from this morning. | **Recorded, not repaired.** The guide's own table puts `backup mirror` in the *note it and proceed* column: it does not affect what a deploy does, and repairing it is not made easier by doing it inside a window. | D1503 answered *why is this host degraded* and the answer had a shelf life of eleven hours. `systemctl is-system-running` is a one-bit summary of a set, and a session that records the cause rather than the set has recorded a fact that stops being true the moment a second unit fails. | — |
 
 
 ---
@@ -131,7 +138,7 @@ in advance, what the operator types, and what each run must read before it
 proceeds. Every `sudo` line is the operator's at a TTY; every other line is the
 agent's over SSH as `op` (`docs/upgrade-guide.md` §3's two-account rule).
 
-Runs allocate `D` numbers from **D1508**.
+Runs allocate `D` numbers from **D1513**.
 
 ### Run 1 — the pre-flight, and the reading that everything after is compared against
 
@@ -673,8 +680,61 @@ python bin/write-session-evidence.py --session 28 \
 **One sweep, and a second only if the first found a defect.** `-k` for
 iteration, which writes no evidence.
 
-**Done.** _to be written, with the three halves' claim tables and the merge's
-exit code._
+**Done.** 2026-09-18. **`evidence/session-28.json` is written: 129 claims,
+123 passed, 5 `not_run`, 1 `failed`.** Merge exit **5** — D686's contract: the
+document was WRITTEN and a claim in it is not passed.
+
+**It took three host sweeps and that is on the sequencing, not the system**
+(D1510). The first found two instrument defects; they were repaired and the
+second came back clean; the third existed only to make both live halves name
+the same deployed commit after a failed deploy was retried.
+
+**The four this trip came for:**
+
+```
+agent_record_retention   not_run -> PASSED    0033 applied, six live proofs
+stage_release            red     -> PASSED    D1401's third occurrence ENDS
+port_allocation          not_run -> PASSED    first time in twelve sessions
+agent_audit_fails_closed regressed -> PASSED  D1509, repaired in the window
+```
+
+**The six that are not passed were all predicted in §7 before the trip began.**
+`documented_path` **failed** — the honest verdict, and the record was declared
+rather than withheld so it reports `failed` and not `not_run`. `bootstrap_identity`,
+`api_authorization` and `credential_rotation_planes` stay `not_run` because no
+rotation was performed (D1496). `deployment_convergence` stays `not_run` for
+want of `--redeploy-before-file`. `replacement_host_restore` stays `not_run` by
+decision (D1028). **Nothing came back unproved that §7 did not name.**
+
+**The halves, and what each measured:**
+
+| half | claims | commit | outcome |
+|---|---|---|---|
+| host | 111 | `8c61309` | 105 passed, 5 `not_run`, 1 `failed`; suite 1004 passed / 1 failed / 7 skipped / 1 error |
+| external | 5 | `8c61309` | all passed, exit **0**, 25 passed / 8 skipped in 108 s |
+| offline | 13 | `1cde025` | all passed, carried from Session 28 |
+
+**The merge reported the offline half's commit rather than folding it**: *"the
+offline half measured checkout `1cde025`; the deployment is release `8c61309`
+— a checkout claim and a deployment claim about different commits."* That is
+D1378's shape handled as §7 said it would be — **noted**, because an offline
+claim is about a checkout, where a mismatched *live* pair is refused outright.
+
+**`documented_path`'s message is worth quoting, because it is the only claim
+here that describes a real defect rather than an instrument:** the walker
+reached all seven goals and the criterion still failed, *"the sharpest being
+step 11's own compile line, whose `>` redirect truncates the contract file
+before the command refuses and leaves a 0-byte JSON that makes the next
+documented command die in an unhandled JSONDecodeError traceback instead of
+refusing."* That is Stage 4's work and it is now on the record with a number.
+
+**One proof errors and moves no claim, which is its own small finding.**
+`test_the_query_view_shows_the_human_their_own_rows_and_not_anothers` fails at
+*setup* — its fixture cannot create a stranger with empty scopes against
+`users_scopes_check1` — and it is **a node id of no claim**, so all three
+`studio_*` claims read `passed` while a proof of theirs never ran. D386's
+distinction (an `ERROR` is a broken fixture, not a kill) and D1236's class (a
+registered clause with no proof) meeting in one place.
 
 ### Run 8 — the reading, and then the tag
 
