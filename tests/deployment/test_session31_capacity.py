@@ -298,13 +298,51 @@ def test_the_admission_rehearsal_recorded_a_refusal_and_a_control(as_root: None)
     record = json.loads(newest.read_text(encoding="utf-8"))
 
     assert record["scenario"] == "admission-refused", record
-    assert record["verdict"] == "refused", (
-        f"{newest.name} records verdict {record['verdict']!r}. A reserve larger "
-        "than any host has must be refused, or the injection did not reach the "
-        "decision"
+
+    # **The READINGS are the assertion, not the verdict** (D1637). The first
+    # version of this proof checked `verdict == "refused"` and
+    # `induced is False`, and the harness produces neither: `verdict` is
+    # `"read"` -- its word for a scenario that reads rather than one that
+    # passes or fails -- and `induced` is true because the induce PHASE ran,
+    # which is not the same as something having been broken. Both were
+    # assumed rather than measured, and the rehearsal they would have failed
+    # did exactly what it should.
+    #
+    # What the record actually holds is stronger than either: the injected
+    # run and the control, each with its outcome AND its exit code, and the
+    # flag saying which of the two carried the injection.
+    readings = record["readings"]
+
+    assert readings["admission_refused"] == "refused", (
+        f"{newest.name}: a reserve larger than any host has was ADMITTED "
+        f"({readings['admission_refused']!r}), so the injection did not reach "
+        "the decision"
     )
-    assert record.get("induced") is False, (
-        f"{newest.name} says it induced a failure; this scenario asks a question and breaks nothing"
+    assert readings["admission_refused_exit"] == capacity_reading.EXIT_ADMISSION_REFUSED, (
+        f"{newest.name}: the refused run exited "
+        f"{readings['admission_refused_exit']}, not "
+        f"{capacity_reading.EXIT_ADMISSION_REFUSED}"
+    )
+
+    # **The control is the half that matters.** A rehearsal whose injected run
+    # refuses proves nothing on a host that refuses everything -- which is
+    # exactly what D1611 found this rule doing before it was repaired. The
+    # host's own declaration must ADMIT the same project in the same breath.
+    assert readings["admission_as_declared"] == "admitted", (
+        f"{newest.name}: the host's own declaration refused this project too "
+        f"({readings['admission_as_declared']!r}), so the injected refusal says "
+        "nothing about the injection"
+    )
+    assert readings["admission_as_declared_exit"] == 0, readings
+
+    # And the control is the one that is NOT injected -- a rehearsal reading
+    # that could be mistaken for the host's own is a rehearsal that proves
+    # nothing about the host.
+    assert readings["control_declaration_injected"] is False, (
+        f"{newest.name}: the control carried the injected declaration"
+    )
+    assert record["reversed"] is True, (
+        f"{newest.name} was not reversed; this scenario changes nothing and says so"
     )
 
 
