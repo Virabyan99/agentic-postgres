@@ -88,6 +88,12 @@ def facts(**overrides: Any) -> rehearsal.Facts:
         "lock_present": True,
         "lock_recorded": True,
         "foreign_lock_path": f"/etc/agentic-postgres/projects/{KEY}/apg-rehearsal-{RID}-lock.json",
+        # Session 31: `admission-refused` refuses without these, which is
+        # asserted below. They are present in the base so the two parametrised
+        # sweeps reach the ninth scenario the way they reach the other eight.
+        "host_manifest": str(REPO_ROOT / "host.example.yaml"),
+        "project_manifest": str(REPO_ROOT / "project.example.yaml"),
+        "admit_py": str(REPO_ROOT / "bin" / "admit.py"),
     }
     base.update(overrides)
     return rehearsal.Facts(**base)
@@ -607,6 +613,13 @@ def rehearse(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         str(registry),
         "--evidence-dir",
         str(tmp_path / "evidence"),
+        # Session 31. Ignored by every scenario but `admission-refused`, which
+        # refuses without them -- so they live here rather than being threaded
+        # through `drive` for one case.
+        "--host",
+        str(REPO_ROOT / "host.example.yaml"),
+        "--manifest",
+        str(REPO_ROOT / "project.example.yaml"),
     ]
     return module
 
@@ -1213,3 +1226,93 @@ def test_the_doctor_wrapper_forwards_the_injections_to_deployed_mode_only() -> N
     deployed = source.split("deployed_mode() {")[1].split("\n}\n")[0]
     assert deployed.count('${INJECTIONS[@]+"${INJECTIONS[@]}"}') == 3, "every exec forwards them"
     assert "is a deployed-mode injection; it needs --project" in source
+
+
+# ---------------------------------------------------------------------------
+# Session 31 -- admission-refused (ADR 0190, ADR 0221)
+# ---------------------------------------------------------------------------
+
+
+def test_admission_refused_moves_the_reserve_and_reads_a_refusal() -> None:
+    """The ninth scenario induces nothing, and that is the whole design.
+
+    A rehearsal that proved admission works by filling the host with 1 GiB of
+    real memory would be a rehearsal nobody runs twice. The reserve is
+    injected into `admit`'s argv -- the disk-threshold shape exactly -- and
+    `admit` renders nothing and writes nothing, so even the injected run
+    leaves the host as it was.
+    """
+    plan = rehearsal.plan("admission-refused", facts())
+
+    assert all(action.kind == "none" for action in (*plan.induce, *plan.reverse))
+    assert "nothing is changed" in plan.induce[0].what
+    # `induced` stays True, like disk-threshold's: it means the reader was
+    # exercised, not that something was broken. `induced=False` belongs to
+    # provider-loss alone, whose verdict is the literal "recorded".
+    assert plan.induced is True
+
+    injected = [o for o in plan.observe if "--reserve-memory-mb" in o.argv]
+    assert len(injected) == 1
+    assert injected[0].expect == "refused"
+    assert str(rehearsal.INJECTED_RESERVE_MB) in injected[0].argv
+
+    control = [o for o in plan.observe if o.control]
+    assert len(control) == 1
+    assert "--reserve-memory-mb" not in control[0].argv, (
+        "the control carries the injection, so the two readings cannot be told apart"
+    )
+
+    # Both read the command's own JSON rather than scraping its prose (D1114).
+    assert all("--json" in o.argv for o in plan.observe)
+
+
+def test_admission_refused_refuses_without_the_two_manifests() -> None:
+    """It asks whether THIS host would admit THAT project.
+
+    Neither manifest is derivable from a deployed document, so planning around
+    their absence would mean inventing a subject -- the shape `capability-drift`
+    already refuses for a missing lock.
+    """
+    for missing in ({"host_manifest": None}, {"project_manifest": None}):
+        with pytest.raises(rehearsal.RehearsalError, match="--host and --manifest"):
+            rehearsal.plan("admission-refused", facts(**missing))
+
+
+def test_admission_refused_has_a_verdict_arm() -> None:
+    """`verdict()` raises for a scenario with no arm, so a scenario added
+    without one fails at the end of a real rehearsal -- on the host, after the
+    reading, which is the most expensive place to find it."""
+    read, why = rehearsal.verdict(
+        "admission-refused",
+        {
+            "admission_refused": "refused",
+            "admission_as_declared": "admitted",
+            "control_declaration_injected": False,
+        },
+    )
+    assert read == "read", why
+
+    unread, why = rehearsal.verdict(
+        "admission-refused",
+        {
+            "admission_refused": "admitted",
+            "admission_as_declared": "admitted",
+            "control_declaration_injected": False,
+        },
+    )
+    assert unread == "unread"
+    assert "injected" in why
+
+    # The half that stops the rehearsal proving nothing: a control whose own
+    # report claims an injected declaration means the two runs cannot be told
+    # apart, whatever their outcomes were.
+    confused, why = rehearsal.verdict(
+        "admission-refused",
+        {
+            "admission_refused": "refused",
+            "admission_as_declared": "admitted",
+            "control_declaration_injected": True,
+        },
+    )
+    assert confused == "unread"
+    assert "told apart" in why

@@ -222,7 +222,8 @@ Six columns. Each row is a **measured fact about the tree at `ae2c0dc`** set
 against what the brief (the stage plan's §5 *Session 31*, its §1 rows, and
 CLAUDE.md §9) says, with the decision this plan takes. **Next free number
 after this table was D1602 at planning time; Run 1 measured eight more
-(D1602-D1609, added 2026-09-19), so the next free number is D1610.**
+(D1602-D1609, added 2026-09-19) and Run 3 four more (D1610-D1613), so the
+next free number is **D1614**.**
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -254,6 +255,10 @@ after this table was D1602 at planning time; Run 1 measured eight more
 | **D1607** | §4: *"a failing export is logged by the SDK and never raises into a tool call (the SDK's reader runs on its own thread — rig 31d confirms with the collector stopped)"*. | **Confirmed, and it costs the process its exit.** Rig 31d: nothing raised, exit 0 — but the container's wall clock went from **1 s** (collector reachable) to **18 s** (name does not resolve) and **11 s** (connect succeeds, read times out at the exporter's 10 s default). **mcp's `stop_grace_period` is 15s**, so a stop while the collector is down is a **SIGKILL**. | **Run 4 sets the OTLP exporter's timeout explicitly and raises mcp's `stop_grace_period` above the worst case**, with a proof. ADR 0223 §3 records the requirement. | The rig answered what it owed and found the thing beside it; a deploy that SIGKILLs mcp on every collector outage would have looked like an unrelated flake for sessions. | 0223 |
 | **D1608** | Run 1's rig 31e text and §4: the third manifest's budget is *"`shared_buffers_mb: 896`"*, one member. | **Three members must move, measured against `config._validate_memory_budget` itself.** `shared_buffers_mb: 896` alone is refused for `shm_size_mb` (256 < 896); with `shm_size_mb: 896` it is refused again for `memory_limit_mb` (768 ≤ 1072). Only `{shared_buffers_mb: 896, shm_size_mb: 896, memory_limit_mb: 1280}` is **ACCEPTED** per project — and its `unreclaimable_mb` is **1072**, against a safe available of **992**. | **Sheet A5's third manifest declares all three.** The control is exactly this: the per-project guardrail accepts it, so the live refusal is the cross-project decision (D1583) and nothing else. | A candidate refused by the per-project validator would have produced a green-looking refusal that proved the opposite of the claim — a proof that passes for the wrong reason. | 0221 |
 | **D1609** | `mcp_metrics.configure`'s docstring: *"every resource attribute is served verbatim on the exposition surface as a label of a synthesised `target_info` series"*. | **Partially superseded, measured in rig 31d.** The prometheus exporter promotes `service.name` → `job` and the SDK's auto-generated `service.instance.id` → `instance` onto **every series**, not only onto `target_info`. `instance` is a fresh UUID per process, so **each mcp restart mints a new series set**, bounded only by `metric_expiration: 60s`. | **`doctor usage` aggregates across `instance`** rather than reading one series, and says so. The docstring gains the measured correction in Run 4. | A counter read from one `instance` would silently undercount after any restart — a cumulative counter answering a point-in-time question in a new disguise (D553). | 0223 |
+| **D1610** | Run 3 §5.2: *"the probe's three `docker` reads are **re-spelled in `deploy-project.py`** through its own `run()` … one parser, two probes"*. | **Three commands need the reading, not two**: `doctor capacity` reports it, `bin/admit.py` decides on it, and the deploy decides on it at step 0. ADR 0093 bars a `bin/`-to-`bin/` import, so the plan's shape is three copies of six probes. §7 question 5 is exactly this: a repair to the ceiling parser that reached the doctor and not the deploy is invisible until a deploy admits what the doctor refused. | **One probe in the library — `src/agentic_postgres/capacity_probe.py` — and each command passes ITS OWN runner.** The runner is the part that genuinely differs: `bin/doctor.py`'s is bounded with `stdin=DEVNULL` (D673), `bin/admit.py`'s the same, and the deploy's general `run()` **has no timeout at all**, so step 0 got a bounded `_probe_run` rather than borrowing it. `container_exec` is the precedent for a subprocess-running module under `src/`. | The doctor/deploy split ADR 0157 draws is about *who decides what*, not about who may parse a number; duplicating the parse to honour it would trade a real invariant for a spelling. | 0221 |
+| **D1611** | §2 `NODE-ADMIT-001`: *"an undetermined reading refuses (fails closed) naming the figure"*, applied to the disk figure read with `shutil.disk_usage(docker_root)`. | **The disk figure is undeterminable unprivileged, so the rule was unsatisfiable.** `/var/lib/docker` **does not exist** on this workstation — Docker Desktop's daemon reports a path inside its own VM, and `disk_usage` raises `FileNotFoundError`; on a CI runner the same path is 0710 root and it raises `PermissionError`. `decide` then refused EVERY admission for a reason with nothing to do with capacity. Measured: `/var/lib`, `/var` and `/` all stat cleanly and share `st_dev` with the checkout. | **`capacity_probe.disk_usage_near` measures the same filesystem from the deepest readable ancestor and REPORTS the path it measured** (`Reading.docker_root_measured_at`, printed as a `disk measured at` line). `statvfs` answers identically from any point on one filesystem; where the Docker root is its own mount an ancestor would describe a different disk, and then an operator reads the path rather than a plausible number. | A rule nothing can satisfy is not a rule — and this one would have been discovered on the host, mid-trip, with every deploy refused. Reporting the measured path is ADR 0195's move; substituting a number would have been the fold. | 0221 |
+| **D1612** | §5.4: the `admission-refused` record's *"`induced: false`"*. | **In the tree `induced=False` means *recorded, not exercised*.** `provider-loss` is its only member and `verdict()` returns the literal `"recorded"` for it (D976). **`disk-threshold` changes nothing either** — it injects a threshold into the doctor's argv — and is `induced=True`, because it exercises the reader. `test_every_scenario_plans_three_phases_and_prints_every_command` asserts `(plan.induced is False) == (scenario == "provider-loss")`. | **`admission-refused` keeps `induced=True`**, disk-threshold's flag, because it is disk-threshold's shape exactly: a threshold injected into a reader's argv, nothing changed, nothing to undo. The existing parametrised assertion stands unedited. | Marking it False would have put it in provider-loss's class, whose verdict is `"recorded"` rather than `"read"` — quietly downgrading what the rehearsal claims to have proved, which is the opposite of what a rehearsal is for. | 0190 |
+| **D1613** | §5.5: *"If `dev_environment.py` carries a `mem_limit`, it carries `pids_limit` from the same default"*; §2 `NODE-LIMIT-001`: *"`apg dev`'s cluster definition carries the same `pids_limit` if it carries a `mem_limit`"*. | **It carries no memory limit at all.** `dev_environment.run_arguments` is a deliberately minimal `docker run` whose docstring says *"Nothing is in this list by accident"*: no `--network`, no `-v`, no `-c`, one `-p`, and no `--memory`. `grep mem_limit src/ bin/` finds it in no cluster definition. | **Nothing is added to the dev cluster**, and the proof is written as the INVARIANT the conditional states — if that argv ever bounds memory, it bounds processes in the same change — rather than deleted for being vacuously true. | A `--pids-limit` there would be the first resource cap on a developer's throwaway cluster and one nobody asked for. Keeping the test as an invariant is what catches the person who bounds its memory later, who is exactly the person who will not think about its processes. | 0222 |
 
 ---
 
@@ -941,8 +946,96 @@ build_compose_env" -- tests/contract`. `bin/apg.sh generate --check --project
 project.example.yaml` (the compose env is not a client input; confirm exit
 0). `python bin/render-config.py --bounds-doc --check`. Push; read CI.
 
-**Done.** _(the executor: the measured-peak → default table; the fork text;
-whether `cpus` as a string was accepted; the `--render-only` reading.)_
+**Done.** 2026-09-19. Admission decides at the deploy's step 0 and on its
+own through `bin/admit.sh`; twenty services are bounded in processes and nine
+in CPU; the ninth rehearsal scenario exists. **Battery 11/11 killed**, every
+control green in the same invocation, every file restored byte-identical.
+Targeted: **37 modules, 2192 passed, 2 documented skips**. `ruff check` 0,
+`shellcheck` clean on both new scripts. Derived artefacts all current:
+`--bounds-doc --check` 0, `apg generate --check` 0, `render-acceptance-matrix
+--check` 0, `app-contract --check` 0, `mcp-contract check` 0.
+
+**The measured-peak → default table** (rig 31b's `pids.peak`, both projects,
+the rule being *the larger of 64 and four times the peak, rounded up to a
+power of two*, postgres additionally ≥ `max_connections + 32`):
+
+| service | peak | 4 × peak | `pids_limit` | `cpus` |
+|---|---|---|---|---|
+| postgres | 28, 29 | 116 | **128** (≥ 88) | `"2.0"` |
+| postgrest | 18, 18 | 72 | **128** | `"1.0"` |
+| metrics | 16, 16 | 64 | **64** | `"1.0"` |
+| store | 16, 16 | 64 | **64** | `"1.0"` |
+| auth / storage / mcp | ≤ 12 | ≤ 48 | **64** | `"1.0"` |
+| docs, pgbouncer | 9, 9 | 36 | **64** | `"1.0"` |
+| the eleven short-lived | ≤ 9 | — | **64** literal | none |
+
+**The fork text, verbatim**, asserted by the proof: `fork: retry: Resource
+temporarily unavailable` then `fork: Resource temporarily unavailable`; the
+control reaches `spawned=20` and reads `pids.max` = `max`.
+
+**`cpus` as a string IS accepted**, so no `deploy.resources.limits.cpus`
+fallback was needed. Validated against real Compose rather than inferred: all
+fourteen profiles selected, **20 of 20 services resolved**, `cpus` normalising
+to an int (`postgres` 2, every sidecar 1) and `pids_limit` to 128/64 exactly as
+the table says. The first two attempts at that check exited 0 and 1 over
+`services: {}` and a dependency error — a check that cannot fail is worse than
+no check, and both would have passed for the wrong reason had the exit code
+been the whole of what was read.
+
+**`--render-only` never reaches admission**, read out of `deploy.sh`: the
+branch `exec`s `bin/render-config.py` directly (`deploy.sh:289-292`) and never
+`bin/deploy-project.py`, so step 0 does not exist on that path. `--render-only`
+keeps working with no host and no root, unchanged.
+
+**Five things the run found rather than assumed:**
+
+1. **The probe is in the library, not spelled three times.** The plan said the
+   deploy would re-spell the three `docker` reads through its own `run()`,
+   because ADR 0093 bars a `bin/`-to-`bin/` import. That would have been three
+   copies of one reading across `doctor`, `admit` and the deploy — §7 question
+   5 exactly, where a repair reaching one caller is invisible in the others
+   until a deploy admits what the doctor refused. `capacity_probe.read` is the
+   one reading; each command still passes **its own runner**, which is the part
+   that genuinely differs (the deploy's general `run` has no timeout at all, so
+   step 0 got a bounded `_probe_run` — an unbounded `docker` call there could
+   hang a deploy before anything had happened). **D1610.**
+2. **The disk figure was undeterminable unprivileged, and the rule was
+   therefore unsatisfiable.** `shutil.disk_usage(docker_root)` raises ENOENT on
+   this workstation (`/var/lib/docker` **does not exist** — Docker Desktop's
+   daemon reports a path inside its own VM) and EACCES on a CI runner (0710
+   root). `decide` fails closed on an undetermined disk figure, correctly — so
+   **every admission would have been refused for a reason that has nothing to
+   do with capacity**, and it would have been found on the host, mid-trip. The
+   figure is now measured from the nearest readable ancestor and **the path is
+   reported**: the same filesystem answers `statvfs` identically, and where it
+   would not, an operator reads the path rather than a plausible number.
+   **D1611.**
+3. **`induced=False` was wrong, and the tree said so.** §4 asks for
+   `induced: false` on the rehearsal record. In the tree `induced=False` means
+   *recorded, not exercised* — provider-loss is its only member and `verdict()`
+   returns the literal `"recorded"` for it. `disk-threshold` changes nothing
+   either, injects a threshold into its reader's argv, and is `induced=True`.
+   `admission-refused` is disk-threshold's shape exactly, so it takes
+   disk-threshold's flag; marking it False would have quietly downgraded what
+   the rehearsal claims to have proved. **D1612.**
+4. **D1184 fired, from the guard that exists for it.** The observe arm parsed
+   `admit --json` into a local called `document`, and
+   `test_container_selectors` reported `outcome` and `declaration_injected` as
+   members a `bin/` command invents off a deployed document. The guard is
+   right — in a `bin/` command that name means the deployed document — and the
+   local is now `decision`.
+5. **`apg dev` carries no memory limit at all**, so ADR 0222's rule does not
+   reach it: `run_arguments` is a deliberately minimal `docker run`
+   (*"Nothing is in this list by accident"*) with no `--memory` and no `-c`. The
+   proof is written as the **invariant** rather than deleted — if that argv ever
+   bounds memory it bounds processes in the same change — because the next
+   person to cap the dev cluster's memory is exactly the person who will not
+   think about its processes. **D1613.**
+
+**Also:** the two committed fixtures were re-rendered, because
+`.generated/fixture-alpine-dev` predated the eighteen new compose keys and
+`test_compose_contract::test_model_renders` failed on it — correctly. Both now
+carry 18 resource keys each.
 
 ### Run 4 — the collector consumed: the label, the retention, the endpoint, `doctor usage`
 

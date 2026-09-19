@@ -27,7 +27,6 @@ import argparse
 import hashlib
 import json
 import re
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -42,12 +41,12 @@ from agentic_postgres import (
     access_broker,
     agent_plane,
     backup_report,
+    capacity_probe,
     capacity_reading,
     config,
     deployed_output,
     diagnosis,
     fleet,
-    host_config,
     migrations,
     naming,
     runtime_override,
@@ -56,11 +55,6 @@ from agentic_postgres import (
 EXIT_INPUT = 2
 EXIT_STATE = 4
 EXIT_CHECK = 6
-
-#: The reading's stand-in key for "the project root itself could not be read".
-#: A slash cannot appear in a project key, so this can never be confused with
-#: a real project whose document is missing.
-PROJECT_ROOT_UNREADABLE = "<project state root>"
 
 #: Compose's own label. `runtime_override` owns the constant; a second spelling
 #: here is the copy that disagrees.
@@ -126,48 +120,6 @@ def load_document(
     except ValueError as problem:
         raise SystemExit(_die(EXIT_STATE, f"{path} is not valid JSON: {problem}")) from None
     return document
-
-
-def read_deployed(root: Path, key: str) -> tuple[dict[str, Any] | None, str | None]:
-    """One deployed document, or the REASON it could not be read.
-
-    The non-fatal sibling of `load_document` above, and the difference between
-    them is the whole point rather than an oversight. `load_document` answers
-    *diagnose THIS project*, where a missing document means the command was
-    asked about something that was never deployed and should stop. This one
-    answers *what has this node already committed*, where a document that
-    cannot be read is one project's claim among several -- and stopping would
-    turn a partial answer into no answer, while returning nothing would turn it
-    into a confident wrong one.
-
-    So the reason is carried back and `capacity_reading.decide` refuses over
-    it. **On this host that is the ordinary case, not the exceptional one**:
-    `/etc/agentic-postgres/projects/<key>/` is `drwx------ root root`, so every
-    document is unreadable to anyone but root (D1606).
-
-    It deliberately does NOT reuse the operator inventory command's reader of
-    the same shape. Nothing in the release may name that command -- it is the
-    end of a chain, never a link in one (ADR 0185, FLEET-INV-002), and the
-    scan that enforces it cannot tell a mention from a use, which is why this
-    paragraph does not spell the path either. What the two readers share is
-    the library underneath, `deployed_path` and `validate_deployed_document`.
-    What they do not share is the failure policy, which is the part that
-    actually differs.
-    """
-    path = deployed_output.deployed_path(key, root=root)
-    try:
-        deployed = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None, "no deployed document: the directory exists and outputs.json does not"
-    except OSError:
-        return None, "the deployed document could not be read"
-    except ValueError:
-        return None, "the deployed document is not valid JSON"
-    try:
-        deployed_output.validate_deployed_document(deployed)
-    except config.ManifestError:
-        return None, "the deployed document does not validate against the outputs schema"
-    return deployed, None
 
 
 def _die(code: int, message: str) -> int:
@@ -791,53 +743,6 @@ def probe_agent_record(document: dict[str, Any]) -> diagnosis.Check:
 # ---------------------------------------------------------------------------
 
 
-def probe_meminfo(path: Path = Path(capacity_reading.MEMINFO_PATH)) -> dict[str, int] | None:
-    """The node's memory, read DIRECTLY and not through a container.
-
-    A figure read inside a cgroup answers a different question: `mem_limit` is
-    what that container may use, and this reading is about what the machine
-    has. Nothing is exec'd, so `container_exec` is not involved (D1593 draws
-    the line at execs INTO a container, and this is a file read).
-    """
-    try:
-        return capacity_reading.parse_meminfo(path.read_text(encoding="utf-8"))
-    except OSError:
-        return None
-
-
-def probe_docker_root() -> str | None:
-    """Where Docker keeps its data, asked rather than assumed.
-
-    `/var/lib/docker` is the default and is not the contract; a host that moved
-    it would otherwise be measured at the wrong filesystem, and the number
-    would look perfectly plausible. `docker info` is not an exec into a
-    container, so it goes through this module's own bounded `run` (D1593).
-    """
-    answered = run("docker", "info", "--format", "{{.DockerRootDir}}", timeout=20)
-    if answered is None or answered.returncode != 0:
-        return None
-    root = answered.stdout.strip()
-    return root or None
-
-
-def probe_ceilings() -> tuple[dict[str, int], tuple[str, ...]]:
-    """Every labelled container's `mem_limit`, summed per project.
-
-    Reports and decides nothing (ADR 0221). `docker ps` and `docker inspect`
-    are not execs into a container.
-    """
-    listing = run("docker", "ps", "--filter", f"label={COMPOSE_PROJECT_LABEL}", "-q", timeout=20)
-    if listing is None or listing.returncode != 0:
-        return {}, ()
-    ids = listing.stdout.split()
-    if not ids:
-        return {}, ()
-    inspected = run("docker", "inspect", *ids, timeout=30)
-    if inspected is None or inspected.returncode != 0:
-        return {}, ()
-    return capacity_reading.ceilings_from_inspect(inspected.stdout)
-
-
 def probe_capacity(
     host_manifest: Path,
     root: Path = deployed_output.PROJECT_STATE_ROOT,
@@ -846,94 +751,13 @@ def probe_capacity(
 ) -> capacity_reading.Reading:
     """What this node has, what was declared, and what is already claimed.
 
-    **Every figure is a `Figure`, and every failure to read one carries its
-    reason** (ADR 0195). Nothing here substitutes a zero, a default or a guess:
-    the reading reports what it could not determine and `capacity_reading.
-    decide` is the thing allowed to refuse over it.
-
-    **The deployed documents are root-readable only.** `/etc/agentic-postgres/
-    projects/<key>/` is `drwx------ root root` (D1606, measured on both
-    projects), so an unprivileged run lands every project in `unreadable` with
-    its reason -- and `decide` then refuses rather than summing zero, which is
-    the whole reason that dict exists.
-
-    The loop variable is `deployed`, never `document`: in a `bin/` command the
-    name `document` means the deployed document, and
-    `test_container_selectors.py` reads every `document[...]` in this file
-    against the outputs schema (D1184).
+    The reading itself lives in `capacity_probe` because `bin/admit.py` and the
+    deploy's step 0 need exactly the same one, and a `bin/` command may not
+    import another (ADR 0093). What stays here is this command's own `run` --
+    bounded, `stdin=DEVNULL`, for D673's reason -- handed in as the runner.
     """
-    declared = host_config.declared_capacity(host_config.load_host_manifest(host_manifest))
-
-    memory = probe_meminfo()
-    if memory is None:
-        why = "/proc/meminfo could not be read, or did not carry all three of "
-        why += "MemTotal, MemAvailable and SwapTotal"
-        mem_total = capacity_reading.Figure.unknown(why)
-        mem_available = capacity_reading.Figure.unknown(why)
-        swap_total = capacity_reading.Figure.unknown(why)
-    else:
-        mem_total = capacity_reading.Figure.measured(memory["MemTotal"])
-        mem_available = capacity_reading.Figure.measured(memory["MemAvailable"])
-        swap_total = capacity_reading.Figure.measured(memory["SwapTotal"])
-
-    docker_root = probe_docker_root()
-    if docker_root is None:
-        why = "`docker info` did not report a data root"
-        free_gb = capacity_reading.Figure.unknown(why)
-        total_gb = capacity_reading.Figure.unknown(why)
-    else:
-        try:
-            usage = shutil.disk_usage(docker_root)
-        except OSError:
-            why = f"the Docker data root could not be stat'd ({len(docker_root)} chars)"
-            free_gb = capacity_reading.Figure.unknown(why)
-            total_gb = capacity_reading.Figure.unknown(why)
-        else:
-            free_gb = capacity_reading.Figure.measured(usage.free // (1024**3))
-            total_gb = capacity_reading.Figure.measured(usage.total // (1024**3))
-
-    documents: dict[str, Any] = {}
-    unreadable: dict[str, str] = {}
-    try:
-        keys = sorted(path.name for path in root.iterdir() if path.is_dir())
-    except OSError as problem:
-        # NOT an empty list. A root this command cannot list is a set of
-        # claims it does not know, and reporting that as `0 MiB committed`
-        # would hand `decide` the whole declared budget as safely available
-        # and admit a candidate on the strength of a directory it could not
-        # open. The reserved key is a project name no manifest can hold
-        # (`/` is refused by the key pattern), so it cannot collide with one.
-        unreadable[PROJECT_ROOT_UNREADABLE] = (
-            f"the project state root could not be listed: {problem.strerror}"
-        )
-        keys = []
-    for key in keys:
-        deployed, why = read_deployed(root, key)
-        if deployed is None:
-            unreadable[key] = why or "the deployed document could not be read"
-            continue
-        documents[key] = deployed
-
-    committed, missing_member = capacity_reading.committed_from_documents(
-        documents, exclude=exclude
-    )
-    unreadable.update(missing_member)
-    unreadable.pop(exclude, None)
-
-    ceilings, unbounded = probe_ceilings()
-
-    return capacity_reading.Reading(
-        declared=declared,
-        mem_total=mem_total,
-        mem_available=mem_available,
-        swap_total=swap_total,
-        docker_root_free_gb=free_gb,
-        docker_root_total_gb=total_gb,
-        committed=committed,
-        unreadable=unreadable,
-        ceilings=ceilings,
-        unbounded=unbounded,
-    )
+    reading, _ = capacity_probe.read(host_manifest, root, runner=run, exclude=exclude)
+    return reading
 
 
 def diagnose(

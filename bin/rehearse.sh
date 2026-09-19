@@ -56,6 +56,14 @@ Scenarios, each with its reader:
   capability-drift           a lock with a foreign hash beside the deployed
                              document; the doctor's capability drift check.
   provider-loss              recorded (D976), not induced; prints the record.
+  admission-refused          bin/admit.py with --reserve-memory-mb injected, so
+                             that nothing can fit; the host's own declaration is
+                             the control. Nothing is changed and no memory is
+                             consumed -- admit renders nothing and writes
+                             nothing. Needs --host and --manifest, and refuses
+                             without them: it asks whether THIS host would admit
+                             THAT project, and neither is derivable from a
+                             deployed document.
 
   --plan       Print induce, observe and reverse with every command; run nothing.
   reverse      Replay the reversal an interrupted rehearsal recorded in

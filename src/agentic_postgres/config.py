@@ -611,6 +611,69 @@ def postgrest_connection_budget(rest: dict[str, Any]) -> int:
 #: which drops every project's ingress at once.
 HOST_MEMORY_GUARDRAIL_MB = 1600
 
+#: The processes and CPU each long-running project service may have (ADR 0222).
+#:
+#: **These narrow a ceiling that already exists.** Rig 31b read
+#: `/sys/fs/cgroup/system.slice/docker-*.scope/pids.max` for all 22 containers
+#: on the reference host as `op` with no root, and every one of them reads
+#: **3647** -- systemd's `DefaultTasksMax`, which nobody chose for these
+#: services (`docker.service` and `containerd.service` are both
+#: `TasksMax=infinity`; `kernel.pid_max` is 4194304). So the claim this table
+#: makes is 3647 -> 128/64, not infinity -> 128/64 (D1602).
+#:
+#: **The rule, applied to `pids.peak` read off both deployed projects on
+#: 2026-09-19**: the larger of 64 and four times the measured peak, rounded up
+#: to a power of two, and postgres additionally at least
+#: `max_connections + 32`. Four times, because a limit at the peak is a limit
+#: that fires on an ordinary busy minute, and a fork storm is orders of
+#: magnitude away from four.
+#:
+#:   ============ ======== ========= ============
+#:   service      peak     4 x peak  pids_limit
+#:   ============ ======== ========= ============
+#:   postgres     28, 29   116       128  (>= 56 + 32 = 88)
+#:   postgrest    18, 18   72        128
+#:   metrics      16, 16   64        64
+#:   store        16, 16   64        64
+#:   auth         <= 12    <= 48     64
+#:   storage      <= 12    <= 48     64
+#:   mcp          <= 12    <= 48     64
+#:   docs         9, 9     36        64
+#:   pgbouncer    9, 9     36        64
+#:   ============ ======== ========= ============
+#:
+#: `cpus` is `"2.0"` for postgres -- the reference host's core count, so a
+#: bigger host does not silently give the cluster more -- and `"1.0"` for every
+#: sidecar, so none of them may take both cores. A QUOTED string, because
+#: `${X_CPUS:?required}` interpolation yields a string and rig 31a measured
+#: that Compose accepts one: `docker compose config` normalises `"1.0"` to
+#: `cpus: 1` and `HostConfig.NanoCpus` reads 1000000000. No
+#: `deploy.resources.limits.cpus` fallback is needed.
+SERVICE_RESOURCE_DEFAULTS: dict[str, dict[str, int | str]] = {
+    "postgres": {"pids_limit": 128, "cpus": "2.0"},
+    "pgbouncer": {"pids_limit": 64, "cpus": "1.0"},
+    "postgrest": {"pids_limit": 128, "cpus": "1.0"},
+    "docs": {"pids_limit": 64, "cpus": "1.0"},
+    "metrics": {"pids_limit": 64, "cpus": "1.0"},
+    "store": {"pids_limit": 64, "cpus": "1.0"},
+    "auth": {"pids_limit": 64, "cpus": "1.0"},
+    "storage": {"pids_limit": 64, "cpus": "1.0"},
+    "mcp": {"pids_limit": 64, "cpus": "1.0"},
+}
+
+#: Every short-lived service's process limit: one-shots, probes and clients.
+#:
+#: A literal in `compose.yaml` rather than an interpolation, because these
+#: eleven take no CPU cap either and a variable per one-shot would be eleven
+#: compose-env keys for a number that is the same everywhere. The highest peak
+#: measured among them was 9 (`edge-probe`), so 64 is seven times the observed
+#: worst case.
+#:
+#: **They get no `cpus`**, and that is a decision rather than an omission: a
+#: capped `dbmate` throttles a migration, and no migration's CPU profile has
+#: been measured on this host. Capping one on a guess is the class §7 names.
+SHORT_LIVED_PIDS_LIMIT = 64
+
 
 def unreclaimable_mb(budget: dict[str, int]) -> int:
     """What the host must actually find for this cluster, in MiB.

@@ -85,6 +85,11 @@ SCENARIOS = (
     "disk-threshold",
     "capability-drift",
     "provider-loss",
+    # Session 31 (ADR 0221). The ninth, and the second that induces nothing:
+    # a reserve is injected into `admit` exactly the way the disk thresholds
+    # are injected into the doctor. A rehearsal moves the threshold; it never
+    # fills the host.
+    "admission-refused",
 )
 
 #: The stateless service whose route the doctor reads (ADR 0015: `edge-probe`
@@ -138,6 +143,14 @@ INJECTED_WARN_COPIES = 1.0e9
 INJECTED_PROBLEM_COPIES = 1.0e9
 INJECTED_WARN_ABOVE_PROBLEM = 2.0e9
 
+#: The reserve injected into `admit` so that nothing can fit (ADR 0221).
+#:
+#: Absurd on purpose, for the reason the disk copies above are: a value near
+#: the real one would make the rehearsal's result depend on how full the host
+#: happened to be that day, and then a green rehearsal would mean *the host was
+#: quiet* rather than *the reader works*.
+INJECTED_RESERVE_MB = 1_000_000_000
+
 
 class RehearsalError(Exception):
     """The plan cannot be built for these facts. The message names why."""
@@ -179,6 +192,12 @@ class Facts:
     lock_present: bool = False
     lock_recorded: bool = False
     foreign_lock_path: str | None = None
+    #: Session 31: the two manifests `admit` needs. Absent for every other
+    #: scenario, and `admission-refused` refuses rather than planning around
+    #: their absence -- the same rule the lock and the mirror already follow.
+    host_manifest: str | None = None
+    project_manifest: str | None = None
+    admit_py: str | None = None
 
     @property
     def compose_project(self) -> str:
@@ -751,6 +770,67 @@ def _provider_loss(facts: Facts) -> Plan:
     )
 
 
+def _admission_refused(facts: Facts) -> Plan:
+    """Does admission actually refuse, on this host, when nothing fits?
+
+    **Nothing is induced and nothing is changed.** The reserve is injected into
+    `bin/admit.py`'s argv, which is the disk-threshold shape exactly: the
+    reader is rehearsed by moving the threshold, never by filling the disk
+    (ADR 0190). `admit` renders nothing and writes nothing, so even the
+    injected run leaves the host as it was.
+
+    Two readings, and the control is the one that matters. The injected run
+    must refuse; the control -- the host's own declaration, unmodified -- must
+    produce whatever the host really says, and its report must NOT be marked
+    injected. Without that second half a rehearsal could pass against a
+    command that refused everything unconditionally, which is the failure the
+    injection is supposed to rule out.
+    """
+    if not facts.host_manifest or not facts.project_manifest or not facts.admit_py:
+        raise RehearsalError(
+            "admission-refused needs --host and --manifest: it asks whether THIS "
+            "host would admit THAT project, and neither is derivable from a "
+            "deployed document"
+        )
+
+    base = (facts.admit_py, "--host", facts.host_manifest, "--project", facts.project_manifest)
+    return Plan(
+        scenario="admission-refused",
+        reader="bin/admit.py, with the memory reserve injected",
+        induce=(
+            Action(
+                what=(
+                    "nothing is changed and no memory is consumed (ADR 0190): the reserve "
+                    "is injected into admit with --reserve-memory-mb"
+                ),
+            ),
+        ),
+        observe=(
+            Observation(
+                name="admission_as_declared",
+                what="admission against the host's own declaration",
+                argv=(*base, "--json"),
+                expect="the host's own decision, whatever it is",
+                control=True,
+            ),
+            Observation(
+                name="admission_refused",
+                what=f"admission with a reserve of {INJECTED_RESERVE_MB} MiB injected",
+                argv=(*base, "--reserve-memory-mb", str(INJECTED_RESERVE_MB), "--json"),
+                expect="refused",
+            ),
+        ),
+        reverse=(Action(what="nothing was changed; nothing to undo"),),
+        verify=(),
+        # `induced` stays True, as `disk-threshold`'s does. It does not mean
+        # "something was broken" -- disk-threshold changes nothing either. It
+        # means the reader was EXERCISED rather than merely recorded, and
+        # `induced=False` is provider-loss's alone, whose verdict is the
+        # literal "recorded". Marking this one False would quietly downgrade
+        # what the rehearsal claims to have proved.
+    )
+
+
 _PLANNERS = {
     "service-termination": _service_termination,
     "database-restart": _database_restart,
@@ -760,6 +840,7 @@ _PLANNERS = {
     "disk-threshold": _disk_threshold,
     "capability-drift": _capability_drift,
     "provider-loss": _provider_loss,
+    "admission-refused": _admission_refused,
 }
 
 
@@ -956,6 +1037,29 @@ def verdict(scenario: str, readings: dict[str, Any]) -> tuple[str, str]:
                 f"the control failed: the deployed lock read {readings.get('drift_deployed')}",
             )
         return "read", "the foreign lock is a problem and the deployed lock is ok"
+    if scenario == "admission-refused":
+        if readings.get("admission_refused") != "refused":
+            return (
+                "unread",
+                f"a reserve of {INJECTED_RESERVE_MB} MiB was injected and admission read "
+                f"{readings.get('admission_refused')}",
+            )
+        if readings.get("admission_as_declared") not in {"admitted", "refused"}:
+            return (
+                "unread",
+                "the control did not produce a decision at all: "
+                f"{readings.get('admission_as_declared')}",
+            )
+        if readings.get("control_declaration_injected") is not False:
+            return (
+                "unread",
+                "the control's own reading reports an injected declaration, so the two "
+                "readings cannot be told apart",
+            )
+        return "read", (
+            f"admission refused with the reserve injected; the host's own declaration "
+            f"reads {readings.get('admission_as_declared')}"
+        )
     raise RehearsalError(f"no verdict for {scenario!r}")
 
 

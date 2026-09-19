@@ -261,6 +261,13 @@ def gather_facts(
             / key
             / f"{rehearsal.rule_comment(rehearsal_id)}-capability-lock.json"
         ),
+        # Session 31. `None` for every scenario but `admission-refused`, which
+        # refuses rather than planning around their absence: it asks whether
+        # THIS host would admit THAT project, and neither manifest is
+        # derivable from a deployed document.
+        host_manifest=str(arguments.host) if arguments.host else None,
+        project_manifest=str(arguments.manifest) if arguments.manifest else None,
+        admit_py=str(REPO_ROOT / "bin" / "admit.py"),
     )
 
 
@@ -464,6 +471,33 @@ def observe(plan: rehearsal.Plan, facts: rehearsal.Facts) -> dict[str, Any]:
         readings["drift_deployed"] = doctor_checks(by_name["drift_deployed"].argv, checks["drift"])[
             checks["drift"]
         ]
+        return readings
+
+    if plan.scenario == "admission-refused":
+        # Both runs are `bin/admit.py --json`, so the decision is read out of
+        # the command's own document rather than scraped from its prose --
+        # D1114's rule with the machine-readable half already provided.
+        for name in ("admission_as_declared", "admission_refused"):
+            result = run(*by_name[name].argv, timeout=CHECK_TIMEOUT_SECONDS)
+            if result is None:
+                readings[name] = "timeout"
+                continue
+            try:
+                # NOT `document`: in a `bin/` command that name means the
+                # DEPLOYED document, and `test_container_selectors.py` reads
+                # every `document[...]` here against the outputs schema by
+                # name (D1184). This is admit's own report.
+                decision = json.loads(result.stdout)
+            except ValueError:
+                readings[name] = "unreadable"
+                continue
+            readings[name] = decision.get("outcome")
+            readings[f"{name}_exit"] = result.returncode
+            if name == "admission_as_declared":
+                # The half that stops a rehearsal proving nothing: the
+                # control's own report must NOT claim an injected
+                # declaration, or the two readings cannot be told apart.
+                readings["control_declaration_injected"] = decision.get("declaration_injected")
         return readings
 
     if plan.scenario == "provider-loss":
@@ -733,6 +767,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--state-root", type=Path, default=deployed_output.PROJECT_STATE_ROOT)
     parser.add_argument("--rendered-root", type=Path, default=deployed_output.RENDERED_ROOT)
     parser.add_argument("--registry", type=Path, default=Path(port_allocations.REGISTRY_PATH))
+    # Session 31 (ADR 0221). Required by `admission-refused` and ignored by
+    # every other scenario -- checked in `main`, where the scenario is known,
+    # rather than made globally required.
+    parser.add_argument("--host", type=Path, default=None, help="the host manifest")
+    parser.add_argument(
+        "--manifest", type=Path, default=None, help="the candidate project manifest"
+    )
     return parser
 
 

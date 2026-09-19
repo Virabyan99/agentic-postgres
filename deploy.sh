@@ -14,6 +14,9 @@
 #   3   missing local prerequisite
 #   5   contract, lock, collision, or generated-output validation failure
 #   10  capability intentionally unavailable in the current session
+#   12  admission refused -- the declared capacity cannot hold this project
+#       (ADR 0221). Raised at step 0, before anything is rendered, so a
+#       refusal leaves the checkout and the host exactly as they were.
 
 set -euo pipefail
 

@@ -32,6 +32,7 @@ Exit codes follow the deploy.sh convention:
   3   missing prerequisite
   4   a precondition of this session has not been run
   5   validation failure
+  12  admission refused -- the declared capacity cannot hold this project
 """
 
 from __future__ import annotations
@@ -56,6 +57,8 @@ from agentic_postgres import (
     agent_plane,
     api_surface,
     backup_report,
+    capacity_probe,
+    capacity_reading,
     config,
     container_exec,
     database_observation,
@@ -87,6 +90,15 @@ EXIT_INPUT = 2
 EXIT_PREREQUISITE = 3
 EXIT_PRECONDITION = 4
 EXIT_VALIDATION = 5
+
+#: Admission refused -- the declared capacity cannot hold this project.
+#:
+#: Imported rather than spelled, so this command and `bin/admit.py` cannot come
+#: to disagree about which number a refusal is (ADR 0221, D1585). Deliberately
+#: neither 4 nor 6: a refusal is not a precondition the operator can go and
+#: create, and it is not a check that failed. It is a decision taken against a
+#: declaration, and `$?` has to tell the three apart.
+EXIT_ADMISSION_REFUSED = capacity_reading.EXIT_ADMISSION_REFUSED
 
 #: The session that introduces the REST plane, and with it the first service
 #: that verifies a token. Below it there is no signing key materialized and
@@ -197,6 +209,32 @@ def run(*command: str) -> subprocess.CompletedProcess[str]:
         text=True,
         check=False,
     )
+
+
+def _probe_run(*command: str, timeout: int = 30) -> subprocess.CompletedProcess[str] | None:
+    """The capacity probe's runner: bounded, and `None` when it cannot finish.
+
+    `run` above is the deploy's general runner and has no timeout, which is
+    right for the steps it drives -- a migration or a bootstrap that took
+    longer than some number would be killed mid-write. Step 0's reading is the
+    opposite case: it decides nothing on its own, and a wedged Docker daemon
+    must cost the deploy a missing ceilings line rather than a hung deploy
+    before anything has happened.
+
+    `None` rather than a synthetic failure, so a timeout and a non-zero exit
+    stay different facts (the shape `bin/doctor.py`'s runner already has).
+    """
+    try:
+        return subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
 
 
 def _establish_directory(path: Path) -> Path:
@@ -1974,6 +2012,41 @@ def main(argv: list[str] | None = None) -> int:
             EXIT_PREREQUISITE if blocked == preflight.KIND_PREREQUISITE else EXIT_PRECONDITION,
             "the deploy has not started; supply what is listed above and re-run.",
         )
+
+    # Still step 0, and still above the line: this reads and decides, and
+    # changes nothing whether it admits or refuses. It is HERE rather than
+    # after the render for D614's reason -- a refusal arriving after the render
+    # has already rewritten `.generated/<key>`, which is the checkout it was
+    # refusing to deploy from.
+    #
+    # The candidate's own key is excluded from the committed sum, which is what
+    # makes a redeploy decidable at all: this project's NEW claim is charged
+    # against the others, so raising `shared_buffers_mb` on something already
+    # running is decided exactly the way adding a third project is (D1592).
+    # Charging its old document as well would refuse redeployments that fit --
+    # including one that LOWERED its budget.
+    #
+    # Same reading, same parser and same `decide` as `bin/admit.sh`, because a
+    # deploy that admitted what that command refused would make it worse than
+    # useless (ADR 0221).
+    admission_budget = config.database_budget(manifest.get("database", {}))
+    admission_reading, ceilings_reason = capacity_probe.read(
+        arguments.host,
+        deployed_output.PROJECT_STATE_ROOT,
+        runner=_probe_run,
+        exclude=key,
+    )
+    admission = capacity_reading.decide(
+        admission_reading,
+        candidate_key=key,
+        candidate_unreclaimable_mb=admission_budget["unreclaimable_mb"],
+        candidate_is_deployed=deployed_output.deployed_path(key).is_file(),
+    )
+    print(capacity_reading.render_decision(admission))
+    if ceilings_reason:
+        print(f"  (ceilings not read: {ceilings_reason} -- they decide nothing)")
+    if admission.refused:
+        fail(EXIT_ADMISSION_REFUSED, "the deploy has not started and nothing has been rendered.")
 
     step("1. Render, from the manifests as given")
     render = run(

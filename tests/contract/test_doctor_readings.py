@@ -29,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, capacity_reading, diagnosis
+from agentic_postgres import REPO_ROOT, capacity_probe, capacity_reading, diagnosis
 from agentic_postgres.host_config import Declared
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
@@ -298,17 +298,58 @@ def test_the_usage_verb_is_refused_until_it_answers() -> None:
 
 
 def test_the_probe_reads_meminfo_directly_rather_than_through_a_container(
-    doctor: Any, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     """A figure read inside a cgroup answers a different question.
 
     `mem_limit` is what a container may use; this reading is about what the
     machine HAS. The probe takes a path so the substitution is visible here.
+
+    It lives in `capacity_probe` rather than in the doctor because `admit` and
+    the deploy's step 0 need the same reading and a `bin/` command may not
+    import another (ADR 0093). One probe, three runners.
     """
-    parsed = doctor.probe_meminfo(Path("/proc/meminfo"))
+    parsed = capacity_probe.read_meminfo(Path("/proc/meminfo"))
     assert parsed is None or set(parsed) == {"MemTotal", "MemAvailable", "SwapTotal"}
 
-    assert doctor.probe_meminfo(tmp_path / "apg-no-such-meminfo") is None
+    assert capacity_probe.read_meminfo(tmp_path / "apg-no-such-meminfo") is None
+
+
+def test_the_three_commands_share_one_probe_and_one_parser() -> None:
+    """§7 question 5, asserted rather than trusted.
+
+    `doctor capacity`, `admit` and the deploy all decide from the same reading.
+    If each spelled its own, a repair that reached one would be invisible in
+    the others until a deploy admitted something the doctor had refused.
+    """
+    import re
+
+    readers = {
+        "bin/doctor.py": "capacity_probe.read",
+        "bin/admit.py": "capacity_probe.read",
+        "bin/deploy-project.py": "capacity_probe.read",
+    }
+    missing = []
+    for relative, call in readers.items():
+        path = REPO_ROOT / relative
+        if not path.is_file():
+            missing.append(f"{relative} does not exist")
+            continue
+        if call not in path.read_text(encoding="utf-8"):
+            missing.append(f"{relative} does not call {call}")
+    assert not missing, missing
+
+    # The control: none of the three re-implements the parse. `parse_meminfo`
+    # is the library's, and a second `MemAvailable` split in `bin/` would be
+    # the copy that drifts.
+    offenders = [
+        str(path.relative_to(REPO_ROOT))
+        for path in sorted((REPO_ROOT / "bin").glob("*.py"))
+        if re.search(r"MemAvailable|/proc/meminfo", path.read_text(encoding="utf-8"))
+    ]
+    assert not offenders, (
+        f"these parse meminfo themselves instead of using the library: {offenders}"
+    )
 
 
 def test_an_unlistable_project_root_is_undetermined_rather_than_empty(
@@ -335,3 +376,81 @@ def test_an_unlistable_project_root_is_undetermined_rather_than_empty(
         candidate_is_deployed=False,
     )
     assert decision.outcome == "refused", "a decision on an unread root must fail closed"
+
+
+# ---------------------------------------------------------------------------
+# The disk figure, and the path it was actually read from
+# ---------------------------------------------------------------------------
+
+
+def test_the_disk_figure_is_measured_from_the_nearest_readable_ancestor(
+    tmp_path: Path,
+) -> None:
+    """A rule nothing can satisfy is not a rule.
+
+    `decide` fails closed on an undetermined disk figure, which is right --
+    and the figure was being read with a bare `disk_usage(docker_root)`.
+    `/var/lib/docker` **does not exist** under Docker Desktop (the daemon
+    reports a path inside its own VM) and is 0710 root on a CI runner, so that
+    read fails unprivileged in both places and every admission would have been
+    refused for a reason that has nothing to do with capacity. It would have
+    been found on the host, during a trip.
+
+    Measuring the same filesystem from an ancestor answers the same question;
+    substituting a number would not. So the path is returned with the figure.
+    """
+    deep = tmp_path / "a" / "b" / "c" / "does-not-exist"
+    usage, measured_at = capacity_probe.disk_usage_near(str(deep))
+
+    assert usage is not None, "nothing on the way up could be stat'd"
+    assert measured_at, "the figure came back without saying where it was measured"
+    assert Path(measured_at).exists()
+    assert str(tmp_path) in measured_at or measured_at == "/"
+    assert usage.total > 0
+
+
+def test_a_readable_docker_root_is_measured_at_itself(tmp_path: Path) -> None:
+    """The control.
+
+    Without it, a walk that ALWAYS climbed to `/` would pass the test above
+    while never once measuring the path it was asked about.
+    """
+    usage, measured_at = capacity_probe.disk_usage_near(str(tmp_path))
+    assert usage is not None
+    assert measured_at == str(tmp_path), (
+        f"a readable path was measured at {measured_at!r} instead of itself"
+    )
+
+
+def test_the_measured_path_is_printed_when_a_decision_is_taken() -> None:
+    """An operator must be able to see which disk was measured.
+
+    If the Docker root were its own mount, an ancestor describes a different
+    filesystem -- and then the honest thing is a visible path rather than a
+    plausible number (ADR 0195).
+    """
+    from agentic_postgres.host_config import Declared
+
+    declared = Declared(memory_mb=3814, reserve_memory_mb=2214, disk_gb=38, reserve_disk_gb=8)
+    measured = capacity_reading.Reading(
+        declared=declared,
+        mem_total=capacity_reading.Figure.measured(3814),
+        mem_available=capacity_reading.Figure.measured(2182),
+        swap_total=capacity_reading.Figure.measured(0),
+        docker_root_free_gb=capacity_reading.Figure.measured(22),
+        docker_root_total_gb=capacity_reading.Figure.measured(37),
+        committed={"alpha-dev": 304},
+        unreadable={},
+        ceilings={},
+        unbounded=(),
+        docker_root_measured_at="/var/lib",
+    )
+    decision = capacity_reading.decide(
+        measured,
+        candidate_key="gamma-dev",
+        candidate_unreclaimable_mb=304,
+        candidate_is_deployed=False,
+    )
+    rendered = capacity_reading.render_decision(decision)
+    assert "disk measured at" in rendered
+    assert "/var/lib" in rendered

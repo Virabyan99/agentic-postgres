@@ -27,6 +27,11 @@ services:
   # model a service to validate; the Session 1 gate renders the model and never
   # starts this container.
   contract-probe:
+    # ADR 0222: a one-shot, a probe or a client. The literal rather
+    # than a variable, because eleven variables for one number that
+    # is the same everywhere are eleven ways to disagree. No `cpus`:
+    # a capped one-shot throttles a migration nobody has measured.
+    pids_limit: 64
     image: ${PYTHON_RUNTIME_IMAGE:?required}
     platform: ${TARGET_PLATFORM:?required}
     profiles: [contract]
@@ -64,6 +69,11 @@ services:
   #      Exposure becomes a deliberate act of deployment rather than a property
   #      of a file in the repository.
   edge-probe:
+    # ADR 0222: a one-shot, a probe or a client. The literal rather
+    # than a variable, because eleven variables for one number that
+    # is the same everywhere are eleven ways to disagree. No `cpus`:
+    # a capped one-shot throttles a migration nobody has measured.
+    pids_limit: 64
     build:
       context: ./services/edge-probe
       args:
@@ -91,6 +101,11 @@ services:
   # If the public route can reach this, discovery is not actually constrained
   # and `exposedByDefault=false` is not doing what it claims.
   unlabeled-probe:
+    # ADR 0222: a one-shot, a probe or a client. The literal rather
+    # than a variable, because eleven variables for one number that
+    # is the same everywhere are eleven ways to disagree. No `cpus`:
+    # a capped one-shot throttles a migration nobody has measured.
+    pids_limit: 64
     build:
       context: ./services/edge-probe
       args:
@@ -115,6 +130,11 @@ services:
   # that secrets.required.yaml and the service contract can be cross-checked
   # from source (tests/contract/test_secret_contract.py).
   secret-check:
+    # ADR 0222: a one-shot, a probe or a client. The literal rather
+    # than a variable, because eleven variables for one number that
+    # is the same everywhere are eleven ways to disagree. No `cpus`:
+    # a capped one-shot throttles a migration nobody has measured.
+    pids_limit: 64
     build:
       context: ./services/secret-check
       args:
@@ -159,6 +179,13 @@ services:
   # derives is recorded in outputs.json instead; Run 8 compares that against the
   # container actually running.
   postgres:
+    # ADR 0222: bounded in processes and CPU. Both from
+    # `config.SERVICE_RESOURCE_DEFAULTS` through the compose
+    # environment, like every other per-service number. `cpus` is a
+    # string because `${VAR:?required}` yields one and Compose
+    # accepts it (rig 31a).
+    pids_limit: ${POSTGRES_PIDS_LIMIT:?required}
+    cpus: ${POSTGRES_CPUS:?required}
     # Built rather than pulled since Session 10, and `image:` is gone rather
     # than kept beside `build:` -- Compose accepts both and then TAGS the build
     # with that name, which would leave a locally built image wearing the
@@ -301,6 +328,11 @@ services:
   # `BACKUP_MIRROR_ENABLED=false` -- never empty, so strict -- is what the
   # script reads first if it is.
   backup-mirror:
+    # ADR 0222: a one-shot, a probe or a client. The literal rather
+    # than a variable, because eleven variables for one number that
+    # is the same everywhere are eleven ways to disagree. No `cpus`:
+    # a capped one-shot throttles a migration nobody has measured.
+    pids_limit: 64
     build:
       context: ./services/backup-mirror
       args:
@@ -329,6 +361,11 @@ services:
   # container's exit status is the shell's. `"$@"` carries the subcommand
   # bin/migrate.sh appends, so this list is the whole of what can be run here.
   dbmate:
+    # ADR 0222: a one-shot, a probe or a client. The literal rather
+    # than a variable, because eleven variables for one number that
+    # is the same everywhere are eleven ways to disagree. No `cpus`:
+    # a capped one-shot throttles a migration nobody has measured.
+    pids_limit: 64
     image: ${DBMATE_IMAGE:?required}
     platform: ${TARGET_PLATFORM:?required}
     profiles: [migration]
@@ -413,6 +450,11 @@ services:
   # /migrations-project otherwise, and bin/migrate.py runs this service only
   # when `sets_for` answers with one.
   dbmate-project:
+    # ADR 0222: a one-shot, a probe or a client. The literal rather
+    # than a variable, because eleven variables for one number that
+    # is the same everywhere are eleven ways to disagree. No `cpus`:
+    # a capped one-shot throttles a migration nobody has measured.
+    pids_limit: 64
     image: ${DBMATE_IMAGE:?required}
     platform: ${TARGET_PLATFORM:?required}
     profiles: [migration]
@@ -514,6 +556,13 @@ services:
   # Both requirements are real and neither was weakened to satisfy the other:
   # SEC-DBX-003 and DBX-POOL-003 are proved against this one configuration.
   pgbouncer:
+    # ADR 0222: bounded in processes and CPU. Both from
+    # `config.SERVICE_RESOURCE_DEFAULTS` through the compose
+    # environment, like every other per-service number. `cpus` is a
+    # string because `${VAR:?required}` yields one and Compose
+    # accepts it (rig 31a).
+    pids_limit: ${PGBOUNCER_PIDS_LIMIT:?required}
+    cpus: ${PGBOUNCER_CPUS:?required}
     image: ${PGBOUNCER_IMAGE:?required}
     platform: ${TARGET_PLATFORM:?required}
     profiles: [session4]
@@ -666,6 +715,13 @@ services:
   # `fe_sendauth: no password supplied` -- which sends the reader to the wrong
   # file entirely.
   postgrest:
+    # ADR 0222: bounded in processes and CPU. Both from
+    # `config.SERVICE_RESOURCE_DEFAULTS` through the compose
+    # environment, like every other per-service number. `cpus` is a
+    # string because `${VAR:?required}` yields one and Compose
+    # accepts it (rig 31a).
+    pids_limit: ${POSTGREST_PIDS_LIMIT:?required}
+    cpus: ${POSTGREST_CPUS:?required}
     image: ${POSTGREST_IMAGE:?required}
     platform: ${TARGET_PLATFORM:?required}
     profiles: [session5]
@@ -860,6 +916,13 @@ services:
   # what ruled out the upstream image -- that, and its publishing `latest` only,
   # so the lock would have recorded a digest with no version identity.
   docs:
+    # ADR 0222: bounded in processes and CPU. Both from
+    # `config.SERVICE_RESOURCE_DEFAULTS` through the compose
+    # environment, like every other per-service number. `cpus` is a
+    # string because `${VAR:?required}` yields one and Compose
+    # accepts it (rig 31a).
+    pids_limit: ${DOCS_PIDS_LIMIT:?required}
+    cpus: ${DOCS_CPUS:?required}
     build:
       context: ./services/docs
       args:
@@ -935,6 +998,13 @@ services:
   # `auth` since Run 10 for deployments that never started it -- an override
   # naming a service Compose has not selected is inert.
   metrics:
+    # ADR 0222: bounded in processes and CPU. Both from
+    # `config.SERVICE_RESOURCE_DEFAULTS` through the compose
+    # environment, like every other per-service number. `cpus` is a
+    # string because `${VAR:?required}` yields one and Compose
+    # accepts it (rig 31a).
+    pids_limit: ${METRICS_PIDS_LIMIT:?required}
+    cpus: ${METRICS_CPUS:?required}
     image: ${OTEL_COLLECTOR_IMAGE:?required}
     profiles: [session14]
     restart: "on-failure:5"
@@ -1010,6 +1080,13 @@ services:
   # `profiles: [session14]` and CURRENT_SESSION is 13, so nothing starts this
   # yet -- the same shape the collector has carried since Run 2.
   store:
+    # ADR 0222: bounded in processes and CPU. Both from
+    # `config.SERVICE_RESOURCE_DEFAULTS` through the compose
+    # environment, like every other per-service number. `cpus` is a
+    # string because `${VAR:?required}` yields one and Compose
+    # accepts it (rig 31a).
+    pids_limit: ${STORE_PIDS_LIMIT:?required}
+    cpus: ${STORE_CPUS:?required}
     image: ${PROMETHEUS_IMAGE:?required}
     profiles: [session14]
     restart: "on-failure:5"
@@ -1103,6 +1180,13 @@ services:
   # caller afterwards; there is no endpoint that creates an administrator over
   # HTTP, and `SEC-BOOT-001` asserts its absence rather than trusting it.
   auth:
+    # ADR 0222: bounded in processes and CPU. Both from
+    # `config.SERVICE_RESOURCE_DEFAULTS` through the compose
+    # environment, like every other per-service number. `cpus` is a
+    # string because `${VAR:?required}` yields one and Compose
+    # accepts it (rig 31a).
+    pids_limit: ${AUTH_PIDS_LIMIT:?required}
+    cpus: ${AUTH_CPUS:?required}
     build:
       context: ./services/auth-api
       args:
@@ -1269,6 +1353,11 @@ services:
   # and is handled the way dbmate was (ADR 0034): it builds a URL at run time,
   # inside the container, from the same file.
   client-psql:
+    # ADR 0222: a one-shot, a probe or a client. The literal rather
+    # than a variable, because eleven variables for one number that
+    # is the same everywhere are eleven ways to disagree. No `cpus`:
+    # a capped one-shot throttles a migration nobody has measured.
+    pids_limit: 64
     build:
       context: ./services/clients/psql
       args:
@@ -1298,6 +1387,11 @@ services:
       - internal
 
   client-node-pg:
+    # ADR 0222: a one-shot, a probe or a client. The literal rather
+    # than a variable, because eleven variables for one number that
+    # is the same everywhere are eleven ways to disagree. No `cpus`:
+    # a capped one-shot throttles a migration nobody has measured.
+    pids_limit: 64
     build:
       context: ./services/clients/node-pg
       args:
@@ -1323,6 +1417,11 @@ services:
       - internal
 
   client-psycopg:
+    # ADR 0222: a one-shot, a probe or a client. The literal rather
+    # than a variable, because eleven variables for one number that
+    # is the same everywhere are eleven ways to disagree. No `cpus`:
+    # a capped one-shot throttles a migration nobody has measured.
+    pids_limit: 64
     build:
       context: ./services/clients/psycopg
       args:
@@ -1352,6 +1451,11 @@ services:
   # disposable schema to exist and is run by the Session 4 gate after the
   # privileged half has created and recorded it (plan §4.4).
   client-prisma:
+    # ADR 0222: a one-shot, a probe or a client. The literal rather
+    # than a variable, because eleven variables for one number that
+    # is the same everywhere are eleven ways to disagree. No `cpus`:
+    # a capped one-shot throttles a migration nobody has measured.
+    pids_limit: 64
     build:
       context: ./services/clients/prisma
       args:
@@ -1409,6 +1513,13 @@ services:
   # the whole offline suite green but for the one test that exists to be
   # answered when a secret name is added.
   storage:
+    # ADR 0222: bounded in processes and CPU. Both from
+    # `config.SERVICE_RESOURCE_DEFAULTS` through the compose
+    # environment, like every other per-service number. `cpus` is a
+    # string because `${VAR:?required}` yields one and Compose
+    # accepts it (rig 31a).
+    pids_limit: ${STORAGE_PIDS_LIMIT:?required}
+    cpus: ${STORAGE_CPUS:?required}
     build:
       context: ./services/auth-api
       args:
@@ -1541,6 +1652,13 @@ services:
   # Moving that constant arms this profile on the next deploy of any project and
   # is therefore a deliberate step in Run 7, not a tidy-up (D410, D414).
   mcp:
+    # ADR 0222: bounded in processes and CPU. Both from
+    # `config.SERVICE_RESOURCE_DEFAULTS` through the compose
+    # environment, like every other per-service number. `cpus` is a
+    # string because `${VAR:?required}` yields one and Compose
+    # accepts it (rig 31a).
+    pids_limit: ${MCP_PIDS_LIMIT:?required}
+    cpus: ${MCP_CPUS:?required}
     build:
       context: ./services/auth-api
       args:

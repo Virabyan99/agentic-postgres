@@ -133,6 +133,15 @@ class Reading:
     unreadable: dict[str, str]
     ceilings: dict[str, int]
     unbounded: tuple[str, ...] = ()
+    #: Which path the disk figures were actually read from.
+    #:
+    #: Normally the Docker data root itself. When that path cannot be stat'd
+    #: -- it does not exist under Docker Desktop, and it is 0710 root on a CI
+    #: runner -- the nearest ancestor that can be is measured instead, and
+    #: this says so. The same filesystem in every case measured so far, and
+    #: where it is not, an operator reads the path rather than a number that
+    #: quietly describes a different disk.
+    docker_root_measured_at: str = ""
 
     @property
     def committed_total_mb(self) -> int:
@@ -362,6 +371,8 @@ def decide(
 
     free = reading.docker_root_free_gb
     lines.append(("declared disk", f"{declared.disk_gb} GiB"))
+    if reading.docker_root_measured_at:
+        lines.append(("disk measured at", reading.docker_root_measured_at))
     lines.append(("reserved disk", f"{declared.reserve_disk_gb} GiB"))
     if not free.known:
         lines.append(("free disk", f"undetermined: {free.reason}"))

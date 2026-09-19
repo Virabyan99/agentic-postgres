@@ -41,6 +41,11 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 #: directory the first time somebody forgets and says nothing when it does.
 SHELL_COMMANDS = (
     "deploy.sh",
+    # Session 31 (ADR 0221): does this project fit on this node? Listed here
+    # the run it landed (D1014), and `git add`ed before this module runs,
+    # because `test_commands_are_executable_in_the_git_index` reads the
+    # INDEX's mode and not the working tree's (D1188).
+    "bin/admit.sh",
     # Session 21 (ADR 0201, D1137): one verb, `init`, scaffolding a project's
     # capability entry from the merged reviewed surface. Listed here the run it
     # landed (D1014).
@@ -174,6 +179,9 @@ SHELL_COMMANDS = (
 )
 
 PYTHON_COMMANDS = (
+    # Session 31 (ADR 0221). Exit 12 when the declared capacity cannot hold
+    # the candidate; it renders nothing and writes nothing either way.
+    "bin/admit.py",
     "bin/agent.py",
     "bin/api.py",
     "bin/api-contract.py",

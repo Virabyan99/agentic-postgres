@@ -617,12 +617,41 @@ def _migrations_block(project: dict[str, Any]) -> dict[str, Any]:
 #: by ADR 0013). Every entry is derived from the project manifest alone.
 #:
 #: The boundary this set encodes: a value that comes from ``host.yaml`` may not
+#: The nine long-running services, in the order their keys are emitted.
+#:
+#: Upper-case here and lower-case in ``config.SERVICE_RESOURCE_DEFAULTS``
+#: because one is a Compose variable name and the other is a Compose service
+#: name. A test asserts the two sets correspond, so the spelling cannot drift
+#: into a key that interpolates to nothing -- which Compose refuses exactly as
+#: firmly as an unset one (D178).
+SERVICE_RESOURCE_ORDER: tuple[str, ...] = (
+    "POSTGRES",
+    "PGBOUNCER",
+    "POSTGREST",
+    "DOCS",
+    "METRICS",
+    "STORE",
+    "AUTH",
+    "STORAGE",
+    "MCP",
+)
+
 #: be here. ``host.yaml`` is not one of the digested render inputs, so a
 #: host-derived value in a rendered file would make the render depend on which
 #: machine produced it and break the determinism contract. Those values live in
 #: the root-owned ``/var/lib/agentic-postgres/projects/{key}/compose.env``,
 #: passed as a third ``--env-file`` in ``--runtime`` mode only.
 COMPOSE_ENV_KEYS: tuple[str, ...] = (
+    # Session 31 (ADR 0222). The nine long-running services' process and CPU
+    # limits, rendered like every other per-service number rather than written
+    # into `compose.yaml` as literals -- so that changing one is a change to
+    # `config.SERVICE_RESOURCE_DEFAULTS` and not to twenty hand-edited lines.
+    #
+    # The eleven short-lived services take `config.SHORT_LIVED_PIDS_LIMIT` as a
+    # literal in `compose.yaml` and appear nowhere here: eleven variables for
+    # one number that is the same everywhere would be eleven ways to disagree.
+    *(f"{service}_PIDS_LIMIT" for service in SERVICE_RESOURCE_ORDER),
+    *(f"{service}_CPUS" for service in SERVICE_RESOURCE_ORDER),
     "COMPOSE_PROJECT_NAME",
     "EDGE_NETWORK_NAME",
     "INTERNAL_NETWORK_NAME",
@@ -1740,6 +1769,22 @@ def build_compose_env(
         # be a coincidence rather than a fact.
         "POSTGRES_MEMORY_LIMIT": f"{budget['memory_limit_mb']}m",
         "POSTGRES_SHM_SIZE": f"{budget['shm_size_mb']}m",
+        # Session 31 (ADR 0222). Every one of the nine, emitted together rather
+        # than beside each service's own block, because they come from one
+        # table and reading them as a table is how a reviewer checks the rule
+        # that produced them. `cpus` is a STRING -- rig 31a measured that
+        # Compose accepts a quoted value and normalises it, so no
+        # `deploy.resources.limits` fallback is needed.
+        **{
+            f"{service}_PIDS_LIMIT": str(
+                config.SERVICE_RESOURCE_DEFAULTS[service.lower()]["pids_limit"]
+            )
+            for service in SERVICE_RESOURCE_ORDER
+        },
+        **{
+            f"{service}_CPUS": str(config.SERVICE_RESOURCE_DEFAULTS[service.lower()]["cpus"])
+            for service in SERVICE_RESOURCE_ORDER
+        },
         # Session 10's archiving four (ADR 0144).
         #
         # A project with backups disabled renders `off` and an archive command
