@@ -741,6 +741,17 @@ def capacity_report(reading: Any) -> tuple[Check, ...]:
     }
     disk_missing = sorted(name for name, figure in disk_figures.items() if not figure.known)
     disk_facts = _pairs(**{name: figure.value for name, figure in disk_figures.items()})
+    # **Where these two numbers came from.** The probe walks up from the Docker
+    # data root to the nearest point it can stat (D1611), because that root
+    # does not exist at all under Docker Desktop and is 0710 root on a CI
+    # runner -- and an ancestor can be a different mount from the one the
+    # daemon actually writes to. `decide` prints this beside its disk line for
+    # exactly that reason; the READING was reporting the same two figures and
+    # saying nothing about their subject, which is a number an operator cannot
+    # check (ADR 0195). Empty when nothing on the way up could be stat'd, in
+    # which case the figures are unknown anyway and say so.
+    if reading.docker_root_measured_at:
+        disk_facts = disk_facts + _pairs(measured_at=reading.docker_root_measured_at)
     if disk_missing:
         reason = disk_figures[disk_missing[0]].reason
         checks.append(

@@ -168,6 +168,15 @@ SHELL_COMMANDS = (
     # is this session's own trip, which passes `--redeploy-before-file` for
     # the first time since Session 11 registered the claim it admits.
     "bin/session-30-check.sh",
+    # Session 31 (ADR 0221-0225). Derived from 30's by diff. **There is no
+    # skipped session between them**: 30 swept its own trip and registered six
+    # claims, so the number goes 30 -> 31 with no gap to explain -- the first
+    # consecutive pair since 24 -> 25. Its offline mode writes a half reporting
+    # SIX claims, one more than any session has declared, and its host mode
+    # adds one flag, `--candidate-manifest`, and exports `--host`'s path for
+    # the first time: admission and the capacity reading are the first things
+    # in this product that read the HOST's manifest rather than a project's.
+    "bin/session-31-check.sh",
     "bin/smoke-test.sh",
     # Session 24 (ADR 0205). A loopback client of a deployment's own
     # surfaces, holding the human's token in one process and handing the

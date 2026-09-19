@@ -470,7 +470,91 @@ from pathlib import Path
 #: 1.7.0 the class is confirmed against a DEPLOYMENT in the same session: Run
 #: 7's `upgrade plan` on both projects, before the deploy, and a `major`
 #: required there is a stop condition rather than a number to write down.
-CURRENT_SESSION = 30
+#: **Session 31 moves it to 31, all-or-nothing again** (D690): TEN
+#: requirements and ten claims, six of them declared offline and four host,
+#: with every offline half written in the run that built its plane (Runs 2-5)
+#: and every live half here, gated on the trip's declarations -- D938's rule,
+#: applied deliberately after D1020 recorded Session 18 missing it.
+#:
+#: **The session's subject is the node as a finite resource**, and the five
+#: ADRs are its shape. ADR 0221: capacity is DECLARED in `host.yaml` and never
+#: inferred from the machine, admission DECIDES against that declaration at
+#: every deploy's step 0 with exit 12, and a reading REPORTS -- a decision may
+#: fail closed, a report may not. ADR 0222: every project service is bounded in
+#: processes and the nine long-running ones in CPU. ADR 0223: the collector is
+#: consumed and every series names its project. ADR 0224: the rotation's
+#: overlap window is closed by the operator's step-6 deploy, and `retire`
+#: reports that it was instead of refusing for the wrong reason. ADR 0225: a
+#: secret's value is checked against its declared kind at materialization.
+#:
+#: `NODE` is a new requirement family and the argument is `STU`'s: its subject
+#: is the MACHINE -- what this node has, what has been claimed of it, whether
+#: one more project fits -- and `DEP`, `OPS` and `CFG` are each about
+#: something else. The tenth requirement, `AGT-METHOD-001`, is not this
+#: session's plane at all: it registers two Session 9 proofs that have run on
+#: every sweep since and belonged to no claim, found by the orphan triage
+#: (D1597). `KNOWN_UNREGISTERED` went 22 -> 0.
+#:
+#: **`host.yaml` schema 3 is ADDITIVE and there is no migrator.** Schema 2
+#: still validates and declares nothing; a schema 2 document carrying a
+#: `capacity` block is refused rather than quietly read; and with no
+#: declaration, admission refuses only a project this host has never deployed,
+#: so an existing project is never made undeployable by a host that has not
+#: declared yet. **No outputs schema moves** (v18 stays), no capability, lock,
+#: project-manifest or secret schema moves, and no released migration is added
+#: -- 33 stays 33. The one thing an operator MUST do is nothing; the one thing
+#: they may do is declare, and until they do the product behaves as it did.
+#:
+#: **`VERSION` moves to `1.9.0`.** What moved: one new command (`bin/admit.sh`
+#: and `bin/admit.py`), two new verbs on an existing one (`apg doctor
+#: capacity|usage`) and one on another (`backup.sh usage`); a ninth rehearsal
+#: scenario; `pids_limit` on all twenty compose services and `cpus` on nine;
+#: `APG_OTLP_ENDPOINT` on the mcp service and `const_labels` on the collector's
+#: exporter; two new internal modules (`capacity_reading`, `capacity_probe`);
+#: an operator manifest schema (`host.yaml` 2 -> 3, additive); and two
+#: behaviour changes in existing commands -- a deploy now takes an admission
+#: decision before it renders, and `rotate-signing-key retire` reports a third
+#: outcome where it used to refuse.
+#:
+#: **ADR 0162 prices it a MINOR, and as in 1.8.0 that price is a judgement
+#: above the floor the product's own command reports** (D1561, D704). Rig: a
+#: git worktree at `be987cf` -- the commit that IS deployed -- and a copy of
+#: this working tree, each rendering `project.example.yaml`, with `upgrade
+#: plan` run between the two documents. **Neither side renders in the
+#: checkout**: `project.example.yaml` renders as `fixture-alpha-dev`, which is
+#: one of the four renders the gate compares for collisions (D1485). Read:
+#:
+#:     bump minor, requires patch, verdict ok, reasons [], changes [],
+#:     operator_digests_moved [], and EXACTLY ONE LEAF DIFFERS --
+#:     template_version, 1.8.0 -> 1.9.0.
+#:
+#: **The compose env's eighteen new keys do not appear**, which the plan for
+#: this run left open and this reading closes: `pids_limit` and `cpus` are
+#: written into `compose.env`, and `outputs.json` is not that file. Both
+#: documents are 5,948 bytes.
+#:
+#: `requires patch` is correct and is not a disagreement. Every one of ADR
+#: 0162's eight rows names something a RENDERED DOCUMENT shows -- a migration,
+#: an API operation, a capability, a secret, a document schema, an operator
+#: manifest -- and `requires` reports the FLOOR: the smallest bump that
+#: permits the change, which is what an operator has to DO to take it. Nothing.
+#:
+#: **And the one row of ADR 0162 that this release does hit is invisible to
+#: that command.** `host.yaml` moves from schema 2 to schema 3, which is an
+#: operator manifest bump and which the table prices at a minor -- but
+#: `host.yaml` is an operator INPUT and appears in no rendered document, so
+#: `upgrade plan` compares two documents that cannot show it. The minor is
+#: therefore chosen above the floor for the same reason 1.3.0, 1.6.0 and 1.8.0
+#: were (a release that gives an operator something new to type is a minor)
+#: AND for a reason those three did not have: an operator manifest schema
+#: really did move, and the reading cannot see it. Bumping above the floor
+#: never costs anybody anything.
+#:
+#: **This session takes a host trip**, so the class is confirmed against a
+#: DEPLOYMENT in the same session: Run 7's `upgrade plan` on both projects,
+#: before the deploy, and a `major` required there is a stop condition rather
+#: than a number to write down.
+CURRENT_SESSION = 31
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

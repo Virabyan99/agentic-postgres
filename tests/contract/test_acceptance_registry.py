@@ -74,7 +74,14 @@ ID_PATTERN = re.compile(
     # exists only while a process is running, whose whole claim is about
     # what it does NOT hold -- and a family of its own is what makes that
     # claim countable.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU)-[A-Z0-9]+(-\d+)?$"
+    # `NODE` is Session 31's, and it is a family rather than more `DEP`
+    # because its subject is the MACHINE: what this node has, what has been
+    # claimed of it, and whether one more project fits. `DEP` is about a
+    # deployment converging, `OPS` about reading a running one, `CFG` about a
+    # document. None of those is a question about a finite resource, and a
+    # family of its own is what makes "the node as a finite resource"
+    # countable -- the same argument `STU` records for Session 24.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE)-[A-Z0-9]+(-\d+)?$"
 )
 
 

@@ -19,14 +19,14 @@ plane, migrations — this page hands to it and does not repeat it.
 
 ## 1. The release you are operating, in one screen
 
-> **This page is part of release `1.8.0`.** It describes that release as it
+> **This page is part of release `1.9.0`.** It describes that release as it
 > runs on this deployment. A release that moves `VERSION` and does not move
 > this line, and the table below it, is a release documented by a page about a
 > different one (ADR 0209, D1388).
 
 | | |
 |---|---|
-| `template_version` / `CURRENT_SESSION` | **1.8.0** / **30** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
+| `template_version` / `CURRENT_SESSION` | **1.9.0** / **31** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
 | Released migrations | **33**, fix-forward; every down block raises `AP900` (D912). 0033 adds two prune functions granted to nobody and a size reading (ADR 0213) — nothing removes an agent record unless an operator asks |
 | Deployed document | outputs schema **v18**; `document_kind: deployed` |
 | Project manifest | schema versions **1–6** accepted; 5 adds `migrations.set`, 6 adds `mcp.capabilities` |
@@ -195,12 +195,12 @@ it.
    that is missing:
    ```bash
    sudo bin/materialize-secrets.sh --project project.alpha.yaml \
-        --requirements secrets.required.yaml --session 30
+        --requirements secrets.required.yaml --session 31
    ```
 6. **Deploy, unredirected, at the terminal:**
    ```bash
    sudo ./deploy.sh --host host.yaml --project project.alpha.yaml \
-        --capabilities capabilities.yaml --through-session 30
+        --capabilities capabilities.yaml --through-session 31
    ```
    The first pass of a new project records the two loopback ports and the
    app route `unavailable` — the documented first-deploy state, not a failure
@@ -280,7 +280,16 @@ sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/alpha-dev/outputs.js
 sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json schedule status
 sudo bin/migrate.sh --project project.alpha.yaml --runtime status
 sudo bin/dr-kit.sh export ...          # after every deploy or manifest change; docs/node-loss-runbook.md §0
+
+sudo bin/doctor.sh capacity --host host.yaml      # the NODE: what it has, what is declared, what is claimed
+sudo bin/doctor.sh usage --project alpha-dev      # ONE project: eight figures, no threshold
 ```
+
+The two readings are §16's and are **readings**: `OK` with the numbers, or
+`UNKNOWN` naming the figure they could not read. Neither has a threshold and
+neither ever says `WARN` or `PROBLEM`, because nobody has measured the
+utilisation at which this node is unwell — and the one command that runs as
+root on production is the worst place to invent one (D1441, ADR 0221).
 
 What each page owns:
 
@@ -478,7 +487,7 @@ place.
 measured sequence and its traps for the three the API plane holds: capture
 the pre-rotation value to a root-only file first (a proof you cannot admit
 skips), replace it at the provider by hand and confirm it saved, **`project-runtime.sh
-… --through-session 30 down` for a credential a container mounts** (D253:
+… --through-session 31 down` for a credential a container mounts** (D253:
 `resume` runs `compose up` without `--force-recreate`, and PostgREST kept a
 generation two rotations stale and crash-looped), materialize, deploy,
 declare it to the gate with the matching `--rotated-*-from-file`. Performed
@@ -589,7 +598,7 @@ mode stops being something a host is asked to run.
 **The merge**, from a checkout at the branch head:
 
 ```bash
-python bin/write-session-evidence.py --session 30 \
+python bin/write-session-evidence.py --session 31 \
   --host-input evidence/session-28-host.json \
   --external-input evidence/session-28-external.json \
   --offline-input evidence/session-28-offline.json \
@@ -640,7 +649,7 @@ with the row that measured it.
 | `render-jwks`: *whether the key set CHANGED cannot be told from here* | there was no previous copy at that path — the normal case, because a deploy replaces the whole rendered directory first (D1374, D1427) | it is neither evidence of a rotation nor evidence against one; `sudo bin/rotate-signing-key.sh --outputs <outputs.json> acknowledge` reads what each verifier is holding |
 | a rotation proof: *the value declared as pre-rotation is the active one* | nothing was rotated: the provider did not take the edit, or materialization did not run | confirm at the provider, materialize, deploy again |
 | a rotation proof fails `401 PT401` | a bootstrap-minted token missing `credential_version`, `authz_version` or the scope array (D298, D675) | repair the identity, not the thing the proof names |
-| PostgREST crash-loops after a credential rotation, route 502 | a container holding a stale generation (D253) | `project-runtime.sh … --through-session 30 down`, then deploy |
+| PostgREST crash-loops after a credential rotation, route 502 | a container holding a stale generation (D253) | `project-runtime.sh … --through-session 31 down`, then deploy |
 | the edge answers 502 on a project route after a deploy | the deploy leaves the previous document until step 7; or the edge is not attached | `bin/edge-network.sh status --project-key <key>`; `reconcile` |
 | `edge.sh status` says `staging` after a promotion | before 1.0.1 it could never say `production` as `op` (D1050) | since: `unknown` when it cannot read; read as root |
 | `TimeoutError` reading Infisical | a transient (D976) | run the command again |
@@ -650,6 +659,8 @@ with the row that measured it.
 | a claim you expected is `not_run` | its declaration flag was not passed (D687, D1133) | the flag, then the sweep once more |
 | `scp` to `/tmp/apg-…` refused | a same-named file from another account (D504), or `/tmp` without its sticky bit (D1301) | a per-commit name; `chmod 1777 /tmp` |
 | a proof needs Docker and `op` cannot reach it | D1375, by decision | the offline half is the workstation's |
+| **the deploy was refused with exit 12** before it rendered anything | admission: the declared capacity cannot hold this project beside what is already here (ADR 0221). Nothing was changed — `admit` renders nothing and writes nothing | read the six lines it printed. `committed` says what the other projects have claimed and `requested` what this one asks; if either reads `unknown` the refusal is about an unreadable figure and **not** about capacity — run it as root (the deployed documents are `0700 root`, D1606). Otherwise the `suggested action` line names the three manifest fields that move the figure. §16 |
+| exit 12 with `committed unknown (…)` | not root, or a deployed document this run could not parse | `sudo`; then `doctor.sh capacity --host host.yaml`, whose `committed` check names the project it could not read |
 | `Get-NetNat` empty, `ping` to the gateway 100% loss, `mtu 1280`, Tailscale up — on the **workstation**, WSL has no outbound TCP | none of the four is the fault; the trigger is sleep/resume and the fix is a reboot (`CLAUDE.md` §1) | reboot Windows; the host and Docker keep the network throughout |
 
 The host reports `systemctl is-system-running` = `degraded`: some unit has
@@ -893,7 +904,7 @@ is irreversible and would print success.
 
    ```
    sudo bin/materialize-secrets.sh --project /home/op/project.<key>.yaml \
-     --requirements secrets.required.yaml --session 30
+     --requirements secrets.required.yaml --session 31
    ```
 
    then read the written file's **shape**, never its content:
@@ -936,7 +947,7 @@ is irreversible and would print success.
    value is wrong and this deploy has left the project half converged.
 3. **Down and up**, so every verifier is recreated:
    `sudo bin/project-runtime.sh --host host.yaml --project-key <key>
-   --through-session 30 down`, then redeploy. A restart is not enough, and after
+   --through-session 31 down`, then redeploy. A restart is not enough, and after
    the key set file has been replaced a restart is measured to leave the
    container unable to start at all.
    **Take `acknowledge` once before this, too.** On 2026-09-19 it came back
@@ -1127,3 +1138,137 @@ right fix and is deferred by name** (ADR 0224). It changes what is served at
 `/auth/jwks.json` mid-rotation and can only be proved by performing a
 rotation, so it belongs to the session that performs the other three — which
 is also what D1469 says is owed before any rotation claim can be taken.
+
+
+## 16. The node as a finite resource
+
+Since `1.9.0`. Two readings and one decision, and the split between them is
+the whole design: **a decision may fail closed, a reading may not** (ADR 0195,
+ADR 0221).
+
+### The four numbers, and how to choose them
+
+`host.yaml` at `schema_version: 3` carries a `capacity` block. It is a
+**declaration**, not a measurement — nothing in this product reads the machine
+and fills it in, because a number this product chose would be a budget nobody
+agreed to, and every admission decision rests on it.
+
+```yaml
+schema_version: 3
+capacity:
+  memory_mb: 3814          # what `free -m` reports as total, on THIS host
+  reserve_memory_mb: 2214  # memory_mb - 1600
+  disk_gb: 38              # the filesystem holding the Docker data root
+  reserve_disk_gb: 8       # twice the larger PGDATA, rounded up
+```
+
+- **`memory_mb`** — read it, do not estimate it: `free -m`, the `total`
+  column. `doctor.sh capacity` prints the same number from `/proc/meminfo`
+  and the two being **separate checks is deliberate**, so an operator who
+  declared 3814 on a host that has 2048 sees two numbers that disagree rather
+  than one that has quietly picked a winner.
+- **`reserve_memory_mb`** — `memory_mb` minus what you are willing to let
+  projects claim. `host.example.yaml` reserves everything except 1600 MiB,
+  which is `HOST_MEMORY_GUARDRAIL_MB`; the example teaches the *arithmetic*,
+  and the numbers are that host's.
+- **`disk_gb`** — the filesystem holding the Docker data root, from `df -Pk`.
+  Ask `docker info --format '{{.DockerRootDir}}'` where that is rather than
+  assuming `/var/lib/docker`; a host that moved it would otherwise be measured
+  at the wrong filesystem and the number would look perfectly plausible.
+- **`reserve_disk_gb`** — enough to survive the thing that actually fills a
+  disk here, which is a backup plus WAL during a restore. Twice the larger
+  project's PGDATA, rounded up to a whole GiB, is the rule this release uses.
+
+**Schema 2 still works and there is no migrator.** A host that declares
+nothing keeps deploying exactly as it did, with one difference: a project this
+host has **never deployed** is refused, and a redeploy of one that has a
+document is admitted. An existing project is never made undeployable by a host
+that has not declared yet.
+
+### The two readings
+
+```bash
+sudo bin/doctor.sh capacity --host host.yaml            # the node
+sudo bin/doctor.sh capacity --host host.yaml --json
+sudo bin/doctor.sh usage --project alpha-dev            # one project
+sudo bin/doctor.sh usage --project alpha-dev --json
+```
+
+`capacity` answers five checks — `declared`, `memory`, `disk`, `committed`,
+`ceilings`. `usage` answers four groups over eight figures: the database
+(bytes, PGDATA KiB, WAL KiB), the repository (bytes), the agent record (audit
+rows, idempotency claims) and traffic (requests, agent tool calls).
+
+Three things worth knowing before you read one:
+
+1. **`UNKNOWN` is an answer, not a fault.** A figure that could not be read
+   says so and names itself. A group is `UNKNOWN` when *any* of its figures is
+   — two of three sizes is not a size.
+2. **`ceilings` decides nothing.** It is the sum of the `mem_limit`s, and on
+   this host those already exceed the machine's RAM (D767). They are ceilings;
+   they were never reservations. The figure admission actually charges is each
+   project's `database.budget.unreclaimable_mb`.
+3. **The disk figures name the filesystem they came from.** The probe walks up
+   from the Docker data root to the nearest point it can stat, because that
+   root does not exist under Docker Desktop and is root-only on some runners
+   (D1611) — and an ancestor can be a different mount. Point `df` at the path
+   the reading printed, not at `/var/lib/docker`.
+
+`usage` needs root and reads the project's own Prometheus **inside its
+container**, because the store publishes no port and is on no router. Traffic
+coming back `UNKNOWN` on a project whose store has just restarted is a true
+reading.
+
+### The decision, asked on its own
+
+```bash
+sudo bin/admit.sh --host host.yaml --project /home/op/new-project.yaml
+sudo bin/admit.sh --host host.yaml --project /home/op/new-project.yaml --json
+```
+
+This is the decision the deploy takes at its **step 0**, before it renders
+anything — asked on its own, for free. It renders nothing, writes nothing and
+starts nothing.
+
+**Exit 12 is a refusal.** It is deliberately neither 4 nor 6: a refusal is not
+a precondition you can go and create, and it is not a check that failed. It is
+a decision taken against a declaration.
+
+Six labelled lines, the same six either way, so comparing a refusal with a
+later admission is comparing two of the same thing:
+
+```
+admission: refused
+  declared        3814 MiB
+  reserved        2214 MiB
+  committed       608 MiB across alpha-dev, beta-dev
+  requested       1216 MiB for gamma-dev
+  safe available  992 MiB
+  suggested action  lower database.shared_buffers_mb, …
+```
+
+The `suggested action` line names **the three manifest fields that actually
+move the figure** — `database.shared_buffers_mb`,
+`database.maintenance_work_mem_mb` and `database.max_connections` — or
+retiring a project, or raising `capacity.memory_mb` *only after* `doctor
+capacity` shows the host really has it. `database.work_mem_mb` is deliberately
+not among them: it is per sort, not per backend, and does not enter the claim.
+
+**Run it as root.** Not for the decision — for the *reading*: the deployed
+documents whose claims it sums are `drwx------ root root`, and a run that
+cannot read them reports every claim `unknown` and **refuses**, which is
+correct and is a refusal about permissions rather than about capacity (D1606).
+
+### What this does not claim
+
+Every service now carries a `pids_limit`, and the nine long-running ones a
+`cpus` (ADR 0222). They were never unbounded: without a limit a container
+inherits the machine's ambient ceiling — systemd's `DefaultTasksMax`, 3647 on
+this host — so the release takes them from 3647 to 128 or 64, not from
+infinity (D1602).
+
+**What a neighbour's load actually does to the other project has not been
+measured**, and disk I/O is bounded by nothing at all: there is no `blkio`
+limit and the two projects share one device. `THR-NOISY-NEIGHBOUR` in
+`docs/threat-model.md` states the bound and states the gap; the measurement
+belongs to a later session.

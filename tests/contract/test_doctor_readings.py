@@ -467,6 +467,62 @@ def test_the_measured_path_is_printed_when_a_decision_is_taken() -> None:
     assert "/var/lib" in rendered
 
 
+def test_the_reading_also_names_the_filesystem_it_measured() -> None:
+    """**The decision said where; the reading did not.** (Run 6.)
+
+    `decide` prints `disk measured at <path>` because the probe walks up from
+    the Docker data root to the nearest point it can stat (D1611) and an
+    ancestor can be a different mount from the one the daemon writes to.
+    `capacity_report` reported the same two figures -- free and total GiB --
+    and said nothing about their subject, so `apg doctor capacity` handed an
+    operator a number they had no way to check against `df`.
+
+    Found by writing `test_capacity_agrees_with_free_and_df_on_this_host`,
+    whose control has to point `df` at the path the reading actually used: the
+    alternative is hardcoding `/var/lib/docker` in the proof, which is the
+    assumption D1611 took OUT of the product.
+
+    Goes red if the evidence loses the member, and the arm below goes red if
+    it is invented when nothing could be stat'd -- an empty path reported as a
+    path would be worse than no path at all.
+    """
+    from agentic_postgres.host_config import Declared
+
+    declared = Declared(memory_mb=3814, reserve_memory_mb=2214, disk_gb=38, reserve_disk_gb=8)
+
+    def reading_at(measured_at: str) -> capacity_reading.Reading:
+        return capacity_reading.Reading(
+            declared=declared,
+            mem_total=capacity_reading.Figure.measured(3814),
+            mem_available=capacity_reading.Figure.measured(2182),
+            swap_total=capacity_reading.Figure.measured(0),
+            docker_root_free_gb=capacity_reading.Figure.measured(22),
+            docker_root_total_gb=capacity_reading.Figure.measured(37),
+            committed={"alpha-dev": 304},
+            unreadable={},
+            ceilings={},
+            unbounded=(),
+            docker_root_measured_at=measured_at,
+        )
+
+    disk = {check.name: check for check in diagnosis.capacity_report(reading_at("/var/lib"))}[
+        "disk"
+    ]
+    evidence = dict(disk.evidence)
+    assert evidence.get("measured_at") == "/var/lib", (
+        "the disk check does not say which filesystem produced its figures, so "
+        f"nothing can check them against df: {evidence}"
+    )
+
+    # And when nothing on the way up could be stat'd there is no path to name.
+    # A path invented here would be the fold ADR 0195 forbids, reported as a
+    # fact an operator would go and check.
+    nowhere = {check.name: check for check in diagnosis.capacity_report(reading_at(""))}["disk"]
+    assert "measured_at" not in dict(nowhere.evidence), (
+        f"a path was reported for a reading that measured nothing: {dict(nowhere.evidence)}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Session 31 Run 4 -- the usage reading (NODE-USAGE-001)
 # ---------------------------------------------------------------------------

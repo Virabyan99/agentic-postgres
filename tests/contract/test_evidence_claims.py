@@ -1104,6 +1104,23 @@ CLAIM_INTRODUCED_IN = {
     "suite_shape": 30,
     "studio_tenant_read": 30,
     "mirror_retry": 30,
+    # Session 31 (ADR 0221-0225). TEN, six offline and four host, landing with
+    # the constant (D690). Nine belong to the session's own planes; the tenth,
+    # `agent_write_method`, registers a pair of Session 9 proofs that have run
+    # on every sweep since and belonged to no claim, so their results were read
+    # into nothing (D1597, D1622). Its target session is 31 because that is
+    # when the requirement was written, not when the proofs were -- a claim's
+    # session is the MAX of its requirements' target sessions (ADR 0089).
+    "capacity_declared": 31,
+    "capacity_reading": 31,
+    "admission_decision": 31,
+    "admission_live": 31,
+    "process_limits": 31,
+    "telemetry_bounded": 31,
+    "telemetry_read": 31,
+    "usage_read": 31,
+    "secret_kind_checked": 31,
+    "agent_write_method": 31,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

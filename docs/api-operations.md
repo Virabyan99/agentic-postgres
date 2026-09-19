@@ -138,7 +138,7 @@ differ:
    identical to one that did, and the proof's own control is what catches it.
 3. **Stop the project** if the credential is one a container mounts:
    `sudo bin/project-runtime.sh --host host.yaml --project-key <key>
-   --through-session 30 down`. Volumes are preserved.
+   --through-session 31 down`. Volumes are preserved.
 4. Redeploy through the current session — the block below shows the number,
    and it is the one `deploy.sh` accepts for this release (this line said
    *session 5* from Session 5 until Session 26, beside a block that said 25:
@@ -157,10 +157,10 @@ Steps 3 and 4 are the same commands every time:
 
 ```bash
 sudo bin/materialize-secrets.sh --project project.alpha.yaml \
-  --requirements secrets.required.yaml --session 30
+  --requirements secrets.required.yaml --session 31
 
 sudo ./deploy.sh --host host.yaml --project project.alpha.yaml \
-  --capabilities capabilities.yaml --through-session 30
+  --capabilities capabilities.yaml --through-session 31
 ```
 
 **The generation directory is derived, never typed.** It changes on every
@@ -208,7 +208,7 @@ sudo bin/session-05-check.sh --mode host --host host.yaml \
 
 ```bash
 sudo bin/project-runtime.sh --host host.yaml --project-key alpha-dev \
-  --through-session 30 down
+  --through-session 31 down
 ```
 
 Without it the deploy leaves PostgREST running on the generation it started

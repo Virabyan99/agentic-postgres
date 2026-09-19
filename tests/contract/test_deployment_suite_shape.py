@@ -124,30 +124,26 @@ def test_no_deployment_proof_calls_a_command_module_fixture() -> None:
 #: a list shorter is a requirement nobody reviewed. Session 31 owns the triage
 #: (D1542, and the stage plan's open items).
 KNOWN_UNREGISTERED: tuple[str, ...] = (
-    # --- Two, after Session 31 Run 5's triage (D1597) ------------------------
+    # --- EMPTY, and the emptiness is the record (Session 31, D1597) ----------
     #
-    # Twenty of the twenty-two became node ids of a requirement that ALREADY
-    # stated their property -- which is what the count was really measuring:
-    # not twenty-two unstated properties, but twenty-two proofs nothing had
-    # connected to the requirement they were written for. Ten of those
-    # requirements gained a sentence; three named the property already and the
-    # node id joined in silence.
+    # It held twenty-two. Session 31 Run 5 triaged them: **twenty were node ids
+    # of a requirement that already stated their property**, which is what the
+    # count was really measuring -- not twenty-two unstated properties, but
+    # twenty-two proofs nothing had connected to the requirement they were
+    # written for. Ten requirements gained a sentence; three named it already
+    # and the node id joined in silence. Run 6 registered the last two under
+    # `AGT-METHOD-001`, ADR 0136's category, which no entry in the registry
+    # stated: an rpc that writes is ineffective over GET because PostgREST runs
+    # a GET in a read-only transaction.
     #
-    # **These two are different and are the reason the triage was worth
-    # taking.** ADR 0136's category -- that an rpc which WRITES is ineffective
-    # over GET, because PostgREST runs a GET in a read-only transaction and
-    # `25006` surfaces as 405 -- is stated by no requirement in the file. Both
-    # predictions going in were wrong in opposite directions (D490):
-    # volatility protects nothing, and it is the transaction that refuses. A
-    # property measured that carefully and registered nowhere is exactly what
-    # `test_every_deployment_proof_is_a_node_id_of_some_requirement` exists to
-    # surface.
-    #
-    # They need a NEW entry, and a new entry carries `target_session: 31`,
-    # which the registry cannot hold until Run 6 moves `CURRENT_SESSION`
-    # (D690). **Run 6 registers them and empties this tuple.**
-    "tests/deployment/test_session9_agent_writes.py::test_a_get_against_the_deployed_audit_rpc_is_refused",
-    "tests/deployment/test_session9_agent_writes.py::test_the_get_that_was_refused_wrote_nothing",
+    # **This tuple is compared for EQUALITY**, so it shrinks and never silently
+    # grows: a new deployment proof that nothing registers fails
+    # `test_every_deployment_proof_is_a_node_id_of_some_requirement` on the day
+    # it is written rather than on the trip that does not read it. An entry
+    # added here again is a decision someone has to defend in a plan, which is
+    # the whole point -- *a requirement written to make a list shorter is a
+    # requirement nobody reviewed*, and so is a deletion taken to make one
+    # shorter.
 )
 
 

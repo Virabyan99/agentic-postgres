@@ -154,7 +154,23 @@ with the four things that went wrong on the way and what each cost. Every
    folder yourself) and `/backup` (exists after `--apply`).
 5. `materialize-secrets.sh --project <path> --requirements secrets.required.yaml
    --session N` — the first reader of all four values; a 404 here names the
-   one that is missing.
+   one that is missing. **Since `1.9.0` it also checks each value against its
+   declared kind** and exits 8 naming the secret and the kind, never the value
+   (ADR 0225): a pasted private key missing a delimiter line, or joined to its
+   body by a paste that lost its newlines, is refused here instead of halfway
+   through the deploy where `render-jwks` cannot say why without printing the
+   key's path (D1578).
+5b. **Ask whether it fits, before you deploy it.** `sudo bin/admit.sh --host
+   host.yaml --project <path>` is the decision the deploy takes at its step 0,
+   asked on its own — it renders nothing, writes nothing and starts nothing,
+   and it costs a few seconds. **Exit 12 is a refusal**, with six labelled
+   lines: what the host declares, what it reserves, what the other projects
+   have already claimed, what this one asks, what is safely available, and
+   which three manifest fields would move the figure (ADR 0221, operator guide
+   §16). Running it here saves a deploy that would otherwise be refused at step
+   0 anyway — and on a host still at `host.yaml` schema 2, which declares no
+   capacity, **a project this host has never deployed is refused**: the
+   declaration is the thing to add, and it is four numbers.
 6. **Deploy, unredirected.** `sudo ./deploy.sh --host host.yaml --project <path>
    --capabilities capabilities.yaml --through-session N`, at the terminal, with
    nothing after it: a redirect or a pipe puts the command in the background

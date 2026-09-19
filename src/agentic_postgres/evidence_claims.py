@@ -173,6 +173,35 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         # not what this claims; what it claims is that a pass which
         # transferred what it could is completed before it is judged.
         "mirror_retry",
+        # Session 31 (ADR 0221-0225). SIX, which is again one more than any
+        # session has declared, and each is a property of a CHECKOUT rather
+        # than of a running system.
+        #
+        # `capacity_declared` is a JSON Schema and an example document.
+        # `capacity_reading` is a parser over fixture text and a reporter
+        # over readings this suite builds -- the FIGURES are the host's and
+        # the parsing is not. `admission_decision` is arithmetic over those
+        # same synthesised readings, which is exactly what makes it testable
+        # without a host: `decide` is pure by construction and the probe that
+        # feeds it is a separate module for that reason. `process_limits` is
+        # a compose model plus two containers this workstation can start --
+        # and the fork proof runs under Docker here, on CI and on the host,
+        # which is how D1602 was found in the first place. `telemetry_bounded`
+        # is a rendered YAML file and an in-process meter provider.
+        # `secret_kind_checked` is a pure function over values the test
+        # builds, deliberately malformed.
+        #
+        # The session's other FOUR claims are deliberately not here:
+        # `admission_live`, `usage_read`, `telemetry_read` and
+        # `agent_write_method` each need a deployment to answer, and a claim
+        # about them that waited for nothing would be a claim about a
+        # checkout wearing a host's name.
+        "capacity_declared",
+        "capacity_reading",
+        "admission_decision",
+        "process_limits",
+        "telemetry_bounded",
+        "secret_kind_checked",
     }
 )
 
@@ -389,6 +418,43 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     # timers a project has and `disaster_kit` about what a kit holds, and
     # neither is about what a pass does when one object flakes.
     "mirror_retry": ("OPS-MIRROR-001",),
+    # Session 31 (ADR 0221-0225). TEN claims, landing with the constant
+    # (D690), six offline and four host. The session's subject is the node as
+    # a finite resource: what it has, what has been claimed of it, whether one
+    # more project fits, and what one project is actually using.
+    #
+    # The six OFFLINE ones are declared in `OFFLINE_CLAIMS` above and each is
+    # a property of a CHECKOUT: a schema and an example document
+    # (`capacity_declared`); a pure parser and a pure decision over readings
+    # this suite synthesises (`capacity_reading`, `admission_decision`); a
+    # compose model and two containers this workstation can start
+    # (`process_limits`); a rendered collector configuration and an
+    # in-process meter provider (`telemetry_bounded`); a pure check over
+    # values built in the test (`secret_kind_checked`). A deployment would
+    # answer none of the six differently.
+    #
+    # The four HOST ones are deliberately not declared. `admission_live` is
+    # `decide` against a real declaration with a real committed total, and
+    # the control beside it is what says the rule does not refuse everything
+    # (D1611 shipped exactly that). `usage_read` is eight figures off two
+    # clusters with nine sessions of data in them, compared with `free -m`
+    # and `df -Pk`. `telemetry_read` is whether a metric crosses an OTLP
+    # connection into a Prometheus that is routed nowhere -- which has never
+    # happened in this product's life, because `mcp_metrics.configure` had no
+    # production caller until this release. `agent_write_method` is Session
+    # 9's pair, registered here by the orphan triage (D1597): the property is
+    # ADR 0136's and no entry stated it, so three sessions of sweeps read
+    # those two proofs' results into nothing.
+    "capacity_declared": ("NODE-CAP-001",),
+    "capacity_reading": ("NODE-READ-001",),
+    "admission_decision": ("NODE-ADMIT-001",),
+    "admission_live": ("NODE-ADMIT-002",),
+    "process_limits": ("NODE-LIMIT-001",),
+    "telemetry_bounded": ("OPS-TELEMETRY-001",),
+    "telemetry_read": ("OPS-TELEMETRY-002",),
+    "usage_read": ("NODE-USAGE-001",),
+    "secret_kind_checked": ("SEC-KIND-001",),
+    "agent_write_method": ("AGT-METHOD-001",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

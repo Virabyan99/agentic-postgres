@@ -164,6 +164,28 @@ ENVIRONMENT_VARIABLES = (
     "APG_REPLACEMENT_BOOTSTRAP_STATE",
     "APG_RESTORE_EVIDENCE_FILE",
     "APG_REHEARSAL_EVIDENCE_DIR",
+    # Session 31 (ADR 0221). Two paths, and both are declarations an operator
+    # makes rather than facts a test could find.
+    #
+    # `APG_HOST_MANIFEST` is the host's own `host.yaml`. Admission and the
+    # capacity reading are the first things in this product that read the
+    # HOST's declaration rather than a project's, and the path is not
+    # derivable: `/etc/agentic-postgres/host.yaml` is where a deploy installs
+    # one, and the trip's copy is the operator's working file. A test that
+    # guessed would measure whichever of the two it happened to find.
+    #
+    # `APG_CANDIDATE_MANIFEST` is the THIRD project's manifest, the one that
+    # is offered for admission and refused. It lives at `/home/op/s31-third.
+    # yaml` and deliberately not in the checkout: a third manifest inside the
+    # release dirties it and every deploy refuses (D971).
+    #
+    # Both are in the roster rather than read straight out of `os.environ`,
+    # which is D687's whole lesson -- `deployment_convergence` was one of
+    # Session 28's own claims and its gate could not pass the flag that admits
+    # it, so both proofs skipped and the claim reported unproved in a run that
+    # had otherwise measured everything.
+    "APG_HOST_MANIFEST",
+    "APG_CANDIDATE_MANIFEST",
 )
 
 
