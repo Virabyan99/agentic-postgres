@@ -719,8 +719,89 @@ doctor), `test_honest_readers`, the twelve readers of `host.example.yaml`
 RELATIONS` gained a line for the guardrail equality, `--write`). Push; read
 CI.
 
-**Done.** _(the executor: the reader's output on this workstation's
-`/proc/meminfo` pasted; which figure read `unknown` here and why.)_
+**Done.** 2026-09-19. `host.yaml` schema 3, `capacity_reading.py`,
+`diagnosis.capacity_report` and the `capacity` verb. **Battery 9/9 killed**,
+every control green in the same invocation, every file restored byte-identical
+to its snapshot. Targeted: **32 modules, 1749 passed, 2 skipped** (both
+documented skips in `test_root_script_policy`). `ruff check` exit 0;
+`shellcheck bin/doctor.sh` clean. The bounds doc was **not** regenerated:
+`bin/render-config.py:44` calls `config.bounds_table()` with its default, which
+is `project.schema.json`, so no generator reads the host schema's new minimums.
+
+**The reading, on this workstation, against a root it cannot list:**
+
+```
+(node): 3 ok, 0 warning, 0 problem, 2 unknown
+  ok       declared — 3814 MiB RAM and 38 GiB disk declared, 1600 MiB claimable
+  ok       memory — 6635 MiB available of 7786 MiB, 2048 MiB swap
+  UNKNOWN  disk — docker_root_free_gb, docker_root_total_gb could not be read:
+           the Docker data root could not be stat'd
+  UNKNOWN  committed — the claim of <project state root> could not be read,
+           so the committed total is not a total
+  ok       ceilings — 0 MiB of mem_limit across 0 project(s) -- ceilings, not
+           reservations (D767)
+```
+
+**Which figure read `unknown` here, and why.** *Disk*: `docker info` reports a
+data root inside the Docker Desktop VM, which WSL cannot `stat` — the right
+answer, arrived at honestly, and it is why the figure is a `Figure` and not an
+`int`. *Committed*: the `--root` given does not exist. **That second one was a
+defect when the run began.** The first version swallowed `project_keys`'
+`OSError` into an empty list and reported `committed 0 MiB across 0 projects`
+with verdict `ok` — and `decide` would then have handed a candidate the entire
+declared budget on the strength of a directory it failed to open. Found by
+running the command rather than by a test, repaired with
+`PROJECT_ROOT_UNREADABLE`, and now the ninth mutation in the battery.
+
+**Exit codes, every one read from inside WSL** (`$?` after `wsl bash -lc` reads
+Git Bash's status, and it printed a confident `EXIT=0` over a run that exited 6
+before this was caught): unreadable root **6**; `--reading capacity` with no
+`--host` **2**; `usage` **2** (Run 4 builds it — refused rather than answered,
+because a reading that returns `OK` having measured nothing is this session's
+own defect class in this session's own code); `--host` without a verb **2**; no
+`--project` and no verb **2**; `doctor.sh capacity --help` **0 without root**;
+`doctor.sh capacity --host …` as a non-root user **3**.
+
+**Two things the plan did not anticipate, both caught by a contract that was
+already there:**
+
+1. **`bin/doctor.py` may not read the inventory.** The first version imported
+   `bin/fleet.py` by path to reuse its `read_document`, and
+   `test_fleet.py::test_nothing_in_the_release_reads_the_inventory` refused it
+   — ADR 0185 and FLEET-INV-002: the inventory is the end of a chain, never a
+   link in one. Replaced by `read_deployed`, a **non-fatal sibling of
+   `load_document`** standing on the same two library primitives
+   (`deployed_path`, `validate_deployed_document`). The difference between the
+   two is the point: `load_document` answers *diagnose THIS project* and exits
+   on a missing document; `read_deployed` answers *what has this node
+   committed* and carries the reason back, because stopping would turn a
+   partial answer into no answer. **The scan strips `#` comments, not
+   docstrings**, so the replacement's docstring had to stop spelling the path
+   as well — the scan cannot tell a mention from a use and is not meant to.
+2. **`test_the_manifest_is_version_two` had to move.** Replaced, not relaxed:
+   the new test pins the example at 3 **and** pins the accepted enum to exactly
+   `[2, 3]`, so an enum widened without the example moving, or an example moved
+   without the enum, both fail here. That is stricter than what it replaced,
+   which is what CLAUDE.md §6 permits under an ADR (0221).
+
+**And one test of mine was weak.** `test_a_redeploy_charges_only_the_other_
+projects` asked for 900 MiB, which fits whether or not the candidate is
+excluded — so it passed against a `committed_from_documents` that ignored
+`exclude` entirely. Found while writing the battery, not while writing the
+test. It now asks for **1200**, which straddles the two answers (1296 available
+excluded, 992 double-charged), and asserts both sides.
+
+**Also added beyond the plan**, because the schema's own policy is that both
+directions fail closed: **a schema 2 manifest carrying a `capacity` block is
+refused** rather than ignored. Ignoring it would leave four numbers an operator
+typed, believed they had declared, and that `declared_capacity` returns `None`
+for — D816 in the file whose whole job is to be read. Nine proofs in
+`test_host_manifest.py`, including a scan asserting `declared_capacity` is the
+**only** reader of the four fields.
+
+**Owed to Run 3**, as the plan says: the deploy's step-0 call, `bin/admit.sh`,
+and the `admission-refused` rehearsal arm. `--reading usage` refuses until Run
+4. Registry entries land in Run 6 with `CURRENT_SESSION` (D690).
 
 ### Run 3 — admission at the deploy, `bin/admit.sh`, the rehearsal, and the limits
 

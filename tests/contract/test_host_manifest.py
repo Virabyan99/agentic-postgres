@@ -493,8 +493,26 @@ def test_a_slug_in_the_organization_id_field_is_rejected(
 # ---------------------------------------------------------------------------
 
 
-def test_the_manifest_is_version_two(example: dict[str, Any]) -> None:
-    assert example["schema_version"] == 2
+def test_the_manifest_is_version_three_and_two_is_still_accepted(
+    example: dict[str, Any],
+) -> None:
+    """The example is at the current version, and the enum accepts exactly two.
+
+    Session 31 moved the example to 3 (ADR 0221, the `capacity` declaration)
+    and widened the enum to `[2, 3]` -- the first time this schema has accepted
+    a predecessor, because unlike version 2 the new version adds a DECLARATION
+    rather than a section an older reader could misread. A version 2 manifest
+    is complete and reports its capacity as undeclared.
+
+    Both halves are asserted here. An enum widened without the example moving
+    would leave the committed example teaching the old shape; an example moved
+    without the enum widening would refuse every host.yaml in the field.
+    """
+    assert example["schema_version"] == 3
+
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    accepted = schema["properties"]["schema_version"]["enum"]
+    assert accepted == [2, 3], f"the accepted versions moved to {accepted} without this test"
 
 
 def test_a_version_one_manifest_is_refused(tmp_path: Path, example: dict[str, Any]) -> None:
@@ -622,3 +640,144 @@ def test_a_privileged_port_cannot_bound_the_range(
     document["database_access"]["port_range_end"] = 20000
     with pytest.raises(ManifestError):
         host_config.load_host_manifest(write(tmp_path, document))
+
+
+# ---------------------------------------------------------------------------
+# Session 31 -- the capacity declaration (NODE-CAP-001, ADR 0221)
+# ---------------------------------------------------------------------------
+
+
+def test_schema_three_requires_the_four_capacity_members(example: dict[str, Any], tmp_path: Path):
+    """Every member, and the refusal names the one that is missing.
+
+    Four separate mutations rather than one, because a schema that required
+    only the first member would pass a single-mutation test and ship three
+    optional fields nobody declared.
+    """
+    for member in ("memory_mb", "reserve_memory_mb", "disk_gb", "reserve_disk_gb"):
+        document = copy.deepcopy(example)
+        assert document["schema_version"] == 3, (
+            "the example must be schema 3 for this to mean anything"
+        )
+        del document["capacity"][member]
+        with pytest.raises(ManifestError) as raised:
+            host_config.load_host_manifest(write(tmp_path, document))
+        assert member in str(raised.value), (
+            f"removing capacity.{member} was refused without naming it: {raised.value}"
+        )
+
+
+def test_a_schema_two_manifest_still_loads_and_declares_nothing(
+    example: dict[str, Any], tmp_path: Path
+) -> None:
+    """The whole reason this release is a minor.
+
+    A schema 2 document is complete and correct and reports its capacity as
+    UNDECLARED -- not as zero, and not as a default measured off the host. No
+    operator has to edit host.yaml before upgrading, which is what keeps the
+    bump below `major` (ADR 0162, D1584).
+    """
+    document = copy.deepcopy(example)
+    document["schema_version"] = 2
+    del document["capacity"]
+
+    loaded = host_config.load_host_manifest(write(tmp_path, document))
+    assert loaded["schema_version"] == 2
+    assert host_config.declared_capacity(loaded) is None
+
+
+def test_a_schema_two_manifest_may_not_carry_a_capacity_block(
+    example: dict[str, Any], tmp_path: Path
+) -> None:
+    """Both directions fail closed, which is this schema's stated policy.
+
+    A version 2 document carrying `capacity` would be four numbers an operator
+    typed, believed they had declared, and that `declared_capacity` returns
+    `None` for -- a declared field with no reader, in the file whose whole job
+    is to be read (D816). Refused rather than ignored.
+    """
+    document = copy.deepcopy(example)
+    document["schema_version"] = 2
+
+    with pytest.raises(ManifestError) as raised:
+        host_config.load_host_manifest(write(tmp_path, document))
+    assert "capacity" in str(raised.value)
+
+
+def test_the_example_declares_the_guardrail_as_memory_minus_reserve(
+    example: dict[str, Any],
+) -> None:
+    """`memory_mb - reserve_memory_mb == HOST_MEMORY_GUARDRAIL_MB`, exactly.
+
+    This equality is the hinge of ADR 0221. `HOST_MEMORY_GUARDRAIL_MB` has
+    always been what ONE project may claim in unreclaimable memory, checked per
+    project and never summed. Declaring the reserve so that what remains equals
+    it turns the same number into a CROSS-PROJECT budget without moving the
+    constant -- and if the two ever drift, the example teaches an arithmetic
+    the release does not implement.
+    """
+    capacity = example["capacity"]
+    claimable = capacity["memory_mb"] - capacity["reserve_memory_mb"]
+    assert claimable == config.HOST_MEMORY_GUARDRAIL_MB, (
+        f"host.example.yaml leaves {claimable} MiB claimable and the release's "
+        f"guardrail is {config.HOST_MEMORY_GUARDRAIL_MB} MiB"
+    )
+    assert host_config.declared_capacity(example).claimable_memory_mb == claimable
+
+
+def test_a_fifth_capacity_member_is_refused_naming_it(
+    example: dict[str, Any], tmp_path: Path
+) -> None:
+    """`additionalProperties: false`, and the message says which one.
+
+    A fifth member is how a capacity block acquires a figure that looks
+    declared and is read by nothing.
+    """
+    document = copy.deepcopy(example)
+    document["capacity"]["reserve_cpu_cores"] = 1
+
+    with pytest.raises(ManifestError) as raised:
+        host_config.load_host_manifest(write(tmp_path, document))
+    assert "reserve_cpu_cores" in str(raised.value)
+
+
+@pytest.mark.parametrize("member", ["memory_mb", "reserve_memory_mb", "disk_gb", "reserve_disk_gb"])
+def test_every_capacity_member_must_be_a_positive_integer(
+    example: dict[str, Any], tmp_path: Path, member: str
+) -> None:
+    """Zero is not a declaration, and neither is a string.
+
+    A zero would be an operator saying this host has no memory, which no
+    operator means; it is what a half-filled template looks like.
+    """
+    for bad in (0, -1, "3814"):
+        document = copy.deepcopy(example)
+        document["capacity"][member] = bad
+        with pytest.raises(ManifestError):
+            host_config.load_host_manifest(write(tmp_path, document))
+
+
+def test_declared_capacity_is_the_only_reader_of_the_four_fields() -> None:
+    """One reader, asserted by a scan (D816, D979).
+
+    Four numbers with five readers are four numbers nobody can change safely.
+    Everything that wants them goes through `host_config.declared_capacity`,
+    so this walks `src/` and `bin/` for any other subscript of the block.
+    """
+    import re
+
+    offenders: list[str] = []
+    pattern = re.compile(r"""\[["']capacity["']\]|\.get\(["']capacity["']""")
+    for root in (REPO_ROOT / "src", REPO_ROOT / "bin"):
+        for path in sorted(root.rglob("*.py")):
+            if path.name == "host_config.py":
+                continue
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if pattern.search(line):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{number}")
+
+    assert not offenders, (
+        "the capacity block is read outside host_config.declared_capacity: "
+        f"{offenders}. Four declared numbers with several readers are four "
+        "numbers nobody can change safely (D816)."
+    )

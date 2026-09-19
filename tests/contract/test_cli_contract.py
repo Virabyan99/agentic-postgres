@@ -417,6 +417,10 @@ COMMANDS_WITH_VERBS = {
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/dev.sh",
+    # Session 31: `capacity` (and `usage` from Run 4). `usage` is deliberately
+    # NOT documented in the help block until it answers, so this derivation
+    # finds one verb and the verb-help proof exercises the one that exists.
+    "bin/doctor.sh",
     "bin/dr-kit.sh",
     "bin/mcp-contract.sh",
     "bin/rehearse.sh",

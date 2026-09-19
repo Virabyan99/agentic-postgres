@@ -6,11 +6,50 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "host", "ssh", "edge", "infisical", "database_access"],
+  "allOf": [
+    {
+      "if": { "required": ["schema_version"], "properties": { "schema_version": { "const": 3 } } },
+      "then": { "required": ["capacity"] }
+    },
+    {
+      "if": { "required": ["schema_version"], "properties": { "schema_version": { "const": 2 } } },
+      "then": { "not": { "required": ["capacity"] } }
+    }
+  ],
   "properties": {
     "schema_version": {
       "type": "integer",
-      "enum": [2],
-      "description": "Version 2 added `database_access` (Session 4). The enum is a single value rather than a list of accepted ones on purpose: a reader that predates version 2 rejects a version 2 document instead of parsing it and silently ignoring the section that says which ports may be published, and a reader at version 2 rejects a version 1 document instead of allocating ports inside a range nobody declared. Both directions fail closed."
+      "enum": [2, 3],
+      "description": "Version 2 added `database_access` (Session 4). Version 3 added `capacity` (Session 31, ADR 0221) and is the first version this enum accepts alongside its predecessor, because unlike version 2 it adds a DECLARATION rather than a section a reader could misinterpret: a version 2 document is complete and correct, and reports its capacity as undeclared. Version 1 is still rejected outright -- a reader at version 2 or 3 would otherwise allocate ports inside a range nobody declared. There is no migrator, and that is deliberate: a default measured from the host at first read would be a reading standing in for a declaration (ADR 0195), so the four numbers are typed by the operator or they are absent, and absent is reported."
+    },
+
+    "capacity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memory_mb", "reserve_memory_mb", "disk_gb", "reserve_disk_gb"],
+      "description": "What the operator PROMISES this node has, and how much of it projects may not claim (ADR 0221). Required at schema_version 3 and forbidden at 2, both directions fail closed: a version 2 document carrying this block would be a declaration nothing reads, which is the exact shape of a declared field with no reader (D816). Every member is declared rather than measured. `apg doctor capacity` reports what the host says it has; this block says what the operator promises it has; the two are printed side by side precisely so that a disagreement is visible rather than reconciled.",
+      "properties": {
+        "memory_mb": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Total usable RAM in MiB. Admission charges each project's `database.budget.unreclaimable_mb` -- what the host must actually find -- against this minus the reserve. It does NOT charge the sum of the services' `mem_limit`s: those already exceed this machine's RAM by design (D767), because a cap is a ceiling and was never a reservation."
+        },
+        "reserve_memory_mb": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "MiB no project may claim. It holds the OS, the shared edge, page cache, and the amount by which each sidecar's real anonymous memory exceeds the cluster budget that names it (D959 measured 348 MB against 304 claimed). Setting `memory_mb - reserve_memory_mb` equal to `HOST_MEMORY_GUARDRAIL_MB` is what turns the release's existing PER-PROJECT guardrail into a cross-project one without moving it, and the example does exactly that."
+        },
+        "disk_gb": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Total disk in GiB at the Docker root. Declared for the reading to compare against `df`; a declaration that disagrees with the measurement by more than five per cent is REPORTED as a disagreement, never silently corrected and never a refusal."
+        },
+        "reserve_disk_gb": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "GiB of free space at the Docker root that a new project may not eat into. Disk admission is a FLOOR and not a sum, because no per-project disk claim exists anywhere -- a candidate's PGDATA is unknowable before it runs, and inventing a number for it would be a value that looked measured and was not (D267, D1596)."
+        }
+      }
     },
 
     "host": {

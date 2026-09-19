@@ -26,6 +26,7 @@ offline, because the contract suite runs in CI where there is no host.
 
 from __future__ import annotations
 
+import dataclasses
 import ipaddress
 from pathlib import Path
 from typing import Any
@@ -78,6 +79,66 @@ def load_host_manifest(path: Path) -> dict[str, Any]:
     config.validate_against_schema(document, "host.schema.json")
     _validate_semantics(document)
     return document
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Declared:
+    """What the operator promised this node has, in the units they wrote.
+
+    A frozen record rather than the raw dict, for the reason ADR 0221 gives:
+    these four numbers are a *declaration*, and every reader of them should be
+    unable to confuse one with a figure something measured. A `Reading` holds
+    measurements and may carry `None` with a reason; this holds promises and
+    cannot.
+    """
+
+    memory_mb: int
+    reserve_memory_mb: int
+    disk_gb: int
+    reserve_disk_gb: int
+
+    @property
+    def claimable_memory_mb(self) -> int:
+        """What every project on this host may claim between them.
+
+        The subtraction is here rather than at each call site so that the
+        question *how much may projects claim* has one answer. On the
+        reference host it equals ``config.HOST_MEMORY_GUARDRAIL_MB``, which is
+        how the release's existing per-project guardrail becomes a
+        cross-project number without moving; ``host.example.yaml`` declares the
+        two numbers that make it so and a test asserts the equality.
+        """
+        return self.memory_mb - self.reserve_memory_mb
+
+
+def declared_capacity(document: dict[str, Any]) -> Declared | None:
+    """The four declared numbers, or ``None`` when nothing was declared.
+
+    **The only reader of the four fields** (D816: a declared field with no
+    reader is an unverified field, and four of them with five readers would be
+    four fields nobody could change safely).
+
+    ``None`` means *the operator declared nothing*, which is a schema 2
+    manifest and is a perfectly valid document. It does **not** mean zero, and
+    no caller may treat it as zero: with no declaration admission refuses a
+    project that has never been deployed here and admits a redeploy of one
+    that has (ADR 0221, D1584). That asymmetry is what lets this release ship
+    as a minor without an operator edit preceding the upgrade.
+
+    The schema guarantees that when the block is present all four members are
+    present and each is a positive integer, and that the block is present if
+    and only if the version is 3 -- so this function does no validation and
+    has no failure mode of its own.
+    """
+    capacity = document.get("capacity")
+    if capacity is None:
+        return None
+    return Declared(
+        memory_mb=capacity["memory_mb"],
+        reserve_memory_mb=capacity["reserve_memory_mb"],
+        disk_gb=capacity["disk_gb"],
+        reserve_disk_gb=capacity["reserve_disk_gb"],
+    )
 
 
 def unrestricted_ssh_sources(document: dict[str, Any]) -> list[str]:

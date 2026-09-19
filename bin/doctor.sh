@@ -6,6 +6,15 @@
 #                                          repository shape, locks. Unprivileged.
 #   sudo bin/doctor.sh --project <key>      deployed: eleven live checks against
 #                                          one project on this host. Needs root.
+#   sudo bin/doctor.sh capacity --host F   the NODE: what it has, what was
+#                                          declared, what is already claimed.
+#                                          Needs root -- the deployed documents
+#                                          it sums are 0700 root (D1606).
+#
+# A VERB is a third mode and not a third flag. `capacity` asks about the node
+# and takes no project; `usage` (Run 4) asks about one project. Both are
+# READINGS: two verdicts only, OK with the numbers or UNKNOWN naming the figure
+# that could not be read, and never a threshold -- ADR 0221, ADR 0213, D1441.
 #
 # **The split is what keeps the bare `python` below correct.** Workstation mode
 # checks the developer's OWN interpreter against `.python-version`, so it must
@@ -34,7 +43,9 @@
 #
 # Exit codes: 0 (ready, warnings allowed), 2 (bad input), 3 (missing local
 # prerequisite), 4 (the project was never deployed here), 6 (a check failed or
-# could not be run).
+# could not be run). A reading that cannot read a figure exits 6, because
+# `UNKNOWN` is a verdict this command already has; 12 belongs to `bin/admit.sh`
+# and to the deploy, which DECIDE.
 
 set -euo pipefail
 
@@ -48,6 +59,19 @@ usage() {
   cat <<'USAGE'
 Usage: bin/doctor.sh [--verbose] [--help]
        sudo bin/doctor.sh --project <project-key> [--verbose]
+       sudo bin/doctor.sh capacity --host <host.yaml> [--project KEY] [--json]
+
+  capacity           Reading. What this NODE has (/proc/meminfo and the Docker
+                     root's filesystem), what host.yaml declared, what every
+                     deployed project has already claimed in unreclaimable
+                     memory, and the sum of the containers' mem_limits --
+                     labelled as ceilings, because they are not reservations
+                     and never were (D767). Two verdicts only: OK with the
+                     numbers, or UNKNOWN naming the figure it could not read.
+                     No threshold, so it cannot fail a host that works.
+                     --project KEY excludes that project from the committed
+                     sum, which is what a deploy of it asks for.
+                     Needs root: the deployed documents are 0700 root.
 
   (no arguments)     Workstation mode. Checks that this machine can run the
                      gate: required tools at usable versions, the pinned
@@ -112,6 +136,28 @@ python_bin() {
     printf 'doctor: no Python interpreter found (looked for .venv/bin/python, python3).\n' >&2
     exit 3
   fi
+}
+
+reading_mode() {
+  # The verb word maps to `--reading`; everything else the Python side owns,
+  # including which flags each reading requires and what it does without them.
+  local verb="$1" host="${2-}" project_key="${3-}" verbose="${4-}" json="${5-}"
+  if [ -n "${verbose}" ] && [ -n "${json}" ]; then
+    printf 'doctor: --json and --verbose are two renderings of one report; choose one.\n' >&2
+    exit 2
+  fi
+  [ "$(id -u)" -eq 0 ] || {
+    printf 'doctor: the %s reading needs root: the deployed documents it sums are 0700 root.\n' \
+      "${verb}" >&2
+    exit 3
+  }
+  local -a argv
+  argv=("${ROOT_DIR}/bin/doctor.py" --reading "${verb}")
+  [ -n "${host}" ] && argv+=(--host "${host}")
+  [ -n "${project_key}" ] && argv+=(--project "${project_key}")
+  [ -n "${json}" ] && argv+=(--json)
+  [ -n "${verbose}" ] && argv+=(--verbose)
+  exec "$(python_bin)" "${argv[@]}"
 }
 
 deployed_mode() {
@@ -214,8 +260,16 @@ check_python_minor() {
 }
 
 main() {
-  local project="" verbose="" json=""
+  local project="" verbose="" json="" reading="" host=""
   INJECTIONS=()
+
+  # The verb is read FIRST and only in first position, so that `--project` can
+  # never be mistaken for one and a verb can never appear after a flag it would
+  # change the meaning of. `bin/apg.sh` holds no verb table and passes the word
+  # straight through, so nothing in the dispatcher moves (D1587).
+  case "${1-}" in
+    capacity|usage) reading="$1"; shift ;;
+  esac
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -226,6 +280,10 @@ main() {
         [ "$#" -ge 2 ] || { printf 'doctor: --project requires a project key.\n' >&2; exit 2; }
         project="$2"; shift 2 ;;
       --project=*) project="${1#--project=}"; shift ;;
+      --host)
+        [ "$#" -ge 2 ] || { printf 'doctor: --host requires a path.\n' >&2; exit 2; }
+        host="$2"; shift 2 ;;
+      --host=*) host="${1#--host=}"; shift ;;
       --disk-warn-copies|--disk-problem-copies|--lock-file)
         [ "$#" -ge 2 ] || { printf 'doctor: %s requires a value.\n' "$1" >&2; exit 2; }
         INJECTIONS+=("$1" "$2"); shift 2 ;;
@@ -234,6 +292,17 @@ main() {
   done
   if [ "${#INJECTIONS[@]}" -gt 0 ] && [ -z "${project}" ]; then
     printf 'doctor: %s is a deployed-mode injection; it needs --project.\n' "${INJECTIONS[0]}" >&2
+    exit 2
+  fi
+
+  # A reading is dispatched before everything, for the same reason deployed
+  # mode is: the modes never execute together, which is what keeps
+  # check_python_minor's deliberate bare `python` off the sudo path (ADR 0158).
+  if [ -n "${reading}" ]; then
+    reading_mode "${reading}" "${host}" "${project}" "${verbose}" "${json}"
+  fi
+  if [ -n "${host}" ]; then
+    printf 'doctor: --host belongs to the capacity reading; try: doctor.sh capacity --host FILE\n' >&2
     exit 2
   fi
 

@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Any
 
 __all__ = [
     "DISK_PROBLEM_COPIES",
@@ -656,6 +657,151 @@ def render_json(checks: tuple[Check, ...], *, project_key: str, observed_at: str
         indent=2,
         sort_keys=True,
     )
+
+
+def capacity_report(reading: Any) -> tuple[Check, ...]:
+    """What this node has, what is declared, and what is already claimed.
+
+    **Two verdicts, never four** (ADR 0221, ADR 0213's shape). Every check
+    below is `OK` with its numbers or `UNKNOWN` naming the figure it could not
+    read. There is deliberately no `WARN` at some percentage of memory used and
+    no `PROBLEM` at some disk threshold, for `agent_record`'s reason: nobody has
+    measured a utilisation at which this node is unwell, `doctor` runs as root
+    on production, and a threshold invented here could fail a host that works
+    (D1441). `decide` in `capacity_reading` is where a rule lives, and it is a
+    decision rather than a report -- it is allowed to fail closed, and this is
+    not.
+
+    The declaration and the measurement are separate checks on purpose. An
+    operator who declared 3814 MiB on a host that reports 2048 should see two
+    numbers that disagree, not one number that has quietly picked a winner.
+
+    `reading` is a `capacity_reading.Reading`; it is typed loosely here for the
+    reason every other function in this module is -- `diagnosis` is pure and
+    imports nothing from the probe side, so the shape arrives rather than being
+    reached for.
+    """
+    checks: list[Check] = []
+
+    if reading.declared is None:
+        checks.append(
+            _check(
+                "declared",
+                UNKNOWN,
+                "host.yaml declares no capacity (schema 2); see host.example.yaml",
+                _pairs(schema="2", capacity="absent"),
+            )
+        )
+    else:
+        declared = reading.declared
+        checks.append(
+            _check(
+                "declared",
+                OK,
+                f"{declared.memory_mb} MiB RAM and {declared.disk_gb} GiB disk declared, "
+                f"{declared.claimable_memory_mb} MiB claimable by projects",
+                _pairs(
+                    memory_mb=declared.memory_mb,
+                    reserve_memory_mb=declared.reserve_memory_mb,
+                    claimable_memory_mb=declared.claimable_memory_mb,
+                    disk_gb=declared.disk_gb,
+                    reserve_disk_gb=declared.reserve_disk_gb,
+                ),
+            )
+        )
+
+    memory_figures = {
+        "mem_total_mb": reading.mem_total,
+        "mem_available_mb": reading.mem_available,
+        "swap_total_mb": reading.swap_total,
+    }
+    missing = sorted(name for name, figure in memory_figures.items() if not figure.known)
+    facts = _pairs(**{name: figure.value for name, figure in memory_figures.items()})
+    if missing:
+        reason = memory_figures[missing[0]].reason
+        checks.append(
+            _check("memory", UNKNOWN, f"{', '.join(missing)} could not be read: {reason}", facts)
+        )
+    else:
+        swap = reading.swap_total.value
+        swap_note = "no swap" if swap == 0 else f"{swap} MiB swap"
+        checks.append(
+            _check(
+                "memory",
+                OK,
+                f"{reading.mem_available.value} MiB available of "
+                f"{reading.mem_total.value} MiB, {swap_note}",
+                facts,
+            )
+        )
+
+    disk_figures = {
+        "docker_root_free_gb": reading.docker_root_free_gb,
+        "docker_root_total_gb": reading.docker_root_total_gb,
+    }
+    disk_missing = sorted(name for name, figure in disk_figures.items() if not figure.known)
+    disk_facts = _pairs(**{name: figure.value for name, figure in disk_figures.items()})
+    if disk_missing:
+        reason = disk_figures[disk_missing[0]].reason
+        checks.append(
+            _check(
+                "disk",
+                UNKNOWN,
+                f"{', '.join(disk_missing)} could not be read: {reason}",
+                disk_facts,
+            )
+        )
+    else:
+        checks.append(
+            _check(
+                "disk",
+                OK,
+                f"{reading.docker_root_free_gb.value} GiB free of "
+                f"{reading.docker_root_total_gb.value} GiB at the Docker root",
+                disk_facts,
+            )
+        )
+
+    if reading.unreadable:
+        named = ", ".join(sorted(reading.unreadable))
+        checks.append(
+            _check(
+                "committed",
+                UNKNOWN,
+                f"the claim of {named} could not be read, so the committed total is not a total",
+                _pairs(readable=len(reading.committed), unreadable=len(reading.unreadable)),
+            )
+        )
+    else:
+        checks.append(
+            _check(
+                "committed",
+                OK,
+                f"{reading.committed_total_mb} MiB claimed across "
+                f"{len(reading.committed)} project(s)",
+                _pairs(**dict(sorted(reading.committed.items()))),
+            )
+        )
+
+    # Ceilings decide nothing and cannot be UNKNOWN in a way that matters: an
+    # empty inspect is reported as an empty sum, and the detail says so. They
+    # are here because an operator reading a refusal wants both numbers, and
+    # because the gap between the two is this host's most misleading fact
+    # (D767: the caps in aggregate already exceed the machine's RAM).
+    ceiling_total = sum(reading.ceilings.values())
+    unbounded = f", {len(reading.unbounded)} unbounded" if reading.unbounded else ""
+    checks.append(
+        _check(
+            "ceilings",
+            OK,
+            f"{ceiling_total} MiB of mem_limit across "
+            f"{len(reading.ceilings)} project(s){unbounded} -- ceilings, not "
+            "reservations (D767)",
+            _pairs(**dict(sorted(reading.ceilings.items()))),
+        )
+    )
+
+    return tuple(checks)
 
 
 def _tail(detail: str) -> str:

@@ -1,0 +1,337 @@
+"""The doctor's two READINGS (Session 31, NODE-READ-001, ADR 0221).
+
+A reading is not a check. The eleven checks answer *is this deployment well*
+and are allowed four verdicts; a reading answers *what is true of this node*
+and is allowed two -- `OK` with the numbers, or `UNKNOWN` naming the figure it
+could not read.
+
+**The missing third and fourth verdicts are the subject of this module.** A
+`WARN` at some percentage of memory used, or a `PROBLEM` at some disk
+threshold, would be a number nobody has measured, invented inside the one
+command that runs as root on production, and capable of failing a host that
+works. That is exactly what `agent record` was corrected for in Session 30
+(D1441, ADR 0213), and the correction is load-bearing here rather than
+stylistic.
+
+`usage`'s proofs land in Run 4, which is what builds it. What this module
+asserts about `usage` today is that the verb is REFUSED rather than answered
+-- a reading that returned `OK` having measured nothing would be the defect
+this session exists to close, wearing the session's own uniform.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from agentic_postgres import REPO_ROOT, capacity_reading, diagnosis
+from agentic_postgres.host_config import Declared
+
+pytestmark = [pytest.mark.contract, pytest.mark.p0]
+
+DOCTOR_PY = REPO_ROOT / "bin" / "doctor.py"
+DOCTOR_SH = REPO_ROOT / "bin" / "doctor.sh"
+
+DECLARED = Declared(memory_mb=3814, reserve_memory_mb=2214, disk_gb=38, reserve_disk_gb=8)
+
+
+@pytest.fixture(scope="module")
+def doctor() -> Any:
+    """`bin/doctor.py` imported by path -- `bin/` is not a package."""
+    spec = importlib.util.spec_from_file_location("_apg_doctor_under_test", DOCTOR_PY)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def reading(**overrides: object) -> capacity_reading.Reading:
+    base: dict[str, object] = {
+        "declared": DECLARED,
+        "mem_total": capacity_reading.Figure.measured(3814),
+        "mem_available": capacity_reading.Figure.measured(2182),
+        "swap_total": capacity_reading.Figure.measured(0),
+        "docker_root_free_gb": capacity_reading.Figure.measured(22),
+        "docker_root_total_gb": capacity_reading.Figure.measured(37),
+        "committed": {"alpha-dev": 304, "beta-dev": 304},
+        "unreadable": {},
+        "ceilings": {"alpha-dev": 2240, "beta-dev": 2240},
+        "unbounded": (),
+    }
+    base.update(overrides)
+    return capacity_reading.Reading(**base)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Two verdicts, never four
+# ---------------------------------------------------------------------------
+
+
+def test_the_capacity_report_has_two_verdicts_only() -> None:
+    """Every check, in both directions, is OK or UNKNOWN.
+
+    Asserted over a healthy reading AND over one where every figure failed, so
+    a report that simply never produced a verdict at all could not pass.
+    """
+    permitted = {diagnosis.OK, diagnosis.UNKNOWN}
+
+    healthy = diagnosis.capacity_report(reading())
+    assert healthy, "the report produced no checks, so this test measures nothing"
+    assert {check.verdict for check in healthy} <= permitted
+
+    why = "nothing could be read"
+    blind = diagnosis.capacity_report(
+        reading(
+            declared=None,
+            mem_total=capacity_reading.Figure.unknown(why),
+            mem_available=capacity_reading.Figure.unknown(why),
+            swap_total=capacity_reading.Figure.unknown(why),
+            docker_root_free_gb=capacity_reading.Figure.unknown(why),
+            docker_root_total_gb=capacity_reading.Figure.unknown(why),
+            committed={},
+            unreadable={"alpha-dev": "the deployed document could not be read"},
+            ceilings={},
+        )
+    )
+    assert {check.verdict for check in blind} <= permitted
+    assert diagnosis.UNKNOWN in {check.verdict for check in blind}, (
+        "the control: a reading that measured nothing must say so"
+    )
+
+
+def test_the_capacity_report_names_neither_warn_nor_problem() -> None:
+    """A scan of the function's own source, not of its output.
+
+    The verdict test above can only see the branches a fixture reaches. This
+    reads the code, so a `WARN` behind a condition no test happens to trigger
+    is still caught -- which is the shape D1441 arrived in: a threshold
+    somebody added that nothing exercised.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(diagnosis.capacity_report)))
+    function = tree.body[0]
+    assert isinstance(function, ast.FunctionDef)
+    # The docstring is removed before the scan, and that is not a convenience.
+    # It is the paragraph explaining WHY this function has no WARN, and a scan
+    # that failed on it would be repaired by deleting the explanation --
+    # leaving a guard that passes and a decision nobody can find the reason
+    # for. `ast.unparse` drops comments too, for the same reason: a comment
+    # cannot emit a verdict.
+    if isinstance(function.body[0], ast.Expr) and isinstance(function.body[0].value, ast.Constant):
+        function.body = function.body[1:]
+    code = ast.unparse(function)
+
+    assert "WARN" not in code, "a capacity reading may not warn (ADR 0221, D1441)"
+    assert "PROBLEM" not in code, "a capacity reading may not report a problem"
+    # The control: this scan can see the verdicts that ARE there, so it would
+    # have seen a third one.
+    assert "UNKNOWN" in code and "OK" in code, "the scan is reading the wrong thing"
+
+
+def test_an_unreadable_figure_is_unknown_and_names_itself() -> None:
+    """The reason travels with the figure, all the way to the operator."""
+    report = diagnosis.capacity_report(
+        reading(
+            docker_root_free_gb=capacity_reading.Figure.unknown("`docker info` said nothing"),
+            docker_root_total_gb=capacity_reading.Figure.unknown("`docker info` said nothing"),
+        )
+    )
+    disk = next(check for check in report if check.name == "disk")
+    assert disk.verdict == diagnosis.UNKNOWN
+    assert "docker_root_free_gb" in disk.detail
+    assert "docker info" in disk.detail
+
+    memory = next(check for check in report if check.name == "memory")
+    assert memory.verdict == diagnosis.OK, "only the figure that failed may be unknown"
+
+
+def test_an_undeclared_capacity_is_unknown_rather_than_a_default() -> None:
+    """A schema 2 host has declared nothing, and the report says so.
+
+    Not zero, and not a number measured off the host and presented as a
+    declaration -- that substitution is the exact fold ADR 0195 forbids.
+    """
+    report = diagnosis.capacity_report(reading(declared=None))
+    declared = next(check for check in report if check.name == "declared")
+    assert declared.verdict == diagnosis.UNKNOWN
+    assert "schema 2" in declared.detail
+
+
+def test_a_project_whose_claim_is_unreadable_makes_the_total_not_a_total() -> None:
+    """The committed sum is either complete or it is not a sum."""
+    report = diagnosis.capacity_report(
+        reading(committed={"alpha-dev": 304}, unreadable={"beta-dev": "permission denied"})
+    )
+    committed = next(check for check in report if check.name == "committed")
+    assert committed.verdict == diagnosis.UNKNOWN
+    assert "beta-dev" in committed.detail
+
+
+def test_the_ceilings_are_reported_as_ceilings() -> None:
+    """The single most misleading number on this host, labelled (D767).
+
+    The six caps sum to 2240 MiB per project against 3814 MiB of RAM. An
+    operator who read that as a reservation would conclude the host is
+    catastrophically oversubscribed; what it means is that a cap is a ceiling.
+    """
+    report = diagnosis.capacity_report(reading())
+    ceilings = next(check for check in report if check.name == "ceilings")
+    assert ceilings.verdict == diagnosis.OK
+    assert "ceiling" in ceilings.detail.lower()
+    assert "D767" in ceilings.detail
+
+
+def test_the_evidence_is_only_values_this_program_produced() -> None:
+    """ADR 0159: no third party's bytes reach a report.
+
+    Every evidence value is a number this process computed or a word from its
+    own vocabulary -- never a line of `docker info`'s output, and never a path
+    under the secret root.
+    """
+    report = diagnosis.capacity_report(reading())
+    for check in report:
+        for name, value in check.evidence:
+            assert "/" not in value or value == "null", (
+                f"{check.name}.{name} carries something path-shaped: {value!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# The verb, and what it does not disturb
+# ---------------------------------------------------------------------------
+
+
+def run_doctor_py(*argv: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(DOCTOR_PY), *argv],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+
+def test_doctor_sh_maps_the_capacity_word_to_the_reading() -> None:
+    """The shell turns a verb into `--reading`, and nothing else does.
+
+    Read out of the script rather than executed, because executing it needs
+    root. The execution half is the trip's (`admission_live`).
+    """
+    source = DOCTOR_SH.read_text(encoding="utf-8")
+    assert "capacity|usage) reading=" in source.replace('"$1"', "$1").replace("  ", " ") or (
+        "capacity|usage)" in source
+    ), "the verb arm is gone, so nothing maps a verb to a reading"
+    assert "--reading" in source
+    assert 'argv=("${ROOT_DIR}/bin/doctor.py" --reading "${verb}")' in source
+
+
+def test_the_capacity_verb_documents_itself_and_needs_no_root_to_say_so() -> None:
+    """DX-002 one level down (D1395): `--help` is a read.
+
+    A verb that demanded root to print its own usage is the failure seven
+    verbs in three commands had before Session 24 found it.
+    """
+    result = subprocess.run(
+        ["bash", str(DOCTOR_SH), "capacity", "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "capacity" in result.stdout
+    assert "--host" in result.stdout
+
+
+def test_doctor_with_no_verb_runs_the_eleven_checks_unchanged(tmp_path: Path) -> None:
+    """The regression that would be quietest.
+
+    `bin/fleet.py` and `rehearsal._doctor` both invoke `doctor.py --project KEY
+    --json` and neither knows a verb exists. If adding `--reading` had made
+    `--project` conditional in a way that broke the bare form, the fleet
+    inventory and every rehearsal would fail somewhere else entirely.
+
+    Run without root, so it gets as far as the document and stops -- which is
+    enough to prove the argument parsing still reaches the eleven checks
+    rather than a usage error.
+    """
+    result = run_doctor_py(
+        "--project", "no-such-project", "--root", str(tmp_path / "apg-nonexistent-root")
+    )
+    assert result.returncode != 2, (
+        f"the bare form now fails as bad INPUT, which is the regression: {result.stderr}"
+    )
+
+
+def test_the_capacity_reading_refuses_without_a_host_manifest() -> None:
+    """It cannot report a declaration without the file that declares it."""
+    result = run_doctor_py("--reading", "capacity")
+    assert result.returncode == 2
+    assert "--host" in result.stderr
+
+
+def test_host_without_a_reading_is_refused_rather_than_ignored() -> None:
+    """A flag that silently does nothing is how an operator comes to believe
+    they asked for something they did not."""
+    result = run_doctor_py("--host", "host.example.yaml", "--project", "alpha-dev")
+    assert result.returncode == 2
+    assert "--host" in result.stderr
+
+
+def test_the_usage_verb_is_refused_until_it_answers() -> None:
+    """Run 4 builds `usage`. Until then it refuses.
+
+    The alternative -- a verb that returns `OK` having measured nothing --
+    would be this session's own defect class in this session's own code.
+    """
+    result = run_doctor_py("--reading", "usage", "--project", "alpha-dev")
+    assert result.returncode == 2
+    assert "usage" in result.stderr
+
+
+def test_the_probe_reads_meminfo_directly_rather_than_through_a_container(
+    doctor: Any, tmp_path: Path
+) -> None:
+    """A figure read inside a cgroup answers a different question.
+
+    `mem_limit` is what a container may use; this reading is about what the
+    machine HAS. The probe takes a path so the substitution is visible here.
+    """
+    parsed = doctor.probe_meminfo(Path("/proc/meminfo"))
+    assert parsed is None or set(parsed) == {"MemTotal", "MemAvailable", "SwapTotal"}
+
+    assert doctor.probe_meminfo(tmp_path / "apg-no-such-meminfo") is None
+
+
+def test_an_unlistable_project_root_is_undetermined_rather_than_empty(
+    doctor: Any, tmp_path: Path
+) -> None:
+    """Found by running the reading, and it is the sharpest case in the module.
+
+    With a root it cannot list, an earlier version reported `committed 0 MiB
+    across 0 projects` with verdict `ok` -- and `decide` would then have
+    handed a candidate the entire declared budget on the strength of a
+    directory it failed to open. The claims of projects this command cannot
+    see are not zero.
+    """
+    missing = tmp_path / "not-a-root"
+    result = doctor.probe_capacity(REPO_ROOT / "host.example.yaml", missing, exclude=None)
+
+    assert result.committed == {}
+    assert result.unreadable, "an unlistable root reported an empty, confident sum"
+
+    decision = capacity_reading.decide(
+        result,
+        candidate_key="gamma-dev",
+        candidate_unreclaimable_mb=1,
+        candidate_is_deployed=False,
+    )
+    assert decision.outcome == "refused", "a decision on an unread root must fail closed"

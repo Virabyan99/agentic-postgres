@@ -15,7 +15,41 @@
 # host address; provision-host.sh --check proves the configured address is
 # genuinely assigned to the host before any mutation.
 
-schema_version: 2
+schema_version: 3
+
+# Session 31, ADR 0221. What this node HAS, and how much of it projects may not
+# claim. Declared, never measured into this file: `apg doctor capacity` reports
+# what the host says it has, and this block says what the operator promises it
+# has. The two are printed side by side so a disagreement is visible.
+#
+# Required at schema_version 3 and forbidden at 2. A version 2 manifest is
+# still valid and reports its capacity as undeclared -- which is why upgrading
+# to this release needs no operator edit first. With nothing declared,
+# admission refuses a project that has never been deployed here and admits a
+# redeploy of one that has.
+capacity:
+  # `free -m` total on the reference host, 2026-09-19 (MemTotal 3906280 kB).
+  # This machine has NO SWAP, so there is nothing below this number to give
+  # and the OOM killer is the only backstop (D52, D959).
+  memory_mb: 3814
+  # 3814 - 1600. `config.HOST_MEMORY_GUARDRAIL_MB` is 1600 and has always been
+  # what ONE project may claim in unreclaimable memory; setting the reserve so
+  # that `memory_mb - reserve_memory_mb` equals it makes the same number a
+  # cross-project budget without moving it. A test asserts the equality.
+  #
+  # The reserve is where everything the per-project budget does not name
+  # lives: the OS, the shared edge (31 MB measured), page cache, and the
+  # amount by which each sidecar's real anonymous memory exceeds the cluster
+  # budget that names it -- D959 measured 348 MB against 304 claimed.
+  reserve_memory_mb: 2214
+  # `df -Pk` at the Docker root on 2026-09-19: 39027964 KiB = 37.2 GiB, which
+  # rounds to 38 as the provider sells it. Declared for the reading to compare
+  # against; a disagreement above five per cent is reported, not refused.
+  disk_gb: 38
+  # Free space at the Docker root that a new project may not eat into. Disk
+  # admission is a floor, not a sum: no per-project disk claim exists, and a
+  # candidate's PGDATA is unknowable before it runs (D1596).
+  reserve_disk_gb: 8
 
 host:
   id: apg-vps-01
