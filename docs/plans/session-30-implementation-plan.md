@@ -1742,10 +1742,63 @@ step under a second; the recreate 3–5 s; the deploys dominate).
 **If alpha's `acknowledge` comes back dirty**: Appendix R's five-point list,
 verbatim; `abandon` is available until `promote` and not after.
 
-**Done.** _(both windows' timings; step 2b's reading — the first evidence on
-whether a redeploy alone recreates the verifiers; both `acknowledge` outputs;
-the `kid`s before and after; where the retired JWKs are kept; what the
-sheets' discipline cost.)_
+**Done.** 2026-09-19. **The signing-key rotation has been performed, on both
+projects.** D860 — declined at five trips, rehearsed once offline, never done —
+is closed as an act. It closes **no claim** (D1469) and §7's five `not_run`
+are unchanged.
+
+| | alpha-dev | beta-dev |
+|---|---|---|
+| retired `kid` | `w4OqVzyJ0Z7wHxr9aZqNyid90Yx1ljQLI8-IVOM3x8o` | `IlFWmP6xqSJty8PQcAsWIbnueFoN14RRBCMcy3qJSzI` |
+| signing `kid` | `snuFu_ZGOVAe_bNBx_N9wlsKf3GyeVs0I_4hEq4LOcE` | `U6fUwgg1hMOaELDGMyWoFgWE4RlcE8AdtIiCPWwzNtg` |
+| published digests | `f6608021` → `ccb3c58b` (two keys) → `f693eded` | `ecc27cc9` → `89946570` (two keys) → `7924af22` |
+| window | ~11:01–11:50 UTC | ~12:00–12:25 UTC |
+| `GET …/api/app/auth/jwks.json` | 200, **one key, the new one, the retired absent** | 200, same |
+| `doctor` after | 11 ok / 0 problem | 11 ok / 0 problem, 35 migrations |
+
+**Step 2b answered D1473, and beta replicated it.** `acknowledge` taken
+*before* the `down` came back **clean on all three verifiers at the first
+reading, on both projects** — `postgrest`, `storage`, `mcp`, never four
+(D1472). A redeploy alone does recreate the verifiers, and a later session can
+now retire step 3's `down`/up with a measurement rather than an argument. The
+`down` was performed anyway, both times: one clean reading is evidence to act
+on later, not licence to drop a safety step mid-window.
+
+**And the same deploy did NOT recreate the issuer, on both projects** — which
+is D1581, and it is why step 6's `down` is the only thing that moves `auth`.
+Had the sheet said *redeploy* without Appendix R's *and recreate*, `auth` would
+have kept signing with the retired key while the document said otherwise.
+
+**The three rows the windows produced are D1579–D1581**, and the middle one is
+the finding: `retire`'s early-refusal branch is **unreachable on the only path
+an operator can walk**. Step 6's mandatory deploy rewrites the `jwt` member
+from the rendered key set, so by the time `retire` is called `retire_after` is
+already `None` and it refuses for the wrong reason — measured on both projects,
+exit 6, *"no rotation is in flight; there is nothing to retire"*, run
+deliberately so the refusal was recorded rather than assumed. **Steps 7 and 8
+were replaced by three readings** — the refusal, an `acknowledge` through
+`/proc`, and the published set over HTTP.
+
+**What the sheets' discipline cost, and what it bought.** Four of Sheet B's
+lines could not have run and were repaired before the window opened
+(D1573–D1576); a fifth defect, the operator-supplied PEM nothing validates,
+was found inside it (D1578). The provider value was malformed **four distinct
+ways** across the two projects — the body without its delimiter lines; the
+delimiters present but joined to the body; an edit that did not commit; and a
+key name with a trailing dot — and **none was caught by anything except a
+script written during the window**. The repair that made beta cheap is one
+line of sequencing: `materialize-secrets` alone, then the shape check, *before*
+any deploy. Alpha spent a failed deploy and a half-converged project learning
+that; beta spent none. `absent at the provider, and optional` is printed
+identically for a deliberate absence and for a typo, and an operator preparing
+a rotation has no way to say so — §10.
+
+**The retired JWKs are kept** at `/home/op/s30-retired-<key>-jwk.json` and on
+the workstation, each a **single JWK object** rather than a key set, because
+`test_session5_convergence.py:596` reads `retired["kid"]`. Both were captured
+from the published endpoint with **no root** (D1574), with the deployed
+document's `active_kid` as the control. Whichever sweep next passes
+`--rotated-jwt-from-file` can move one node id of nine.
 
 ### Run 9 — the close
 
