@@ -664,8 +664,13 @@ themselves, and nobody has passed it since.
 
 Named so nothing on this page reads as measured when it is not.
 
-- **The signing-key rotation** (D860): built, tested offline, offered and
-  declined at four trips.
+- ~~**The signing-key rotation**~~ — **PERFORMED 2026-09-19**, on both
+  projects, after being declined at five trips (D860). §15 is the record. It
+  closes no claim on its own (D1469) and the three rotations below it have
+  still never been performed.
+- **The authenticator password, the documentation Basic Auth password and the
+  application credential rotations** — the other three of the four
+  `credential_rotation_planes` needs.
 - **The R2 credential rotation** by `storage-admin.sh`'s six steps: no record
   found.
 - **A `major` upgrade**: every plan has priced `minor`.
@@ -676,7 +681,11 @@ Named so nothing on this page reads as measured when it is not.
   decision, D1028).
 - **Studio opened in a browser** against this deployment by an operator; the
   sweep has driven it, a person has not, on record.
-- **The kernel restart and `--after-reboot`** since Session 20.
+- ~~**The kernel restart and `--after-reboot`**~~ — **BOTH DONE 2026-09-17**
+  by Session 29 (D1500): `7.0.0-29` to `7.0.0-31`, eight seconds of
+  downtime, `--after-reboot` declared and `port_allocation` passed. It is
+  `not_run` again at Session 30 because that trip performed no reboot and
+  the declaration would not have been true (D1568).
 - **A person's walk** of the documented path (ADR 0207's residual); two
   sessions of a model have walked it, and `documented_path` is `failed` on the
   second's record.
@@ -781,24 +790,59 @@ The tag itself stays what it has always been — the operator's own annotated
 
 ## 15. The signing-key rotation, step by step
 
-**Rehearsed end to end offline on 2026-09-17** (rig 28d, Session 28 Run 8) and
-**never performed on this deployment** (D860). §9 says what it is; this says how
-it goes, in order, with what each step was measured to print.
+**Performed on this deployment for the first time on 2026-09-19** — both
+projects, in two windows, Session 30 Run 8 — after being rehearsed end to end
+offline on 2026-09-17 (rig 28d) and declined at five trips (D860). Everything
+below that carries a date or a number was read off one of those two windows.
+**Where the rehearsal and the window disagreed, the window is what this page
+now says**, and the row that records the disagreement is named.
 
 Every line here needs root — `rotate-signing-key` requires it for *every* step
 including `status`, because the deployed document and the secret generations are
 root-owned and reading a verifier's key set means reaching its container.
-`OUT` below is `/home/op/<key>-dev-outputs.json`, the current pair.
+
+**`OUT` is the deployment's own document**, typed in full:
+
+```
+/etc/agentic-postgres/projects/<key>/outputs.json
+```
+
+It is **not** one of the `/home/op/<key>-dev-outputs.json` copies, and this page
+said it was until 2026-09-19 (D1575). `--outputs` is not a read. **Every step of
+this command writes the file it names** — `write_back` hands the path straight
+to `write_deployed_document`, which writes it atomically, `0600 root`. Aimed at
+a copy, `acknowledge`, `promote` and `retire` would record the acknowledgements,
+the promotion and the retirement into that copy, leave the deployment's own
+document untouched, and chown the copy to `root:root` on the way out. `promote`
+is irreversible and would print success.
 
 **Alpha first, then beta.** Beta's window does not start until alpha reads
 `steady`.
 
 ### Before you start
 
-1. **Capture the retiring key's JWK.** `cat` the project's rendered
-   `jwks.json` and keep the object whose `kid` is the active one. It is `0444`
-   by design, so this needs no root. After the last step it is not in the
-   published set, and `--rotated-jwt-from-file` wants exactly it.
+1. **Capture the retiring key's JWK, from the published endpoint.**
+
+   ```
+   curl -sS https://<the project's app route>/auth/jwks.json
+   ```
+
+   The app route is `routes.app.url` in the deployed document. **The document
+   publishes no route named `auth`** (D1576) — the issuer lives under the app
+   route, at `…/api/app/auth`. Keep the **single JWK object** whose `kid` equals
+   the document's `jwt.active_kid`, not the whole key set: the proof that reads
+   it back does `retired["kid"]`. Use `active_kid` as the control — if the
+   endpoint's one key and the document disagree *before* you start, stop and
+   read, because the whole evidence of a rotation is that they agree after it.
+
+   This page used to say *`cat` the project's rendered `jwks.json`; it is `0444`
+   by design, so this needs no root.* **Both halves were wrong** (D1573, D1574).
+   There is no `rendered` directory under `/opt` at all; the set is at
+   `/var/lib/agentic-postgres/rendered/<key>/jwks.json`, and while the file is
+   `0444` the directory above it is `0700 root` — the mode was widened on the
+   stated premise that *the enclosing directory stays `0700` root-owned*, so
+   `op` cannot traverse to it. The endpoint needs no root and no host.
+
 2. `sudo bin/rotate-signing-key.sh --outputs OUT status` — expect
    `phase steady -- one key, nothing in flight`. **Anything else means a
    rotation is already in flight; stop.**
@@ -819,22 +863,78 @@ root-owned and reading a verifier's key set means reaching its container.
    does — `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048
    -outform PEM` — and put it at `APG_AUTH_JWT_PREPARED_KEY`, path `/auth`. No
    command here writes a provider value (D249).
-2. **Redeploy.** `render-jwks` publishes the prepared key's public half beside
-   the active one and prints **`wrote … the key set CHANGED: every verifier
-   must be RECREATED, not restarted`**. If it prints `published … cannot be
-   told from here`, that is the normal case for a deploy that replaced the
-   whole rendered directory, and it is neither evidence of a rotation nor
-   evidence against one — what answers it is step 4.
+
+   **Then prove the value is a PEM before you deploy anything** (D1578).
+   Nothing in this product validates an operator-supplied key.
+   `bootstrap-providers.py` checks the delimiter lines of the key *it*
+   generates; the materialization path writes whatever the provider returns.
+   `render-jwks` is where a bad one lands — at deploy time, half way through a
+   convergence — and it **deliberately does not echo openssl's stderr**,
+   because openssl names the key's path and on some failures prints material
+   from it. So the whole of what you get is:
+
+   ```
+   render-jwks: openssl failed: openssl rsa -in /var/lib/agentic-postgres/…
+   ```
+
+   The repair is one line of sequencing — materialize, read the shape, *then*
+   deploy:
+
+   ```
+   sudo bin/materialize-secrets.sh --project /home/op/project.<key>.yaml \
+     --requirements secrets.required.yaml --session 30
+   ```
+
+   then read the written file's **shape**, never its content:
+
+   ```
+   sudo sh -c '
+     k=<key>
+     r=/var/lib/agentic-postgres/secrets/$k
+     g=$(sed -n "s/.*\"generation_id\"[^\"]*\"\([a-z0-9]*\)\".*/\1/p" \
+           "$r/active-secret-generation.json")
+     f="$r/generations/$g/_root/auth_jwt_prepared_key.pem"
+     wc -c < "$f"
+     grep -c -- "-----BEGIN PRIVATE KEY-----" "$f"
+     grep -c -- "-----END PRIVATE KEY-----" "$f"
+     awk "{ if (length > m) m = length } END { print m }" "$f"
+     openssl rsa -in "$f" -noout && echo ACCEPTED || echo REFUSED
+   '
+   ```
+
+   A PKCS#8 RSA key is **one** `BEGIN` line and **one** `END` line, each on a
+   line of its own, with **no line longer than 64 characters**, and
+   `openssl rsa -noout` exits 0. On 2026-09-19 the value was malformed **four
+   distinct ways** across the two projects, and none of them was caught by
+   anything but this reading:
+
+   | What the shape said | What had happened |
+   |---|---|
+   | 1649 bytes, `BEGIN` 0, `END` 0 | the body was pasted without its delimiter lines |
+   | byte-identical on a re-read | the edit at the provider had not been committed |
+   | 1701 bytes, longest line 91 | the delimiters were there and joined to the body |
+   | `absent at the provider, and optional` | the key **name** carried a trailing dot |
+
+2. **Redeploy.**
+   `render-jwks` publishes the prepared key's public half beside the active one
+   and prints **`wrote … the key set CHANGED: every verifier must be RECREATED,
+   not restarted`**. If it prints `published … cannot be told from here`, that
+   is the normal case for a deploy that replaced the whole rendered directory,
+   and it is neither evidence of a rotation nor evidence against one — what
+   answers it is step 4. If it prints `openssl failed`, go back to step 1: the
+   value is wrong and this deploy has left the project half converged.
 3. **Down and up**, so every verifier is recreated:
    `sudo bin/project-runtime.sh --host host.yaml --project-key <key>
-   --through-session N down`, then redeploy. A restart is not enough, and after
+   --through-session 30 down`, then redeploy. A restart is not enough, and after
    the key set file has been replaced a restart is measured to leave the
    container unable to start at all.
-   **Take `acknowledge` once before this, too** — since D591 the deploy labels
-   each service with a digest of its mounted content and Compose recreates the
-   ones whose content moved, and `jwks.json` is a bind mount of all three
-   verifiers, so step 2 may already have done it. That reading costs nothing,
-   and it is the evidence a later session needs to retire this step (D1473).
+   **Take `acknowledge` once before this, too.** On 2026-09-19 it came back
+   **clean on all three verifiers at the first reading, on both projects**
+   (D1473) — so a redeploy alone does recreate the verifiers, and the session
+   that wants to retire this step now has a measurement rather than an
+   argument. The `down` was performed anyway, both times, and this page still
+   says to perform it: one clean reading is evidence to act on later, not
+   licence to drop a safety step mid-window.
 4. `sudo bin/rotate-signing-key.sh --outputs OUT acknowledge` — **three lines,
    not four** (D1472): `postgrest`, `storage`, `mcp`. `auth` is the issuer and
    is not a verifier; an acknowledgement from it would be the issuer agreeing
@@ -845,29 +945,70 @@ root-owned and reading a verifier's key set means reaching its container.
 5. `sudo bin/rotate-signing-key.sh --outputs OUT promote`. It prints `status`
    first, then asks for the literal word `PROMOTE`. **Irreversible**, and
    refused at exit 6 while any verifier is behind — measured both ways.
-6. **At the provider, then redeploy**: move the prepared key's value to
-   `APG_AUTH_JWT_SIGNING_KEY`, **clear** `APG_AUTH_JWT_PREPARED_KEY`, redeploy
-   and recreate. Until this is done the document says the new key signs and the
-   service is still using the old one, which is the one state the command
-   cannot detect — it says so itself.
+6. **At the provider, then `down`, then redeploy**: move the prepared key's
+   value to `APG_AUTH_JWT_SIGNING_KEY`, **clear** `APG_AUTH_JWT_PREPARED_KEY`,
+   then bring the project down and deploy it again. Until this is done the
+   document says the new key signs and the service is still using the old one,
+   which is the one state the command cannot detect — it says so itself.
    **Nothing redeploys this project between step 5 and this step.** The deploy
    re-derives `active_kid` from the key set file's first key, which is still
    the old one until the value moves, so a redeploy in between quietly restores
    the pre-promotion record while keeping the deadline (D1474).
-7. **Wait for the deadline, then retire.** `retire_after` is promotion plus
-   **930 seconds** — the longest token this issuer mints (900) plus the leeway
-   the verifier applies (30, D241's bisected measurement). `retire` before it
-   exits 6 and names the moment. Then redeploy and recreate, so the verifiers
-   stop accepting the retired key.
+
+   **The `down` here is not caution. It is the only thing that moves the
+   issuer** (D1581). A deploy recreates a container whose mounted content
+   changed (ADR 0155), and the digest that decides it is built from **one**
+   rendered compose payload — the runtime override — while the secret
+   generation is mounted from another. A new generation is therefore invisible
+   to the digest, and on 2026-09-19 the deploy did **not** recreate `auth` on
+   either project. Without the `down`, `auth` goes on signing with the retired
+   key while the document says the new one signs.
+
+   **This step is also where the rotation ends.** See step 7.
+7. **The deadline, and what `retire` actually does.** `retire_after` is
+   promotion plus **930 seconds** — the longest token this issuer mints (900)
+   plus the leeway the verifier applies (30, D241's bisected measurement).
+   `retire` before the deadline exits 6 and names the moment.
+
+   **After step 6 there is nothing left for `retire` to do, and it will refuse**
+   (D1580). Two things get there first. Step 6's deploy rewrites the document's
+   whole `jwt` member from the rendered key set, which puts `retire_after` back
+   to `None`; and `render-jwks` builds the published set from three **files** —
+   the auth key, the signing key, the prepared key — and never reads
+   `verification_kids`, so clearing the prepared key at step 6 drops the
+   retiring key from the published set immediately. **The two-key overlap ends
+   at step 6, not at step 7.** `retire` then exits **6** with *"no rotation is
+   in flight; there is nothing to retire"* — the right exit for the wrong
+   reason. Measured on both projects on 2026-09-19, deliberately, so the
+   refusal was recorded rather than assumed.
+
+   **Run it anyway, and read it as a record rather than as an act.** What ends
+   the rotation is step 6; what proves it is three readings taken after:
+
+   * `status` → `phase steady -- one key, nothing in flight`;
+   * `acknowledge` → three verifiers, each `holds the published set`;
+   * `curl -sS https://<the project's app route>/auth/jwks.json` → **one key,
+     the new one, the retired one absent.**
+
+   The last is the only one that answers the state step 6 says it cannot
+   detect: it is taken from off the host, it needs no root, and the document it
+   returns is derived from the auth service's **in-process** signing key.
+
+   An ADR is owed for a refusal that cannot fire for the reason it is watching
+   for. Until it is written, this page is the record.
 
 ### The window, in time
 
-Every step is seconds; the only thing that takes time is the deadline. **So the
-window is about sixteen minutes wide at its narrowest, and there are two of
-them.** Do not plan a sweep between `promote` and `retire`: the proof behind
+**Measured, 2026-09-19.** Alpha **~11:01–11:50 UTC**; beta **~12:00–12:25**.
+Every command is seconds, the recreate is 3–5 s, the deploys dominate, and the
+deadline is the only real wait. **Twenty-five minutes is what a window costs
+when step 1's value is right**; alpha is what it costs when it is not, and the
+deploy is what tells you.
+
+Do not plan a sweep between `promote` and **step 6**: the proof behind
 `SEC-BOOT-001` asserts the retired `kid` is **absent** from the document's
-`verification_kids`, which is exactly what `retire` does and what `promote`
-deliberately does not (D1470).
+`verification_kids`, which is exactly what step 6 now does and what `promote`
+deliberately does not (D1470, read with D1580).
 
 ### If `acknowledge` comes back dirty
 
@@ -887,23 +1028,42 @@ holding the previous key set.
    `APG_AUTH_JWT_PREPARED_KEY` and redeploy. After promotion there is no way
    back and the recovery is to complete forward.
 
-### Two lines that look like faults and are not
+### Three lines that look like faults and are not
 
-**At the end**, after a successful `retire`, `status` prints `phase steady` and
-then `promotion BLOCKED on ['mcp', 'postgrest', 'storage']` (D1475). Nothing is
-blocked: `retire` resets the acknowledgements to an empty object, which reads as
-*asked and unanswered* rather than as *nothing has been asked*.
+**At the end**, `status` prints `phase steady -- one key, nothing in flight`
+and **no** `promotion BLOCKED` line. D1475 predicted one — after a *successful*
+`retire`, `verifier_acknowledgements` is reset to an empty object, which reads
+as *asked and unanswered* and prints `promotion BLOCKED on ['mcp', 'postgrest',
+'storage']`. On the path an operator actually walks, step 6's deploy gets there
+first and leaves the field `None`, which reads as *nothing has been asked* and
+prints nothing. **Both are the same end state**; the difference is one field and
+which command wrote it (D1579). If you *do* see the `BLOCKED` line, nothing is
+blocked either.
 
 **At step 2**, `render-jwks` may print *whether the key set CHANGED cannot be
 told from here* instead of *the key set CHANGED*. That is the normal case for a
 deploy that replaced the whole rendered directory; what answers it is step 4.
 
+**At step 1**, `materialize-secrets` prints `auth_jwt_prepared_key: absent at
+the provider, and optional`. That sentence is printed **identically** for a
+deliberate absence — the steady state, where it is correct — and for a key whose
+**name** at the provider is not the name the product reads. One of
+2026-09-19's four malformations was a trailing dot on
+`APG_AUTH_JWT_PREPARED_KEY`, and this is the line it produced. If you have just
+pasted a key and see this, the name is wrong, not the key.
+
 ### What this rotation does not close
 
 **It moves one proof.** `bootstrap_identity`, `api_authorization` and
-`credential_rotation_planes` have been carried for four trips as *the rotation*,
+`credential_rotation_planes` have been carried for five trips as *the rotation*,
 and between them they need **four** rotations: this one, the authenticator
 password, the documentation Basic Auth password, and the application credential
 on both projects. A claim is `not_run` unless every proof it lists ran and
-passed, so this window alone moves none of the three to `passed` (D1469). The
-node-id table is in `docs/plans/session-28-implementation-plan.md`, Appendix R.
+passed, so this window alone moves none of the three to `passed` (D1469) — one
+node id of nine, `test_a_rotated_signing_key_is_the_only_one_the_plane_accepts`.
+The node-id table is in `docs/plans/session-28-implementation-plan.md`,
+Appendix R.
+
+**And the node id it moves has still not been taken.** No sweep has read the
+retired JWKs; they are kept at `/home/op/s30-retired-<key>-jwk.json`, each a
+single JWK object, for the first sweep that passes `--rotated-jwt-from-file`.

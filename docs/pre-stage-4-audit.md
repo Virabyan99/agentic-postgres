@@ -99,11 +99,11 @@ This is the project's own evidence, `evidence/session-25.json`: **126 claims,
 | Claim | Status | Why, and what closes it |
 |---|---|---|
 | `documented_path` | **failed** | The only `failed` claim this project has ever written. Two readers holding nothing but a clone and a task statement recorded **six and then eleven** undocumented steps (ADR 0207). Closing it means repairing what they found and having a *third* reader confirm. **Tier 3** — it needs a reader who has not seen the repository |
-| `bootstrap_identity` | not_run | Needs the signing-key rotation **performed**. **Tier 2** |
-| `api_authorization` | not_run | Same rotation. **Tier 2** |
-| `credential_rotation_planes` | not_run | Same rotation — built, tested offline, offered and declined at four trips, most recently 2026-09-15 (D860). **DECIDED 2026-09-16: it will be performed.** **Tier 2** now, not 2/3 |
-| `deployment_convergence` | not_run | **Tier 2** |
-| `port_allocation` | not_run | **Tier 2** |
+| `bootstrap_identity` | not_run | **The rotation was PERFORMED 2026-09-19** (Session 30 Run 8) and this claim did not move. It lists nine node ids; the cutover takes **one** (D1469), and that one has not been taken either — no sweep has yet read the retired JWK with `--rotated-jwt-from-file`. **The audit's pricing of this row was wrong** |
+| `api_authorization` | not_run | Same rotation, same answer: performed 2026-09-19, claim unmoved |
+| `credential_rotation_planes` | not_run | **PERFORMED 2026-09-19**, on both projects, after being declined at five trips (D860 closed as an act). It stays `not_run`: this claim needs **four** rotations and the signing-key cutover is one of them. The other three — the authenticator password, the documentation Basic Auth password, the application credential on both projects — have still never been performed |
+| `deployment_convergence` | ~~not_run~~ **passed** | **CLOSED 2026-09-19**, `not_run` since Session 11. `--redeploy-before-file` was declared on a trip for the first time and one deploy answered both halves: the sentinel row survived and the secret generation moved |
+| `port_allocation` | not_run | **Passed 2026-09-17** on Session 29's reboot, and `not_run` again at Session 30 **by choice** (D1568): `--after-reboot` is a declaration that a reboot happened, that trip performed none, and a claim is not kept green by a declaration that is no longer true |
 | `replacement_host_restore` | not_run | **`not_run` BY DECISION** (D1028): a rehearsal ends at the restore. Closing it means reversing that decision and building a replacement host. **Tier 3** |
 
 ---
@@ -170,12 +170,12 @@ the one most worth spending Session 28 on.**
 
 | ID | What is wrong |
 |---|---|
-| **D860** | **The signing-key rotation, and it is now DECIDED rather than offered.** Built, tested offline, declined at four trips, and the operator has reversed that on 2026-09-16: Session 28 performs it. It unblocks `bootstrap_identity`, `api_authorization` and `credential_rotation_planes`, and it is the first item on Stage 4's own bill. **Plan it with its own rehearsal**: `promote` is irreversible, each project publishes exactly one verification key (ADR 0170), and a key cutover recreates all four verifiers (ADR 0155). The one credential path in this product that has been built, tested and never run |
+| ~~**D860**~~ | **PERFORMED 2026-09-19 — on both projects, by Session 30 Run 8, and it closes no claim.** Read the row below as the pricing it was, not as a forecast: it says the rotation *unblocks* three claims, and D1469 measured that those three need four rotations between them while this one moves one node id of nine. What it did buy is an act that had been declined at five trips, two windows (~49 minutes and ~25), and three findings that only performing it could produce — D1579, D1580 and D1581, in `docs/scope-closure.md` §23. **The original text follows.** **The signing-key rotation, and it is now DECIDED rather than offered.** Built, tested offline, declined at four trips, and the operator has reversed that on 2026-09-16: Session 28 performs it. It unblocks `bootstrap_identity`, `api_authorization` and `credential_rotation_planes`, and it is the first item on Stage 4's own bill. **Plan it with its own rehearsal**: `promote` is irreversible, each project publishes exactly one verification key (ADR 0170), and a key cutover recreates all four verifiers (ADR 0155). The one credential path in this product that has been built, tested and never run |
 | **D1375** | `op` on the host **cannot reach the Docker socket**, and Session 25 is the first release whose offline gate mode needs one. The group membership was deliberately not granted (root-equivalent on production) |
 | ~~**D1401**~~ | **CLOSED 2026-09-18 by Session 29.** Both projects deployed at `8c61309`, swept, then tagged **1.7.0** on that commit. `stage_release` passed. Structurally closed: the tag now waits for the deploy (D1425) |
 | ~~—~~ | **INVESTIGATED 2026-09-18 (D1503).** `cloud-init-hotplugd.service`, socket-activated, fails **at every boot** 2 min 42 s after `btime` on a NIC hotplug event (`hotplug_hook.py:110`). The provider's cloud-init, not this product; both projects doctor clean with it failed. **D1512:** two `backup-mirror` units joined it on 2026-09-18 |
 | ~~—~~ | **BOTH DONE 2026-09-17 (D1500).** `7.0.0-29` → `7.0.0-31`, skipping 30, plus `libc6`; 40 days of uptime ended in 8 s of downtime; both projects came back by themselves; `--after-reboot` declared and **`port_allocation` passed for the first time in twelve sessions** |
-| — | The signing-key cutover, ADR 0122's rotation repairs, and the agent plane's round trip on a host **have never been timed** |
+| — | ~~The signing-key cutover~~ **timed 2026-09-19**: every command under a second, the recreate 3–5 s, the deploys dominating; a window that goes as written costs **~25 minutes** end to end. ADR 0122's rotation repairs and the agent plane's round trip on a host **have still never been timed** |
 | — | The database container **can reach the internet** (ADR 0147's residual) |
 | **D688** | The IPv6 scan has nothing to scan |
 | **D771** | The host's OOM history is unknown |
@@ -193,8 +193,8 @@ the one most worth spending Session 28 on.**
 | — | **The operator guide has never been read cold** | The upgrade guide has, and it produced 34 findings. Only a reader who did not write it can do this |
 | **D1303** | **Studio has never been opened in a browser** against this deployment by a person | The sweep has driven it; a person has not |
 | **D1028** | `replacement_host_restore` is `not_run` **by decision** | Reversing the decision means building a replacement host |
-| **D1084** | **The public-endpoint decision** — Stage 4's first ADR. `runtime_override.publication()` still raises | Stage 4's own report says *nothing measured in Stage 3 argues for or against it* |
-| — | **Template, or managed control plane?** (`scope-closure.md` §6, ADR 0185 drew the inventory's line without resolving it) | This is the question Stage 4 exists to answer |
+| ~~**D1084**~~ | **DECIDED 2026-09-18, ADR 0216**: no public Postgres endpoint in Stage 4. `publication()` stays a refusal by decision rather than by omission, and the five preconditions a Stage 5 reading would have to pay are written down | Closed as a decision, which is the only way this row could close |
+| — | **DECIDED 2026-09-18, ADR 0217**: appliance first, hosting deferred, and the boundary stated as a rule — nothing built in Sessions 31–35 may require a hosted trust model to be safe | Closed as a decision. The hosted platform is a Stage 5 reading with preconditions, not a Stage 4 build |
 | — | **The 21 unclaimed requirements** | Reportable one DECLARATION at a time under ADR 0202; each is a decision |
 | **D1311** | `1.3.0`–`1.5.0` have no tag, **by decision** | Tagging them retroactively would be a record that looks measured and was not |
 
@@ -213,17 +213,24 @@ Three readings of the operator's goal, priced:
    **closes four of the seven unproven claims**. D1469 measured otherwise — the
    three rotation claims need **four** rotations between them and the signing-key
    cutover moves **one of nine** node ids, closing **none** on its own. **The
-   rotation was therefore NOT performed** (D1496), and the trip still moved the
-   deployment to the tree, closed D1401 structurally and brought
-   `agent_record_retention` and `port_allocation` to `passed`. What remains unproven afterwards is three claims, each
+   rotation was therefore not performed on that trip** (D1496), which still
+   moved the deployment to the tree, closed D1401 structurally and brought
+   `agent_record_retention` and `port_allocation` to `passed`. **It was
+   performed on 2026-09-19 by Session 30, on its own day and its own sheets,
+   and it closed none of the three claims — exactly as D1469 said it would
+   not.** What remains unproven afterwards is three claims, each
    for a reason that names an event: `documented_path` until a third reader
    walks it, `replacement_host_restore` by a standing decision, and
-   `deployment_convergence` or `port_allocation` depending on what the trip
-   exercises.
+   `studio_tenant_read` until a fixture is repaired. `deployment_convergence`
+   **passed** on 2026-09-19 and `port_allocation` is `not_run` again by the
+   trip's own choice.
 3. **Tier 1 + 2 + 3.** Requires a person to walk the documentation, a person to
    open Studio, and two open product questions to be *decided* rather than
    built. The decisions are Stage 4's subject, so this reading asks Session 28
-   to do Stage 4's job first.
+   to do Stage 4's job first. **Both decisions were taken on 2026-09-18** —
+   ADR 0216 and ADR 0217 — by the stage plan rather than by Session 28, which
+   is where this reading said they belonged. The two rows that remain are the
+   two that need a **person**.
 
 **The one row that should be read twice**: `documented_path` is the only `failed`
 claim this project has ever written, and it is failing *because* somebody finally

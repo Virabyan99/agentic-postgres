@@ -1,24 +1,33 @@
 # Session 30 — Inheritance, the rotation, and the two decisions
 
-**Status:** **IN PROGRESS.** Planned 2026-09-18 at `f89b03a` (the Stage 4
-plan commit) on `main`; **Runs 1–3 done 2026-09-18** — Run 1 the mirror,
-diagnosed with root (a fourth outcome; D1546 rewritten, D1549 opened); Run 2
-the rigs and ADRs 0216–0220 (four of seven measurements came back different
-from the plan; D1542, D1544 and D1548 rewritten, D1550–D1552 opened). Run 3 the exec discipline: one helper, one
-sourced guard, the class at **0** unguarded sites, 11/11 mutations killed
-(D1553–D1554 opened); **Run 4** `release-reading --ref` and `compile --output`
-(D1555–D1556 opened; two registry entries deferred to Run 6); **Run 5** the two
-suite-shape guards, five shadows repaired, 23 orphans frozen, three counts
-(D1557–D1558 opened); **Run 6** the bump — `VERSION` 1.8.0 and
-`CURRENT_SESSION` 30, five requirements and five claims, the Session 30
-gate, and the redeploy-before recipe the trip needs (D1559–D1565 opened).
-**Run 7 is next: the trip.** §1 is D1537–D1548 at planning, each read from the
-tree at `f89b03a`. Run 1 measured D1546 and added **D1549**; Run 2 rewrote
-D1542, D1544 and D1548 and added **D1550–D1552**; Run 3 added **D1553–D1554**;
-Run 4 added **D1555–D1556**; Run 5 added **D1557–D1558**; Run 6 added
-**D1559–D1566**, Run 7 **D1567–D1572** and Run 8 **D1573–D1581**; **next free
-is D1582**, and the
-runs add theirs below.
+**Status:** **COMPLETE, 2026-09-19.** Planned 2026-09-18 at `f89b03a` (the
+Stage 4 plan commit) on `main`; **nine runs, all done**, the last three on
+2026-09-19. **`1.8.0` is deployed, swept and tagged at one commit, `be987cf`**
+(D1425), and **the signing key is rotated on both projects** — D860, declined
+at five trips, closed as an act.
+
+Run 1 the mirror, diagnosed with root (a **fourth** outcome, which none of the
+three anyone had written contained; D1546 rewritten, D1549 opened); Run 2 the
+rigs and ADRs 0216–0220 (four of seven measurements came back different from
+the plan; D1542, D1544 and D1548 rewritten, D1550–D1552 opened); Run 3 the exec
+discipline — one helper, one sourced guard, the class at **0** unguarded sites,
+11/11 mutations killed (D1553–D1554); Run 4 `release-reading --ref` and
+`compile --output` (D1555–D1556; two registry entries deferred to Run 6); Run 5
+the two suite-shape guards, five shadows repaired, 23 orphans frozen, three
+counts (D1557–D1558); Run 6 the bump — `VERSION` 1.8.0 and `CURRENT_SESSION`
+30, five requirements, five claims, the Session 30 gate and the
+redeploy-before recipe the trip needed (D1559–D1566); **Run 7 the trip** —
+deploy, one sweep with `--redeploy-before-file` declared for the first time,
+then the tag; 135 claims, 128 `passed`, 5 `not_run`, 2 `failed`
+(D1567–D1572); **Run 8 the rotation**, alpha then beta, on its own day
+(D1573–D1581); Run 9 this close.
+
+§1 is D1537–D1548 at planning, each read from the tree at `f89b03a`. Run 1
+added **D1549**; Run 2 rewrote D1542, D1544 and D1548 and added
+**D1550–D1552**; Run 3 **D1553–D1554**; Run 4 **D1555–D1556**; Run 5
+**D1557–D1558**; Run 6 **D1559–D1566**; Run 7 **D1567–D1572**; Run 8
+**D1573–D1581**. **Forty-five rows, of which thirty-three were written by
+executing the plan rather than by writing it. NEXT FREE: D1582, ADR 0221.**
 ADRs **0216–0220** are this session's, all written in Run 2 and all Accepted;
 **0220 went to the mirror fold** (D1549/D1546), not to Run 4, because D1540's
 condition was not met (D1550). **0221 is reserved, conditionally, by Run 4.**
@@ -1816,8 +1825,66 @@ and if it did, §9 says where that goes. Documentation only: push, no CI
 read. The memory file for this project updated by the executor's own
 session.
 
-**Done.** _(one line per closed item; the numbers the next session should
-not re-take.)_
+**Done.** 2026-09-19. **Session 30 is closed.** Documentation only, one
+commit, no CI read.
+
+**What this run wrote.** `docs/scope-closure.md` **§23** — what Session 30
+closed (ten rows), what it left and why (nine), and what Session 31 inherits
+(seven, in order). `CLAUDE.md` §2 rewritten whole from the scratchpad copy:
+`SESSION 30 COMPLETE`, `NEXT SESSION 31`, the release and host blocks read off
+Runs 7 and 8 rather than off the previous text, **next free `D1582`, ADR
+0221**. §9's **nine** closed rows removed and four opened in their place. This
+plan's status header. `docs/pre-stage-4-audit.md`: ten rows marked, struck
+through with a date rather than deleted, because that page is a **record** and
+its value is that it can be read against what happened afterwards — including
+its own pricing of D860, which was wrong in the direction that made the
+rotation look like it would close three claims.
+
+**And one repair that is the reason Run 9 is not only bookkeeping.**
+`docs/operator-guide.md` §15 is a **released page**, and it told an operator to
+point `--outputs` at `/home/op/<key>-dev-outputs.json` for every step of a
+command whose every step **writes the file it names** (D1575). Followed
+literally it would have recorded an irreversible `promote` into an op-owned
+copy, left the deployment's own document untouched, printed success, and made
+the copy read exactly right afterwards. §15 now names
+`/etc/agentic-postgres/projects/<key>/outputs.json` in full and says why. Four
+more of its statements were repaired from the windows: the retiring key is
+captured **from the published endpoint** rather than from a rendered file `op`
+cannot traverse to (D1573, D1574); the document publishes **no route named
+`auth`** (D1576); step 1 now carries the shape check and the four malformations
+it catches (D1578); step 6's `down` is stated as **the only thing that moves
+the issuer** (D1581); and step 7 says what `retire` actually does, which is
+refuse (D1580). §13's *never performed* list lost the rotation and the kernel
+restart — both were performed, on 2026-09-19 and 2026-09-17, and a page whose
+whole job is to say *nothing here reads as measured when it is not* was
+carrying two rows that read the other way round.
+
+**What is NOT closed, said once so the next session does not re-take it.**
+`documented_path` is `failed` until a **person** walks the path.
+`studio_tenant_read` is `failed` and the **product is right** — the fixture is
+Session 31's. `port_allocation` is `not_run` by Run 7's own choice.
+`bootstrap_identity`, `api_authorization` and `credential_rotation_planes` are
+`not_run` **with the rotation performed**: they need four rotations, this was
+one, it moves one node id of nine, and **no sweep has taken even that one** —
+the retired JWKs are on the host waiting for `--rotated-jwt-from-file`.
+`replacement_host_restore` is `not_run` by decision. `op` still cannot reach
+the Docker socket, and that is deliberate.
+
+**The numbers at close.** `template_version` **1.8.0**, `CURRENT_SESSION`
+**30**, tagged at `be987cf`. 228 requirements, 135 claims, **220 ADRs**, 33
+released migrations, no schema move of any kind. `evidence/session-30.json`:
+128 `passed`, 5 `not_run`, 2 `failed`, exit 5. Forty-five divergence rows,
+D1537–D1581, **thirty-three of them written by executing the plan rather than
+by writing it** — the highest ratio this project has recorded, and the reason
+is simply that two of the nine runs were live.
+
+**The one sentence worth carrying into Session 31.** Three of this session's
+findings — the mirror's fourth outcome, `retire`'s unreachable refusal, and
+the mount digest that cannot see a secret generation — were each invisible to
+a green suite, a passing contract test and a completed rehearsal, and each was
+found by **performing the thing against the real deployment**. The rehearsal
+of the rotation edited the document directly; the deploy is what overwrites
+it, and that one difference is the whole of D1580.
 
 ---
 
@@ -1969,6 +2036,10 @@ redeploy, each its own sheet.
 | **`apg-diag` cannot read `auth`, `storage` or `mcp` logs** (D380) | The allowlist is six services. Session 34 widens it by one service with a test if the connector route's log must be readable by the agent account. |
 | **`--rotated-from-file` is accepted by the gate and undocumented in its usage block** | Found while reading `session-28-check.sh:627-631` against `:279-280`. The 30 gate inherits it; Session 31's derivation adds the line. |
 | **The retired signing key's JWK is kept on the host and no sweep has read it** | `/home/op/s30-retired-<key>-jwk.json` after Run 8; the sweep that passes `--rotated-jwt-from-file` moves one node id and belongs to the session that performs the other three rotations. |
+| **`retire`'s early refusal cannot fire for the reason it watches for** (D1580) | Measured on both projects in Run 8's windows. Step 6's mandatory deploy rewrites the `jwt` member from the rendered key set, so `retire_after` is `None` before `retire` is called and it refuses with *no rotation is in flight* rather than with *the deadline has not passed*. `render-jwks.build()` reads three **files** and never `verification_kids`, so the two-key overlap ends at step 6 as well. **An ADR before any code**: the question is whether the deadline belongs in a command at all once the deploy owns the document. D509's shape, in a credential path. |
+| **Nothing validates an operator-supplied PEM** (D1578) | `bootstrap-providers.py` validates the delimiters of the key **it** generates; the materialization path writes whatever the provider returns; `render-jwks` is where a bad one lands, mid-deploy, and it suppresses openssl's stderr by design because openssl names the key's path. Four distinct malformations in one day. A `value_kind: rsa_private_pem` checked at materialization is the repair — and so is a `materialize-secrets` that can distinguish *deliberately absent* from *the name you typed is not a name I read*. |
+| **Why `auth` was recreated by Run 7's deploy and not by Run 8's is UNDETERMINED** (D1581) | `mounted_paths_by_service` parses **one** rendered compose payload and the secret mounts live in another, so a new generation is invisible to the mount digest — which explains Run 8, where `auth` was not recreated on either project, and contradicts D1571, written seven hours earlier off Run 7, where it was. One of the two readings has a cause nobody has established. Recorded, not folded (ADR 0195). |
+| **The D587 comment names six services where eight carry the label** | `runtime_override.py:42` lists `edge-probe`, `postgrest`, `docs`, `auth`, `storage`, `mcp` as the services carrying `apg.project.key`; a `docker ps` filtered on that label returns **eight** on this host — `metrics` and `store` joined at Session 14 and the comment did not. It is a comment, not a selector, so nothing is broken by it; it is the kind of stale number D1557 found in `evidence.py`'s docstring. |
 | **An operator CAN write a sentinel row and cannot remove one** | D1547, answered in Run 6 and half-open. `bin/dev-token.sh --role authenticated -- bin/api.sh create-note --title …` writes it through the product's own surface and is now Sheet A2's step 2. There is **no `delete-note`**, and a human may not run SQL through a product surface, so Sheet A4's cleanup is a root `docker exec … psql -c DELETE` — outside every product surface, on a production cluster, typed by a person. A trip that re-takes `deployment_convergence` every time leaves a row behind every time unless somebody does that. Session 31's, if the claim is to be routine. |
 | **ADR 0162 prices no row for a command gaining an option** | D1561. Its eight rows each name something a RENDERED DOCUMENT shows, so `release-reading --ref` and `compile --output` price as *implementation only* — a **patch** — and `upgrade plan` said exactly that while `VERSION` moved a minor. The verdict is right about what the upgrade costs an operator and silent about what the release added. A row saying an option is priced by hand, or a decision that it is always a patch, belongs to the session that next adds one. |
 | **`KNOWN_UNREGISTERED`** (if non-empty) | Each entry names its session; the tuple shrinks only. |

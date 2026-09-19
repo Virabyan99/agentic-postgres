@@ -830,3 +830,84 @@ by writing it.**
    `docs/operator-guide.md` §15 — with the knowledge that it closes no claim by
    itself, so it should be planned for what it actually is.
 
+
+## 23. What Session 30 closed, what it left, and what Session 31 inherits
+
+**Session 30 is the first session in this repository's history to deploy a
+release and then perform a credential rotation on it.** Nine runs,
+`D1537`–`D1581`, **forty-five divergence rows of which thirty-three were
+written by executing the plan rather than by writing it** — the highest ratio
+any session has recorded, and the reason is that Runs 7 and 8 were both live.
+`1.8.0` is deployed, swept and tagged at one commit, `be987cf` (D1425), and
+both projects sign with a key that did not exist that morning.
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **D860** — the signing-key rotation has never been performed | **Closed as an act**, 2026-09-19, on **both** projects, after being declined at five trips and rehearsed once offline. alpha `w4OqVzyJ…` → `snuFu_ZGOVAe…`, beta `IlFWmP6x…` → `U6fUwgg1hMOa…`; `GET <app route>/auth/jwks.json` returns **one key, the new one**, on each, read from off the host with no root. It closes **no claim** (D1469) and it moves **one node id of nine**, which no sweep has yet taken. |
+| **D1504 / D1505** — D972's guard exists on one of fourteen callers | **Closed, and by measurement rather than by a list** (ADR 0218). Rig 30a2 isolated the class to one variable — *a child that reads stdin, handed a terminal* — so the repair is `container_exec`, one helper that closes stdin, plus `bin/lib/tty-guard.sh` sourced by `deploy.sh` as a belt. An AST scan over `bin/` and `src/` read **14 unguarded sites before and 0 after**, and that scan *is* the guard. Five of the fourteen were files no plan had named, including `rotate-signing-key.py` — the command Run 8 then ran against production. |
+| **D1512** — the B2 mirror has failed on both projects since 04:38 | **Closed as an answer** (D1546, ADR 0220). It is a **fourth outcome**, and the plan's three and D1512's own `exit-code` both stopped one frame short of it: **the copy succeeds and the verb still exits 5.** One object per pass, always a small `.gz`, `ContentLength=<n> with Body length 0` reading from R2, ~1 in 3,700. Three files stated D1001 — *a pass may exit non-zero with objects behind* — as the design while `backup.py` treated exactly that as a hard failure. The verb now reports complete, partial and failed, and retries in-process. |
+| **D1513** — `release-reading` reads `HEAD` and takes no ref | **Closed** (ADR 0219). `--ref`, with `VERSION` read from the ref rather than from the working tree — a `--ref` that kept the working-tree read would be right on every occasion except the one the option exists for. Its first real use was Run 7's tag: the deployed commit prices **16** commits since 1.7.0 where `HEAD` prices 18. |
+| **D1359** — the documented compile line truncates its target | **Closed.** `mcp-contract compile --output PATH` refuses *before* it writes: exit 5, `PATH` absent, no temporary left behind. The same refusal under the old `>` shape truncated an 18-byte contract to **0 bytes**, which is what made the next documented command die in an unhandled `JSONDecodeError`. |
+| **D1509** — a lint for a local shadowing a module-level function | **Closed, and the count was five, not one** (D1552). Of a raw scan's fifty, forty-five shadow a *fixture* and are not the class. All five renamed; the guard asserts **zero with no exemption list**. |
+| **D1236 / D1543** — a `studio_*` proof errors at setup and belongs to no claim | **Closed as a registration, which is not the same as a green claim.** `STU-QUERY-002` is registered, the proof executed on the trip for the first time anywhere, and it reports **`failed`**. Before this session three Studio claims read `passed` while it had never run. **It reports now, which is what registering it was for** (D1572). |
+| `deployment_convergence` — `not_run` since **Session 11** | **Closed: `passed`.** `--redeploy-before-file` was declared on a trip for the first time, and one deploy answered both halves — the sentinel row written through `api.create_note` survived, and the secret generation moved `59ce4a78cafc3be6` → `c18ea3c95b89521f`, which is the control that stops a no-op deploy passing. |
+| **D1536** — stale counts in the isolation page and the envelope | **Closed, and the row was wrong in both terms** (D1557). Both *31 released* occurrences are measurement **conditions**, not claims about today, and rewriting them would have stated that a measurement was taken against a tree it was not; the envelope is **generated** and the edit the row implied would have been undone by the next render. The isolation sentence was wrong in both halves — **18** pointers, not fifteen, and **14** roles, not thirteen — and `evidence.py`'s own docstring carried the stale thirteen. |
+| **D1084** — the public-endpoint decision · **the template-or-control-plane question** | **Decided, not built** (ADR 0216, ADR 0217). No public Postgres endpoint in Stage 4; `publication()` stays a refusal, and the five preconditions a Stage 5 reading would pay are written down. Nothing built in Sessions 31–35 may require a hosted trust model to be safe. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| `studio_tenant_read` | **`failed`, and the product is right.** The fixture creates its subjects as `project_admin` and then writes through an API only `authenticated` may write to, one layer below the error Run 5 repaired. The instrument is wrong; **Session 31 repairs it** (D1572). |
+| `documented_path` | **`failed` by decision**, until a person walks the path. Both of the repairs the second walk found — the compile line and the guide's own gaps — are now made, and neither changes the verdict: only a third reader does. |
+| `port_allocation` | **`not_run` again, and it is a choice** (D1568). `--after-reboot` is a *declaration that a reboot happened*; this trip performed none, so the claim is reported `not_run` rather than kept green by a declaration that is no longer true. |
+| `bootstrap_identity`, `api_authorization`, `credential_rotation_planes` | **`not_run`, with the rotation performed.** They need **four** rotations between them; this was one, and it moves one node id of nine. The other three — the authenticator password, the documentation Basic Auth password, and the application credential on both projects — are each a provider replacement plus a redeploy, and each is its own sheet. |
+| `replacement_host_restore` | `not_run` by standing decision (D1028). |
+| **D1375** — `op` cannot reach the Docker socket | Unchanged deliberately. The host still writes no offline half; the one merged is the workstation's, and Run 7's had to be **re-taken rather than reused**, because the 01:30 half came from a checkout two commits before `mirror_retry` was registered. |
+| **The 22 orphaned deployment proofs** | Frozen in `KNOWN_UNREGISTERED`, which is compared for **equality**, so a proof that stops being an orphan must leave the tuple. Several are security proofs — the firewall, sshd's limits, four project-isolation proofs. They are frozen rather than registered in a hurry: **a requirement written to make a list shorter is a requirement nobody reviewed.** |
+| **An operator can write a sentinel row and cannot remove one** | D1547, half-answered. `dev-token.sh --role authenticated -- api.sh create-note` writes it through the product's own surface; there is no `delete-note`, and a human may not run SQL through a product surface, so the cleanup is a root `docker exec … psql -c DELETE` typed by a person on a production cluster. A trip that re-takes `deployment_convergence` every time leaves a row behind every time. |
+| **The mirror's per-pass transport flake** | Upstream, and no repair here removes it (D1546, D1566). ADR 0220's retry makes the verb *report* it correctly; nobody has asked Cloudflare or Backblaze which side truncates. Tomorrow's 04:42/04:48 passes are the first to run the retry on `1.8.0`. |
+
+### What Session 31 inherits, in order
+
+1. **A refusal that cannot fire for the reason it is watching for** (D1580).
+   `retire`'s early-refusal branch — the one whose docstring says *refusing
+   early is the half that matters* — is **unreachable on the only path an
+   operator can walk**. Step 6's mandatory deploy rewrites the `jwt` member
+   from the rendered key set, so `retire_after` is `None` before `retire` is
+   called, and it refuses for the wrong reason. Measured on **both** projects.
+   A rehearsal could not find it: rig 28d edited the document directly, and
+   **the deploy is what overwrites it**. This is D509's shape in a credential
+   path, and it needs an ADR before it needs code.
+2. **The `studio_tenant_read` fixture** (D1572). The one instrument this
+   session registered and did not repair.
+3. **An operator-supplied PEM that nothing validates** (D1578). The product
+   checks the delimiters of the key *it* generates and nothing checks the one a
+   human pastes; `render-jwks` is where a bad one lands, mid-deploy, and it
+   deliberately suppresses openssl's stderr because openssl names the key's
+   path. On 2026-09-19 the value was malformed **four distinct ways in one day**
+   and none was caught by anything but a script written during the window.
+   A `value_kind: rsa_private_pem` checked at materialization is the repair;
+   so is a `materialize-secrets` that can say *the name you typed is not a name
+   I read* instead of `absent at the provider, and optional`.
+4. **Why `auth` was recreated by Run 7's deploy and not by Run 8's**
+   (D1581) — **UNDETERMINED, and recorded as such.** `mounted_paths_by_service`
+   parses **one** rendered compose payload and the secret mounts live in
+   another, so a new generation is invisible to the mount digest; that explains
+   Run 8, where `auth` was not recreated on either project, and it contradicts
+   D1571, written seven hours earlier off Run 7, where it was. One of the two
+   readings has a cause nobody has established, and the row says so rather than
+   folding it.
+5. **The 22 orphans** (D1542), each named with the session that owes it.
+6. **`agent_record` counts with no threshold** — the doctor's eleventh check
+   reports and judges nothing by design (D1441). It is the number Session 31's
+   `doctor capacity|usage` starts from.
+7. **Two small stale facts found while reading.** The D587 comment at
+   `runtime_override.py:42` lists **six** services as carrying
+   `apg.project.key`; a `docker ps` filtered on that label returns **eight** on
+   this host — `metrics` and `store` joined at Session 14 and the comment did
+   not. And ADR 0162 prices no row for a command gaining an option (D1561) — `upgrade plan` read this release as
+   `requires patch` while `VERSION` moved a minor, which is right about what
+   the upgrade costs an operator and silent about what the release added.
