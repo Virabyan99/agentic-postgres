@@ -516,44 +516,41 @@ from pathlib import Path
 #: decision before it renders, and `rotate-signing-key retire` reports a third
 #: outcome where it used to refuse.
 #:
-#: **ADR 0162 prices it a MINOR, and as in 1.8.0 that price is a judgement
-#: above the floor the product's own command reports** (D1561, D704). Rig: a
-#: git worktree at `be987cf` -- the commit that IS deployed -- and a copy of
-#: this working tree, each rendering `project.example.yaml`, with `upgrade
-#: plan` run between the two documents. **Neither side renders in the
-#: checkout**: `project.example.yaml` renders as `fixture-alpha-dev`, which is
-#: one of the four renders the gate compares for collisions (D1485). Read:
+#: **The price, read rather than chosen** (D704). The rig: a git worktree at
+#: `be987cf`, the commit that IS deployed, and a copy of this working tree,
+#: each rendering the example project, with `upgrade plan` run between the two
+#: documents. **Neither side renders in the checkout**, because the example
+#: project renders under the same key as one of the four fixtures the gate
+#: compares for collisions, and a render here would overwrite it (D1485,
+#: D1624). Read: `bump minor`, `requires patch`, verdict `ok`, `reasons []`,
+#: `changes []`, `operator_digests_moved []`, and **exactly one leaf differs
+#: -- `template_version`, 1.8.0 to 1.9.0.** Both documents are 5,948 bytes.
+#: The compose environment's eighteen new keys do not appear, which the plan
+#: for this run left open and this reading closes: `pids_limit` and `cpus` are
+#: written into `compose.env`, and `outputs.json` is not that file (D1625).
 #:
-#:     bump minor, requires patch, verdict ok, reasons [], changes [],
-#:     operator_digests_moved [], and EXACTLY ONE LEAF DIFFERS --
-#:     template_version, 1.8.0 -> 1.9.0.
+#: **And the one row of ADR 0162 this release does hit is invisible to that
+#: command.** `host.yaml` goes from schema 2 to schema 3 -- an operator
+#: manifest bump, which the table prices at a minor -- and `host.yaml` is an
+#: operator INPUT that appears in no rendered document, so the floor came back
+#: computed without the field that would have raised it (D1626). Reported
+#: rather than folded: teaching `upgrade` to read an operator input would make
+#: it a second reader of `host.yaml` beside `host_config` (ADR 0002, D816).
 #:
-#: **The compose env's eighteen new keys do not appear**, which the plan for
-#: this run left open and this reading closes: `pids_limit` and `cpus` are
-#: written into `compose.env`, and `outputs.json` is not that file. Both
-#: documents are 5,948 bytes.
-#:
-#: `requires patch` is correct and is not a disagreement. Every one of ADR
-#: 0162's eight rows names something a RENDERED DOCUMENT shows -- a migration,
-#: an API operation, a capability, a secret, a document schema, an operator
-#: manifest -- and `requires` reports the FLOOR: the smallest bump that
-#: permits the change, which is what an operator has to DO to take it. Nothing.
-#:
-#: **And the one row of ADR 0162 that this release does hit is invisible to
-#: that command.** `host.yaml` moves from schema 2 to schema 3, which is an
-#: operator manifest bump and which the table prices at a minor -- but
-#: `host.yaml` is an operator INPUT and appears in no rendered document, so
-#: `upgrade plan` compares two documents that cannot show it. The minor is
-#: therefore chosen above the floor for the same reason 1.3.0, 1.6.0 and 1.8.0
-#: were (a release that gives an operator something new to type is a minor)
-#: AND for a reason those three did not have: an operator manifest schema
-#: really did move, and the reading cannot see it. Bumping above the floor
-#: never costs anybody anything.
-#:
-#: **This session takes a host trip**, so the class is confirmed against a
-#: DEPLOYMENT in the same session: Run 7's `upgrade plan` on both projects,
-#: before the deploy, and a `major` required there is a stop condition rather
-#: than a number to write down.
+#: **ADR 0162 prices it a MINOR**, and `1.9.0` is above the floor its own
+#: command reports. `requires patch` is that floor -- the smallest bump that
+#: permits the change, which is what an operator has to DO to take it, and the
+#: answer is nothing. **No outputs, capability, lock, project-manifest or
+#: secret schema moves**, no released migration is added and no command loses
+#: a verb; the only schema that moves is an operator's, additively, with no
+#: migrator. So the minor is chosen above the floor for the reason 1.3.0,
+#: 1.6.0 and 1.8.0 were -- a release that gives an operator something new to
+#: type -- AND for one those three did not have, a manifest schema that really
+#: did move where the reading cannot see it. Bumping above the floor costs
+#: nobody anything. **This session takes a host trip**, so the class is
+#: confirmed against a DEPLOYMENT in the same session: Run 7's `upgrade plan`
+#: on both projects before the deploy, and a `major` required there is a stop
+#: condition rather than a number to write down.
 CURRENT_SESSION = 31
 
 #: Repository root, resolved from this file rather than the caller's cwd so
