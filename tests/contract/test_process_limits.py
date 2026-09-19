@@ -294,9 +294,7 @@ def test_the_same_fork_succeeds_with_no_limit() -> None:
     # under is nothing like the subject's 8. So that is what it asserts.
     ceiling = completed.stdout.strip().splitlines()[-1].strip()
     if ceiling != "max":
-        assert ceiling.isdigit(), (
-            f"pids.max read {ceiling!r}, which is neither `max` nor a number"
-        )
+        assert ceiling.isdigit(), f"pids.max read {ceiling!r}, which is neither `max` nor a number"
         assert int(ceiling) > 64, (
             f"the control ran under a ceiling of {ceiling}, which is close "
             "enough to the subject's 8 that the two arms are not comparing "

@@ -565,6 +565,14 @@ def test_the_runtime_records_the_lock_it_loaded_at_module_level(
         project_key = "probe-dev"
         postgrest_url = "https://postgrest.test"
         max_concurrent_reads = 4
+        # `None`, which is the arm where no collector is configured: this test
+        # is about the lock the runtime recorded, and an exporter reaching for
+        # a real endpoint is not its subject. It has to be declared, though --
+        # a hand-rolled stub answers only the attributes it was written with,
+        # so every setting `create_mcp_app` reads has to be here or the call
+        # raises `AttributeError` somewhere down the function and the failure
+        # surfaces as whatever the next assertion happens to be.
+        otlp_endpoint = None
 
     record = tmp_path / "apg-loaded-lock.json"
     monkeypatch.setattr(mcp_runtime, "LOADED_LOCK_RECORD", str(record))

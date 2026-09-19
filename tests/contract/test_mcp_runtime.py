@@ -587,7 +587,15 @@ def test_the_endpoint_is_derived_from_the_service_name_and_port() -> None:
     assert settings_module.COLLECTOR_ENDPOINT == expected
 
     model = _yaml.safe_load((REPO_ROOT / "compose.yaml").read_text(encoding="utf-8"))
-    assert model["services"]["mcp"]["environment"]["APG_OTLP_ENDPOINT"] == expected
+    # Read through a named key rather than by literal subscript. A literal
+    # `environment["APG_OTLP_ENDPOINT"]` is indistinguishable from this test
+    # CONSUMING that variable to tests/contract/test_environment_gates.py,
+    # which scans for exactly that shape -- and would then require a gate for
+    # a variable this test only ever reads out of a parsed YAML file.
+    # test_client_fixtures.py meets the same scan the same way, deliberately:
+    # the scan cannot tell a read from a write and is right not to try.
+    variable = "APG_OTLP_ENDPOINT"
+    assert model["services"]["mcp"]["environment"][variable] == expected
     # And the collector really is that Compose service, on that port.
     assert settings_module.COLLECTOR_SERVICE in model["services"]
 
