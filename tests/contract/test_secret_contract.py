@@ -1312,6 +1312,91 @@ def test_a_valid_value_of_each_kind_passes() -> None:
     assert secrets_contract.check_value_kind("rsa_private_pem", valid) is None
 
 
+def test_an_opaque_value_is_checked_against_nothing_and_that_is_the_answer() -> None:
+    """**D1634.** A third party's credential has no shape this product owns.
+
+    `opaque` returns `None` for anything, including values that would fail
+    every other kind. That is not a hole: a Backblaze B2 application key is 31
+    characters in a base64url alphabet, and a rule written here would be a
+    guess about somebody else's format that refuses a working key the day they
+    change it.
+
+    The pair with `test_an_unknown_kind_fails_closed_naming_it` is the point.
+    Two kinds check nothing, and they mean opposite things: an unknown kind
+    means the schema gained one and nobody taught the checker, so it fails
+    closed; `opaque` means somebody thought about the shape and concluded
+    there is nothing here to assert. If this ever returns a reason, the second
+    meaning has quietly become the first.
+    """
+    for value in ("K0mplex/B2+key==", "NOT-HEX", "", "0123abc", SENTINEL, _pem(lines=2)):
+        assert secrets_contract.check_value_kind("opaque", value) is None, (
+            f"`opaque` refused {value[:12]!r}...; it is declared for values whose "
+            "shape this product does not define"
+        )
+
+
+def test_every_operator_supplied_secret_declares_a_kind_its_issuer_can_satisfy() -> None:
+    """**The audit that should have run before the checker shipped** (D1634).
+
+    `check_value_kind` was written, tested, gated and pushed without anyone
+    walking the declarations it would read. The contract said `random_hex` for
+    two Backblaze credentials that are not hex, and the first run of the first
+    reader refused a production deploy at step 5.
+
+    What makes that possible is that `value_kind` is a claim about a value this
+    product never sees. For a `generated` secret the claim is enforced by the
+    generator -- `bootstrap-providers` produces exactly the declared kind or
+    raises. For an `operator_supplied` one there is no such loop: the claim is
+    about what a third party issues, and until this session nothing compared
+    them.
+
+    So this table is the comparison, written out with its reason per secret
+    rather than derived -- a derivation would be the mechanism checking itself
+    (D260). Adding an `operator_supplied` secret means adding a row and saying
+    why, which is the review this needed and did not get.
+    """
+    ISSUERS = {
+        # Cloudflare R2: the Access Key ID is the API token's id and the Secret
+        # Access Key is the SHA-256 of the token's value -- 64 hex characters,
+        # so `random_hex` is TRUE about the shape. The comment above these in
+        # the contract argues at length why changing it would be WRONG: the
+        # trap is that a generator could produce a perfectly-shaped credential
+        # Cloudflare never issued, which is what `origin` exists to prevent.
+        "r2_access_key_id": ("random_hex", "Cloudflare R2, hex"),
+        "r2_secret_access_key": ("random_hex", "Cloudflare R2, SHA-256 hex"),
+        "backup_r2_access_key_id": ("random_hex", "Cloudflare R2, hex"),
+        "backup_r2_secret_access_key": ("random_hex", "Cloudflare R2, SHA-256 hex"),
+        # Backblaze B2: an application key id and an application key. The key
+        # is base64url and is not hex. The ID happens to fall inside [0-9a-f]
+        # and therefore PASSED the check that refused its sibling -- a
+        # declaration that is false and sometimes satisfied.
+        "mirror_s3_access_key_id": ("opaque", "Backblaze B2, not ours to describe"),
+        "mirror_s3_secret_access_key": ("opaque", "Backblaze B2, base64url"),
+    }
+
+    contract = secrets_contract.load_secret_contract(CONTRACT)
+    supplied = {
+        secret["name"]: secret
+        for secret in contract["secrets"]
+        if secrets_contract.is_operator_supplied(secret)
+    }
+
+    assert set(supplied) == set(ISSUERS), (
+        "the operator-supplied set has moved and this table has not: "
+        f"only in the contract {sorted(set(supplied) - set(ISSUERS))}, "
+        f"only here {sorted(set(ISSUERS) - set(supplied))}. A secret whose value "
+        "comes from a third party needs a row saying which issuer and what shape, "
+        "because nothing else in this repository compares the two"
+    )
+
+    for name, (kind, why) in sorted(ISSUERS.items()):
+        assert supplied[name]["value_kind"] == kind, (
+            f"{name} is declared {supplied[name]['value_kind']} and its issuer "
+            f"produces {why}, so the declaration is a false statement about the "
+            "value -- which is what refused a production deploy on 2026-09-20"
+        )
+
+
 def test_an_unknown_kind_fails_closed_naming_it() -> None:
     """ADR 0195's third outcome, in a function whose other two are decisions.
 
@@ -1343,7 +1428,13 @@ def test_every_declared_kind_has_a_branch_in_the_check() -> None:
     kinds = schema["$defs"]["secret"]["properties"]["value_kind"]["enum"]
     assert kinds, "the enum is empty; this scan measures nothing"
 
-    passing = {"random_hex": "abc123", "rsa_private_pem": _pem(lines=20)}
+    passing = {
+        "random_hex": "abc123",
+        "rsa_private_pem": _pem(lines=20),
+        # Anything at all: that IS the branch. See
+        # `test_an_opaque_value_is_checked_against_nothing`.
+        "opaque": "K0mplex/B2+key==",
+    }
     for kind in kinds:
         assert kind in passing, (
             f"value_kind {kind!r} is declared in the schema and this test has no "

@@ -477,6 +477,27 @@ def check_value_kind(kind: str, value: str) -> str | None:
             )
         return None
 
+    if kind == "opaque":
+        # **Checked against nothing, deliberately, and that is not the
+        # fall-through below.** An `opaque` value is a credential a third party
+        # issued -- a Backblaze B2 application key, 31 characters in a
+        # base64url alphabet -- and this product does not define its shape. A
+        # rule written here would be a guess about somebody else's format, and
+        # the day they changed it this function would refuse a key that works.
+        #
+        # The distinction from an unknown kind matters and is the whole reason
+        # this branch is explicit: an unknown kind FAILS CLOSED, because it
+        # means the schema gained a kind and nobody taught the checker. This
+        # one means the opposite -- somebody thought about the shape and
+        # concluded there is nothing here for us to assert.
+        #
+        # It arrived because `random_hex` was declared for two B2 credentials
+        # that are not hex, which refused a production deploy the first time
+        # this function ran against them (D1634). `origin` already says who
+        # made the value; `opaque` says what it is, and "not ours to describe"
+        # is a true answer where `random_hex` was a false one.
+        return None
+
     if kind == "random_hex":
         if not _HEX_VALUE.fullmatch(value):
             return f"declared {kind} and the value is not lowercase hexadecimal from end to end"

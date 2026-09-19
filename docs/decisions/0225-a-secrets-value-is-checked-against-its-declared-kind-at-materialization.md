@@ -129,6 +129,56 @@ Two of four, with the remaining two out of reach of any check of this kind and
 said so. The line-of-its-own rule does not refuse a key wrapped at 76
 characters rather than 64, because the body's wrapping is not a boundary and a
 false refusal here would block a legitimate key mid-window.
+
+## Amendment, the trip (D1634)
+
+**The two-kind enum could not describe a credential a third party issued, and
+the first production run of this check found out.** Alpha's deploy on
+2026-09-20 was refused at step 5:
+
+```
+materialize-secrets: mirror_s3_secret_access_key: declared random_hex and the
+value is not lowercase hexadecimal from end to end
+```
+
+The check was right and **the contract was wrong**.
+`mirror_s3_secret_access_key` is a Backblaze B2 application key -- 31
+characters in a base64url alphabet -- declared `random_hex` since Session 18
+added the mirror. Nothing could tell, because until this ADR nothing read the
+field. **That is this ADR's own thesis arriving from the other side**: it
+argued that a declared field with no reader is an unverified field, and the
+first reader found the declaration false.
+
+Its sibling `mirror_s3_access_key_id` is mis-declared identically and
+**passed**, because a B2 key id happens to fall inside `[0-9a-f]`. A
+declaration that is false and *sometimes* satisfied is worse than one that is
+simply false: it would have been read as evidence the pair was checked.
+
+**`opaque` is added to the enum** -- a credential a third party issued whose
+shape this product does not define and must not constrain -- and both mirror
+secrets are declared with it. `check_value_kind` returns `None` for it, and
+the explicit branch matters: an UNKNOWN kind fails closed, because it means
+the schema gained one and nobody taught the checker; `opaque` means somebody
+considered the shape and concluded there is nothing here to assert. A rule
+over a format this product does not own would refuse a working key the day the
+provider changed it.
+
+**Cloudflare's four R2 secrets stay `random_hex`, and that is not an
+inconsistency.** For them it is TRUE: the secret access key is the SHA-256 of
+the token, 64 hex characters. The contract's own comment above them argues
+that changing it would be wrong, because the trap there is the opposite one --
+a generator could produce a perfectly-shaped credential Cloudflare never
+issued, which is what `origin` exists to prevent.
+
+**What this cost and what it bought.** It cost a deploy, stopped before
+anything was written, with the running plane untouched and both projects
+serving throughout -- which is the check failing in the direction it was built
+to fail. It bought a `value_kind` that is true about every secret for the
+first time, and an audit
+(`test_every_operator_supplied_secret_declares_a_kind_its_issuer_can_satisfy`)
+that compares each operator-supplied secret against the issuer that produces
+it. **That audit is what should have run before this check shipped**: a
+reader was given to a field without walking the declarations it would read.
 - **Leave it and document the failure mode.** Four malformations in one day,
   with the only diagnosis being a script written under time pressure during a
   host window. Rejected.
