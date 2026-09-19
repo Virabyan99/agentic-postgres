@@ -223,8 +223,8 @@ against what the brief (the stage plan's §5 *Session 31*, its §1 rows, and
 CLAUDE.md §9) says, with the decision this plan takes. **Next free number
 after this table was D1602 at planning time; Run 1 measured eight more
 (D1602-D1609, added 2026-09-19), Run 3 four more (D1610-D1613) and Run 4 one
-(D1614), Run 5 eight (D1615-D1622) and Run 6 seven (D1623-D1629), so the
-next free number is **D1630**.**
+(D1614), Run 5 eight (D1615-D1622) and Run 6 seven (D1623-D1629) and Run 7's
+preparation three (D1630-D1632), so the next free number is **D1633**.**
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -276,6 +276,9 @@ next free number is **D1630**.**
 | **D1627** | Run 6 §5: *"`test_no_gate_exists_for_the_session_that_took_the_trip` **deleted** (there is no skipped session between 30 and 31 -- the docstring says so)"*. | Deleting it is right and leaves the module with **no assertion about the derivation chain at all**. That test carried two: that the gap is real, and -- in its second half -- that the gate this session derived FROM exists, which is the anti-vacuity guard for every `SESSION_PREVIOUS` assertion in the file. Session 30's copy needed the first half; this session still needs the second. | Replaced rather than deleted, by `test_the_previous_gate_is_the_one_before_this_one_with_no_gap`: the previous gate is a file, `SESSION_PREVIOUS_NUMBER == SESSION - 1` (**true again for the first time since 24 -> 25**), and the gate holds `readonly SESSION=31`. Its docstring says why the literal is kept anyway -- `SESSION - 1` was right for six consecutive derivations before 26 broke it, which is exactly how it came to be trusted (D719). | A test deleted because its subject went away is correct; a test deleted without asking what else it was holding up is how an anti-vacuity guard disappears quietly. | -- |
 | **D1628** | Run 6 §5: *"`bin/session-31-check.sh --mode offline` writes `evidence/session-31-offline.json` carrying the six new offline claims plus the **nineteen** inherited, every one `passed`"*. | **Eighteen are inherited, not nineteen.** Measured from `OFFLINE_CLAIMS` and `CLAIM_INTRODUCED_IN` rather than counted by hand: the tuple held 18 before this session and holds **24** after it. `CLAIMS` goes 135 -> 145. | The Done and the gate's own prose say 24 and say where the number came from. Nothing in the product moves -- the gate derives the list, it does not carry one. | The fourth stale count this session has corrected against a measurement (D1595's four were the first three plus the label count). A number in a plan is a number that was right when the plan was written, and this one was one short before Run 5 declared six rather than five. | 0202 |
 | **D1629** | Run 6 §5: *"`bin/session-01-check.sh` runs once, on a clean tree (commit, gate, repair, commit, gate again)"* -- and the plan asks for the gate's first-run defects as rows. | **Three failures of 6,225, all in the release paragraph and none in the product.** `test_release_contract` reads the LAST `#:` paragraph above `CURRENT_SESSION`, because the convention its own docstring states is that the version-and-class sentence CLOSES the block -- so an older paragraph naming an older version can never satisfy it. The measured-verdict addendum was appended AFTER the pricing sentence, which left the final paragraph naming neither `1.9.0` nor a class: two tests, one mistake. The third, `test_deployable_source_does_not_hardcode_a_fixture_identity`, refused `src/agentic_postgres/__init__.py` because the rig description named the fixture the example project renders as. | The pricing paragraph goes last again and carries all four things its two readers take from it, **verified by reproducing the reader's own splitting logic rather than by eye** -- the repair was made from Windows with WSL's command channel down, so neither `ruff` nor pytest could be run until the machine came back. The fixture identity is replaced by the PROPERTY that mattered: *the same key as one of the four fixtures the gate compares*. | Both guards are right and both are about the same thing -- a paragraph that describes the release before, and a source file that names a fixture. The gate is the only instrument that reads either, which is why it runs before the push and why a run that skipped it would have shipped a release paragraph describing 1.8.0. | 0162 |
+| **D1630** | Sheet A6: *"`setsid nohup bash /home/op/g31-host.sh > /dev/null 2>&1 < /dev/null &` … `cat /home/op/g31-host.exit`"*. | **Neither file exists and neither name is this trip's.** `g25-host.sh` is two conventions old; Session 30 -- the last host sweep that actually ran -- used `s30-r7-gate.sh` with a separate `s30-r7-launch.sh`, wrote its log to `s30-r7-host.txt`, its exit to `s30-r7-host.code` and a reading to `s30-r7-host-summary.txt`. Deriving from the newest working script is D1482's rule and it lands on that shape, not on the planned one. | The staged scripts are `s31-r7-{checkout,renders,gate,launch}.sh`, derived from Session 30's by named substitution with every count asserted, and **Sheet A6 names the launcher rather than the gate**: `sudo bash /home/op/s31-r7-launch.sh` detaches the sweep itself, so the sheet no longer carries a `setsid nohup` line for an operator to retype. | A sheet naming a file that is not there is a failed line in the middle of a fifteen-minute window, and the failure is indistinguishable at a glance from a sweep that refused. | -- |
+| **D1631** | Sheet A6: *"`sudo install -o op -g op -m 0600 /etc/agentic-postgres/projects/alpha-dev/outputs.json /home/op/alpha-dev-dev-outputs.json`"*. | **The host's op-owned copies are `/home/op/alpha-dev-outputs.json` and `/home/op/beta-dev-outputs.json`** -- read 2026-09-20, both written 2026-09-19 09:38. The doubled `-dev-` names nothing. `install` would CREATE it, the agent's confirmation that the copy carries the new `source_commit` would then read a file nothing else uses, and the real pair would sit stale beside it looking installed. | The sheet names the two paths that exist. (The bare `/home/op/alpha-outputs.json` pair, 2026-08-23, is older still and is a third thing again -- CLAUDE.md already warns never to point a WRITING command at either.) | **D1575's shape**: a sheet pointing a command at the wrong copy of the deployed document. That one cost a window; this one was caught by listing the directory before the day rather than by a command failing during it. | -- |
+| **D1632** | Sheet A1: *"`df -Pk /var/lib/docker` → the 1K-blocks and Available columns"*, whose number becomes `capacity.disk_gb` on Sheet A2. | **`/var/lib/docker` is the default and is not the contract.** `capacity_probe.read_docker_root` asks `docker info --format '{{.DockerRootDir}}'` for exactly this reason -- *a host that had moved it would otherwise be measured at the wrong filesystem, and the number would look perfectly plausible*. The sheet assumed the path the product refuses to assume. `op` cannot ask: no Docker socket, by decision (D1375), and `/var/lib/docker` is `drwx--x--- root root`. | Sheet A1 gains `sudo docker info --format '{{.DockerRootDir}}'` and runs `df -Pk` **at that path**. It stays on A1 rather than A2 because A1 is the `sudo` sheet and A2 is `op`'s. | The declaration is the thing every admission decision rests on, and a `disk_gb` describing a different filesystem is the defect this session spent D1611 and D1623 removing from the product -- reintroduced in the sheet that produces the number. | 0221 |
 
 ---
 
@@ -2043,8 +2046,17 @@ versions, `verdict OK`. `bin/doctor.sh --project alpha-dev` and `beta-dev`
 → 11 ok; **write down the `disk headroom` line's `cluster_kb` for each**.
 `bin/fleet.sh` → 2 projects. `bin/backup.sh --outputs
 /etc/agentic-postgres/projects/alpha-dev/outputs.json info` → a full
-exists. `free -m` → the `total` and `available` columns. `df -Pk
-/var/lib/docker` → the 1K-blocks and Available columns. `nproc` → 2.
+exists. `free -m` → the `total` and `available` columns. **`sudo docker info
+--format '{{.DockerRootDir}}'` → the Docker data root, and `df -Pk` at THAT
+path** → the 1K-blocks and Available columns. `nproc` → 2.
+
+**Ask the daemon; do not assume `/var/lib/docker`** (D1632). It is the
+default and it is not the contract: a host that had moved it would be
+measured at the wrong filesystem and `disk_gb` would describe a different
+disk, which is exactly the class D1611 removed from the product and D1623
+made the reading report. `op` cannot ask — it has no Docker socket by
+decision (D1375) — so this line is `sudo` and belongs here rather than on
+Sheet A2, where the number is used.
 `bin/dr-kit.sh export … --output /home/op/kit-<date>-pre` (the exact line
 from `--help`, printed on the sheet by the agent).
 
@@ -2118,11 +2130,28 @@ The same with `project.beta.yaml`; ledger 33 + 2, `Pending: 0` twice.
 ### Sheet A6 — the sweep, then the cleanup (`sudo`)
 
 `sudo install -o op -g op -m 0600 /etc/agentic-postgres/projects/alpha-dev/
-outputs.json /home/op/alpha-dev-dev-outputs.json` and beta (D1506's pair);
+outputs.json /home/op/alpha-dev-outputs.json` and beta (D1506's pair);
+
+**`alpha-dev-outputs.json`, not `alpha-dev-dev-outputs.json`** (D1631). The
+host's op-owned copies are `/home/op/alpha-dev-outputs.json` and
+`/home/op/beta-dev-outputs.json` — read on 2026-09-20, both written
+2026-09-19 09:38. The doubled `-dev-` would `install` a NEW file beside the
+real one, and the agent's confirmation that the copy names the new
+`source_commit` would then read a file nothing else uses while the stale
+pair sat untouched. **D1575's shape**: a sheet pointing a command at the
+wrong copy. (The bare `/home/op/alpha-outputs.json` pair is older still —
+2026-08-23 — and is not this.)
 the agent confirms both name the new `source_commit` **before** this line:
-`setsid nohup bash /home/op/g31-host.sh > /dev/null 2>&1 < /dev/null &`
-(the script holds the full `session-31-check.sh --mode host` line from Run
-7 step 7, every path absolute); ~15 min; `cat /home/op/g31-host.exit` → 0 or
-5. Then the sentinel removed, exactly Session 30 Sheet A4's two lines with
+`sudo bash /home/op/s31-r7-launch.sh` — which detaches the sweep itself and
+returns at once, so an SSH drop cannot kill it; ~15 min; `cat
+/home/op/s31-r7-host.code` → 0 or 5, and `/home/op/s31-r7-host-summary.txt`
+is the reading.
+
+**The names are `s31-r7-*`, not `g31-host.*`** (D1630). The planned names
+follow `g25-host.sh`, which is two conventions old; the scripts staged for
+this trip are derived from Session 30's `s30-r7-gate.sh` and
+`s30-r7-launch.sh` — the last host sweep that actually ran — and carry that
+shape. A sheet naming a file that is not there is a failed line in the
+middle of a window. Then the sentinel removed, exactly Session 30 Sheet A4's two lines with
 the `s31-` title (no `-i`; expect `DELETE 1`). Then `bin/dr-kit.sh export …
 --output /home/op/kit-<date>-post`.
