@@ -223,8 +223,8 @@ against what the brief (the stage plan's §5 *Session 31*, its §1 rows, and
 CLAUDE.md §9) says, with the decision this plan takes. **Next free number
 after this table was D1602 at planning time; Run 1 measured eight more
 (D1602-D1609, added 2026-09-19), Run 3 four more (D1610-D1613) and Run 4 one
-(D1614) and Run 5 eight (D1615-D1622), so the next free number is
-**D1623**.**
+(D1614), Run 5 eight (D1615-D1622) and Run 6 seven (D1623-D1629), so the
+next free number is **D1630**.**
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -269,6 +269,13 @@ after this table was D1602 at planning time; Run 1 measured eight more
 | **D1620** | D1595's fourth: `runtime_override.py:42`'s comment *"names six services carrying `apg.project.key` where eight do (scope-closure §23 item 7)"*. | **Nine do**, measured from `compose.yaml` at Session 30's close commit `ae2c0dc` and at this one: `auth`, `backup-mirror`, `docs`, `edge-probe`, `mcp`, `metrics`, `postgrest`, `storage`, `store`. The comment said six and the plan said eight. The three the comment omits -- `metrics`, `store`, `backup-mirror` -- are also the three that are **not edge-facing**, so the sentence was teaching the wrong shape as well as the wrong number. | The comment names all nine, marks which six are edge-facing, and says the count was measured and by whom it was got wrong twice. The property the comment exists for -- that `postgres` does NOT carry the label, which is the whole of D587 -- is unchanged. | A count stated in prose is a count that was right once; a count restated from a stale source is the same error with a citation. | -- |
 | **D1621** | Run 5 §5.5: *"`test_acceptance_registry` checks the row's referential integrity, so this lands green only in Run 6 with the entries -- write it now, run the registry test in Run 6."* | Written and **measured**: `test_threat_model_requirement_ids_exist_in_the_registry` fails naming both IDs, and CI is the full check read per commit. Landing the row in Run 5 pushes a **red `main`** and keeps it red until Run 6 -- which is the state this session has just spent a commit getting out of. | `THR-NOISY-NEIGHBOUR` is **reverted from Run 5 and lands in Run 6** beside `NODE-LIMIT-001` and `NODE-ADMIT-001`. Nothing is lost: the row's full text is in Run 5's **Done**, ready to paste. | The plan's instruction and the project's own rule about CI are in conflict, and the rule wins for the cheaper reason: the row costs nothing to move and a red `main` across two runs costs a verdict nobody can read. | -- |
 | **D1622** | Run 5 §5.6: *"When the proof proves nothing a requirement should state (the run expects this for `test_the_classifier_can_tell_the_categories_apart` if it is a self-test of a test helper -- read it), delete it and say why."* | Read: it is the anti-vacuity control for `_classify`, which drives the other three proofs of `DEP-ISO-001`'s isolation matrix. A classifier returning `not_authority` for everything would make the matrix *report a clean bill of health forever* and `test_every_leaf_is_classified` *pass most loudly of all* (D374). **Deleting it removes the only thing that makes the other three mean anything.** | **Registered under `DEP-ISO-001`, not deleted**, with one sentence added to that requirement. A control belongs to the claim it protects: if it fails, the matrix is unmeasured and the claim should say so. Of the twenty-two, twenty went to requirements that already stated their property; the two that stay are ADR 0136's category (a writing rpc is ineffective over GET), which no entry states -- they need a new `target_session: 31` entry and that is Run 6's (D690). | *A requirement written to make a list shorter is a requirement nobody reviewed* -- and so is a deletion taken to make one shorter. The count was never twenty-two unstated properties; it was twenty-two proofs nothing had connected to the requirement they were written for. | -- |
+| **D1623** | Run 6 §5: the eight live proofs, among them *"the `free -m` / `df -Pk` controls are the proof's own reads on the host (root), compared within 5 % for MemTotal and exactly for the Docker root's total KiB"*. | **`df` has to be pointed at a path, and `apg doctor capacity` did not report one.** `decide` prints `disk measured at <path>` because the probe walks up from the Docker data root to the nearest point it can stat (D1611) and an ancestor can be a different mount -- but `diagnosis.capacity_report` reported the same two figures and named no subject, so the READING handed an operator a number they had no way to check. The only alternative for the control was hardcoding `/var/lib/docker`, which is the assumption D1611 removed from the product. | `capacity_report`'s `disk` check gains `measured_at` in its evidence, empty-path excluded (a path invented for a reading that measured nothing would be worse than none). One offline proof for both arms; the live control points `df` at whatever the reading printed. | Found by writing the control, which is the only reason it was found at all: every offline proof feeds the reporter a `Reading` it built, and a reader who already knows which path was measured never notices that the report does not say. | 0221 |
+| **D1624** | Run 6 §5, the price: *"render `project.example.yaml` from `be987cf` in a throwaway worktree `/tmp/apg-be987cf` (D1485: never the checkout's own `.generated/fixture-alpha-dev`) and from the bump commit"*. | **`project.example.yaml` renders AS `fixture-alpha-dev`** (`project.name: fixture_alpha_dev`). The parenthesis warns about the installed side and the candidate side has the same problem: rendering it in the checkout overwrites one of the four renders the gate compares for collisions (D1507), and CLAUDE.md's rule is that anything calling `render_project` must delete what it published. | **Neither side renders in the checkout.** The installed side is a git worktree at `be987cf`; the candidate side is a `tar`-piped copy of the working tree at `/tmp/apg-candidate`, which is byte-for-byte what the bump commit contains. `.generated/` is excluded from the copy so the candidate renders into an empty one. | A copy rather than a second worktree because a worktree carries the committed tree and the reading is wanted BEFORE the commit -- the verdict goes into the release paragraph, and a number written before the command ran is D267. | -- |
+| **D1625** | Run 6 §5: *"the leaves are `template_version` and whatever the compose env's new keys show as (if the rendered document publishes them -- read the output and list every leaf in the Done)"*. | **The rendered document publishes none of them.** `upgrade plan` reports exactly ONE leaf: `template_version`, 1.8.0 -> 1.9.0. `pids_limit` and `cpus` are written into `compose.env`, and `outputs.json` is not that file. Both documents are 5,948 bytes. `changes []`, `reasons []`, `operator_digests_moved []`, `verdict ok`, `bump minor`, `requires patch`. | The Done lists the single leaf, and the release paragraph says which file the eighteen keys actually live in. Nothing changes in the product: this closes a question the plan left open. | The same shape 1.8.0's reading produced (D1561), and for a different reason -- that release moved nothing a document shows, this one moves eighteen keys into a file `upgrade plan` does not compare. | 0162 |
+| **D1626** | ADR 0162 prices an **operator manifest bump** at a minor, and Run 6 asks the product's own command what this release costs. | **The command cannot see the row this release hits.** `host.yaml` moves from schema 2 to schema 3 -- an operator manifest bump -- and `upgrade plan` compares two RENDERED DOCUMENTS. `host.yaml` is an operator INPUT and appears in neither, so `requires` comes back `patch`: a floor computed without the field that would have raised it. The reading is not wrong; it is answering a question about documents. | **Reported, not folded** (ADR 0195). The release paragraph states the minor is chosen above the floor for 1.8.0's reason AND for one 1.8.0 did not have, and names the row the command could not see. No change to `upgrade`: teaching it to read an operator input would make it a second reader of `host.yaml` beside `host_config` (D816, ADR 0002). | 1.8.0 was the first release where the price was a judgement rather than a reading (D1561). This is the first where the reading is INCOMPLETE in a way the table can name -- worth a number, because the next session to bump a manifest schema will run the same command and get the same floor. | 0162 |
+| **D1627** | Run 6 §5: *"`test_no_gate_exists_for_the_session_that_took_the_trip` **deleted** (there is no skipped session between 30 and 31 -- the docstring says so)"*. | Deleting it is right and leaves the module with **no assertion about the derivation chain at all**. That test carried two: that the gap is real, and -- in its second half -- that the gate this session derived FROM exists, which is the anti-vacuity guard for every `SESSION_PREVIOUS` assertion in the file. Session 30's copy needed the first half; this session still needs the second. | Replaced rather than deleted, by `test_the_previous_gate_is_the_one_before_this_one_with_no_gap`: the previous gate is a file, `SESSION_PREVIOUS_NUMBER == SESSION - 1` (**true again for the first time since 24 -> 25**), and the gate holds `readonly SESSION=31`. Its docstring says why the literal is kept anyway -- `SESSION - 1` was right for six consecutive derivations before 26 broke it, which is exactly how it came to be trusted (D719). | A test deleted because its subject went away is correct; a test deleted without asking what else it was holding up is how an anti-vacuity guard disappears quietly. | -- |
+| **D1628** | Run 6 §5: *"`bin/session-31-check.sh --mode offline` writes `evidence/session-31-offline.json` carrying the six new offline claims plus the **nineteen** inherited, every one `passed`"*. | **Eighteen are inherited, not nineteen.** Measured from `OFFLINE_CLAIMS` and `CLAIM_INTRODUCED_IN` rather than counted by hand: the tuple held 18 before this session and holds **24** after it. `CLAIMS` goes 135 -> 145. | The Done and the gate's own prose say 24 and say where the number came from. Nothing in the product moves -- the gate derives the list, it does not carry one. | The fourth stale count this session has corrected against a measurement (D1595's four were the first three plus the label count). A number in a plan is a number that was right when the plan was written, and this one was one short before Run 5 declared six rather than five. | 0202 |
+| **D1629** | Run 6 §5: *"`bin/session-01-check.sh` runs once, on a clean tree (commit, gate, repair, commit, gate again)"* -- and the plan asks for the gate's first-run defects as rows. | **Three failures of 6,225, all in the release paragraph and none in the product.** `test_release_contract` reads the LAST `#:` paragraph above `CURRENT_SESSION`, because the convention its own docstring states is that the version-and-class sentence CLOSES the block -- so an older paragraph naming an older version can never satisfy it. The measured-verdict addendum was appended AFTER the pricing sentence, which left the final paragraph naming neither `1.9.0` nor a class: two tests, one mistake. The third, `test_deployable_source_does_not_hardcode_a_fixture_identity`, refused `src/agentic_postgres/__init__.py` because the rig description named the fixture the example project renders as. | The pricing paragraph goes last again and carries all four things its two readers take from it, **verified by reproducing the reader's own splitting logic rather than by eye** -- the repair was made from Windows with WSL's command channel down, so neither `ruff` nor pytest could be run until the machine came back. The fixture identity is replaced by the PROPERTY that mattered: *the same key as one of the four fixtures the gate compares*. | Both guards are right and both are about the same thing -- a paragraph that describes the release before, and a source file that names a fixture. The gate is the only instrument that reads either, which is why it runs before the push and why a run that skipped it would have shipped a release paragraph describing 1.8.0. | 0162 |
 
 ---
 
@@ -1642,8 +1649,103 @@ offline claims plus the nineteen inherited, every one `passed`. Then `git
 diff --stat` against this run's list, one line each, **before** the push
 (D1116). Then CI by full SHA. **And then nothing** — no tag (D1425).
 
-**Done.** _(the executor: the plan's verdict and leaves; the offline claim
-table; the gate's first-run defects, if any, as rows.)_
+**Done.** 2026-09-19. The bump landed all-or-nothing (D690): `VERSION`
+**1.9.0**, `CURRENT_SESSION` **31**, **ten requirements and ten claims** --
+six declared offline, one more than any session has declared, and four host.
+`NODE` joined `ID_PATTERN`. **`KNOWN_UNREGISTERED` is empty**, 22 -> 2 -> 0.
+Seven divergence rows, **D1623-D1629**.
+
+**`bin/session-01-check.sh`: PASSED at `33d82e0`** -- `6225 passed, 0 failed,
+3 skipped, 0 errors`, P0 collected 6615, 0 future placeholders, two rendered
+projects, **0 identity collisions, 0 floating image refs**. Its FIRST run, at
+`02f8b22`, exited 1 on three failures, and D1629 is the row: all three were
+the release paragraph and none was the product.
+
+**`bin/session-31-check.sh --mode offline`** wrote `evidence/session-31-
+offline.json`: **24 claims, 24 passed**.
+The six this session declares -- `capacity_declared`, `capacity_reading`,
+`admission_decision`, `process_limits`, `telemetry_bounded`,
+`secret_kind_checked` -- are all `passed`. **Eighteen were inherited, not the
+nineteen the plan predicted** (D1628), measured from `OFFLINE_CLAIMS` and
+`CLAIM_INTRODUCED_IN` rather than counted: `CLAIMS` goes 135 -> 145.
+
+**The plan's verdict and its leaves** (D704, and the rig is D1624's):
+
+```
+bump                      minor
+requires                  patch
+verdict                   ok
+reasons                   []
+changes                   []
+operator_digests_moved    []
+differences               ONE -- template_version, 1.8.0 -> 1.9.0
+```
+
+**Every leaf, listed: there is one.** Both documents are 5,948 bytes. The
+compose environment's eighteen new keys do NOT appear, which this run's plan
+left open and this reading closes (D1625): `pids_limit` and `cpus` are written
+into `compose.env`, and `outputs.json` is not that file.
+
+**Neither side rendered in the checkout** (D1624). The plan's parenthesis
+warns about the installed side; the candidate side has the same problem,
+because `project.example.yaml` renders under the key of one of the four
+fixtures the gate compares for collisions. The installed side is a git
+worktree at `be987cf`; the candidate is a `tar`-piped copy of the working
+tree, which is byte-for-byte what the bump commit contains.
+
+**And the one row of ADR 0162 this release hits is invisible to that command**
+(D1626). `host.yaml` goes schema 2 -> 3, an operator manifest bump the table
+prices at a minor, and `host.yaml` is an operator INPUT that appears in no
+rendered document -- so `requires patch` is a floor computed without the field
+that would have raised it. Reported rather than folded, and `upgrade` is left
+alone: teaching it to read an operator input would make it a second reader of
+`host.yaml` beside `host_config` (ADR 0002, D816).
+
+**`apg release-reading`**: `tag_is_owed`, `VERSION 1.9.0`, no tag on HEAD, last
+tag `1.8.0` at `be987cf9632d`, **ADRs 220 -> 225 moved**, 14 commits and 67
+files since. **No tag here** -- the deploy, the sweep and the tag land on one
+commit in that order, and that is Run 7 (D1425).
+
+**The eight live proofs plan and do not skip** (D671, D676). With the six
+variables set, `--setup-plan` lists all eight and the fixture chain under
+them; with none set, eight SKIP and none errors, which is what a gate variable
+in the closed roster buys (D687). `APG_HOST_MANIFEST` and
+`APG_CANDIDATE_MANIFEST` joined that roster and the gate exports both --
+`--host` has existed since Session 2 and was never exported, because until
+this release nothing in the suite read the HOST's manifest.
+
+**The gate was derived by diff and its header and usage block rewritten
+whole** (D1482, D1488, D853, D858). One `session-30` reference survives on
+purpose: the line recording what it was derived from.
+`test_no_gate_exists_for_the_session_that_took_the_trip` was not merely
+deleted but REPLACED (D1627) -- it carried a second assertion, that the gate
+this session derived FROM exists, which is the anti-vacuity guard under every
+`SESSION_PREVIOUS` assertion in the module. **30 -> 31 is the first
+consecutive pair since 24 -> 25.**
+
+**One product change came out of writing a live proof** (D1623). `apg doctor
+capacity` reported the disk figures and never said WHICH filesystem it
+measured -- only `decide` did. The probe walks up to the nearest readable
+ancestor and an ancestor can be a different mount, so the reading was handing
+an operator a number they had no way to check against `df`; the alternative
+for the control was hardcoding `/var/lib/docker`, which is the assumption
+D1611 took out of the product. The reading names the path now.
+
+**Carried in from Run 5, both measured there and deferred:**
+`THR-NOISY-NEIGHBOUR` and its `## Scope` sentence, which
+`test_acceptance_registry` refused until `NODE-LIMIT-001` and
+`NODE-ADMIT-001` existed (D1621); and the last two orphans, now
+`AGT-METHOD-001`.
+
+**Targeted:** 34 modules, **1575 passed, 13 skipped** (all legitimate: two
+shell scripts that run no Python, eight Session 31 live proofs and three
+Studio proofs with no host). The sweep-selector guard collects 6237/6699
+(D1242). `ruff format --check` and `ruff check` 0; `shellcheck` clean over
+`deploy.sh`, `bin/*.sh`, `bin/lib/*.sh` and `libexec/*`. `apg generate
+--check`, `app-contract --check` and `mcp-contract check` all exit 0; the
+acceptance matrix, the bounds table, the mcp catalog, the evaluation report
+and the capacity envelope are current. **No `freeze-lock`** -- no migration
+moved.
 
 ### Run 7 — the trip: the host declares, both projects redeploy, a third is refused, one sweep, the tag
 
