@@ -164,7 +164,7 @@ SHELL_COMMANDS = (
     # took the trip that deployed, swept and tagged 1.7.0, and a trip writes
     # the evidence of the session whose release it deploys rather than one
     # of its own (D1063, D1514). Its offline mode writes a half reporting
-    # FOUR claims -- more than any session has declared -- and its host mode
+    # FIVE claims -- more than any session has declared -- and its host mode
     # is this session's own trip, which passes `--redeploy-before-file` for
     # the first time since Session 11 registered the claim it admits.
     "bin/session-30-check.sh",

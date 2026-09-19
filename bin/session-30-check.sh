@@ -1499,6 +1499,19 @@ mode_host() {
   export APG_PROJECT_A_OUTPUTS="${PROJECT_A_OUTPUTS}"
   export APG_PROJECT_B_OUTPUTS="${PROJECT_B_OUTPUTS}"
   [ -n "${SENTINEL_FILE}" ] && export APG_SECRET_SENTINEL_FILE="${SENTINEL_FILE}"
+  # NOT in `tests/conftest.py`'s roster, deliberately (D1278), and this gate
+  # said it was until D1595 measured it. What consumes it is the
+  # `admin_password` FIXTURE in tests/deployment/conftest.py, which SKIPS with
+  # the variable's name when it is unset -- so a sweep run outside a window
+  # where the operator had the password to hand is a legitimate run and the
+  # claims it cannot prove come out `not_run`.
+  #
+  # It cannot simply join the roster: `test_every_registered_variable_is_used`
+  # calls an entry used when a test module declares it on a marker or names it
+  # as a constant, and `all_test_modules()` is `rglob("test_*.py")` -- it does
+  # not walk conftests, which is the only place this name appears. Adding it
+  # would read as unused on the day it was added. Widening that scan is a
+  # change to a guard several other checks share and is section 10's item.
   [ -n "${ADMIN_PASSWORD_FILE}" ] && export APG_ADMIN_PASSWORD_FILE="${ADMIN_PASSWORD_FILE}"
   [ -n "${ROTATED_FROM_FILE}" ] && export APG_ROTATED_FROM_FILE="${ROTATED_FROM_FILE}"
   # One variable per credential. A window rotates one at a time, and a single
@@ -1519,8 +1532,11 @@ mode_host() {
   [ -n "${DX_RECORD_FILE}" ] && export APG_DX_RECORD_FILE="${DX_RECORD_FILE}"
   # Session 21 exports NOTHING new of its own (D687 read from the other end):
   # every live half this session adds reads `APG_LIVE_HOST`, the two outputs
-  # and `APG_ADMIN_PASSWORD_FILE`, all in the roster and exported here -- so
-  # `pytest --setup-plan` can answer "will these run" before the trip.
+  # and `APG_ADMIN_PASSWORD_FILE` -- the first three in the roster, the fourth
+  # NOT in it and read by a fixture instead (see the export line above; the
+  # claim that all four were in the roster was this sentence's, and D1595
+  # measured it false). All four are exported here, so `pytest --setup-plan`
+  # can answer "will these run" before the trip.
   #
   # Session 18's five declarations are exported again (D1133). They admit that
   # session's kit, replacement and rehearsal proofs, which THIS sweep runs

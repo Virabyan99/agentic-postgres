@@ -227,7 +227,7 @@ def auditor(
     app_base: Callable[[dict[str, Any]], str],
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Any:
-    """An audit- and agent-capable `project_admin`, and a `0600` file for Studio.
+    """An audit- and agent-capable subject, and a `0600` file for Studio.
 
     `audit_admin`'s shape with this module's own names, so the two can run in one
     sweep without either sweeping the other's rows. Created through
@@ -235,12 +235,30 @@ def auditor(
     every probe subject here gives: a fixture built on an endpoint makes every
     proof below conditional on that endpoint.
 
+    **The request role is `authenticated`, not `project_admin` (D1572).** What
+    a subject may do administratively is decided by the scope in its token and
+    not by the role name -- `bootstrap_statements.py:258-263` states it and
+    `API-ADMIN-001` is the requirement -- so this one holds `AUDITOR_SCOPES`
+    and the ordinary tenant role, which is the pair a real auditor holds.
+
+    Created as `project_admin` it could do neither of the two things the proofs
+    below ask of it. Migration 0007 grants `EXECUTE` on `api.create_note` to
+    `{{authenticated}}, {{agent_writer}}` after revoking it from `PUBLIC`, and
+    migration 0004 grants `SELECT` on `app.notes` to those two and
+    `{{agent_reader}}`: `project_admin` is on neither list. That is the whole
+    of `studio_tenant_read`'s failure -- **the product was right** and the
+    instrument asked it for something no role this subject held could do.
+
     The password file is written under a `tmp_path`, mode `0600`, and removed
     with the rest of the temporary tree. It is the only way Studio will take a
     password apart from a TTY, and there is no TTY in a sweep.
     """
     hashing = service_source.load("hashing")
-    role_name = project_a["database"]["roles"]["project_admin"]
+    # `authenticated` -- see the docstring. The name is read out of the
+    # deployed document rather than derived here, which is the same reach
+    # `tests/deployment/conftest.py`'s `_registered_subject` makes for every
+    # other live subject in this suite (ADR 0002: one authority for a name).
+    role_name = project_a["database"]["roles"]["authenticated"]
     scopes = ", ".join(f"'{scope}'" for scope in sorted(AUDITOR_SCOPES))
 
     psql(project_a, f"DELETE FROM app_private.users WHERE username = '{AUDITOR_USERNAME}';")
@@ -580,10 +598,15 @@ def test_revocation_through_studio_refuses_the_agents_next_request_on_alpha(
         f"{revocation['after_right']}"
     )
 
-    # And the launch printed nothing it should not have. The auditor is a
-    # `project_admin`, so the surface answer here is `stale_contract` by
-    # construction (D1275) and the audit view works anyway, which is the split
-    # this session built.
+    # And the launch printed nothing it should not have. The surface answer
+    # is not asserted here and is not this proof's subject: PostgREST's
+    # `openapi-mode = follow-privileges` serves a document shaped by the
+    # CALLER's privileges and the contract was captured as `api_documentation`
+    # (D1275), so a subject holding any other request role may differ from it.
+    # The audit view works either way, which is the split this session built.
+    # Since D1572 the auditor's request role is `authenticated`; what it may do
+    # administratively comes from its token's scopes, so what that does to the
+    # served document is a reading the trip takes, not one asserted here.
     printed = "\n".join(launched_studio.lines)
     assert AUDITOR_PASSWORD not in printed, printed
     assert AGENT_SECRET not in printed, printed
@@ -724,7 +747,12 @@ def two_owners_one_relation(
     # not have read anything either way. Sorted by construction -- a one-element
     # array is sorted -- which `is_scope_set` requires (D248).
     hashing = service_source.load("hashing")
-    role_name = project_a["database"]["roles"]["project_admin"]
+    # `authenticated`, for the reason the auditor fixture's docstring gives:
+    # this subject WRITES a note through `POST /rpc/create_note` and READS it
+    # back through `/notes`, and `project_admin` is granted neither. The two
+    # owners must also hold the SAME role, or the absence this proof turns on
+    # could be a missing grant rather than the row policy (D509).
+    role_name = project_a["database"]["roles"]["authenticated"]
 
     psql(project_a, f"DELETE FROM app_private.users WHERE username = '{STRANGER_USERNAME}';")
     code, stranger_id, error = psql(

@@ -39,9 +39,19 @@ DATABASE_SERVICE_PORT = 5432
 #: The Compose labels that select one project's database container.
 #:
 #: **`apg.project.key` is NOT among them, and that is the whole of D587.** That
-#: label is a first-party one this model applies to six EDGE-FACING services --
-#: `edge-probe`, `postgrest`, `docs`, `auth`, `storage`, `mcp` -- and not to
-#: `postgres`, `pgbouncer` or `dbmate`. Run 6's `bin/backup.py` selected the
+#: label is a first-party one this model applies to NINE services -- the six
+#: edge-facing ones, `edge-probe`, `postgrest`, `docs`, `auth`, `storage` and
+#: `mcp`, and three that are not edge-facing at all, `metrics`, `store` and
+#: `backup-mirror` -- and not to `postgres`, `pgbouncer` or `dbmate`.
+#:
+#: **Nine, measured** (D1595): this comment said six and scope-closure section
+#: 23 said eight, and `compose.yaml` says nine at Session 30's close commit and
+#: at this one. Which services carry it is not the property that matters here
+#: -- `postgres` not carrying it is -- but a count stated in prose is a count
+#: that was right once, and the three that were missing from it are the three
+#: a reader would least expect, so the sentence was teaching the wrong shape.
+#:
+#: Run 6's `bin/backup.py` selected the
 #: database container with it anyway, Run 8's drill copied that selector, and
 #: **neither could ever match**: measured on the host, `apg.project.key=alpha-dev`
 #: plus `service=postgres` returns 0 containers while the cluster is up and

@@ -455,6 +455,31 @@ def abandon(arguments, path: Path, document: dict, state: dict) -> dict:
 
 STEPS = {"acknowledge": acknowledge, "promote": promote, "retire": retire, "abandon": abandon}
 
+#: What to say when a step returns the state it was handed. Printing
+#: "recorded" about it would be false -- nothing was recorded, because there
+#: was nothing to decide -- and exiting non-zero would be false the other way.
+#:
+#: Only `retire` can reach this today (ADR 0224), and `main` asks the general
+#: question rather than re-testing the rule: `jwt_keys.retire_rotation` is the
+#: one reader of what a settled state looks like, and a second reader here
+#: would be two places that have to agree (D600).
+UNCHANGED = {
+    "retire": (
+        "nothing to retire: one key is published, no deadline is set, and no verifier\n"
+        "acknowledgement is outstanding.\n"
+        "\n"
+        "If a rotation was just completed, THE DEPLOY THAT RENDERED THIS KEY SET IS\n"
+        "WHAT CLOSED THE OVERLAP WINDOW -- from that moment the retiring key stopped\n"
+        "being published and tokens it signed stopped verifying. This step records a\n"
+        "decision to stop publishing a key, and that has already happened.\n"
+        "\n"
+        "This document cannot tell that apart from a project that has never rotated:\n"
+        "the deploy writes the same three members either way (ADR 0224, D1617). So\n"
+        "this says what is true of the state rather than narrating which history\n"
+        "produced it."
+    ),
+}
+
 #: What an operator has to do after a step, because the step only records a
 #: decision. The key set on disk is rewritten by `render-jwks.py` during a
 #: deploy, and a verifier only picks one up by being recreated.
@@ -465,7 +490,13 @@ FOLLOW_UP = {
         "  clear APG_AUTH_JWT_PREPARED_KEY,\n"
         "  bring the project down, and redeploy.\n"
         "Until then the document says the new key signs and the service is still\n"
-        "using the old one -- which is the one state this command cannot detect."
+        "using the old one -- which is the one state this command cannot detect.\n"
+        "\n"
+        "TAKE THAT DEPLOY ONLY AFTER THE DOCUMENT'S retire_after HAS PASSED.\n"
+        "The deploy is what closes the overlap window: it renders a key set\n"
+        "holding one kid, and from that moment the retiring key is no longer\n"
+        "published and tokens it signed no longer verify. Deploying early\n"
+        "refuses tokens that are still inside their own lifetime (ADR 0224)."
     ),
     "retire": (
         "Redeploy to republish the key set without the retired key, then recreate\n"
@@ -503,6 +534,12 @@ def main(argv: list[str] | None = None) -> int:
 
         updated = STEPS[arguments.step](arguments, arguments.outputs, document, state)
         jwt_keys.validate_key_state(updated)
+        if updated == state and arguments.step in UNCHANGED:
+            # Nothing is written, deliberately. The document is already what
+            # this step would have made it, and rewriting it would give an
+            # operator a fresh mtime to read as evidence that something moved.
+            print(f"rotate-signing-key: {UNCHANGED[arguments.step]}")
+            return 0
         write_back(arguments.outputs, document, updated)
         print(f"\nrotate-signing-key: {arguments.step} recorded in {arguments.outputs}")
         if arguments.step in FOLLOW_UP:

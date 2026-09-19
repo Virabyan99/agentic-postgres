@@ -471,9 +471,48 @@ def retire_rotation(state: dict[str, Any], *, now: datetime) -> dict[str, Any]:
     The acknowledgements are cleared: they described the two-key set that has
     just stopped being published, and a digest kept past the set it describes is
     a record that would authorise the next promotion for free.
+
+    **Three outcomes, not two** (ADR 0224, ADR 0195). The third is a settled
+    state that a deploy already retired, and it is REPORTED rather than
+    refused. Walking the rotation end to end on both projects on 2026-09-19
+    found that the refusal above fires on the only path an operator can walk,
+    and says the opposite of the truth when it does: `FOLLOW_UP["promote"]`
+    sends the operator to redeploy, that deploy renders a key set holding one
+    kid, `observe_jwt` drops the deadline because a deadline describing an
+    ended overlap is a document `validate_key_state` would refuse -- and so
+    `retire` is reached with no deadline and reports *nothing is in flight*
+    about a rotation that has just been completed (D1580).
+
+    Rig 28d rehearsed this branch both ways and could not find it, because the
+    rig edited the document and **the deploy is what overwrites it** -- D509's
+    shape in a credential path.
+
+    The refusal is kept and so is its test. It is unreachable on today's
+    runbook and it is not unreachable in principle: a document written before
+    step 6 still carries a future deadline. A correct guard deleted because
+    one runbook cannot reach it is a guard missing the next time the runbook
+    changes.
     """
     validate_key_state(state)
     if state["retire_after"] is None:
+        # All three, because any other combination is a document some future
+        # deploy could still write and the refusal is right about those. One
+        # published kid says the overlap is over; no deadline says nothing is
+        # waiting on one; no acknowledgements says nothing is mid-promotion
+        # holding a digest for a set that is no longer published. `retire`
+        # would remove nothing here, and there is nothing to record.
+        #
+        # **This state has two histories and the document cannot tell them
+        # apart** (D1617). `bin/deploy-project.py:2963-2964` writes both
+        # `retire_after` and `verifier_acknowledgements` as null whenever the
+        # rendered set holds one kid, which is exactly the shape
+        # `initial_key_state` gives a project that has never rotated. What is
+        # returned is the same either way, because the ANSWER is the same
+        # either way -- there is nothing here to retire. The caller's sentence
+        # is written to be true of both, rather than narrating a rotation this
+        # function cannot know happened.
+        if len(state["verification_kids"]) == 1 and state["verifier_acknowledgements"] is None:
+            return dict(state)
         raise JwkError("no rotation is in flight; there is nothing to retire")
 
     deadline = datetime.strptime(state["retire_after"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)

@@ -223,7 +223,8 @@ against what the brief (the stage plan's §5 *Session 31*, its §1 rows, and
 CLAUDE.md §9) says, with the decision this plan takes. **Next free number
 after this table was D1602 at planning time; Run 1 measured eight more
 (D1602-D1609, added 2026-09-19), Run 3 four more (D1610-D1613) and Run 4 one
-(D1614), so the next free number is **D1615**.**
+(D1614) and Run 5 eight (D1615-D1622), so the next free number is
+**D1623**.**
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -260,6 +261,14 @@ after this table was D1602 at planning time; Run 1 measured eight more
 | **D1612** | §5.4: the `admission-refused` record's *"`induced: false`"*. | **In the tree `induced=False` means *recorded, not exercised*.** `provider-loss` is its only member and `verdict()` returns the literal `"recorded"` for it (D976). **`disk-threshold` changes nothing either** — it injects a threshold into the doctor's argv — and is `induced=True`, because it exercises the reader. `test_every_scenario_plans_three_phases_and_prints_every_command` asserts `(plan.induced is False) == (scenario == "provider-loss")`. | **`admission-refused` keeps `induced=True`**, disk-threshold's flag, because it is disk-threshold's shape exactly: a threshold injected into a reader's argv, nothing changed, nothing to undo. The existing parametrised assertion stands unedited. | Marking it False would have put it in provider-loss's class, whose verdict is `"recorded"` rather than `"read"` — quietly downgrading what the rehearsal claims to have proved, which is the opposite of what a rehearsal is for. | 0190 |
 | **D1613** | §5.5: *"If `dev_environment.py` carries a `mem_limit`, it carries `pids_limit` from the same default"*; §2 `NODE-LIMIT-001`: *"`apg dev`'s cluster definition carries the same `pids_limit` if it carries a `mem_limit`"*. | **It carries no memory limit at all.** `dev_environment.run_arguments` is a deliberately minimal `docker run` whose docstring says *"Nothing is in this list by accident"*: no `--network`, no `-v`, no `-c`, one `-p`, and no `--memory`. `grep mem_limit src/ bin/` finds it in no cluster definition. | **Nothing is added to the dev cluster**, and the proof is written as the INVARIANT the conditional states — if that argv ever bounds memory, it bounds processes in the same change — rather than deleted for being vacuously true. | A `--pids-limit` there would be the first resource cap on a developer's throwaway cluster and one nobody asked for. Keeping the test as an invariant is what catches the person who bounds its memory later, who is exactly the person who will not think about its processes. | 0222 |
 | **D1614** | Run 4 §5.4: *"the repository through `bin/backup.sh --outputs … info --json` exactly as `probe_repository` does, reading the new `repository_bytes` member that `backup_report.summarise` gains"*. | **`info --json` is not a report -- it is the deployed document's `backup_state` block**, and `bin/deploy-project.py:1390` consumes exactly it: *"`summary` here is what `bin/backup.sh info --json` printed, and that command prints an already-computed state block"*. A member added there travels into `outputs.json` and is refused by the outputs schema -- a schema move this session explicitly does not take (D1591). | **`summarise` gains `repository_bytes` as planned, and a NEW VERB serves it**: `bin/backup.sh usage [--json]`. The published block stays byte-for-byte what it was, and a proof asserts `backup_state` does not carry the member. `doctor usage` calls the new verb. | The figure genuinely belongs to the command that holds the backup credential; what it cannot do is ride along on the one output whose whole contract is *this is the document*. A new verb is reviewable; a widened document is a schema bump nobody planned. | 0221 |
+| **D1615** | Run 5 §5.2: *"a reason → `OperatorError(8, f"{secret['name']}: {reason}")` (the module's error class and exit-8 constant -- read `:1-60`)"*. | `bin/materialize-secrets.py` has no `OperatorError`. Its class is `MaterializeError` and **nothing raises it in the fetch loop**: every failure goes through `fail(code, message)` (`:57-60`), which prints `materialize-secrets: <message>` to stderr and raises `SystemExit(code)`. The exit-8 constant is `EXIT_SECRET`. The plan told the executor to read `:1-60` for exactly this reason. | The tree's own shape: `fail(EXIT_SECRET, f"{secret['name']}: {reason}")`, one line below the `could not read {name}` failure it sits beside. No new error class. | A second way to fail in a forty-line loop is a second message format an operator has to recognise, and the one already there is the one this failure is a sibling of. | 0225 |
+| **D1616** | Run 5 §2: *"`test_materialize_secrets.py::test_the_loop_checks_the_kind_before_it_writes` (an AST/text scan: `check_value_kind` precedes the write in the loop)"*. | There is no `test_materialize_secrets.py` (the plan anticipated this and named the grep). And the scan's premise is wrong: `bin/materialize-secrets.py` holds **two** `for secret in active_secrets(...)` loops, at `:145` and `:223`. The first is `plan()`'s -- it prints what would be written, contacts no provider and **holds no value**, so it has nothing to check a kind against. | The proofs land in **`tests/contract/test_optional_secrets.py`**, which is the module that already scans this loop for a declared field it did not read (D276/D283 -- the same defect class, in the same file). `_fetch_loop()` selects the loop **by the presence of a `write_secret_file` call** and asserts exactly one loop has one, rather than by position. | A scan that picks its subject by position picks the wrong one eventually, and this one had a 50% chance on the day it was written. Picking it by what it does is also what the scan is about. | 0225 |
+| **D1617** | ADR 0224's decision 3: with the three conditions met, `retire` *"**reports** retired by the deploy that published one key"*. | **The document cannot support that sentence.** `bin/deploy-project.py:2963-2964` writes BOTH `retire_after` and `verifier_acknowledgements` as null whenever the rendered key set holds one kid -- which is member-for-member the state `jwt_keys.initial_key_state` gives a project that has **never rotated at all**. Measured against both op-owned document copies and asserted by a new proof. A completed rotation and a virgin project are indistinguishable here. | The ARM is implemented exactly as decided -- the answer is the same for both histories, because there is nothing to retire either way. **The sentence is not.** It reads *nothing to retire: one key is published, no deadline is set, and no verifier acknowledgement is outstanding*, then says that if a rotation was just completed the deploy is what closed the window, then says the document cannot tell the two apart. ADR 0225's amendment records the same kind of correction. | ADR 0195 applied to the ADR that cites it: the refusal was replaced because it said something false to an operator, and a report that claimed a rotation had happened would be the same defect facing the other way. | 0224 |
+| **D1618** | ADR 0225, *Alternatives considered*: *"The delimiter-and-length pair catches every malformation actually observed."* | **Measured against the four shapes of 2026-09-19: it catches ONE.** The body pasted without delimiters is refused. The delimiters JOINED to the body (1701 bytes, longest line 91) is **accepted** -- `in value` is a substring test and a joined boundary is still a substring -- and that is precisely the malformation that reaches `bin/render-jwks` mid-deploy, where openssl's stderr is suppressed by design. The byte-identical re-read is a well-formed key. The mistyped provider key NAME never reaches the function at all. | The rule is **stricter than decided**: each delimiter must be an encapsulation boundary **on a line of its own** (RFC 7468, and what `openssl rsa` enforces), which takes it to two of four. The body's wrapping is deliberately NOT constrained -- a key wrapped at 76 rather than 64 is legitimate and a false refusal mid-window is the worst moment for one. ADR 0225 gains an **Amendment** section carrying the four-row table and naming the two that are out of reach of any check of this kind. | A claim about four measured shapes is cheap to test and was not tested. Two of the four are staleness and a naming mistake, neither of which is a question about a value's shape, and saying so is better than a check that implies it covers the class. | 0225 |
+| **D1619** | D1595's fifth statement: *"if any proof reads it, it joins the tuple with a `requires_environment` mark"* for `APG_ADMIN_PASSWORD_FILE`. | **It cannot join the tuple.** `test_every_registered_variable_is_used` calls an entry used when a test module declares it on a marker or names it as an `ast.Constant`, and `all_test_modules()` is `TESTS_ROOT.rglob("test_*.py")` -- **conftests are not walked**. The only AST constant naming this variable is `tests/deployment/conftest.py:1230`. Adding it to the roster reads as unused on the day it is added. D1278 had already decided it stays out. What IS wrong is the gates' own prose: `bin/session-30-check.sh:1522` says it is *"in the roster and exported here"*, and seven gates carry that sentence. | The plan's second branch: the export line gains a comment naming the **fixture** that consumes it (`admin_password`, which SKIPS with the variable's name), why it cannot join the roster, and what widening `all_test_modules()` would cost. The false sentence in `session-30-check.sh` is corrected; §10 carries the scan-widening question. The roster is untouched. | The direction nobody chases (D954), found in the reassuring direction: a reader checking whether the variable was covered would have read that it was. | -- |
+| **D1620** | D1595's fourth: `runtime_override.py:42`'s comment *"names six services carrying `apg.project.key` where eight do (scope-closure §23 item 7)"*. | **Nine do**, measured from `compose.yaml` at Session 30's close commit `ae2c0dc` and at this one: `auth`, `backup-mirror`, `docs`, `edge-probe`, `mcp`, `metrics`, `postgrest`, `storage`, `store`. The comment said six and the plan said eight. The three the comment omits -- `metrics`, `store`, `backup-mirror` -- are also the three that are **not edge-facing**, so the sentence was teaching the wrong shape as well as the wrong number. | The comment names all nine, marks which six are edge-facing, and says the count was measured and by whom it was got wrong twice. The property the comment exists for -- that `postgres` does NOT carry the label, which is the whole of D587 -- is unchanged. | A count stated in prose is a count that was right once; a count restated from a stale source is the same error with a citation. | -- |
+| **D1621** | Run 5 §5.5: *"`test_acceptance_registry` checks the row's referential integrity, so this lands green only in Run 6 with the entries -- write it now, run the registry test in Run 6."* | Written and **measured**: `test_threat_model_requirement_ids_exist_in_the_registry` fails naming both IDs, and CI is the full check read per commit. Landing the row in Run 5 pushes a **red `main`** and keeps it red until Run 6 -- which is the state this session has just spent a commit getting out of. | `THR-NOISY-NEIGHBOUR` is **reverted from Run 5 and lands in Run 6** beside `NODE-LIMIT-001` and `NODE-ADMIT-001`. Nothing is lost: the row's full text is in Run 5's **Done**, ready to paste. | The plan's instruction and the project's own rule about CI are in conflict, and the rule wins for the cheaper reason: the row costs nothing to move and a red `main` across two runs costs a verdict nobody can read. | -- |
+| **D1622** | Run 5 §5.6: *"When the proof proves nothing a requirement should state (the run expects this for `test_the_classifier_can_tell_the_categories_apart` if it is a self-test of a test helper -- read it), delete it and say why."* | Read: it is the anti-vacuity control for `_classify`, which drives the other three proofs of `DEP-ISO-001`'s isolation matrix. A classifier returning `not_authority` for everything would make the matrix *report a clean bill of health forever* and `test_every_leaf_is_classified` *pass most loudly of all* (D374). **Deleting it removes the only thing that makes the other three mean anything.** | **Registered under `DEP-ISO-001`, not deleted**, with one sentence added to that requirement. A control belongs to the claim it protects: if it fails, the matrix is unmeasured and the claim should say so. Of the twenty-two, twenty went to requirements that already stated their property; the two that stay are ADR 0136's category (a writing rpc is ineffective over GET), which no entry states -- they need a new `target_session: 31` entry and that is Run 6's (D690). | *A requirement written to make a list shorter is a requirement nobody reviewed* -- and so is a deletion taken to make one shorter. The count was never twenty-two unstated properties; it was twenty-two proofs nothing had connected to the requirement they were written for. | -- |
 
 ---
 
@@ -1362,8 +1371,179 @@ gates`, `test_evidence_claims`, `test_cli_contract` (the comment moved),
 `test_runtime_override` (the comment moved); `test_acceptance_registry` per
 item 6. Push; read CI.
 
-**Done.** _(the executor: the 22-row triage table; the `--setup-plan`
-line; the `APG_ADMIN_PASSWORD_FILE` reading.)_
+**Done.** 2026-09-19. The carried-in items are closed: the Studio fixture
+creates its subjects in the role that holds the grants they need, a secret's
+value is checked against its declared kind before it is written, `retire`
+reports instead of refusing for the wrong reason, four stale counts are
+corrected against a measurement, the fifth is measured, and **twenty of the
+twenty-two orphans are node ids of a requirement**. **Battery 8/8 killed**,
+every control green, all six files restored byte-identically; one mutation
+recorded as unreachable offline (D493). Targeted: **33 modules, 1575 passed,
+6 skipped** (each legitimate: one chown needing privilege, two shell scripts
+that run no Python, three Studio proofs with no host). `ruff format --check`
+and `ruff check` 0; `shellcheck` clean. Eight divergence rows, **D1615-D1622**.
+
+**The `--setup-plan` line**, with the environment SET (D671, D676):
+
+```
+APG_LIVE_HOST=1 APG_PROJECT_A_OUTPUTS=/home/gmpar/apg-deployed-docs/alpha-dev-outputs.json \
+  python -m pytest --setup-plan -q -p no:randomly \
+  tests/deployment/test_session24_studio.py -k query_view
+```
+
+**Planned, not skipped**, and the whole chain plans: `auditor` →
+`launched_studio` → `two_owners_one_relation` →
+`test_the_query_view_shows_the_human_their_own_rows_and_not_anothers`. The
+document's roles map answers `authenticated` → `apg_alpha_dev_authenticated`.
+**The trip is its second execution**, and §7 says so.
+
+**D1572's cause is larger than the plan stated, and the product is right
+twice.** The plan said the fixtures write through an API only `authenticated`
+may write to. They also READ through one: migration 0007 grants `EXECUTE` on
+`api.create_note` to `{{authenticated}}, {{agent_writer}}` after revoking it
+from `PUBLIC`, **and migration 0004 grants `SELECT` on `app.notes` to those
+two and `{{agent_reader}}`**. `project_admin` is on neither list. So the RLS
+proof this module exists for could not have run even if the seeding had
+worked — the read would have been refused before `notes_owner_select` was
+consulted. Both fixtures now take `authenticated`, which is also what
+`tests/deployment/conftest.py`'s `_registered_subject` takes for every other
+live subject in the suite, and what the subject holds administratively is its
+token's scopes (`bootstrap_statements.py:258-263`, `API-ADMIN-001`). Nothing in
+the module asserts the `project_admin` role name — grepped, four mentions
+remain and all four are prose.
+
+**The `APG_ADMIN_PASSWORD_FILE` reading (D1595's fifth, now D1619).**
+
+| Question | Measured |
+|---|---|
+| Does any proof read it? | A **fixture** does — `admin_password` in `tests/deployment/conftest.py`, which SKIPS with the variable's name when it is unset. No test module names it as a constant. |
+| Is it in `tests/conftest.py`'s roster? | **No**, and D1278 decided that deliberately. |
+| Can it join? | **No.** `test_every_registered_variable_is_used` counts an entry used when a test declares it on a marker or names it as an `ast.Constant`, and `all_test_modules()` is `TESTS_ROOT.rglob("test_*.py")` — **conftests are not walked**. It would read as unused on the day it was added. |
+| What was actually wrong? | `bin/session-30-check.sh:1522` says it is *"in the roster and exported here"*. **It is not in the roster**, and seven gates carry that sentence. |
+
+Corrected in `session-30-check.sh` (the gate Run 6 derives 31's from), with the
+export line now naming the fixture that consumes it. Widening
+`all_test_modules()` to conftests is a change to a scan several guards share
+and is §10's.
+
+**The other four counts, measured rather than recounted:** Session 30 has
+**six** claims, **five** offline and one host (`contract_compile_output`,
+`exec_discipline`, `mirror_retry`, `release_reading_ref`, `suite_shape`; host
+`studio_tenant_read`) — `test_cli_contract.py` said FOUR, `evidence_claims.py`
+said five/four, `test_evidence_claims.py` said four/one. And
+`apg.project.key` is carried by **nine** services, not the comment's six nor
+the plan's eight (D1620).
+
+**The 22-row triage (D1597).** Twenty went to a requirement that **already
+stated their property** — which is what the count was really measuring: not
+twenty-two unstated properties, but twenty-two proofs nothing had connected to
+the requirement they were written for. Ten requirements gained one sentence;
+three named it already and the node id joined in silence.
+
+| # | Proof | → | Sentence added |
+|---|---|---|---|
+| 1 | `test_session11_operations::test_a_malformed_request_id_header_does_not_destroy_the_write` | `OPS-LOG-001` | yes |
+| 2 | `test_session12_isolation_matrix::test_the_classifier_can_tell_the_categories_apart` | `DEP-ISO-001` | yes |
+| 3 | `test_session14_observability::test_the_deployed_document_reports_the_metrics_route_it_observed` | `OPS-READ-002` | no — *a status carried over rather than observed* is its own words |
+| 4 | `test_session20_tenant::test_alpha_declares_no_set_and_holds_none_of_betas_objects` | `TEN-SET-001` | yes |
+| 5 | `test_session2_edge::test_the_deployed_document_agrees_with_the_live_route` | `OPS-HEALTH-001` | yes |
+| 6 | `test_session2_edge::test_hsts_is_present_on_the_https_response` | `SEC-TLS-001` | yes |
+| 7 | `test_session2_edge::test_the_acme_state_file_matches_the_recorded_environment` | `SEC-TLS-001` | (same sentence) |
+| 8 | `test_session2_edge::test_the_health_route_is_reachable_only_through_the_edge` | `OPS-HEALTH-001` | (same sentence) |
+| 9 | `test_session2_host::test_sshd_limits_authentication_attempts` | `SEC-HOST-001` | yes |
+| 10 | `test_session2_host::test_the_edge_publishes_exactly_eighty_and_four_four_three` | `SEC-NET-002` | (same sentence) |
+| 11 | `test_session2_host::test_the_docker_user_chain_is_reachable_from_forward` | `SEC-NET-002` | yes |
+| 12 | `test_session2_host::test_ufw_denies_incoming_by_default` | `SEC-HOST-001` | (same sentence) |
+| 13 | `test_session2_host::test_the_daemon_runs_the_configuration_we_installed` | `SEC-DOCKER-001` | yes |
+| 14 | `test_session2_isolation::test_the_two_projects_are_actually_distinct` | `DEP-ISO-002` | yes |
+| 15 | `test_session2_isolation::test_an_unknown_hostname_is_not_served` | `DEP-ISO-002` | (same sentence) |
+| 16 | `test_session2_isolation::test_the_recorded_networks_are_project_scoped` | `DEP-ISO-002` | (same sentence) |
+| 17 | `test_session2_isolation::test_neither_project_joins_the_others_network` | `DEP-ISO-002` | (same sentence) |
+| 18 | `test_session2_isolation::test_each_project_holds_only_its_own_secret_generation` | `DEP-ISO-001` | (same sentence) |
+| 19 | `test_session8_agent_plane::test_a_read_only_agent_can_neither_discover_nor_invoke_a_write_on_the_deployment` | `AGT-WRITE-001` | no — the docstring already names it |
+| 20 | `test_session9_agent_writes::test_a_revoked_token_fails_its_next_read_write_and_direct_request` | `SEC-REV-001` | no — the docstring already names it |
+| 21 | `test_session9_agent_writes::test_a_get_against_the_deployed_audit_rpc_is_refused` | **stays** | a NEW entry, Run 6 |
+| 22 | `test_session9_agent_writes::test_the_get_that_was_refused_wrote_nothing` | **stays** | a NEW entry, Run 6 |
+
+**21 and 22 are the reason the triage was worth taking.** ADR 0136's category
+— that an rpc which WRITES is ineffective over GET, because PostgREST runs a
+GET in a **read-only transaction** and `25006` surfaces as 405, while
+volatility protects nothing (D490, both predictions wrong in opposite
+directions) — is stated by **no requirement in the file**. A property measured
+that carefully and registered nowhere is exactly what the scan exists to
+surface. `KNOWN_UNREGISTERED` is **22 → 2**; Run 6 writes the entry and empties
+it.
+
+**Number 2 was not deleted, and the plan expected it might be** (D1622). It is
+the anti-vacuity control for `_classify`, which drives `DEP-ISO-001`'s other
+three proofs; a classifier answering `not_authority` for everything would make
+the matrix report a clean bill of health forever. A control belongs to the
+claim it protects.
+
+**ADR 0224's outcome is registered without a new entry.** The plan named
+`IDN-ROTATE`'s next free number; **there is no `IDN-ROTATE` family**.
+`SEC-KEY-002` — *"Prepare, acknowledge, promote, retire"* — is the rotation's
+requirement, and the three new proofs joined it with one sentence. No
+`target_session: 31` entry, so nothing here waits on Run 6.
+
+**ADR 0225's own claim was wrong and is amended (D1618).** *"The
+delimiter-and-length pair catches every malformation actually observed"* —
+measured against the four shapes of 2026-09-19, it catches **one**. The rule
+implemented is stricter than the one decided: each delimiter must be an
+encapsulation boundary **on a line of its own** (RFC 7468, and what `openssl
+rsa` enforces), which takes it to **two of four**. The other two are not shape
+questions and no check of this kind reaches them — a byte-identical re-read is
+a well-formed key, just the previous one, and a mistyped provider key NAME
+means no value is fetched at all. The ADR carries the four-row table. The
+body's wrapping is deliberately unconstrained: a key wrapped at 76 rather than
+64 is legitimate, and a false refusal mid-window is the worst possible one.
+
+**The battery found three weak proofs of mine, not three weak products**, and
+each is worth the row:
+
+* dropping `PEM_END` from the check **survived**, because every
+  footer-missing value in the test was also shorter than
+  `PEM_MINIMUM_LENGTH` — the length floor was doing the work and the footer
+  requirement was never proved. Every case is now long enough to clear the
+  floor, and asserts that it is;
+* leaking `value[:20]` **survived**, because the planted sentinel sat at
+  offset 64. A sentinel says *this exact string did not appear*; it says
+  nothing about a leak that misses its position. There is now a
+  position-independent check: no twelve-character window of the value may
+  occur in the reason;
+* dropping `len(verification_kids) == 1` from `retire`'s new arm **survived**,
+  because `prepare_rotation` leaves the acknowledgements at `{}` and the
+  acknowledgement condition refused the two-key state on its own. A two-key
+  state with `None` acknowledgements is reachable —
+  `bin/deploy-project.py:2964` carries the previous value forward when the set
+  holds two keys — and it now has its own arm.
+
+All three were then killed.
+
+**The threat row is Run 6's (D1621)**, measured: it fails
+`test_threat_model_requirement_ids_exist_in_the_registry` naming
+`NODE-LIMIT-001` and `NODE-ADMIT-001`, and landing it here would push a red
+`main` and hold it there until Run 6. **The row, ready to paste:**
+
+```
+| `THR-NOISY-NEIGHBOUR` | A project's own workload, run without malice: an agent's tool calls, a connection storm, a fork storm, a runaway query | The neighbouring project's latency, and the host's stability | Per-service `mem_limit` and `pids_limit` on every service, `cpus` on the nine long-running ones, `max_connections` summed across six claimants per cluster, and admission against a capacity the host declares -- a deploy that would not fit is refused before it renders | `apg doctor capacity` and `apg doctor usage` on each project; the store's series, every one of which names its project | **The effect of one project's load on the other has not been measured.** Every control here is a ceiling declared per service, and nothing yet says what a neighbour actually feels when one of them is reached -- Session 35's noisy-neighbour measurement. Disk I/O is bounded by nothing at all: there is no `blkio` limit, and a project writing continuously shares one device with the other's WAL | `NODE-LIMIT-001`, `NODE-ADMIT-001` | `tests/contract/test_process_limits.py::test_a_container_cannot_fork_past_its_pids_limit`, `tests/contract/test_admission.py::test_a_candidate_that_does_not_fit_is_refused_with_exit_twelve` | 31 |
+```
+
+The `## Scope` sentence it owes is also Run 6's: *a neighbour's load is
+bounded, not a claim about availability*.
+
+**Run 4's three CI failures were repaired first**, in their own commit
+(`f9c6eb5`, CI **success**), before any of this: a `ruff format` diff the
+run could not produce because WSL's command channel was down; a compose-model
+subscript the environment-gate scanner reads as a variable consumption, met
+the way `test_client_fixtures.py` and `test_completion_command.py` already
+meet it; and a hand-rolled `McpSettings` stub that did not grow the setting
+Run 4 gave the runtime to read, so `create_mcp_app` threw `AttributeError`
+inside the try/except and the failure surfaced two assertions later as
+`KeyError: 'lock'`. All three were invisible to Run 4's targeted list and
+visible to the gate — §7's question 5, in its usual shape. **The five
+derived-artefact checks Run 4 owed all exit 0**, and were re-run again at this
+close.
 
 ### Run 6 — the bump, the registry, the gate, and the trip's proofs
 

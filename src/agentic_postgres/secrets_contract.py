@@ -2,8 +2,14 @@
 
 `secrets.required.yaml` declares *which* secrets exist, *which* service consumes
 each one, and *under what numeric ownership* it is materialized. It never
-declares a value, and this module never reads one — every function here operates
-on identifiers.
+declares a value.
+
+Three functions here are handed one — `render_secret`, `recover_secret` and
+`check_value_kind` — and they are pure for the reason ADR 0056 gives: the
+transformation a value undergoes, and now the check it must pass, are testable
+with no provider and no host. **None of the three returns a value into a
+message, and none of them logs.** Everything else in this module operates on
+identifiers alone.
 
 The design commitment recorded in `docs/decisions/0010-secret-materialization.md`
 is that a secret is an **individual file granted to one service**, not an entry
@@ -25,6 +31,7 @@ tested grant surface.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -383,6 +390,103 @@ def recover_secret(rendered: str, consumer: dict[str, Any]) -> str:
             )
         return line[len(prefix) :].rstrip("\n")
     raise ManifestError(f"no reader for secret format {fmt!r}")
+
+
+#: What a `rsa_private_pem` value has to carry. PKCS#8, which is the form
+#: `openssl genpkey` writes and the form ADR 0055's description names -- an
+#: `RSA PRIVATE KEY` header is PKCS#1 and a different thing, so matching it
+#: here would accept a value `render-jwks` would then have to interpret.
+PEM_BEGIN = "-----BEGIN PRIVATE KEY-----"
+PEM_END = "-----END PRIVATE KEY-----"
+
+#: The floor a body of key material clears. A 2048-bit PKCS#8 private key in
+#: PEM is around 1,700 characters; the shortest thing that could be mistaken
+#: for one is a header and a footer with nothing between them, at 52. 1,000 is
+#: below anything real and far above every truncation D1578 observed.
+#:
+#: **It is a floor, not a length check.** The delimiters cannot catch a key
+#: that was truncated after its header and had its footer pasted back on, and
+#: that was one of the four malformations. Nothing here re-derives the key's
+#: size: that would mean parsing key material in this loop, which ADR 0225
+#: rejected on purpose.
+PEM_MINIMUM_LENGTH = 1000
+
+#: Lowercase hex, whole string. `secrets.token_hex` emits exactly this, and
+#: `fullmatch` rather than `search` because a hex prefix on something else is
+#: the shape a half-pasted value has.
+_HEX_VALUE = re.compile(r"[0-9a-f]+")
+
+
+def check_value_kind(kind: str, value: str) -> str | None:
+    """Is this value the kind of thing the contract says it is? (ADR 0225)
+
+    Returns ``None`` when it is, and otherwise **a reason built from the kind,
+    the delimiter names and the length floor -- never from the value**. This
+    function is called with key material in hand, and the string it returns is
+    printed to an operator's terminal by a command that runs as root. A reason
+    carrying so much as ``value[:20]`` would put part of a private key into a
+    scrollback buffer, and the point of `bin/render-jwks` suppressing openssl's
+    stderr is that even the key's *path* is more than that command should say.
+
+    `value_kind` has been declared on every secret since ADR 0055 and its
+    schema description has always stated what it is for -- *a default is how a
+    hex string ends up stored under a name that says key* -- while the only
+    runtime reader was the pgpass cross-check in `_validate_formats`, which
+    asks a question about the consumer rather than about the value. D816's
+    shape: a declared field whose stated purpose no code performed.
+
+    **Three outcomes, and the third is reported** (ADR 0195): the value is what
+    it claims, the value is not, or the kind is one this function does not
+    know. The last one cannot arrive from a loaded contract -- the enum is
+    closed and `load_secret_contract` validates it -- but this function is the
+    only reader of the field, so a kind added to the schema and not added here
+    fails closed and says which kind it was, rather than returning ``None``
+    and passing an unchecked value through the branch that means *fine*.
+
+    Pure, and it neither normalises nor trims. A value that passes is written
+    byte for byte as the provider held it: a transformation here would make
+    this a second place where a secret's bytes are decided, and the value path
+    in `bin/materialize-secrets.py` has exactly one.
+    """
+    if kind == "rsa_private_pem":
+        # Each boundary on a line of its own, which is what RFC 7468 requires
+        # and what `openssl rsa` enforces. A `in value` test alone accepts a
+        # delimiter JOINED to the body -- one of the four malformations of
+        # 2026-09-19, at 1701 bytes with a longest line of 91 -- and that is
+        # the one whose failure lands in `render-jwks` mid-deploy with
+        # openssl's stderr suppressed. Stripped, because trailing whitespace
+        # on a boundary line is not what anybody means by malformed.
+        boundaries = {line.strip() for line in value.splitlines()}
+        for delimiter in (PEM_BEGIN, PEM_END):
+            if delimiter not in value:
+                return (
+                    f"declared {kind} and the value does not contain {delimiter!r}. "
+                    "A PKCS#8 private key carries both delimiters"
+                )
+            if delimiter not in boundaries:
+                return (
+                    f"declared {kind} and {delimiter!r} is not on a line of its own. "
+                    "Joined to the body it is a substring rather than an "
+                    "encapsulation boundary, and openssl refuses the file"
+                )
+        if len(value) < PEM_MINIMUM_LENGTH:
+            return (
+                f"declared {kind} and the value is shorter than "
+                f"{PEM_MINIMUM_LENGTH} characters. A 2048-bit key in PEM is "
+                "several times that, so this one is truncated"
+            )
+        return None
+
+    if kind == "random_hex":
+        if not _HEX_VALUE.fullmatch(value):
+            return f"declared {kind} and the value is not lowercase hexadecimal from end to end"
+        return None
+
+    return (
+        f"declares value_kind {kind!r}, which `check_value_kind` does not know "
+        "how to check. A kind added to the schema is added here in the same "
+        "change, or a value of it would be written unexamined"
+    )
 
 
 def consumer_directory(consumer: dict[str, Any]) -> str:

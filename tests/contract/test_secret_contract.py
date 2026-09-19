@@ -8,8 +8,13 @@ declared* far more than about what can. Three properties carry the design:
 * the session filter keeps a later session's credential out of this session's
   Compose model.
 
-No test here reads or constructs a secret value. The contract holds identifiers
-only, and a test that needed a value would mean the contract did not.
+Almost no test here constructs a secret value, and none reads a real one. The
+contract holds identifiers, and a test that needed a *provider's* value would
+mean it did not. The exceptions are the three functions that are handed a value
+because they are pure and therefore testable without one:
+``render_secret``/``recover_secret``, whose round-trip proof builds a hex
+string, and ``check_value_kind`` (ADR 0225), whose proofs build values that are
+deliberately WRONG. Nothing in this file has ever held a credential.
 
 The cross-check between a consumer's numeric UID and the Compose service's
 ``user:`` lands in Run 2, with the service.
@@ -18,6 +23,7 @@ The cross-check between a consumer's numeric UID and the Compose service's
 from __future__ import annotations
 
 import copy
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -1064,3 +1070,285 @@ def test_every_service_that_reads_a_secret_declares_it_as_a_consumer() -> None:
         + "\nAdd a consumer in secrets.required.yaml. A missing one fails when the "
         "container starts, which on a deploy is after the cluster has migrated."
     )
+
+
+# ---------------------------------------------------------------------------
+# SEC-KIND-001 -- a value is checked against its declared kind (ADR 0225)
+# ---------------------------------------------------------------------------
+
+#: Planted inside a malformed value so a reason that leaked any part of one
+#: would be caught by a grep rather than by a reviewer's eye. Nothing about the
+#: string matters except that it could not occur by accident.
+SENTINEL = "SENTINEL-DO-NOT-PRINT-a7f21c90"
+
+#: A body long enough to clear `PEM_MINIMUM_LENGTH`, and **not a key**. That is
+#: the honest shape of this control: ADR 0225 rejected parsing key material in
+#: this loop, so the check is delimiters plus a length floor and a synthetic
+#: body passes it. A control that used a real key would suggest the function
+#: verifies more than it does.
+_PEM_LINE = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj"
+
+
+#: The shortest run of the value that would be a leak. Twelve, because the
+#: reason legitimately contains `random_hex` and `rsa_private_pem` and those
+#: are ten and fifteen characters -- and because a run that short is already
+#: a quarter of a 32-character hex secret.
+LEAK_WINDOW = 12
+
+
+def _assert_no_window_of(value: str, reason: str) -> None:
+    """No run of the value appears in the reason, wherever the run is.
+
+    **A planted sentinel is not enough on its own** and the battery proved it:
+    a mutation that leaked `value[:20]` survived a test whose sentinel sat at
+    offset 64. The sentinel says *this exact string did not appear*; this says
+    *no part of the value appeared*, which is the property the docstring of
+    `check_value_kind` actually claims.
+    """
+    for start in range(0, max(1, len(value) - LEAK_WINDOW + 1)):
+        window = value[start : start + LEAK_WINDOW]
+        if len(window) < LEAK_WINDOW:
+            break
+        assert window not in reason, (
+            f"the refusal carries {LEAK_WINDOW} characters of the value from "
+            f"offset {start}: {reason!r}"
+        )
+
+
+def _pem(lines: int, body: str | None = None) -> str:
+    """A PKCS#8-delimited blob of a chosen length, built from the constants."""
+    filling = "\n".join([body or _PEM_LINE] * lines)
+    return f"{secrets_contract.PEM_BEGIN}\n{filling}\n{secrets_contract.PEM_END}\n"
+
+
+def test_a_pem_without_delimiters_is_refused_naming_the_secret_not_the_value() -> None:
+    """**The reason may not carry the value, and the split is deliberate.**
+
+    `check_value_kind` names the KIND and the delimiter it wanted;
+    `bin/materialize-secrets.py` prefixes the secret's NAME. Neither half
+    names a byte of the value, and it takes both halves to tell an operator
+    which secret to go and fix.
+
+    That matters here more than in most places: this reason is printed by a
+    command running as root, to a terminal with scrollback, holding a private
+    key in the variable one line above. `bin/render-jwks` suppresses openssl's
+    stderr because even the key's *path* is more than it should say (D1578).
+
+    Goes red if a reason is ever built by interpolating `value`, however
+    little of it.
+    """
+    # **Each of these is long enough to clear `PEM_MINIMUM_LENGTH`**, which
+    # the first version of this test got wrong: its header-without-footer case
+    # was 58 characters, so the LENGTH floor refused it and the END delimiter
+    # was never the thing being proved. A battery mutation dropping `PEM_END`
+    # from the check survived, and that is what it was telling us.
+    long_body = "\n".join([_PEM_LINE] * 26)
+    for value in (
+        f"{SENTINEL}\n{long_body}",  # no delimiter at all
+        f"{secrets_contract.PEM_BEGIN}\n{long_body}\n{SENTINEL}\n",  # header, no footer
+        f"{SENTINEL}\n{long_body}\n{secrets_contract.PEM_END}\n",  # footer, no header
+    ):
+        assert len(value) >= secrets_contract.PEM_MINIMUM_LENGTH, (
+            "this case is short enough for the length floor to refuse it, so it "
+            "says nothing about the delimiter rule"
+        )
+        reason = secrets_contract.check_value_kind("rsa_private_pem", value)
+        assert reason is not None, (
+            "a value with a missing PKCS#8 delimiter was accepted as a private key"
+        )
+        assert SENTINEL not in reason, f"the refusal echoed the value it was given: {reason!r}"
+        assert "rsa_private_pem" in reason, reason
+
+    # And the caller is what adds the name, so the operator-visible line
+    # identifies the secret without the function ever being told which it is.
+    source = (REPO_ROOT / "bin" / "materialize-secrets.py").read_text(encoding="utf-8")
+    assert "fail(EXIT_SECRET, f\"{secret['name']}: {reason}\")" in source, (
+        "the materializer no longer composes the refusal from the secret's name "
+        "and the reason, so either the secret is unnamed or something else is"
+    )
+
+
+def test_a_truncated_pem_is_refused() -> None:
+    """The malformation the delimiters cannot see.
+
+    A key truncated in the middle and given its footer back carries both
+    delimiters and is not a key. It was one of the four malformations Session
+    30's trip produced in a single day, and it is the whole reason
+    `PEM_MINIMUM_LENGTH` exists beside the delimiter check rather than the
+    delimiter check being thought sufficient.
+    """
+    truncated = _pem(lines=2)
+    assert secrets_contract.PEM_BEGIN in truncated
+    assert secrets_contract.PEM_END in truncated
+    assert len(truncated) < secrets_contract.PEM_MINIMUM_LENGTH
+
+    reason = secrets_contract.check_value_kind("rsa_private_pem", truncated)
+    assert reason is not None, (
+        "a value carrying both delimiters and almost no body was accepted; the "
+        "length floor is the only thing that distinguishes it from a key"
+    )
+    assert str(secrets_contract.PEM_MINIMUM_LENGTH) in reason, reason
+
+
+def test_a_pem_whose_delimiters_are_joined_to_the_body_is_refused() -> None:
+    """**D1618.** The malformation a substring test cannot see.
+
+    One of the four shapes of 2026-09-19 was a key whose `BEGIN` and `END`
+    lines had been joined to the body by a paste that lost its newlines: 1701
+    bytes, longest line 91, both delimiters present as substrings. `in value`
+    accepts it. `openssl rsa` does not, and neither does RFC 7468 -- an
+    encapsulation boundary is a LINE, and a boundary in the middle of one is
+    not a boundary.
+
+    This is the malformation that matters most of the four, because it is the
+    one that gets past everything and lands in `bin/render-jwks` mid-deploy,
+    where the failure is reported as `openssl failed:` and the explanation is
+    suppressed on purpose.
+    """
+    body = _PEM_LINE * 26
+    joined = f"{secrets_contract.PEM_BEGIN}{body}{secrets_contract.PEM_END}\n"
+
+    # It clears both of the rules the ADR originally decided, which is the
+    # point: those two are what this one is here to be stricter than.
+    assert secrets_contract.PEM_BEGIN in joined
+    assert secrets_contract.PEM_END in joined
+    assert len(joined) >= secrets_contract.PEM_MINIMUM_LENGTH
+
+    reason = secrets_contract.check_value_kind("rsa_private_pem", joined)
+    assert reason is not None, (
+        "a value whose delimiters are joined to the body was accepted as a key; "
+        "it fails at render-jwks instead, mid-deploy, with openssl's stderr "
+        "suppressed"
+    )
+    assert "line of its own" in reason, reason
+    assert body[:32] not in reason, f"the refusal echoed the body: {reason!r}"
+
+
+def test_a_body_wrapped_at_seventy_six_is_still_accepted() -> None:
+    """The control the line rule owes: it is about BOUNDARIES, not wrapping.
+
+    `openssl genpkey` wraps at 64 and other tools wrap at 76. Refusing a
+    76-wrapped key would be a false refusal in the middle of a rotation
+    window, which is the one moment an operator can least afford one -- so the
+    rule deliberately says nothing about the body's line length.
+    """
+    wrapped = "\n".join([_PEM_LINE + _PEM_LINE[:12]] * 18)
+    value = f"{secrets_contract.PEM_BEGIN}\n{wrapped}\n{secrets_contract.PEM_END}\n"
+    assert max(len(line) for line in value.splitlines()) == 76
+    assert secrets_contract.check_value_kind("rsa_private_pem", value) is None
+
+
+def test_the_check_says_which_of_the_four_malformations_it_reaches() -> None:
+    """**The honest half of D1618**, asserted so it cannot quietly become a
+    claim that the check covers the class.
+
+    ADR 0225 as decided said the delimiter-and-length pair *catches every
+    malformation actually observed*. Measured against the four, it caught one.
+    The rule is now stricter and catches two; the other two are not shape
+    questions at all and no check of this kind reaches them:
+
+    * a value byte-identical to the previous one is a well-formed key -- the
+      PREVIOUS key. That is staleness, and nothing inside a value answers it;
+    * a mistyped provider KEY NAME means no value is fetched, so this function
+      is never called. It is `absent at the provider, and optional`, and
+      telling that from a deliberate absence is ADR 0225's deferred item.
+
+    Goes red if someone widens a rule until this table stops being true, which
+    is the useful direction for it to go red in.
+    """
+    body_lines = [_PEM_LINE] * 26
+    well_formed = _pem(lines=26)
+
+    no_delimiters = "\n".join(body_lines)
+    joined = f"{secrets_contract.PEM_BEGIN}{''.join(body_lines)}{secrets_contract.PEM_END}\n"
+    stale = well_formed  # the previous key, intact
+
+    assert secrets_contract.check_value_kind("rsa_private_pem", no_delimiters) is not None
+    assert secrets_contract.check_value_kind("rsa_private_pem", joined) is not None
+    assert secrets_contract.check_value_kind("rsa_private_pem", stale) is None, (
+        "a well-formed key was refused, so this test no longer demonstrates that "
+        "staleness is out of reach -- it demonstrates something else"
+    )
+
+
+def test_a_hex_with_an_uppercase_character_is_refused() -> None:
+    """`random_hex` is what `secrets.token_hex` emits, which is lowercase.
+
+    The uppercase arm is not pedantry: a value typed or pasted by a human in
+    place of a generated one is exactly where a stray case or a stray space
+    comes from, and both are the same defect -- something that is not this
+    product's 32 bytes of entropy stored under a name that says it is.
+    """
+    good = "0123456789abcdef" * 4
+    assert secrets_contract.check_value_kind("random_hex", good) is None
+
+    for bad in (
+        good[:-1] + "A",
+        good + " ",
+        f"{good}{SENTINEL}",
+        f"{SENTINEL}{good}",
+        "",
+        good + "\n",
+    ):
+        reason = secrets_contract.check_value_kind("random_hex", bad)
+        assert reason is not None, f"accepted {bad[:8]!r}... as lowercase hex"
+        assert "random_hex" in reason, reason
+        _assert_no_window_of(bad, reason)
+
+
+def test_a_valid_value_of_each_kind_passes() -> None:
+    """**The control.** Without it every assertion above is satisfied by a
+    function that returns a reason for everything.
+
+    The PEM here is a blob with the right delimiters and enough of them, not a
+    key -- which is exactly what the check examines, and saying so here is
+    better than a control that quietly implies more.
+    """
+    assert secrets_contract.check_value_kind("random_hex", "deadbeef" * 8) is None
+    assert secrets_contract.check_value_kind("random_hex", "0") is None
+
+    valid = _pem(lines=20)
+    assert len(valid) >= secrets_contract.PEM_MINIMUM_LENGTH
+    assert secrets_contract.check_value_kind("rsa_private_pem", valid) is None
+
+
+def test_an_unknown_kind_fails_closed_naming_it() -> None:
+    """ADR 0195's third outcome, in a function whose other two are decisions.
+
+    The enum is closed and `load_secret_contract` validates it, so this cannot
+    arrive from a loaded contract. It can arrive from a kind added to
+    `schemas/secret-contract.schema.json` and not added here -- and the
+    dangerous answer is `None`, because `None` is the branch that means *this
+    value is what it claims to be* and the value would be written unexamined.
+    """
+    reason = secrets_contract.check_value_kind("ed25519_private_pem", SENTINEL)
+    assert reason is not None, (
+        "an unrecognised value_kind returned the same answer as a value that "
+        "passed its check, so a kind added to the schema alone writes unchecked"
+    )
+    assert "ed25519_private_pem" in reason, reason
+    assert SENTINEL not in reason, reason
+
+
+def test_every_declared_kind_has_a_branch_in_the_check() -> None:
+    """The guard against the class, not against the kind that failed (D600).
+
+    `test_an_unknown_kind_fails_closed` proves the fall-through is safe. This
+    proves the fall-through is not where the contract's own kinds land: every
+    value in the schema's enum is checked by a branch that can also say yes.
+    """
+    schema = json.loads(
+        (REPO_ROOT / "schemas" / "secret-contract.schema.json").read_text(encoding="utf-8")
+    )
+    kinds = schema["$defs"]["secret"]["properties"]["value_kind"]["enum"]
+    assert kinds, "the enum is empty; this scan measures nothing"
+
+    passing = {"random_hex": "abc123", "rsa_private_pem": _pem(lines=20)}
+    for kind in kinds:
+        assert kind in passing, (
+            f"value_kind {kind!r} is declared in the schema and this test has no "
+            "value of it, so nothing here says `check_value_kind` knows it"
+        )
+        assert secrets_contract.check_value_kind(kind, passing[kind]) is None, (
+            f"a well-formed {kind} value was refused"
+        )

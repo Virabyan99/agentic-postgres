@@ -20,6 +20,7 @@ secret the contract says may be.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import urllib.error
 import urllib.request
@@ -235,3 +236,130 @@ def test_the_module_still_imports() -> None:
     """Cheap, and it is the check that would have caught a syntax error in a
     file that only ever runs as root on a host."""
     assert _materializer() is not None
+
+
+# ---------------------------------------------------------------------------
+# SEC-KIND-001 -- the check runs before the value reaches a file (ADR 0225)
+# ---------------------------------------------------------------------------
+
+
+def _calls_named(node: ast.AST, name: str) -> list[ast.Call]:
+    return [
+        call
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == name
+    ]
+
+
+def _fetch_loop() -> ast.For:
+    """The loop that writes, located by what it does rather than by where it is.
+
+    There are two `for secret in active_secrets(...)` loops in that file and
+    only one of them is this scan's subject. The other is `plan()`'s, which
+    prints what would be written, contacts no provider and holds no value --
+    so it has nothing to check a kind against, and a scan that picked it by
+    position would eventually pick it by accident.
+    """
+    tree = ast.parse((REPO_ROOT / "bin" / "materialize-secrets.py").read_text(encoding="utf-8"))
+    loops = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.For)
+        and isinstance(node.iter, ast.Call)
+        and isinstance(node.iter.func, ast.Name)
+        and node.iter.func.id == "active_secrets"
+    ]
+    assert loops, "no `for ... in active_secrets(...)` loop at all; this scan is stale"
+
+    writing = [loop for loop in loops if _calls_named(loop, "write_secret_file")]
+    assert len(writing) == 1, (
+        f"{len(writing)} of the {len(loops)} `active_secrets` loops call "
+        "`write_secret_file`; this scan measures the one that writes and cannot "
+        "tell which that is"
+    )
+    return writing[0]
+
+
+def test_the_loop_checks_the_kind_before_it_writes() -> None:
+    """**ADR 0225, and it is an ORDER, not a mention** (D277).
+
+    `test_the_materializer_reads_the_required_field_at_all` above says why
+    this is asserted against the source: the loop needs a live provider to
+    run. It also says what is wrong with a scan that only asks whether a name
+    appears -- dead code satisfies it. So this one reads the tree: both calls
+    are located inside the same fetch loop and the check is required to come
+    first.
+
+    First is the whole property. A check after `write_secret_file` would
+    refuse the same values and would already have written a malformed private
+    key to a `0o400` file in a consumer's directory, where the generation's
+    rollback -- and not the check -- would be what removed it. A check after
+    `render_secret` would have formatted it.
+
+    Goes red if the call is removed, if it moves below the consumer loop, or
+    if it moves out of this loop entirely.
+    """
+    loop = _fetch_loop()
+
+    checks = _calls_named(loop, "check_value_kind")
+    writes = _calls_named(loop, "write_secret_file")
+    renders = _calls_named(loop, "render_secret")
+
+    assert len(checks) == 1, (
+        "the materialization loop does not check the value against its declared "
+        f"`value_kind` exactly once ({len(checks)} calls). ADR 0225: a declared "
+        "field whose stated purpose no code performs is an unverified field"
+    )
+    assert writes, "the scan found no `write_secret_file` call, so it is measuring nothing"
+    assert renders, "the scan found no `render_secret` call, so it is measuring nothing"
+
+    check = checks[0]
+    for call, what in [(writes[0], "write_secret_file"), (renders[0], "render_secret")]:
+        assert check.lineno < call.lineno, (
+            f"`check_value_kind` is called at line {check.lineno}, after `{what}` at "
+            f"line {call.lineno}. The value reaches a file before anything asks "
+            "whether it is the kind of thing the contract says it is"
+        )
+
+    # And it is asked about the DECLARED kind, not about something re-derived
+    # here -- the contract is the authority for what a value is meant to be.
+    kinds = [
+        node
+        for node in ast.walk(check)
+        if isinstance(node, ast.Constant) and node.value == "value_kind"
+    ]
+    assert kinds, (
+        "the check is not passed `secret['value_kind']`, so whatever it is "
+        "checking against is not what the contract declared"
+    )
+
+
+def test_a_refused_value_is_dropped_and_never_counted() -> None:
+    """The failure path is as careful as the success path.
+
+    The loop's own comment says a value is dropped "as soon as it is written",
+    because holding every value resident for the whole run is a cost with no
+    purpose. A refusal is an early exit from the middle of that loop, and it
+    has to do the same thing: `del value` before the message is composed.
+
+    `written` is the other half. It counts files, and a value that was refused
+    produced none -- a refusal that incremented it would report a generation
+    holding a file that was never created.
+    """
+    loop = _fetch_loop()
+    check = _calls_named(loop, "check_value_kind")[0]
+
+    deletes = [
+        node
+        for node in ast.walk(loop)
+        if isinstance(node, ast.Delete)
+        and any(isinstance(target, ast.Name) and target.id == "value" for target in node.targets)
+    ]
+    assert len(deletes) >= 2, (
+        "the refusal path does not drop the value before it reports; only the "
+        f"success path does ({len(deletes)} `del value`)"
+    )
+    assert any(check.lineno < node.lineno < check.lineno + 12 for node in deletes), (
+        "no `del value` follows the kind check closely enough to be its own; the "
+        "refused value stays resident while the message is built and raised"
+    )

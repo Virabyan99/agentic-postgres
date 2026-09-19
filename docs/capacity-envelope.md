@@ -326,3 +326,9 @@ The plan asks for tuning after the load scenarios. **Nothing is tuned here, deli
 The first `apg dev up` a developer ever runs pulls the locked postgres image, and that pull is most of what they will wait for. Measuring it here means `docker rmi` of the image **the whole contract suite shares** -- six cluster fixtures and the round trip -- so the measurement would cost every later test in the session a pull, and the number obtained would be this machine's link speed rather than anything about the product. CI measures the case instead: a fresh `ubuntu-latest` runner has cached nothing, and the round-trip step times the same two verbs there (D1168, D1169).
 
 *Unblocked by: nothing that should be run mid-session; the CI row is the measurement, and a developer wanting their own first-run number can time `docker pull` from versions.env.*
+
+### apg doctor capacity and usage, on the deployment
+
+Session 31's two readings are **host reads and store queries taken as root**: `/proc/meminfo`, `shutil.disk_usage` at the Docker root and at each project's data volume, `docker inspect` for the memory ceilings, the deployed documents under `/etc/agentic-postgres/projects/<key>/` which are `drwx------ root root` (D1606), and a Prometheus query executed inside the store's own container because the store is routed nowhere. **Nothing here has a host**, and every one of those readings answers `unknown` off it -- correctly, which is the whole design (ADR 0221: a reading reports, it does not guess). An envelope row taken on this workstation would therefore be a row about a machine that is not the subject, which is the shape D1519 already records against the collector's own numbers.
+
+*Unblocked by: the Session 31 trip (Sheet A5).*

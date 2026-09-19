@@ -124,29 +124,30 @@ def test_no_deployment_proof_calls_a_command_module_fixture() -> None:
 #: a list shorter is a requirement nobody reviewed. Session 31 owns the triage
 #: (D1542, and the stage plan's open items).
 KNOWN_UNREGISTERED: tuple[str, ...] = (
-    # --- Session 31 owes these twenty-two a requirement each -----------------
-    "tests/deployment/test_session11_operations.py::test_a_malformed_request_id_header_does_not_destroy_the_write",
-    "tests/deployment/test_session12_isolation_matrix.py::test_the_classifier_can_tell_the_categories_apart",
-    "tests/deployment/test_session14_observability.py::test_the_deployed_document_reports_the_metrics_route_it_observed",
-    "tests/deployment/test_session20_tenant.py::test_alpha_declares_no_set_and_holds_none_of_betas_objects",
-    "tests/deployment/test_session2_edge.py::test_the_deployed_document_agrees_with_the_live_route",
-    "tests/deployment/test_session2_edge.py::test_hsts_is_present_on_the_https_response",
-    "tests/deployment/test_session2_edge.py::test_the_acme_state_file_matches_the_recorded_environment",
-    "tests/deployment/test_session2_edge.py::test_the_health_route_is_reachable_only_through_the_edge",
-    "tests/deployment/test_session2_host.py::test_sshd_limits_authentication_attempts",
-    "tests/deployment/test_session2_host.py::test_the_edge_publishes_exactly_eighty_and_four_four_three",
-    "tests/deployment/test_session2_host.py::test_the_docker_user_chain_is_reachable_from_forward",
-    "tests/deployment/test_session2_host.py::test_ufw_denies_incoming_by_default",
-    "tests/deployment/test_session2_host.py::test_the_daemon_runs_the_configuration_we_installed",
-    "tests/deployment/test_session2_isolation.py::test_the_two_projects_are_actually_distinct",
-    "tests/deployment/test_session2_isolation.py::test_an_unknown_hostname_is_not_served",
-    "tests/deployment/test_session2_isolation.py::test_the_recorded_networks_are_project_scoped",
-    "tests/deployment/test_session2_isolation.py::test_neither_project_joins_the_others_network",
-    "tests/deployment/test_session2_isolation.py::test_each_project_holds_only_its_own_secret_generation",
-    "tests/deployment/test_session8_agent_plane.py::test_a_read_only_agent_can_neither_discover_nor_invoke_a_write_on_the_deployment",
+    # --- Two, after Session 31 Run 5's triage (D1597) ------------------------
+    #
+    # Twenty of the twenty-two became node ids of a requirement that ALREADY
+    # stated their property -- which is what the count was really measuring:
+    # not twenty-two unstated properties, but twenty-two proofs nothing had
+    # connected to the requirement they were written for. Ten of those
+    # requirements gained a sentence; three named the property already and the
+    # node id joined in silence.
+    #
+    # **These two are different and are the reason the triage was worth
+    # taking.** ADR 0136's category -- that an rpc which WRITES is ineffective
+    # over GET, because PostgREST runs a GET in a read-only transaction and
+    # `25006` surfaces as 405 -- is stated by no requirement in the file. Both
+    # predictions going in were wrong in opposite directions (D490):
+    # volatility protects nothing, and it is the transaction that refuses. A
+    # property measured that carefully and registered nowhere is exactly what
+    # `test_every_deployment_proof_is_a_node_id_of_some_requirement` exists to
+    # surface.
+    #
+    # They need a NEW entry, and a new entry carries `target_session: 31`,
+    # which the registry cannot hold until Run 6 moves `CURRENT_SESSION`
+    # (D690). **Run 6 registers them and empties this tuple.**
     "tests/deployment/test_session9_agent_writes.py::test_a_get_against_the_deployed_audit_rpc_is_refused",
     "tests/deployment/test_session9_agent_writes.py::test_the_get_that_was_refused_wrote_nothing",
-    "tests/deployment/test_session9_agent_writes.py::test_a_revoked_token_fails_its_next_read_write_and_direct_request",
 )
 
 

@@ -865,9 +865,20 @@ is irreversible and would print success.
    command here writes a provider value (D249).
 
    **Then prove the value is a PEM before you deploy anything** (D1578).
-   Nothing in this product validates an operator-supplied key.
+
+   **Since template 1.9.0 `materialize-secrets` checks it for you** and exits
+   **8** naming the secret and its declared kind, before the value reaches a
+   file (ADR 0225). It reaches **two** of the four shapes below: a body pasted
+   without its delimiter lines, and delimiters joined to the body. It cannot
+   reach the other two and no check of its kind could — a value byte-identical
+   to the previous one is a well-formed key, just the *previous* one, and a
+   mistyped key NAME means no value is fetched at all. **So take the reading
+   anyway.** It is thirty seconds and it is the half that catches the two the
+   product cannot.
+
+   Before 1.9.0 nothing in this product validated an operator-supplied key:
    `bootstrap-providers.py` checks the delimiter lines of the key *it*
-   generates; the materialization path writes whatever the provider returns.
+   generates; the materialization path wrote whatever the provider returned.
    `render-jwks` is where a bad one lands — at deploy time, half way through a
    convergence — and it **deliberately does not echo openssl's stderr**,
    because openssl names the key's path and on some failures prints material
@@ -945,7 +956,29 @@ is irreversible and would print success.
 5. `sudo bin/rotate-signing-key.sh --outputs OUT promote`. It prints `status`
    first, then asks for the literal word `PROMOTE`. **Irreversible**, and
    refused at exit 6 while any verifier is behind — measured both ways.
-6. **At the provider, then `down`, then redeploy**: move the prepared key's
+6. **Wait for the deadline. Then: at the provider, then `down`, then
+   redeploy.**
+
+   **This deploy is what closes the overlap window** (ADR 0224), so it is taken
+   only once `retire_after` has passed. `render-jwks` builds the published set
+   from three files and never reads `verification_kids`, so the moment this
+   deploy renders a set holding one key, the retiring key stops being published
+   and every token it signed stops verifying. Taken early, that refuses tokens
+   that are still inside their own lifetime — which is exactly the harm step 7's
+   refusal was written to prevent, arriving one step earlier than anyone looked.
+
+   Read the deadline from the document and compare it with now:
+
+   ```
+   sudo python3 -c "
+   import json
+   print(json.load(open('/etc/agentic-postgres/projects/<key>/outputs.json'))['jwt']['retire_after'])
+   "
+   date -u +%Y-%m-%dT%H:%M:%SZ
+   ```
+
+   It is promotion plus **930 seconds** — about sixteen minutes — so this is
+   the one real wait in the procedure. Then: move the prepared key's
    value to `APG_AUTH_JWT_SIGNING_KEY`, **clear** `APG_AUTH_JWT_PREPARED_KEY`,
    then bring the project down and deploy it again. Until this is done the
    document says the new key signs and the service is still using the old one,
@@ -965,22 +998,34 @@ is irreversible and would print success.
    key while the document says the new one signs.
 
    **This step is also where the rotation ends.** See step 7.
-7. **The deadline, and what `retire` actually does.** `retire_after` is
-   promotion plus **930 seconds** — the longest token this issuer mints (900)
-   plus the leeway the verifier applies (30, D241's bisected measurement).
-   `retire` before the deadline exits 6 and names the moment.
+7. **What `retire` actually does.** `retire_after` is promotion plus **930
+   seconds** — the longest token this issuer mints (900) plus the leeway the
+   verifier applies (30, D241's bisected measurement). `retire` before the
+   deadline exits 6 and names the moment; with step 6 now taken after the
+   deadline, you will not see that.
 
-   **After step 6 there is nothing left for `retire` to do, and it will refuse**
-   (D1580). Two things get there first. Step 6's deploy rewrites the document's
-   whole `jwt` member from the rendered key set, which puts `retire_after` back
-   to `None`; and `render-jwks` builds the published set from three **files** —
+   **After step 6 there is nothing left for `retire` to do**, and since
+   template 1.9.0 it **says so and exits 0** instead of refusing (ADR 0224).
+   Two things get there first. Step 6's deploy rewrites the document's whole
+   `jwt` member from the rendered key set, which puts `retire_after` back to
+   `None`; and `render-jwks` builds the published set from three **files** —
    the auth key, the signing key, the prepared key — and never reads
    `verification_kids`, so clearing the prepared key at step 6 drops the
    retiring key from the published set immediately. **The two-key overlap ends
-   at step 6, not at step 7.** `retire` then exits **6** with *"no rotation is
-   in flight; there is nothing to retire"* — the right exit for the wrong
-   reason. Measured on both projects on 2026-09-19, deliberately, so the
-   refusal was recorded rather than assumed.
+   at step 6, not at step 7.**
+
+   Until 1.9.0 it exited **6** with *"no rotation is in flight; there is
+   nothing to retire"* — the right exit for the wrong reason, and a sentence
+   that says the opposite of the truth to an operator who has just completed a
+   rotation (D1580, measured on both projects on 2026-09-19). It now prints
+   *nothing to retire: one key is published, no deadline is set, and no
+   verifier acknowledgement is outstanding*, and says that the deploy is what
+   closed the window. **It writes nothing**, so the document keeps the mtime
+   step 6 gave it.
+
+   That sentence deliberately does not claim a rotation happened. The document
+   cannot tell one that completed from a project that never rotated — the
+   deploy writes the same three members either way (D1617).
 
    **Run it anyway, and read it as a record rather than as an act.** What ends
    the rotation is step 6; what proves it is three readings taken after:
@@ -1067,3 +1112,18 @@ Appendix R.
 **And the node id it moves has still not been taken.** No sweep has read the
 retired JWKs; they are kept at `/home/op/s30-retired-<key>-jwk.json`, each a
 single JWK object, for the first sweep that passes `--rotated-jwt-from-file`.
+
+**And the overlap does not survive a deploy.** `render-jwks` builds the
+published set from three files — the auth key, the signing key, the prepared
+key — and **never reads `verification_kids`**. So any deploy taken between
+`promote` and the deadline drops the retiring key from the published set at
+once, whatever the document says is still verifiable. Step 6 is ordered after
+the deadline for exactly that reason, and the ordering is a procedure, not a
+guard: nothing refuses a deploy taken early.
+
+Making `render-jwks` read `verification_kids`, so that the overlap is a
+property of the product rather than of the order the sheet is walked, is **the
+right fix and is deferred by name** (ADR 0224). It changes what is served at
+`/auth/jwks.json` mid-rotation and can only be proved by performing a
+rotation, so it belongs to the session that performs the other three — which
+is also what D1469 says is owed before any rotation claim can be taken.

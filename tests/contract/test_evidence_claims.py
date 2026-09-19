@@ -1093,7 +1093,8 @@ CLAIM_INTRODUCED_IN = {
     "project_set_release_record": 28,
     "agent_record_retention": 28,
     "release_reading": 28,
-    # Session 30 (ADR 0216-0220). Four offline and one host, and 29 is
+    # Session 30 (ADR 0216-0220). FIVE offline and one host (D1595, measured
+    # from this table and `OFFLINE_CLAIMS`), and 29 is
     # absent from this table the way 19, 26 and 27 are: it took the trip
     # that deployed, swept and tagged 1.7.0 and registered nothing, so it
     # has no claim to introduce and the gap is the record (D1063).

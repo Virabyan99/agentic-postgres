@@ -296,10 +296,15 @@
     - tests/deployment/test_session2_host.py::test_only_ssh_and_the_edge_listen_on_a_public_address
     - tests/deployment/test_session2_host.py::test_unattended_upgrades_is_enabled_and_does_not_reboot
     - tests/contract/test_host_infrastructure.py::test_ssh_snippet_sets_the_policy_that_carries_the_boundary
+    - tests/deployment/test_session2_host.py::test_sshd_limits_authentication_attempts
+    - tests/deployment/test_session2_host.py::test_ufw_denies_incoming_by_default
   description: >-
     The host admits key-based SSH only, refuses root and password logins as
-    OpenSSH actually resolves them, patches itself without rebooting itself, and
-    exposes no public listener beyond SSH and the edge.
+    OpenSSH actually resolves them, patches itself without rebooting itself,
+    and exposes no public listener beyond SSH and the edge. sshd bounds
+    authentication attempts per connection, and the host firewall's default
+    incoming policy is deny, so a listener added later is closed until
+    something opens it.
 
 - id: SEC-NET-002
   priority: P0
@@ -311,10 +316,15 @@
     - tests/deployment/test_session2_host.py::test_the_live_policy_is_the_installed_policy
     - tests/contract/test_host_infrastructure.py::test_policy_matches_the_original_destination_port
     - tests/contract/test_compose_contract.py::test_only_traefik_publishes_host_ports
+    - tests/deployment/test_session2_host.py::test_the_edge_publishes_exactly_eighty_and_four_four_three
+    - tests/deployment/test_session2_host.py::test_the_docker_user_chain_is_reachable_from_forward
   description: >-
     Only the edge publishes a host port, and forwarded public traffic to
     anything else is dropped by a DOCKER-USER policy that matches the pre-DNAT
-    destination port rather than the container's.
+    destination port rather than the container's. FORWARD is asserted to jump
+    to that chain: `iptables -S DOCKER-USER` reads identically whether or not
+    anything reaches it, so a policy that is not enforcing is invisible to
+    every other check here.
 
 - id: SEC-DOCKER-001
   priority: P0
@@ -325,10 +335,13 @@
     - tests/deployment/test_session2_host.py::test_traefik_holds_no_docker_socket
     - tests/contract/test_compose_contract.py::test_the_socket_proxy_denies_every_unneeded_api_section
     - tests/contract/test_compose_contract.py::test_traefik_has_no_direct_docker_socket_mount
+    - tests/deployment/test_session2_host.py::test_the_daemon_runs_the_configuration_we_installed
   description: >-
     The publicly reachable proxy reads the Docker API through an allowlisting
     socket proxy that refuses every write, and the daemon itself is reachable
-    over no network socket.
+    over no network socket. The RUNNING daemon is asserted to hold the
+    configuration that was installed, rather than the file on disk being read
+    as the daemon's state.
 
 - id: SEC-TLS-001
   priority: P0
@@ -339,10 +352,17 @@
     - tests/deployment/test_session2_edge.py::test_the_recorded_certificate_is_the_one_being_served
     - tests/external/test_session2_public_edge.py::test_the_certificate_is_trusted_by_a_default_trust_store
     - tests/contract/test_edge_config.py::test_tls_minimum_version_is_at_least_1_2
+    - tests/deployment/test_session2_edge.py::test_hsts_is_present_on_the_https_response
+    - tests/deployment/test_session2_edge.py::test_the_acme_state_file_matches_the_recorded_environment
   description: >-
     The public origin serves TLS 1.2 or better with a certificate a default
     trust store accepts, permanently redirects plaintext, and serves the exact
-    certificate the deployed document records.
+    certificate the deployed document records. HSTS follows the recorded ACME
+    environment rather than being demanded unconditionally -- sending it under
+    a staging certificate pins browsers to an origin they cannot validate, and
+    the recovery is a cache expiry rather than a deploy -- and the ACME state
+    on disk matches the environment the document records, so production state
+    cannot be reached by re-running an earlier command.
 
 - id: SEC-LOG-001
   priority: P0
@@ -382,9 +402,18 @@
     - tests/deployment/test_session2_isolation.py::test_traefik_joins_both_edge_networks_and_neither_internal_one
     - tests/deployment/test_session2_isolation.py::test_removing_the_second_project_leaves_the_first_routed
     - tests/contract/test_compose_contract.py::test_two_projects_render_disjoint_resource_names
+    - tests/deployment/test_session2_isolation.py::test_the_two_projects_are_actually_distinct
+    - tests/deployment/test_session2_isolation.py::test_an_unknown_hostname_is_not_served
+    - tests/deployment/test_session2_isolation.py::test_the_recorded_networks_are_project_scoped
+    - tests/deployment/test_session2_isolation.py::test_neither_project_joins_the_others_network
   description: >-
     Two projects sharing one host and one edge share no route, network, or
-    ingress attachment, and stopping one leaves the other served.
+    ingress attachment, and stopping one leaves the other served. Two guards
+    sit under those assertions: that the two documents really describe two
+    projects, since two names for one would satisfy every comparison, and that
+    the network fields are project-scoped rather than one host-wide value,
+    which is what they held before ADR 0023. And there is no catch-all: an
+    unmatched Host reaches neither project.
 
 - id: DEP-REL-001
   priority: P0
@@ -435,9 +464,13 @@
     - tests/deployment/test_session2_edge.py::test_an_unrouted_path_is_not_served
     - tests/external/test_session2_public_edge.py::test_the_public_health_route_answers
     - tests/contract/test_output_migrations.py::test_health_route_constant_agrees_with_naming
+    - tests/deployment/test_session2_edge.py::test_the_deployed_document_agrees_with_the_live_route
+    - tests/deployment/test_session2_edge.py::test_the_health_route_is_reachable_only_through_the_edge
   description: >-
     Every deployed project answers the reserved health route with its own
-    project key, through the edge only, and no unrouted path is served.
+    project key, through the edge only, and no unrouted path is served. The
+    deployed document records that route's URL and a ready status, and the
+    probe behind it publishes no host port of its own.
 
 # ---------------------------------------------------------------------------
 # Session 3 — database authorization
@@ -1096,6 +1129,9 @@
     - tests/contract/test_jwt_keys.py::test_a_second_rotation_cannot_be_prepared_while_one_is_published
     - tests/deployment/test_session6_tokens.py::test_the_cutover_is_built_and_deliberately_unexercised
     - tests/deployment/test_session6_tokens.py::test_the_published_set_holds_exactly_the_signer_outside_a_rotation
+    - tests/contract/test_jwt_keys.py::test_retiring_a_settled_state_reports_and_changes_nothing
+    - tests/contract/test_jwt_keys.py::test_a_settled_state_that_still_holds_an_acknowledgement_is_still_refused
+    - tests/contract/test_jwt_keys.py::test_the_settled_state_has_two_histories_and_the_document_cannot_tell_them_apart
   description: >-
     Prepare, acknowledge, promote, retire: promotion is blocked until every
     verifier has acknowledged the prepared public generation, and retirement
@@ -1104,13 +1140,20 @@
     rotation the machinery exists for, and Session 6 builds the machinery
     rather than driving it. What the live proofs assert is everything that
     holds without starting one -- the deployed key state satisfies the model's
-    own validator, no rotation is in flight, the acknowledgement record is null
-    rather than empty, and the published set holds exactly the key that signs.
-    That last one replaced a two-key assertion when ADR 0170 retired the
-    bootstrap issuer: until Session 15 two live issuers filled the two-key
+    own validator, no rotation is in flight, the acknowledgement record is
+    null rather than empty, and the published set holds exactly the key that
+    signs. That last one replaced a two-key assertion when ADR 0170 retired
+    the bootstrap issuer: until Session 15 two live issuers filled the two-key
     ceiling, which was the reason no rotation could be prepared at all (D683).
-    The slot is now free, so the ceiling is no longer the reason -- the scope of
-    Session 6 is.
+    The slot is now free, so the ceiling is no longer the reason -- the scope
+    of Session 6 is. Retire has a THIRD outcome since ADR 0224 and it is
+    reported rather than refused: one published kid, no deadline and no
+    acknowledgement is a state a deploy has already retired, and the refusal
+    that used to fire there said the opposite of the truth to an operator who
+    had just completed a rotation (D1580). The early refusal is kept and keeps
+    its proof; the reported sentence deliberately claims no history, because
+    the deploy writes the same three members for a completed rotation and for
+    a project that has never rotated (D1617).
 - id: SEC-BOOT-002
   priority: P0
   target_session: 6
@@ -1510,6 +1553,7 @@
     - tests/security/test_session9_revocation.py::test_both_a_read_and_a_write_lose_their_context_together
     - tests/security/test_session9_revocation.py::test_no_upstream_status_becomes_a_degraded_mode
     - tests/deployment/test_session9_agent_writes.py::test_the_admin_audit_endpoint_refuses_an_administrator_without_the_scope
+    - tests/deployment/test_session9_agent_writes.py::test_a_revoked_token_fails_its_next_read_write_and_direct_request
   description: >-
     A token issued before revocation is denied on its next read and write
     through both MCP and PostgREST. Session 9 PROVES this rather than building
@@ -1551,6 +1595,7 @@
     - tests/contract/test_mcp_tools.py::test_a_write_tool_exposes_the_locks_own_argument_names_in_order
     - tests/deployment/test_session9_agent_writes.py::test_a_write_agent_creates_one_note_through_the_agent_plane
     - tests/deployment/test_session9_agent_writes.py::test_a_denied_write_is_recorded_and_never_reaches_the_database
+    - tests/deployment/test_session8_agent_plane.py::test_a_read_only_agent_can_neither_discover_nor_invoke_a_write_on_the_deployment
   description: >-
     A read-only agent can neither discover nor invoke a write, and the two are
     proved SEPARATELY because hiding a name is not a boundary (ADR 0140).
@@ -1736,11 +1781,16 @@
     - tests/contract/test_request_id_stamping.py::test_the_agent_plane_uses_the_id_the_response_will_carry
     - tests/deployment/test_session11_operations.py::test_the_edge_logs_the_request_id_the_runtime_served
     - tests/deployment/test_session9_agent_writes.py::test_the_request_id_is_recorded_and_is_this_planes_own_mint
+    - tests/deployment/test_session11_operations.py::test_a_malformed_request_id_header_does_not_destroy_the_write
   description: >-
     One request ID spans ingress, API, agent and audit records. The runtime
-    mints it and stamps it on the response, where Traefik's access log keeps it
-    as downstream_X-Request-Id; migration 0022 puts the same value on the
-    database-source audit row. No caller-supplied id is ever adopted (ADR 0160).
+    mints it and stamps it on the response, where Traefik's access log keeps
+    it as downstream_X-Request-Id; migration 0022 puts the same value on the
+    database-source audit row. No caller-supplied id is ever adopted (ADR
+    0160). A malformed caller-supplied header is recorded as NULL and the
+    write still happens: the unguarded cast this replaced raised 22P02,
+    answered 400 and left the table empty, so a header destroyed the caller's
+    own row.
 
 - id: DEP-ISO-001
   priority: P0
@@ -1750,9 +1800,16 @@
     - tests/deployment/test_session12_isolation_matrix.py::test_no_project_scoped_value_is_shared
     - tests/deployment/test_session12_isolation_matrix.py::test_neither_projects_scoped_names_appear_in_the_others_document
     - tests/deployment/test_session12_isolation_matrix.py::test_every_leaf_is_classified
+    - tests/deployment/test_session12_isolation_matrix.py::test_the_classifier_can_tell_the_categories_apart
+    - tests/deployment/test_session2_isolation.py::test_each_project_holds_only_its_own_secret_generation
   description: >-
     Two projects on one host share no state or authority; shared provider
-    accounts are permitted, shared project scope is not.
+    accounts are permitted, shared project scope is not. The matrix's
+    classifier is asserted to tell its categories apart, because one answering
+    not_authority for everything would report a clean bill of health forever
+    (D374); and neither project can READ the other's secret generation, proved
+    by the mount path rather than by comparing digests, which would only show
+    the bytes differ.
 
 - id: DEP-REMOVE-001
   priority: P0
@@ -2748,18 +2805,23 @@
     - tests/contract/test_migration_ledger.py::test_the_ledger_records_a_row_for_every_rendered_migration_of_every_set
     - tests/contract/test_migration_ledger.py::test_each_rows_template_digest_comes_from_its_own_sets_lock
     - tests/deployment/test_session20_tenant.py::test_the_project_set_beta_declares_is_applied_ledgered_and_published
+    - tests/deployment/test_session20_tenant.py::test_alpha_declares_no_set_and_holds_none_of_betas_objects
   description: >-
     A project manifest at schema version 5 may name a migration set under
     `projects/<slug>/`, tracked in the release checkout; the render writes the
     release's set and then the project's into one directory in ascending
-    version order, recording which set each payload came from;
-    `freeze-lock --project` and `verify-lock --project` freeze and verify the
-    project's own lock and never the release's; a project version that does not
-    sort after the release lock's newest at freeze is refused, because dbmate
-    orders one directory by filename and an out-of-order version is refused by
-    `up --strict` on a deployed cluster while a fresh cluster applies it
-    silently; and the ledger records a row per migration from either set, its
-    template digest taken from that set's own lock (ADR 0198, D1092, D1096).
+    version order, recording which set each payload came from; `freeze-lock
+    --project` and `verify-lock --project` freeze and verify the project's own
+    lock and never the release's; a project version that does not sort after
+    the release lock's newest at freeze is refused, because dbmate orders one
+    directory by filename and an out-of-order version is refused by `up
+    --strict` on a deployed cluster while a fresh cluster applies it silently;
+    and the ledger records a row per migration from either set, its template
+    digest taken from that set's own lock (ADR 0198, D1092, D1096). The
+    control is a project that declares NO set: its manifest stays at an
+    earlier schema under this release and its cluster holds none of the other
+    project's objects, without which a project set would be a release
+    migration with extra steps.
 
 - id: TEN-SET-002
   priority: P0
@@ -2914,6 +2976,7 @@
     - tests/contract/test_deployed_output.py::test_unobserved_and_unavailable_are_not_the_same_record
     - tests/contract/test_deployed_output.py::test_a_route_nothing_answers_on_is_unobserved_rather_than_an_exception
     - tests/deployment/test_session20_tenant.py::test_no_route_on_either_project_reads_unobserved_after_a_redeploy
+    - tests/deployment/test_session14_observability.py::test_the_deployed_document_reports_the_metrics_route_it_observed
   description: >-
     `routes.*.status` carries `unobserved` for a route the deploy did not
     observe and `unavailable` only for one it observed failing or determined is

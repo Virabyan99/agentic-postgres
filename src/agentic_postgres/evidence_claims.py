@@ -367,8 +367,12 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "project_set_release_record": ("DX-FOLLOWS-001",),
     "agent_record_retention": ("AGT-RETAIN-001",),
     "release_reading": ("REL-READ-001",),
-    # Session 30 (ADR 0216-0220). Five claims, landing with the constant
-    # (D690), four offline and one host. No claim is added for the
+    # Session 30 (ADR 0216-0220). SIX claims, landing with the constant
+    # (D690), FIVE offline and one host -- measured 2026-09-19 against
+    # `CLAIM_INTRODUCED_IN` and `OFFLINE_CLAIMS` rather than counted by hand
+    # (D1595). The five are `contract_compile_output`, `exec_discipline`,
+    # `mirror_retry`, `release_reading_ref` and `suite_shape`; the host one is
+    # `studio_tenant_read`. No claim is added for the
     # signing-key rotation this session PERFORMS for the first time:
     # `bootstrap_identity`, `api_authorization` and
     # `credential_rotation_planes` already exist, the cutover moves ONE of

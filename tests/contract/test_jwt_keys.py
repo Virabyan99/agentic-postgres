@@ -524,9 +524,133 @@ def test_promoting_a_key_that_was_never_published_is_refused(
         )
 
 
-def test_retiring_a_rotation_that_is_not_happening_is_refused(state: dict[str, object]) -> None:
+def test_retiring_a_settled_state_reports_and_changes_nothing(
+    state: dict[str, object],
+) -> None:
+    """**ADR 0224.** This used to raise `nothing to retire`, and that refusal
+    fired on the only path an operator can walk while saying the opposite of
+    the truth (D1580).
+
+    The chain, measured on both projects on 2026-09-19: `FOLLOW_UP["promote"]`
+    sends the operator to redeploy; that deploy renders a key set holding one
+    kid; `observe_jwt` drops the deadline because a deadline describing an
+    ended overlap is a document `validate_key_state` refuses; and `retire` is
+    then reached with no deadline. Rig 28d rehearsed the branch both ways and
+    could not find it, because the rig edited the document and the deploy is
+    what overwrites it.
+
+    **Changed nothing is the assertion**, not merely *did not raise*. A
+    version that returned a subtly different document would pass a
+    `did not raise` test and would hand `write_back` a rewrite of a credential
+    document for no reason.
+    """
+    settled = jwt_keys.retire_rotation(state, now=NOW)
+    assert settled == state, (
+        "a state with nothing to retire came back modified; this outcome exists "
+        "precisely because there is nothing to record"
+    )
+    assert settled is not state, "the caller was handed its own dictionary to mutate"
+    jwt_keys.validate_key_state(settled)
+
+
+def test_the_settled_state_has_two_histories_and_the_document_cannot_tell_them_apart(
+    state: dict[str, object], incoming: dict[str, str]
+) -> None:
+    """**D1617**, and it is why the reported sentence says what it says.
+
+    `bin/deploy-project.py:2963-2964` writes BOTH `retire_after` and
+    `verifier_acknowledgements` as null whenever the rendered key set holds
+    one kid. So the document a completed rotation leaves behind is
+    member-for-member the document `initial_key_state` gives a project that
+    has never rotated at all.
+
+    Asserted here rather than described, because the honesty of the operator's
+    message depends on it: a sentence claiming *the rotation was retired by
+    the deploy* would be a statement about history that this state cannot
+    support. Goes red the day the two shapes diverge -- at which point the
+    message can say more, and should.
+    """
+    retired = jwt_keys.retire_rotation(
+        jwt_keys.promote_rotation(
+            acknowledged(prepared(state, incoming)),
+            incoming_kid=incoming["kid"],
+            consumers=VERIFIERS,
+            jwks_sha256=PREPARED,
+            now=NOW,
+            max_token_ttl_seconds=300,
+            clock_skew_seconds=30,
+        ),
+        now=NOW + timedelta(seconds=330),
+    )
+    # What the NEXT deploy writes for that state, by the rule the deploy uses:
+    # one published kid, so both members are reset to null.
+    assert len(retired["verification_kids"]) == 1
+    after_deploy = {**retired, "retire_after": None, "verifier_acknowledgements": None}
+
+    never_rotated = jwt_keys.initial_key_state(
+        jwk=jwt_keys.public_jwk(modulus_hex=THIRD_MODULUS, exponent=EXPONENT),
+        temporary=bool(state["temporary"]),
+    )
+
+    decided = {"retire_after", "verification_kids", "verifier_acknowledgements"}
+    assert {
+        member: len(after_deploy[member]) if member == "verification_kids" else after_deploy[member]
+        for member in decided
+    } == {
+        member: len(never_rotated[member])
+        if member == "verification_kids"
+        else never_rotated[member]
+        for member in decided
+    }, (
+        "the two states differ, so `retire` could tell a completed rotation from a "
+        "project that never rotated -- and the reported sentence may now say which"
+    )
+
+    # And both report rather than refuse, which is the behaviour that follows.
+    for shape in (after_deploy, never_rotated):
+        assert jwt_keys.retire_rotation(shape, now=NOW) == shape
+
+
+def test_a_settled_state_that_still_holds_an_acknowledgement_is_still_refused(
+    state: dict[str, object], incoming: dict[str, str]
+) -> None:
+    """**The control ADR 0224's three conditions owe.** Any other combination
+    keeps the refusal, because any other combination is a document some deploy
+    could still write.
+
+    Two keys with no deadline is a PREPARED rotation (ADR 0088's split), and
+    `abandon` is its verb -- reporting *nothing to retire* about it and exiting
+    0 would tell an operator a prepared rotation had been dealt with. A digest
+    held for a set that is no longer published is the record that would
+    authorise the next promotion for free.
+    """
+    twoish = prepared(state, incoming)
+    assert twoish["retire_after"] is None
+    assert len(twoish["verification_kids"]) == 2
     with pytest.raises(JwkError, match="nothing to retire"):
-        jwt_keys.retire_rotation(state, now=NOW)
+        jwt_keys.retire_rotation(twoish, now=NOW)
+
+    # **The kid count, proved on its own.** `prepare_rotation` leaves the
+    # acknowledgements at `{}`, so the arm above is refused by the
+    # ACKNOWLEDGEMENT condition and says nothing about the count -- a battery
+    # mutation dropping `len(...) == 1` survived it, which is how we know.
+    #
+    # Two keys with `None` acknowledgements is reachable and is not a settled
+    # state: `bin/deploy-project.py:2964` carries the previous value forward
+    # whenever the rendered set holds two keys, so a deploy taken while a
+    # rotation is prepared and nothing has been asked yet writes exactly this.
+    # Reporting *nothing to retire* about it would tell an operator a prepared
+    # rotation had been dealt with.
+    two_unasked = {**twoish, "verifier_acknowledgements": None}
+    jwt_keys.validate_key_state(two_unasked)
+    assert len(two_unasked["verification_kids"]) == 2
+    with pytest.raises(JwkError, match="nothing to retire"):
+        jwt_keys.retire_rotation(two_unasked, now=NOW)
+
+    held = {**state, "verifier_acknowledgements": {}}
+    jwt_keys.validate_key_state(held)
+    with pytest.raises(JwkError, match="nothing to retire"):
+        jwt_keys.retire_rotation(held, now=NOW)
 
 
 def test_a_rotation_carrying_private_material_is_refused(

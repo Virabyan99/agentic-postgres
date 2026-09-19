@@ -107,9 +107,28 @@ yet. It is §10's item, named rather than silently skipped.
 - **Parse the PEM properly with `cryptography` and verify it is a 2048-bit RSA
   key.** Strictly better validation, and it puts key material through a parser
   inside the one loop whose whole discipline is that the value is never
-  formatted, logged, or passed anywhere. The delimiter-and-length pair catches
-  every malformation actually observed. Rejected for now; it is a reasonable
+  formatted, logged, or passed anywhere. Rejected for now; it is a reasonable
   future strengthening under a new ADR.
+
+## Amendment, Run 5 (D1618)
+
+**The sentence "the delimiter-and-length pair catches every malformation
+actually observed" was written from the four shapes and not measured against
+them. Measured, it caught one.** The rule implemented is therefore stricter
+than the one decided above, and what it still cannot reach is named rather
+than implied:
+
+| 2026-09-19's malformation | delimiter + length | as implemented |
+|---|---|---|
+| body pasted without its delimiter lines | **refused** | refused |
+| delimiters present but **joined to the body** (1701 bytes, longest line 91) | *accepted* | **refused** — each boundary must be on a line of its own (RFC 7468), which is also what `openssl rsa` enforces |
+| **byte-identical on a re-read** — the edit at the provider was never committed | *accepted* | *accepted*, and **it cannot be otherwise**: the value is a well-formed key, just the previous one. This is a staleness question, not a shape question, and nothing in a value answers it. The operator guide's re-read is what answers it. |
+| the key **name** carried a trailing dot | not reached | not reached — no value is fetched, and the `absent at the provider, and optional` line is printed. Telling a deliberate absence from a mistyped name is §10's deferred item, above. |
+
+Two of four, with the remaining two out of reach of any check of this kind and
+said so. The line-of-its-own rule does not refuse a key wrapped at 76
+characters rather than 64, because the body's wrapping is not a boundary and a
+false refusal here would block a legitimate key mid-window.
 - **Leave it and document the failure mode.** Four malformations in one day,
   with the only diagnosis being a script written under time pressure during a
   host window. Rejected.

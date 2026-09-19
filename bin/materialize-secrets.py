@@ -36,6 +36,7 @@ from agentic_postgres.secret_generation import build_manifest, write_manifest
 from agentic_postgres.secrets_contract import (
     SECRET_ROOT,
     active_secrets,
+    check_value_kind,
     consumer_directory,
     enabled_facilities,
     load_secret_contract,
@@ -249,6 +250,28 @@ def materialize(
                     print(f"  {secret['name']}: absent at the provider, and optional")
                     continue
                 fail(EXIT_SECRET, f"could not read {secret['name']}: {exc}")
+
+            # ADR 0225. Here, because here is where the value first lands on
+            # this host's disk. Earlier is the provider console, which this
+            # product does not own -- an `operator_supplied` secret is pasted
+            # into it by a human and no generator of ours ever sees it. Later
+            # is `bin/render-jwks`, MID-DEPLOY, which cannot say why it failed
+            # without printing the key's path and so suppresses openssl's
+            # stderr by design. Session 30's trip produced four distinct
+            # malformations in one day and nothing in this repository caught
+            # one of them (D1578).
+            #
+            # Before the write and before `render_secret`, so a value that is
+            # not what it claims never reaches a 0o400 file, never reaches a
+            # consumer's directory, and is not counted in `written`.
+            #
+            # `reason` names the secret and its declared kind. It never names
+            # a byte of `value` -- `check_value_kind`'s docstring is where that
+            # is argued, and a proof plants a sentinel to hold it.
+            reason = check_value_kind(secret["value_kind"], value)
+            if reason is not None:
+                del value
+                fail(EXIT_SECRET, f"{secret['name']}: {reason}")
 
             for consumer in secret["consumers"]:
                 # `consumer_directory`, not `consumer["service"]`: a root-plane
