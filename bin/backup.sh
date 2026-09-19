@@ -16,6 +16,11 @@
 #   backup         Take one, --type full or --type incr.
 #   info           What the repository reports. --json prints the summary the
 #                  deployed document is built from.
+#   usage          How much the repository occupies at the provider, summed
+#                  from each backup's repository DELTA. Separate from `info`
+#                  because `info --json` IS the deployed document's block and
+#                  the deploy consumes it verbatim -- a member added there
+#                  would land in outputs.json and be refused by the schema.
 #   expire         Apply the retention policy. Retention is NOT restated on the
 #                  command line: it is repo1-retention-full in the rendered
 #                  config, and pgBackRest applies it from there (D495, D463).
@@ -50,6 +55,7 @@ Usage:
   sudo bin/backup.sh --outputs <outputs.json> check
   sudo bin/backup.sh --outputs <outputs.json> backup --type full|incr
   sudo bin/backup.sh --outputs <outputs.json> info [--json]
+  sudo bin/backup.sh --outputs <outputs.json> usage [--json]
   sudo bin/backup.sh --outputs <outputs.json> expire
   sudo bin/backup.sh --outputs <outputs.json> schedule status [--json]
   sudo bin/backup.sh --outputs <outputs.json> schedule enable|disable
@@ -132,12 +138,12 @@ main() {
   local argument
   for argument in "$@"; do
     case "${argument}" in
-      stanza-create | check | backup | info | expire | schedule | mirror)
+      stanza-create | check | backup | info | usage | expire | schedule | mirror)
         [ -n "${verb}" ] || verb="${argument}"
         ;;
     esac
   done
-  [ -n "${verb}" ] || die 2 "unknown verb. One of: stanza-create check backup info expire schedule mirror"
+  [ -n "${verb}" ] || die 2 "unknown verb. One of: stanza-create check backup info usage expire schedule mirror"
 
   # `expire` is the only verb that DESTROYS anything, and what it destroys is a
   # backup chain that may be the only copy of a database. `backup` writes and

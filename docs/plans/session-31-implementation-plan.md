@@ -222,8 +222,8 @@ Six columns. Each row is a **measured fact about the tree at `ae2c0dc`** set
 against what the brief (the stage plan's §5 *Session 31*, its §1 rows, and
 CLAUDE.md §9) says, with the decision this plan takes. **Next free number
 after this table was D1602 at planning time; Run 1 measured eight more
-(D1602-D1609, added 2026-09-19) and Run 3 four more (D1610-D1613), so the
-next free number is **D1614**.**
+(D1602-D1609, added 2026-09-19), Run 3 four more (D1610-D1613) and Run 4 one
+(D1614), so the next free number is **D1615**.**
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -259,6 +259,7 @@ next free number is **D1614**.**
 | **D1611** | §2 `NODE-ADMIT-001`: *"an undetermined reading refuses (fails closed) naming the figure"*, applied to the disk figure read with `shutil.disk_usage(docker_root)`. | **The disk figure is undeterminable unprivileged, so the rule was unsatisfiable.** `/var/lib/docker` **does not exist** on this workstation — Docker Desktop's daemon reports a path inside its own VM, and `disk_usage` raises `FileNotFoundError`; on a CI runner the same path is 0710 root and it raises `PermissionError`. `decide` then refused EVERY admission for a reason with nothing to do with capacity. Measured: `/var/lib`, `/var` and `/` all stat cleanly and share `st_dev` with the checkout. | **`capacity_probe.disk_usage_near` measures the same filesystem from the deepest readable ancestor and REPORTS the path it measured** (`Reading.docker_root_measured_at`, printed as a `disk measured at` line). `statvfs` answers identically from any point on one filesystem; where the Docker root is its own mount an ancestor would describe a different disk, and then an operator reads the path rather than a plausible number. | A rule nothing can satisfy is not a rule — and this one would have been discovered on the host, mid-trip, with every deploy refused. Reporting the measured path is ADR 0195's move; substituting a number would have been the fold. | 0221 |
 | **D1612** | §5.4: the `admission-refused` record's *"`induced: false`"*. | **In the tree `induced=False` means *recorded, not exercised*.** `provider-loss` is its only member and `verdict()` returns the literal `"recorded"` for it (D976). **`disk-threshold` changes nothing either** — it injects a threshold into the doctor's argv — and is `induced=True`, because it exercises the reader. `test_every_scenario_plans_three_phases_and_prints_every_command` asserts `(plan.induced is False) == (scenario == "provider-loss")`. | **`admission-refused` keeps `induced=True`**, disk-threshold's flag, because it is disk-threshold's shape exactly: a threshold injected into a reader's argv, nothing changed, nothing to undo. The existing parametrised assertion stands unedited. | Marking it False would have put it in provider-loss's class, whose verdict is `"recorded"` rather than `"read"` — quietly downgrading what the rehearsal claims to have proved, which is the opposite of what a rehearsal is for. | 0190 |
 | **D1613** | §5.5: *"If `dev_environment.py` carries a `mem_limit`, it carries `pids_limit` from the same default"*; §2 `NODE-LIMIT-001`: *"`apg dev`'s cluster definition carries the same `pids_limit` if it carries a `mem_limit`"*. | **It carries no memory limit at all.** `dev_environment.run_arguments` is a deliberately minimal `docker run` whose docstring says *"Nothing is in this list by accident"*: no `--network`, no `-v`, no `-c`, one `-p`, and no `--memory`. `grep mem_limit src/ bin/` finds it in no cluster definition. | **Nothing is added to the dev cluster**, and the proof is written as the INVARIANT the conditional states — if that argv ever bounds memory, it bounds processes in the same change — rather than deleted for being vacuously true. | A `--pids-limit` there would be the first resource cap on a developer's throwaway cluster and one nobody asked for. Keeping the test as an invariant is what catches the person who bounds its memory later, who is exactly the person who will not think about its processes. | 0222 |
+| **D1614** | Run 4 §5.4: *"the repository through `bin/backup.sh --outputs … info --json` exactly as `probe_repository` does, reading the new `repository_bytes` member that `backup_report.summarise` gains"*. | **`info --json` is not a report -- it is the deployed document's `backup_state` block**, and `bin/deploy-project.py:1390` consumes exactly it: *"`summary` here is what `bin/backup.sh info --json` printed, and that command prints an already-computed state block"*. A member added there travels into `outputs.json` and is refused by the outputs schema -- a schema move this session explicitly does not take (D1591). | **`summarise` gains `repository_bytes` as planned, and a NEW VERB serves it**: `bin/backup.sh usage [--json]`. The published block stays byte-for-byte what it was, and a proof asserts `backup_state` does not carry the member. `doctor usage` calls the new verb. | The figure genuinely belongs to the command that holds the backup credential; what it cannot do is ride along on the one output whose whole contract is *this is the document*. A new verb is reviewable; a widened document is a schema bump nobody planned. | 0221 |
 
 ---
 
@@ -1139,8 +1140,94 @@ collector), `test_mcp_runtime`, `test_mcp_tracing`, `test_mcp_telemetry`,
 (if a node id moved), plus `git grep -ln "build_otel_config\|MCP_VARIABLES\|
 summarise(" -- tests/contract`. Push; read CI.
 
-**Done.** _(the executor: the rendered `otelcol.yaml` diff; rig 31d's memory
-number against 384; the store query's exact URL.)_
+**Done.** 2026-09-19. The collector is consumed: every series it exports
+names its project, the store's retention has a constant and a test, the mcp
+runtime configures its two instruments for the first time in production, and
+`doctor usage` answers. **Battery 11/11 killed**, controls green, every file
+restored byte-identical. Targeted: **34 modules, 1481 passed, 0 skipped**.
+`ruff check` 0; `shellcheck` clean on both scripts.
+
+**The rendered `otelcol.yaml` diff** (both fixtures regenerated):
+
+```
+ exporters:
+   prometheus:
+     endpoint: 0.0.0.0:8889
++    const_labels:
++      project: fixture-alpha-dev
+     metric_expiration: 60s
+```
+
+Six of seven series carry it and **`target_info` does not** (D1604), which the
+contract test names as an exception rather than folding away.
+
+**Rig 31d's memory number against the limit**: the provider, reader and
+exporter cost **25.2 MiB RSS** (25756 KiB, measured) against `MCP_MEMORY_LIMIT`
+**384 MiB** — **6.6 %**. The `endpoint=None` control cost **0 KiB**, so the
+figure is the instruments' and not the interpreter's.
+
+**The store query's exact URL**, derived and quoted rather than typed:
+
+```
+http://127.0.0.1:9090/api/v1/query?query=sum%28agent_tool_calls_total%29
+```
+
+`sum(...)` and not a bare selector, because the exporter promotes the SDK's
+`service.instance.id` to an `instance` label and that id is a fresh UUID per
+process — every restart of the mcp container mints a new series, and reading
+one would undercount silently afterwards (D1609). It is fetched with
+`container_exec.run(f"apg-{key}-store-1", "wget", …)` because the store is
+routed nowhere, the container name is derived (ADR 0002), and **every series
+returned must carry `project=<key>`** or the figure is `unknown` with *the
+store answered for another project*.
+
+**The finding that moved the design (D1614).** The plan had `doctor usage`
+read a new `repository_bytes` member off `bin/backup.sh info --json`. **That
+output is not a report — it is the deployed document's `backup_state` block,
+and `bin/deploy-project.py:1390` consumes exactly it.** A member added there
+would have travelled into `outputs.json` and been refused by the outputs
+schema — a schema move this session explicitly does not take (D1591). So
+`summarise` gains the figure as planned and a **new verb** serves it,
+`bin/backup.sh usage [--json]`; a proof asserts `backup_state` still does not
+carry it. Found by reading the consumer, not by the deploy failing.
+
+**`repository_bytes` sums `delta`, never `size`**, and the captured fixture
+tells them apart: over `info-full-and-incr.json` the deltas total **4,245,284**
+and the sizes **8,153,434**, because an incremental's `size` counts the bytes
+of the full it references. Summing `size` would report a repository larger
+than the provider has ever held. `None` when any backup lacks the member —
+never a partial sum, which would read as a smaller repository rather than an
+unread one.
+
+**The endpoint is narrow on purpose.** `APG_OTLP_ENDPOINT` is refused unless
+it is exactly `http://metrics:4318/v1/metrics`, derived in the test from
+`COLLECTOR_SERVICE` and `COLLECTOR_OTLP_HTTP_PORT` rather than retyped, and
+**the refusal never echoes the address it was given** — a proof plants a
+sentinel hostname and greps the message for it. A metric exporter that cannot
+reach its endpoint logs and carries on (rig 31d), so a wrong address would
+move a project's telemetry somewhere nobody reviewed, silently.
+
+**Two tests moved, neither weakened.** `test_span_has_a_product_caller_and_
+configure_deliberately_does_not` became
+`test_exactly_one_module_configures_metrics_and_none_configures_tracing`,
+which asserts everything it did **and** that exactly `mcp_runtime` configures
+metrics — two callers would mean two meter providers exporting the same
+instruments under one service name (ADR 0223 authorises it; the replaced test
+is not a registry node id, checked). Run 2's
+`test_the_usage_verb_is_refused_until_it_answers` was replaced by a proof of
+what the verb now does, including that it prints nothing for a project it
+never found.
+
+**Owed, and the reason is environmental:** the five derived-artefact checks
+(`--bounds-doc --check`, `apg generate --check`, `render-acceptance-matrix
+--check`, `app-contract --check`, `mcp-contract check`) were run green at Run
+3's close and **were not re-run at Run 4's**, because WSL's command channel
+stopped answering (`Wsl/Service/0x8007274c`) after the targeted suite passed —
+the VM and its filesystem stayed reachable over `\\wsl$`, only `wsl.exe -e`
+did not. Nothing Run 4 touched is an input to any of those five generators
+(the registry, the ADR index, the project schema and the api contract are all
+unchanged), and CI runs the full check on the push. **Run 5 re-runs them
+first.**
 
 ### Run 5 — the carried-in items: the fixture, the kind check, the rotation's report, the triage, the counts, the threat row
 

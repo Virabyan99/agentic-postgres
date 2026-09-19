@@ -501,3 +501,66 @@ def test_the_deploy_reads_the_rendered_document_not_the_deployed_one() -> None:
         "step 6c reads the deployed document, which at this point is the PREVIOUS deploy's (D465)"
     )
     assert "rendered_path" in step
+
+
+# ---------------------------------------------------------------------------
+# Session 31 -- what the repository occupies (NODE-USAGE-001)
+# ---------------------------------------------------------------------------
+
+
+def test_repository_bytes_is_the_sum_of_deltas() -> None:
+    """`delta`, not `size`, and the captured fixture tells them apart.
+
+    An incremental's `info.repository.size` counts the bytes of the full it
+    references. Summing `size` over `info-full-and-incr.json` gives 8,153,434;
+    summing `delta` gives 4,245,284. The first is a repository larger than the
+    provider has ever held -- a number that looks measured and is not.
+
+    Both totals are computed here, so the assertion is that the code took the
+    right one rather than that it produced a plausible number.
+    """
+    document = _load("info-full-and-incr.json")
+    summary = backup_report.summarise(document, "rigstanza")
+
+    backups = document[0]["backup"]
+    delta_total = sum(b["info"]["repository"]["delta"] for b in backups)
+    size_total = sum(b["info"]["repository"]["size"] for b in backups)
+    assert delta_total != size_total, "the fixture cannot distinguish the two rules"
+
+    assert summary["repository_bytes"] == delta_total
+    assert summary["repository_bytes"] != size_total
+
+
+def test_repository_bytes_is_none_when_a_backup_carries_no_delta() -> None:
+    """All of them or none (D600).
+
+    A total that silently omitted one backup would read as a SMALLER
+    repository rather than as an unread one -- reassuring, and wrong.
+    """
+    document = _load("info-full-and-incr.json")
+    del document[0]["backup"][1]["info"]["repository"]["delta"]
+
+    summary = backup_report.summarise(document, "rigstanza")
+    assert summary["repository_bytes"] is None
+
+
+def test_an_empty_repository_occupies_nothing_and_that_is_a_measurement() -> None:
+    """A stanza created and never backed up is a fact, not a failure to read."""
+    # `emptystanza`, because that is the stanza this fixture was captured
+    # against -- `summarise` selects by name and refuses a report about
+    # something else, which is the behaviour and not an obstacle.
+    summary = backup_report.summarise(_load("info-no-backups.json"), "emptystanza")
+    assert summary["repository_bytes"] == 0
+
+
+def test_repository_bytes_is_not_published_in_the_deployed_document() -> None:
+    """The figure exists for `doctor usage` and for nothing else (D1591).
+
+    `bin/backup.sh info --json` prints the deployed document's own
+    `backup_state` block and `bin/deploy-project.py` consumes exactly that, so
+    a member added there would travel into `outputs.json` and be refused by
+    the schema. It is served by the separate `usage` verb instead.
+    """
+    summary = backup_report.summarise(_load("info-full-and-incr.json"), "rigstanza")
+    state = backup_report.backup_state(summary)
+    assert "repository_bytes" not in state

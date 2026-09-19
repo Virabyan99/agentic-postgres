@@ -277,13 +277,20 @@ def test_a_real_span_carries_only_the_attributes_it_was_given(
 # ---------------------------------------------------------------------------
 
 
-def test_span_has_a_product_caller_and_configure_deliberately_does_not() -> None:
-    """The audit reads this module as dead code and it is not (D1413, D1444).
+def test_exactly_one_module_configures_metrics_and_none_configures_tracing() -> None:
+    """The two halves diverged in Session 31, and this says which is which.
 
-    `span()` is called around every tool call. `configure()` is called by
-    nothing but this file's own tests. So the plane opens a span per tool call
-    into a tracer nobody configured -- a carrier with no transport, which is a
-    different thing from dead code and has a different repair.
+    **Metrics have a caller now** (ADR 0223): `mcp_runtime.create_mcp_app`
+    calls `mcp_metrics.configure` after the lock is loaded, so the two
+    instruments exist in production for the first time. This asserts it is
+    EXACTLY that module -- two callers would mean two meter providers
+    exporting the same instruments under one service name.
+
+    **Tracing still has none, and that is still the decision.** `span()` is
+    called around every tool call; `configure()` is called by nothing but this
+    file's own tests. So the plane opens a span per tool call into a tracer
+    nobody configured -- a carrier with no transport, which is a different
+    thing from dead code and has a different repair.
 
     **Deleting `configure` removes a working instrumentation point; adding a
     caller starts a new outbound flow out of the container that handles a
@@ -306,6 +313,16 @@ def test_span_has_a_product_caller_and_configure_deliberately_does_not() -> None
     with_configure = sorted(
         name for name, text in sources.items() if "mcp_tracing.configure(" in text
     )
+    # Session 31 (ADR 0223). The metrics half now HAS a caller, and this
+    # asserts which one -- not merely that one exists. `mcp_metrics.record` is
+    # called from `mcp_telemetry` and always has been; what moved is
+    # `configure`, and a second module calling it would mean two meter
+    # providers exporting the same two instruments under one service name.
+    configures_metrics = sorted(
+        name
+        for name, text in sources.items()
+        if "mcp_metrics.configure(" in text and name != "mcp_metrics.py"
+    )
 
     assert with_span, (
         "nothing opens a span any more, so deleting this module would now cost "
@@ -316,6 +333,11 @@ def test_span_has_a_product_caller_and_configure_deliberately_does_not() -> None
         "is a new outbound flow from the container that handles a caller's "
         "credential, and mcp_tracing.configure's docstring says it is Stage 4's "
         "decision (D1413, D1444). Take the decision, then move this assertion."
+    )
+    assert configures_metrics == ["mcp_runtime.py"], (
+        f"{configures_metrics} configure the metrics carrier. Exactly one module "
+        "may: two meter providers would export the same two instruments under "
+        "one service name, and the counter would double (ADR 0223)."
     )
 
     # And the reason is written where the reader who reaches for `git rm` is.

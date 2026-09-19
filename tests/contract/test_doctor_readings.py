@@ -286,15 +286,26 @@ def test_host_without_a_reading_is_refused_rather_than_ignored() -> None:
     assert "--host" in result.stderr
 
 
-def test_the_usage_verb_is_refused_until_it_answers() -> None:
-    """Run 4 builds `usage`. Until then it refuses.
+def test_the_usage_verb_needs_a_project_and_then_reads_its_document() -> None:
+    """Run 2 asserted this verb REFUSED; Run 4 built it, so the proof moves.
 
-    The alternative -- a verb that returns `OK` having measured nothing --
-    would be this session's own defect class in this session's own code.
+    With no `--project` it is bad input (2). With one, it goes looking for
+    that project's deployed document and reports the state it found -- 4 when
+    the document is not there, which on this workstation is the honest answer
+    and on the host is root's to read (D1606). What it must never do is
+    return `OK` having measured nothing.
     """
-    result = run_doctor_py("--reading", "usage", "--project", "alpha-dev")
-    assert result.returncode == 2
-    assert "usage" in result.stderr
+    without = run_doctor_py("--reading", "usage")
+    assert without.returncode == 2
+    assert "--project" in without.stderr
+
+    with_project = run_doctor_py(
+        "--reading", "usage", "--project", "no-such-project", "--root", "/nonexistent-root"
+    )
+    assert with_project.returncode == 4, with_project.stderr
+    assert with_project.stdout.strip() == "", (
+        "a usage reading printed a report for a project it never found"
+    )
 
 
 def test_the_probe_reads_meminfo_directly_rather_than_through_a_container(
@@ -454,3 +465,119 @@ def test_the_measured_path_is_printed_when_a_decision_is_taken() -> None:
     rendered = capacity_reading.render_decision(decision)
     assert "disk measured at" in rendered
     assert "/var/lib" in rendered
+
+
+# ---------------------------------------------------------------------------
+# Session 31 Run 4 -- the usage reading (NODE-USAGE-001)
+# ---------------------------------------------------------------------------
+
+
+def figures(**overrides: object) -> capacity_reading.UsageFigures:
+    base: dict[str, object] = {
+        name: capacity_reading.Figure.measured(1) for name in capacity_reading.USAGE_FIGURE_UNITS
+    }
+    base.update(overrides)
+    return capacity_reading.UsageFigures(**base)  # type: ignore[arg-type]
+
+
+def test_the_usage_report_has_two_verdicts_only() -> None:
+    """OK with the numbers, or UNKNOWN naming the figure. Never four."""
+    permitted = {diagnosis.OK, diagnosis.UNKNOWN}
+
+    healthy = diagnosis.usage_report(figures(), units=capacity_reading.USAGE_FIGURE_UNITS)
+    assert healthy, "the report produced no checks"
+    assert {check.verdict for check in healthy} == {diagnosis.OK}
+
+    why = "nothing answered"
+    blind = diagnosis.usage_report(
+        figures(
+            **{
+                name: capacity_reading.Figure.unknown(why)
+                for name in capacity_reading.USAGE_FIGURE_UNITS
+            }
+        ),
+        units=capacity_reading.USAGE_FIGURE_UNITS,
+    )
+    assert {check.verdict for check in blind} <= permitted
+    assert {check.verdict for check in blind} == {diagnosis.UNKNOWN}
+
+
+def test_no_usage_figure_carries_a_threshold() -> None:
+    """A scan of the code, not of the output (D1441).
+
+    No size or count here has a measured value at which this deployment is
+    unwell, and `doctor` runs as root on production.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(diagnosis.usage_report)))
+    function = tree.body[0]
+    assert isinstance(function, ast.FunctionDef)
+    if isinstance(function.body[0], ast.Expr) and isinstance(function.body[0].value, ast.Constant):
+        function.body = function.body[1:]
+    code = ast.unparse(function)
+
+    assert "WARN" not in code
+    assert "PROBLEM" not in code
+    assert "UNKNOWN" in code and "OK" in code, "the scan is reading the wrong thing"
+
+
+def test_half_a_group_is_not_a_group() -> None:
+    """A group with one unreadable figure is UNKNOWN, and names it.
+
+    Two of three sizes is not a size. Reporting the two that came back as a
+    healthy line would be the fold ADR 0195 forbids, and it is the shape an
+    operator would never notice.
+    """
+    report = diagnosis.usage_report(
+        figures(wal_kb=capacity_reading.Figure.unknown("du printed nothing")),
+        units=capacity_reading.USAGE_FIGURE_UNITS,
+    )
+    database = next(check for check in report if check.name == "database")
+    assert database.verdict == diagnosis.UNKNOWN
+    assert "wal_kb" in database.detail
+    assert "du printed nothing" in database.detail
+
+    others = [check for check in report if check.name != "database"]
+    assert {check.verdict for check in others} == {diagnosis.OK}, (
+        "one unreadable figure took down a group it does not belong to"
+    )
+
+
+def test_storage_objects_is_not_a_usage_figure() -> None:
+    """D1601, asserted rather than left as an absence.
+
+    The object listing is reachable only through the credential the storage
+    container alone holds, and a second holder of that credential is this
+    stage's declared failure mode. A member reported `unknown` forever would
+    be a field with no reader (D816), so it is absent by decision.
+    """
+    assert "storage_objects" not in capacity_reading.USAGE_FIGURE_UNITS
+    assert not hasattr(capacity_reading.UsageFigures, "storage_objects")
+
+
+def test_every_usage_figure_has_a_unit() -> None:
+    """A number whose unit lives only in its name is a number to guess about."""
+    assert set(capacity_reading.USAGE_FIGURE_UNITS) == set(figures().as_mapping())
+    assert all(unit for unit in capacity_reading.USAGE_FIGURE_UNITS.values())
+
+
+def test_doctor_sh_maps_the_usage_word_to_the_reading() -> None:
+    source = DOCTOR_SH.read_text(encoding="utf-8")
+    assert "capacity|usage)" in source
+    assert "usage --project" in source
+
+
+def test_the_store_query_sums_across_instances(doctor: Any) -> None:
+    """`sum(...)`, because `instance` is a fresh UUID per process (D1609).
+
+    The exporter promotes the SDK's `service.instance.id` onto every series,
+    so each restart of the mcp container mints a new one. Reading a single
+    series would undercount silently after any restart -- D553's shape in a
+    new disguise.
+    """
+    for query in doctor.STORE_QUERIES.values():
+        assert query.startswith("sum("), query
+    assert set(doctor.STORE_QUERIES) == {"requests_total", "tool_calls_total"}

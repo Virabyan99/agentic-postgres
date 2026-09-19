@@ -416,6 +416,37 @@ def verb_backup(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def verb_usage(arguments: argparse.Namespace) -> int:
+    """What this stanza occupies at the provider, and nothing else.
+
+    **`delta`, summed, and not `size`.** An incremental's `size` counts the
+    bytes of the full it references, so summing `size` over a chain counts the
+    same bytes once per backup and reports a repository larger than the
+    provider has ever held -- a number that looks measured and is not.
+    `backup_report` owns that rule; this verb prints its answer.
+
+    `None` -- when any backup lacks the member -- is printed as `null` rather
+    than as a zero or a partial sum: a repository figure that quietly omitted
+    one backup would read as a smaller repository rather than as an unread one
+    (D600).
+    """
+    document = load_document(arguments.outputs)
+    stanza = stanza_name(document)
+    container = database_container(document)
+    summary = read_repository(container, stanza)
+    total = summary.get("repository_bytes")
+
+    if arguments.json:
+        print(json.dumps({"stanza": stanza, "repository_bytes": total}, indent=2, sort_keys=True))
+        return 0
+
+    if total is None:
+        print("repository size: unknown -- a backup carries no repository delta")
+        return 0
+    print(f"repository size: {total} bytes across {summary['backup_count']} backup(s)")
+    return 0
+
+
 def verb_info(arguments: argparse.Namespace) -> int:
     document = load_document(arguments.outputs)
     stanza = stanza_name(document)
@@ -789,6 +820,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the summary the deployed document is built from",
     )
     show.set_defaults(handler=verb_info)
+
+    # Session 31 (ADR 0221). SEPARATE from `info`, and the separation is the
+    # point: `info --json` prints the deployed document's `backup_state` block
+    # and the deploy consumes exactly that, so a member added there would land
+    # in `outputs.json` and be refused by the schema. This verb answers a
+    # different question -- how much room the repository occupies -- and
+    # nothing writes its answer to a document.
+    usage = verbs.add_parser("usage", help="how much the repository occupies at the provider")
+    usage.add_argument(
+        "--json",
+        action="store_true",
+        help="print the figure as a document",
+    )
+    usage.set_defaults(handler=verb_usage)
 
     expire = verbs.add_parser("expire", help="apply the retention policy from the config")
     expire.set_defaults(handler=verb_expire)

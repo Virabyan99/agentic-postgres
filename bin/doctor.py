@@ -29,6 +29,7 @@ import json
 import re
 import subprocess
 import sys
+import urllib.parse
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,6 +45,7 @@ from agentic_postgres import (
     capacity_probe,
     capacity_reading,
     config,
+    container_exec,
     deployed_output,
     diagnosis,
     fleet,
@@ -760,6 +762,216 @@ def probe_capacity(
     return reading
 
 
+# ---------------------------------------------------------------------------
+# The project -- usage (Session 31, ADR 0221 and ADR 0223)
+# ---------------------------------------------------------------------------
+
+
+#: The two figures the store answers, and the PromQL that asks for each.
+#:
+#: `sum(...)` rather than a bare selector, because the collector's exporter
+#: promotes the SDK's `service.instance.id` to an `instance` label and that id
+#: is a fresh UUID per process -- so every restart of the mcp container mints a
+#: new series, and reading one of them would undercount silently after any
+#: restart (D1609). A cumulative counter answering a point-in-time question is
+#: D553's shape; this is its sibling.
+STORE_QUERIES = {
+    "requests_total": "sum(traefik_service_requests_total)",
+    "tool_calls_total": "sum(agent_tool_calls_total)",
+}
+
+
+def probe_store(project_key: str, query: str) -> tuple[int | None, str]:
+    """One instant query against THIS project's store. `(value, reason)`.
+
+    **Read through the container, because the store is routed nowhere** (ADR
+    0168). It sits on `edge` only and publishes no port, so the only way in is
+    its own network namespace -- which is exactly how the Session 14 proof
+    already reads it, and the product's path is created from the proof's here
+    rather than the other way round (D1582, D1114).
+
+    The container name is DERIVED from the project key and the service
+    constant, never assembled from a document field (ADR 0002).
+
+    **Every series that comes back must name the project that was asked
+    about.** The collector labels each one with `project` (ADR 0223), so a
+    reply carrying another project's label means this reading reached the
+    wrong store -- question 3 of the handoff's §7 -- and that is `unknown`
+    with a reason rather than a number.
+    """
+    container = f"apg-{project_key}-{runtime_override.STORE_SERVICE}-1"
+    url = (
+        f"http://127.0.0.1:{runtime_override.STORE_PORT}/api/v1/query"
+        f"?query={urllib.parse.quote(query)}"
+    )
+    try:
+        answered = container_exec.run(
+            container, "wget", "-q", "-Y", "off", "-O", "-", url, timeout=20
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None, "the store could not be reached in its own container"
+    if answered.returncode != 0:
+        return None, "the store did not answer the query"
+
+    try:
+        payload = json.loads(answered.stdout)
+    except ValueError:
+        return None, "the store's answer was not JSON"
+    if payload.get("status") != "success":
+        return None, "the store reported the query unsuccessful"
+
+    results = ((payload.get("data") or {}).get("result")) or []
+    if not results:
+        # Truthfully zero is NOT this case: a `sum()` over no series returns
+        # an empty result, and so does a query for a metric that has never
+        # existed. The two are indistinguishable from here, so the honest
+        # answer is that nothing was measured.
+        return None, "the store holds no such series yet"
+
+    for series in results:
+        labelled = (series.get("metric") or {}).get("project")
+        if labelled is not None and labelled != project_key:
+            return None, "the store answered for another project"
+
+    try:
+        return int(float(results[0]["value"][1])), ""
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None, "the store's answer did not carry a number"
+
+
+def _figure(value: int | None, reason: str) -> capacity_reading.Figure:
+    if value is None:
+        return capacity_reading.Figure.unknown(reason or "the reading did not arrive")
+    return capacity_reading.Figure.measured(value)
+
+
+def _cluster_int(container: str, database: str, statement: str) -> tuple[int | None, str]:
+    """One `psql` round trip returning one integer, parsed before it is used.
+
+    Parsed into a value BEFORE any `diagnosis.*` call, never inside one: `int`
+    could not leak text either way, but *no `.stdout` appears in a
+    `diagnosis.*` call* is a rule a scan can check and a reader can apply
+    without judgement (ADR 0159).
+    """
+    try:
+        answered = container_exec.run(
+            container,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            database,
+            "-X",
+            "-qtA",
+            "-c",
+            statement,
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None, "the cluster could not be reached"
+    if answered.returncode != 0:
+        return None, "the cluster did not answer"
+    try:
+        return int(answered.stdout.strip()), ""
+    except ValueError:
+        return None, "the cluster's answer was not an integer"
+
+
+def _directory_kb(container: str, path: str) -> tuple[int | None, str]:
+    """`du -sk` inside the cluster's own container."""
+    try:
+        answered = container_exec.run(container, "du", "-sk", path, user="postgres", timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None, f"{path} could not be measured in the container"
+    if answered.returncode != 0:
+        return None, f"du reported no size for {path}"
+    head = answered.stdout.strip().split()
+    if not head:
+        return None, f"du printed nothing for {path}"
+    try:
+        return int(head[0]), ""
+    except ValueError:
+        return None, f"du's first field for {path} was not an integer"
+
+
+def probe_usage(
+    document: dict[str, Any], root: Path = deployed_output.PROJECT_STATE_ROOT
+) -> capacity_reading.UsageFigures:
+    """Eight figures for one project, each measured or each explained.
+
+    Every probe here goes through `container_exec.run` -- the rule for new code
+    (D1593, ADR 0218) -- and every value is parsed to an `int` in this module
+    before it reaches `diagnosis` (ADR 0159).
+    """
+    db = document.get("database") or {}
+    container = db.get("container")
+    name = db.get("name")
+    key = (document.get("project") or {}).get("key") or ""
+
+    if container and name:
+        database_bytes = _cluster_int(
+            container, name, "SELECT pg_database_size(current_database())"
+        )
+        audit = _cluster_int(container, name, "SELECT count(*) FROM app_private.agent_audit")
+        idempotency = _cluster_int(
+            container, name, "SELECT count(*) FROM app_private.agent_idempotency"
+        )
+        pgdata = _directory_kb(container, runtime_override.POSTGRES_PGDATA)
+        wal = _directory_kb(container, f"{runtime_override.POSTGRES_PGDATA}/pg_wal")
+    else:
+        why = "the deployed document names no database container"
+        database_bytes = audit = idempotency = pgdata = wal = (None, why)
+
+    repository = probe_repository_bytes(key, root)
+
+    store: dict[str, tuple[int | None, str]] = {}
+    for figure, query in STORE_QUERIES.items():
+        store[figure] = probe_store(key, query) if key else (None, "no project key")
+
+    return capacity_reading.UsageFigures(
+        database_bytes=_figure(*database_bytes),
+        pgdata_kb=_figure(*pgdata),
+        wal_kb=_figure(*wal),
+        repository_bytes=_figure(*repository),
+        audit_rows=_figure(*audit),
+        idempotency_rows=_figure(*idempotency),
+        requests_total=_figure(*store["requests_total"]),
+        tool_calls_total=_figure(*store["tool_calls_total"]),
+    )
+
+
+def probe_repository_bytes(
+    project_key: str, root: Path = deployed_output.PROJECT_STATE_ROOT
+) -> tuple[int | None, str]:
+    """What this stanza occupies at the provider, through `bin/backup.sh`.
+
+    The same command `probe_repository` runs, for the same reason: the backup
+    plane's credential belongs to the backup command and this one holds none.
+    """
+    report = run(
+        str(REPO_ROOT / "bin" / "backup.sh"),
+        "--outputs",
+        str(deployed_output.deployed_path(project_key, root=root)),
+        # `usage`, not `info`. `info --json` prints the deployed document's own
+        # `backup_state` block and the deploy consumes exactly that, so a
+        # member added there would travel into `outputs.json` and be refused by
+        # the schema -- a schema move this session does not take (D1591, D1614).
+        "usage",
+        "--json",
+        timeout=PROBE_TIMEOUT_SECONDS,
+    )
+    if report is None or report.returncode != 0:
+        return None, "the backup repository could not be read"
+    try:
+        payload = json.loads(report.stdout)
+    except ValueError:
+        return None, "the backup report was not JSON"
+    total = payload.get("repository_bytes")
+    if not isinstance(total, int):
+        return None, "the backup report carries no repository size"
+    return total, ""
+
+
 def diagnose(
     project_key: str,
     root: Path = deployed_output.PROJECT_STATE_ROOT,
@@ -847,10 +1059,15 @@ def main(argv: list[str] | None = None) -> int:
         return diagnosis.exit_code(checks)
 
     if arguments.reading == "usage":
-        # Run 4 builds this. Until then the verb is refused rather than
-        # answered with a report that reads nothing -- a reading that returns
-        # OK having measured nothing is the defect this session exists to stop.
-        return _die(EXIT_INPUT, "the usage reading is not available in this release")
+        if arguments.project is None:
+            return _die(EXIT_INPUT, "--project is required with the usage reading")
+        document = load_document(arguments.project, arguments.root)
+        checks = diagnosis.usage_report(
+            probe_usage(document, arguments.root),
+            units=capacity_reading.USAGE_FIGURE_UNITS,
+        )
+        _render(checks, arguments, project_key=arguments.project)
+        return diagnosis.exit_code(checks)
 
     if arguments.host is not None:
         return _die(EXIT_INPUT, "--host belongs to the capacity reading; see `doctor.sh capacity`")

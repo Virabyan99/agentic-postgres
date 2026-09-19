@@ -1749,6 +1749,18 @@ services:
       # all of. Measured before the bound existed: eight overlapping tool
       # calls ran eight bodies at once.
       APG_MCP_MAX_CONCURRENT_READS: ${MCP_MAX_CONCURRENT_READS:?required}
+      # Session 31 (ADR 0223). The project's OWN collector, by Compose service
+      # name on the OTLP http port. A literal rather than an interpolation:
+      # it is identical in every deployment, and `settings._optional_collector_
+      # endpoint` refuses any other value -- the runtime exports to its own
+      # project's collector and to nothing else. A test derives this string
+      # from the two constants rather than retyping it.
+      #
+      # Not a credential, which is what lets it be an ordinary environment
+      # line at all. The mcp container is on this project's `internal` and
+      # `edge` networks, so `metrics` resolves to its own collector and no
+      # other's.
+      APG_OTLP_ENDPOINT: http://metrics:4318/v1/metrics
     # Run 7's, and the module Run 4 deferred (D429) now exists: ADR 0124's
     # allowlist gave the probe a row with a reason, which is what it was waiting
     # for.

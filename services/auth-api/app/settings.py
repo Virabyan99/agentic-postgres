@@ -65,6 +65,50 @@ def _required_int(name: str, *, minimum: int = 1) -> int:
     return value
 
 
+#: The only endpoint this runtime may export to: its OWN project's collector,
+#: by the Compose service name, on the OTLP http port (ADR 0223).
+#:
+#: Spelled from the two constants rather than typed, so that a test can derive
+#: the expected value the same way and the compose environment cannot drift
+#: from the check that validates it.
+COLLECTOR_SERVICE = "metrics"
+COLLECTOR_OTLP_HTTP_PORT = 4318
+COLLECTOR_ENDPOINT = f"http://{COLLECTOR_SERVICE}:{COLLECTOR_OTLP_HTTP_PORT}/v1/metrics"
+
+
+def _optional_collector_endpoint(name: str) -> str | None:
+    """The collector endpoint, or `None`, and nothing else.
+
+    **Not a general URL setting, and the narrowness is the point.** The agent
+    plane's metrics are per project by construction: the mcp container sits on
+    its own project's `internal` and `edge` networks, so the service name
+    `metrics` reaches its own collector and no other's. An environment line
+    carrying some other address would move this project's telemetry onto a
+    surface nobody reviewed -- off the host, in the worst case -- and it would
+    do it silently, because a metric exporter that cannot reach its endpoint
+    logs and carries on (measured in rig 31d: nothing raises into a tool call).
+
+    So the value is compared against the one endpoint that is correct, and the
+    refusal names the EXPECTED SHAPE rather than echoing what it was given: an
+    error message that printed the address would put an operator's typo into
+    the log of a service that is careful about what it logs.
+
+    Absent or empty is `None`, which turns metrics off. That is a deployment
+    decision, not a failure -- `configure` returns False and clears the two
+    instruments.
+    """
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return None
+    if value != COLLECTOR_ENDPOINT:
+        raise MissingSetting(
+            f"{name} must be exactly http://{COLLECTOR_SERVICE}:"
+            f"{COLLECTOR_OTLP_HTTP_PORT}/v1/metrics -- this runtime exports to its own "
+            "project's collector by service name and to nothing else (ADR 0223)"
+        )
+    return value
+
+
 def _required_http_url(name: str) -> str:
     """A required `http://` or `https://` URL, with no credential in it.
 
@@ -230,6 +274,15 @@ class McpSettings:
     #: number is a REST API that starves under agent load rather than an
     #: error anybody sees.
     max_concurrent_reads: int
+    #: Session 31 (ADR 0223). Where the two agent-plane instruments go, or
+    #: `None` when no collector is configured -- which is a deployment with
+    #: metrics off, and a decision rather than a failure.
+    #:
+    #: Last, and with a default, because it is the only optional member of
+    #: this dataclass. Everything above it is required for the reason the
+    #: class docstring gives; this one is genuinely absent on a project that
+    #: exports nothing.
+    otlp_endpoint: str | None = None
 
 
 def load_mcp(environ: dict[str, str] | None = None) -> McpSettings:
@@ -269,6 +322,7 @@ def load_mcp(environ: dict[str, str] | None = None) -> McpSettings:
         postgrest_url=_required_http_url("APG_POSTGREST_URL"),
         capability_lock_file=Path(_required("APG_MCP_LOCK_FILE")),
         max_concurrent_reads=_required_int("APG_MCP_MAX_CONCURRENT_READS"),
+        otlp_endpoint=_optional_collector_endpoint("APG_OTLP_ENDPOINT"),
     )
 
 
@@ -452,6 +506,16 @@ MCP_VARIABLES: tuple[str, ...] = (
     "APG_MCP_LOCK_FILE",
     # Session 8 Run 8. The concurrency share (ADR 0129).
     "APG_MCP_MAX_CONCURRENT_READS",
+    # Session 31 (ADR 0223). Where the two agent-plane instruments are
+    # exported. A URL and not a credential, which is what lets it be an
+    # ordinary setting at all -- a bearer token for a collector would be one,
+    # and the MCP runtime holds no credential.
+    #
+    # OPTIONAL, and that is the deployment's decision rather than a
+    # convenience: a project with no collector should cost nothing, and
+    # `mcp_metrics.configure` returns False for a falsy endpoint and clears
+    # the instruments.
+    "APG_OTLP_ENDPOINT",
 )
 
 #: The variable each mode must NOT be given. Stated as a set rather than left

@@ -34,7 +34,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from agentic_postgres import jwt_keys, runtime_override
+from agentic_postgres import REPO_ROOT, jwt_keys, runtime_override
 from app import claims as claim_contract
 from app import mcp_runtime
 from app import settings as settings_module
@@ -326,6 +326,13 @@ def _mcp_environment(**extra: str) -> dict[str, str]:
         "APG_MCP_LOCK_FILE": "/etc/mcp/capability-lock.json",
         # Session 8 Run 8: the concurrency share (ADR 0129).
         "APG_MCP_MAX_CONCURRENT_READS": "5",
+        # Session 31 (ADR 0223): where the two instruments are exported.
+        # Present here because `MCP_VARIABLES` is asserted to equal this set,
+        # and an OPTIONAL variable is still one `load_mcp` reads. That it is
+        # optional -- absent means metrics off, not a failed start -- is
+        # asserted by `test_an_endpoint_that_is_not_this_projects_collector_
+        # is_refused`, which loads this environment without it.
+        "APG_OTLP_ENDPOINT": "http://metrics:4318/v1/metrics",
     }
     environment.update(extra)
     return environment
@@ -540,3 +547,110 @@ def test_the_probe_asks_the_readiness_route_the_runtime_serves() -> None:
     from app import mcp_health
 
     assert mcp_health.PROBE_URL.endswith(mcp_runtime.HEALTH_READY_PATH)
+
+
+# ---------------------------------------------------------------------------
+# Session 31 -- the collector endpoint (OPS-TELEMETRY-001, ADR 0223)
+# ---------------------------------------------------------------------------
+
+
+def test_the_runtime_names_its_collector_endpoint() -> None:
+    """`APG_OTLP_ENDPOINT` is a variable this mode reads, and it is optional.
+
+    Optional because a project with no collector should cost nothing:
+    `mcp_metrics.configure` returns False for a falsy endpoint and clears both
+    instruments, and the runtime logs that metrics are off rather than
+    pretending they are on.
+    """
+    from app import settings as settings_module
+
+    assert "APG_OTLP_ENDPOINT" in settings_module.MCP_VARIABLES
+    # A URL is not a credential, which is what lets it be an ordinary setting.
+    assert "APG_OTLP_ENDPOINT" not in settings_module.FORBIDDEN_VARIABLES["mcp"]
+
+
+def test_the_endpoint_is_derived_from_the_service_name_and_port() -> None:
+    """Derived in the test the way it is derived in the product (D486).
+
+    Two lists that must agree beat one list read twice: the compose
+    environment and the check that validates it are compared against the same
+    two constants rather than against a string typed in both places.
+    """
+    import yaml as _yaml
+
+    from app import settings as settings_module
+
+    expected = (
+        f"http://{settings_module.COLLECTOR_SERVICE}:"
+        f"{settings_module.COLLECTOR_OTLP_HTTP_PORT}/v1/metrics"
+    )
+    assert settings_module.COLLECTOR_ENDPOINT == expected
+
+    model = _yaml.safe_load((REPO_ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    assert model["services"]["mcp"]["environment"]["APG_OTLP_ENDPOINT"] == expected
+    # And the collector really is that Compose service, on that port.
+    assert settings_module.COLLECTOR_SERVICE in model["services"]
+
+
+def test_an_endpoint_that_is_not_this_projects_collector_is_refused() -> None:
+    """The runtime may not be pointed off its own project by a config line.
+
+    A metric exporter that cannot reach its endpoint logs and carries on
+    (rig 31d), so a mistyped -- or malicious -- address would move this
+    project's telemetry somewhere nobody reviewed, silently. The refusal names
+    the EXPECTED SHAPE and never echoes what it was given: a message that
+    printed the address would put it into the log of a service that is careful
+    about what it logs.
+    """
+    from app import settings as settings_module
+
+    base = {
+        "APG_PROJECT_KEY": "alpha-dev",
+        "APG_PROJECT_ENVIRONMENT": "dev",
+        "APG_JWT_ISSUER": "https://x.test/api/app/auth",
+        "APG_JWT_AUDIENCE": "urn:apg:alpha:dev",
+        "APG_JWKS_FILE": "/run/jwks.json",
+        "APG_LISTEN_PORT": "8080",
+        "APG_POSTGREST_URL": "http://postgrest:3000",
+        "APG_MCP_LOCK_FILE": "/run/lock.json",
+        "APG_MCP_MAX_CONCURRENT_READS": "4",
+    }
+
+    sentinel = "collector.example.invalid"
+    for bad in (
+        f"http://{sentinel}/v1/metrics",
+        "http://metrics:4318/",
+        "https://metrics:4318/v1/metrics",
+    ):
+        with pytest.raises(settings_module.MissingSetting) as raised:
+            settings_module.load_mcp({**base, "APG_OTLP_ENDPOINT": bad})
+        assert sentinel not in str(raised.value), "the refusal echoed the address it was given"
+
+    # Absent is None and NOT an error -- metrics off is a deployment decision.
+    assert settings_module.load_mcp(base).otlp_endpoint is None
+    assert settings_module.load_mcp({**base, "APG_OTLP_ENDPOINT": ""}).otlp_endpoint is None
+
+    # The control: the correct endpoint is accepted.
+    accepted = settings_module.load_mcp(
+        {**base, "APG_OTLP_ENDPOINT": settings_module.COLLECTOR_ENDPOINT}
+    )
+    assert accepted.otlp_endpoint == settings_module.COLLECTOR_ENDPOINT
+
+
+def test_the_runtime_configures_metrics_after_it_loads_the_lock() -> None:
+    """Ordering, read out of the source, because ordering is the property.
+
+    The tool roster is the lock's. Configuring before it would pass a guess at
+    the tool names, and `mcp_metrics` substitutes `LABEL_OTHER` for any value
+    outside the set it was given -- so every call would be counted under
+    `other` and the counter would be useless in the way that looks like it is
+    working.
+    """
+    source = (REPO_ROOT / "services" / "auth-api" / "app" / "mcp_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    load_at = source.find("lock = load_lock(")
+    configure_at = source.find("mcp_metrics.configure(")
+    assert load_at != -1, "the lock is no longer loaded; this scan measures nothing"
+    assert configure_at != -1, "the runtime no longer configures metrics"
+    assert load_at < configure_at, "metrics are configured before the lock is loaded"

@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 from fastmcp.server.auth import TokenVerifier as _TokenVerifier
 from mcp.types import LATEST_PROTOCOL_VERSION
 
+from app import mcp_metrics, mcp_telemetry
 from app import settings as settings_module
 from app.claims import ClaimError, verify_claims
 from app.mcp_authorization import AgentContextMiddleware, ToolVisibilityMiddleware
@@ -461,6 +462,33 @@ def create_mcp_app() -> Starlette:
     # And written where a SECOND process can read it (D1286). The global above
     # is invisible to `docker exec python -c`, which is how the deploy asks.
     record_loaded_lock(lock)
+    # Session 31 (ADR 0223). The two instruments, wired AFTER the lock, because
+    # the tool roster is the lock's: configuring before it would have to pass a
+    # guess at the tool names, and `mcp_metrics` substitutes `LABEL_OTHER` for
+    # any value outside the set it was given -- so every tool call would be
+    # counted under `other` and the counter would be useless in exactly the way
+    # that looks like it is working.
+    #
+    # The two closed sets arrive as arguments rather than being imported there,
+    # which is `configure`'s own decision: `mcp_tools` owns the roster and
+    # imports `mcp_telemetry`, so importing either from `mcp_metrics` would
+    # close a real cycle.
+    #
+    # `mcp_tracing.configure` is NOT called, and that is the standing decision
+    # its own module records. Tracing has no reader, and a span carries
+    # request-shaped values a metric does not.
+    metrics_on = mcp_metrics.configure(
+        endpoint=settings.otlp_endpoint,
+        service_name="apg-mcp",
+        tool_names=tuple(tool.name for tool in lock.tools),
+        outcomes=mcp_telemetry.OUTCOMES,
+    )
+    if not metrics_on:
+        # Said rather than inferred, for the reason `configure` returns a bool
+        # at all. A deployment with no collector is a decision, and the line an
+        # operator needs is the one that distinguishes it from an export that
+        # is failing silently.
+        mcp_telemetry.LOGGER.warning("metrics are not exported: no APG_OTLP_ENDPOINT")
     server = build_server(
         AgentTokenVerifier(key_set, issuer=settings.issuer, audience=settings.audience),
         project_key=settings.project_key,

@@ -804,5 +804,49 @@ def capacity_report(reading: Any) -> tuple[Check, ...]:
     return tuple(checks)
 
 
+def usage_report(figures: Any, *, units: dict[str, str]) -> tuple[Check, ...]:
+    """How much this project is using, in one check per group.
+
+    **Two verdicts, never four**, for `capacity_report`'s reason and
+    `agent_record`'s before it: no size or count here has a measured value at
+    which this deployment is unwell, and a threshold invented inside the one
+    command that runs as root on production could fail a host that works
+    (D1441, ADR 0213, ADR 0221).
+
+    Grouped rather than one check per figure, because the groups are what an
+    operator actually asks about -- how big is the database, how big is the
+    backup, how much agent record is there, how busy has it been -- and eight
+    one-line checks would be a list to scan rather than an answer.
+
+    A group is `UNKNOWN` when ANY of its figures is, and names the ones it
+    could not read. Half a group reported as a healthy number is the fold ADR
+    0195 forbids: two of three sizes is not a size.
+    """
+    mapping = figures.as_mapping()
+
+    groups = (
+        ("database", ("database_bytes", "pgdata_kb", "wal_kb")),
+        ("repository", ("repository_bytes",)),
+        ("agent record", ("audit_rows", "idempotency_rows")),
+        ("traffic", ("requests_total", "tool_calls_total")),
+    )
+
+    checks: list[Check] = []
+    for name, members in groups:
+        selected = {member: mapping[member] for member in members}
+        facts = _pairs(**{member: figure.value for member, figure in selected.items()})
+        missing = sorted(member for member, figure in selected.items() if not figure.known)
+        if missing:
+            reason = selected[missing[0]].reason
+            checks.append(
+                _check(name, UNKNOWN, f"{', '.join(missing)} could not be read: {reason}", facts)
+            )
+            continue
+        detail = ", ".join(f"{figure.value} {units[member]}" for member, figure in selected.items())
+        checks.append(_check(name, OK, detail, facts))
+
+    return tuple(checks)
+
+
 def _tail(detail: str) -> str:
     return f" ({detail})" if detail else ""

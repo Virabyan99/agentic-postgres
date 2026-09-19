@@ -220,7 +220,9 @@ def test_the_rendered_collector_scrapes_the_edge_by_its_registered_alias() -> No
     label. A scrape target cannot resolve a label, so the attachment registers
     a name and the config spells that one.
     """
-    rendered = rendering.build_otel_config(naming.project_router_names("alpha"), DOMAIN).decode()
+    rendered = rendering.build_otel_config(
+        naming.project_router_names("alpha"), DOMAIN, "alpha"
+    ).decode()
 
     assert f"{host_config.EDGE_PROXY_ALIAS}:{host_config.EDGE_METRICS_PORT}" in rendered
     assert "prometheus:" in rendered
@@ -476,7 +478,9 @@ def test_the_exposition_expires_a_series_whose_emitter_has_stopped() -> None:
     t+10s -- so the two are distinguishable and this is a setting rather than a
     hope.
     """
-    rendered = rendering.build_otel_config(naming.project_router_names("alpha"), DOMAIN).decode()
+    rendered = rendering.build_otel_config(
+        naming.project_router_names("alpha"), DOMAIN, "alpha"
+    ).decode()
 
     assert f"metric_expiration: {runtime_override.OTEL_METRIC_EXPIRATION_SECONDS}s" in rendered
 
@@ -517,3 +521,127 @@ def test_edge_network_is_shellcheck_clean() -> None:
     if shellcheck.returncode == 127:  # pragma: no cover - not installed
         pytest.skip("shellcheck is not installed")
     assert shellcheck.returncode == 0, shellcheck.stdout
+
+
+# ---------------------------------------------------------------------------
+# Session 31 -- every exported series names its project (OPS-TELEMETRY-001)
+# ---------------------------------------------------------------------------
+
+
+def test_every_exported_series_carries_the_project_as_a_const_label() -> None:
+    """`const_labels` on the exporter, so the label reaches EVERY series.
+
+    Not `external_labels` on the store, which Prometheus attaches on
+    federation, remote write and alerts and **not** to locally queried
+    series -- the only kind `doctor usage` reads. That would have been a
+    declared field with no reader (D816).
+
+    Measured in rig 31c against otelcol-contrib 0.159.0, with a control that
+    omitted the option and carried nothing.
+    """
+    rendered = rendering.build_otel_config(
+        naming.project_router_names("alpha"), DOMAIN, "alpha-dev"
+    ).decode()
+    assert "const_labels:" in rendered
+    assert "project: alpha-dev" in rendered
+
+    block = rendered.split("exporters:", 1)[1]
+    assert "const_labels:" in block, "the labels are not on the EXPORTER"
+
+
+def test_the_const_label_is_the_project_key_and_nothing_else() -> None:
+    """One label, and it is the key.
+
+    A second const label would be a dimension nobody reviewed on every series
+    the store holds -- and cardinality on a 3814 MiB node is not free.
+    """
+    rendered = rendering.build_otel_config(
+        naming.project_router_names("alpha"), DOMAIN, "alpha-dev"
+    ).decode()
+    lines = rendered.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "const_labels:")
+    labels = []
+    for line in lines[start + 1 :]:
+        if not line.startswith("      ") or line.strip().startswith("#"):
+            break
+        labels.append(line.strip())
+    assert labels == ["project: alpha-dev"], labels
+
+
+def test_a_project_key_that_is_not_a_name_is_refused() -> None:
+    """The key is interpolated into YAML, so it is asserted rather than trusted.
+
+    A key holding a `:` or a newline would not be a label value -- it would be
+    a second key in the exporter's block.
+    """
+    for bad in ("alpha dev", "alpha:dev", "alpha\ndev", ""):
+        with pytest.raises(ValueError, match="const_labels"):
+            rendering.build_otel_config(naming.project_router_names("alpha"), DOMAIN, bad)
+
+
+def test_two_projects_get_two_labels() -> None:
+    """The control for the three above: the label follows the project."""
+    alpha = rendering.build_otel_config(
+        naming.project_router_names("alpha"), DOMAIN, "alpha-dev"
+    ).decode()
+    beta = rendering.build_otel_config(
+        naming.project_router_names("beta"), DOMAIN, "beta-dev"
+    ).decode()
+    assert "project: alpha-dev" in alpha
+    assert "project: beta-dev" in beta
+    assert "project: beta-dev" not in alpha
+
+
+def test_configure_with_an_endpoint_creates_both_instruments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`configure` returns True and both instruments exist.
+
+    The endpoint is `http://127.0.0.1:9/v1/metrics` -- port 9 is discard, so
+    nothing can connect. That is deliberate: rig 31d measured that an
+    unreachable collector never raises into the caller (the SDK's reader runs
+    on its own thread and logs), so this asserts the wiring without needing a
+    collector in the suite.
+    """
+    # The endpoint is unreachable by design, so the SDK's reader retries with
+    # exponential backoff and prints several hundred bytes of transient-error
+    # noise into every suite run. Bounded here through the SDK's own
+    # variables rather than by making the endpoint reachable, because an
+    # unreachable one is exactly what this asserts survives.
+    monkeypatch.setenv("OTEL_METRIC_EXPORT_TIMEOUT", "200")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_METRICS_TIMEOUT", "1")
+
+    import sys as _sys
+
+    service = REPO_ROOT / "services" / "auth-api"
+    _sys.path.insert(0, str(service))
+    try:
+        from app import mcp_metrics
+    except ImportError:  # pragma: no cover - the SDK is only in the image
+        pytest.skip("the OpenTelemetry SDK is not installed in this environment")
+    finally:
+        _sys.path.remove(str(service))
+
+    try:
+        assert (
+            mcp_metrics.configure(
+                endpoint="http://127.0.0.1:9/v1/metrics",
+                service_name="apg-mcp",
+                tool_names=("list_resources",),
+                outcomes=("served",),
+            )
+            is True
+        )
+        assert mcp_metrics._CALLS is not None
+        assert mcp_metrics._DURATION is not None
+        # The hot path may not raise, whatever the exporter is doing.
+        mcp_metrics.record(tool="list_resources", outcome="served", elapsed_ms=1)
+    finally:
+        # The control, and the cleanup in one: with no endpoint, `configure`
+        # returns False and CLEARS the instruments.
+        assert (
+            mcp_metrics.configure(endpoint=None, service_name="apg-mcp", tool_names=(), outcomes=())
+            is False
+        )
+        assert mcp_metrics._CALLS is None
+        assert mcp_metrics._DURATION is None

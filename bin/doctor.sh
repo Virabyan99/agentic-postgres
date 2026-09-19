@@ -10,9 +10,11 @@
 #                                          declared, what is already claimed.
 #                                          Needs root -- the deployed documents
 #                                          it sums are 0700 root (D1606).
+#   sudo bin/doctor.sh usage --project K   ONE project: how much of the node it
+#                                          is using, in eight figures.
 #
 # A VERB is a third mode and not a third flag. `capacity` asks about the node
-# and takes no project; `usage` (Run 4) asks about one project. Both are
+# and takes no project; `usage` asks about one project. Both are
 # READINGS: two verdicts only, OK with the numbers or UNKNOWN naming the figure
 # that could not be read, and never a threshold -- ADR 0221, ADR 0213, D1441.
 #
@@ -60,6 +62,7 @@ usage() {
 Usage: bin/doctor.sh [--verbose] [--help]
        sudo bin/doctor.sh --project <project-key> [--verbose]
        sudo bin/doctor.sh capacity --host <host.yaml> [--project KEY] [--json]
+       sudo bin/doctor.sh usage --project <project-key> [--json]
 
   capacity           Reading. What this NODE has (/proc/meminfo and the Docker
                      root's filesystem), what host.yaml declared, what every
@@ -72,6 +75,18 @@ Usage: bin/doctor.sh [--verbose] [--help]
                      --project KEY excludes that project from the committed
                      sum, which is what a deploy of it asks for.
                      Needs root: the deployed documents are 0700 root.
+
+  usage              Reading. How much of this node ONE project is using:
+                     database bytes, PGDATA and pg_wal in KiB, the backup
+                     repository's bytes, the two agent-record row counts, and
+                     the request and agent-tool-call counters read from this
+                     project's own store. Two verdicts only, and NO threshold
+                     on any figure -- nobody has measured a size at which this
+                     deployment is unwell.
+                     The store is read inside its own container, because it is
+                     routed nowhere; every series it returns must name this
+                     project or the figure is unknown.
+                     Needs root.
 
   (no arguments)     Workstation mode. Checks that this machine can run the
                      gate: required tools at usable versions, the pinned

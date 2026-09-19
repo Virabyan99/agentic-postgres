@@ -131,7 +131,41 @@ def summarise(document: Any, stanza: str) -> dict[str, Any]:
         # Present so a caller can say WHICH backup failed rather than only that
         # the repository is unhappy. pgBackRest sets it per backup.
         "backup_errors": [b.get("label") for b in backups if b.get("error")],
+        # Session 31 (ADR 0221): what this stanza actually occupies at the
+        # provider, for `doctor usage`.
+        #
+        # **`delta`, not `size`.** `info.repository.size` is what this backup
+        # WOULD occupy alone; `delta` is what it added to the repository given
+        # what was already there. An incremental's `size` counts the bytes of
+        # the full it references, so summing `size` over a chain counts the
+        # same bytes once per backup and produces a total larger than the
+        # repository has ever held -- a number that looks measured and is not.
+        #
+        # `None` when ANY backup lacks the member, never a partial sum: a
+        # repository figure that silently omitted one backup would read as a
+        # smaller repository rather than as an unread one (D600).
+        "repository_bytes": _repository_delta_total(backups),
     }
+
+
+def _repository_delta_total(backups: list[dict[str, Any]]) -> int | None:
+    """The sum of every backup's repository delta, or `None`.
+
+    Separate from `summarise` so the rule -- all of them or none -- is one
+    expression a reader can check, rather than a comprehension with a
+    conditional buried in a dict literal.
+    """
+    if not backups:
+        # An empty repository occupies nothing, and that IS a measurement: a
+        # stanza created and never backed up is a fact, not a failure to read.
+        return 0
+    total = 0
+    for backup in backups:
+        delta = ((backup.get("info") or {}).get("repository") or {}).get("delta")
+        if not isinstance(delta, int):
+            return None
+        total += delta
+    return total
 
 
 def status_for(summary: dict[str, Any]) -> str:

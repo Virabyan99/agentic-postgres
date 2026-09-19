@@ -284,5 +284,8 @@ def test_disable_disables_what_is_installed_and_skips_what_is_not(
 
 def test_the_wrapper_knows_the_verb() -> None:
     source = (REPO_ROOT / "bin" / "backup.sh").read_text(encoding="utf-8")
-    assert "stanza-create | check | backup | info | expire | schedule | mirror)" in source
+    # Session 31 added `usage` (ADR 0221): the repository's size, separate
+    # from `info` because `info --json` IS the deployed document's block and
+    # the deploy consumes it verbatim.
+    assert "stanza-create | check | backup | info | usage | expire | schedule | mirror)" in source
     assert "schedule status [--json]" in source

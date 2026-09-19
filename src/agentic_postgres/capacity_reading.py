@@ -47,9 +47,11 @@ __all__ = [
     "MEMINFO_PATH",
     "SUGGESTED_ACTION_DISK",
     "SUGGESTED_ACTION_MEMORY",
+    "USAGE_FIGURE_UNITS",
     "Decision",
     "Figure",
     "Reading",
+    "UsageFigures",
     "ceilings_from_inspect",
     "committed_from_documents",
     "decide",
@@ -168,6 +170,51 @@ class Decision:
     @property
     def exit_code(self) -> int:
         return EXIT_ADMISSION_REFUSED if self.refused else 0
+
+
+#: What each usage figure is counted in, for the renderer. A figure whose unit
+#: lived only in its name would be a number an operator has to guess about.
+USAGE_FIGURE_UNITS: dict[str, str] = {
+    "database_bytes": "bytes",
+    "pgdata_kb": "KiB",
+    "wal_kb": "KiB",
+    "repository_bytes": "bytes",
+    "audit_rows": "rows",
+    "idempotency_rows": "rows",
+    "requests_total": "requests",
+    "tool_calls_total": "calls",
+}
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class UsageFigures:
+    """How much of this node one project is actually using.
+
+    Eight figures, each a :class:`Figure` -- a number or the reason there is
+    none. **Not `storage_objects`** (D1601): the object listing is reachable
+    only through the credential the storage container alone holds, and a second
+    holder of that credential is this stage's declared failure mode. A member
+    reported `unknown` forever would be a field with no reader (D816), so it is
+    absent rather than permanently unanswerable.
+
+    **Nothing here is thresholded.** These are sizes and counts; nobody has
+    measured a value at which this deployment is unwell, and `doctor` runs as
+    root on production (D1441, ADR 0213). What the reading owes is the numbers,
+    or the reason it could not read one.
+    """
+
+    database_bytes: Figure
+    pgdata_kb: Figure
+    wal_kb: Figure
+    repository_bytes: Figure
+    audit_rows: Figure
+    idempotency_rows: Figure
+    requests_total: Figure
+    tool_calls_total: Figure
+
+    def as_mapping(self) -> dict[str, Figure]:
+        """Ordered, because the report prints them in this order."""
+        return {name: getattr(self, name) for name in USAGE_FIGURE_UNITS}
 
 
 def parse_meminfo(text: str) -> dict[str, int] | None:

@@ -324,3 +324,29 @@ def test_a_rule_waits_more_than_one_scrape_before_firing(rule_list: list[dict]) 
     assert runtime_override.ALERT_FOR_SECONDS > runtime_override.STORE_SCRAPE_INTERVAL_SECONDS
     for rule in rule_list:
         assert rule["for"] == f"{runtime_override.ALERT_FOR_SECONDS}s"
+
+
+def test_the_store_keeps_exactly_the_declared_retention() -> None:
+    """The literal in `compose.yaml` and the constant beside it agree (D1589).
+
+    The store's `mem_limit` two lines away already had a constant and a test;
+    the retention was a bare `14d` with neither, and a declared value with no
+    reader is an unverified value (D600).
+
+    **And no second retention flag**, because `--storage.tsdb.retention.size`
+    silently wins over `.time` when both are set -- two settings for one
+    decision, where the one an operator reads is not the one that applies.
+    """
+    import yaml as _yaml
+
+    from agentic_postgres import runtime_override as _runtime
+
+    model = _yaml.safe_load((REPO_ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    command = model["services"]["store"]["command"]
+    rendered = " ".join(command) if isinstance(command, list) else str(command)
+
+    assert f"--storage.tsdb.retention.time={_runtime.STORE_RETENTION_DAYS}d" in rendered
+    assert "retention.size" not in rendered, (
+        "a size retention beside a time retention is two settings for one "
+        "decision, and the size wins"
+    )

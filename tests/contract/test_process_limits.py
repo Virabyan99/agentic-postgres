@@ -282,7 +282,23 @@ def test_the_same_fork_succeeds_with_no_limit() -> None:
     combined = completed.stdout + completed.stderr
     assert "spawned=20" in combined, combined[-500:]
     assert "Resource temporarily unavailable" not in combined, combined[-500:]
-    assert "max" in completed.stdout, (
-        "with no --pids-limit the cgroup's pids.max should read `max`; it read "
-        f"{completed.stdout!r}"
-    )
+
+    # **The ceiling is NOT asserted as a literal**, and the first version of
+    # this test was wrong to do so. It read `max` here and `19151` on CI --
+    # the runner's systemd `DefaultTasksMax` -- and `3647` on the reference
+    # host. That IS D1602: a container with no `--pids-limit` is not
+    # unbounded, it inherits whatever ambient ceiling the machine sets, and
+    # the value is the environment's business.
+    #
+    # What this control owes the subject beside it is that the ceiling it ran
+    # under is nothing like the subject's 8. So that is what it asserts.
+    ceiling = completed.stdout.strip().splitlines()[-1].strip()
+    if ceiling != "max":
+        assert ceiling.isdigit(), (
+            f"pids.max read {ceiling!r}, which is neither `max` nor a number"
+        )
+        assert int(ceiling) > 64, (
+            f"the control ran under a ceiling of {ceiling}, which is close "
+            "enough to the subject's 8 that the two arms are not comparing "
+            "a limit against the absence of one"
+        )

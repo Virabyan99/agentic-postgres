@@ -265,6 +265,19 @@ STORE_CONFIG_CONTAINER_PATH = "/etc/prometheus/prometheus.yaml"
 STORE_RULES_FILENAME = "alert-rules.yaml"
 STORE_RULES_CONTAINER_PATH = "/etc/prometheus/alert-rules.yaml"
 
+#: How long the store keeps a series, in days (ADR 0223, D1589).
+#:
+#: The number was a bare literal in `compose.yaml`'s `--storage.tsdb.
+#: retention.time=14d` with no constant and no test -- a declared value with
+#: no reader is an unverified value (D600), and the store's `mem_limit` two
+#: lines away already had both. The literal stays where Compose needs it; this
+#: is what a test compares it against.
+#:
+#: Fourteen days is a retention, not a budget: nothing sizes the volume from
+#: it, and no rule evaluates over a window longer than an hour. Changing it
+#: changes how far back an operator can look and nothing else.
+STORE_RETENTION_DAYS = 14
+
 #: How often the store scrapes the collector, and how often it evaluates.
 #:
 #: The two are deliberately equal. Evaluating faster than data arrives
