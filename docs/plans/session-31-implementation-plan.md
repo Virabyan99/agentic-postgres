@@ -1,0 +1,1466 @@
+# Session 31 — The node as a finite resource
+
+**Status:** PLANNED 2026-09-19 at `ae2c0dc` (Session 30's close) on `main`.
+Eight runs. Runs 1–6 are offline (Run 1 has one read-only host step as `op`,
+no root). **Run 7 is the trip** (deploy, the admission proofs, one sweep, the
+tag). Run 8 is the close.
+**Brief:** `docs/plans/stage-4-plan.md` §5 *Session 31* whole (Builds /
+Already true / Must not / Measures / Closes), its rows **D1519** (keep the
+collector and Prometheus, bound them, read them), **D1520** (capacity, admission,
+`pids_limit`/`cpus`), **D1526** (`doctor usage`), **D1527** (`THR-NOISY-
+NEIGHBOUR`), **D1535** (`doctor capacity` is a reading, not `apg tune`); §3's
+ordering rule *31 before 32* (the worker is a seventh claimant and must be
+charged against a declared capacity); §7's row for Session 31 (a reading and a
+decision are two claims); §8 whole (the row *Admission refuses; a capacity
+reading reports*); §9's stop conditions for 31; §11. Plus
+`docs/scope-closure.md` §23 *What Session 31 inherits, in order* (seven items:
+D1580, D1572, D1578, D1581, D1542, D1441's number, two stale facts), CLAUDE.md
+§9 (the same items as rows), and `docs/plans/session-30-implementation-plan.md`
+§10 (what 30 created for 31) and its Sheets A1–A4 (the trip's shape).
+**Shape:** eight runs on `main` directly. Every run that changes code pushes
+and reads that commit's CI verdict by full SHA; Run 8 is documentation only
+and reads none.
+**Product version at close:** `CURRENT_SESSION` **31**; `template_version`
+**`1.9.0`** — `host.yaml` schema 3 (additive; schema 2 still validates),
+`pids_limit` on every project service and `cpus` on the nine long-running
+ones, one new command (`bin/admit.sh`), two new doctor readings, one new
+rehearsal, one new exit code (12), the collector consumed for the first time;
+**no migration, no outputs/capability/lock/secret schema move, no new
+deployed-document field** (D1592). ADR 0162: `upgrade plan` will read the
+change as `implementation` and require `patch`; the minor is chosen above that
+floor by the stage rule (D1081, D1561), and a `major` is §9's stop.
+**Written for whoever picks this up cold, and it will be a different model
+than the one that planned it.** Every path below was read from the tree on
+2026-09-19 at `ae2c0dc` by four explore passes over `src/`, `bin/`, `services/`,
+`compose.yaml`, `schemas/`, `tests/` and `docs/`, and each is cited by
+`path:line`. Every third-party claim is measured in Run 1's rigs with a control
+or is marked as the measurement Run 1 owes — never assumed. **Read CLAUDE.md §1
+in the launch folder before the first command, then this plan's §1, then the
+appendix.** If a step here and the tree disagree, **the tree wins and the
+disagreement is a divergence row** (next free `D` after §1's table), never a
+silent reconciliation.
+
+---
+
+## 0. Where the session starts
+
+```
+HEAD            ae2c0dc on main, local = origin, clean. Deployed: be987cf
+                (1.8.0) on both projects, seven documentation commits behind.
+VERSION         1.8.0. CURRENT_SESSION 30. Outputs schema 18. host.yaml schema 2.
+REGISTRY        228 requirements. 135 claims (19 declared offline). 220 ADRs.
+                ID families: DEP CFG DBX SEC API AGT STO REC OPS DX REL CAP IDN
+                EVAL FLEET TEN DEV EVD GEN STU (test_acceptance_registry.py:79).
+                NEXT FREE: D1582, ADR 0221. This plan uses D1582-D1601 in §1.
+                NEXT FREE AFTER THIS PLAN: D1602.
+EVIDENCE        evidence/session-30.json: 135 claims, 128 passed, 5 not_run,
+                2 failed (documented_path by decision; studio_tenant_read, the
+                instrument this session repairs).
+HOST            3814 MiB, no swap, 2 vCPU (docs/database.md:74; D52). host.yaml
+                :13-14 records "38 G disk, 3.7 GiB RAM" AS A COMMENT, read by
+                nothing. Kernel 7.0.0-31. 22 containers across two projects
+                and the edge (D960). Measured anon 348/351 MB per project, edge
+                31 MB, 1982 MB available of 3814 (D959, 2026-09-04).
+```
+
+**What exists, measured at `ae2c0dc`, and the session builds on:**
+
+- **The memory budget is per project and compile-time.** `config.py:207-223`
+  `DATABASE_BUDGET_DEFAULTS` (shared_buffers 128, max_connections 56,
+  maintenance_work_mem 64, memory_limit 768, shm 256); `:615-628`
+  `unreclaimable_mb(budget)` = shared_buffers + maintenance_work_mem +
+  max_connections × `PER_BACKEND_ANON_MB` (2) = **304** at the defaults;
+  `:612` `HOST_MEMORY_GUARDRAIL_MB = 1600`; `:1175-1207`
+  `_validate_memory_budget` refuses a project whose unreclaimable exceeds the
+  guardrail. **The guardrail is checked per project and never summed across
+  projects.** `unreclaimable_mb` is published in the document on BOTH branches
+  (`schemas/outputs.schema.json:695-716` rendered, `:754-776` deployed —
+  `database.budget` is a required member of `database`).
+- **`mem_limit` is on six services and no service has `pids_limit` or `cpus`.**
+  `compose.yaml:180` postgres `${POSTGRES_MEMORY_LIMIT:?required}`, `:1153`
+  auth, `:1450` storage, `:1582` mcp, and two literals `:965` metrics `128m`,
+  `:1053` store `192m`. The values come from `rendering.build_compose_env`
+  (`rendering.py:1668-1992`, the memory lines at `:1741`, `:1855-1857`, `:1885`,
+  `:1901`) and every key is listed in `COMPOSE_ENV_KEYS` (`:625ff`). **The
+  six caps sum to 2240 MiB per project, 4480 for two, against a 3814 MiB host
+  — the caps are ceilings and were never a reservation (D767).** `pids_limit`,
+  `cpus`, `cpu_quota`, `ulimits`, `nproc`: **0 hits** under `src/ bin/
+  services/ compose.yaml infra/edge/compose.yaml deploy.sh tests/`. `compose.
+  yaml` has **20 services** and no per-service render loop (§1 D1586).
+- **Nothing reads the host.** `/proc/meminfo`, `shutil.disk_usage`,
+  `os.statvfs`, `free`: 0 hits in `src/` and `bin/`. The only `df` is the
+  doctor's, inside the postgres container (`bin/doctor.py:528`); the only
+  cgroup read is the deploy's `memory.stat` inside the container
+  (`bin/deploy-project.py:849-854`, parsed by `database_observation.
+  parse_memory_stat:83-93`). Per-container `pids.current`/`pids.max`/`pids.
+  peak` sit beside `memory.stat` under `/sys/fs/cgroup/system.slice/docker-*.
+  scope/` and are **world-readable, read as `op` with no root** (D765).
+- **`host.yaml` is schema 2 with a single-value enum.** `schemas/host.schema.
+  json:10-14` `"enum": [2]` — *"both directions fail closed"*; loader
+  `host_config.load_host_manifest:74-80`; **no host-manifest migrator exists**
+  (the outputs document has `output_migrations.py`; the host manifest has an
+  operator edit). `host.example.yaml` at the root is read by `tests/contract/
+  test_host_manifest.py:29,433` and eleven other modules (§1 D1584).
+- **The doctor is two files and four verdicts.** `bin/doctor.py` probes (root,
+  live, *"nothing in it is testable behaviourally"*, `:1-14`) and
+  `src/agentic_postgres/diagnosis.py` verdicts (pure). Eleven checks assembled
+  imperatively at `bin/doctor.py:739-759`; verdicts `OK/WARN/PROBLEM/UNKNOWN`
+  (`diagnosis.py:80-88`); `Check(name, verdict, detail, evidence)`
+  (`:102-121`); text at `:597-616`, `--json` at `:619-650`; exit 0 for ok/warn,
+  6 for problem/unknown (`:586-594`). `agent record` (`:527-578`) is the
+  template for a reading with no threshold: **two outcomes, `OK` with numbers
+  or `UNKNOWN` with the reason** (ADR 0213, D1441). The doctor takes
+  `--project KEY` and no verb; `bin/apg.sh` holds no verb table (`:9-15`,
+  `:136-151`) so `apg doctor capacity` reaches `bin/doctor.sh` with `capacity`
+  as `$1`, which today falls to `usage >&2; exit 3` (`bin/doctor.sh:232`).
+  `bin/doctor.py` and `bin/fleet.py` build `docker exec -i` argv by hand with
+  `stdin=DEVNULL` (`bin/doctor.py:67-94`, `bin/fleet.py:63-78`) and do not
+  call `container_exec` (§1 D1593).
+- **Rehearsals.** `rehearsal.SCENARIOS` (`rehearsal.py:79-88`, eight names);
+  `Facts` `:146-195`, `Action` `:198-220`, `Observation` `:223-234`, `Plan`
+  `:237-246`; `_doctor(facts, *extra)` `:259-260`; planners `_PLANNERS`
+  `:754-763`; `verdict()` `:884-959` **raises `RehearsalError` for a scenario
+  with no arm**; `disk-threshold` (`:650-692`) is the model — *the reader is
+  rehearsed by moving the threshold, never by filling the disk* (ADR 0190).
+  `bin/rehearse.py`: `execute` `:272-302`, `observe` `:336-475` (the
+  disk-threshold arm `:445-458`), parser `:727-736` (`scenario` positional,
+  `--outputs`, `--plan`, `--evidence-dir`, `--state-root`, `--rendered-root`,
+  `--registry`), exit codes `:58-62` (2, 3, 5 refused, 6 unread, 7 unreversed),
+  the record `rehearsal.record:976-1005` written to
+  `evidence/rehearsal-<key>-<scenario>-<id>.json` (`bin/rehearse.py:575-582`).
+- **The collector and the store.** Both configs are **built in Python**, not
+  files under `services/`: `rendering.build_otel_config(router_names, domain)`
+  `:1211-1344` (receivers `otlp` 4317/4318 and a `prometheus` receiver scraping
+  `apg-edge-proxy:8089` with a per-project keep-regex; processors
+  `memory_limiter` 96 MiB + `batch`; exporter `prometheus` on 8889 with
+  `metric_expiration: 60s`; written at `:2529-2541`) and
+  `build_prometheus_config()` `:1347-1406` (*"It takes no project, and unlike
+  `build_otel_config` it stays that way"*, one target `metrics:8889`,
+  `honor_labels: true`, written `:2552-2556`). Constants in `runtime_override.
+  py`: `OTEL_EXPORTER_PORT = 8889` `:228`, `OTEL_OTLP_GRPC_PORT = 4317` `:229`,
+  `OTEL_OTLP_HTTP_PORT = 4318` `:230`, `STORE_SERVICE = "store"` `:261`,
+  `STORE_PORT = 9090` `:262`, `STORE_MEMORY_LIMIT_MIB = 192` `:287`,
+  `OTEL_MEMORY_LIMIT_MIB = 96` `:319`, `METRICS_MEMORY_LIMIT_MB = 128` `:326`.
+  **Both are on `edge` only** (`compose.yaml:988-995`, `:1070-1081` — the store's
+  block says *"ADR 0164 section 3 says 'the project's internal network', and
+  this is a deliberate divergence"*). Retention is a bare literal
+  `--storage.tsdb.retention.time=14d` at `compose.yaml:1022` with **no constant
+  and no test** (`14d|retention.time`: 0 hits under `tests/ src/ bin/`).
+  Traefik's metrics entrypoint `apgmetrics` on 8089 IS enabled and IS scraped
+  (`infra/edge/traefik.yaml:29-70`; `host_config.EDGE_PROXY_ALIAS:135`,
+  `EDGE_METRICS_PORT:148`). Images: `otel/opentelemetry-collector-contrib
+  0.159.0` and `prom/prometheus v3.7.3` (`versions.env:17,21`).
+- **The two instruments exist and nothing exports them.** `services/auth-api/
+  app/mcp_metrics.py` (NOT under `src/`): `configure(*, endpoint, service_name,
+  tool_names, outcomes) -> bool` `:114-176` (returns `False` and clears the
+  instruments when `endpoint` is falsy; else an OTLP **http** exporter,
+  `PeriodicExportingMetricReader` every `METRIC_EXPORT_INTERVAL_SECONDS` 15,
+  counter `agent.tool_calls` and histogram `agent.tool_call.duration`);
+  `METRIC_LABELS = ("outcome", "tool")` `:48-56`; the canary at `:205-207`
+  raises on an undeclared label. `mcp_tracing.configure` `:166` carries the
+  paragraph *"NOTHING IN THIS PRODUCT CALLS THIS, AND THAT IS A STANDING
+  DECISION"* (`:177-202`, D1413/D1444) and `tests/contract/test_mcp_tracing.py:
+  283-322` is a text scan that enumerates every module calling `configure(`.
+  `MCP_VARIABLES` (`settings.py:439-455`) has no collector-endpoint variable;
+  the mcp container's environment is `compose.yaml:1583-1633`; the mcp service
+  is on `internal` AND `edge` (`:~1658`), so it reaches its own project's
+  collector by the service name `metrics` and no other's. The insertion point
+  is `mcp_runtime.create_mcp_app()` `:437-463`, after `lock = load_lock(...)`
+  `:453` (the tool names come from the lock).
+- **The deploy's preflight already has the three-outcome vocabulary.**
+  `src/agentic_postgres/preflight.py` (`PRESENT/ABSENT/UNDETERMINED` `:46-48`,
+  `KIND_PREREQUISITE/KIND_PRECONDITION` `:51-53`, `report` `:270`, `exit_kind`
+  `:257`), consumed at `bin/deploy-project.py:482-556` and `:1970-1974`. Step
+  0 is `:1963` and **the comment at `:1960-1962` is the admission check's
+  insertion point**: *"everything above this line reads. The render below
+  writes `.generated/<key>`"* (D614). Exit codes `:86-89` (`EXIT_INPUT 2`,
+  `EXIT_PREREQUISITE 3`, `EXIT_PRECONDITION 4`, `EXIT_VALIDATION 5`); the
+  repo-wide convention table is `docs/session-02-operator-guide.md:259-276`,
+  codes 0–11, and its `:275-276` says a new code belongs in that table and not
+  a second one. `tests/contract/test_cli_contract.py` pins **no** exit-code
+  table; the header-documents-its-codes precedent is `tests/contract/
+  test_dev_command.py:234`.
+- **The evidence model.** Registry entry shape `tests/acceptance-registry.
+  yaml:4091-4109`; `ID_PATTERN` `test_acceptance_registry.py:79`;
+  `target_session <= CURRENT_SESSION` at `:163` (so every `target_session: 31`
+  entry lands with the bump, D690); `CLAIMS` `evidence_claims.py:224-890`
+  (Session 30's block `:370-387`), `OFFLINE_CLAIMS` `:106-177` (19 members);
+  `CLAIM_INTRODUCED_IN` `tests/contract/test_evidence_claims.py:949-1105`;
+  `ENVIRONMENT_VARIABLES` `tests/conftest.py:82-167` (26 names, closed);
+  `KNOWN_UNREGISTERED` `tests/contract/test_deployment_suite_shape.py:116-150`
+  (**22** node ids, compared for equality); the gate `bin/session-30-check.sh`
+  (1669 lines; header `:1-229`, usage `:294-556`, flags `:571-747`, offline
+  `:1201-1400`, host `:1467-1600`, external `:1615-1660`) and
+  `tests/contract/test_session_thirty_gate_modes.py` (24 tests,
+  `SESSION_PREVIOUS_NUMBER = 28` at `:80`).
+- **The carried-in items, located.** D1572: `tests/deployment/test_session24_
+  studio.py:689-788`, subjects created with `project_a["database"]["roles"]
+  ["project_admin"]` at `:727` (and the `auditor` fixture at `:243-251`), the
+  write at `:756-768` is `POST /rpc/create_note`, granted only to
+  `{{authenticated}}, {{agent_writer}}` (`migrations/templates/0007-api-surface-
+  convergence.sql:261-271`; `api_documentation` at `0009:33-34`) and never to
+  `project_admin`. D1580: `jwt_keys.retire_rotation:464-492` (the early
+  refusal `:480-485`, unreachable because `bin/deploy-project.py:2885-2890`
+  sets `retire_after = None` when the rendered set holds one kid, and
+  `FOLLOW_UP["promote"]` (`bin/rotate-signing-key.py:459-468`) tells the
+  operator to clear the prepared key and redeploy). D1578: the only PEM
+  delimiter check is `bin/bootstrap-providers.py:159-165` over the key the
+  product generated; `bin/render-jwks.py:140-149` suppresses openssl's stderr
+  by design; `value_kind` is an enum `["random_hex", "rsa_private_pem"]`
+  (`schemas/secret-contract.schema.json:92-98`) whose only runtime reader is
+  `secrets_contract.py:543-546` (the pgpass cross-check); `bin/materialize-
+  secrets.py:219-235`'s loop never reads it. D1581: `runtime_override.
+  mounted_paths_by_service:960-981` reads `services.*.volumes` of
+  `runtime-compose.override.yaml`; the secret mounts are `secrets.<name>.file`
+  in `secrets-compose.override.yaml` (`secret_override.py:56,93-137`).
+
+---
+
+## 1. The divergence table
+
+Six columns. Each row is a **measured fact about the tree at `ae2c0dc`** set
+against what the brief (the stage plan's §5 *Session 31*, its §1 rows, and
+CLAUDE.md §9) says, with the decision this plan takes. **Next free number
+after this table is D1602.**
+
+| # | Brief says | Tree does | Decision | Why | ADR |
+|---|---|---|---|---|---|
+| **D1582** | *"Publish Prometheus on a route (it stays unrouted; the doctor reads it over the internal network)"* — stage plan §5, Must not. | **The store is on `edge` only**, not `internal` (`compose.yaml:1070-1081`, a recorded divergence from ADR 0164 §3). The Session 14 proof reaches it **through the container**: `docker exec <store> wget -q -Y off -O - http://127.0.0.1:9090/api/v1/query?query=…` (`tests/deployment/test_session14_observability.py:234-261`); the image has `wget` and no shell (`compose.yaml:1062-1065`). | **The doctor reads the store the way the proof does**, through `container_exec.run(container, "wget", …)` on the container named `apg-<key>-store-1`, over 127.0.0.1 inside it. No network is added to the store; nothing is routed. | The store stays unrouted and joins no new network (ADR 0168, stage plan §9); the reader that already works is the one to copy (D1114: a proof calls the product's own path, and here the product's path is created from the proof's). | 0223 |
+| **D1583** | D1520: *"`deploy` REFUSES a new project when the sum of every deployed project's `mem_limit`s plus this one's plus the reserve exceeds the declared memory"*. | **The `mem_limit`s of one project sum to 2240 MiB (768+384+384+384+128+192), 4480 for the two deployed, against 3814 MiB** — D767 measured in Session 14 that *"the caps in aggregate already exceed the machine's RAM, so they were never a reservation"*. A rule over `Σ mem_limit` refuses **today's own deployment**. What the schema computes and the document publishes as *what the host must actually find* is `database.budget.unreclaimable_mb` (`outputs.schema.json:918`), **304** per project at the defaults, checked per project against `HOST_MEMORY_GUARDRAIL_MB` 1600 and never summed. | **Admission charges the UNRECLAIMABLE claim, not the ceiling**: `Σ_deployed unreclaimable_mb (other projects) + candidate's unreclaimable_mb + reserve_memory_mb ≤ memory_mb`. `host.example.yaml` declares `memory_mb: 3814` and `reserve_memory_mb: 2214`, so `memory_mb − reserve_memory_mb == HOST_MEMORY_GUARDRAIL_MB`, asserted by a test — the guardrail becomes a host-level, cross-project number without moving. The reading reports `Σ mem_limit` on its own line as *ceilings, not reservations (D767)*. | A decision that refuses the deployment it is protecting is the stop condition §9 names; the reserve is where the sidecars' anon (D959: 348 MB measured against 304 claimed), the edge (31 MB) and the OS live. | 0221 |
+| **D1584** | *"`host.yaml` schema 3 … migratable from schema 2 with defaults equal to today's prose"*. | **There is no host-manifest migration mechanism.** `schemas/host.schema.json:10-14` is `"enum": [2]` by design — *"both directions fail closed"* — and the outputs migrator chain (`output_migrations.py`) has no host counterpart. `host.yaml:13-14` carries the prose (*38 G disk, 3.7 GiB RAM*) as a comment nothing reads. | **The enum widens to `[2, 3]`; schema 3 REQUIRES a `capacity` object with four integer members (`memory_mb`, `reserve_memory_mb`, `disk_gb`, `reserve_disk_gb`), schema 2 stays valid and reports `capacity` absent.** No migrator. With no declaration, admission **refuses a project with no deployed document and admits a redeploy** (D1592) — so no operator action precedes the upgrade and the change is not `operator_manifest_invalidated`. `host.example.yaml` moves to schema 3 with the four numbers and their derivations in comments. The trip's Sheet A2 moves the host's `host.yaml` (op-owned, gitignored) with a backup copy first. | A default that is *measured at first read* is a reading standing in for a declaration — the exact fold ADR 0195 forbids; a declaration is typed by the operator or absent, and *absent* is reported. A required edit before an upgrade would price the release `major` (ADR 0162) for four numbers. | 0221 |
+| **D1585** | *"exiting with a new code the CLI contract names"*. | `test_cli_contract.py` pins no exit-code table; the convention table is `docs/session-02-operator-guide.md:259-276` (0–11; 6 is *a host or gate check failed*, 10 is forbidden to new commands by `test_no_command_reports_an_unavailable_capability:815`) and each command's `# Exit codes` header (`deploy.sh:11-16`, `bin/deploy-project.py:86-89`). | **Exit code 12: *admission refused — the declared capacity cannot hold this project*.** A row in the convention table; `EXIT_ADMISSION_REFUSED = 12` in `capacity_reading.py`, imported by `bin/admit.py` and `bin/deploy-project.py`; the header blocks of `deploy.sh`, `bin/deploy-project.py`, `bin/admit.sh` and `bin/admit.py` name it; a test in `test_admission.py` reads the four headers for the literal (the `test_dev_command.py:234` shape). | An admission refusal is neither a precondition the operator creates (4) nor a check that failed (6): it is a decision against a declaration, and an operator reading `$?` must be able to tell the three apart. | 0221 |
+| **D1586** | *"`pids_limit` and `cpus` on every service, defaults in `config.py` beside the memory defaults and rendered like `mem_limit`"*. | `compose.yaml` has **20 services** and **no per-service render loop**: four `mem_limit`s are `${…:?required}` interpolations and two are literals; eleven services are one-shots, probes or clients (`contract-probe`, `edge-probe`, `unlabeled-probe`, `secret-check`, `backup-mirror`, `dbmate`, `dbmate-project`, `client-psql`, `client-node-pg`, `client-psycopg`, `client-prisma`); the edge plane (`infra/edge/compose.yaml`) is shared, not a project's. | **The nine long-running services** (postgres, pgbouncer, postgrest, docs, metrics, store, auth, storage, mcp) get `pids_limit: ${<SERVICE>_PIDS_LIMIT:?required}` and `cpus: ${<SERVICE>_CPUS:?required}` from `config.SERVICE_RESOURCE_DEFAULTS` through `COMPOSE_ENV_KEYS` and `build_compose_env`; **the eleven short-lived services** get the literal `pids_limit: 64` (`config.SHORT_LIVED_PIDS_LIMIT`) and no `cpus`; **the edge plane is untouched** (§10). A contract test walks every service in `compose.yaml` and asserts the split by name. | Twenty hand edits are the tree's shape and a loop would be a second renderer (ADR 0133's argument in the other direction); a one-shot's `cpus` would throttle a migration nobody measured; recreating Traefik on a trip is its own act. | 0222 |
+| **D1587** | `apg doctor capacity` and `apg doctor usage` as verbs; stage plan §7: *a capacity reading may report `unknown`*. | The doctor has **four** verdicts (`WARN` is an advisory tier, `diagnosis.py:16-22,80-88`), **no verb** (`--project KEY` is the mode switch, `bin/doctor.sh:243-245`), and `bin/doctor.py`'s parser is flat (`:763-780`); `bin/fleet.py:102-133` and `rehearsal._doctor:259-260` invoke `bin/doctor.py --project KEY --json` and must keep working. `bin/apg-diag.sh:60,355-374` is the verb-dispatch shape. | **`bin/doctor.sh capacity --host host.yaml [--project KEY] [--json]` and `bin/doctor.sh usage --project KEY [--json]`**: the shell maps the verb word to `bin/doctor.py --reading capacity|usage …`; with no verb the eleven checks run exactly as before. Both readings use **two outcomes only, `OK` with numbers or `UNKNOWN` with the reason** — `agent_record`'s shape — never `WARN`, never `PROBLEM`. `bin/doctor.sh` joins `COMMANDS_WITH_VERBS` (`test_cli_contract.py:413`). | A reading with a threshold in the one command that runs as root on production could fail a host that works (D1441); the verb is a word the dispatcher already passes through (`bin/apg.sh:266-269`), so nothing in `apg.sh` moves. | 0221 |
+| **D1588** | *"`mcp_metrics.configure()` called from the service's startup so the two instruments exist"*; §8: *no span leaves a process*. | `mcp_metrics.py` and `mcp_tracing.py` live under `services/auth-api/app/`, not `src/`. `configure()` needs an `endpoint` and **no setting carries one** (`MCP_VARIABLES`, `settings.py:439-455`); `tests/contract/test_mcp_tracing.py:283-322` **enumerates the callers of `configure(`** and asserts the no-caller docstring; `mcp_tracing.py:177-202` says the standing decision is nobody's oversight. | **Metrics only.** A new `APG_OTLP_ENDPOINT` in `MCP_VARIABLES`, set in `compose.yaml`'s mcp environment to `http://metrics:4318/v1/metrics` (a test derives it from `METRICS_SERVICE` and `OTEL_OTLP_HTTP_PORT`); `create_mcp_app` calls `mcp_metrics.configure(...)` after `load_lock` with the lock's tool names and the telemetry outcome vocabulary; **`mcp_tracing.configure` stays uncalled** and its paragraph stays true. The scan test's expectation moves from *no module calls `configure(`* to *exactly `mcp_runtime` calls `mcp_metrics.configure` and nothing calls `mcp_tracing.configure`* — a contract test changed under ADR 0223. | D1519's decision was the two instruments in production with a reader; tracing has no reader and a span carries request-shaped values a metric does not. | 0223 |
+| **D1589** | *"the 14 d retention asserted by a test rather than a flag nobody reads"*. | `--storage.tsdb.retention.time=14d` is a literal at `compose.yaml:1022` with no constant; the store's `mem_limit` literal has a constant and a test (`STORE_MEMORY_LIMIT_MIB`, `test_alert_rules.py:281-287`). | `runtime_override.STORE_RETENTION_DAYS = 14`; the literal stays; `test_alert_rules.py` gains `test_the_store_keeps_exactly_the_declared_retention` asserting the compose command carries `--storage.tsdb.retention.time={STORE_RETENTION_DAYS}d` and no second retention flag (`retention.size`). | The house pattern for a literal in compose is a constant beside it and a test that the two agree (D600: a declared value with no reader is unverified). | 0223 |
+| **D1590** | *"a `project` label on every scraped series"*. | `build_prometheus_config()` takes no project **by its own docstring's decision** (`rendering.py:1348-1350`); Prometheus `external_labels` are attached on federation, remote write and alerts and **not** to locally queried series; every scraped series passes through the collector's `prometheus` exporter, which supports `const_labels`. | **`const_labels: {project: <key>}` on the collector's `prometheus` exporter**, so every series on the exposition surface — OTLP-pushed and edge-scraped alike — carries `project="<key>"`, the store scrapes it, and the metrics route serves it. `build_otel_config` gains a `project_key` parameter (it already takes the project's routers and domain); `build_prometheus_config()` stays parameterless. **Measured in rig 31c with a control before the code is written.** | The label's reader is `doctor usage`, which asserts every series it gets back names the project it asked (question 3 of CLAUDE.md §7: are we reading the right store); the collector is per project already, so the label costs one series-set no cardinality. | 0223 |
+| **D1591** | Stage plan §7 item 3: *"Every new deployed-document field is classified in the isolation matrix in the session that adds it: 31's capacity"*. | Capacity is a **host** declaration in `host.yaml`; the per-project claim admission charges is `database.budget.unreclaimable_mb`, already on both branches of the document and already an `ISOLATED_FIELDS` pointer's neighbour (`test_render_isolation.py:137`). | **No deployed-document field is added; outputs stays v18; the matrix is unchanged.** The stage plan's expectation is recorded as unmet for a reason: there is nothing per-project to classify. | A field added so that a matrix row can be written is D816's shape (a declared field with no reader). | — |
+| **D1592** | *"`deploy.sh` for a project whose document does not yet exist refuses when …"*. | A new project is distinguished from a redeploy only by the presence of `/etc/agentic-postgres/projects/<key>/outputs.json` (`bin/deploy-project.py:1852-1858`, `:2838-2839`); a redeploy can raise `shared_buffers_mb` and move the same sum; a rehearsal needs a deployed subject (`rehearse.py` takes `--outputs`). | **Admission runs on EVERY deploy, at step 0, with the candidate's own key excluded from the committed sum.** A new project charges its manifest's claim against the others; a redeploy charges its new claim against the others. With no declaration: a new project is refused, a redeploy admitted (D1584). A refusal at step 0 changes nothing on the host (`:1960-1962`). | A raised budget is the same decision as a new project; the stage plan's stop condition *"admission would degrade a running project instead of refusing a new one"* is honoured because a refused redeploy leaves the running project running. | 0221 |
+| **D1593** | CLAUDE.md §2: *"Every container exec in `bin/` and `src/` goes through `container_exec` … the AST scan reads 0 unguarded sites."* | `bin/doctor.py:67-94` and `bin/fleet.py:63-78` build `docker exec -i …` argv by hand with `stdin=subprocess.DEVNULL` (D673). The scan (`test_container_exec.py::test_the_scan_finds_no_docker_or_compose_subprocess_outside_the_helper`) guards **inherited stdin**, which these do not have, so they pass it. The sentence overstates: the CLASS is guarded at 0; the HELPER has callers it does not have. | **Every probe this session adds to `bin/doctor.py` calls `container_exec.run`** (the rule for new code); the existing hand-built sites are left where they are and named here. CLAUDE.md's sentence is corrected in Run 8's handoff. | Rewriting eleven working probes to make a sentence true is the shape this project refuses (D1564's second half); a new probe has no reason not to use the helper. | — |
+| **D1594** | CLAUDE.md §9: *"an operator can write a sentinel row and cannot remove one … Session 31's, if the claim is to be routine."* | `bin/api.py:49-60` `OPERATIONS` is a closed set of six with no `delete-*`; `api.create_note` is a reviewed RPC granted by migration 0007; a `delete_note` RPC is a migration plus an `api` contract move plus a client regeneration (`apg generate`, ADR 0204). | **Not built here.** `deployment_convergence` is re-taken on this trip with the Sheet A2 recipe from Session 30 (it worked), and the sentinel is removed by the root line on Sheet A6. A `delete_note` operation belongs to a session that moves the `api` contract anyway (32 adds the worker's functions; 34 adds `emit_event`). | A migration written so a sheet loses one line is a contract move nobody reviewed; the claim IS routine now that the recipe is written. | — |
+| **D1595** | The tree's own prose. | Five stale statements: `tests/contract/test_cli_contract.py:161` says 30's offline mode reports *FOUR* claims (five); `evidence_claims.py:370-371` and `tests/contract/test_evidence_claims.py:1096` say *five claims, four offline* (six, five); `runtime_override.py:42`'s D587 comment names six services carrying `apg.project.key` where eight do (scope-closure §23 item 7); `APG_ADMIN_PASSWORD_FILE` is exported by `bin/session-30-check.sh:1502` and is **absent from `tests/conftest.py`'s closed `ENVIRONMENT_VARIABLES`** — D687's shape in the other direction (a variable the gate exports that no proof gates on, or one a proof reads by `os.environ` outside the roster). | Run 5 corrects the four comments and **measures the fifth**: `git grep -n APG_ADMIN_PASSWORD_FILE -- tests/` — if any proof reads it, it joins the tuple with a `requires_environment` mark; if none does, the gate's export line gains a comment saying which fixture consumes it or is deleted, and the row says which. | The direction nobody chases (D954), and the roster is the one place a gate variable is allowed to be closed. | — |
+| **D1596** | *"or the disk equivalent"* of the memory sum. | No per-project **disk** declaration exists anywhere: the manifest has no disk field, the document's `disk` reading is the doctor's copies-of-PGDATA rule (`diagnosis.disk_headroom:388-434`), and a candidate's PGDATA is unknown before it runs. | **Disk admission is a FLOOR, not a sum**: refused when `free_gb at the Docker root − reserve_disk_gb < 0`, i.e. the operator's declared reserve is what a new project may not eat into. `disk_gb` is declared for the reading to compare against `df`'s total (a declaration that disagrees with the measurement by more than 5 % is reported as such, not refused). | A number for a candidate's disk would be invented (D267); a floor is a decision the operator can state. | 0221 |
+| **D1597** | CLAUDE.md §9: *"22 orphaned deployment proofs … Session 31 triages."* | `KNOWN_UNREGISTERED` holds 22 node ids clustered 5× `test_session2_host.py`, 5× `test_session2_isolation.py`, 4× `test_session2_edge.py`, 3× `test_session9_agent_writes.py`, 1 each in modules 8, 11, 12, 14, 20 (`test_deployment_suite_shape.py:116-150`); no per-id comment names an owner. Other proofs in each of those modules ARE registered, so the requirement families exist. | **Triage by the rule in Run 5, item 6**: each orphan is attached as a node id to the EXISTING requirement whose description already states the property it proves (the requirement's description gains at most one sentence), or, when no requirement states it, gets a new requirement in the module's family. A proof that proves nothing a requirement should state is deleted with the reason. The tuple ends **empty** or names each survivor with the owning session. The count of each outcome is in the Done. | Attaching a proof to the requirement it establishes makes an existing claim stricter, which CLAUDE.md §6 permits; a new requirement per orphan would be the *list made shorter* the docstring warns against. | — |
+| **D1598** | CLAUDE.md §9: *"Nothing validates an operator-supplied PEM … A `value_kind: rsa_private_pem` checked at materialization."* | `value_kind` is declared on every secret (`secrets.required.yaml:392,530,564` are `rsa_private_pem`) and has **one** runtime reader, the pgpass cross-check (`secrets_contract.py:543-546`); `bin/materialize-secrets.py:219-235` writes whatever the provider returns. | `secrets_contract.check_value_kind(kind, value) -> str | None` — a reason that **names no byte of the value** — called in the materialize loop before the write; `rsa_private_pem` requires both PKCS#8 delimiters and a body of at least 1,000 characters; `random_hex` requires lowercase hex. A failing check exits 8 (*a secret could not be fetched or written*) naming the secret's NAME and the kind. The *mistyped name vs deliberately absent* half is **not** built (§10). | The check belongs where the value first lands on disk; `render-jwks` cannot say why it failed without printing the path, and the bootstrap check only ever sees the product's own key. | 0225 |
+| **D1599** | CLAUDE.md §9: *"An ADR is owed for a refusal that cannot fire … Session 31, ADR before code."* | Step 6 of the rotation (the `promote` follow-up, `bin/rotate-signing-key.py:459-468`) clears the prepared key and redeploys; the deploy's `observe_jwt` sets `retire_after = None` when the rendered set holds one kid (`bin/deploy-project.py:2885-2890`); `retire_rotation` then refuses with *no rotation is in flight* (`jwt_keys.py:476-477`) and the early refusal `:480-485` is unreachable. **The overlap window therefore closes at step 6's deploy**, measured on both projects (D1580, D1581). | **ADR 0224: the window is closed by the operator's step-6 deploy, and `retire` records that it was.** The operator guide §15 and Appendix R's step 6 are rewritten so that the deploy is taken **only after `retire_after` has passed** (the sheet reads the document's `retire_after` and waits); `FOLLOW_UP["promote"]` says so; `retire_rotation` with `retire_after is None` and one published kid **reports** *retired by the deploy that published one key* (exit 0) instead of refusing; the early refusal stays for a document a future deploy could write and keeps its test. Whether `render-jwks` should read `verification_kids` so the deploy carries the retiring key is **§10's item for the session that performs the other three rotations**. | Reordering a sheet costs nothing and makes the refusal's premise true; rewriting `render-jwks` in a credential path is a rig and a rotation to prove it, and this session has neither. | 0224 |
+| **D1600** | *"`pids_limit` on the auth container measured by forking past it in a throwaway container"*; defaults *"in `config.py`"*. | No number for any service's process count exists. Per-container `pids.current` and `pids.max` (and `pids.peak` on this kernel — Run 1 reads whether the file exists) are world-readable on the host as `op` (D765's method). | **Run 1 reads `pids.current`/`pids.peak` for all 22 containers as `op` over SSH, no root**; each service's default is **the larger of 64 and four times its measured peak, rounded up to a power of two**; postgres's default is additionally at least `max_connections + 32`. `cpus`: postgres `"2.0"` (the host's count; a bigger host does not silently give it more), every other long-running service `"1.0"` (no sidecar may take both cores). The provisional numbers in Run 3 are replaced by the reading and the Done prints both. | A limit typed from a guess is the class §7 names; a limit four times a measured peak stops a fork storm without touching a working service. | 0222 |
+| **D1601** | D1526: `doctor usage` reads *"storage object count from the existing listing"*. | The listing is the storage service's own S3 list through the credential only the storage container holds (`storage_cleanup.py:166-255`); no other process reaches the bucket, and *one service cannot read another's credential* is an invariant (stage plan §8). | **`storage_objects` is NOT a member of the usage reading.** The seven that are: database bytes (`pg_database_size`), PGDATA KiB, `pg_wal` KiB, the backup repository's bytes (a new `repository_bytes` member of `backup_report.summarise`, summed from each backup's `info.repository.delta`), audit rows, idempotency claims, request count and agent tool-call count from the store. A count route on the storage service is Session 34's if a reader wants it. | A member reported `unknown` forever is a field with no reader (D816); a second holder of the bucket credential is the stage's failure mode. | 0221 |
+
+---
+
+## 2. What the session adds to `tests/acceptance-registry.yaml`
+
+**One new family, `NODE`**, added to `ID_PATTERN` at
+`tests/contract/test_acceptance_registry.py:79` with a comment naming this
+session (the way `STU` names 24). **Nine requirements, nine claims, all
+`target_session: 31`, all P0** — six offline, three host. Every requirement
+belongs to a claim (D697); a new requirement gets a claim of its own (ADR
+0089, D1150). **Node ids below are proposed; Run 6 writes what the runs
+actually wrote, read out of the tree with `pytest --collect-only -q`**
+(D1236). The registry entries cannot be committed before Run 6 moves
+`CURRENT_SESSION` (`:163`, D690) — the runs write the proofs and this table;
+Run 6 lands the YAML.
+
+| Requirement | What it states | Offline node ids (proposed) | Live half |
+|---|---|---|---|
+| `NODE-CAP-001` | `host.yaml` schema 3 declares `capacity` with exactly four positive-integer members; schema 2 still validates and reports the declaration absent; `host.example.yaml` is schema 3 and its `memory_mb − reserve_memory_mb` equals `HOST_MEMORY_GUARDRAIL_MB`; a schema-3 document missing any member, or carrying a fifth, is refused naming it | `test_host_manifest.py::test_schema_three_requires_the_four_capacity_members`, `::test_a_schema_two_manifest_still_loads_and_declares_nothing`, `::test_the_example_declares_the_guardrail_as_memory_minus_reserve`, `::test_a_fifth_capacity_member_is_refused_naming_it` | — (offline claim `capacity_declared`) |
+| `NODE-READ-001` | The capacity reading has three outcomes per figure: `/proc/meminfo` parsed to MemTotal/MemAvailable/SwapTotal in MiB or `unknown` with the reason; `disk_usage` at the Docker root and at each project's data volume or `unknown`; committed unreclaimable per deployed project from the documents; `Σ mem_limit` from `docker inspect` reported as ceilings; `doctor capacity` prints `OK` with every figure or `UNKNOWN` naming the one it could not read, never `WARN` or `PROBLEM`, and its `--json` carries every figure as a number or `null` with a `reason` | `test_capacity_reading.py::test_meminfo_is_parsed_to_mebibytes`, `::test_a_meminfo_missing_memavailable_is_unknown_not_zero`, `::test_committed_memory_sums_unreclaimable_across_documents_and_excludes_the_candidate`, `::test_ceilings_sum_hostconfig_memory_and_ignore_unbounded_containers`, `test_doctor_readings.py::test_the_capacity_report_has_two_verdicts_only`, `::test_an_unreadable_figure_is_unknown_and_names_itself`, `::test_doctor_sh_maps_the_capacity_word_to_the_reading`, `::test_doctor_with_no_verb_runs_the_eleven_checks_unchanged` | — (offline claim `capacity_reading`) |
+| `NODE-ADMIT-001` | Admission decides: refused (exit 12) when committed + requested + reserve exceeds declared memory or free disk is below the disk reserve, admitted (exit 0) otherwise; the candidate's own key is excluded from the committed sum; with no declaration a candidate with no deployed document is refused and one with a document is admitted; an undetermined reading refuses (fails closed) naming the figure; the refusal prints six labelled lines (declared, reserved, committed, requested, safe available, suggested action) and `--json` the same six; the deploy calls the same function at step 0 before any render; the four headers name exit 12 | `test_admission.py::test_a_candidate_that_does_not_fit_is_refused_with_exit_twelve`, `::test_a_candidate_that_fits_is_admitted` (control), `::test_a_redeploy_charges_only_the_other_projects`, `::test_no_declaration_refuses_a_new_project_and_admits_a_redeploy`, `::test_an_unknown_figure_fails_closed_naming_it`, `::test_the_refusal_prints_the_six_lines`, `::test_the_deploy_decides_admission_before_it_renders` (an AST scan of `bin/deploy-project.py`: the call to `capacity_reading.decide` precedes `step("1. Render`), `::test_every_header_names_exit_twelve`, `test_rehearsal.py::test_admission_refused_moves_the_reserve_and_reads_a_refusal`, `::test_admission_refused_has_a_verdict_arm` | — (offline claim `admission_decision`) |
+| `NODE-ADMIT-002` | On the deployment, a third project's manifest whose unreclaimable claim exceeds the safe available is refused by `bin/admit.sh` with exit 12 and the six lines; the same manifest at the release's default budget is admitted (control); the rehearsal `admission-refused` on a deployed project records `refused` with the reserve injected and the host's own answer as control | — | `test_session31_capacity.py::test_a_third_project_that_does_not_fit_is_refused_on_this_host`, `::test_the_same_project_at_the_default_budget_is_admitted`, `::test_the_admission_rehearsal_recorded_a_refusal_and_a_control` (host claim `admission_live`) |
+| `NODE-LIMIT-001` | Every service in `compose.yaml` carries `pids_limit`; the nine long-running services take theirs and `cpus` from `SERVICE_RESOURCE_DEFAULTS` through the compose environment; the eleven short-lived carry the literal; every default is a power of two ≥ 64 and postgres's ≥ `max_connections + 32`; `cpus` is `2.0` for postgres and `1.0` otherwise; a container under `pids_limit` cannot fork past it and the same fork succeeds with no limit (control); `apg dev`'s cluster definition carries the same `pids_limit` if it carries a `mem_limit` | `test_process_limits.py::test_every_service_carries_a_pids_limit`, `::test_the_nine_take_theirs_from_the_environment_and_the_eleven_the_literal`, `::test_every_default_is_a_power_of_two_at_least_sixty_four`, `::test_postgres_can_hold_its_connections_and_its_workers`, `::test_cpus_is_two_for_postgres_and_one_for_every_sidecar`, `::test_a_container_cannot_fork_past_its_pids_limit` (`@requires_docker`), `::test_the_same_fork_succeeds_with_no_limit` (`@requires_docker`, control), `::test_the_dev_cluster_carries_the_same_limit_as_the_release` | — (offline claim `process_limits`) |
+| `OPS-TELEMETRY-001` | The collector's exporter carries `const_labels` with `project` equal to the project key and nothing else; the store's retention is the declared constant; the mcp environment names the collector endpoint derived from the service name and the OTLP http port and the endpoint is in `MCP_VARIABLES`; `create_mcp_app` calls `mcp_metrics.configure` once, after the lock is loaded, with the lock's tool names; `mcp_tracing.configure` has no caller; `configure` with the endpoint set returns `True` and the two instruments record; metrics and store carry `pids_limit` | `test_metrics_surface.py::test_every_exported_series_carries_the_project_as_a_const_label`, `::test_the_const_label_is_the_project_key_and_nothing_else`, `test_alert_rules.py::test_the_store_keeps_exactly_the_declared_retention`, `test_mcp_runtime.py::test_the_runtime_names_its_collector_endpoint`, `::test_the_endpoint_is_derived_from_the_service_name_and_port`, `test_mcp_tracing.py::test_exactly_one_module_configures_metrics_and_none_configures_tracing` (replaces the enumeration at `:283-322`), `test_metrics_surface.py::test_configure_with_an_endpoint_creates_both_instruments` | — (offline claim `telemetry_bounded`) |
+| `OPS-TELEMETRY-002` | On the deployment, `doctor usage` returns a request count and an agent tool-call count read from the project's store, every series returned carries `project="<key>"`, and the metrics route serves `agent_tool_calls_total` for the first time | — | `test_session31_capacity.py::test_usage_reads_request_counts_from_this_projects_store`, `::test_every_series_the_store_returns_names_this_project`, `::test_the_metrics_route_now_serves_the_agent_instrument` (host claim `telemetry_read`) |
+| `NODE-USAGE-001` | `doctor usage` reports seven figures per project (database bytes, PGDATA KiB, WAL KiB, repository bytes, audit rows, idempotency claims, request count, tool-call count — eight with the two from the store) with `OK` or `UNKNOWN` naming the figure it could not read; no figure is thresholded; `backup_report.summarise` exposes `repository_bytes` summed from the deltas; every value printed is an integer this program produced | `test_doctor_readings.py::test_the_usage_report_has_two_verdicts_only`, `::test_no_usage_figure_carries_a_threshold`, `::test_doctor_sh_maps_the_usage_word_to_the_reading`, `test_backup_report.py::test_repository_bytes_is_the_sum_of_deltas`, `::test_repository_bytes_is_none_when_a_backup_carries_no_delta` | `test_session31_capacity.py::test_capacity_agrees_with_free_and_df_on_this_host`, `::test_usage_returns_every_figure_on_both_projects` (host claim `usage_read`) |
+| `SEC-KIND-001` | A secret's value is checked against its declared `value_kind` at materialization before it is written; an `rsa_private_pem` without both PKCS#8 delimiters or shorter than 1,000 characters is refused with exit 8 naming the secret's name and kind and no byte of the value; a `random_hex` that is not lowercase hex is refused the same way; a value that passes is written unchanged | `test_secret_contract.py::test_a_pem_without_delimiters_is_refused_naming_the_secret_not_the_value`, `::test_a_truncated_pem_is_refused`, `::test_a_hex_with_an_uppercase_character_is_refused`, `::test_a_valid_value_of_each_kind_passes` (control), `test_materialize_secrets.py::test_the_loop_checks_the_kind_before_it_writes` (an AST/text scan: `check_value_kind` precedes the write in the loop) | — (offline claim `secret_kind_checked`) |
+
+**Claims** (`src/agentic_postgres/evidence_claims.py` `CLAIMS`, each in a
+block commented *Session 31 (ADR 0221-0225)*): `capacity_declared:
+("NODE-CAP-001",)`, `capacity_reading: ("NODE-READ-001",)`,
+`admission_decision: ("NODE-ADMIT-001",)`, `process_limits:
+("NODE-LIMIT-001",)`, `telemetry_bounded: ("OPS-TELEMETRY-001",)`,
+`secret_kind_checked: ("SEC-KIND-001",)` — **these six in `OFFLINE_CLAIMS`**,
+with the per-session assertion in `test_session_thirty_one_gate_modes.py`
+(D1237: assert THESE six are in the set, never the set's size).
+`admission_live: ("NODE-ADMIT-002",)`, `telemetry_read: ("OPS-TELEMETRY-
+002",)`, `usage_read: ("NODE-USAGE-001",)` are **host** claims and are not
+declared. `CLAIM_INTRODUCED_IN` gains nine rows at 31.
+
+**Existing entries that move:** `STU-QUERY-002` keeps its node id (the
+fixture is repaired, the proof is not renamed). The orphan triage (Run 5,
+D1597) adds node ids to existing entries and possibly new entries in existing
+families; each is listed in Run 5's Done and pasted in Run 6. `IDN-ROTATE`'s
+next free number (read from the registry in Run 5) gains one entry for ADR
+0224's report path if Run 5 writes a proof for it; otherwise the ADR's change
+is covered by the existing rotation module's edited test and no entry is added
+— **Run 5's Done says which.**
+
+**New environment gates** (`tests/conftest.py` `ENVIRONMENT_VARIABLES`, and
+exported by the Session 31 gate's host mode): `APG_CANDIDATE_MANIFEST` (the
+path of the third project's manifest, `/home/op/s31-third.yaml`), `APG_HOST_
+MANIFEST` (the path of the host's `host.yaml`, needed by `admit.sh` and
+`doctor capacity`). Both are declared with a `#:` comment naming this session
+and D687. The gate's flags are `--candidate-manifest FILE` and `--host FILE`
+(the latter already exists, `bin/session-30-check.sh:576`, and is now also
+exported).
+
+---
+
+## 4. Irreversible operations
+
+| Operation | Where | What makes it safe |
+|---|---|---|
+| `host.example.yaml` moved to schema 3; the schema enum widened | Run 2 | Schema 2 still validates (a test); the twelve readers of the example (`test_host_manifest.py:29,433`, `test_bootstrap_state.py:295`, `test_printed_commands.py:115`, `test_project_state_roots.py:235`, `test_edge_config.py:314`, `test_deploy_command.py:40,319,338`, `test_repository_contract.py:32,376,851`, `test_cli_contract.py:965`, the session 3–7 gate-mode modules) run whole |
+| `compose.yaml`: twenty services gain `pids_limit`, nine gain `cpus` | Run 3 | A contract test walks every service; `bin/compose.sh … config` in the gate's step 5 validates the interpolation; rig 31a measured the keys' semantics first; **on the trip every container of both projects is recreated by Compose, including the database** (Sheet A3 says so and reads the ledger after) |
+| `deploy.sh` and `bin/deploy-project.py` gain exit 12 and an admission call at step 0 | Run 3 | The call precedes the render (an AST proof); a refusal changes nothing on the host; `--render-only` keeps working with no host and no root (the gate's step 2 renders four fixtures) |
+| `build_otel_config` gains a parameter; the mcp environment gains a variable; `test_mcp_tracing.py:283-322` replaced | Run 4 | ADR 0223 first; every caller of `build_otel_config` grepped (`rendering.py:2529`, the tests) and edited in the same commit (D979); the replacement is stricter (names the one caller); `FORBIDDEN_VARIABLES` unchanged and its guards run |
+| `mcp_metrics.configure` called in production for the first time | Run 4 | Rig 31d measured the exporter's memory and the series' arrival with a control; `MCP_MEMORY_LIMIT_MB` 384 against the measured cost recorded in the Done; a failing export is logged by the SDK and never raises into a tool call (the SDK's reader runs on its own thread — rig 31d confirms with the collector stopped) |
+| `bin/materialize-secrets.py` refuses a value it used to write | Run 5 | ADR 0225 first; the check names no byte of the value (a test plants a sentinel and greps the output); both projects' provider values are the product's own PEMs (D1578's four malformations were all repaired on trip day), so the trip's deploy is the live control |
+| `retire_rotation` reports where it refused | Run 5 | ADR 0224 first; the early refusal keeps its test; the new outcome is exit 0 only when `retire_after is None` AND exactly one kid is published AND `verifier_acknowledgements` is `None` |
+| Five orphan proofs' registration; `KNOWN_UNREGISTERED` emptied or shrunk | Run 5/6 | Equality guard; `test_acceptance_registry` (D1119); each attachment is one line in the Done with the requirement it joined |
+| `CURRENT_SESSION` 30 → 31; `VERSION` 1.8.0 → 1.9.0 | Run 6 | All-or-nothing (D690); every `target_session: 31` entry in the same commit; the client regenerated (D1238); both release pages gain a `1.9.0` row (ADR 0209); `upgrade plan` on the host confirms `bump minor` or §9 stops |
+| `bin/session-31-check.sh` | Run 6 | Derived from 30's by diff (D1482); header and usage rewritten whole (D1488); `SHELL_COMMANDS` gains it and `chmod 755` before `git add` (D1014, D1188); `test_session_thirty_one_gate_modes.py` copied from thirty's |
+| The host's `host.yaml` moved to schema 3 | Run 7, Sheet A2 (op) | `cp host.yaml /home/op/host.yaml.pre-s31` first; the four numbers come from Sheet A1's `free -m` and `df` readings and the derivation in `host.example.yaml`; `bin/apg.sh generate --check` is unaffected (host.yaml is not a client input); the render as `op` validates it before any `sudo` line |
+| Deploy `--through-session 31` on alpha, then beta | Run 7 | `upgrade plan` OK first (§9); alpha first; at a terminal under `script(1)`; **every container recreated** (the compose keys moved) — the ledgers read after and expected unchanged (33; 33 + 2); `doctor` 11 ok after each |
+| `bin/admit.sh` run against a third manifest on production | Run 7, Sheet A5 | It renders nothing and writes nothing (a contract test: no `.generated` entry and no file under `/etc` or `/var` after a run — the `--root` fixture proof asserts the fixture root's mtime set is unchanged); the manifest lives at `/home/op/s31-third.yaml`, never in the checkout (D971) |
+| Rehearsal `admission-refused` on alpha | Run 7 | Induces nothing (the reserve is injected into `admit.py`'s argv); `reverse` is a no-op; the record's `induced: false` |
+| One sentinel row on alpha before the redeploy | Run 7 | Session 30's recipe verbatim (Sheet A3); deleted on Sheet A6 by the root line; `count 0` read after |
+| Tag `1.9.0` on the deployed commit | Run 7 | After the merge exits 0 or 5 for the expected reasons only (§7); `release-reading --ref <deployed sha>` first; `git ls-tree` of both release pages |
+
+---
+
+## 5. Build order, run by run
+
+Each offline run ends with: `ruff format && ruff check` (its **exit code**
+printed), the targeted modules (named, each checked for existence — D1104),
+derived documents regenerated where a generator's input moved, `chmod 755
+bin/*.sh bin/*.py deploy.sh`, one commit with a message written to a file and
+passed with `-F`, a push, and **that commit's CI verdict read by full SHA with
+three buckets** (D1059) — code commits only. A run that writes a test runs its
+battery (appendix). Mark the run **Done.** with what it measured. **A targeted
+list is derived from the tree** (D1146, D1149, D1184, D1187): a run that moves
+a definition greps every reader of the name AND of the distinctive text and
+runs every module found, whole.
+
+**Docker is required for Runs 1, 3, 4 and 6** (rigs 31a/31c/31d, the fork
+proof, the gate). **Root over SSH is required for Run 7 only** and is typed by
+the operator. **Run 1 has one `op` step over SSH with no root** (the pids
+reading). **No network is required by Runs 2–6** beyond what the tree pins.
+
+### Run 1 — the measurements, and ADRs 0221–0225
+
+**Read first:** stage plan §5 *Session 31* and D1519/D1520/D1526; this plan's
+§1; `docs/decisions/0195-…md` whole; `docs/decisions/0165-…md:55-68` (`anon`
+is the figure a limit is chosen against, never `memory.current`) and ADR
+0169 (`CONFIGURATION` vs `MACHINE`); `docs/plans/session-14-implementation-
+plan.md:99-104` (D765 the cgroup method, D767, D770); `docs/plans/session-17-
+implementation-plan.md:86` (D959); `docs/decisions/0220-…md:1-15` (the ADR
+header shape) and `docs/decisions/README.md:283-286` (the index line);
+`tests/contract/test_image_contracts.py:1495-1535` (how a throwaway
+`otelcol.yaml` is run); `services/auth-api/app/mcp_metrics.py:114-176`;
+`bin/rehearse.py:272-302`, `:336-475`; `rehearsal.py:650-692`.
+
+**Every rig is a script written with the Write tool to
+`\\wsl$\Ubuntu\tmp\rig31<x>.sh`, run with `wsl bash -lc "bash /tmp/rig31x.sh
+> /tmp/rig31x.txt 2>&1"`, its exit statuses printed from inside, and its
+output pasted into the Done.** Every rig has a control. Each names the image
+it ran by digest (`versions.env`). Copy each script to the scratchpad when it
+is green (WSL's `/tmp` dies).
+
+1. **Rig 31a — `pids_limit` and `cpus` through Compose, on this workstation.**
+   A throwaway directory with a `compose.yaml` of three services on
+   `${POSTGRES_IMAGE}` (it has `bash`): `limited` with `pids_limit: 8`,
+   `unlimited` with no key, `capped` with `cpus: "1.0"` (a **quoted string**,
+   because that is what `${X_CPUS:?required}` interpolation yields — measured
+   here, not assumed; if Compose refuses the string, the row records it and
+   the fallback is `deploy.resources.limits.cpus`, which Compose v2 honours
+   outside swarm). Command for the first two: `bash -c 'for i in $(seq 1 20);
+   do sleep 60 & done; wait'`. Expect: `limited` logs *Resource temporarily
+   unavailable* or `fork: retry` and `docker inspect --format
+   '{{.HostConfig.PidsLimit}}'` prints `8` and `cat
+   /sys/fs/cgroup/pids.max` inside prints `8`; `unlimited` reaches 20 sleeps
+   (`cat /sys/fs/cgroup/pids.current` ≥ 21) and `PidsLimit` is `0`. For
+   `capped`: two busy loops (`bash -c 'while :; do :; done & while :; do :;
+   done & sleep 5; cat /sys/fs/cgroup/cpu.stat'`) — `usage_usec` over the 5 s
+   ≤ ~5.5 s under the cap; the control (no `cpus`, `nproc` ≥ 2) reads ≈ 10 s;
+   `cat /sys/fs/cgroup/cpu.max` inside prints `100000 100000`. Also run
+   `docker compose config` and quote how `cpus: "1.0"` is rendered.
+   **Owes:** whether a quoted `cpus` is accepted; the exact fork-failure text
+   (the offline proof asserts it); `pids.max` read-back.
+2. **Rig 31b — the host's process counts, as `op`, no root** (D765's method,
+   the only host step before the trip). Script `s31-pids.sh` scp'd to
+   `/home/op`, run over SSH: for every `/sys/fs/cgroup/system.slice/docker-*.
+   scope`, print the container id, `pids.current`, `pids.max`, and
+   `pids.peak` **if the file exists** (say `absent` otherwise — the reader
+   has three outcomes), then map ids to names with `apg-diag containers`
+   (the agent account, ADR 0071) — 22 scopes expected (D960). Also
+   `cat /proc/meminfo | head -5`, `free -m`, `df -Pk /var/lib/docker /` and
+   `nproc` — the first program-readable copies of the host's numbers.
+   **If WSL has no outbound TCP, use Git's ssh from Windows (CLAUDE.md §1).**
+   **Owes:** the per-service peaks that set `SERVICE_RESOURCE_DEFAULTS`
+   (D1600); MemTotal/MemAvailable/SwapTotal; the Docker root's free space.
+3. **Rig 31c — `const_labels` on the collector's exporter.** Two throwaway
+   `otelcol.yaml`s in the shape `test_image_contracts.py:1495-1535` runs
+   (the `otlp` receiver, the `prometheus` exporter on 8889), one with
+   `exporters.prometheus.const_labels: {project: rig31c}` and one without
+   (control), each run for 20 s with a `hostmetrics`-free pipeline fed by one
+   OTLP http POST from `curl` (a minimal `ExportMetricsServiceRequest` JSON
+   with one sum metric — write it to a file). `wget -O - :8889/metrics` from
+   the collector's own container (it is `read_only`, `cap_drop ALL`; use the
+   image's own binary via a second `docker run --network container:<id>
+   ${POSTGRES_IMAGE} bash -c 'curl …'` if the collector image lacks `wget`
+   — the rig finds out). Expect every non-`#` line of the subject's
+   exposition to carry `project="rig31c"` — including `target_info` — and no
+   line of the control's to. **Owes:** whether `const_labels` reaches every
+   series including the synthesised ones; the option's exact spelling on
+   0.159.0.
+4. **Rig 31d — `mcp_metrics.configure` against a real collector.** A docker
+   network; the collector from rig 31c (with `const_labels`); a container of
+   the auth-api image (`versions.env`'s pin; the exporter package is in the
+   image, `mcp_tracing.py:192-193`) running `python - <<'PY'` **with `-i`**
+   (CLAUDE.md §1): `from app import mcp_metrics; import resource; before =
+   resource.getrusage(...).ru_maxrss; ok = mcp_metrics.configure(endpoint=
+   "http://<collector>:4318/v1/metrics", service_name="apg-mcp", tool_names=
+   ("list_resources",), outcomes=("ok",)); mcp_metrics.record(...)` per the
+   `record()` signature at `:179-213`; sleep 20; print `ok`, the RSS delta,
+   and exit. Then `wget :8889/metrics` → `agent_tool_calls_total{outcome=
+   "ok",project="rig31d",tool="list_resources"} 1`. **Control:** the same
+   with `endpoint=None` → `configure` returns `False`, nothing on 8889.
+   **Second control:** the collector stopped before `record()` — the process
+   exits 0 in under 30 s and prints the SDK's export failure on stderr
+   (nothing raises into the caller). **Owes:** the endpoint's exact path
+   (`/v1/metrics` on the http exporter); the memory cost of the provider and
+   reader (expect single-digit MiB; recorded against `MCP_MEMORY_LIMIT_MB`);
+   whether `service_name` becomes a label (`target_info` only, per
+   `mcp_metrics.py:155-160`'s measurement — confirm).
+5. **Rig 31e — the admission arithmetic, pure, against the fixtures.** No
+   container. A Python script with `PYTHONPATH=src` reading
+   `tests/fixtures/outputs-v10.json` (`unreclaimable_mb` 292) and the two
+   op-owned copies if present in the scratchpad from Session 30 (304 each):
+   compute `committed`, `requested` at the default budget (304) and at
+   `shared_buffers_mb: 896` (896 + 64 + 112 = **1072**), `safe available` =
+   3814 − 2214 − 608 = **992**. Expect: 304 admitted, 1072 refused, and
+   `config._validate_memory_budget` **accepts** 1072 (≤ 1600) — so the
+   refusal on the trip is the cross-project decision and not the per-project
+   guardrail (the control that makes the live proof mean something).
+   **Owes:** the third manifest's budget for Sheet A5 (`shared_buffers_mb:
+   896`), and the confirmation that `database.budget.unreclaimable_mb` is
+   read off the DEPLOYED document by name (`deployed_output.deployed_path`),
+   not the rendered one.
+6. **The five ADRs**, each Accepted, indexed in `docs/decisions/README.md`:
+   - **0221 — Capacity is declared, admission decides, a reading reports.**
+     The four members and their units; the arithmetic of D1583 (unreclaimable,
+     not ceilings) and D1596 (the disk floor); undeclared → new refused /
+     redeploy admitted (D1584); admission on every deploy with self excluded
+     (D1592); exit 12 (D1585); the two doctor readings with two outcomes
+     (D1587); what is NOT built (§7.4's shedding, `apg tune`, a per-project
+     disk declaration, `storage_objects` — D1601). Alternatives: `Σ mem_limit`
+     (refuses the deployment), a default measured at first read (a fold), a
+     thirteenth ADR 0162 class (nothing rendered establishes it).
+   - **0222 — Every project service is bounded in processes, and the
+     long-running nine in CPU.** The split (D1586), the rule for the numbers
+     (D1600), the edge plane excluded, `cpus` 2.0/1.0 and why a cap below
+     the machine's count on a one-shot would be a throttle nobody measured.
+   - **0223 — The collector is consumed: the runtime exports its two
+     instruments, the store stays unrouted and is read by exec, and every
+     series names its project.** D1582, D1588, D1589, D1590; tracing stays
+     unconfigured; the contract tests it changes by name.
+   - **0224 — The rotation's overlap window is closed by the operator's
+     step-6 deploy, and `retire` reports that it was.** D1599, D1580,
+     D1581; the guide's reorder; the `render-jwks`/`verification_kids`
+     question deferred by name.
+   - **0225 — A secret's value is checked against its declared kind at
+     materialization.** D1598; the two kinds' rules; the reason names no
+     byte; the mistyped-name half deferred by name.
+
+**Targeted:** nothing runs (no code changed); `bin/session-01-check.sh` is
+NOT run (no generated artefact moved except the ADR index — run
+`python bin/render-acceptance-matrix.py --check` only if it reads the ADR
+index; otherwise nothing). Commit (ADRs + index), push, **no CI read** (docs).
+
+**Done.** _(to be written by the executor: every rig's output, the five owed
+numbers, and any row §1 got wrong — rewritten in place with the date, D1602+
+for anything new.)_
+
+### Run 2 — capacity declared and read: schema 3, the reader, `doctor capacity`
+
+**Read first:** `schemas/host.schema.json` whole; `src/agentic_postgres/
+host_config.py:74-80,252-263`; `host.example.yaml` whole; `tests/contract/
+test_host_manifest.py` whole; `src/agentic_postgres/diagnosis.py:80-124,
+375-434,527-578,586-650`; `bin/doctor.py:1-120,498-546,682-780`;
+`bin/doctor.sh:200-245`; `src/agentic_postgres/container_exec.py:88-120`;
+`src/agentic_postgres/database_observation.py:83-93` (the parse-then-pass
+shape, ADR 0159); `tests/contract/test_container_selectors.py:243-335`
+(`bin/doctor.py` is a `DEPLOYED_DOCUMENT_READERS` member: a parsed blob that
+is not the deployed document **must not be named `document`**, D1184);
+`bin/fleet.py:84-99` (`read_document` validates the deployed document).
+
+1. **`schemas/host.schema.json`**: `schema_version` enum `[2, 3]`; a
+   `capacity` object (`additionalProperties: false`; four `integer`
+   members, `minimum: 1`, all required) that is **required when
+   `schema_version` is 3** (a `oneOf`/`if-then` in the schema — the run
+   reads how `config.validate_against_schema` reports a failure and asserts
+   the message names `capacity`). `host_config.load_host_manifest` unchanged
+   in signature; `host_config.declared_capacity(manifest) -> Declared | None`
+   (a frozen dataclass `Declared(memory_mb, reserve_memory_mb, disk_gb,
+   reserve_disk_gb)`; `None` for schema 2) — the ONE reader of the four
+   fields (D816). `host.example.yaml` → `schema_version: 3` and:
+   ```yaml
+   capacity:
+     # Declared, never measured into this file. `apg doctor capacity` reports
+     # what the host says and this block says what the operator promises.
+     memory_mb: 3814          # `free -m` total on 2026-09-19 (D52, D959)
+     reserve_memory_mb: 2214  # 3814 - 1600: the release's guardrail is what
+                              # projects may claim in unreclaimable memory
+                              # across the host; the reserve holds the OS, the
+                              # edge (31 MB), page cache and each sidecar's
+                              # anon above its claim (D959: 348 MB against 304)
+     disk_gb: 38              # `df -BG` at the Docker root on 2026-09-19
+     reserve_disk_gb: 8       # below this much free at the Docker root no new
+                              # project is admitted; twice the larger cluster's
+                              # PGDATA rounded up (doctor: disk headroom)
+   ```
+   `test_host_manifest.py` gains the four proofs §2 names; the existing
+   `:433` walk of documented field paths must still resolve (add the four to
+   whatever document it walks — read `:400-440` first).
+2. **`src/agentic_postgres/capacity_reading.py`** (new, pure; `__all__`
+   explicit; module docstring citing ADR 0221 and ADR 0195's two halves):
+   - `MEMINFO_PATH = "/proc/meminfo"`; `parse_meminfo(text: str) ->
+     dict[str, int] | None` — MiB for `MemTotal`, `MemAvailable`, `SwapTotal`
+     (kB // 1024); `None` when any of the three is absent (rig 31b's text
+     is the fixture).
+   - `Figure` — `value: int | None`, `reason: str` (empty when measured);
+     `Reading(declared: Declared | None, mem_total, mem_available, swap_total,
+     docker_root_free_gb, docker_root_total_gb, volumes: dict[str, Figure],
+     committed: dict[str, int], ceilings: dict[str, int])` all `Figure`s
+     except the two dicts.
+   - `committed_from_documents(documents: dict[str, dict], *, exclude:
+     str | None) -> dict[str, int]` — `database.budget.unreclaimable_mb` per
+     key; a document missing the member is **omitted with its key returned
+     in a second tuple** so the caller reports it (never counted as 0).
+   - `ceilings_from_inspect(payload: str) -> dict[str, int]` — parses
+     `docker inspect` JSON of every container labelled `apg.project.key`
+     (`HostConfig.Memory` bytes → MiB; `0` means unbounded and is **listed
+     under `unbounded`, not summed**), grouped by the label's value.
+   - `decide(reading: Reading, *, candidate_key: str, candidate_unreclaimable_
+     mb: int, candidate_is_deployed: bool) -> Decision` — `Decision(outcome:
+     "admitted" | "refused", lines: tuple[tuple[str, str], ...], reason:
+     str)`; the six lines in the order **declared, reserved, committed,
+     requested, safe available, suggested action** for memory and a second
+     six for disk (declared, reserved, free, requested `n/a — no per-project
+     disk claim (D1596)`, safe available, suggested action); rules as §1
+     D1583/D1584/D1592/D1596; **any `Figure.value is None` that the rule
+     needs → `refused` with the figure's reason** (fails closed).
+   - `render_decision(decision) -> str` — the text `bin/admit.py` and the
+     deploy print; `EXIT_ADMISSION_REFUSED = 12`.
+   - `SUGGESTED_ACTION_MEMORY` — one sentence naming the three manifest
+     fields that move `unreclaimable_mb`, *retire a project*, and *raise
+     `capacity.memory_mb` only after `doctor capacity` shows the host has
+     it*.
+   `tests/contract/test_capacity_reading.py` — the proofs §2 names plus a
+   synthetic-document control.
+3. **`diagnosis.capacity_report(reading: Reading) -> tuple[Check, ...]`** —
+   one `Check` per figure group (`declared`, `memory`, `disk`, `committed`,
+   `ceilings`), each `OK` with `_pairs(...)` evidence or `UNKNOWN` with the
+   figure's reason; **`WARN` and `PROBLEM` never** (a test greps the function
+   body for the two names). `bin/doctor.py`: `--reading {capacity,usage}` and
+   `--host FILE` (required with `capacity`; refused with the eleven checks,
+   exit 2); `probe_capacity(host_manifest, root) -> Reading` reads
+   `/proc/meminfo` (**directly, no exec**), `shutil.disk_usage(docker_root)`
+   with the root from `docker info --format '{{.DockerRootDir}}'`. **Which
+   runner for which command:** `docker info`, `docker inspect` and `docker
+   volume inspect` are not execs into a container and go through the
+   module's own bounded `run()` `:67-94`; anything that runs INSIDE a
+   container goes through `container_exec.run` (D1593); every deployed document
+   under `--root` loaded with `bin/fleet.py:84-99`'s `read_document` shape
+   (copy the validation, name the loop variable `deployed`, not `document`).
+   Text output through `diagnosis.report(...)` unchanged; `--json` through
+   `diagnosis.document(...)` unchanged. `bin/doctor.sh`: verb arms
+   `capacity)`/`usage)` before the flag loop, mapping to `--reading`; usage
+   block gains the two lines; `--help` with a verb exits 0 without root
+   (`test_a_verbs_help_is_a_read_and_needs_nothing`, `test_cli_contract.py:
+   459`). `COMMANDS_WITH_VERBS` gains `bin/doctor.sh`.
+4. **`tests/contract/test_doctor_readings.py`** (new; `pytestmark` before
+   the first test, D1240): the four proofs §2 names for `capacity`; the
+   `usage` ones land in Run 4 and the module says so.
+5. **Battery (≥6)**: `parse_meminfo` returning 0 for a missing MemAvailable
+   (killed by the unknown-not-zero proof); `committed_from_documents`
+   counting a document without the member as 0 (killed); `decide` charging
+   the candidate twice on a redeploy (killed by the redeploy proof written in
+   Run 3 — **this mutation is recorded as owed to Run 3**); `capacity_report`
+   emitting `WARN` when available < 10 % (killed by the two-verdicts proof);
+   the schema enum back to `[2]` (killed by the example's load); the example's
+   `reserve_memory_mb` off by one (killed by the guardrail-equality proof).
+
+**Targeted:** `test_host_manifest`, `test_capacity_reading`,
+`test_doctor_readings`, `test_diagnosis`, `test_doctor_redaction`,
+`test_container_selectors`, `test_cli_contract` (a verb-taking command
+joined the control), `test_apg_dispatcher`, `test_fleet` (it runs the
+doctor), `test_honest_readers`, the twelve readers of `host.example.yaml`
+(§4). `python bin/render-config.py --bounds-doc --check` (if `CROSS_FIELD_
+RELATIONS` gained a line for the guardrail equality, `--write`). Push; read
+CI.
+
+**Done.** _(the executor: the reader's output on this workstation's
+`/proc/meminfo` pasted; which figure read `unknown` here and why.)_
+
+### Run 3 — admission at the deploy, `bin/admit.sh`, the rehearsal, and the limits
+
+**Read first:** `bin/deploy-project.py:86-89,176-182,482-556,1922-1995`;
+`deploy.sh:11-16,200-295`; `src/agentic_postgres/preflight.py` whole (the
+voice); `bin/fleet.py:84-133` and `tests/contract/test_fleet.py` (a `bin/`
+command driven against a fixture `--root` — the shape `test_admission.py`
+copies); `tests/contract/test_deploy_command.py`; `src/agentic_postgres/
+config.py:207-335,594-643`; `src/agentic_postgres/rendering.py:625-660,
+1668-1760,1850-1905`; `compose.yaml` — every `services:` entry (the twenty
+lines §0 lists) and `:154-180`; `src/agentic_postgres/dev_environment.py`
+(grep `mem_limit`; if the dev cluster carries one it carries the new key
+too, D979); `rehearsal.py:79-107,137-139,259-271,650-692,754-763,884-959`;
+`bin/rehearse.py:124,272-302,336-475,727-736`; `bin/rehearse.sh`'s usage
+block; `tests/contract/test_rehearsal.py:1-80` and its `disk-threshold`
+proofs; `tests/contract/test_container_exec.py:38,144-170` (`requires_docker`
+imported from `test_image_contracts`); rig 31a's and 31b's outputs.
+
+1. **`bin/admit.py`** (new; imports only `agentic_postgres` and `yaml`, ADR
+   0093; header block naming exit codes 0, 2, 3, **12**): `--host FILE`
+   (required), `--project FILE` (required), `--root DIR` (default
+   `deployed_output.PROJECT_STATE_ROOT`), `--json`, and the four injections
+   `--declared-memory-mb N`, `--reserve-memory-mb N`, `--declared-disk-gb
+   N`, `--reserve-disk-gb N` (each overrides the declaration for this run
+   and is printed on the `declared`/`reserved` line as `(injected)` so a
+   rehearsal's reading cannot be mistaken for the host's — the
+   `disk_headroom` evidence pattern). The candidate's key and claim come from
+   `config.load_project_manifest` → `naming` (the key) and
+   `config.database_budget(manifest["database"])["unreclaimable_mb"]`;
+   **nothing is rendered and nothing under `.generated` is touched** (a
+   proof asserts it). `candidate_is_deployed = (root / key /
+   "outputs.json").is_file()`. Prints `render_decision`, exits 0 or 12.
+   **`bin/admit.sh`**: the `bin/doctor.sh` preamble shape (root required
+   for a real run because `docker inspect` needs the socket; `--help` free),
+   forwards verbatim. Both `chmod 755` and `git add`ed before the suite
+   (D1188); `SHELL_COMMANDS` and `PYTHON_COMMANDS` gain them.
+2. **The deploy**: `bin/deploy-project.py` imports `EXIT_ADMISSION_REFUSED`
+   and, **inside step 0 after the preflight report and before `step("1.
+   Render`**, builds the `Reading` with the same probe the doctor uses
+   (move `probe_capacity` into a small `bin/lib`-free shape: the probe
+   functions live in `bin/doctor.py` today; the deploy imports nothing from
+   `bin/` (ADR 0093 bars `bin`-to-`bin` imports — check `test_repository_
+   contract.py`), so the probe's three `docker` reads are **re-spelled in
+   `deploy-project.py` through its own `run()`** and the parsing stays in
+   `capacity_reading` — one parser, two probes, the doctor/deploy split ADR
+   0157 already draws); calls `decide`; on `refused`, prints the six lines
+   and `fail(EXIT_ADMISSION_REFUSED, …)`. `deploy.sh:11-16` gains the `12`
+   line. `docs/session-02-operator-guide.md:259-276` gains the row. The
+   `--render-only` path never reaches step 0's admission (it does not run
+   `deploy-project.py`'s main deploy — confirm by reading `deploy.sh:200-
+   295` and say so in the Done).
+3. **`tests/contract/test_admission.py`** (new): a fixture `--root` with
+   two synthetic deployed documents (built from `tests/fixtures/outputs-
+   v10.json` with the keys and `unreclaimable_mb` rewritten — validate each
+   with `deployed_output.validate_deployed_document` so the fixture shares
+   the code's belief, question 6), a `host.yaml` at schema 3 in `tmp_path`,
+   a candidate manifest from `project.example.yaml` with `shared_buffers_mb`
+   raised. **`docker inspect` is not available in the suite, and no hidden
+   fixture switch is added for it** (a switch only a test sets is D1509's
+   shape). `ceilings` are a REPORT line and never a rule input, so
+   `admit.py` treats a failed `docker inspect` as `ceilings: unknown` and
+   still decides; the proof runs with no Docker and asserts the `ceilings`
+   line reads `unknown (docker inspect: …)`. The nine proofs §2 names, each
+   driving `bin/admit.py` as a subprocess (D1114).
+4. **Rehearsal `admission-refused`**: `SCENARIOS` gains the name;
+   `Facts` gains `host_manifest: str | None` and `project_manifest: str |
+   None`; `bin/rehearse.py` gains `--host FILE` and `--manifest FILE`
+   (refused with exit 2 when the scenario is `admission-refused` and either
+   is absent; ignored otherwise); planner `_admission_refused(facts)`:
+   `induce=(Action(what="nothing is changed: the reserve is injected into
+   admit with --reserve-memory-mb"),)`, `observe=(Observation("admission_as_
+   declared", argv=(admit_py, "--host", …, "--project", …, "--json"),
+   expect="the host's own decision, whatever it is", control=True),
+   Observation("admission_refused", argv=(… "--reserve-memory-mb",
+   f"{INJECTED_RESERVE_MB}"), expect="refused"))` with
+   `INJECTED_RESERVE_MB = 1_000_000_000` beside the disk constants;
+   `reverse=(Action(what="nothing was changed; nothing to undo"),)`;
+   `verdict()` gains the arm (the injected reading's `outcome == "refused"`,
+   the control's outcome in `{"admitted", "refused"}` and its `declared`
+   line **not** marked injected); `observe()` in `bin/rehearse.py` gains the
+   arm (runs the argv, parses `--json`, stashes both decisions as
+   `admission_evidence`); `bin/rehearse.sh`'s usage lists the ninth scenario
+   and its two flags; `DEPLOYED_DOCTOR_CHECKS` unchanged (the reader is
+   `admit`, not the doctor). `test_rehearsal.py` gains the two proofs §2
+   names (the recorded-runner shape the module already uses).
+5. **The limits**: `config.SERVICE_RESOURCE_DEFAULTS: dict[str, dict[str,
+   int | str]]` for the nine, **values from rig 31b by D1600's rule** (the
+   provisional table below is replaced and the Done prints
+   measured-peak → default for each), `config.SHORT_LIVED_PIDS_LIMIT = 64`;
+   `rendering.COMPOSE_ENV_KEYS` gains `<SERVICE>_PIDS_LIMIT` and
+   `<SERVICE>_CPUS` for the nine (`POSTGRES_`, `PGBOUNCER_`, `POSTGREST_`,
+   `DOCS_`, `METRICS_`, `STORE_`, `AUTH_`, `STORAGE_`, `MCP_`);
+   `build_compose_env` emits them beside the memory lines; `compose.yaml`:
+   `pids_limit: ${<SERVICE>_PIDS_LIMIT:?required}` and `cpus:
+   ${<SERVICE>_CPUS:?required}` on the nine (each beside its `mem_limit` or,
+   for the three that have none, beside `read_only`/`cap_drop`, with a
+   one-line comment citing ADR 0222), `pids_limit: 64` on the eleven; the
+   metrics and store literals stay as `mem_limit` is. If
+   `dev_environment.py` carries a `mem_limit`, it carries `pids_limit` from
+   the same default. `tests/contract/test_process_limits.py` (new): the
+   eight proofs §2 names; the fork proof runs `${POSTGRES_IMAGE}` by digest
+   with `--pids-limit 8` and asserts rig 31a's failure text, its control
+   with no flag.
+
+   | Service | provisional `pids_limit` | `cpus` |
+   |---|---|---|
+   | postgres | 256 (≥ 56 + 32) | "2.0" |
+   | pgbouncer | 64 | "1.0" |
+   | postgrest | 128 | "1.0" |
+   | docs | 64 | "1.0" |
+   | metrics | 128 | "1.0" |
+   | store | 128 | "1.0" |
+   | auth | 256 | "1.0" |
+   | storage | 128 | "1.0" |
+   | mcp | 128 | "1.0" |
+
+6. **Battery (≥8)**: `decide` ignoring `candidate_is_deployed` (killed by
+   the redeploy proof); the disk rule inverted (killed); exit 12 → 4 in
+   `admit.py` (killed by the exit proof and the header proof); the admission
+   call moved below `step("1. Render` (killed by the AST proof); `verdict()`
+   arm removed (killed); the injected `reserve` not echoed as `(injected)`
+   (killed by the rehearsal proof asserting the control's line is not
+   marked); `pids_limit` removed from `docs` in `compose.yaml` (killed by the
+   every-service walk); `SHORT_LIVED_PIDS_LIMIT` 64 → 63 (killed by the
+   power-of-two proof); the fork proof's expected text loosened to `""`
+   (killed by the control, which would then also match).
+
+**Targeted:** `test_admission`, `test_capacity_reading`, `test_process_
+limits`, `test_rehearsal`, `test_deploy_command`, `test_printed_commands`,
+`test_compose_contract`, `test_auth_service_shape` (it reads every
+service's env references, `:403`), `test_secret_origin`, `test_alert_rules`,
+`test_metrics_surface`, `test_runtime_override`, `test_cli_contract`,
+`test_repository_contract`, `test_dev_command` and `test_dev_environment`
+(if `dev_environment.py` moved), `test_capacity_envelope`, `test_render_
+isolation`, `test_project_manifest`, plus `git grep -ln "COMPOSE_ENV_KEYS\|
+build_compose_env" -- tests/contract`. `bin/apg.sh generate --check --project
+project.example.yaml` (the compose env is not a client input; confirm exit
+0). `python bin/render-config.py --bounds-doc --check`. Push; read CI.
+
+**Done.** _(the executor: the measured-peak → default table; the fork text;
+whether `cpus` as a string was accepted; the `--render-only` reading.)_
+
+### Run 4 — the collector consumed: the label, the retention, the endpoint, `doctor usage`
+
+**Read first:** `src/agentic_postgres/rendering.py:1190-1406,2529-2561`;
+`.generated/fixture-alpha-dev/otelcol.yaml` and `prometheus.yaml` (the
+rendered shapes); `src/agentic_postgres/runtime_override.py:225-330`;
+`services/auth-api/app/mcp_metrics.py` whole; `mcp_tracing.py:160-205`;
+`mcp_telemetry.py:180-200`; `mcp_runtime.py:437-465`; `settings.py:250-260,
+439-480`; `compose.yaml:937-1081,1543-1660`; `tests/contract/
+test_metrics_surface.py:200-270,390-490`; `test_alert_rules.py:55-70,
+240-310`; `test_mcp_tracing.py:270-330`; `test_mcp_runtime.py:330-350`;
+`test_auth_service_shape.py:330-350,395-410`; `tests/deployment/
+test_session14_observability.py:234-261` (the `store_query` shape);
+`bin/backup.py:238-260,314-336`; `src/agentic_postgres/backup_report.py:
+73-134`; `bin/doctor.py:356-404,661-711` (the ledger read and
+`AGENT_RECORD_QUERY`); `bin/fleet.py:53-58` (a statement with an integer this
+program validated and no caller text); rigs 31c and 31d.
+
+1. **`build_otel_config(router_names, domain, project_key)`**: the
+   `prometheus` exporter gains `const_labels:\n      project: <key>` (rig
+   31c's spelling); the docstring's *"reversal is the scrape filter and
+   nothing else"* sentence (`:1214-1216`) is rewritten to name the second
+   reversal; **every caller edited** (`rendering.py:2529-2541` passes
+   `identity.key`; grep `build_otel_config` under `tests/`); the two rendered
+   fixtures regenerated by the gate's step 2 (`.generated/fixture-*` are
+   committed — read `bin/session-01-check.sh`'s step 2 for the command that
+   regenerates them and run it). `test_metrics_surface.py` gains the two
+   label proofs. `runtime_override.STORE_RETENTION_DAYS = 14` and
+   `test_alert_rules.py`'s retention proof (D1589). `pids_limit` on
+   `metrics` and `store` landed in Run 3.
+2. **The endpoint**: `settings.py` `MCP_VARIABLES` gains `APG_OTLP_ENDPOINT`
+   (optional; `load_mcp()` exposes it as `otlp_endpoint: str | None`; **a
+   value that is not `http://` + a hostname of the compose service name +
+   `:4318/v1/metrics` is refused at load** — the runtime may not be pointed
+   off the project's network by an environment line, and the check names
+   the expected shape, not the value); `compose.yaml`'s mcp environment
+   gains `APG_OTLP_ENDPOINT: http://metrics:4318/v1/metrics`;
+   `test_mcp_runtime.py` and `test_auth_service_shape.py` gain the two
+   proofs §2 names; `FORBIDDEN_VARIABLES` unchanged (a URL is not a
+   credential; the guards at `test_mcp_runtime.py:343` and
+   `test_auth_service_shape.py:340` run).
+3. **The call**: `mcp_runtime.create_mcp_app()` after `lock = load_lock(...)`
+   `:453`: `mcp_metrics.configure(endpoint=settings.otlp_endpoint,
+   service_name="apg-mcp", tool_names=<the lock's tool names, in the shape
+   `build_server` reads them>, outcomes=<the outcome vocabulary
+   `mcp_telemetry` passes to `record()` at `:194-197`>)`; its `bool` is
+   logged at `warn` level when `False` with the sentence *metrics are not
+   exported: no APG_OTLP_ENDPOINT* (the tracing docstring's voice). The
+   `mcp_metrics.py` module docstring, if it says nothing calls `configure`,
+   is rewritten; `mcp_tracing.py:177-202` stays. `test_mcp_tracing.py:283-
+   322`'s enumeration is **replaced** by `test_exactly_one_module_configures_
+   metrics_and_none_configures_tracing` (ADR 0223; D1119 applies if the
+   replaced test is a registry node id — check with `git grep -n
+   "test_mcp_tracing.py::" tests/acceptance-registry.yaml` and move the id
+   in the same commit). `test_metrics_surface.py::test_configure_with_an_
+   endpoint_creates_both_instruments` uses an in-process OTLP http endpoint
+   that cannot connect (`http://127.0.0.1:9/v1/metrics`) and asserts
+   `configure` returned `True` and both instruments are non-`None` — the
+   export failure is the SDK's and rig 31d showed it never raises.
+4. **`doctor usage`**: `diagnosis.usage_report(figures: UsageFigures) ->
+   tuple[Check, ...]` (`UsageFigures` in `capacity_reading.py` — eight
+   `Figure`s: `database_bytes`, `pgdata_kb`, `wal_kb`, `repository_bytes`,
+   `audit_rows`, `idempotency_rows`, `requests_total`, `tool_calls_total`),
+   two verdicts only. `bin/doctor.py` `probe_usage(document) ->
+   UsageFigures`: `pg_database_size(current_database())`, `du -sk` of
+   PGDATA and of `PGDATA/pg_wal`, all through `container_exec.run(container,
+   "psql"/"du", …, user=…)` with `.stdout` parsed to `int` **before** any
+   `diagnosis.*` call (ADR 0159); the repository through `bin/backup.sh
+   --outputs … info --json` exactly as `probe_repository` `:407-426` does,
+   reading the new `repository_bytes` member that `backup_report.summarise`
+   gains (`sum(backup["info"]["repository"]["delta"] …)`, `None` when any
+   backup lacks it — `test_backup_report.py` gains two proofs against the
+   module's existing captured-JSON fixture); audit and idempotency counts
+   through `AGENT_RECORD_QUERY` unchanged; the two store figures through
+   `container_exec.run(f"apg-{key}-store-1", "wget", "-q", "-Y", "off",
+   "-O", "-", f"http://127.0.0.1:{STORE_PORT}/api/v1/query?query=…")` with
+   `sum(traefik_service_requests_total)` and `sum(agent_tool_calls_total)`
+   (URL-quoted; the container name derived from `document["project"]["key"]`
+   and `STORE_SERVICE` — a **derived** name, ADR 0002), the JSON's
+   `data.result[0].value[1]` parsed to `int`, **and every result series'
+   `metric.project` asserted equal to the key before the figure is accepted**
+   — a mismatch is `unknown` with the reason *the store answered for
+   another project*. `bin/doctor.sh usage --project KEY [--json]`.
+   `test_doctor_readings.py` gains the three `usage` proofs; the module's
+   docstring records that the probes are proved on the trip
+   (`test_session31_capacity.py`, Run 6).
+5. **Battery (≥6)**: `const_labels` value → the domain (killed by the
+   key-only proof); retention `14d` → `15d` in compose (killed); the
+   endpoint check accepting any `http://` (killed by a proof planting
+   `http://example.com/`); `configure` called before `load_lock` (killed by
+   the ordering proof's AST read); `usage_report` returning `WARN` above a
+   size (killed); `repository_bytes` summing `size` instead of `delta`
+   (killed by the fixture proof, whose two numbers differ).
+
+**Targeted:** `test_metrics_surface`, `test_alert_rules`, `test_runtime_
+override`, `test_rendered_migrations`, `test_image_contracts` (it runs the
+collector), `test_mcp_runtime`, `test_mcp_tracing`, `test_mcp_telemetry`,
+`test_mcp_budgets`, `test_auth_service_shape`, `test_doctor_readings`,
+`test_diagnosis`, `test_doctor_redaction`, `test_backup_report`,
+`test_backup_command`, `test_container_selectors`, `test_acceptance_registry`
+(if a node id moved), plus `git grep -ln "build_otel_config\|MCP_VARIABLES\|
+summarise(" -- tests/contract`. Push; read CI.
+
+**Done.** _(the executor: the rendered `otelcol.yaml` diff; rig 31d's memory
+number against 384; the store query's exact URL.)_
+
+### Run 5 — the carried-in items: the fixture, the kind check, the rotation's report, the triage, the counts, the threat row
+
+**Read first:** `tests/deployment/test_session24_studio.py:230-260,689-
+838`; `migrations/templates/0007-api-surface-convergence.sql:255-275`;
+`src/agentic_postgres/bootstrap_statements.py:250-269`; `tests/deployment/
+conftest.py` (grep `authenticated` — how other live proofs mint a token for
+that role; `dev-token.sh --role authenticated` is the operator's path and
+the fixture should share the code's belief, question 6); `src/agentic_
+postgres/secrets_contract.py:530-560`; `bin/materialize-secrets.py:150-260`;
+`tests/contract/test_secret_contract.py:100-140,360-395`; `src/agentic_
+postgres/jwt_keys.py:440-510,560-575`; `bin/rotate-signing-key.py:180-210,
+440-480`; `tests/contract/test_jwt_keys.py` or wherever `retire_rotation`
+is proved (`git grep -ln retire_rotation -- tests/`); `docs/operator-guide.md:
+791-1055`; `docs/plans/session-28-implementation-plan.md` Appendix R;
+`tests/contract/test_deployment_suite_shape.py:100-230`; each of the 22
+orphans' docstrings; `docs/threat-model.md:13-34,150-160`; `docs/scope-
+closure.md:907-913`; `tests/conftest.py:82-167`.
+
+1. **D1572, the fixture**: `two_owners_one_relation` and `auditor` create
+   their subjects with the **`authenticated`** role name
+   (`project_a["database"]["roles"]["authenticated"]` — confirm the key in
+   the document's `roles` map) so the `POST /rpc/create_note` each performs
+   is one migration 0007 grants; the docstring says why (`0007:261-271`)
+   and that `project_admin`'s administrative power is its token's scope,
+   not its role (`bootstrap_statements.py:255-263`). `pytest --setup-plan
+   tests/deployment/test_session24_studio.py -k query_view` with
+   `APG_LIVE_HOST=1 APG_PROJECT_A_OUTPUTS=<an op-owned copy in the
+   scratchpad>` set: planned, not skipped. **The trip is its second
+   execution; §7 says so.** Grep every reader of the two fixtures
+   (`auditor`, `two_owners_one_relation`) in the module and confirm none
+   asserts the `project_admin` role name.
+2. **D1578 / ADR 0225**: `secrets_contract.check_value_kind(kind: str,
+   value: str) -> str | None` — `rsa_private_pem`: both `-----BEGIN PRIVATE
+   KEY-----` and `-----END PRIVATE KEY-----` present, `len(value) >= 1000`;
+   `random_hex`: `re.fullmatch(r"[0-9a-f]+", value)`; an unknown kind →
+   the reason names the kind (the schema forbids it, but the function is
+   the one reader); **the returned reason is built from `kind`, the
+   delimiter names and the length threshold only**. `bin/materialize-
+   secrets.py:219-235`'s loop calls it after `read_secret` and before the
+   write; a reason → `OperatorError(8, f"{secret['name']}: {reason}")` (the
+   module's error class and exit-8 constant — read `:1-60`). The five proofs
+   §2 names; the sentinel proof plants `SENTINEL-DO-NOT-PRINT` inside a bad
+   value and asserts it appears in neither stream.
+3. **D1599 / ADR 0224**: `jwt_keys.retire_rotation` — when `state["retire_
+   after"] is None` **and** `len(state["verification_kids"]) == 1` **and**
+   `state.get("verifier_acknowledgements") is None`, return the state
+   **unchanged** (**no new document member** — a `retired_by` note would be
+   a schema move for a sentence) and let `bin/rotate-signing-key.py`'s
+   `retire` print *the rotation was retired by the deploy that published one
+   key; nothing to do* and exit 0; the *no rotation is in flight* refusal
+   stays for a two-key state with no deadline (validate_key_state refuses
+   that anyway, `:567-569` — read it and say which branch is reachable).
+   `FOLLOW_UP["promote"]` gains the sentence *take this deploy only after the
+   document's `retire_after` has passed; the deploy closes the window*.
+   `docs/operator-guide.md` §15 *The seven steps*: step 6 gains the wait
+   (read `retire_after` from the deployed document with the
+   `rendered-document`/`python3 -c` line the section already uses for the
+   `jwt` member; wait until it has passed; then deploy), and *What this
+   rotation does not close* names the `render-jwks`/`verification_kids`
+   question. Appendix R of the Session 28 plan is **not edited** (a released
+   record); §15 is the operator form. The existing `retire_rotation` proofs
+   run unchanged; one new proof for the reported outcome.
+4. **D1595, the counts**: the four comment edits; `git grep -n
+   APG_ADMIN_PASSWORD_FILE -- tests/ bin/session-30-check.sh` and the
+   measured outcome written into the Done and the row.
+5. **D1527, the threat row**: `docs/threat-model.md` gains
+   `THR-NOISY-NEIGHBOUR` in the table's nine-column shape — *Attacker
+   capability*: a project's own workload (an agent's tool calls, a
+   connection storm, a fork storm) run without malice; *Protected asset*:
+   the neighbouring project's latency and the host's stability; *Prevention*:
+   per-service `mem_limit`, `pids_limit`, `cpus`, `max_connections` per
+   cluster, admission against a declared capacity; *Detection*: `doctor
+   capacity|usage`, the store's series per project; *Residual risk*: **the
+   effect of one project's load on the other has not been measured** —
+   Session 35's noisy-neighbour measurement (stage plan §5 *Session 35*),
+   and disk I/O is unbounded; *Acceptance requirement IDs*: `NODE-LIMIT-001`,
+   `NODE-ADMIT-001`; *node IDs*: the fork proof and the refusal proof;
+   *Target session*: 31. The `## Scope` sentence at `:159-160` gains *a
+   neighbour's load is bounded, not a claim about availability*.
+   `test_acceptance_registry` checks the row's referential integrity
+   (`threat-model.md:3-15`), so this lands green only in Run 6 with the
+   entries — write it now, run the registry test in Run 6.
+6. **D1597, the triage.** For each of the 22 in `KNOWN_UNREGISTERED`: read
+   its docstring and assertions; `git grep -n "<module>::" tests/acceptance-
+   registry.yaml` to see which requirements that module already feeds; pick
+   the requirement whose `description` states the property (e.g. the four
+   `test_session2_edge.py` proofs → the `DEP-EDGE`/`SEC` entries that name
+   HSTS, ACME, the health route; the five `test_session2_host.py` proofs →
+   the `SEC-HOST`/`DEP-HOST` entries that name ufw, sshd, the daemon
+   configuration; the five `test_session2_isolation.py` → `DEP-ISO-001`/
+   `-002`; the three `test_session9_agent_writes.py` and the `test_session8`
+   one → the `AGT-*` denial/revocation entries; `test_session11` → the
+   `API-*` request-id entry; `test_session12` → `EVD-`/`DEP-ISO-` (the
+   classifier's control); `test_session14` → the `OPS-`/`DEP-` metrics-route
+   entry; `test_session20` → the `TEN-*` entry). Append the node id;
+   extend the description by one sentence only if the property is not
+   already stated. **When no entry states it**, write a new entry in that
+   module's family (`target_session: 31`, listed in §2's addendum in the
+   Done, its claim added to `CLAIMS` — host, undeclared). **When the proof
+   proves nothing a requirement should state** (the run expects this for
+   `test_the_classifier_can_tell_the_categories_apart` if it is a self-test
+   of a test helper — read it), delete it and say why. The tuple ends empty
+   or names each survivor with the session that owes it. The table of 22
+   decisions is in the Done. `test_deployment_suite_shape`'s equality guard
+   and `test_acceptance_registry` (D1119) run — the latter green only in
+   Run 6 for any `target_session: 31` entry (D1555's shape; say which).
+7. **The envelope**: `capacity.UNMEASURED` gains `Unmeasured(subject="apg
+   doctor capacity and usage, on the deployment", reason="the readings are
+   host reads and store queries under root; nothing here has a host",
+   unblocked_by="the Session 31 trip (Sheet A5)")`; `MEASURED_AGAINST`
+   is **not** widened (the readings' cost is a claim about the doctor, not
+   about the collector image — D1519's note in the observability report
+   stands as a §10 item). `python bin/render-capacity-envelope.py --write`.
+8. **Battery (≥5)**: the fixture's role back to `project_admin` (**recorded
+   as unreachable offline**, D493 — the trip is the proof); `check_value_
+   kind` accepting a PEM with one delimiter (killed); the reason carrying
+   `value[:20]` (killed by the sentinel proof); the materialize call moved
+   after the write (killed by the ordering scan); `retire`'s new outcome
+   returned when two kids are published (killed by the new proof's control);
+   one orphan left in the tuple that is now registered (killed by the
+   equality guard).
+
+**Targeted:** `test_secret_contract`, `test_secret_origin`,
+`test_materialize_secrets` (or the module that drives `bin/materialize-
+secrets.py` — `git grep -ln materialize-secrets -- tests/contract`),
+`test_jwt_keys`/the rotation modules found by grep, `test_rotate_signing_key`
+if it exists, `test_documentation_index`, `test_session12_documented_path`
+(the guide moved), `test_deployment_suite_shape`, `test_deployment_module_
+shape`, `test_suite_shape`, `test_capacity_envelope`, `test_environment_
+gates`, `test_evidence_claims`, `test_cli_contract` (the comment moved),
+`test_runtime_override` (the comment moved); `test_acceptance_registry` per
+item 6. Push; read CI.
+
+**Done.** _(the executor: the 22-row triage table; the `--setup-plan`
+line; the `APG_ADMIN_PASSWORD_FILE` reading.)_
+
+### Run 6 — the bump, the registry, the gate, and the trip's proofs
+
+`VERSION` **1.9.0** and `CURRENT_SESSION` **31**, in one commit with
+everything the bump owes (Session 30 Run 6's shape, `session-30-
+implementation-plan.md:1339-1400`):
+
+- **`src/agentic_postgres/__init__.py`**: `CURRENT_SESSION = 31` and a `#:`
+  paragraph naming the nine requirements, the nine claims, the five ADRs,
+  that `host.yaml` schema 3 is additive, that no outputs schema moved, and
+  that the minor is a judgement above `requires patch` (D1561).
+- **The registry**: every §2 entry and every Run 5 triage entry, node ids
+  from `pytest --collect-only -q` (D1236); `ID_PATTERN` gains `NODE`;
+  `CLAIMS`, `OFFLINE_CLAIMS` (six), `CLAIM_INTRODUCED_IN` (nine + Run 5's);
+  `KNOWN_UNREGISTERED` as Run 5 left it; `python bin/render-acceptance-
+  matrix.py --write`.
+- **`tests/deployment/test_session31_capacity.py`** (new; `pytestmark`
+  with `live_host`, `p0`, and `requires_environment("APG_LIVE_HOST",
+  "APG_HOST_MANIFEST", "APG_CANDIDATE_MANIFEST", "APG_PROJECT_A_OUTPUTS",
+  "APG_PROJECT_B_OUTPUTS", "APG_REHEARSAL_EVIDENCE_DIR")` — every name in
+  `ENVIRONMENT_VARIABLES`, D687): the eight live proofs §2 names. Each calls
+  the product's command (`bin/admit.sh`, `bin/doctor.sh capacity|usage
+  --json`) as a subprocess (D1114); the `free -m` / `df -Pk` controls are
+  the proof's own reads on the host (root), compared within 5 % for
+  MemTotal and exactly for the Docker root's total KiB; the admitted control
+  copies the candidate manifest to `tmp_path` with `database.shared_buffers_
+  mb` reset to the default and runs `admit.sh` again; the rehearsal proof
+  reads the newest `rehearsal-<key>-admission-refused-*.json` under
+  `APG_REHEARSAL_EVIDENCE_DIR` (written on Sheet A5 BEFORE the sweep) and
+  asserts `verdict`, `induced: false`, and the control's `declared` line
+  unmarked. `pytest --setup-plan` with the six variables set: **eight
+  planned, none skipped** (D671).
+- **`tests/conftest.py`** gains `APG_HOST_MANIFEST` and
+  `APG_CANDIDATE_MANIFEST` (D687 comment).
+- **`apg generate` regenerated and committed** (D1238): `templateVersion`
+  `1.9.0`; `generate --check` exit 0.
+- **Both release pages gain a `1.9.0` row** (`docs/upgrade-guide.md:79-97`'s
+  table and `:17`; `docs/operator-guide.md:22,29`; `README.md:7`). The
+  row's text: *capacity declared in `host.yaml` (schema 3, additive) and
+  admission at every deploy (exit 12; ADR 0221); `pids_limit` on every
+  project service and `cpus` on nine (ADR 0222); the collector consumed —
+  the runtime's two instruments exported, a `project` label on every
+  series, retention a constant (ADR 0223); `apg doctor capacity|usage`;
+  `bin/admit.sh`; rehearsal `admission-refused`; the rotation's window
+  closed by the deploy (ADR 0224); a secret's kind checked at
+  materialization (ADR 0225); no migration; **this deploy recreates every
+  container, the database included, because its definition moved**.*
+  `docs/operator-guide.md` gains **§16 *The node as a finite resource***:
+  the four numbers and how to choose them, `doctor capacity|usage`, what a
+  refusal prints and the three things it suggests, `admit.sh` as the
+  decision printed and not taken; §5 *Every day, every week* gains the two
+  readings; §12 gains *the deploy was refused with exit 12*.
+  `docs/fleet-operations.md` §6 (the new-project steps) gains *`admit.sh`
+  before the first deploy*. `test_documentation_index` and
+  `test_session12_documented_path` run.
+- **`bin/session-31-check.sh`**, derived from `bin/session-30-check.sh` by
+  diff (D1482, D1488): `readonly SESSION=31`; the header and usage block
+  **rewritten whole** (the usage block is a heredoc and its lines are
+  script lines — no data-scope literal in it, D1563); `--mode offline`
+  names the six offline claims and writes `evidence/session-31-offline.
+  json`; `--mode host` names the three host claims, gains `--candidate-
+  manifest FILE` (exported as `APG_CANDIDATE_MANIFEST`, readable-file
+  precheck like `--kit-dir`'s) and exports `--host`'s path as
+  `APG_HOST_MANIFEST`; `--redeploy-before-file` given on THIS trip
+  (deployment_convergence re-taken); the `--kit-dir` paragraph still says
+  `kit-2026-09-11` (D1282); `run_suite "p0 and not future and not live_host
+  and not external"` verbatim (D1242); the `--rotated-from-file` usage line
+  added (Session 30 §10's item); step 1 carries `bin/lib/*.sh` (D1564);
+  `SHELL_COMMANDS` gains it; `chmod 755` before `git add`. **`tests/
+  contract/test_session_thirty_one_gate_modes.py`** copied from thirty's:
+  `SESSION = 31`, `SESSION_PREVIOUS_NUMBER = 30`, the six offline claims,
+  `test_no_gate_exists_for_the_session_that_took_the_trip` **deleted**
+  (there is no skipped session between 30 and 31 — the docstring says so),
+  a new `test_host_mode_exports_the_two_new_gates` (`APG_HOST_MANIFEST`,
+  `APG_CANDIDATE_MANIFEST` in the export block).
+- Derived documents: `render-acceptance-matrix.py --write`, `render-config.
+  py --bounds-doc --write`, `render-mcp-catalog.py --write`, `render-
+  evaluation-report.py --write`, `render-capacity-envelope.py --write`,
+  `bin/app-contract.sh --check`, `bin/mcp-contract.sh check`, `bin/apg.sh
+  generate --check --project project.example.yaml`. No `freeze-lock`.
+- **The price, read not chosen** (D704): render `project.example.yaml` from
+  `be987cf` in a throwaway worktree `/tmp/apg-be987cf` (D1485: never the
+  checkout's own `.generated/fixture-alpha-dev`) and from the bump commit;
+  `bin/upgrade.sh plan --project <fixture> --candidate … --json` → expect
+  `bump minor`, `requires patch`, `OK`, `reasons []`; the leaves are
+  `template_version` and whatever the compose env's new keys show as (if
+  the rendered document publishes them — read the output and list every
+  leaf in the Done). A `major` is §9's stop.
+- `bin/apg.sh release-reading` on the bump commit, quoted (expect
+  `tag_is_owed`, `1.9.0`, last tag `1.8.0`, ADRs 220 → 225).
+
+**`bin/session-01-check.sh` runs once, on a clean tree** (commit, gate,
+repair, commit, gate again), then **`bin/session-31-check.sh --mode
+offline`** writes `evidence/session-31-offline.json` carrying the six new
+offline claims plus the nineteen inherited, every one `passed`. Then `git
+diff --stat` against this run's list, one line each, **before** the push
+(D1116). Then CI by full SHA. **And then nothing** — no tag (D1425).
+
+**Done.** _(the executor: the plan's verdict and leaves; the offline claim
+table; the gate's first-run defects, if any, as rows.)_
+
+### Run 7 — the trip: the host declares, both projects redeploy, a third is refused, one sweep, the tag
+
+**Before the day** (agent, offline): read Session 30's Run 7 and Sheets
+A1–A4 (`session-30-implementation-plan.md:1566-1707,2112-2213`),
+`docs/upgrade-guide.md` §3, `docs/operator-guide.md` §12 (D977);
+`pytest --setup-plan` for `test_session31_capacity.py`, `test_session24_
+studio.py -k query_view`, `test_session11_operations.py` (with
+`APG_REDEPLOY_BEFORE_FILE` pointing at a two-field JSON in the scratchpad)
+and `test_session14_observability.py` with the variables set (D671, D676),
+outputs kept; CI green on the bump commit by full SHA; host scripts staged
+under `/home/op` derived from `s30-*.sh` (read each first; `EXPECTED=`,
+the session number, the gate name; the renders script renders all FOUR —
+D1507); the third manifest `/home/op/s31-third.yaml` written from
+`project.example.yaml` with `project.name` `third` (a key that collides with
+no render, checked against `naming` offline), `database.shared_buffers_mb:
+896`, and every provider/domain field the host's `project.alpha.yaml` has
+(read it over SSH as `op`; **no secret value lives in a manifest**);
+the external script in WSL derived from Session 30's (D466); WSL's outbound
+TCP probed on the day (CLAUDE.md §1).
+
+**The day, in order.** `op` steps are the agent's over SSH; **`sudo` steps
+are the operator's**, on Sheets A1–A6 in the appendix, **one sheet per
+outcome, read before the next is issued** (D1510):
+
+1. *(op)* Transport: bundle, `scp`, `git bundle verify`, `git fetch`, **`git
+   rev-parse FETCH_HEAD` equal to the pushed SHA**, `git checkout -B main
+   FETCH_HEAD`, `cat VERSION` → `1.9.0`, porcelain 0; `uv pip sync` only if
+   `requirements-dev.*`/`.python-version` moved since `be987cf` (D1491).
+2. *(Sheet A1, sudo)* the reads: `upgrade.sh check` both; `doctor.sh` both
+   (11 ok); `fleet.sh`; `backup.sh … info` alpha; `free -m`; `df -Pk
+   /var/lib/docker`; `nproc`; `dr-kit.sh export … /home/op/kit-<date>-pre`.
+   **Every number written on the sheet.**
+3. *(op)* **Sheet A2 — the declaration**: `cp host.yaml
+   /home/op/host.yaml.pre-s31`; edit `host.yaml` to `schema_version: 3` with
+   the `capacity` block from `host.example.yaml`, `memory_mb` and `disk_gb`
+   from Sheet A1's readings, `reserve_memory_mb: memory_mb − 1600`,
+   `reserve_disk_gb` twice the larger PGDATA from the doctors' `disk
+   headroom` evidence rounded up to a whole GiB; **then the four renders as
+   `op`** (`--render-only`, which loads `host.yaml` and validates schema 3
+   before anything with `sudo` is issued); `bin/upgrade.sh plan` both as
+   `op`? — no, `plan` reads root paths: it is Sheet A3's first line.
+4. *(Sheet A3, sudo)* `upgrade.sh plan` both (`bump minor`, `OK`); then
+   **the sentinel recipe** (Session 30 Sheet A2 steps 1–5 verbatim with
+   `s31-` in the title and `/root/s31-redeploy-before.json`); then alpha's
+   deploy under `script(1)`, nothing after it. Expect exit 0; step 0 prints
+   the admission decision **`admitted`** with its six lines (the first
+   admission decision on production — write the six numbers on the sheet);
+   step 6 applies nothing (ledger 33); **every container recreated** (their
+   definitions moved — `docker ps` ages all younger than the deploy); step
+   7's document `deployed_through_session 31`; `doctor.sh --project
+   alpha-dev` 11 ok; `migrate.sh … status` 33 `[X]`, `Pending: 0`.
+5. *(Sheet A4, sudo)* beta the same (ledger 33 + 2).
+6. *(Sheet A5, sudo)* **the session's own proofs, before the sweep**:
+   `bin/admit.sh --host host.yaml --project /home/op/s31-third.yaml` →
+   **exit 12**, six lines, `requested 1072`, `safe available 992`; the
+   control: `sed 's/shared_buffers_mb: 896/shared_buffers_mb: 128/'
+   /home/op/s31-third.yaml > /home/op/s31-third-default.yaml` (op, before
+   the sheet) and `admit.sh` on it → **exit 0, `admitted`**;
+   `bin/rehearse.sh admission-refused --outputs <alpha> --host host.yaml
+   --manifest project.alpha.yaml` → the record under `evidence/`, verdict
+   `passed`, then `rehearse.sh reverse` (a no-op that clears the in-progress
+   file); `bin/doctor.sh capacity --host host.yaml` and `--project` each;
+   `bin/doctor.sh usage --project alpha-dev` and `beta-dev` — **the first
+   Prometheus query anyone has run on this deployment**; every line written
+   on the sheet; `time` on each doctor line for the envelope.
+7. *(op, then Sheet A6)* op-owned copies installed (`install -o op -g op -m
+   0600 … /home/op/<key>-dev-outputs.json`, both, sudo); the agent confirms
+   both name the new `source_commit` before the sweep line is issued
+   (D1510). **The one sweep**: `setsid nohup bash /home/op/g31-host.sh
+   > /dev/null 2>&1 < /dev/null &` holding the full `session-31-check.sh
+   --mode host` line — every declaration Session 30's sweep passed, plus
+   `--host host.yaml` (already there), `--candidate-manifest /home/op/s31-
+   third.yaml`, `--rehearsal-evidence-dir` pointing where Sheet A5's record
+   landed, `--redeploy-before-file /root/s31-redeploy-before.json`; the
+   `--rotated-*` three, `--dx-record-file` and `--after-reboot` NOT given.
+   ~15 min. Expected: the three host claims `passed`; `studio_tenant_read`
+   **passed** (the repaired fixture's first execution); `deployment_
+   convergence` passed; every inherited host claim unchanged. A failing
+   proof: an instrument repaired in the window and re-run with `-k`; a
+   product defect recorded and left.
+8. *(op, then the workstation)* the host half to WSL; `--mode external`
+   from WSL; the merge into `evidence/session-31.json`. Expected: **144
+   claims** (135 + 9; more if Run 5 registered new entries — the Done says
+   the number); `not_run` 4 (the rotation trio, `replacement_host_restore`);
+   `failed` 1 (`documented_path`); exit 5 for those reasons and no other.
+9. **The tag**: `bin/apg.sh release-reading --ref <the deployed SHA>`
+   quoted; `git tag -a 1.9.0 <sha>`; `git push origin 1.9.0`; `git ls-tree`
+   of both release pages.
+10. The sentinel swept (Sheet A6's last lines); `host.yaml.pre-s31` kept on
+    the host; the post kit exported; D rows for what the day found; this
+    run **Done.** with the claim table, the two `upgrade plan` verdicts,
+    the two ledgers, the admission's six numbers on production, the
+    refused third's six, `doctor capacity`'s figures against `free -m` and
+    `df`, `doctor usage`'s eight figures per project, and the two
+    `time`s.
+
+**Done.** _(the executor.)_
+
+### Run 8 — the close
+
+Documentation only, no CI read: this plan's header rewritten (COMPLETE,
+the dates, the rows each run added, NEXT FREE); `docs/scope-closure.md`
+**§24** (what 31 closed, what it left, what 32 inherits — the worker's
+claim against the declared capacity first); `docs/plans/stage-4-plan.md`'s
+Status block (`CURRENT_SESSION 31`, `1.9.0`, the count of ADRs, next free
+`D`); the envelope's `Unmeasured` row replaced by a `MACHINE` `Measurement`
+naming the host with Sheet A5's two `time`s (`render-capacity-envelope.py
+--write`); CLAUDE.md in the launch folder: §2's block (STAGE 4, RELEASE,
+EVIDENCE, CURRENT_SESSION, HOST, DR KITS), §8's two sentences that this
+session made false (*"Nothing sets `pids_limit` or `cpus`, and host RAM is
+never read"*; the `container_exec` sentence per D1593), §9's rows removed
+or rewritten; the memory file. Commit, push, done.
+
+---
+
+## 7. Evidence and claims
+
+Unchanged rules (ADR 0163, 0202; D1237; D1543). **Nine claims land with the
+constant** (D690): six declared offline — each a property of a checkout
+(a schema, a parser, a decision driven against a fixture root, a compose
+file walked, a config built, a materialize loop scanned) — and three host,
+undeclared, first executed on the trip. **Session 31 is the session the
+stage plan's item 2 names**: a capacity reading (`capacity_reading`,
+`usage_read`) and an admission decision (`admission_decision`,
+`admission_live`) are separate claims, and only the reading may report
+`unknown`.
+
+| Claim | Mode | Moves on |
+|---|---|---|
+| `capacity_declared`, `capacity_reading`, `admission_decision`, `process_limits`, `telemetry_bounded`, `secret_kind_checked` | offline | Run 6's gate |
+| `admission_live`, `telemetry_read`, `usage_read` | host | Run 7's sweep — their proofs' **first execution anywhere** |
+| `studio_tenant_read` | host | Run 7 — from `failed` to `passed` if the fixture repair is right; **a second `failed` is recorded and left** (the product was right the first time; the run reads the error one layer down again) |
+| `deployment_convergence` | host | Run 7, `--redeploy-before-file` declared |
+| the rotation trio, `replacement_host_restore` | — | `not_run`, unchanged; `documented_path` `failed` by decision |
+
+**No claim is added for the orphan attachments** (Run 5's item 6): a node
+id joining an existing requirement makes that requirement's claim stricter
+and moves no count. New entries Run 5 writes get their own host claims and
+the Done names them.
+
+**Environment gates this session adds:** `APG_HOST_MANIFEST`,
+`APG_CANDIDATE_MANIFEST` — both in the roster, both exported by the gate's
+host mode, both read only through `requires_environment` (D687).
+
+---
+
+## 8. Security invariants this session touches
+
+| Invariant | Where 31 puts it at risk | Control |
+|---|---|---|
+| **Admission refuses; a capacity reading reports** (stage plan §8) | `decide` and `capacity_report` in one module | Two functions with two vocabularies; a grep proof that `capacity_report` and `usage_report` never emit `WARN`/`PROBLEM`; a proof that `decide` refuses on `unknown` |
+| A report may not substitute an answer for a failure to determine one (ADR 0195) | Every figure in both readings | `Figure(value=None, reason=…)`; `null` + `reason` in `--json`; a missing `MemAvailable` is `unknown`, never 0 |
+| An agent record carries no URL, key, token or caller value | The store's series (a `project` label) | The label is the project key, a derived constant; `doctor usage` prints integers it parsed and nothing from the store's body; `test_doctor_redaction` runs over the new readings |
+| The MCP runtime holds no credential | `APG_OTLP_ENDPOINT` | A URL of a fixed shape on the project's own network; refused at load if it names another host; `FORBIDDEN_VARIABLES` unchanged and its guards run |
+| One service cannot read another's credential | `storage_objects` | Not read (D1601) |
+| Projects share no project-scoped value | `const_labels` | The label's value is the key; the isolation proof for the metrics route (`test_session14_observability.py:180-202`) gains a positive control |
+| A workstation holds no production secret | `check_value_kind`'s reason | Built from the kind and the rule, never the value; a sentinel proof |
+| There is no public Postgres endpoint (ADR 0216) | Nothing here touches a port or a network | The store joins no network (D1582) |
+| `--render-only` keeps working with no host and no root | Admission at step 0 | `--render-only` does not reach step 0's admission (Run 3's reading); the gate's step 2 renders four fixtures |
+| A deploy over a broken archiver fails | Unchanged | Step 6c unchanged |
+| The deploy, the sweep and the tag land on one commit | Run 7 | D1425's order on the sheets |
+| A human cannot run SQL through a product surface | `doctor usage`'s SQL | Statements are constants in `bin/doctor.py` with no caller text (the `DENIALS_SQL` shape, `bin/fleet.py:50-58`) |
+| Never grant `op` the docker group | `admit.sh`, `doctor capacity` | Both require root for a real run; `--help` is free |
+
+---
+
+## 9. Stop conditions
+
+- Rig 31a: Compose refuses `cpus` as an interpolated string AND
+  `deploy.resources.limits.cpus` is not honoured by the pinned Compose:
+  stop; the row says which; `cpus` becomes an ADR 0222 alternative not
+  taken and `pids_limit` lands alone.
+- Rig 31b: any container's `pids.peak` is within 2× of a proposed default,
+  or `pids.peak` is absent AND `pids.current` exceeds half a proposed
+  default: raise that default to the rule's value and say so; **never** set
+  a default below a measured peak.
+- Rig 31c: `const_labels` does not reach the synthesised series (`up`,
+  `target_info`): the doctor's per-series assertion excludes them by name
+  and the row records it; if it reaches none, stop — the label moves to the
+  store's scrape config after all and `build_prometheus_config` takes a
+  project (D1590 rewritten).
+- Rig 31d: `configure` raises into `record()` when the collector is down,
+  or the memory cost exceeds 32 MiB: stop; the call is not made from
+  `create_mcp_app` until ADR 0223 is rewritten.
+- Rig 31e: the third manifest at `shared_buffers_mb: 896` is refused by
+  `_validate_memory_budget` (the per-project guardrail): the live proof
+  would measure the wrong decision; choose a budget the guardrail admits
+  and admission refuses, and rewrite Sheet A5.
+- Admission would refuse alpha's or beta's OWN redeploy on the trip (Sheet
+  A3's step 0): **stop before the deploy**; do not edit `host.yaml` to make
+  it admit; the arithmetic is wrong or the declaration is, and the row says
+  which.
+- Admission would degrade a running project instead of refusing (stage
+  plan §9) — anything in `decide` that stops, scales or restarts a
+  container: there is no such path; if one is proposed, stop.
+- A capacity reading would refuse anything: stop.
+- A port, a route, a published store or a non-loopback bind for any reason
+  (ADR 0216).
+- Run 6's `upgrade plan` prices `1.9.0` at **major**: stop; a row; the
+  operator's decision.
+- A passing test would be weakened — including `test_the_store_is_routed_
+  nowhere`, `test_the_store_holds_no_credential`, any `FORBIDDEN_VARIABLES`
+  guard, or `test_mcp_tracing`'s no-caller assertion for TRACING.
+- `studio_tenant_read` fails a second time on the trip: read the error;
+  the product is presumed right; the instrument is recorded and left
+  (D1572's rule); no fixture edited in the window unless the error is in
+  the fixture's own arithmetic.
+- The sweep's `admission_live` reads `not_run`: `skipped_node_ids` first;
+  a missing gate variable is the gate's defect, repaired and re-run with
+  `-k`; never re-run the deploy.
+- The orphan triage would register more than three NEW requirements: stop
+  and ask; the count is the operator's decision (Session 30 §9's rule).
+- CI red on a code commit: stop and read; a cancelled run is not a failed
+  one (D1059).
+- WSL has lost outbound TCP on trip day: CLAUDE.md §1; a Windows reboot
+  early.
+
+---
+
+## 10. Open items this session carries and creates
+
+**Carried in, untouched, each still true:** D1045; `replacement_host_
+restore` (D1028); D1375; the 21 unclaimed requirements; D976, D688, D771,
+D340, D466, D540, D942, D1203, D1205, D1211; the Infisical control-plane
+identity's org admin; `process-max` 1 (D593); `documented_path` failed until
+a person walks it (35); the three rotations 30 did not perform; the retired
+JWKs on the host unread by any sweep; the mirror's upstream flake (D1546);
+`apg-diag`'s standing account (D1528) and its allowlist (D380); ADR 0162's
+missing row for an option (D1561).
+
+**Created or left here:**
+
+| Item | Note |
+|---|---|
+| **The edge plane carries no `pids_limit` or `cpus`** | D1586: Traefik and the socket proxy are shared and their recreation is its own act. Session 35's hardening run, with the deploy-downtime measurement it already owes (D1524). |
+| **Three long-running services carry no `mem_limit`** | pgbouncer, postgrest, docs (`config.py:262-275` has no `memory_limit_mb` for `api.rest`). The reading lists them under `unbounded`. Bounding them is a measurement first (D770's rule: a limit chosen against `anon`, on the host). |
+| **`render-jwks` reads three files and never `verification_kids`** | ADR 0224 closes the window at the deploy and defers this. The session that performs the other three rotations owns whether the deploy should carry the retiring key until `retire_after`. |
+| **`materialize-secrets` cannot tell *deliberately absent* from *a name I do not read*** | D1578's second half; the first is closed by ADR 0225. |
+| **`delete_note` does not exist** | D1594; a session that moves the `api` contract. |
+| **`storage_objects` is not a usage figure** | D1601; a count route on the storage service, Session 34's if wanted. |
+| **The noisy-neighbour effect is unmeasured** | `THR-NOISY-NEIGHBOUR`'s residual; Session 35 measures both ways. |
+| **The envelope is pinned to three images and the collector is not one of them** | `capacity.MEASURED_AGAINST`; if a collector or store number is ever recorded there, the pin list must widen first. |
+| **A worker is a seventh claimant** | Session 32 charges its `unreclaimable` (or its measured `anon`, on the host) and its connections against `capacity` and `max_connections` **before** it is built — the ordering rule 31-before-32. `decide` takes the candidate's claim as an integer; a worker's claim is one more line in the candidate's document. |
+| **Why `auth` was recreated by Session 30 Run 7's deploy and not Run 8's stays UNDETERMINED** (D1581) | This trip cannot observe it: every container is recreated because its definition moved (D1586), so a generation-only redeploy is not on any sheet. The observation belongs to the first trip whose deploy moves a secret generation and nothing else — Session 32's, if its deploy is such a one. The candidate repair (`build_mount_override` reading `secrets-compose.override.yaml`'s `secrets.<name>.file` beside `runtime-compose.override.yaml`'s volumes) is written only after the observation, not before (ADR 0195). |
+| **`KNOWN_UNREGISTERED`** | As Run 5 left it; the tuple shrinks only. |
+| **`host.yaml.pre-s31` on the host** | The schema-2 copy; kept until 32's trip, then removed on that sheet. |
+
+---
+
+## Appendix — what to consult, how a run is executed here, the rigs, and the sheets
+
+**Consult, in this order:** this plan's §1 and §5. The stage plan's §5
+*Session 31*, §8, §9, §11. `docs/plans/session-30-implementation-plan.md`
+§5 Runs 6–7 and Sheets A1–A4 (the trip's shape, the sentinel recipe, the
+detached sweep), §10 (what 30 created for 31). ADR 0195 before any reader;
+0157/0158 (the doctor/deploy split, the document as address book); 0159
+(no `.stdout` in a `diagnosis.*` call); 0165/0169 (`anon`, CONFIGURATION vs
+MACHINE); 0190/0193 (a rehearsal moves a threshold); 0213 (a reading with
+no threshold); 0218 (`container_exec`); 0093 (a `bin/` command imports only
+`agentic_postgres` and `yaml`); 0002 (a container name is derived).
+
+**How a run is executed here** (CLAUDE.md §1 and §5, the parts that bite):
+the Bash tool is Git Bash; every WSL command is `wsl bash -lc "cd
+~/projects/agentic-postgres && . .venv/bin/activate && …"`; anything with a
+loop, a nested quote or a `$` goes in a script file written with the Write
+tool to `\\wsl$\Ubuntu\tmp\` and run with its output redirected to a file
+that is `rm`'d first; **never pipe a gate into `tail`**; a long gate runs
+detached with its exit code written from inside; `chmod 755 bin/*.sh
+bin/*.py deploy.sh` before every `git add`; commit messages from a file with
+`-F`; `PYTHONDONTWRITEBYTECODE=1` and `__pycache__` cleared before a battery;
+restore by copy and `cmp`, never `git checkout --`; every anchor pre-flighted
+to match exactly once and a miss fatal; a mutation is evidence only beside a
+control it cannot reach, in the same invocation; assert HOW each mutation
+failed; `--setup-plan` with the variables SET before a trip. **A `sudo` line
+on any sheet has nothing after it**, and every sheet is grepped for `|`,
+`>`, `$(` and `&` on every `sudo` product line before it is handed over
+(D1505; `deploy.sh` refuses the mixed shape by design, ADR 0218).
+
+**The rigs, summarised** (Run 1; each a script, each with a control, each
+naming its image by digest):
+
+| Rig | Subject | Control | Owes |
+|---|---|---|---|
+| 31a | `pids_limit: 8` and `cpus: "1.0"` through Compose on `${POSTGRES_IMAGE}` | the same services with no key | fork-failure text; string `cpus` accepted or the fallback; `pids.max`/`cpu.max` read-back |
+| 31b | `pids.current`/`pids.max`/`pids.peak` for 22 scopes, `/proc/meminfo`, `free -m`, `df -Pk`, `nproc` on the host as `op` | none needed (a reading); `apg-diag containers` maps ids | every default in `SERVICE_RESOURCE_DEFAULTS`; the host's numbers for Sheet A2 |
+| 31c | `const_labels: {project: rig31c}` on otelcol-contrib 0.159.0's `prometheus` exporter | the same config without it | reaches every series incl. `up`/`target_info`; the option's spelling |
+| 31d | `mcp_metrics.configure` from the auth-api image against 31c's collector | `endpoint=None`; the collector stopped | endpoint path; RSS delta; nothing raises |
+| 31e | `decide` over the fixture documents at 304 / 1072 | `_validate_memory_budget` accepts 1072 | Sheet A5's third manifest budget |
+
+### Sheet A1 — the reads (all `sudo`; write each reading down)
+
+`bin/upgrade.sh check --project alpha-dev` and `beta-dev` → installed
+versions, `verdict OK`. `bin/doctor.sh --project alpha-dev` and `beta-dev`
+→ 11 ok; **write down the `disk headroom` line's `cluster_kb` for each**.
+`bin/fleet.sh` → 2 projects. `bin/backup.sh --outputs
+/etc/agentic-postgres/projects/alpha-dev/outputs.json info` → a full
+exists. `free -m` → the `total` and `available` columns. `df -Pk
+/var/lib/docker` → the 1K-blocks and Available columns. `nproc` → 2.
+`bin/dr-kit.sh export … --output /home/op/kit-<date>-pre` (the exact line
+from `--help`, printed on the sheet by the agent).
+
+### Sheet A2 — the declaration (`op`, no `sudo`)
+
+The agent, over SSH as `op`: `cp host.yaml /home/op/host.yaml.pre-s31`;
+`schema_version: 3`; the `capacity` block with `memory_mb` = Sheet A1's
+`total`, `reserve_memory_mb` = `memory_mb − 1600`, `disk_gb` = Sheet A1's
+1K-blocks ÷ 1048576 rounded down, `reserve_disk_gb` = 2 × the larger
+`cluster_kb` ÷ 1048576 rounded **up**, each with its comment from
+`host.example.yaml`; then the four renders `--render-only` (`project.
+alpha.yaml`, `project.beta.yaml`, `project.example.yaml`, `project.second.
+example.yaml`) — each exits 0, which is the schema's acceptance. **If a
+render refuses `host.yaml`, STOP: the declaration is edited until it
+validates, and nothing with `sudo` is issued.**
+
+### Sheet A3 — the sentinel, then alpha (`sudo`)
+
+1. `bin/upgrade.sh plan --project alpha-dev --candidate
+   /home/op/agentic-postgres/.generated/alpha-dev/outputs.json --json` →
+   `bump minor`, `OK`; the same for `beta-dev`.
+2. The sentinel, Session 30 Sheet A2 steps 1–5 with `s31-redeploy-sentinel-
+   <YYYY-MM-DD>` and `/root/s31-redeploy-before.json`; step 5's read-back
+   must print both fields.
+3. **The deploy**, at the terminal, nothing after this line:
+
+       script -q -e -c "sudo ./deploy.sh --host host.yaml --project project.alpha.yaml --capabilities capabilities.yaml --through-session 31" /home/op/s31-deploy-alpha.txt
+
+   → exit 0. **Step 0 prints the admission decision**: `admitted`, six
+   lines — write the six numbers on the sheet. If it prints `refused` and
+   exits 12: **STOP** (§9); nothing has changed on the host.
+
+Then the reads: `sudo bin/migrate.sh --project project.alpha.yaml --runtime
+status` at the terminal, nothing after it → 33 `[X]`, `Pending: 0`
+(**unchanged**); `sudo docker ps --format '{{.Names}} {{.Status}}' --filter
+label=apg.project.key=alpha-dev` → **every container younger than the
+deploy** (the definitions moved; the database restarted); `sudo docker
+inspect --format '{{.Name}} {{.HostConfig.PidsLimit}} {{.HostConfig.
+NanoCpus}}' $(sudo docker ps -q --filter label=apg.project.key=alpha-dev)`
+→ the nine limits and `1000000000`/`2000000000`; `sudo bin/doctor.sh
+--project alpha-dev` → 11 ok.
+
+### Sheet A4 — beta (`sudo`)
+
+The same with `project.beta.yaml`; ledger 33 + 2, `Pending: 0` twice.
+
+### Sheet A5 — the session's proofs (`sudo`; each line's output written down)
+
+1. `sudo bin/admit.sh --host host.yaml --project /home/op/s31-third.yaml`
+   → **exit 12**, `refused`, the six lines with `requested 1072` and `safe
+   available 992` (if Sheet A1's `total` was not 3814, the numbers move
+   with it and the agent recomputes them on the sheet beforehand).
+2. `sudo bin/admit.sh --host host.yaml --project /home/op/s31-third-
+   default.yaml` → **exit 0**, `admitted`.
+3. `sudo bin/rehearse.sh admission-refused --outputs /etc/agentic-postgres/
+   projects/alpha-dev/outputs.json --host host.yaml --manifest
+   project.alpha.yaml` → `verdict passed`, the record's path printed; then
+   `sudo bin/rehearse.sh reverse` → exit 0.
+4. `time sudo bin/doctor.sh capacity --host host.yaml` and `time sudo
+   bin/doctor.sh capacity --host host.yaml --project alpha-dev` → every
+   group `ok`; `mem_total_mb` equal to Sheet A1's `total`; `committed`
+   naming both keys at 304; `ceilings` naming 2240 per key and the three
+   `unbounded` services.
+5. `time sudo bin/doctor.sh usage --project alpha-dev` and `beta-dev` →
+   eight figures each, `ok`. `requests_total` may read **0** here: the
+   doctor lines above are not requests through the edge, the sweep's are,
+   and the sweep has not run yet. A 0 is honest; the proof asserts ≥ 0, and
+   the same line re-run after Sheet A6 is where a positive number is
+   expected. `tool_calls_total` ≥ 0 for the same reason.
+
+### Sheet A6 — the sweep, then the cleanup (`sudo`)
+
+`sudo install -o op -g op -m 0600 /etc/agentic-postgres/projects/alpha-dev/
+outputs.json /home/op/alpha-dev-dev-outputs.json` and beta (D1506's pair);
+the agent confirms both name the new `source_commit` **before** this line:
+`setsid nohup bash /home/op/g31-host.sh > /dev/null 2>&1 < /dev/null &`
+(the script holds the full `session-31-check.sh --mode host` line from Run
+7 step 7, every path absolute); ~15 min; `cat /home/op/g31-host.exit` → 0 or
+5. Then the sentinel removed, exactly Session 30 Sheet A4's two lines with
+the `s31-` title (no `-i`; expect `DELETE 1`). Then `bin/dr-kit.sh export …
+--output /home/op/kit-<date>-post`.
