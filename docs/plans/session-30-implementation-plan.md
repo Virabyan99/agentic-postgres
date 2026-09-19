@@ -1621,7 +1621,63 @@ outcome, read before the next is issued** (D1510):
    the two `upgrade plan` verdicts, the two ledgers, the container ages,
    `mirror-state.json`'s `last_copied_at` on both.
 
-**Done.** _(as above.)_
+**Done.** 2026-09-19. **The deploy, the sweep and the tag landed on one
+commit, `be987cf`, in that order** (D1425), and `1.8.0` is pushed.
+
+**What it came for.** `deployment_convergence` **passed** — `not_run` since
+Session 11, when D687 found `APG_REDEPLOY_BEFORE_FILE` was read by
+`os.environ.get` inside a fixture, appeared in no roster, and had no gate flag
+to pass it, so both `DEP-002` proofs skipped and the claim came back unproved
+from the gate written to record it. `--redeploy-before-file` was declared on a
+trip for the first time today, and one deploy answered both halves: the
+sentinel row written through `api.create_note` before the redeploy was still
+there after it, and the secret generation moved `59ce4a78cafc3be6` →
+`c18ea3c95b89521f`, which is the control that stops a no-op deploy passing
+(D509).
+
+| | |
+|---|---|
+| `upgrade plan`, both projects | `bump minor`, **`requires patch`**, verdict `ok`, `reasons []`, `changes []`, `operator_digests_moved []`, **one leaf: `template_version` 1.7.0→1.8.0** — D1561's offline reading, reproduced on production |
+| Ledgers | alpha **33**, beta **33 + 2**, `Pending: 0` on each. This release adds no migration |
+| Containers | `auth`, `storage`, `mcp` recreated on **both** projects (46s/47s and 34s); `postgrest`, `docs`, `store`, `edge-probe`, `metrics` untouched at 25 h. The three are the ones that mount a secret (D1571) |
+| `mirror-state.json` | alpha `2026-09-19T04:42:45Z` / 4013 objects · beta `2026-09-18T16:38:15Z` / 3446 objects — beta's is Run 1's hand copy, because last night's pass exited 5 |
+| Evidence | **135 claims: 128 passed, 5 `not_run`, 2 `failed`**, exit 5 |
+| Halves | host 1004 passed / 1 failed / 1 error · external 25 passed, exit 0 · offline 6072 passed, exit 0 |
+
+**The offline half was re-run, not reused.** The one from 01:30 came from
+checkout `24c616a`, two commits before `be987cf` registered `mirror_retry`, and
+carried seventeen claims rather than eighteen. Merging it would have made
+`write-session-evidence` report `mirror_retry` as recorded by neither half —
+the loud failure that mechanism exists for. The merge then printed the
+remaining commit difference rather than folding it: *"the offline half measured
+checkout `da1b4dc79c02`; the deployment is release `be987cf9632d`"* (ADR 0195).
+
+**`release-reading --ref` had its first real use and it mattered** (ADR 0219,
+D1513): the deployed commit prices **16** commits since 1.7.0 where `HEAD`
+prices 18. Reading `HEAD` would have described a window the tag does not carry.
+
+**Six divergence rows, D1567–D1572**, and five of the six are the same shape:
+*a statement in this plan that had never been executed against the thing it
+describes.* The sharpest is **D1570** — Sheet A2's sentinel recipe could not
+work at all, because `dev-token` mints a token that names a role and carries no
+subject (ADR 0095), and **neither `--help` page says so**. Run 6 derived that
+recipe from the operator surface exactly as §5 instructed. A recipe derived
+from a command's `--help` inherits whatever that `--help` leaves out, which is
+a sharper form of §7's second question than *has it ever run*.
+
+**Two claims are `failed` and both are honest.** `documented_path` stays failed
+by decision until a person walks the path. `studio_tenant_read` failed because
+the orphan errored at setup one layer below the error Run 5 repaired — a
+fixture that creates its subjects as `project_admin` and then writes through an
+API only `authenticated` may write to. **The product refusing that is correct**;
+the instrument is wrong, it is recorded and left, and Session 31 repairs it.
+Before this session that same proof errored and belonged to no claim, so three
+Studio claims read `passed` while it had never run. **It reports now, which is
+what `STU-QUERY-002` was registered to make it do** (D1572).
+
+`port_allocation` is `not_run` because this trip performed no reboot and the
+flag declaring one would not have been true (D1568). The sentinel row was swept
+(`count 0` confirmed), and `kit-2026-09-19-pre` and `-post` are both exported.
 
 ### Run 8 — the rotation, alpha then beta, on its own day
 
