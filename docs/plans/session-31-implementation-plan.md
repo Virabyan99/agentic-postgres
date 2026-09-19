@@ -221,7 +221,8 @@ HOST            3814 MiB, no swap, 2 vCPU (docs/database.md:74; D52). host.yaml
 Six columns. Each row is a **measured fact about the tree at `ae2c0dc`** set
 against what the brief (the stage plan's §5 *Session 31*, its §1 rows, and
 CLAUDE.md §9) says, with the decision this plan takes. **Next free number
-after this table is D1602.**
+after this table was D1602 at planning time; Run 1 measured eight more
+(D1602-D1609, added 2026-09-19), so the next free number is D1610.**
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -245,6 +246,14 @@ after this table is D1602.**
 | **D1599** | CLAUDE.md §9: *"An ADR is owed for a refusal that cannot fire … Session 31, ADR before code."* | Step 6 of the rotation (the `promote` follow-up, `bin/rotate-signing-key.py:459-468`) clears the prepared key and redeploys; the deploy's `observe_jwt` sets `retire_after = None` when the rendered set holds one kid (`bin/deploy-project.py:2885-2890`); `retire_rotation` then refuses with *no rotation is in flight* (`jwt_keys.py:476-477`) and the early refusal `:480-485` is unreachable. **The overlap window therefore closes at step 6's deploy**, measured on both projects (D1580, D1581). | **ADR 0224: the window is closed by the operator's step-6 deploy, and `retire` records that it was.** The operator guide §15 and Appendix R's step 6 are rewritten so that the deploy is taken **only after `retire_after` has passed** (the sheet reads the document's `retire_after` and waits); `FOLLOW_UP["promote"]` says so; `retire_rotation` with `retire_after is None` and one published kid **reports** *retired by the deploy that published one key* (exit 0) instead of refusing; the early refusal stays for a document a future deploy could write and keeps its test. Whether `render-jwks` should read `verification_kids` so the deploy carries the retiring key is **§10's item for the session that performs the other three rotations**. | Reordering a sheet costs nothing and makes the refusal's premise true; rewriting `render-jwks` in a credential path is a rig and a rotation to prove it, and this session has neither. | 0224 |
 | **D1600** | *"`pids_limit` on the auth container measured by forking past it in a throwaway container"*; defaults *"in `config.py`"*. | No number for any service's process count exists. Per-container `pids.current` and `pids.max` (and `pids.peak` on this kernel — Run 1 reads whether the file exists) are world-readable on the host as `op` (D765's method). | **Run 1 reads `pids.current`/`pids.peak` for all 22 containers as `op` over SSH, no root**; each service's default is **the larger of 64 and four times its measured peak, rounded up to a power of two**; postgres's default is additionally at least `max_connections + 32`. `cpus`: postgres `"2.0"` (the host's count; a bigger host does not silently give it more), every other long-running service `"1.0"` (no sidecar may take both cores). The provisional numbers in Run 3 are replaced by the reading and the Done prints both. | A limit typed from a guess is the class §7 names; a limit four times a measured peak stops a fork storm without touching a working service. | 0222 |
 | **D1601** | D1526: `doctor usage` reads *"storage object count from the existing listing"*. | The listing is the storage service's own S3 list through the credential only the storage container holds (`storage_cleanup.py:166-255`); no other process reaches the bucket, and *one service cannot read another's credential* is an invariant (stage plan §8). | **`storage_objects` is NOT a member of the usage reading.** The seven that are: database bytes (`pg_database_size`), PGDATA KiB, `pg_wal` KiB, the backup repository's bytes (a new `repository_bytes` member of `backup_report.summarise`, summed from each backup's `info.repository.delta`), audit rows, idempotency claims, request count and agent tool-call count from the store. A count route on the storage service is Session 34's if a reader wants it. | A member reported `unknown` forever is a field with no reader (D816); a second holder of the bucket credential is the stage's failure mode. | 0221 |
+| **D1602** | §0: *"`pids_limit`, `cpus`, `cpu_quota`, `ulimits`, `nproc`: **0 hits**"*; D1600: *"No number for any service's process count exists."* Both read as *nothing bounds a container's processes*. | **Measured, rig 31b (host, as `op`, no root): every one of the 22 scopes reads `pids.max = 3647`** — systemd's `DefaultTasksMax` (`systemctl show -p DefaultTasksMax` = 3647; `docker.service` and `containerd.service` are both `TasksMax=infinity`; `kernel.pid_max` = 4194304). The compose files set nothing, and the containers are still bounded. | **The session NARROWS an existing ceiling nobody chose for these services, rather than creating the first one.** ADR 0222 says so in its Context; the numbers and the decision are unchanged. | A premise wrong in the reassuring direction survives longest (D930, D957) — and this one is wrong in the *alarming* direction, which would have made the ADR overstate what it achieves. The honest claim is 3647 → 128/64, not ∞ → 128/64. | 0222 |
+| **D1603** | Run 1's rig 31a text: *"`unlimited` reaches 20 sleeps … and `PidsLimit` is `0`"*. | **`docker inspect --format '{{.HostConfig.PidsLimit}}'` prints `<nil>`, not `0`**, when no limit is set (Docker 29.5.2; the field is a nil `*int64`). Everything else the rig predicted held: `pids.max` reads `max`, all 20 sleeps spawn, `pids.current` 23. | Any proof that reads `HostConfig.PidsLimit` asserts on **the absence of a number**, not on `0`. The offline fork proof asserts the cgroup file and the fork-failure text instead, which are stable across Docker versions. | A test written to the plan's literal would have failed on first execution — the fifteenth instance of §7 question 2. | 0222 |
+| **D1604** | D1590: *"Expect every non-`#` line of the subject's exposition to carry `project=\"rig31c\"` — **including `target_info`**."* | **False, measured three ways in rig 31c.** With `const_labels` and a `prometheus` receiver scraping a separate target (the production shape), **six of seven series carry the label and `target_info` does not**: `up`, `scrape_duration_seconds`, `scrape_samples_scraped`, `scrape_samples_post_metric_relabeling` and `scrape_series_added` all carry it. `target_info` is synthesised by the exporter from the resource and `const_labels` are not applied to it. The control without the option carried nothing on any line. | **`target_info` is a named exception in the contract test**, asserted as an exception (`target_info` carries no `project`), never folded into *every series*. `doctor usage`'s check that every series names its project excludes `target_info` by name and says why. | Folding a measured exception into a universal claim is the reassuring-direction premise §7 warns about; naming it costs one assertion and keeps the claim true. | 0223 |
+| **D1605** | Nothing in the brief. | **A scraped series that already carries a `project` label is DROPPED by the exporter**, silently on the exposition surface: rig 31c's self-scraping arm logged `failed to convert metric up: duplicate label names in constant and variable labels for metric "up"` and the series vanished. Only the collector's log says why. Traefik's metrics (`apgmetrics` on 8089) carry no `project` label today, so the decision is safe. | **ADR 0223 names the hazard** and the offline proof covers it: a scrape target that emits `project` loses those series. The keep-regex the collector already applies is what bounds which of the edge's series arrive at all. | A silent drop whose only evidence is a container log is the class §7 exists for; it is cheap to know about now and expensive to discover on a trip. | 0223 |
+| **D1606** | §1 D1592 and §4 assume admission can read *"every deployed project's"* document; Sheet A2 is `op`, and only A5 is `sudo`. | **`/etc/agentic-postgres/projects/<key>/` is `drwx------ root root`** (measured on both projects as `op`): `op` **cannot read a deployed document at all** — `Permission denied` on `outputs.json`. The op-owned copies at `/home/op/<key>-dev-outputs.json` are a reading aid and are stale (D1575), so they are not a substitute. | **The committed sum is root-readable only.** `bin/admit.sh` and `doctor capacity` are **root** commands; an unprivileged run reports the committed figure `unknown` and **fails closed** rather than summing zero. Sheet A5 stays `sudo`; no sheet may run `admit.sh` as `op`. | A reader that quietly summed zero deployed projects would admit everything — the decision that looks measured and is not. ADR 0195's third outcome is the whole defence here. | 0221 |
+| **D1607** | §4: *"a failing export is logged by the SDK and never raises into a tool call (the SDK's reader runs on its own thread — rig 31d confirms with the collector stopped)"*. | **Confirmed, and it costs the process its exit.** Rig 31d: nothing raised, exit 0 — but the container's wall clock went from **1 s** (collector reachable) to **18 s** (name does not resolve) and **11 s** (connect succeeds, read times out at the exporter's 10 s default). **mcp's `stop_grace_period` is 15s**, so a stop while the collector is down is a **SIGKILL**. | **Run 4 sets the OTLP exporter's timeout explicitly and raises mcp's `stop_grace_period` above the worst case**, with a proof. ADR 0223 §3 records the requirement. | The rig answered what it owed and found the thing beside it; a deploy that SIGKILLs mcp on every collector outage would have looked like an unrelated flake for sessions. | 0223 |
+| **D1608** | Run 1's rig 31e text and §4: the third manifest's budget is *"`shared_buffers_mb: 896`"*, one member. | **Three members must move, measured against `config._validate_memory_budget` itself.** `shared_buffers_mb: 896` alone is refused for `shm_size_mb` (256 < 896); with `shm_size_mb: 896` it is refused again for `memory_limit_mb` (768 ≤ 1072). Only `{shared_buffers_mb: 896, shm_size_mb: 896, memory_limit_mb: 1280}` is **ACCEPTED** per project — and its `unreclaimable_mb` is **1072**, against a safe available of **992**. | **Sheet A5's third manifest declares all three.** The control is exactly this: the per-project guardrail accepts it, so the live refusal is the cross-project decision (D1583) and nothing else. | A candidate refused by the per-project validator would have produced a green-looking refusal that proved the opposite of the claim — a proof that passes for the wrong reason. | 0221 |
+| **D1609** | `mcp_metrics.configure`'s docstring: *"every resource attribute is served verbatim on the exposition surface as a label of a synthesised `target_info` series"*. | **Partially superseded, measured in rig 31d.** The prometheus exporter promotes `service.name` → `job` and the SDK's auto-generated `service.instance.id` → `instance` onto **every series**, not only onto `target_info`. `instance` is a fresh UUID per process, so **each mcp restart mints a new series set**, bounded only by `metric_expiration: 60s`. | **`doctor usage` aggregates across `instance`** rather than reading one series, and says so. The docstring gains the measured correction in Run 4. | A counter read from one `instance` would silently undercount after any restart — a cumulative counter answering a point-in-time question in a new disguise (D553). | 0223 |
 
 ---
 
@@ -477,9 +486,119 @@ NOT run (no generated artefact moved except the ADR index — run
 `python bin/render-acceptance-matrix.py --check` only if it reads the ADR
 index; otherwise nothing). Commit (ADRs + index), push, **no CI read** (docs).
 
-**Done.** _(to be written by the executor: every rig's output, the five owed
-numbers, and any row §1 got wrong — rewritten in place with the date, D1602+
-for anything new.)_
+**Done.** 2026-09-19. Five rigs, each with its control in the same
+invocation; five ADRs written and indexed; **eight new divergence rows,
+D1602-D1609**, added to §1 in place. Next free is **D1610**, ADR **0226**.
+Nothing in `src/` or `bin/` changed, so no targeted module ran and no CI
+verdict was read. `test_acceptance_registry.py -k 'adr or decision or README'`
+(3 passed) and `test_documentation_index.py` (47 passed) ran because the ADR
+index moved.
+
+**Rig 31a — `pids_limit` and `cpus` through Compose** (`${POSTGRES_IMAGE}` =
+`pgvector/pgvector:pg18@sha256:691673...b62`, five services, subject and
+control in one `docker compose up`). Everything the rig owed:
+
+- **A quoted `cpus` string is accepted.** `cpus: "1.0"` and the product's own
+  shape `cpus: ${RIG_CPUS:?required}` (which yields a *string*) both render:
+  `docker compose config` normalises both to `cpus: 1`, and
+  `HostConfig.NanoCpus` reads `1000000000`. **The
+  `deploy.resources.limits.cpus` fallback is not needed.**
+- **`pids_limit: ${RIG_PIDS_LIMIT:?required}` interpolates too**:
+  `HostConfig.PidsLimit=8`, `/sys/fs/cgroup/pids.max` inside reads `8`.
+- **The fork-failure text, verbatim** (this is what the offline proof
+  asserts): `fork: retry: Resource temporarily unavailable` four times, then
+  `fork: Resource temporarily unavailable`. The script exits 254.
+- **Controls held.** No `pids_limit` → `pids.max` reads `max`, all 20 sleeps
+  spawn, `pids.current` 23. No `cpus` → `cpu.max` reads `max 100000`.
+- **The CPU cap is real**: over a 5 s two-thread burn the capped container used
+  **5.06 s** of CPU (`cpu.max` `100000 100000`), the uncapped control
+  **9.95 s**, on an 8-core workstation.
+- **D1603**: `HostConfig.PidsLimit` prints `<nil>`, not `0`, when unset.
+
+**Rig 31b — the host's counts, as `op` over SSH, no root** (WSL's outbound TCP
+was alive; a timed `/dev/tcp` connect to `:22` and to `pypi.org:443` both
+returned 0 before anything was run). **22 scopes** as D960 expects, and
+**`pids.peak` exists on this kernel**. Container ids mapped to processes
+rootlessly through `/proc/<pid>/cgroup` and `/proc/<pid>/cmdline`, because
+`apg-diag containers` prints names and no ids.
+
+| Service | `pids.peak` (alpha, beta) | `pids_limit` by the rule |
+|---|---|---|
+| postgres | 28, 29 | **128** (4x29=116, and >= `max_connections`+32 = 88) |
+| postgrest | 18, 18 | **128** |
+| metrics (otelcol-contrib) | 16, 16 | **64** |
+| store (prometheus) | 16, 16 | **64** |
+| auth / storage / mcp (uvicorn) | 9-12 | **64** |
+| docs, pgbouncer, edge-probe | 9, 9 | **64** |
+| traefik 17, haproxy 11 | **edge — excluded** | — |
+
+The host's numbers, first program-readable copies, **for Sheet A2's
+declaration**: `MemTotal` 3906280 kB = **3814 MiB**, `MemAvailable` 2234652 kB
+= 2182 MiB, **`SwapTotal` 0**, `nproc` **2**, kernel 7.0.0-31. `df -Pk /` and
+`/var/lib/docker` are the same filesystem `/dev/sda1`: **39027964 KiB total
+(37.2 GiB)**, 23640416 KiB available (**22.5 GiB**), 37 % used. **D1602**: every
+scope already reads `pids.max = 3647`, systemd's `DefaultTasksMax`.
+
+**Rig 31c — `const_labels` on otelcol-contrib 0.159.0**, three arms. The
+spelling is `exporters.prometheus.const_labels` as a map. Arm 1 (OTLP only):
+the subject's series carried `project="rig31c"`, the control's carried
+nothing. Arm 2 self-scraped and produced the **D1605** hazard. **Arm 3 is the
+production shape** — a `prometheus` receiver scraping a *separate* collector,
+as the deployment scrapes `apg-edge-proxy:8089`: **6 of 7 series carried the
+label**, `up` / `scrape_duration_seconds` / `scrape_samples_scraped` /
+`scrape_samples_post_metric_relabeling` / `scrape_series_added` among them,
+and **`target_info` did not** (**D1604**). No duplicate-label error in this
+arm — the arm-2 error was the self-scrape.
+
+**Rig 31d — `mcp_metrics.configure` against a real collector.** The cached
+`apg-prebuild-auth:latest` **could not answer this**: it predates the OTel SDK
+(no `opentelemetry` module, no `app.mcp_metrics`), so the auth-api image was
+built at the tree's pins (`apg-rig31d-auth:local`, SDK 1.44.0). Three arms, all
+green:
+
+- **Subject** (endpoint set, collector up): `configure` → `True`, `record`
+  raised nothing, and after one 15 s export interval the collector served
+  `agent_tool_calls_total{...,outcome="ok",project="rig31c",tool="list_resources"} 1`
+  plus the 16-bucket histogram. **The endpoint path is `/v1/metrics`** on the
+  http exporter. **RSS delta 25756 KiB = 25.2 MiB** for provider + reader +
+  exporter, against `MCP_MEMORY_LIMIT` 384 MiB (6.6 %).
+- **Control** (`endpoint=None`): `configure` → `False`, **RSS delta 0 KiB**,
+  nothing on 8889.
+- **Control** (collector stopped): `configure` → `True`, **`record` raised
+  nothing**, process **exited 0**, the SDK printed its export failure on
+  stderr. `service_name` becomes `job=`, confirming the docstring — and
+  `service.instance.id` becomes `instance=` on every series too (**D1609**).
+- **The fourth arm, added because the third's wall clock was wrong**: 1 s
+  reachable, **18 s** when the name does not resolve, 11 s when the connect
+  succeeds and the read times out at the exporter's 10 s default. Against
+  mcp's `stop_grace_period: 15s` that is a SIGKILL (**D1607**).
+
+**Rig 31e — the admission arithmetic, pure, against the real functions.**
+`HOST_MEMORY_GUARDRAIL_MB` 1600, `PER_BACKEND_ANON_MB` 2, unreclaimable at the
+defaults **304**. `outputs-v10.json`'s `database.budget.unreclaimable_mb` is
+**292** and recomputes to 292 from its own members, so the document's figure is
+read by name and agrees with the function. `memory_mb 3814 − reserve_memory_mb
+2214 = 1600 = HOST_MEMORY_GUARDRAIL_MB` exactly. Committed **608**, safe
+available **992**; the candidate at the defaults (304) **admitted**, at 1072
+**refused**. **The control did not hold as written and produced D1608**: the
+Sheet A5 manifest needs `shared_buffers_mb: 896`, `shm_size_mb: 896` **and**
+`memory_limit_mb: 1280` before `_validate_memory_budget` accepts it.
+
+**And one precondition the plan did not state**, measured because Run 3
+depends on it: `/etc/agentic-postgres/projects/<key>/` is `drwx------ root
+root` and **`op` cannot read a deployed document** (**D1606**). Admission and
+`doctor capacity` are root readers; an unprivileged run must report `unknown`
+and fail closed.
+
+**The five ADRs** are written, Accepted, and indexed: **0221** (capacity is
+declared, admission decides, a reading reports), **0222** (every project
+service bounded in processes, the long-running nine in CPU), **0223** (the
+collector consumed, every series names its project), **0224** (the rotation's
+window is closed by the step-6 deploy and `retire` reports it), **0225** (a
+secret's value is checked against its declared kind at materialization).
+Each carries the rig numbers above in its Context rather than a summary of
+them. Every rig script and output is in the scratchpad (`rigs/`), because
+WSL's `/tmp` does not survive a shutdown.
 
 ### Run 2 — capacity declared and read: schema 3, the reader, `doctor capacity`
 

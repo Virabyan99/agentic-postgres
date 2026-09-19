@@ -284,3 +284,8 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0218](0218-no-product-child-reads-the-terminal.md) | No product child reads the terminal: one exec helper, stdin closed unless input is given, and the class guarded by a scan | 30 | Accepted |
 | [0219](0219-the-reading-before-a-tag-takes-a-ref.md) | The reading before a tag takes a ref, and reads VERSION from it rather than from the working tree | 30 | Accepted |
 | [0220](0220-a-mirror-pass-has-three-outcomes-and-the-verb-reports-three.md) | A mirror pass has three outcomes, and the verb reports three: one immediate second pass separates a flake from a failure | 30 | Accepted |
+| [0221](0221-capacity-is-declared-admission-decides-a-reading-reports.md) | Capacity is declared, admission decides, and a reading reports | 31 | Accepted |
+| [0222](0222-every-project-service-is-bounded-in-processes-and-the-nine-in-cpu.md) | Every project service is bounded in processes, and the long-running nine in CPU | 31 | Accepted |
+| [0223](0223-the-collector-is-consumed-and-every-series-names-its-project.md) | The collector is consumed: the runtime exports its two instruments, the store stays unrouted, and every series names its project | 31 | Accepted |
+| [0224](0224-the-rotations-overlap-window-is-closed-by-the-step-six-deploy.md) | The rotation's overlap window is closed by the operator's step-6 deploy, and `retire` reports that it was | 31 | Accepted |
+| [0225](0225-a-secrets-value-is-checked-against-its-declared-kind-at-materialization.md) | A secret's value is checked against its declared kind at materialization | 31 | Accepted |
