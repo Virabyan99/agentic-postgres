@@ -467,6 +467,11 @@ at the close to say which run added which.
 | **D1672** | 1 | §5 Run 5 / §1 D1661: "an error whose token is in `RETRYABLE_TOKENS`"; "Terminal: every other token and **any 4xx from the plane**". | **A tool refusal is not a 4xx and is not a JSON-RPC `error` member. Rig 32b measured both shapes from a sibling container**: a `tools/call` refusal is **HTTP 200** with `result.isError: true` and the reason in `result.content[0].text`; only a protocol-level failure carries `error`. A loop that classified on HTTP status would read **every** tool refusal as a success. | **The classifier reads `result.isError` first, takes its token from `result.content[0].text`, and treats a JSON-RPC `error` member as terminal.** HTTP status is checked only for 401/403 (a refused bearer), which is a `token_refused`-shaped stop rather than a step failure. `test_a_terminal_refusal_fails_the_run_naming_the_boundary` feeds rig 32b's BYTES, not a hand-written envelope. |
 | **D1673** | 2 | §5 Run 2 step 2: `capacity_probe.read` maps a compose-name key to a project key "when a document under `root` publishes `compose.project_name` equal to it (`read_deployed` at `:55` already loads them for `committed`)". | **The DEPLOYED document publishes no `compose` block at all.** `naming.compose_project_name`'s own docstring says it: *"The RENDERED document publishes this as `compose.project_name`. The DEPLOYED document does not publish it at all -- it carries `project`, `host`, `routes`, `database` and the rest, and `compose` is not among them"* (`naming.py:704-708`), and `postgres_volume_name`'s repeats it for the volume (D592). `capacity_probe.read` walks the DEPLOYED documents under `/etc/agentic-postgres/projects/<key>/`, so the mapping as specified **would never have fired**, and production would have printed `apg-alpha-dev 2240` instead of `alpha-dev 2240` -- a Sheet B4 line that did not match its own expectation. | **The mapping derives through `naming.compose_project_name(key)` over the keys `read` already listed from `root`, and needs no document field.** That is not a second derivation under ADR 0002: the function *is* the authority and says so (`naming.py:711-714`). A compose project this node runs whose directory could not be listed **keeps its compose name** rather than being mapped to a key that was never established (ADR 0195). The proof's control is exactly that second entry. |
 | **D1674** | 2 (repair) | §2: *"`NODE-READ-001` keeps every node id; the proof `test_ceilings_sum_hostconfig_memory_and_ignore_unbounded_containers` is edited to feed a labelled postgres and expect it counted (a passing test made stricter)."* | **Run 2 also REPLACED a proof, and the plan's sentence only anticipated one being edited.** `test_an_unlabelled_container_belongs_to_no_project` asserted the drop, so it could not be made stricter -- it had to become `test_a_container_with_neither_label_is_reported_not_dropped`. `tests/acceptance-registry.yaml` still named the old node id, and **Run 2's targeted list did not include `test_acceptance_registry`** even though CLAUDE.md §5 requires it of *"a run that renames, adds or removes a test function"* (D1119). The four targeted modules passed; **CI went red** on six proofs across `test_acceptance_registry` and `test_evidence_claims`, all naming the same dangling node id. | **`NODE-READ-001` is repointed at the replacement and gains the run's two other new proofs**; `bin/render-acceptance-matrix.py --write` regenerated the matrix. **The rule that failed is the targeted list, not the guard**: D1486's point exactly -- a list derived from a diff cannot see a caller the diff does not touch, and the gate can. Every later run in this session adds `test_acceptance_registry` and `test_evidence_claims` to its targeted list whenever it renames, adds or removes a test function, and Run 3 does so. |
+| **D1675** | 3 | §5 Run 3: `workflow_claim_step(...) RETURNS TABLE (step_id uuid, run_id uuid, position integer, name text, ...)`. | **`position` is a `col_name_keyword`**: accepted as a COLUMN name in `CREATE TABLE` and a **syntax error** as a bare OUT parameter in `RETURNS TABLE`, where the parser is in a type-function-name context. Measured: the migration created all four tables and then died with `syntax error at or near "position"` on the claim's signature. | **The claim returns `step_position` and `step_name`.** `name` is renamed beside it although it is legal, so the pair reads as one decision rather than as one workaround, and the `COMMENT ON FUNCTION` says why. `workflow_step.position` and `.name` keep their names -- the table is where an operator reads them. |
+| **D1676** | 3 | §5 Run 3: *"`docs/migrations.md` gains 0034's line in whatever table lists the released migrations (read the page)."* | **There is no such table.** The page is conceptual, and its one listing is a heading reading **"The five that exist"** above five versions from Session 1 -- written when there were five, never updated, and wrong by twenty-nine by the time this session opened. | **No table is invented.** The heading becomes *"Which ones exist"* and points at `migrations/manifest.json` with the one-line command that counts it, saying explicitly that the page deliberately keeps no second copy. **D1664's class, fourth instance** (`rehearse.sh`'s *"Eight scenarios"*, `apg-diag.sh`'s *"three of thirteen"*, and now this): a count in prose is a count nothing updates. |
+| **D1677** | 3 | §5 Run 3: the proofs are written; nothing anticipated how the proof module's own SPELLING would read to another guard. | **`test_every_call_to_a_released_function_uses_a_released_arity` scans the proofs as well as the product (D887), and it walks the parentheses of the call AS WRITTEN** (D464). Two spellings in the new module defeated it: a signature passed to `has_function_privilege` as `workflow_install_definition({signature})`, whose single f-string placeholder is not a bare identifier so `_is_a_call` could not classify it as a signature (D890); and an `enqueue` call split across two Python literals, whose quoting broke the paren walk so the scan read four arguments where five are passed. | **Both repaired in this module's spelling, never by a row in `DELIBERATE_RETIRED_CALLS`** -- that list is for calls that are SUPPOSED to name a retired parameter, and using it here would have excused a proof from a guard it was not entitled to be excused from. The signature is written out as six literal types; the enqueue call is one expression under the line limit, with its input document a named constant carrying the reason. |
+| **D1678** | 3 | §5 Run 3 lists the targeted modules; nothing says a new migration invalidates the rendered fixtures. | **The rendered fixtures are an INPUT to two of them.** `test_rendered_migrations::test_one_file_per_declared_migration` compares `.generated/fixture-alpha-dev/migrations/rendered-manifest.json` against `migrations.sets_for(document)`, and a render taken before 0034 exists is short by one. Re-rendering ONLY alpha then failed `test_project_migration_sets::test_the_rendered_document_records_the_set_it_applied` with *"two projects rendered by one release disagree about the release lock"* -- the second fixture still carried the old digest. | **A run that adds a migration re-renders BOTH example projects** (`project.example.yaml` and `project.second.example.yaml`, `--render-only`) before its targeted list, and says so. The gate reads FOUR renders (D1507); a run that renders one has told itself something the gate will not believe. |
+| **D1679** | 3 | §5 Run 3: the template carries prose in the house voice. | **A migration template may not contain `{{` in its COMMENTS.** `migrations.render`'s residue check refuses any `{{...}}` surviving substitution -- *"A marker the substitution pattern did not match is a typo, not a literal"* -- and it fired on a comment describing the compiler's `{{steps.<name>.<field>}}` reference syntax. | **The prose says "a step reference by name" instead.** Recorded because the guard is right and the next writer will hit it: the template language has no escape, and a migration explaining a placeholder syntax must describe it in words. The guard working is the finding; no change to `migrations.py`. |
 
 ---
 
@@ -1050,9 +1055,96 @@ committed, so the sweep-selector proof passes vacuously for it; say so).
 Commit (`Session 32 Run 3: migration 0034, the durable step substrate`),
 push, read CI.
 
-**Done.** *(the agents PK column; the PT codes chosen; whether
-`test_database_function_signatures.py` pins the set; the battery's kills,
-the recorded survivor; the ledger count the fixture reads (34); CI)*
+**Done.** Migration 0034 is written, frozen and proved under a real cluster, as
+`migration_user`.
+
+**The four questions §5 asked.** *The agents PK*: `app_private.agents.id`, a
+`uuid PRIMARY KEY DEFAULT gen_random_uuid()` (`0011:175`) -- §9's stop condition
+is not met, and `auth_create_agent`'s released arity is SEVEN (`0025:216`, with
+`p_expires_at`), which is what the proofs call. *The PT codes*: **none is new.**
+`grep -rhno "PT[0-9][0-9][0-9]" migrations/templates/*.sql` returns exactly
+`PT401 PT403 PT404 PT409 PT412 PT422`, and 0034 reuses `PT403` (inactive agent,
+`scope_not_held`), `PT404` (no such definition, no such run), `PT409` (a
+definition installed with a different source, a definition with no steps) and
+`PT422` (a claim with no holder, a lease under a second). Nothing enters
+`mcp_errors.UPSTREAM_WRITE_REFUSALS`: these functions are called by the worker
+over psycopg, never through PostgREST, and that map's guard is a **subset**
+check over every template (`test_mcp_budgets.py:481-484`), which only grows more
+permissive as templates add codes. *Does
+`test_database_function_signatures.py` pin the set?* **No.** It is an ARITY
+guard that DERIVES the released set from the migrations and scans the product
+AND the proofs for call sites -- so the nine new functions join it automatically
+and need no registration. It did find two things, and they were this module's
+spelling: **D1677**. *The ledger count*: the fixture applies **34**, asserted by
+name (`"20260917120034" in applied["versions"]`) and by count.
+
+**The template.** `migrations/templates/0034-workflow-substrate.sql`, version
+`20260917120034`, placeholders `object_owner` and `auth_service` -- exactly the
+two the manifest entry declares, asserted by a marker scan after **D1679**
+removed a `{{...}}` from a comment. Three enums, four tables, nine functions,
+`REVOKE ALL FROM PUBLIC` on all nine, `GRANT EXECUTE` to `{{auth_service}}` on
+eight, **nothing for `workflow_install_definition`**, schema USAGE not
+re-granted (D337, it is 0011's), `RESET ROLE` below the privileges block (D285),
+no `NOTIFY pgrst`, and the `AP900` down block verbatim from 0033. The manifest
+gained one entry and **every earlier entry is byte-identical**, asserted by a
+comparison before the write. `bin/migrate.sh freeze-lock` wrote
+`migrations/released.lock.json` (34 migrations) and `verify-lock` agrees with
+the manifest and the templates.
+
+**The proofs.** `tests/contract/test_workflow_substrate.py`, `pytestmark =
+[contract, p0, database, security]` (D1240), the cluster fixture copied from
+`test_migrations_apply_as_the_migration_user.py:95-163` with both its skips, and
+**every migration applied as `migration_user` over TCP** -- never as a
+superuser, which is the whole of D285 and the reason every offline rig that
+applies as `postgres` could report success for a migration that cannot be
+applied. **Twenty-two proofs, all passing on their FIRST execution anywhere**,
+which is rarer in this tree than it sounds (§7 question 2) and is attributable
+to the rigs: 32d gave the privilege assertions their exact expected values --
+including that `psql -qtA` renders `has_*_privilege()::text` as the WORDS -- and
+32e gave the lease proofs their timings and the reason they sleep past a short
+lease rather than holding a transaction open.
+
+**The battery.** `PYTHONDONTWRITEBYTECODE=1`, `__pycache__` cleared before each
+arm, four anchors pre-flighted to exactly one match with a miss fatal, restore
+by copy with `cmp` verifying each, and the control
+`test_the_migration_applies_as_the_migration_user_and_its_down_refuses` in
+**every** invocation.
+
+| Mutation | Subject | Read |
+|---|---|---|
+| m1 — drop `AND s.claimed_by = p_holder` from `finish` | `test_finish_by_a_holder_that_lost_its_lease_is_refused` | **FAILED** (a kill) |
+| m2 — `lease_until <= now()` in the reclaim predicate | `test_an_expired_lease_is_reclaimed_with_the_attempt_incremented` | **PASSED — a RECORDED SURVIVOR** (D493) |
+| m3 — grant `workflow_install_definition` to `auth_service` | `test_install_is_executable_by_nobody` | **FAILED** (a kill) |
+| m4 — drop the earlier-positions-succeeded predicate from the claim | `test_claim_returns_the_lowest_unfinished_step_once_and_leases_it` | **FAILED** (a kill) |
+
+The control read **PASSED** on all four, and every kill is a `FAILED` rather
+than an `ERROR` — a broken fixture that never reached its assertion is not a
+kill (D386). m2 survived **as the plan predicted**: `<` and `<=` on a lease
+boundary differ only for a row whose `lease_until` is exactly `now()`, which no
+proof can place and no deployment depends on. It is recorded rather than
+converted into a proof, because a test written to kill an uninformative mutation
+measures the mutation and not the product. The module is green after every
+revert: **22 passed**.
+
+**Targeted, once at the close** — and the list is the plan's plus the two
+modules **D1674** bought: `test_workflow_substrate.py`,
+`test_migrations_apply_as_the_migration_user.py`,
+`test_rendered_migrations.py`, `test_database_function_signatures.py`,
+`test_project_migration_sets.py`, `test_acceptance_registry.py`,
+`test_evidence_claims.py`, and `test_documentation_index.py` +
+`test_session12_documented_path.py` because the run touched a documentation
+page. **222 passed.** The first pass read 2 failed and the second 1, both
+recorded as **D1677** and **D1678**; neither was a defect in the migration.
+
+**The sweep-selector guard passes vacuously for the new module, and that is
+stated rather than relied on** (D1240/D1242): `WF-STATE-001` is not in
+`tests/acceptance-registry.yaml` yet — Run 7 lands the registry, because moving
+`CURRENT_SESSION` is all-or-nothing (D690) — so
+`test_every_offline_claims_proof_is_swept_by_the_gate_that_reports_it` has
+nothing to check for it. The module carries its `pytestmark` now so that when
+Run 7 registers it the guard has something true to find.
+
+**Rows added: D1675, D1676, D1677, D1678, D1679. NEXT FREE: D1680.**
 
 ### Run 4 — the definition: schema, compiler, `init`/`validate`, step 6d, `apg dev`
 

@@ -23,14 +23,17 @@ deterministic and carries no deployment metadata — no timestamp, no commit —
 because a payload that changed on every render could never be compared with the
 one that ran.
 
-## The five that exist
+## Which ones exist
+
+**`migrations/manifest.json` is the list, and this page deliberately does not
+keep a second copy of it.** The heading here read *"The five that exist"* and
+named five by version from Session 1 until Session 32, by which point there were
+thirty-four — the same class of stale prose as `bin/rehearse.sh`'s *"Eight
+scenarios"* and `bin/apg-diag.sh`'s *"three of thirteen"* (D1664), and the
+reason a count in prose is a count nothing updates. Read the manifest:
 
 ```
-20260807120001  schemas_and_default_privileges
-20260807120002  project_identity_and_ledger
-20260807120003  owner_scoped_tables_and_forced_rls
-20260807120004  security_invoker_api_views
-20260807120005  write_rpcs
+python -c "import json;print(len(json.load(open('migrations/manifest.json'))['migrations']))"
 ```
 
 `migrations/manifest.json` declares them; `migrations/released.lock.json` freezes
