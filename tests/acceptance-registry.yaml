@@ -4330,7 +4330,9 @@
     - tests/contract/test_capacity_reading.py::test_a_document_with_no_budget_at_all_is_unreadable
     - tests/contract/test_capacity_reading.py::test_a_non_integer_claim_is_unreadable
     - tests/contract/test_capacity_reading.py::test_ceilings_sum_hostconfig_memory_and_ignore_unbounded_containers
-    - tests/contract/test_capacity_reading.py::test_an_unlabelled_container_belongs_to_no_project
+    - tests/contract/test_capacity_reading.py::test_a_container_with_neither_label_is_reported_not_dropped
+    - tests/contract/test_capacity_reading.py::test_ceilings_group_by_the_compose_project_label_and_include_the_database
+    - tests/contract/test_capacity_reading.py::test_a_compose_name_is_mapped_to_its_key_and_an_unknown_one_keeps_its_name
     - tests/contract/test_capacity_reading.py::test_an_unparseable_inspect_is_empty_rather_than_wrong
     - tests/contract/test_capacity_reading.py::test_a_figure_cannot_be_unknown_without_a_reason
     - tests/contract/test_doctor_readings.py::test_the_capacity_report_has_two_verdicts_only
