@@ -197,7 +197,16 @@ def main(argv: list[str] | None = None) -> int:
         lines.append(("ceilings", f"unknown ({ceilings_reason})"))
     else:
         total = sum(reading.ceilings.values())
-        lines.append(("ceilings", f"{total} MiB of mem_limit -- ceilings, not reservations (D767)"))
+        # "by compose project" because the keys changed meaning in Session 32
+        # (D1636, ADR 0221): they were `apg.project.key` values and dropped the
+        # database, and they are compose project names now, mapped back to a
+        # project key where one is known.
+        lines.append(
+            (
+                "ceilings",
+                f"{total} MiB of mem_limit by compose project -- ceilings, not reservations (D767)",
+            )
+        )
     decision = capacity_reading.Decision(
         outcome=decision.outcome, lines=tuple(lines), reason=decision.reason
     )

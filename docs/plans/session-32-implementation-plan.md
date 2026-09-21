@@ -465,6 +465,7 @@ at the close to say which run added which.
 | **D1670** | 1 | §5 Run 5: `CONNECT_TIMEOUT_SECONDS` and `READ_TIMEOUT_SECONDS` "taken from the plane's client constants by import"; §1 D1667: the margin is `2 x (connect + read timeout)`. | **Those two constants are not the plane's.** `mcp_upstream.py` holds ONE timeout, `UPSTREAM_TIMEOUT_SECONDS = 10` (`:72`), because `urllib.request.urlopen` takes a single `timeout` and has no connect/read split. `CONNECT_TIMEOUT_SECONDS = 5` and `READ_TIMEOUT_SECONDS = 15` live in `storage_client.py:60-61` and are **boto3's, for R2**. Importing them into the loop would make its lease a function of an object-store client it never calls. | **`def lease_margin_seconds() -> int: return 2 * mcp_upstream.UPSTREAM_TIMEOUT_SECONDS`** -- still a FUNCTION over an imported constant, never a literal (`storage_cleanup.py:86-100`'s discipline, which exists so a change to the constant cannot leave a stale copy behind). The proof binds to the constant: mutating `UPSTREAM_TIMEOUT_SECONDS` must move the margin. |
 | **D1671** | 1 | §5 Run 5: the loop finishes a step by "reading the plane's outcome word from the result's audit outcome field if present"; §2 `WF-WORK-001`: *"a `replayed` result finishes the step as replayed"*. | **There is no such field, and a replay is indistinguishable from a first write in the plane's result.** `invoke_write` returns exactly `{tool, row_count, row, dry_run}` (`mcp_tools.py:644-652`), `row_count` is `len(rows)`, and both writes return one composite row. **Rig 32c measured it**: the same key twice returns the SAME row id, `app.notes` holds one row, and the word `replayed` appears ONLY in `app_private.agent_audit.outcome` on the `database`-source row (`committed:1` then `replayed:0`), which the HTTP result does not carry. | **The loop finishes a successful call as `succeeded` and does not assign an outcome it cannot determine** (ADR 0195). `replayed` stays in `workflow_step_outcome` as a value the SUBSTRATE may hold. Exactly-once is proved where it actually lives: one `app.notes` row, `agent_idempotency.replay_count = 1`, and one `committed` + one `replayed` audit row. `WF-WORK-001`'s node id becomes `::test_a_successful_call_finishes_the_step_and_the_replay_is_not_the_loops_to_see`. Surfacing it through the result would move `mcp_tools.py`'s reviewed shape, the catalog and every caller -- a contract move to make a sentence true. |
 | **D1672** | 1 | §5 Run 5 / §1 D1661: "an error whose token is in `RETRYABLE_TOKENS`"; "Terminal: every other token and **any 4xx from the plane**". | **A tool refusal is not a 4xx and is not a JSON-RPC `error` member. Rig 32b measured both shapes from a sibling container**: a `tools/call` refusal is **HTTP 200** with `result.isError: true` and the reason in `result.content[0].text`; only a protocol-level failure carries `error`. A loop that classified on HTTP status would read **every** tool refusal as a success. | **The classifier reads `result.isError` first, takes its token from `result.content[0].text`, and treats a JSON-RPC `error` member as terminal.** HTTP status is checked only for 401/403 (a refused bearer), which is a `token_refused`-shaped stop rather than a step failure. `test_a_terminal_refusal_fails_the_run_naming_the_boundary` feeds rig 32b's BYTES, not a hand-written envelope. |
+| **D1673** | 2 | §5 Run 2 step 2: `capacity_probe.read` maps a compose-name key to a project key "when a document under `root` publishes `compose.project_name` equal to it (`read_deployed` at `:55` already loads them for `committed`)". | **The DEPLOYED document publishes no `compose` block at all.** `naming.compose_project_name`'s own docstring says it: *"The RENDERED document publishes this as `compose.project_name`. The DEPLOYED document does not publish it at all -- it carries `project`, `host`, `routes`, `database` and the rest, and `compose` is not among them"* (`naming.py:704-708`), and `postgres_volume_name`'s repeats it for the volume (D592). `capacity_probe.read` walks the DEPLOYED documents under `/etc/agentic-postgres/projects/<key>/`, so the mapping as specified **would never have fired**, and production would have printed `apg-alpha-dev 2240` instead of `alpha-dev 2240` -- a Sheet B4 line that did not match its own expectation. | **The mapping derives through `naming.compose_project_name(key)` over the keys `read` already listed from `root`, and needs no document field.** That is not a second derivation under ADR 0002: the function *is* the authority and says so (`naming.py:711-714`). A compose project this node runs whose directory could not be listed **keeps its compose name** rather than being mapped to a key that was never established (ADR 0195). The proof's control is exactly that second entry. |
 
 ---
 
@@ -810,8 +811,76 @@ tests/contract | grep envelope`). `bin/render-capacity-envelope.py --write`.
 Commit (`Session 32 Run 2: the ceilings count the database (D1636)`), push,
 read CI.
 
-**Done.** *(readers found; the four fixture keys the proofs now print; the
-battery's two kills and one control; CI)*
+**Done.** D1636 is repaired in the reading, and the repair is guarded by two
+kills and a control it cannot reach.
+
+**Every reader found, and there was no fourth.** `grep -rn 'ceilings' src/ bin/
+tests/ --include=*.py` separates into the capacity ceilings and the unrelated
+SCOPE ceilings (`capability_compiler.py`, `runtime_override.py:431,837`,
+`test_scope_registry.py`, `test_mcp_catalog.py`, `test_auth_endpoints.py`) --
+none of which this run touches. The capacity readers are **five**:
+`capacity_reading.ceilings_from_inspect` and the `Reading.ceilings` field;
+`capacity_probe.read_ceilings` and `read`; and **three printers** --
+`diagnosis.py:802-813`, `bin/admit.py:196-200`, and
+`bin/deploy-project.py:2046-2047`. **The deploy was read and needs no edit**:
+it prints the ceilings *reason* only and never a key. The proofs are
+`test_capacity_reading.py`, `test_doctor_readings.py`, `test_admission.py`
+(re-run, unedited -- it asserts the "could not read them" line and no key
+space) and `test_session31_capacity.py:375` (a set membership, unaffected).
+
+**What changed.** `ceilings_from_inspect` groups by
+`runtime_override.COMPOSE_PROJECT_LABEL`, imported inside the function because
+`runtime_override` imports from this package and a module-level import would be
+a cycle. A container carrying neither label goes under the new module constant
+`UNLABELED_CEILINGS_KEY = "(unlabeled)"` instead of being `continue`d.
+`capacity_probe.read` then translates compose names back to project keys
+through `naming.compose_project_name` over the keys it listed -- **D1673**, the
+row this run added, because the deployed document publishes no `compose` block
+and the mapping the plan specified would never have fired. Both printers say
+**by compose project** and both keep *ceilings, not reservations (D767)*.
+
+**The fixture shared the code's belief, and that is why the defect survived a
+green suite** (§7 question 6). `inspect_payload` emitted `apg.project.key` on
+every container, so every fixture in the module described a host where the
+grouping label was universal. It now emits `com.docker.compose.project` on
+everything and `apg.project.key` on everything except `postgres`, `pgbouncer`
+and `dbmate` -- production's actual shape (D587, D1620). The existing
+`test_ceilings_sum_hostconfig_memory_and_ignore_unbounded_containers` is made
+**stricter** under that fixture: the same payload summed to 384 for alpha and 0
+for beta before, and is required to read **1152 and 768** now.
+`test_an_unlabelled_container_belongs_to_no_project`, which asserted the drop,
+is **replaced** by `test_a_container_with_neither_label_is_reported_not_dropped`
+(CLAUDE.md §6, under ADR 0221/D1636).
+
+**The keys the proofs now print:** `{"apg-alpha-dev": 1152, "apg-beta-dev":
+768}` out of `ceilings_from_inspect`, and `{"alpha-dev": 2240,
+"apg-some-other-stack": 512, "(unlabeled)": 256}` out of
+`_ceilings_by_project_key` -- the mapped key, the unmapped compose name and the
+unlabelled bucket, in one assertion.
+
+**The battery.** `PYTHONDONTWRITEBYTECODE=1`, `__pycache__` cleared before each
+arm, both anchors pre-flighted to exactly one match with a miss fatal, restore
+by copy with `cmp` verifying each. **m1** — restore the `apg.project.key` read,
+which is the defect itself → `test_ceilings_group_by_the_compose_project_label_
+and_include_the_database` **FAILED** (a kill, not an ERROR). **m2** — `continue`
+on a missing label → `test_a_container_with_neither_label_is_reported_not_
+dropped` **FAILED**. **Control, in the same invocation both times:**
+`test_a_meminfo_missing_memavailable_is_unknown_not_zero` **PASSED** — a
+`/proc/meminfo` parser these mutations cannot reach. After both reverts, all
+three green. Battery exit 0.
+
+**The envelope.** `Measurement` has no `repaired_in` field (`capacity.py:77-95`
+is `subject, value, kind, conditions, note`), so the plan's conditional applies:
+the D1636 row's **conditions** gain the sentence that the reading was taken
+before the repair and that the same command now reports 4,480 MiB, and its note
+records that this is the last reading of its kind.
+`bin/render-capacity-envelope.py --write` regenerated `docs/capacity-envelope.md`.
+
+**Targeted, once at the close:** `test_capacity_reading.py`,
+`test_doctor_readings.py`, `test_admission.py`, `test_capacity_envelope.py` —
+**86 passed**. `ruff format && ruff check` clean.
+
+**Rows added: D1673. NEXT FREE: D1674.**
 
 ### Run 3 — migration 0034: the substrate, and its proofs under a real cluster
 

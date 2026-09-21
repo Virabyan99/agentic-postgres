@@ -508,6 +508,11 @@ ENVELOPE: tuple[Measurement, ...] = (
             "two projects deployed at template 1.9.0, both healthy",
             "run as root; `time bin/doctor.sh capacity --host host.yaml`",
             "the Docker root read with df at the path the reading names, not /var/lib/docker",
+            "**taken BEFORE Session 32 Run 2 repaired the ceilings grouping (D1636)**: "
+            "the 2,944 MiB below is what the pre-repair reading produced, and the "
+            "same command on the same host reports 4,480 MiB by compose project "
+            "from template 1.10.0 onwards -- the wall time is unchanged, the "
+            "figure is not",
         ),
         note=(
             "Sub-second, and that matters for what the reading is FOR: admission "
@@ -520,7 +525,12 @@ ENVELOPE: tuple[Measurement, ...] = (
             "cap on the host, because `apg.project.key` is not applied to "
             "`postgres` or `pgbouncer` (D587). The real sum is 4,480 MiB against "
             "3,814 MB of RAM, which is D767's whole point -- and the number as "
-            "reported under-states it in the REASSURING direction."
+            "reported under-states it in the REASSURING direction. **Repaired in "
+            "Session 32 Run 2** (ADR 0221, D1636): the reading groups by "
+            "`com.docker.compose.project`, which Compose applies to every "
+            "container it creates, and a container carrying neither label is "
+            "reported under `(unlabeled)` rather than dropped. The figure this "
+            "row records is therefore the last reading of its kind."
         ),
     ),
     Measurement(

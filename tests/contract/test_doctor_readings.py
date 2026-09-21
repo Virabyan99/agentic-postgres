@@ -189,6 +189,21 @@ def test_the_ceilings_are_reported_as_ceilings() -> None:
     assert "D767" in ceilings.detail
 
 
+def test_the_ceilings_line_says_by_compose_project() -> None:
+    """The keys changed meaning, so the line has to say which question it answers.
+
+    Session 32 regrouped the reading from `apg.project.key` to Compose's own
+    project label (D1636, ADR 0221), which is what puts the database's 768 MiB
+    back in the sum. An operator comparing this figure against Session 31's
+    sheet -- where it read 2,944 MiB and the true sum was 4,480 -- must be able
+    to tell the two readings apart from the line itself.
+    """
+    report = diagnosis.capacity_report(reading())
+    ceilings = next(check for check in report if check.name == "ceilings")
+    assert "by compose project" in ceilings.detail, ceilings.detail
+    assert "D767" in ceilings.detail, "the ceilings-are-not-reservations warning was lost"
+
+
 def test_the_evidence_is_only_values_this_program_produced() -> None:
     """ADR 0159: no third party's bytes reach a report.
 

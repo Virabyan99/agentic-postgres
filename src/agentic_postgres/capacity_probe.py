@@ -150,10 +150,16 @@ def disk_usage_near(path: str) -> tuple[Any | None, str]:
 
 
 def read_ceilings(runner: Runner) -> tuple[dict[str, int], tuple[str, ...], str]:
-    """Every labelled container's `mem_limit`, summed per project.
+    """Every Compose container's `mem_limit`, summed per COMPOSE PROJECT.
 
-    Returns ``(by_project, unbounded, reason)`` where ``reason`` is empty when
-    the reading succeeded.
+    Returns ``(by_compose_project, unbounded, reason)`` where ``reason`` is
+    empty when the reading succeeded. The keys are compose project names;
+    :func:`read` is what maps them back to project keys.
+
+    The `docker ps` filter here has always been `com.docker.compose.project`.
+    Until Session 32 the *grouping* in `ceilings_from_inspect` was
+    `apg.project.key`, so this function selected the database and then threw it
+    away (D1636). The two now agree, and agreeing is the repair.
 
     **These decide nothing**, which is why a failure here is a missing report
     line and not a refusal (ADR 0221). They are read at all because an operator
@@ -178,6 +184,30 @@ def read_ceilings(runner: Runner) -> tuple[dict[str, int], tuple[str, ...], str]
     return by_project, unbounded, ""
 
 
+def _ceilings_by_project_key(by_compose_project: dict[str, int], keys: list[str]) -> dict[str, int]:
+    """Compose project names translated back to project keys, where one is known.
+
+    **Derived through `naming.compose_project_name`, not read from a document**
+    (D1673), and that is not a second derivation under ADR 0002 -- that function
+    IS the authority and says so (`naming.py:711-714`). The obvious alternative,
+    matching a document's published `compose.project_name`, **cannot work
+    here**: only the RENDERED document publishes a `compose` block, and this
+    reader walks the DEPLOYED documents under
+    `/etc/agentic-postgres/projects/<key>/` (`naming.py:704-708`,
+    `postgres_volume_name`'s docstring, D592). A mapping written that way would
+    have printed `apg-alpha-dev` on production and never fired.
+
+    `keys` is what :func:`read` could actually list. A compose project this
+    node runs but whose directory could not be read keeps its compose name --
+    reported as what it is, rather than mapped to a key that was never
+    established (ADR 0195).
+    """
+    from agentic_postgres import naming
+
+    translated = {naming.compose_project_name(key): key for key in keys}
+    return {translated.get(name, name): total for name, total in by_compose_project.items()}
+
+
 def read(
     host_manifest: Path,
     root: Path,
@@ -193,6 +223,10 @@ def read(
     failure is a report line rather than an input to any rule -- keeping it out
     of `Reading.unreadable` is what stops a missing `docker inspect` from
     refusing a deploy that would otherwise be fine.
+
+    `Reading.ceilings` is keyed by PROJECT KEY for every project whose
+    directory this call could list, and by COMPOSE PROJECT NAME for anything
+    else on the node (D1636, D1673).
 
     `declared_override` exists for a rehearsal (ADR 0190): a threshold is moved
     rather than a host filled. The caller is responsible for marking an
@@ -265,6 +299,7 @@ def read(
     unreadable.pop(exclude, None)
 
     ceilings, unbounded, ceilings_reason = read_ceilings(runner)
+    ceilings = _ceilings_by_project_key(ceilings, keys)
 
     reading = Reading(
         declared=declared,

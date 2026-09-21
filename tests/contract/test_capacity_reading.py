@@ -198,16 +198,33 @@ def test_a_non_integer_claim_is_unreadable() -> None:
 
 
 def inspect_payload(*containers: tuple[str, str, int]) -> str:
-    return json.dumps(
-        [
+    """An inspect payload shaped the way Compose actually labels a host.
+
+    **`com.docker.compose.project` on every container, `apg.project.key` on
+    only the ones that carry it.** The helper emitted `apg.project.key` alone
+    until Session 32, so every fixture in this module described a host where
+    the grouping label was universal -- which is precisely the belief the code
+    held and the reason D1636 survived a green suite. That is §7 question 6:
+    the fixture shared the code's belief.
+
+    `apg.project.key` is applied to nine of twenty services and is absent from
+    `postgres`, `pgbouncer`, `dbmate` and `dbmate-project` (D587, D1620), so a
+    container whose name says `postgres` is emitted WITHOUT it here.
+    """
+    unlabelled_services = ("postgres", "pgbouncer", "dbmate")
+    payload = []
+    for name, key, limit in containers:
+        labels = {"com.docker.compose.project": f"apg-{key}"} if key else {}
+        if key and not any(service in name for service in unlabelled_services):
+            labels["apg.project.key"] = key
+        payload.append(
             {
                 "Name": f"/{name}",
-                "Config": {"Labels": {"apg.project.key": key}},
+                "Config": {"Labels": labels},
                 "HostConfig": {"Memory": limit},
             }
-            for name, key, limit in containers
-        ]
-    )
+        )
+    return json.dumps(payload)
 
 
 def test_ceilings_sum_hostconfig_memory_and_ignore_unbounded_containers() -> None:
@@ -215,6 +232,11 @@ def test_ceilings_sum_hostconfig_memory_and_ignore_unbounded_containers() -> Non
 
     Adding it as zero makes the one container that could take the whole host
     look like the cheapest thing on it.
+
+    **Made stricter in Session 32** (D1636, ADR 0221): the payload's `postgres`
+    containers carry no `apg.project.key`, exactly as production's do, and the
+    768 MiB they each cap at is now REQUIRED to be in the sum. Under the old
+    grouping this same payload summed to 384 for alpha and 0 for beta.
     """
     payload = inspect_payload(
         ("apg-alpha-dev-postgres-1", "alpha-dev", 768 * 1024 * 1024),
@@ -223,12 +245,47 @@ def test_ceilings_sum_hostconfig_memory_and_ignore_unbounded_containers() -> Non
         ("apg-beta-dev-postgres-1", "beta-dev", 768 * 1024 * 1024),
     )
     ceilings, unbounded = capacity_reading.ceilings_from_inspect(payload)
-    assert ceilings == {"alpha-dev": 1152, "beta-dev": 768}
+    assert ceilings == {"apg-alpha-dev": 1152, "apg-beta-dev": 768}
     assert unbounded == ("apg-alpha-dev-dbmate-1",)
 
 
-def test_an_unlabelled_container_belongs_to_no_project() -> None:
-    """The edge is shared and is nobody's claim."""
+def test_ceilings_group_by_the_compose_project_label_and_include_the_database() -> None:
+    """The repair, stated as the thing that was wrong (D1636).
+
+    `postgres` and `pgbouncer` carry `com.docker.compose.project` and NOT
+    `apg.project.key` (D587). The old grouping dropped them, so production read
+    2,944 MiB where the real sum is 4,480 -- under-reporting by the largest cap
+    on the host, in the reassuring direction.
+
+    The control inside this proof is the `auth` container, which carries BOTH
+    labels: it was counted before and is counted now, so a failure here is
+    about the containers the repair adds and not about the sum breaking.
+    """
+    payload = inspect_payload(
+        ("apg-alpha-dev-postgres-1", "alpha-dev", 768 * 1024 * 1024),
+        ("apg-alpha-dev-pgbouncer-1", "alpha-dev", 0),
+        ("apg-alpha-dev-auth-1", "alpha-dev", 384 * 1024 * 1024),
+    )
+    parsed = json.loads(payload)
+    assert "apg.project.key" not in parsed[0]["Config"]["Labels"], (
+        "the fixture must describe production, where postgres carries no project key"
+    )
+    assert "apg.project.key" in parsed[2]["Config"]["Labels"], "the control lost its label"
+
+    ceilings, unbounded = capacity_reading.ceilings_from_inspect(payload)
+    assert ceilings == {"apg-alpha-dev": 1152}, "the database's 768 MiB is not in the sum"
+    assert unbounded == ("apg-alpha-dev-pgbouncer-1",)
+
+
+def test_a_container_with_neither_label_is_reported_not_dropped() -> None:
+    """The edge is nobody's claim -- and it is still ON THE HOST.
+
+    **Replaces `test_an_unlabelled_container_belongs_to_no_project`, which
+    asserted the drop** (CLAUDE.md section 6: a passing test replaced by a
+    stricter one under an ADR -- 0221, D1636). Dropping is what produced the
+    defect; a sum that silently omits what it could not classify tells an
+    operator the host is emptier than it is.
+    """
     payload = json.dumps(
         [
             {
@@ -238,7 +295,38 @@ def test_an_unlabelled_container_belongs_to_no_project() -> None:
             }
         ]
     )
-    assert capacity_reading.ceilings_from_inspect(payload) == ({}, ())
+    ceilings, unbounded = capacity_reading.ceilings_from_inspect(payload)
+    assert ceilings == {capacity_reading.UNLABELED_CEILINGS_KEY: 256}
+    assert unbounded == ()
+
+
+def test_a_compose_name_is_mapped_to_its_key_and_an_unknown_one_keeps_its_name() -> None:
+    """The keys an operator reads are project keys, where the reader knows one.
+
+    **Mapped through `naming.compose_project_name`, not through a document**
+    (D1673): only the RENDERED document publishes a `compose` block, and this
+    reader walks the DEPLOYED ones. A mapping that read
+    `compose.project_name` would never have fired on production.
+
+    The control is the second entry: a compose project this node runs but whose
+    directory the reader could not list keeps its compose NAME, rather than
+    being mapped to a key that was never established (ADR 0195).
+    """
+    from agentic_postgres import capacity_probe, naming
+
+    mapped = capacity_probe._ceilings_by_project_key(
+        {
+            naming.compose_project_name("alpha-dev"): 2240,
+            "apg-some-other-stack": 512,
+            capacity_reading.UNLABELED_CEILINGS_KEY: 256,
+        },
+        ["alpha-dev"],
+    )
+    assert mapped == {
+        "alpha-dev": 2240,
+        "apg-some-other-stack": 512,
+        capacity_reading.UNLABELED_CEILINGS_KEY: 256,
+    }
 
 
 def test_an_unparseable_inspect_is_empty_rather_than_wrong() -> None:

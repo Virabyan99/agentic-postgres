@@ -799,6 +799,13 @@ def capacity_report(reading: Any) -> tuple[Check, ...]:
     # are here because an operator reading a refusal wants both numbers, and
     # because the gap between the two is this host's most misleading fact
     # (D767: the caps in aggregate already exceed the machine's RAM).
+    #
+    # **"by compose project" is in the line because the KEYS changed meaning**
+    # (D1636, ADR 0221). They were `apg.project.key` values, which dropped the
+    # database and the pooler and under-reported by the largest cap on the
+    # host; they are compose project names now, mapped back to project keys
+    # where the reader knows one. An operator comparing this figure against
+    # Session 31's sheet has to be told which question it answers.
     ceiling_total = sum(reading.ceilings.values())
     unbounded = f", {len(reading.unbounded)} unbounded" if reading.unbounded else ""
     checks.append(
@@ -806,8 +813,8 @@ def capacity_report(reading: Any) -> tuple[Check, ...]:
             "ceilings",
             OK,
             f"{ceiling_total} MiB of mem_limit across "
-            f"{len(reading.ceilings)} project(s){unbounded} -- ceilings, not "
-            "reservations (D767)",
+            f"{len(reading.ceilings)} project(s){unbounded}, by compose project "
+            "-- ceilings, not reservations (D767)",
             _pairs(**dict(sorted(reading.ceilings.items()))),
         )
     )

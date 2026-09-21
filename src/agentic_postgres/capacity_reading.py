@@ -47,6 +47,7 @@ __all__ = [
     "MEMINFO_PATH",
     "SUGGESTED_ACTION_DISK",
     "SUGGESTED_ACTION_MEMORY",
+    "UNLABELED_CEILINGS_KEY",
     "USAGE_FIGURE_UNITS",
     "Decision",
     "Figure",
@@ -58,6 +59,21 @@ __all__ = [
     "parse_meminfo",
     "render_decision",
 ]
+
+#: Where a container carrying NEITHER label is reported (D1636, D587).
+#:
+#: It is a key in the ceilings dict rather than a silent `continue`, and the
+#: difference is the whole of D1636. The reading used to group by
+#: `apg.project.key` and drop anything without it -- and `postgres`,
+#: `pgbouncer`, `dbmate` and `dbmate-project` carry no such label (D587), so
+#: production reported **2,944 MiB** where the real sum is **4,480** against
+#: 3,814 MB of RAM. It decided nothing, `decide` charges `unreclaimable_mb` and
+#: never a cap -- and it under-reported in the REASSURING direction, which is
+#: D767's point inverted and the reason it was Session 32's first item.
+#:
+#: A container Compose did not create is a real thing to see on this host, so
+#: it is named rather than dropped. Dropping it is what produced the defect.
+UNLABELED_CEILINGS_KEY = "(unlabeled)"
 
 #: Read directly rather than through a container: the question is about the
 #: node, and a figure read inside a cgroup would answer a different one.
@@ -133,6 +149,11 @@ class Reading:
     docker_root_total_gb: Figure
     committed: dict[str, int]
     unreadable: dict[str, str]
+    #: Summed `mem_limit`s, **keyed by project key when a project directory
+    #: under the state root derives that compose project name, and by the
+    #: COMPOSE PROJECT NAME otherwise** (D1636). Never by `apg.project.key`:
+    #: that label is absent from the database and the pooler (D587), and
+    #: grouping by it dropped the largest cap on the host.
     ceilings: dict[str, int]
     unbounded: tuple[str, ...] = ()
     #: Which path the disk figures were actually read from.
@@ -286,20 +307,42 @@ def committed_from_documents(
 
 
 def ceilings_from_inspect(payload: str) -> tuple[dict[str, int], tuple[str, ...]]:
-    """Sum each project's container memory CEILINGS from `docker inspect`.
+    """Sum each container's memory CEILING from `docker inspect`, **by COMPOSE project**.
 
-    Returns ``(by_project_mib, unbounded_container_names)``.
+    Returns ``(by_compose_project_mib, unbounded_container_names)``. The keys
+    are Compose project NAMES -- `capacity_probe.read` is what maps a name back
+    to a project key, and only for the keys it could actually read.
+
+    **Grouped by `com.docker.compose.project`, which Compose applies to every
+    container it creates, and NOT by `apg.project.key`** (D1636). That label is
+    on nine of twenty services (D1620) and is absent from `postgres`,
+    `pgbouncer`, `dbmate` and `dbmate-project` (D587) -- so grouping by it
+    dropped the single largest cap on the host. This is the repair
+    `runtime_override.py:41-70` already made for D587's first instance, applied
+    to its third.
+
+    The constant is imported rather than retyped, because a second spelling of
+    a label is a second authority over one fact (ADR 0002) -- and it is
+    imported INSIDE the function because `runtime_override` imports from this
+    package and a module-level import would be a cycle.
+
+    A container carrying neither label goes under
+    :data:`UNLABELED_CEILINGS_KEY` rather than being dropped: a sum that
+    silently omits what it could not classify is exactly the defect this
+    function is being repaired for.
 
     These decide nothing. They are reported because an operator reading a
     refusal wants to see both numbers, and because the gap between them is the
-    single most misleading thing about this host: the six caps sum to 2240 MiB
-    per project against 3814 MiB of RAM, which is only survivable because a cap
-    is a ceiling and not a reservation (D767).
+    single most misleading thing about this host: the caps sum to 2240 MiB per
+    project against 3814 MiB of RAM, which is only survivable because a cap is
+    a ceiling and not a reservation (D767).
 
     A container with ``HostConfig.Memory`` of 0 is **unbounded**, and is listed
     by name rather than added as zero -- adding it as zero would make an
     unbounded container look like a free one, which is the opposite of true.
     """
+    from agentic_postgres import runtime_override
+
     try:
         containers = json.loads(payload)
     except ValueError:
@@ -313,9 +356,7 @@ def ceilings_from_inspect(payload: str) -> tuple[dict[str, int], tuple[str, ...]
         if not isinstance(container, dict):
             continue
         labels = container.get("Config", {}).get("Labels") or {}
-        key = labels.get("apg.project.key")
-        if not key:
-            continue
+        key = labels.get(runtime_override.COMPOSE_PROJECT_LABEL) or UNLABELED_CEILINGS_KEY
         limit = container.get("HostConfig", {}).get("Memory")
         name = str(container.get("Name", "")).lstrip("/")
         if not isinstance(limit, int) or limit <= 0:
