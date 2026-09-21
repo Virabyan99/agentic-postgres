@@ -472,6 +472,7 @@ at the close to say which run added which.
 | **D1677** | 3 | §5 Run 3: the proofs are written; nothing anticipated how the proof module's own SPELLING would read to another guard. | **`test_every_call_to_a_released_function_uses_a_released_arity` scans the proofs as well as the product (D887), and it walks the parentheses of the call AS WRITTEN** (D464). Two spellings in the new module defeated it: a signature passed to `has_function_privilege` as `workflow_install_definition({signature})`, whose single f-string placeholder is not a bare identifier so `_is_a_call` could not classify it as a signature (D890); and an `enqueue` call split across two Python literals, whose quoting broke the paren walk so the scan read four arguments where five are passed. | **Both repaired in this module's spelling, never by a row in `DELIBERATE_RETIRED_CALLS`** -- that list is for calls that are SUPPOSED to name a retired parameter, and using it here would have excused a proof from a guard it was not entitled to be excused from. The signature is written out as six literal types; the enqueue call is one expression under the line limit, with its input document a named constant carrying the reason. |
 | **D1678** | 3 | §5 Run 3 lists the targeted modules; nothing says a new migration invalidates the rendered fixtures. | **The rendered fixtures are an INPUT to two of them.** `test_rendered_migrations::test_one_file_per_declared_migration` compares `.generated/fixture-alpha-dev/migrations/rendered-manifest.json` against `migrations.sets_for(document)`, and a render taken before 0034 exists is short by one. Re-rendering ONLY alpha then failed `test_project_migration_sets::test_the_rendered_document_records_the_set_it_applied` with *"two projects rendered by one release disagree about the release lock"* -- the second fixture still carried the old digest. | **A run that adds a migration re-renders BOTH example projects** (`project.example.yaml` and `project.second.example.yaml`, `--render-only`) before its targeted list, and says so. The gate reads FOUR renders (D1507); a run that renders one has told itself something the gate will not believe. |
 | **D1679** | 3 | §5 Run 3: the template carries prose in the house voice. | **A migration template may not contain `{{` in its COMMENTS.** `migrations.render`'s residue check refuses any `{{...}}` surviving substitution -- *"A marker the substitution pattern did not match is a typo, not a literal"* -- and it fired on a comment describing the compiler's `{{steps.<name>.<field>}}` reference syntax. | **The prose says "a step reference by name" instead.** Recorded because the guard is right and the next writer will hit it: the template language has no escape, and a migration explaining a placeholder syntax must describe it in words. The guard working is the finding; no change to `migrations.py`. |
+| **D1680** | 3 (repair) | §5 Run 3 writes migration 0034 **with its grants**; §5 Run 5 writes `workflow_repository.py`, the module that calls them. | **A grant may not ship a run ahead of its caller.** `test_migrations.py::test_every_granted_function_has_a_caller` refuses a `GRANT EXECUTE` on a function no Python and no other migration calls -- *"a grant nobody can audit against a caller that does not exist"*, 0011's rule, guarded as a CLASS since D837 -- and its docstring names this failure shape exactly: *"the shape of a plane half-built one run early."* Run 3's first push went **red in CI** on seven of the eight (`workflow_run_status` escaped only because the identically-named ENUM TYPE appears in the table definitions, which is a blind spot worth knowing and not worth acting on). The targeted list could not see it: `test_migrations.py` was in neither the plan's list nor D1674's addition. | **`services/auth-api/app/workflow_repository.py` ships in Run 3, beside the grants it audits**, with `tests/contract/test_workflow_repository.py`. It is pure plumbing -- eight statements, every value a parameter, no decision in it -- so moving it earlier costs Run 5 nothing but the file. **The alternative was worse in both directions**: splitting the grants into a later migration would put a function's privileges in a different file from the function (and 0034 is a floor once applied, D912), and there is no allowlist in this guard by design. Run 5 now writes the loop, the routes and `step_token` against a repository that already exists and is proved. |
 
 ---
 
@@ -1144,7 +1145,18 @@ stated rather than relied on** (D1240/D1242): `WF-STATE-001` is not in
 nothing to check for it. The module carries its `pytestmark` now so that when
 Run 7 registers it the guard has something true to find.
 
-**Rows added: D1675, D1676, D1677, D1678, D1679. NEXT FREE: D1680.**
+**Repaired after CI.** Run 3's first push (`42672a0`) read **failure** on
+`Session 1 gate` and `Session 2 offline contract` -- one proof, one cause:
+`test_every_granted_function_has_a_caller`, refusing seven grants whose caller
+the plan had scheduled for Run 5. **D1680**, and the repair is to ship the
+caller with the grants rather than to except the migration from the guard.
+`services/auth-api/app/workflow_repository.py` and
+`tests/contract/test_workflow_repository.py` are Run 3's now; the targeted
+list gained `test_migrations.py` and `test_auth_service_shape.py` and reads
+**256 passed**.
+
+**Rows added: D1675, D1676, D1677, D1678, D1679, and D1680 at the repair.
+NEXT FREE: D1681.**
 
 ### Run 4 — the definition: schema, compiler, `init`/`validate`, step 6d, `apg dev`
 
