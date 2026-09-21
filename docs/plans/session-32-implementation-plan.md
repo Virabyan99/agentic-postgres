@@ -456,6 +456,16 @@ at the close to say which run added which.
 | **D1666** | ADR 0162's table: *a new released migration → minor*; §5 Run 7 prices the release with `upgrade plan`. | `upgrade_plan.classify_document_changes` derives only `image_digest`, `implementation`, `secret_required_added`, `capability_added` from two rendered documents (`:222-253`) and says so: *"A function that inferred `migration_added` from a `schema_version` move would be answering a question it cannot see the evidence for."* `migration_added` and the API classes are DECLARED by the caller through `bin/upgrade.py`'s `DECLARABLE` (`:129-138`). | **Run 7's reading declares `migration_added` and `api_operation_added` through the command's own declaration flag (read `bin/upgrade.py:116-138` for its spelling), and the release paragraph says the floor is `minor` BY DECLARATION, not by the document diff.** Without the declaration the reading floors at `patch` (D1625's shape) and would be wrong in the reassuring direction. | The third release in a row whose price the command cannot fully see (D1561, D1626); the declaration mechanism exists for exactly this, and using it is cheaper than teaching the command to read a lock file. | 0162 |
 | **D1667** | Stage plan §5: *"the audit correlated"* by run; §8: *"An unauditable write does not happen — the worker must not reorder"*; `storage_cleanup.py`'s margin *derived from the HTTP client's timeouts*. | The plane's audit row carries `request_id` from the `X-Request-Id` header the caller sends (`mcp_query.py:78`, `:94`; `0019:73-97`); it carries no run id and adding one is an audit schema move (33's, D1248). The audit order is the PLANE's (`bounded()`), which the loop cannot reorder because it never touches the audit functions. `lease_margin_seconds()` is a function of the client's timeouts (`storage_cleanup.py:86-100`). | **Each step attempt mints a `request_id` (uuid4), stores it on the step row at claim, and sends it as `X-Request-Id`; correlation is `workflow_step.request_id = agent_audit.request_id`, proved live by a join.** The loop's lease is `step.timeout_seconds + lease_margin_seconds()` where the margin is `2 × (connect + read timeout)` of the loop's HTTP client, a function; the loop stops before its lease does (`deadline = started + lease - margin`, monotonic) and abandons a step it cannot start in time rather than starting it late. **A heartbeat row** (`app_private.workflow_worker`, one row per project: `holder`, `started_at`, `seen_at`) is written by `workflow_heartbeat(p_holder)` at every poll; `holder` is `<hostname>:<pid>:<start monotonic>` so a restart is visible as a NEW holder. The doctor's `workflow` check reports `heartbeat_age_seconds` and the counts and thresholds nothing. | The audit's own key is the correlation the plane already supports; the heartbeat is the reader ADR 0193 says a rehearsal must read; the margin as a function is the discipline §0 quotes. | **0227** |
 
+**Rows the runs added, in execution order.**
+
+| # | Run | Plan says | Tree does / measured | Decision |
+|---|---|---|---|---|
+| **D1668** | 1 | §5 Run 5: the holder is `f"{socket.gethostname()}:{os.getpid()}:{int(time.monotonic())}"`. | **`socket` is a banned transport name.** `TRANSPORT_NAMES` (`test_auth_service_shape.py:643-645`) holds `socket`, and `test_every_transport_in_the_service_is_declared_with_a_reason` refuses any module under `services/auth-api/app/` that names one without a `TRANSPORT_ALLOWLIST` row. The tree solved this exact problem in Session 7: `storage_cleanup.worker_identity` uses `os.uname().nodename` and says why -- *"the same fact from a call that cannot open a connection, whereas `socket` is a module that can"*, after `socket` tripped the guard on that module's first run. | **`HOLDER = f"{os.uname().nodename[:40] or 'unknown'}:{os.getpid()}:{int(time.monotonic())}"`** -- `worker_identity`'s shape, with `time.monotonic()` in place of its random component because a restart must be visible as a NEW holder and a monotonic tick is what moves across one. No exemption is bought for the safe half of a network module. |
+| **D1669** | 1 | §5 Run 5: the loop calls the plane over HTTP with "the SAME client library" as `mcp_upstream`. | That library is `urllib`, and `TRANSPORT_ALLOWLIST` grants it **per module**: `mcp_upstream.py`, `mcp_query.py`, `mcp_health.py`. A new `workflow_worker.py` naming `urllib` fails the guard. | **`TRANSPORT_ALLOWLIST` gains one row, `"app/workflow_worker.py": frozenset({"urllib"})`, with a comment naming ADR 0226 and what the call is** (one request to the project's own `mcp` container carrying the step's token). A row is a reviewed act, and widening an allowlist to a measured set is not weakening (CLAUDE.md §6). |
+| **D1670** | 1 | §5 Run 5: `CONNECT_TIMEOUT_SECONDS` and `READ_TIMEOUT_SECONDS` "taken from the plane's client constants by import"; §1 D1667: the margin is `2 x (connect + read timeout)`. | **Those two constants are not the plane's.** `mcp_upstream.py` holds ONE timeout, `UPSTREAM_TIMEOUT_SECONDS = 10` (`:72`), because `urllib.request.urlopen` takes a single `timeout` and has no connect/read split. `CONNECT_TIMEOUT_SECONDS = 5` and `READ_TIMEOUT_SECONDS = 15` live in `storage_client.py:60-61` and are **boto3's, for R2**. Importing them into the loop would make its lease a function of an object-store client it never calls. | **`def lease_margin_seconds() -> int: return 2 * mcp_upstream.UPSTREAM_TIMEOUT_SECONDS`** -- still a FUNCTION over an imported constant, never a literal (`storage_cleanup.py:86-100`'s discipline, which exists so a change to the constant cannot leave a stale copy behind). The proof binds to the constant: mutating `UPSTREAM_TIMEOUT_SECONDS` must move the margin. |
+| **D1671** | 1 | §5 Run 5: the loop finishes a step by "reading the plane's outcome word from the result's audit outcome field if present"; §2 `WF-WORK-001`: *"a `replayed` result finishes the step as replayed"*. | **There is no such field, and a replay is indistinguishable from a first write in the plane's result.** `invoke_write` returns exactly `{tool, row_count, row, dry_run}` (`mcp_tools.py:644-652`), `row_count` is `len(rows)`, and both writes return one composite row. **Rig 32c measured it**: the same key twice returns the SAME row id, `app.notes` holds one row, and the word `replayed` appears ONLY in `app_private.agent_audit.outcome` on the `database`-source row (`committed:1` then `replayed:0`), which the HTTP result does not carry. | **The loop finishes a successful call as `succeeded` and does not assign an outcome it cannot determine** (ADR 0195). `replayed` stays in `workflow_step_outcome` as a value the SUBSTRATE may hold. Exactly-once is proved where it actually lives: one `app.notes` row, `agent_idempotency.replay_count = 1`, and one `committed` + one `replayed` audit row. `WF-WORK-001`'s node id becomes `::test_a_successful_call_finishes_the_step_and_the_replay_is_not_the_loops_to_see`. Surfacing it through the result would move `mcp_tools.py`'s reviewed shape, the catalog and every caller -- a contract move to make a sentence true. |
+| **D1672** | 1 | §5 Run 5 / §1 D1661: "an error whose token is in `RETRYABLE_TOKENS`"; "Terminal: every other token and **any 4xx from the plane**". | **A tool refusal is not a 4xx and is not a JSON-RPC `error` member. Rig 32b measured both shapes from a sibling container**: a `tools/call` refusal is **HTTP 200** with `result.isError: true` and the reason in `result.content[0].text`; only a protocol-level failure carries `error`. A loop that classified on HTTP status would read **every** tool refusal as a success. | **The classifier reads `result.isError` first, takes its token from `result.content[0].text`, and treats a JSON-RPC `error` member as terminal.** HTTP status is checked only for 401/403 (a refused bearer), which is a `token_refused`-shaped stop rather than a step failure. `test_a_terminal_refusal_fails_the_run_naming_the_boundary` feeds rig 32b's BYTES, not a hand-written envelope. |
+
 ---
 
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -639,10 +649,114 @@ Run `pytest tests/contract/test_acceptance_registry.py -q -p no:randomly`
 (the ADR index proofs at `:493` and `:530`). Commit (`Session 32 Run 1: the
 rigs, and ADRs 0226-0229`), push, read CI.
 
-**Done.** *(the executor writes: the deployable-diff answer; each rig's
-numbers — 32a's RSS with and without the loop, 32b's headers and the SSE
-shape, 32c's outcomes verbatim, 32d's zero-row control, 32e's timings, 32f's
-claim diff; the rows added; the CI verdict)*
+**Done.** Run 1 is complete. Six rigs, each with a control, each printing its
+own exit status from inside; all six exit **0**. Scripts and transcripts kept
+at `scratchpad/rig32/`.
+
+**The deployable diff.** `git diff --name-only 4344a1f..HEAD` filtered to
+`src/ bin/ services/ migrations/ templates/ schemas/ compose.yaml deploy.sh
+VERSION` names **exactly one file**, `src/agentic_postgres/capacity.py`, 56
+insertions / 18 deletions. Every changed line is a string literal inside a
+`Measurement` (`value=`/`conditions=` text: the 0.69 s capacity reading, the
+2.92 s usage reading); no `def`, `class`, `import` or expression moved. D1641's
+caveat holds: **the deployed commit and HEAD differ by data in the envelope and
+by nothing executable.**
+
+**Rig 32a -- the cost of the loop.** The released image, built from
+`compose.yaml:1190-1212`'s own build args, as `APP_MODE: auth` against a rig
+cluster with all 33 released migrations applied; arm 2 injects a polling task
+through `sitecustomize`, so the image measured is byte-for-byte the released
+one. **Bare: 53.77 MiB RSS / 54.7 MiB cgroup. With the loop: 61.57 MiB RSS /
+62.9 MiB cgroup. Idle delta 7.8 MiB RSS, 8.1 MiB cgroup, against a 32 MiB
+criterion** -- cleared four-fold. `docker top` reads **one** process, the
+uvicorn entrypoint with no `--workers`. Control: the same image in `mcp` mode
+reads 94.88 MiB. **No flip criterion is tripped; Run 5 proceeds.** The injected
+task is a conservative OVER-estimate (its own thread, event loop and
+connection, where the real loop shares the application's) -- the only direction
+in which an approximation may clear a gate. Two rig-side findings recorded in
+ADR 0226: a bind-mounted 0600 secret is unreadable by `USER 65532` and the
+lifespan dies with `PoolTimeout` naming the pool and never the file (both arms
+of the first pass); and the image carries no `ps`, so the third criterion was
+skipped by a falsy guard until it was read with `docker top`.
+
+**Rig 32b -- the transport.** A sibling container reaches
+`http://mcp:8080/mcp` on a user network with a bearer: **200**. **No session id
+is demanded** -- `stateless_http` needs none, so §9's stop condition is not
+met. The reply is `event: message\r\ndata: {...}\r\n\r\n` and parses with
+`sse_result`'s shape (last `data:` wins). Controls: no bearer -> **401**; a
+`token_use: access` bearer -> **401**, both with
+`www-authenticate: Bearer error="invalid_token"`. **What the loop sends,
+measured:** `POST http://mcp:8080/mcp`, `Authorization: Bearer <per-step
+token>`, `Accept: application/json, text/event-stream`, `Content-Type:
+application/json`, `X-Request-Id: <the attempt's uuid4>`, body
+`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":<tool>,
+"arguments":{...}}}`. **The finding that mattered most is D1672**, the
+classifier shape. The tool ROSTER is reported **undetermined** in this rig
+rather than folded into a pass: `resolve_agent_context` is *"the FIRST of the
+three or four upstream requests one tool call makes"* (`mcp_upstream.py:191-194`)
+and runs for `tools/list` too, so with `APG_POSTGREST_URL=http://nowhere:3000`
+no call gets past it.
+
+**Rig 32c -- replay.** Verbatim, through `api.create_note` on a 33-migration
+cluster: the same key and arguments twice returns **the same row id**, one row
+in `app.notes`, `replay_count` **1**, audit `committed:1,replayed:0`. The same
+key with different arguments -> `AP412: this idempotency key was used for a
+different call` (errcode `PT412`, raised in
+`agent_idempotency_claim` line 24). No key at all -> `AP412: an agent write
+requires an Idempotency-Key header`. Dry-run header -> **no row, no claim**,
+rc 0 with a null id. Control: a fresh key -> a second row. **D1646 is
+confirmed and no stop condition fires** -- a replay is re-read, never refused.
+D1671 is the row this rig produced.
+
+**Rig 32d -- the posture.** A no-grant `app_private` table behind a definer
+function granted to `auth_service`: direct `SELECT` -> `permission denied for
+table`; the function -> succeeds, reads every row; `agent_writer`,
+`agent_reader`, `authenticated`, `anon` and `storage_service` -> `permission
+denied for function`, all five. `has_table_privilege` / `has_function_privilege`
+/ anon's -> **`false true false`**. **The control is the decisive one:** the
+same table under `FORCE ROW LEVEL SECURITY` with no policy -- the definer
+function returns **zero rows and exits 0**, silently, in the reassuring
+direction. **D1647's premise is measured**, and the stage plan's FORCE-RLS
+sentence stays refused. Also measured: `psql -qtA` prints
+`has_*_privilege()::text` as the WORDS, which would have failed WF-STATE-001's
+privilege proofs on first execution.
+
+**Rig 32e -- the lease.** Five arms across two concurrent sessions over a
+step-shaped table. A holder inside an open transaction is skipped by
+`SKIP LOCKED`; after it commits with its lease still standing, the second
+claimant takes **nothing**; once the lease expires it takes the row with
+`attempt 2` and a new holder; the first holder's late finish updates **0 rows**
+and the row stays the second holder's. Control, the same statement with the
+lease predicate removed: the second claimant takes the row **thirty seconds
+into a thirty-second lease**. 0016:65-69 re-measured for a step. **The rig's
+first pass found a third-party fact worth the whole rig: `pg_catalog.now()` is
+the TRANSACTION START time**, so a 2 s lease with a 3 s in-transaction sleep
+had already expired at commit; the claim and the reclaim predicate read the
+same clock. (Three of that pass's four failures were the rig's own
+expectation -- `psql -qtA` separates with `|`, not `,`.)
+
+**Rig 32f -- the token split.** Against the real `AuthService` with a faked
+repository and hasher, and a vocabulary loaded by the product's own
+`scopes.load_vocabulary` from a lock the product's own `bin/mcp-contract.sh
+lock` compiled. The two tokens for one active agent **differ in `jti` alone**;
+`token_use`, `scope`, `role`, `authz_version`, `credential_version`, `sub`,
+`iss` and `aud` are identical. Four refusal pairs are byte-identical: `agent is
+revoked`, `agent secret has expired`, `no such agent` (control), `agent id is
+not a uuid` (control). `step_token` pays no hash. The one asymmetry is the one
+that must exist: a wrong secret is `secret mismatch` for `agent_token` and
+`step_token` has no secret to be wrong. **Measured, after a vacuous pass: the
+claim is spelled `scope`, not `scopes`** -- the first version of that check
+compared two absent keys.
+
+**Rows added: D1668, D1669, D1670, D1671, D1672. NEXT FREE: D1673.**
+D1668-D1670 are the three ways the plan's Run 5 sketch does not fit the tree
+(a banned module name, a missing allowlist row, two constants that are the
+object-store client's); D1671 and D1672 are what the rigs measured about what
+the loop can and cannot see in a plane result. None reopens a decision; all
+five are carried into ADRs 0226, 0227 and 0229 as written.
+
+**ADRs 0226-0229 written and indexed** in `docs/decisions/README.md` (229
+rows). No stop condition in §9 was met.
 
 ### Run 2 — D1636 first: the ceilings grouped by Compose's own label
 
