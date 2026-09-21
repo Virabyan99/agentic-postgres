@@ -185,7 +185,7 @@ def test_a_third_project_that_does_not_fit_is_refused_on_this_host(
 
     labels = [line["label"] for line in decision["lines"]]
     assert labels[:6] == [
-        "declared",
+        "declared memory",
         "reserved",
         "committed",
         "requested",

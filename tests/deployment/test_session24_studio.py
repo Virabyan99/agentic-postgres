@@ -81,6 +81,17 @@ AUDITOR_PASSWORD = "s24-studio-auditor-9c41e7b0d268"  # noqa: S105 -- a probe cr
 #: leak exactly here, because it is the one view that returns a tenant's data.
 STRANGER_USERNAME = "apg-s24-studio-stranger"
 STRANGER_PASSWORD = "s24-studio-stranger-4f0aa7c31d95"  # noqa: S105 -- a probe credential
+
+#: The tenant half's own subject, because the auditor cannot be one (D1638).
+#:
+#: Two product rules meet in the auditor and do not both admit one role: the
+#: token ceiling gives admin scopes to `project_admin` alone, and the notes
+#: grants go to `authenticated` and the two agent roles alone. So the subject
+#: whose rows the query view returns is a THIRD account, holding the ordinary
+#: tenant role and the two note scopes and nothing administrative at all.
+OWNER_USERNAME = "apg-s24-studio-owner"
+OWNER_PASSWORD = "s24-studio-owner-7b25c9e3a01f"  # noqa: S105 -- a probe credential
+OWNER_SCOPES = ("notes:read", "notes:write")
 AGENT_NAME = "apg-s24-studio-reader"
 AGENT_SECRET = "s24-studio-reader-3f80a2c5e194"  # noqa: S105 -- a probe credential
 
@@ -235,30 +246,39 @@ def auditor(
     every probe subject here gives: a fixture built on an endpoint makes every
     proof below conditional on that endpoint.
 
-    **The request role is `authenticated`, not `project_admin` (D1572).** What
-    a subject may do administratively is decided by the scope in its token and
-    not by the role name -- `bootstrap_statements.py:258-263` states it and
-    `API-ADMIN-001` is the requirement -- so this one holds `AUDITOR_SCOPES`
-    and the ordinary tenant role, which is the pair a real auditor holds.
+    **The request role is `project_admin`, and this subject is administrative
+    ONLY (D1638).** Two product rules meet here and they do not both admit one
+    role, so no single account can be what Session 24 asked this one to be:
 
-    Created as `project_admin` it could do neither of the two things the proofs
-    below ask of it. Migration 0007 grants `EXECUTE` on `api.create_note` to
-    `{{authenticated}}, {{agent_writer}}` after revoking it from `PUBLIC`, and
-    migration 0004 grants `SELECT` on `app.notes` to those two and
-    `{{agent_reader}}`: `project_admin` is on neither list. That is the whole
-    of `studio_tenant_read`'s failure -- **the product was right** and the
-    instrument asked it for something no role this subject held could do.
+    * the token ceiling admits `AUDITOR_SCOPES` to `project_admin` and to no
+      other role -- `permitted_scopes` measured over all six -- and
+      `/auth/login` enforces it at issuance, answering 422 rather than
+      truncating, because a subject holding a scope its role may not carry is
+      a state somebody has to know about (`services/auth-api/app/service.py`);
+    * the database grants go the other way. Migration 0007 grants `EXECUTE` on
+      `api.create_note` to `{{authenticated}}, {{agent_writer}}` after revoking
+      it from `PUBLIC`, and migration 0004 grants `SELECT` on `app.notes` to
+      those two and `{{agent_reader}}`. `project_admin` is on neither list.
+
+    D1572 read the second rule, moved the role to `authenticated` and left
+    `AUDITOR_SCOPES` in place, which the first rule refuses at login -- so all
+    three of this module's live claims errored at setup on the next trip. The
+    offline suite could not see it: the ceiling is enforced by the running auth
+    service when it mints a token, and nothing offline mints one.
+
+    The tenant half uses `note_owner` instead, and reaches Studio through
+    `launched_studio_as_owner`.
 
     The password file is written under a `tmp_path`, mode `0600`, and removed
     with the rest of the temporary tree. It is the only way Studio will take a
     password apart from a TTY, and there is no TTY in a sweep.
     """
     hashing = service_source.load("hashing")
-    # `authenticated` -- see the docstring. The name is read out of the
+    # `project_admin` -- see the docstring. The name is read out of the
     # deployed document rather than derived here, which is the same reach
     # `tests/deployment/conftest.py`'s `_registered_subject` makes for every
     # other live subject in this suite (ADR 0002: one authority for a name).
-    role_name = project_a["database"]["roles"]["authenticated"]
+    role_name = project_a["database"]["roles"]["project_admin"]
     scopes = ", ".join(f"'{scope}'" for scope in sorted(AUDITOR_SCOPES))
 
     psql(project_a, f"DELETE FROM app_private.users WHERE username = '{AUDITOR_USERNAME}';")
@@ -387,13 +407,72 @@ class Launched:
 
 
 @pytest.fixture(scope="module")
-def launched_studio(auditor: dict[str, Any]) -> Any:
-    """`bin/studio.sh` against this deployment, as the auditor (D1114).
+def note_owner(
+    project_a: dict[str, Any],
+    psql: Callable[..., tuple[int, str, str]],
+    api_call: Callable[..., Any],
+    app_base: Callable[[dict[str, Any]], str],
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Any:
+    """The human whose rows the query view returns. A tenant, and nothing more.
+
+    `authenticated` with `notes:read` and `notes:write`: the pair that can
+    write a note through `POST /rpc/create_note` and read it back through
+    `/notes`, which is the whole of what `STU-QUERY-002` asks of a subject.
+    It holds no administrative scope, so the token ceiling admits it and the
+    login this fixture performs is the proof of that (D1638).
+
+    The auditor cannot be this subject and the reason is in its docstring.
+    """
+    hashing = service_source.load("hashing")
+    role_name = project_a["database"]["roles"]["authenticated"]
+    scopes = ", ".join(f"'{scope}'" for scope in sorted(OWNER_SCOPES))
+
+    psql(project_a, f"DELETE FROM app_private.users WHERE username = '{OWNER_USERNAME}';")
+    code, user_id, error = psql(
+        project_a,
+        "SELECT app_private.auth_create_user("
+        f"'{OWNER_USERNAME}', 'Session 24 studio note owner', '{role_name}', "
+        f"ARRAY[{scopes}]::text[], "
+        f"'{hashing.Hasher().hash(OWNER_PASSWORD)}');",
+    )
+    assert code == 0 and user_id.strip(), f"could not create the studio note owner: {error}"
+
+    password_file = tmp_path_factory.mktemp("studio-owner") / "password"
+    password_file.write_text(OWNER_PASSWORD + "\n", encoding="utf-8")
+    password_file.chmod(0o600)
+
+    try:
+        answer = api_call(
+            f"{app_base(project_a)}/auth/login",
+            method="POST",
+            body={"username": OWNER_USERNAME, "password": OWNER_PASSWORD},
+        )
+        assert answer.status == 200, (
+            f"the studio note owner could not log in ({answer.status}: {answer.body[:200]}). "
+            "Every reading below would then be a reading of a missing credential"
+        )
+        yield {
+            "user_id": user_id.strip(),
+            "token": json.loads(answer.body)["access_token"],
+            "password_file": password_file,
+        }
+    finally:
+        psql(project_a, f"DELETE FROM app_private.users WHERE username = '{OWNER_USERNAME}';")
+
+
+def _launch_studio(username: str, password_file: Any) -> Any:
+    """`bin/studio.sh` against this deployment, as one named subject (D1114).
 
     The product's own wrapper, as a subprocess, pointed at the op-owned copy of
     the deployed document — `APG_PROJECT_A_OUTPUTS` is what the whole deployment
     suite reads, and Studio is a client of a deployed document by decision
     (ADR 0158).
+
+    Parameterised by subject because this module needs two: Studio forwards the
+    token of whoever it logged in as and holds no authority of its own (ADR
+    0205), so the administrative proofs and the tenant proof cannot share one
+    launch any more than they can share one account (D1638).
     """
     outputs = os.environ.get("APG_PROJECT_A_OUTPUTS")
     assert outputs, "APG_PROJECT_A_OUTPUTS is unset; the environment gate should have skipped"
@@ -409,8 +488,8 @@ def launched_studio(auditor: dict[str, Any]) -> Any:
             str(REPO_ROOT / "bin" / "studio.sh"),
             "--project", str(ALPHA_MANIFEST),
             "--outputs", outputs,
-            "--username", AUDITOR_USERNAME,
-            "--password-file", str(auditor["password_file"]),
+            "--username", username,
+            "--password-file", str(password_file),
         ],
         cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )  # fmt: skip
@@ -447,6 +526,24 @@ def launched_studio(auditor: dict[str, Any]) -> Any:
         except subprocess.TimeoutExpired:
             started.process.kill()
             started.process.wait(timeout=10)
+
+
+@pytest.fixture(scope="module")
+def launched_studio(auditor: dict[str, Any]) -> Any:
+    """Studio holding the ADMINISTRATIVE subject's token. Revocation and audit."""
+    yield from _launch_studio(AUDITOR_USERNAME, auditor["password_file"])
+
+
+@pytest.fixture(scope="module")
+def launched_studio_as_owner(note_owner: dict[str, Any]) -> Any:
+    """Studio holding the TENANT's token. The query view, and nothing else.
+
+    A second launch rather than a second login, because Studio takes its
+    subject once at start-up and forwards that token for the life of the
+    process. `STU-QUERY-002` is about what PostgreSQL returns to a human's own
+    token, so the human has to be the one Studio is holding.
+    """
+    yield from _launch_studio(OWNER_USERNAME, note_owner["password_file"])
 
 
 @pytest.fixture(scope="module")
@@ -604,9 +701,9 @@ def test_revocation_through_studio_refuses_the_agents_next_request_on_alpha(
     # CALLER's privileges and the contract was captured as `api_documentation`
     # (D1275), so a subject holding any other request role may differ from it.
     # The audit view works either way, which is the split this session built.
-    # Since D1572 the auditor's request role is `authenticated`; what it may do
-    # administratively comes from its token's scopes, so what that does to the
-    # served document is a reading the trip takes, not one asserted here.
+    # The auditor's request role is `project_admin` and its scopes are the
+    # three administrative ones (D1638), so what that pair does to the served
+    # document is a reading the trip takes, not one asserted here.
     printed = "\n".join(launched_studio.lines)
     assert AUDITOR_PASSWORD not in printed, printed
     assert AGENT_SECRET not in printed, printed
@@ -716,13 +813,13 @@ def two_owners_one_relation(
     api_call: Callable[..., Any],
     app_base: Callable[[dict[str, Any]], str],
     rest_base: Callable[[dict[str, Any]], str],
-    auditor: dict[str, Any],
+    note_owner: dict[str, Any],
 ) -> Any:
-    """One row owned by the auditor and one owned by somebody else.
+    """One row owned by the note owner and one owned by somebody else.
 
     **The second row is the whole proof.** A query view that returned nothing at
     all would satisfy *the stranger's row is absent*, and a query view with no
-    policy behind it would satisfy *the auditor's row is present*. Only the pair
+    policy behind it would satisfy *the owner's row is present*. Only the pair
     distinguishes a forwarder whose upstream enforces ownership from one that
     happens to be empty (D173, D260).
 
@@ -747,11 +844,11 @@ def two_owners_one_relation(
     # not have read anything either way. Sorted by construction -- a one-element
     # array is sorted -- which `is_scope_set` requires (D248).
     hashing = service_source.load("hashing")
-    # `authenticated`, for the reason the auditor fixture's docstring gives:
-    # this subject WRITES a note through `POST /rpc/create_note` and READS it
-    # back through `/notes`, and `project_admin` is granted neither. The two
-    # owners must also hold the SAME role, or the absence this proof turns on
-    # could be a missing grant rather than the row policy (D509).
+    # `authenticated`, the same role `note_owner` holds -- and the sameness is
+    # load-bearing. The two owners must hold the SAME role, or the absence this
+    # proof turns on could be a missing grant rather than the row policy
+    # (D509). `project_admin` is granted neither the `create_note` EXECUTE nor
+    # the `app.notes` SELECT, which is why the auditor is not one of the two.
     role_name = project_a["database"]["roles"]["authenticated"]
 
     psql(project_a, f"DELETE FROM app_private.users WHERE username = '{STRANGER_USERNAME}';")
@@ -778,11 +875,11 @@ def two_owners_one_relation(
 
         base = rest_base(project_a)
         titles = {
-            "mine": f"{AUDITOR_USERNAME}-rls-own",
+            "mine": f"{OWNER_USERNAME}-rls-own",
             "theirs": f"{STRANGER_USERNAME}-rls-other",
         }
         for token, title in (
-            (auditor["token"], titles["mine"]),
+            (note_owner["token"], titles["mine"]),
             (stranger_token, titles["theirs"]),
         ):
             written = api_call(
@@ -811,13 +908,13 @@ def two_owners_one_relation(
         psql(
             project_a,
             "DELETE FROM app.notes WHERE title IN ("
-            f"'{AUDITOR_USERNAME}-rls-own', '{STRANGER_USERNAME}-rls-other');",
+            f"'{OWNER_USERNAME}-rls-own', '{STRANGER_USERNAME}-rls-other');",
         )
         psql(project_a, f"DELETE FROM app_private.users WHERE username = '{STRANGER_USERNAME}';")
 
 
 def test_the_query_view_shows_the_human_their_own_rows_and_not_anothers(
-    launched_studio: Launched, two_owners_one_relation: dict[str, str]
+    launched_studio_as_owner: Launched, two_owners_one_relation: dict[str, str]
 ) -> None:
     """**D1276's other half, and the one with work in it** (D1429, D1453).
 
@@ -837,11 +934,14 @@ def test_the_query_view_shows_the_human_their_own_rows_and_not_anothers(
     to hide.
 
     Both directions, because each alone is satisfied by a broken view: the
-    auditor's own row present (a view returning nothing passes the second
+    owner's own row present (a view returning nothing passes the second
     assertion), and the stranger's absent (a view with no policy behind it
     passes the first).
+
+    Studio here holds the OWNER's token, not the auditor's (D1638): the subject
+    whose rows come back has to be the subject Studio logged in as.
     """
-    status, body = launched_studio.call(
+    status, body = launched_studio_as_owner.call(
         "POST",
         "/__apg/query",
         {"relation": AUDITED_RELATION, "select": ["title"], "limit": 200},
@@ -854,7 +954,7 @@ def test_the_query_view_shows_the_human_their_own_rows_and_not_anothers(
 
     titles = [str(row.get("title")) for row in body.get("rows", [])]
     assert two_owners_one_relation["mine"] in titles, (
-        "the auditor's OWN row is missing from their own query view, so the absence "
+        "the owner's OWN row is missing from their own query view, so the absence "
         "asserted below would be the absence of everything (D509)"
     )
     assert two_owners_one_relation["theirs"] not in titles, (

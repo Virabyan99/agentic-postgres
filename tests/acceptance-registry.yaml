@@ -4241,11 +4241,15 @@
     Studio forwards a request holding the human's own token and has no policy
     of its own, and the stranger is given `notes:read` rather than no scope at
     all, which is the stronger subject -- a caller who CAN read the relation
-    and still sees none of the auditor's rows says something a caller who can
-    read nothing does not. This proof existed from Session 24 and belonged to
-    no requirement, so all three Studio claims read `passed` while its fixture
-    errored at setup on an empty scope array migration 0011 refuses and it had
-    never executed (D386, D1236, D1544).
+    and still sees none of the owner's rows says something a caller who can
+    read nothing does not. Both subjects hold `authenticated`, and the Studio
+    this proof reaches is launched as the owner rather than as the module's
+    administrative auditor: the token ceiling admits the auditor's admin scopes
+    to `project_admin` alone and the notes grants exclude that role, so no one
+    account can be both (D1638). This proof existed from Session 24 and
+    belonged to no requirement, so all three Studio claims read `passed` while
+    its fixture errored at setup on an empty scope array migration 0011 refuses
+    and it had never executed (D386, D1236, D1544).
 
 - id: OPS-MIRROR-001
   priority: P0
