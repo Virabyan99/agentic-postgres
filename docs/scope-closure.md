@@ -911,3 +911,73 @@ both projects sign with a key that did not exist that morning.
    not. And ADR 0162 prices no row for a command gaining an option (D1561) — `upgrade plan` read this release as
    `requires patch` while `VERSION` moved a minor, which is right about what
    the upgrade costs an operator and silent about what the release added.
+
+
+## 24. What Session 31 closed, what it left, and what Session 32 inherits
+
+**Session 31 is the session that taught this node it is finite.** Eight runs,
+`D1582`–`D1644`, **sixty-two divergence rows of which forty-two were written by
+executing the plan rather than by writing it**. `1.9.0` is deployed, swept,
+merged and tagged at `4344a1f` (D1425, with D1641's one stated exception), and
+the merged evidence reads **145 claims: 139 passed, 5 not_run, 1 failed** — ten
+more claims than Session 30, and the ten new ones all passed.
+
+**The sentence this session would most want carried forward: seven of its
+defects were the instrument rather than the product**, and the product's own
+refusals diagnosed two of them in one line each. Every one was a value that
+looked measured and was not, and every one was caught by running the check
+against the real thing instead of the expected thing.
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **D1580** — `retire`'s early refusal cannot fire on the only path an operator can walk | **Closed** (ADR 0224). The overlap window is closed by the step-six deploy, not by `retire`, and `retire_rotation` gained a third outcome so the state *no rotation is in flight* is distinguished from *a rotation is in flight and not ready*. `rotate-signing-key.sh` no longer writes when nothing changed. |
+| **D1578** — nothing validates an operator-supplied PEM | **Closed** (ADR 0225). `check_value_kind` runs at materialisation, before the value touches disk, and `bin/materialize-secrets.py` deletes the value and exits on a refusal. **The ADR's own claim was then measured FALSE and corrected**: *catches every malformation actually observed* caught one of four, and strengthening it to require RFC 7468 boundaries on lines of their own brought it to two — the other two are named as out of reach rather than implied to be covered (D1618). |
+| **D1572** — the `studio_tenant_read` fixture | **Closed, and not the way Run 5 closed it.** Run 5 moved the auditor's role from `project_admin` to `authenticated` on the grants reading, which was right about the grants and unaware of the ceiling: the auth service validates a stored record's scopes against `permitted_scopes(role)` before signing and **refuses rather than truncating**, and `project_admin` is the only role of six whose ceiling carries the three admin scopes. All three Studio proofs then errored at setup on the trip. **The subject is split in two** — an administrative `auditor` and a tenant `note_owner`, with two Studio launches, because Studio takes its subject once at start-up and forwards that token for the process's life (D1638). `studio_tenant_read` **passes**, which it had never done anywhere. |
+| **D1542** — 22 orphaned deployment proofs | **Triaged, not emptied.** Ten requirements registered with their own claims; twenty orphan node ids attached to requirements that already existed, which makes those requirements stricter and moves no count. `KNOWN_UNREGISTERED` shrank by exactly what was registered and by nothing else — **a requirement written to make a list shorter is a requirement nobody reviewed.** |
+| **D1595** — five stale statements in the tree's own prose | **Closed, including the fifth, which was a measurement rather than an edit.** `APG_ADMIN_PASSWORD_FILE` was exported by the gate and absent from the closed roster; the grep said which fixture consumes it and the row says which. |
+| `deployment_convergence` | **Passed again**, a second trip running, with `--redeploy-before-file` declared. |
+| **The collector, unconsumed since Session 14** | **Closed** (ADR 0223). `telemetry_read` passed on the trip: **the project's own Prometheus answered on production for the first time in this product's life**, and every series it returned named its project. |
+| **Nothing set `pids_limit` or `cpus`, and host RAM was never read** | **Both closed** (ADR 0221, 0222). Twenty service definitions carry `pids_limit` and nine carry `cpus`; `host.yaml` declares the machine at schema 3 and admission charges every deploy against it. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **D1636** — `ceilings` excludes the database and under-reports by the largest cap on the host | **Reported and deliberately not repaired mid-trip.** Production reads **2,944 MiB** where the real sum is **4,480** against 3,814 MB of RAM, because `apg.project.key` is not applied to `postgres`, `pgbouncer` or `dbmate` (D587). The figure **decides nothing** — `decide` charges `unreclaimable_mb`, never the caps — but it under-reports in the **reassuring** direction, and D767's whole point is that the caps in aggregate already exceed the machine. The repair is to group by Compose's own labels, as `runtime_override` already does for the database selector. **This is Session 32's first item.** |
+| **D1642** — a DR kit names the checkout's commit as its release | New, and harmless in this instance only because D1641 measured the deployable diff empty. `export` reads `release` from the tree it runs in and the deployed document beside it in the same kit names another; nothing compares them. Belongs to a session already in `dr-kit.py`. |
+| **D1643** — `doctor usage` exits 6 on beta | **Not a defect, and recorded so nobody repairs it.** `tool_calls_total` has no series because no agent tool call has ever been made on beta, and `exit_code` returns 6 for `UNKNOWN` as well as `PROBLEM` because *a check that could not run is not a healthy check*. The product declined to fold *no series* into *zero calls* even though the audit table agreed the answer was zero. The default `doctor` is a separate verb and still reads 11 ok on both. |
+| **D1547** — an operator can write a sentinel row and cannot remove one | **Still half-open, and it cost a root `psql` again this trip.** The removal is now a staged script that derives the container, the database and the title from the deployed document and the before-file rather than taking them typed, which removes the transcription risk but not the gap: `bin/api.sh`'s `OPERATIONS` is a closed set of six with no counterpart to `create-note`. A `delete_note` RPC is a migration plus an `api` contract move plus a client regeneration, and belongs to a session that moves that contract anyway. |
+| **D1581** — why `auth` was recreated by one deploy and not another | Unchanged and still **UNDETERMINED**. The mount digest parses one compose payload and the secret mounts live in another. |
+| `documented_path` | **`failed` by decision**, until a person walks the path. |
+| `port_allocation` | **`not_run` by choice** for the second trip running (D1568). This trip performed no reboot, and `--after-reboot` is a declaration that one happened. |
+| `bootstrap_identity`, `api_authorization`, `credential_rotation_planes` | `not_run`. They need four rotations between them; Session 30 performed one, and this session performed none. |
+| `replacement_host_restore` | `not_run` by standing decision (D1028). |
+| **D1375** — `op` cannot reach the Docker socket | Unchanged deliberately. The host writes no offline half; the merged one is the workstation's. |
+| The mirror's per-pass transport flake | Upstream. ADR 0220's retry makes the verb report it correctly; nobody has asked which side truncates. |
+
+### What Session 32 inherits, in order
+
+1. **The worker is a seventh claimant, and it must be charged against a
+   declared capacity** — which is why the stage plan ordered 31 before 32.
+   That declaration now exists: `host.yaml` schema 3, admission at step 0, and
+   a refusal at exit 12 that has fired on production against a real third
+   project. **A worker that does not declare `unreclaimable_mb` is a worker
+   admission cannot see.**
+2. **D1636's label gap, first.** It is the third wrong reading D587 has
+   produced and the first that is a capacity figure. Session 32 adds a
+   long-running process to a host whose reported ceilings already understate
+   the truth by 1,536 MiB; fixing the reading before adding the claimant is
+   cheaper than explaining the number afterwards.
+3. **`storage_cleanup.py`'s lease-based GC is the one pattern to copy**
+   (unchanged from §23). There is still no worker, queue, outbox, scheduler or
+   workflow.
+4. **A worker holds nothing an agent identity does not hold** — the stage's
+   sibling invariant, and the one D1638 just demonstrated has teeth: this
+   product refuses to mint a token whose stored scopes exceed its role's
+   ceiling, and it refuses at issuance rather than truncating. A worker
+   identity will meet the same check, and **a worker that needs both
+   administrative scopes and tenant grants cannot exist** any more than
+   Session 24's auditor could.
+5. **D1248's audit filters** remain Session 33's, for the provenance reader.

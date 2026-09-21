@@ -30,20 +30,29 @@ STAGE 3 IS CLOSED.  Tagged 1.6.0 on a16cb84 (2026-09-15). Sessions 26-29 were
                 1.6.1 / 1.6.2 (ADR 0209), 28 offline (ADR 0210-0215, migration
                 0033), 29 THE TRIP. None of 26, 27, 29 registered a requirement,
                 so the ordinal skips them the way it skips 19 (D1063).
-RELEASE         1.7.0, tagged 2026-09-18 on 8c61309b6cf9 -- THE COMMIT THAT WAS
-                DEPLOYED (D1425). The tree and the deployment agree for the
-                first time since Session 25.
-HEAD            de9ecbb, main, local and origin identical, clean.
-EVIDENCE        evidence/session-28.json: 129 claims, 123 passed, 5 not_run,
-                1 failed (documented_path, deliberately -- §2.4).
-CURRENT_SESSION 28. Stage 4 numbers its sessions 30-35.
-template_version 1.7.0. Outputs schema v18, capability manifest 4, lock 4,
-                project lock 3, project manifest 6, api-surface 2.
-ADRs            215, next free 0216.   migrations 33, released and applied on
-                both projects, fix-forward only.   requirements 222 (214 P0,
-                8 P1).   claims 129, 13 declared offline.
+RELEASE         1.9.0, tagged 2026-09-21 on 4344a1ff4836 -- THE COMMIT THAT WAS
+                DEPLOYED (D1425, with D1641's one stated exception: the second
+                sweep's INSTRUMENTS came from 05fdfe9, whose deployable diff
+                against the tag was measured EMPTY).
+SESSIONS DONE   30 (2026-09-19, 1.8.0) and 31 (2026-09-21, 1.9.0). FOUR LEFT:
+                32 the durable step substrate and workflow execution - 33
+                approval gates, compensation, provenance - 34 governed
+                connectivity - 35 change-governance, hardening, the third
+                reader, the Stage 5 decision report.
+EVIDENCE        evidence/session-31.json: 145 claims, 139 passed, 5 not_run,
+                1 failed (documented_path, deliberately -- §2.4). The best
+                document this repository has produced, and the ten claims
+                Session 31 added all passed on their FIRST execution anywhere.
+CURRENT_SESSION 31. Stage 4 numbers its sessions 30-35.
+template_version 1.9.0. host.yaml schema 3. Outputs schema v18, capability
+                manifest 4, lock 4, project lock 3, project manifest 6,
+                api-surface 2 -- none of them moved in 30 or 31.
+ADRs            225, next free 0226.   migrations 33, released and applied on
+                both projects, fix-forward only -- UNCHANGED through 30 and 31.
+                requirements 238.   claims 145, 24 declared offline.
 divergences     D1-D1513 recorded in the session plans. D1514-D1536 recorded
-                here.  **Next free: D1537.**
+                here. D1537-D1581 in Session 30's plan, D1582-D1644 in Session
+                31's (D1633 never issued).  **Next free: D1645.**
 PostgreSQL      18.4 (pgvector/pgvector:pg18 by digest). STAYS. Decided by the
                 operator on 2026-09-18 (D1515).
 DIRECTION       APPLIANCE FIRST, HOSTING DEFERRED. Decided by the operator on
@@ -54,8 +63,9 @@ OBSERVABILITY   The OTel collector and Prometheus that already run, bounded.
                 No ClickStack. Decided 2026-09-18 (D1519).
 ```
 
-**Every number in this document was measured on 2026-09-18 at `de9ecbb`**, or
-says whose it is.
+**Every number in §1 onward was measured on 2026-09-18 at `de9ecbb`**, or says
+whose it is; **the Status block above is re-read at each session's close** and
+currently stands at Session 31's, 2026-09-21.
 
 ---
 

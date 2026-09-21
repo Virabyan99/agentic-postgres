@@ -491,6 +491,62 @@ ENVELOPE: tuple[Measurement, ...] = (
             "into a figure about nothing."
         ),
     ),
+    # ---- the deployment's own numbers, taken ON the deployment ----------
+    #
+    # Session 31 Run 8, 2026-09-21, on the host, as root, after the trip's
+    # sweep. Until this session the envelope carried an `Unmeasured` row here
+    # saying every number in it was taken off-host and that **the
+    # CONFIGURATION numbers transfer and the MACHINE numbers do not**. These
+    # are the first figures in this document measured on the machine the
+    # product actually runs on.
+    Measurement(
+        subject="doctor capacity: the whole-host reading, on the host",
+        value="0.69 s wall (0.68 s for the single-project form)",
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, no swap, 2 vCPU, eighteen containers",
+            "two projects deployed at template 1.9.0, both healthy",
+            "run as root; `time bin/doctor.sh capacity --host host.yaml`",
+            "the Docker root read with df at the path the reading names, not /var/lib/docker",
+        ),
+        note=(
+            "Sub-second, and that matters for what the reading is FOR: admission "
+            "consults the same sum at a deploy's step 0, so the cost of deciding "
+            "whether a project fits is noise beside the deploy it gates. Five "
+            "groups ok -- declared 3,814 MiB and 37 GiB with 1,600 MiB claimable, "
+            "2,067 MiB available, 22 GiB free, **608 MiB committed across two "
+            "projects**, and a ceilings figure of 2,944 MiB that is WRONG BY "
+            "DESIGN-FLAW and known (D1636): it excludes the database, the largest "
+            "cap on the host, because `apg.project.key` is not applied to "
+            "`postgres` or `pgbouncer` (D587). The real sum is 4,480 MiB against "
+            "3,814 MB of RAM, which is D767's whole point -- and the number as "
+            "reported under-states it in the REASSURING direction."
+        ),
+    ),
+    Measurement(
+        subject="doctor usage: one project's eight figures, on the host",
+        value="2.92 s wall, against 0.69 s for the capacity reading",
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, run as root, immediately after a 1,030-proof sweep",
+            "alpha-dev: the database sized, the pgBackRest repository sized, the "
+            "agent record counted, and the project's own Prometheus queried",
+            "beta-dev read in the same pass as the control",
+        ),
+        note=(
+            "Four times the capacity reading, and the difference is where it goes: "
+            "capacity reads manifests, a `df` and container labels, while usage "
+            "reaches the database, the repository AND the store. Alpha returned "
+            "`285 requests, 21 calls` -- **the sweep's own traffic, which is the "
+            "first time this product has read its own telemetry back on "
+            "production**. Beta returned `UNKNOWN: tool_calls_total could not be "
+            "read; the store holds no such series yet` and the verb exited 6, "
+            "because no agent tool call has ever been made there. That is the "
+            "reading working: a Prometheus counter has no series until it is "
+            "first incremented, and `exit_code` refuses to fold *no series* into "
+            "*zero calls* (D1643, ADR 0195)."
+        ),
+    ),
 )
 
 
@@ -564,24 +620,6 @@ UNMEASURED: tuple[Unmeasured, ...] = (
             "and a developer wanting their own first-run number can time "
             "`docker pull` from versions.env"
         ),
-    ),
-    Unmeasured(
-        subject="apg doctor capacity and usage, on the deployment",
-        reason=(
-            "Session 31's two readings are **host reads and store queries taken as "
-            "root**: `/proc/meminfo`, `shutil.disk_usage` at the Docker root and at "
-            "each project's data volume, `docker inspect` for the memory ceilings, "
-            "the deployed documents under `/etc/agentic-postgres/projects/<key>/` "
-            "which are `drwx------ root root` (D1606), and a Prometheus query "
-            "executed inside the store's own container because the store is routed "
-            "nowhere. **Nothing here has a host**, and every one of those readings "
-            "answers `unknown` off it -- correctly, which is the whole design (ADR "
-            "0221: a reading reports, it does not guess). An envelope row taken on "
-            "this workstation would therefore be a row about a machine that is not "
-            "the subject, which is the shape D1519 already records against the "
-            "collector's own numbers."
-        ),
-        unblocked_by="the Session 31 trip (Sheet A5)",
     ),
 )
 
