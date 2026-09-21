@@ -225,7 +225,7 @@ after this table was D1602 at planning time; Run 1 measured eight more
 (D1602-D1609, added 2026-09-19), Run 3 four more (D1610-D1613) and Run 4 one
 (D1614), Run 5 eight (D1615-D1622) and Run 6 seven (D1623-D1629) and Run 7's
 preparation three (D1630-D1632) and the trip's first deploy two
-(D1634-D1637) and the trip's sweep two (D1638-D1639), so the next free number is **D1640**.**
+(D1634-D1637), the trip's first sweep two (D1638-D1639) and its second two (D1640-D1641), so the next free number is **D1642**.**
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -286,6 +286,8 @@ preparation three (D1630-D1632) and the trip's first deploy two
 | **D1637** | Run 6 §5, `test_session31_capacity.py`: the rehearsal proof asserts `record["verdict"] == "refused"` and `record.get("induced") is False`. | **The harness produces neither, and the rehearsal it would have failed did exactly what it should.** Measured from the record `rehearse.sh admission-refused` wrote on production: `"verdict": "read"` -- the harness's word for a scenario that READS rather than one that passes or fails -- and `"induced": true`, because the induce PHASE ran, which is not the same as something having been broken. Both values were assumed from the plan's prose rather than measured, and a sweep would have reported `admission_live` FAILED for an instrument error. | The proof asserts the record's **readings** instead, which are stronger than either field: `admission_refused` is `refused` at exit **12**, `admission_as_declared` is `admitted` at exit **0**, `control_declaration_injected` is `false`, and the scenario reversed. Every one was then RUN against the record the host actually wrote, here, before the sweep runs it there. | **The fourth time this session the instrument was wrong rather than the product** -- after the fork control's environment-specific literal (Run 4), the flag scan that read its own header's prose (Run 7 preparation), and the sentinel comparing three lines of `psql` output against one value (D1635). Each was a value that looked measured and was not, and each was caught by running the check against the real thing instead of the expected thing. | 0190 |
 | **D1638** | Run 5 §5 and `test_session24_studio.py`'s `auditor` docstring, written this session: *"the request role is `authenticated`, not `project_admin` (D1572) — what a subject may do administratively is decided by the scope in its token and not by the role name"*. | **False, and the running auth service says so in one sentence.** The sweep's three Studio proofs ERRORED at setup with `422 {"error":"invalid_request","message":"the stored record grants ['admin_agents:read', 'admin_agents:write', 'admin_audit:read'], which a authenticated token may not carry"}`. `issue()` validates the stored scopes against `permitted_scopes(role_suffix)` before signing and **refuses rather than truncating**. Measured over all six roles a token may name: `project_admin` is the ONLY one whose ceiling contains the three admin scopes, and its ceiling also contains `notes:*`. So there are two rules, not one — the token ceiling admits admin scopes to `project_admin` alone, and migrations 0004/0007 grant the notes SELECT and the `create_note` EXECUTE to `authenticated`/`agent_writer`/`agent_reader` alone. **No single account satisfies both**, and Session 24's auditor was asked to. | **The subject is split.** The `auditor` returns to `project_admin` with `AUDITOR_SCOPES` — it reads `/admin/audit`, lists and revokes through `/admin/agents`, and `reader_agent` registers through it, all of which need the admin half. A new `note_owner` fixture holds `authenticated` + `notes:read,notes:write` and owns the row `STU-QUERY-002` reads. `launched_studio` becomes two launches over one `_launch_studio(username, password_file)` helper, because **Studio takes its subject once at start-up and forwards that token for the life of the process** (ADR 0205), so the tenant proof has to reach a Studio holding the tenant's token. | **D1572 fixed the side that was visible and the offline suite could not see the other.** The notes grants are readable in a migration; the ceiling is enforced by the auth service when it mints a token, and nothing offline mints one — so a repair measured against the source passed every gate and errored on the next trip. §7's question 4 exactly (*when a defect class was fixed, which side got the fix*) with a second answer nobody looked for. **The sixth time this session the instrument was wrong rather than the product**, and the product's refusal named its own reason precisely enough to diagnose from one grep. | — |
 | **D1639** | Run 6 §5, `test_session31_capacity.py`: the live refusal proof asserts `labels[:6] == ["declared", "reserved", "committed", "requested", "safe available", "suggested action"]`. | **The renderer's first label is `declared memory`.** `capacity_reading.decide` emits `("declared memory", f"{declared.memory_mb} MiB")` — there is a `declared disk` line further down and the two are distinguished by name. The operator's own `admit.sh` output on Sheet A5 printed it, and the sweep failed on `At index 0 diff: 'declared memory' != 'declared'` **after** passing every reading that mattered: outcome `refused`, exit 12, `declaration_injected False`, `already_deployed_here False`. | The live proof asserts the six labels the renderer emits. **The guard against a repeat is already there and was not used**: `test_capacity_reading.py:447` pins the same five labels against the module, so a renderer that renamed one goes red offline first — the live proof hand-typed a list instead of failing behind it. | A label asserted from memory of the plan's prose rather than from the renderer, in a proof whose every substantive reading was correct. Same shape as D1637 four rows up, in the same module, written in the same run: **the assertions around the measurement were the unmeasured part.** | — |
+| **D1640** | CLAUDE.md §5: *"External mode runs from this workstation with an ephemeral `ssh-agent` and `--ssh-destination op@62.238.99.122`"*, and this run's staged step-8 script, which passed `--ssh-destination` and started no agent. | **Both `connection_tooling` proofs failed with `op@62.238.99.122: Permission denied (publickey)`.** There is no `~/.ssh/config` in this WSL, so `ssh op@host` with no `-i` and no agent has no identity to offer -- every other SSH this session carried `-i ~/.ssh/agentic_postgres_ed25519` explicitly and worked, which is exactly why the gap was invisible. The gate's own `ssh` calls cannot carry `-i`: the destination is a flag and the key is not. | **Re-run with `eval "$(ssh-agent -s)"`, `ssh-add` and a `trap … EXIT` that kills the agent on every path**, plus a control that reaches the host with NO `-i` flag before the gate is invoked. External mode then PASSED, 25 passed / 0 failed, and `connection_tooling` went from `failed` to `passed`. | **The proofs failed on their POSITIVE CONTROL, which is why this cost twenty minutes and not a release.** `test_the_access_broker_returns_nothing_to_an_unauthorized_caller` asks a granted profile first, precisely so that a broker refusing everything -- a missing policy, an unreachable trampoline, or this -- cannot satisfy its refusals. Without that control the run would have reported a security property PASSED on a connection that was never made. D173/D509's shape, paying for itself. **The seventh instrument defect of the session**, and the second in step 8's own scripts. | -- |
+| **D1641** | D1425: *"the deploy, the sweep and the tag land on ONE commit, in that order"*, and the trip deployed `4344a1f`. | **The first sweep failed two proofs and the repair had to land before the second sweep could run**, so the sweep's instruments came from `05fdfe9` while the deployment stayed on `4344a1f`. Measured rather than assumed: `git diff --name-only 4344a1f..05fdfe9` filtered to `src/ bin/ services/ migrations/ templates/ schemas/ compose.yaml deploy.sh VERSION` is **empty** -- two test modules, one registry description and three documents. | **The tag goes on `4344a1f`, the deployed and measured commit**, and the exception is written into the tag's own message rather than left for a reader to notice. The merged evidence carries both: `source_commit 4344a1f` and `offline_checkout_commit 05fdfe9`, and `write-session-evidence` PRINTS the difference rather than folding it -- which is the behaviour ADR 0195 asks for, found already built. | Session 30's precedent decides it: HEAD was seven documentation commits past the deployed `be987cf` and the tag went on `be987cf`, because **a tag names what runs**. The narrower question this trip adds is whether a test-only commit between deploy and sweep breaks D1425, and the answer taken here is that it does not, PROVIDED the deployable diff is measured empty and the gap is stated. Anything in `src/` or `bin/` would have required a second deploy. | 0214 |
 
 ---
 
@@ -1853,7 +1855,65 @@ outcome, read before the next is issued** (D1510):
     `df`, `doctor usage`'s eight figures per project, and the two
     `time`s.
 
-**Done.** _(the executor.)_
+**Done.** 2026-09-20 (the trip) and 2026-09-21 (the second sweep and the
+tag). **1.9.0 is deployed on both projects at `4344a1f`, swept, merged and
+tagged**, in that order and on that commit (D1425, with D1641's one stated
+exception).
+
+*The deploy refused before it wrote anything.* Step 5 on alpha stopped at
+`mirror_s3_secret_access_key: declared random_hex and the value is not
+lowercase hexadecimal`. The CHECK was right and the CONTRACT was wrong -- a
+Backblaze B2 key is base64url, and it had been declared `random_hex` since
+Session 18. Nothing was damaged: both projects stayed 10/10 healthy, routes
+200, the document unmoved at 1.8.0/`be987cf`, the generation unmoved. An audit
+of all 21 secrets found exactly two mis-declared, and `mirror_s3_access_key_id`
+was passing BY COINCIDENCE -- a declaration that is false and sometimes
+satisfied is worse than one that is simply false. `opaque` is the third kind
+(D1634); the four R2 secrets were deliberately left alone.
+
+*The trip's readings.* `host.yaml` at schema 3 (3814/2214/37/8). Both projects
+deployed through session 31, `doctor` **11 ok / 0 problem** each, every
+container recreated as this release requires, ledgers 33 and 35 unmoved. A
+third project was offered to the host and **REFUSED at exit 12**, and the same
+project against the host's own declaration was **ADMITTED at exit 0** -- the
+control without which the refusal proves nothing.
+
+*Two sweeps, because the first found two defects in this run's own
+instruments.* The first: 1026 passed, 2 failed, 3 errors. `admission_live`
+asserted a label typed from the plan's prose where the renderer emits
+`"declared memory"` (D1639); three Studio proofs errored because Run 5 moved
+the auditor's role and left its scopes, which the running auth service refuses
+at issuance (D1638). Both repaired at `05fdfe9`, CI green, and the second sweep
+returned **1030 passed / 1 failed / 0 errors**.
+
+*Step 8 found a third.* `--mode external` ran with no `ssh-agent` and both
+`connection_tooling` proofs failed on their POSITIVE CONTROL -- which is why it
+cost twenty minutes and not a release (D1640). Re-run with an ephemeral agent:
+25 passed, 0 failed.
+
+*The merged evidence: **145 claims, 139 passed, 5 not_run, 1 failed**.* Ten
+claims more than Session 30, and the ten new ones all passed.
+`telemetry_read` is the one worth naming: **the project's own Prometheus
+answered on production for the first time in this product's life**, and every
+series it returned named its project. `usage_read`, `admission_live` and
+`agent_write_method` passed with it, none having executed anywhere before.
+`studio_tenant_read` passed, which it had never done. `documented_path` stays
+`failed` by decision until a person walks the path; `port_allocation` stays
+`not_run` because this trip performed no reboot and the flag declaring one
+would not have been true.
+
+*What the trip reported and did not repair.* `ceilings` excludes the database
+and under-reports by the largest cap on the host, because D587's missing
+`apg.project.key` label hides `postgres` and `pgbouncer`. It decides nothing --
+`decide` charges `unreclaimable_mb`, never the caps -- and it under-reports in
+the REASSURING direction, which is why it is written down rather than folded
+(D1636, ADR 0195).
+
+*The count that matters.* **Seven of this session's defects were the
+instrument rather than the product**, and the product's own refusals diagnosed
+two of them in one line each. Each was a value that looked measured and was
+not; each was caught by running the check against the real thing instead of the
+expected thing.
 
 ### Run 8 — the close
 
