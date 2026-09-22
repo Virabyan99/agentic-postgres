@@ -537,6 +537,10 @@ def _observed(**overrides: Any) -> dict[str, Any]:
         "timeline_id": 2,
         "schema_version": "20260101000000",
         "schema_migration_count": 21,
+        # Session 32. A dict and not a bare value, because its absence is an
+        # ANSWER: a backup taken before migration 0034 restores a cluster with
+        # no such function (ADR 0195).
+        "workflow_runs": {"value": {"succeeded": 2}, "reason": ""},
     }
     document.update(overrides)
     return document
@@ -721,6 +725,45 @@ def test_the_document_carries_no_secret_value() -> None:
         assert forbidden not in serialized.lower(), f"the evidence document mentions {forbidden}"
 
 
+def test_the_document_carries_the_restored_clusters_workflow_runs() -> None:
+    """Session 32 (ADR 0227): the drill says what the restored cluster holds.
+
+    Counts by status and nothing else -- no run id, no input, no result. A
+    run's own document is the agent's; this record is the operator's, and the
+    secret scan above runs over it unchanged.
+    """
+    document = _evidence()
+    assert document["workflow_runs"] == {"value": {"succeeded": 2}, "reason": ""}
+
+
+def test_a_backup_predating_the_substrate_says_so_rather_than_reading_zero() -> None:
+    """**The third outcome, at the one member that has one** (ADR 0195, D600).
+
+    A backup taken before migration 0034 restores a cluster with no
+    `app_private.workflow_counts`, and that is a fact about the backup rather
+    than a failed drill. `{"value": null, "reason": ...}` says which happened;
+    an empty object would read as *this cluster holds no runs*, and a bare
+    `null` beside eleven other nulls would say nothing at all.
+
+    The verdict is untouched by it either way: the drill's subject is the
+    restore, and a substrate a backup predates is not a failed restore.
+    """
+    document = _evidence(
+        observed=_observed(
+            workflow_runs={
+                "value": None,
+                "reason": (
+                    "app_private.workflow_counts is not present in the restored cluster; "
+                    "the backup predates migration 0034"
+                ),
+            }
+        )
+    )
+    assert document["workflow_runs"]["value"] is None
+    assert "predates migration 0034" in document["workflow_runs"]["reason"]
+    assert document["verdict"]["passed"] is True
+
+
 def test_the_document_records_who_measured_the_time() -> None:
     """D529: RTO is wall time this command measured, not a number from anywhere else."""
     timing = _evidence()["timing"]
@@ -774,6 +817,9 @@ sql_answer() {
     *pg_last_xact_replay_timestamp*)  printf '%s\n' "${APG_ACHIEVED_POINT}" ;;
     *pg_last_wal_replay_lsn*)         printf '0/50039F0\n' ;;
     *timeline_id*)                    printf '2\n' ;;
+    # Session 32. Above the `count(*)` arm because the function's NAME
+    # contains `count`, and the arms are matched most specific first.
+    *workflow_counts*)                printf '%s\n' "${APG_WORKFLOW_RUNS}" ;;
     *"max(version)"*)                 printf '20260101000000\n' ;;
     *"count(*)"*)                     printf '21\n' ;;
     *"SELECT 1"*)                     printf '1\n' ;;
@@ -945,6 +991,7 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         ("APG_SMOKE_OWNER", SMOKE_OWNER),
         ("APG_FOREIGN_OWNER", _foreign_owner()),
         ("APG_WRITTEN_NOTE_ID", "6f1c3a10-0000-4000-8000-00000000abcd"),
+        ("APG_WORKFLOW_RUNS", '{"succeeded": 2}'),
     ):
         monkeypatch.setenv(name, value)
 
@@ -1008,6 +1055,42 @@ def test_the_drill_runs_to_completion_against_a_stubbed_daemon(rig: dict[str, An
     assert evidence["recovery"]["timeline_id"] == 2
     assert evidence["schema_version"] == "20260101000000"
     assert evidence["timing"]["rto_seconds"] >= 0
+
+
+def _newest_evidence(rig: dict[str, Any]) -> dict[str, Any]:
+    """The document the most recent drive wrote. By mtime, because a second
+    drive in the same test writes a second document beside the first."""
+    documents = sorted(
+        rig["evidence_dir"].glob("restore-drill-*.json"), key=lambda p: p.stat().st_mtime
+    )
+    assert documents, "the drill wrote no document at all, so this arm proves nothing"
+    return json.loads(documents[-1].read_text(encoding="utf-8"))
+
+
+def test_the_drill_reads_the_restored_clusters_workflow_runs_or_says_why_not(
+    rig: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The member read through the real command, not composed by hand.
+
+    The subject and the third outcome in one invocation, because they are the
+    same code path taking two branches: the stub answers `workflow_counts` and
+    the document carries the counts; the stub then answers nothing at all --
+    which is what a cluster restored from a pre-0034 backup does -- and the
+    document carries `null` WITH the reason rather than an empty object.
+
+    A proof that only asserted the first would pass against a command that
+    reported `{}` for a substrate that is not there (D600).
+    """
+    assert _drive(rig) == 0
+    document = _newest_evidence(rig)
+    assert document["workflow_runs"] == {"value": {"succeeded": 2}, "reason": ""}
+
+    monkeypatch.setenv("APG_WORKFLOW_RUNS", "")
+    assert _drive(rig) == 0
+    absent = _newest_evidence(rig)
+    assert absent["workflow_runs"]["value"] is None
+    assert "predates migration 0034" in absent["workflow_runs"]["reason"]
+    assert absent["verdict"]["passed"] is True, "a substrate a backup predates is not a failure"
 
 
 def test_the_command_never_hands_docker_the_live_volume(rig: dict[str, Any]) -> None:

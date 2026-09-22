@@ -678,6 +678,12 @@ def evidence_document(
             "measured_by": "bin/restore-test.py, time.monotonic()",
         },
         "schema_version": observed.get("schema_version"),
+        # Session 32 (ADR 0227). Counts by status, or a null with the reason
+        # it is null -- a backup taken before migration 0034 restores a cluster
+        # with no such function, and that is a fact about the backup rather
+        # than a failure of the drill. No run id, no input, no result: a run's
+        # own document is the agent's, and this record is the operator's.
+        "workflow_runs": observed.get("workflow_runs"),
         "smoke": smoke,
         "verdict": drill_verdict(observed=observed, repository=repository, smoke=smoke),
     }

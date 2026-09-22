@@ -92,7 +92,9 @@ the kit's, or the verdict fails and says so.
 
 ## 4. The rehearsals
 
-Eight scenarios, each an induce, an observe and a reverse over a reader that
+The table below is the list, and it carries no count of its own -- a number
+in this paragraph was wrong for two sessions (D1595, D1664). Each scenario is
+an induce, an observe and a reverse over a reader that
 already exists (ADR 0190, ADR 0193). One at a time, never during a backup,
 and never on a host whose mirror is not yet enabled for the WAL scenario.
 `--plan` prints the three phases with every command and does nothing.
@@ -112,6 +114,8 @@ sudo bin/rehearse.sh reverse                         # after an interrupted one
 | `disk-threshold` | nothing; the doctor with injected thresholds | `disk headroom` at `warn` and `problem` | nothing was changed |
 | `capability-drift` | a lock with a foreign hash beside the deployed document | the doctor's `capability drift` check with `--lock-file` | the file removed |
 | `provider-loss` | nothing: recorded (D976) | the record | nothing |
+| `admission-refused` | nothing; `bin/admit.py` with `--reserve-memory-mb` injected so nothing can fit | the injected run's refusal; the host's own declaration as the control | nothing was changed |
+| `worker-restart` | SIGKILL to the `auth` process, which holds the workflow loop (ADR 0226) | the doctor's `workflow` check: the heartbeat's HOLDER before and after, and the oldest overdue lease; the restart count as the control | the restart policy; `docker start` only if it did not |
 
 Exit codes: 0 the reader read and the reversal verified; 5 refused (another
 rehearsal un-reversed, or the scenario has nothing to induce here); 6 the
@@ -127,11 +131,13 @@ step the trip repeats.
 
 ## 5. The doctor's two rehearsed readers
 
-`sudo bin/doctor.sh --project <key>` reports **eleven** checks since 1.7.0: the
+`sudo bin/doctor.sh --project <key>` reports **twelve** checks since 1.10.0: the
 ninth is the mirror (§1), the tenth is `capability drift`, the live SHA-256
-of the lock on disk against the digest the deployed document recorded, and the
+of the lock on disk against the digest the deployed document recorded, the
 eleventh is `agent record` — the two agent tables' counts and the date the
-record starts, with **no threshold** (ADR 0213). It reads the tables rather
+record starts, with **no threshold** (ADR 0213) — and the twelfth is
+`workflow`, the substrate's counts by status and the loop's heartbeat, with no
+threshold for the same reason (ADR 0226). It reads the tables rather
 than migration 0033's functions, so it answers the same against a deployment
 that has not applied the retention migration. Three
 flags exist for the rehearsals and are carried in the evidence so an

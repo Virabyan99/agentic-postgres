@@ -63,12 +63,14 @@ __all__ = [
     "Plan",
     "RehearsalError",
     "doctor_check",
+    "doctor_evidence",
     "doctor_worst",
     "foreign_lock",
     "inspect_state",
     "iptables_delete_arguments",
     "plan",
     "record",
+    "refuse_without_a_reading",
     "render_plan",
     "rule_comment",
     "state_document",
@@ -90,6 +92,11 @@ SCENARIOS = (
     # are injected into the doctor. A rehearsal moves the threshold; it never
     # fills the host.
     "admission-refused",
+    # Session 32 (ADR 0226). The tenth: the auth process holds the workflow
+    # loop, so a worker restart is an auth restart -- and the rehearsal reads
+    # something no separate worker could have proved, which is that the signer
+    # and the loop come back together.
+    "worker-restart",
 )
 
 #: The stateless service whose route the doctor reads (ADR 0015: `edge-probe`
@@ -97,6 +104,12 @@ SCENARIOS = (
 #: kills, because it is the one the reader covers (ADR 0193).
 HEALTH_SERVICE = "edge-probe"
 DATABASE_SERVICE = "postgres"
+
+#: The service whose process holds the workflow loop (ADR 0226). Not a new
+#: container and not a new role: the loop runs inside the verifier, using its
+#: pool and its token issuance, which is what makes this scenario's kill a
+#: test of both at once.
+WORKER_SERVICE = "auth"
 
 #: The doctor's check names this module reads. Spelled once, from
 #: `diagnosis`'s own vocabulary; a misspelling here would read nothing and
@@ -109,6 +122,7 @@ DEPLOYED_DOCTOR_CHECKS = {
     "mirror": "backup mirror",
     "disk": "disk headroom",
     "drift": "capability drift",
+    "workflow": "workflow",
 }
 
 #: Seconds a scenario waits for its reader, chosen and named so they can be
@@ -119,6 +133,10 @@ BOUNDS = {
     "service-termination": 120,
     "database-restart": 300,
     "wal-archiving-failure": 900,
+    # Session 32. Two minutes: the auth process restarts in seconds and then
+    # polls every `POLL_SECONDS`, so the holder moves well inside this. The
+    # bound is what the rehearsal gives up after, not what it expects.
+    "worker-restart": 120,
 }
 
 #: The one file that says a rehearsal is un-reversed. Beside the projects'
@@ -198,6 +216,12 @@ class Facts:
     host_manifest: str | None = None
     project_manifest: str | None = None
     admit_py: str | None = None
+    #: Session 32: the heartbeat's holder, read from the doctor's `workflow`
+    #: check BEFORE anything is signalled. `None` for every scenario but
+    #: `worker-restart`, which refuses rather than planning around it: the
+    #: reader must read before the kill or a holder read afterwards is not a
+    #: comparison with anything.
+    workflow_heartbeat: str | None = None
 
     @property
     def compose_project(self) -> str:
@@ -288,6 +312,34 @@ def plan(scenario: str, facts: Facts) -> Plan:
     if scenario not in SCENARIOS:
         raise RehearsalError(f"unknown scenario {scenario!r}; one of {', '.join(SCENARIOS)}")
     return _PLANNERS[scenario](facts)
+
+
+def refuse_without_a_reading(plan: Plan, facts: Facts) -> None:
+    """The readings a scenario must already have taken before it induces
+    anything. Raises `RehearsalError` naming the one that is missing.
+
+    **Separate from `plan()` because `--plan` takes no readings at all.** Every
+    other precondition a scenario has -- a container, a pid, a mirror, two
+    manifests -- is a fact about the deployment that `--plan` can check for
+    free, and those stay in the planners. A *reading* is not free: it runs the
+    doctor, and `--plan`'s contract is that it prints the phases and takes
+    none of them.
+
+    So this is called once, after `--plan` has returned and before anything is
+    written or signalled. `worker-restart` is its only subject today: the
+    heartbeat's holder is the ONLY evidence that distinguishes a loop that came
+    back from one that never stopped, and it is a comparison -- a rehearsal
+    whose "after" has no "before" would report `read` for a worker that never
+    died.
+    """
+    if plan.scenario == "worker-restart" and not facts.workflow_heartbeat:
+        raise RehearsalError(
+            "the doctor's workflow check read no heartbeat holder, so there is nothing "
+            "to compare a holder after the restart against. Either this deployment has "
+            "not applied migration 0034, or no loop has asked for work on it yet -- and "
+            "a rehearsal whose reader reads only after the kill would report a restart "
+            "it could not have seen"
+        )
 
 
 def _service_termination(facts: Facts) -> Plan:
@@ -831,6 +883,99 @@ def _admission_refused(facts: Facts) -> Plan:
     )
 
 
+def _worker_restart(facts: Facts) -> Plan:
+    """The signer dies mid-flight; does the loop come back, and does the
+    substrate say so? (ADR 0226, ADR 0193.)
+
+    **The scenario the decision to put the worker inside `auth` earned.** ADR
+    0226 chose a loop in the auth process over a container of its own, and
+    named the cost honestly: a worker restart is an auth restart. This is that
+    cost, rehearsed -- and it reads something a separate worker could not have
+    proved, which is that the verifier and the loop come back together.
+
+    `service-termination`'s induce exactly: SIGKILL to the container's main
+    process from the host's PID namespace, never `docker kill`, which the
+    daemon records as a manual stop that no restart policy restarts (rig 4,
+    D1015).
+
+    **The reader must read before the kill.** The heartbeat's `holder` is the
+    only evidence that distinguishes *the loop came back* from *the loop never
+    stopped*, and it is a comparison: `workflow_heartbeat` is gathered by
+    `bin/rehearse.py` from the doctor's own `workflow` check BEFORE anything is
+    signalled. The refusal when it did not come back is in
+    `refuse_without_a_reading` and not here, because `--plan` takes no readings
+    and would otherwise have to refuse every deployment (D1694).
+    """
+    container = facts.containers.get(WORKER_SERVICE)
+    if not container:
+        raise RehearsalError(
+            f"{facts.project_key} has no running {WORKER_SERVICE} container; the process "
+            "the workflow loop lives inside is not there to terminate"
+        )
+    pid = facts.container_pids.get(WORKER_SERVICE)
+    if not pid:
+        raise RehearsalError(f"{container} has no main process id; it is not running")
+    doctor = _doctor(facts)
+    return Plan(
+        scenario="worker-restart",
+        reader=(
+            "the doctor's workflow check: the heartbeat's holder before and after, and "
+            "the oldest overdue lease"
+        ),
+        induce=(
+            Action(
+                what=(
+                    f"SIGKILL to {container}'s main process (host pid {pid}) from the host's "
+                    "PID namespace. Not `docker kill`: the daemon records that as a manual "
+                    "stop and no restart policy restarts it (rig 4, D1015). The signing key "
+                    "goes down with the loop, which is ADR 0226's stated cost"
+                ),
+                kind="run",
+                argv=("kill", "-KILL", str(pid)),
+            ),
+        ),
+        observe=(
+            Observation(
+                name="state_after_kill",
+                what=(
+                    f"{container}'s state and restart count immediately after -- the control: "
+                    "a holder that changed without the process having died proves nothing"
+                ),
+                argv=("docker", "inspect", "-f", "{{.State.Running}} {{.RestartCount}}", container),
+                expect="not running, or already restarted once",
+                control=True,
+            ),
+            Observation(
+                name="heartbeat_after_restart",
+                what=(
+                    "the doctor's workflow check, polled for a heartbeat holder that is "
+                    "not the one read before the kill"
+                ),
+                argv=doctor,
+                expect=f"a new holder within {BOUNDS['worker-restart']}s",
+                until="holder-changed",
+            ),
+            Observation(
+                name="steps_after_restart",
+                what="the same reading's oldest overdue lease, once the new holder is up",
+                argv=doctor,
+                expect="no step claimed past its lease",
+            ),
+        ),
+        reverse=(
+            Action(what="the restart policy (on-failure:5) is the reversal; nothing to undo"),
+            Action(
+                what=f"docker start {container}, only if the policy did not bring it back",
+                kind="run",
+                argv=("docker", "start", container),
+                conditional="restarted",
+            ),
+        ),
+        verify=(f"{container} is running",),
+        bound_seconds=BOUNDS["worker-restart"],
+    )
+
+
 _PLANNERS = {
     "service-termination": _service_termination,
     "database-restart": _database_restart,
@@ -841,6 +986,7 @@ _PLANNERS = {
     "capability-drift": _capability_drift,
     "provider-loss": _provider_loss,
     "admission-refused": _admission_refused,
+    "worker-restart": _worker_restart,
 }
 
 
@@ -902,6 +1048,28 @@ def doctor_check(document_text: str, check: str) -> str | None:
     for entry in report.get("checks") or []:
         if entry.get("name") == check:
             return str(entry.get("verdict"))
+    return None
+
+
+def doctor_evidence(document_text: str, check: str, key: str) -> str | None:
+    """One value out of one check's EVIDENCE in `doctor --json`'s output.
+
+    `doctor_check` answers what a check decided; this answers what it read. The
+    literal string `"null"` comes back as `None` on purpose: `diagnosis._pairs`
+    renders an absent value that way, so a caller comparing the result against
+    another reading would otherwise be comparing two four-letter words and
+    calling them equal (D600, ADR 0195).
+    """
+    try:
+        report = json.loads(document_text)
+    except ValueError:
+        return None
+    for entry in report.get("checks") or []:
+        if entry.get("name") == check:
+            value = (entry.get("evidence") or {}).get(key)
+            if value is None or value == "null":
+                return None
+            return str(value)
     return None
 
 
@@ -1059,6 +1227,28 @@ def verdict(scenario: str, readings: dict[str, Any]) -> tuple[str, str]:
         return "read", (
             f"admission refused with the reserve injected; the host's own declaration "
             f"reads {readings.get('admission_as_declared')}"
+        )
+    if scenario == "worker-restart":
+        if not readings.get("restarted"):
+            return "unread", "the auth container did not come back within the bound"
+        before = readings.get("heartbeat_holder_before")
+        after = readings.get("heartbeat_holder_after")
+        if not after:
+            return "unread", "the workflow check read no heartbeat holder after the restart"
+        if after == before:
+            return "unread", (
+                "the heartbeat's holder did not change within the bound, so nothing "
+                "distinguishes a loop that came back from one that never stopped"
+            )
+        overdue = readings.get("oldest_claimed_lease_age_seconds")
+        if overdue is not None:
+            return "unread", (
+                f"a step is claimed {overdue}s past its lease after the restart; the new "
+                "loop has not reclaimed what the old one was holding"
+            )
+        return "read", (
+            f"a new holder {readings.get('seconds_to_holder')}s after the kill, and no "
+            "step claimed past its lease"
         )
     raise RehearsalError(f"no verdict for {scenario!r}")
 

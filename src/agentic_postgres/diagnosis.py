@@ -75,6 +75,7 @@ __all__ = [
     "repository",
     "route",
     "tls",
+    "workflow_record",
     "worst",
 ]
 
@@ -575,6 +576,80 @@ def agent_record(
         OK,
         f"{audit_rows} audit rows{since}, {idempotency_rows} idempotency claims; "
         "nothing prunes either unless an operator asks (ADR 0213)",
+        facts,
+    )
+
+
+def workflow_record(
+    *,
+    definitions: int | None,
+    runs: str,
+    steps: str,
+    oldest_claimed_lease_age_seconds: int | None,
+    heartbeat_age_seconds: int | None,
+    heartbeat_holder: str | None,
+    detail: str = "",
+) -> Check:
+    """What the workflow substrate holds, and how long ago the loop asked for work.
+
+    **`agent_record`'s shape and its reason, one session later** (D1441, ADR
+    0213, ADR 0226). Counts and ages, `OK` or `UNKNOWN`, and no threshold
+    anywhere -- because nobody has measured a run count, a parked count or a
+    heartbeat age at which a deployment is unwell, and a number invented in the
+    one command that runs as root on production could fail a host that works.
+
+    The two values it is most tempting to give a verdict to are here as
+    numbers on purpose:
+
+    - **`oldest_claimed_lease_age_seconds`** is `null` unless some step's lease
+      is already in the past, so a number here means a step was claimed by a
+      holder that has not finished it. That is what a dead worker looks like
+      -- and it is also what a worker restarted four seconds ago looks like,
+      and the difference is the heartbeat beside it, not a threshold.
+    - **`heartbeat_age_seconds`** grows by five every poll the loop misses. A
+      `PROBLEM` at some multiple of `POLL_SECONDS` would be this module
+      inventing the interval at which an auth process is unwell, which is a
+      judgement the operator makes with the restart count in front of them.
+
+    `runs` and `steps` arrive already rendered as `status=count` by the probe,
+    which is where the cluster's own words are admitted or dropped -- this
+    module is pure and sees only strings the probe was willing to repeat.
+
+    `definitions` is `None` when the reading did not come back, which is the
+    third outcome and is reported rather than folded into a healthy-looking
+    zero (ADR 0195, D600). A deployment carrying no definitions at all is `0`,
+    which is a fact: a project may install none.
+    """
+    facts = _pairs(
+        definitions=definitions,
+        runs=runs,
+        steps=steps,
+        oldest_claimed_lease_age_seconds=oldest_claimed_lease_age_seconds,
+        heartbeat_age_seconds=heartbeat_age_seconds,
+        heartbeat_holder=heartbeat_holder,
+    )
+    if definitions is None:
+        return _check(
+            "workflow",
+            UNKNOWN,
+            f"app_private.workflow_counts did not answer{_tail(detail)}",
+            facts,
+        )
+    heartbeat = (
+        f"the loop last asked for work {heartbeat_age_seconds}s ago"
+        if heartbeat_age_seconds is not None
+        else "no loop has asked for work on this deployment yet"
+    )
+    overdue = (
+        f"; one step is {oldest_claimed_lease_age_seconds}s past its lease"
+        if oldest_claimed_lease_age_seconds is not None
+        else ""
+    )
+    return _check(
+        "workflow",
+        OK,
+        f"{definitions} definitions; runs {runs}; steps {steps}; {heartbeat}{overdue}; "
+        "counts and ages only, no threshold (ADR 0226)",
         facts,
     )
 

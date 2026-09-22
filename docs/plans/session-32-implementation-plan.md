@@ -483,6 +483,11 @@ at the close to say which run added which.
 | **D1688** | 5 | §5 Run 5: *"write it as two helpers, `_agent_record(agent_id)` and `_refuse_unless_issuable(credential)`"*, with the split explicitly required not to reorder. | **The split did not reorder anything and it still broke a contract test** -- `test_every_state_check_happens_after_the_hash_comparison` walks ONE function's AST and asserts that `status` and `secret_expired` are read after every `verify`. Moving those two reads into a helper made them invisible to it, and the failure message was *"agent_token no longer reads status"*: a guard going quiet in the reassuring direction, because the checks were still there, still after the hash, and the proof had simply stopped being able to tell. | **The proof follows ONE named call.** It reads the delegate's body as well, compares a read inside the delegate against the line the delegate is CALLED from, and refuses a function that calls it more than once. Strictly stronger than before: the old version could not have caught a helper invoked before the hash comparison, because there was no helper. The delegate is listed rather than discovered -- a scan following every call would follow `self.issue` into the signer. | This is D1486's shape inside one file: a reader derived from one function cannot see a caller that function does not contain. | 0229 |
 | **D1689** | 5 | D1669: *"`workflow_worker.py` still needs its own allowlist row for `urllib`"*. | **The transport scan has a SECOND list and the row alone does not satisfy it.** `test_the_allowlist_describes_modules_that_exist_and_use_what_they_declare` carries `senders = {"app/mcp_upstream.py", "app/mcp_health.py"}` and requires every OTHER allowlisted module to name no `urlopen`, `Request` or `urlretrieve` -- because `urllib` covers both `urllib.parse` (encoding) and `urllib.request` (sending), and the package name cannot tell them apart. A row without a `senders` entry fails with *"allowlisted for encoding and names a sender"*. | **Both lists gained the module**, and the prose that said *only two modules may send* was corrected to three in the same edit: a list that grows while its own sentence still says "two" is how an allowlist stops being read. Both are WIDENINGS to a measured set, which CLAUDE.md §6 distinguishes from weakenings, and ADR 0226 authorises the sender -- the loop makes the tool call itself, which is the whole of what it does that the plane does not. | 0226 |
 | **D1690** | 5 (repair) | §5 Run 5 lists the targeted modules; CLAUDE.md §5's table says `bin/apg.sh generate --check --project project.example.yaml` runs *"after any bump or contract move"*. | **Moving the app surface IS a contract move, and the generated client RECORDS its digest.** Run 5 added three operations to the auth service's OpenAPI document and regenerated `contracts/app-openapi.canonical.json`; `projects/example/clients/typescript/contract.ts` and `generated.json` carry `app_openapi_sha256`, and neither was regenerated. **CI went red on five proofs across four modules** -- `test_client_typescript`, `test_generate_command` (three of them), `test_studio_command` -- all one cause, and two of the three in `test_generate_command` failed for a DERIVED reason: they mutate one generated file and expect `--check` to name it, and the already-stale `contract.ts` was named first. The rule was on the page and the run did not apply it. | **`bin/apg.sh generate --project project.example.yaml`**, committed with the run. `generate` reports *"version 1.0.0 (no contract change)"* -- the client's SHAPE did not move, only the digest it records, so ADR 0204 requires no bump. **A run that moves the app OpenAPI document regenerates the example client and runs `test_client_typescript`, `test_generate_command`, `test_studio_command` and `test_client_ir`**; those four are in this session's targeted list from here. | **The third instance of one class in one session** (D1674 a registry row, D1680 a caller, this a derived artefact): a targeted list derived from a diff cannot see something the diff does not touch. D1486 said it; the gate sees it every time and the targeted list has now missed it three ways. |
+| **D1691** | 6 | §5 Run 6 item 3: *"`bin/restore-test.py`: the evidence dictionary (`:459-480`) gains `workflow_runs`"*; §4's table names `bin/restore-test.py` and nothing else. | **A member added to `observed` and not to the document is a member nothing reads.** `restore_drill.evidence_document` does not spread `observed`; it selects fields BY NAME (`:649-682`), so `workflow_runs` in the command's reading would never have reached `evidence/restore-<key>-<id>.json`. The plan's line range points at `observe_restored_instance`, which is the READING, and the document is a second file. | **`src/agentic_postgres/restore_drill.py` moved with it** -- one member in `evidence_document`, beside `schema_version`. Recorded rather than done silently because §4's irreversible-operations table names the files a run touches, and this run touched one it does not name. | D816 and D1247's class: a declared field with no reader is an unverified field. The plan priced a reading and the reading needed a writer. | -- |
+| **D1692** | 6 | §5 Run 6 item 4: `docs/recovery-operations.md` *"gains the scenario's line beside `admission-refused`'s"*. | **`admission-refused` has no line there.** Session 31 added the ninth scenario to `SCENARIOS`, `bin/rehearse.sh`'s usage and the operator guide, and did NOT add it to the recovery page's table, which still listed eight and opened *"Eight scenarios"*. Nothing checks that table against `rehearsal.SCENARIOS`, so it went stale without failing -- and §5's instruction was written from it. | **Both rows added**, the ninth and the tenth, and the paragraph's count removed the way `bin/rehearse.sh`'s header's was (D1664): the table is the list, and a list cannot go stale without being edited. The page's §5 moved from *eleven* checks to *twelve* in the same pass. | The third site of one class in one run -- `bin/rehearse.sh:4`, `bin/apg-diag.sh:140` and this -- all prose counting something a tuple already counts. What none of them has is a proof, and this run does not write one either: a guard over English prose is D622's denylist wearing a different hat. What it has instead is that the numbers are gone. | -- |
+| **D1693** | 6 | §5 Run 6 item 1: the probe returns the JSON *"or `None` with the error text"*; ADR 0159 admits a cluster value only when it looks like what was asked for. | **The first heartbeat-holder guard was an ALPHABET and not a shape, and the redaction rig caught it in the same run.** `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$` admits any sentence without a space in it, which is most of what a cluster could hand back -- `test_no_subprocess_output_reaches_the_report` went red on the canary in `verbose` and `json`. `_timestamp` (D1441's session) had already made this exact choice correctly, and this run made it wrongly for the second cluster value to reach a report. | **The guard is the shape `worker_identity()` builds**: `^[A-Za-z0-9][A-Za-z0-9._-]{0,39}:[0-9]{1,10}:[0-9a-f]{8}$` -- three parts, the last two fixed. `test_a_heartbeat_holder_that_is_not_one_is_dropped_rather_than_printed` is its own proof with the well-formed value as the discriminating control, and battery m3 kills it by restoring the alphabet. The status-name guard beside it stays a SHAPE deliberately (`^[a-z][a-z_]{0,31}$`) so a status a later migration adds appears on its own rather than being silently dropped. | **The rig found a defect in the product on its first execution**, which is what a leak scan over every rendering is for. Writing the check into the existing scan cost four lines and one fixture arm; finding this on a host would have cost a trip. | -- |
+| **D1694** | 6 | §5 Run 6 item 2: *"refuse with `RehearsalError` when the check is `UNKNOWN` -- the reader must read before the kill"*, in `_worker_restart(facts)`. | **`--plan` takes no readings, and `test_plan_reads_the_facts_and_runs_writes_and_moves_nothing` asserts it for every scenario** -- any `doctor.py` call is in its `mutating_calls` set. A refusal inside the planner forces the fact to be gathered before `plan()` is called, which is before the `--plan` branch, so `--plan` would run the doctor. Gathering it only under `--plan`-is-false would instead make `--plan` refuse every deployment. The nine existing planner refusals are all facts `--plan` can check for free -- a container, a pid, a mirror, two manifests -- and a READING is not one. | **The refusal is `rehearsal.refuse_without_a_reading(plan, facts)`**, pure, called from `rehearse()` after the `--plan` return and before the in-progress file, so a refusal leaves the host as it was with nothing to reverse. `worker-restart` is its only subject; `test_worker_restart_refuses_when_the_reader_did_not_read_before_the_kill` asserts every OTHER scenario passes it with no reading at all, which is what keeps it a precondition of one rehearsal rather than a new global one. The holder also leaves the printed plan: it is a host identity, and `--plan` has not read it. | **The tree wins and the disagreement is a row** (CLAUDE.md §"Who does what"). The plan named the right refusal and the wrong place for it, and the place was decided by a proof written three sessions earlier. | -- |
+| **D1695** | 6 | §5 Run 6 item 2's verdict arm: *"`read` when the holder changed and no lease is overdue, else not read"*. | **`else not read` is two findings and the first observer wrote one.** The poll recorded `heartbeat_holder_after` only on the iteration where it DIFFERED, so a holder that came back unchanged and a check that read no holder at all both left the field `None` -- and the verdict reported *"the workflow check read no heartbeat holder after the restart"* for a loop that never stopped. Found by driving the rehearsal end to end against a rig whose holder does not move (`test_a_worker_that_comes_back_as_the_same_holder_is_reported_unread`), which failed on its first execution. | **The last holder read is recorded on every poll**; only `seconds_to_holder` and the break are conditional. The verdict has both arms and says which happened. Battery m4 restores the single assignment and the proof dies. | ADR 0195 at the verdict rather than at the reading: a reader has three outcomes and the third is *I could not determine it* -- **and its sibling, that two different determinations must not share one field**. The rehearsal that exists to tell *came back* from *never stopped* was reporting *never read* for both. |
 
 ---
 
@@ -1718,8 +1723,135 @@ py`. `bin/render-mcp-catalog.py --check` (unchanged, a control). Commit
 (`Session 32 Run 6: the readers -- the doctor, the rehearsal, the drill,
 the pages`), push, read CI.
 
-**Done.** *(the check's evidence keys; the rehearsal's poll and bound; the
-`THR-WORKER` row verbatim; the two counts corrected; the battery; CI)*
+**Done.** The readers are built and the tenth rehearsal has been driven end to
+end against a rig.
+
+**The twelfth check.** `probe_workflow` is `probe_agent_record`'s shape
+exactly -- one `psql` round trip over the container socket as the superuser,
+the statement a module constant (`WORKFLOW_QUERY`), the verdict computed by
+`diagnosis.workflow_record` from values the probe parsed. Six evidence keys:
+`definitions`, `runs` and `steps` as `status=count` strings, and
+`oldest_claimed_lease_age_seconds`, `heartbeat_age_seconds`,
+`heartbeat_holder`. **No threshold anywhere**, asserted at every magnitude of
+both ages and every parked count, with the argument written into the test that
+a future edit has to delete. Three `UNKNOWN` paths: no container in the
+document, a cluster that did not answer (which is also every deployment below
+1.10.0, and the detail says so in this program's words rather than psql's), and
+a reply that is not the shape asked for. Appended LAST in `diagnose()`, so
+`bin/fleet.py` and `rehearsal._doctor` find the eleven where they were.
+
+**Two cluster values reach the report and both are guarded.** A status NAME
+(rendered into `runs` and `steps`) and the heartbeat HOLDER. The holder's guard
+was written as an alphabet and **the redaction scan found it in the same run**
+-- `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$` admits any sentence without a space in
+it. It is now the shape `worker_identity()` builds, and the status guard is
+deliberately still a shape so a status a later migration adds appears rather
+than being dropped (**D1693**).
+
+**The tenth rehearsal.** `worker-restart`: SIGKILL to the `auth` container's
+main process, never `docker kill` (D1015), bound 120 s, the restart policy as
+the reversal with `docker start` as the conditional fallback. **The reading is
+the heartbeat's HOLDER and not the check's verdict** -- the check has no
+threshold and reads `ok` throughout, so a verdict could not tell a loop that
+came back from one that never stopped. The holder is read BEFORE the kill, and
+the refusal when it did not come back is `refuse_without_a_reading`, called
+after `--plan` has returned rather than inside the planner: `--plan` takes no
+readings and a proof three sessions old says so (**D1694**). The observer
+records the last holder it read on every poll, so *never changed* and *never
+read* are two findings rather than one (**D1695**). The control is the
+container's restart count. `BOUNDS["worker-restart"] = 120`; `DEPLOYED_DOCTOR_
+CHECKS` gained `workflow`; `rehearsal.doctor_evidence` reads one value out of
+one check's evidence and maps the string `"null"` back to `None`.
+
+**Driven end to end against the rig**, not only planned: the process is
+signalled, the policy brings it back, the poll reads the holder until it moves,
+`verdict` is `read`, the reversal verifies and the in-progress file is gone.
+And the failure it exists to catch is driven too -- a rig whose holder does not
+move reads `unread` with *"never stopped"*, exit 6.
+
+**The restore drill's member.** `workflow_runs`, counts by status, or
+`{"value": null, "reason": ...}` when the restored cluster has no such function
+-- a backup taken before 0034 restores one, and that is a fact about the backup
+rather than a failed drill (the verdict is untouched either way). It needed
+`restore_drill.evidence_document` to move as well, because that function selects
+fields by name and a member in the reading alone would have had no reader
+(**D1691**).
+
+**The pages.** `docs/workflows.md` is new and indexed under *Developer loop*:
+what a definition is with both example files quoted, the six verbs, the run
+status document, what `parked`, `stopped`, `cancelled` and `replayed` mean, one
+paragraph on the worker, the five things a run may never do, and a table of
+what is not here yet with the session that brings each. `docs/operator-guide.md`
+gained **§17**, §16's shape: the twelfth check with the two figures to read
+together, the rehearsal with *rehearse it when no run is in flight*, the drill's
+member, an agent's own run, and five things that go wrong.
+`docs/recovery-operations.md` gained the ninth AND tenth rehearsal rows --
+`admission-refused` was never added there by Session 31 (**D1692**) -- and its
+check count moved to twelve.
+
+**Three stale counts corrected** (D1664, and one more than the plan named):
+`bin/rehearse.sh:4`'s *"Eight scenarios"* and `docs/recovery-operations.md:95`'s
+both became sentences with no number in them, and `bin/apg-diag.sh:140`'s
+*"three of thirteen services"* became **nine of twenty**, measured from
+`compose.yaml` -- auth, backup-mirror, docs, edge-probe, mcp, metrics, postgrest,
+storage, store, and neither postgres nor pgbouncer. D210's finding never
+depended on the number.
+
+**The eleven-check proof was renamed to twelve**, so
+`tests/acceptance-registry.yaml`'s node id moved with it and
+`docs/acceptance-matrix.md` was regenerated -- D1119, and the fourth chance this
+session has had to repeat D1674.
+
+**`THR-WORKER`, ready to paste in Run 7** (it cannot land here:
+`test_threat_model_requirement_ids_exist_in_the_registry` would go red against
+requirement ids the registry does not carry until Run 7 -- D1621):
+
+> \| `THR-WORKER` \| A compromised `auth` process, or an operator with root
+> running SQL against the four `app_private` workflow tables \| Every agent's
+> ability to act, and the notes and tasks a run may write \| The loop holds the
+> auth service's own role, pool and token issuance and nothing more (ADR 0226);
+> a step's token is minted through the same status, expiry and scope checks an
+> agent's own mint passes, held for one call and discarded; the four tables
+> grant no privilege to any request role; every step is an ordinary plane call
+> under the plane's scope check, audit, budget and idempotency claim; a
+> definition names capabilities from a closed vocabulary and takes no SQL, path
+> or query; revocation stops the run at its next step boundary \| The doctor's
+> `workflow` check -- counts by status, the oldest overdue lease and the
+> heartbeat's age and holder; the `worker-restart` rehearsal; `agent_audit`
+> rows correlated to a step by its `request_id` \| The auth process already
+> holds the signing key, so a compromise of it was always total -- what the
+> loop adds is the ability to spend an ACTIVE agent's quota on that agent's own
+> capabilities, and nothing else. An operator with root can insert a run row by
+> hand and the loop will execute it as the named agent; the same operator can
+> already mint any token, so this widens no boundary. A step already claimed
+> when an agent is revoked is refused at the token, not after the call \|
+> `WF-WORK-001`, `WF-STATE-001`, `WF-REVOKE-001` \|
+> `tests/contract/test_workflow_worker.py::test_one_token_per_step_attempt_and_none_outlives_the_step`,
+> `tests/contract/test_workflow_substrate.py::test_no_role_holds_a_privilege_on_the_four_tables` \|
+> 32 \|
+
+**Mutation battery: five kills, no survivors**, each with a control the
+mutation cannot reach, green in the same invocation, HOW each failed asserted
+(FAILED, never ERROR), anchors pre-flighted to one match with a miss fatal,
+restored by copy and `filecmp`, and the ten proofs green again afterwards.
+(m1) a `PROBLEM` when a step is parked kills the no-threshold proof; (m2)
+`docker kill` in the planner's argv kills the induce proof; (m3) the holder
+guard loosened back to an alphabet kills the guard's own proof; (m4) the
+observer recording only a CHANGED holder kills the same-holder rehearsal; (m5)
+an absent substrate reported as `{"value": {}}` kills the drill's third
+outcome. m4's first control was the worker-restart end-to-end proof, which the
+mutation runs through -- replaced with `admission-refused`'s, which it cannot
+reach (D499).
+
+Targeted, once at the close: `test_diagnosis`, `test_doctor_redaction`,
+`test_doctor_readings`, `test_rehearsal`, `test_restore_test_command`,
+`test_fleet`, `test_cli_contract`, `test_documentation_index`,
+`test_session12_documented_path`, `test_acceptance_registry`,
+`test_evidence_claims`. `bin/render-mcp-catalog.py --check` is current, the
+control the plan asked for.
+
+**Rows added: D1691, D1692, D1693, D1694, D1695. NEXT FREE: D1696.**
+
 
 ### Run 7 — the bump, the registry, the gate, and the trip's proofs
 

@@ -1,6 +1,6 @@
 """The doctor's two READINGS (Session 31, NODE-READ-001, ADR 0221).
 
-A reading is not a check. The eleven checks answer *is this deployment well*
+A reading is not a check. The twelve checks answer *is this deployment well*
 and are allowed four verdicts; a reading answers *what is true of this node*
 and is allowed two -- `OK` with the numbers, or `UNKNOWN` naming the figure it
 could not read.
@@ -266,7 +266,7 @@ def test_the_capacity_verb_documents_itself_and_needs_no_root_to_say_so() -> Non
     assert "--host" in result.stdout
 
 
-def test_doctor_with_no_verb_runs_the_eleven_checks_unchanged(tmp_path: Path) -> None:
+def test_doctor_with_no_verb_runs_the_twelve_checks_unchanged(tmp_path: Path) -> None:
     """The regression that would be quietest.
 
     `bin/fleet.py` and `rehearsal._doctor` both invoke `doctor.py --project KEY
@@ -275,7 +275,7 @@ def test_doctor_with_no_verb_runs_the_eleven_checks_unchanged(tmp_path: Path) ->
     inventory and every rehearsal would fail somewhere else entirely.
 
     Run without root, so it gets as far as the document and stops -- which is
-    enough to prove the argument parsing still reaches the eleven checks
+    enough to prove the argument parsing still reaches the twelve checks
     rather than a usage error.
     """
     result = run_doctor_py(

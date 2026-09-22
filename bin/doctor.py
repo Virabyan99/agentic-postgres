@@ -741,6 +741,139 @@ def probe_agent_record(document: dict[str, Any]) -> diagnosis.Check:
 
 
 # ---------------------------------------------------------------------------
+# The workflow substrate (Session 32, ADR 0226, ADR 0227)
+# ---------------------------------------------------------------------------
+
+
+#: The substrate's counts and ages, in one round trip, for `AGENT_RECORD_QUERY`'s
+#: reason: the numbers describe one moment and several calls would describe
+#: several. The function is migration 0034's; a cluster that has not applied it
+#: answers with an error, which is the third outcome rather than a zero.
+WORKFLOW_QUERY = "SELECT app_private.workflow_counts()"
+
+#: What a status name read back from the cluster may look like before it is
+#: repeated in a report. The enums' own alphabet (`queued`, `running`,
+#: `succeeded`, `failed`, `cancelled`, `stopped`, `claimed`, `parked`) and
+#: nothing else.
+#:
+#: Deliberately a SHAPE rather than the eleven names spelled here: a status
+#: added to `app_private.workflow_run_status` by a later migration would appear
+#: in this reading on its own, where a hard-coded vocabulary would silently
+#: drop it -- D1486's class, in the direction that reassures.
+_STATUS = re.compile(r"^[a-z][a-z_]{0,31}$")
+
+#: What a heartbeat holder may look like. `workflow_worker.worker_identity()`
+#: builds exactly `<nodename>:<pid>:<8 hex>`, and this is that SHAPE -- three
+#: parts, the last two of a fixed form -- rather than the alphabet those
+#: characters are drawn from.
+#:
+#: The alphabet was the first version, and the redaction rig refused it: a
+#: bounded run of letters, digits, dots, dashes and colons admits any sentence
+#: without a space in it, which is most of what a cluster could hand back. The
+#: value is written by this product and read back through the cluster, so the
+#: rule is `_timestamp`'s -- admitted only when it looks like the thing that
+#: was asked for (ADR 0159, D1693).
+_HOLDER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,39}:[0-9]{1,10}:[0-9a-f]{8}$")
+
+
+def _by_status(value: Any) -> str:
+    """`{"queued": 2, "succeeded": 1}` as ``queued=2 succeeded=1``.
+
+    Sorted, so two readings of the same cluster produce the same string. A key
+    that is not a status name or a value that is not a count is DROPPED, which
+    is the same rule `_timestamp` applies to the one cluster value the agent
+    record repeats.
+    """
+    if not isinstance(value, dict):
+        return "unreadable"
+    parts = [
+        f"{name}={count}"
+        for name, count in sorted(value.items())
+        if isinstance(name, str) and _STATUS.match(name) and isinstance(count, int)
+    ]
+    return " ".join(parts) or "none"
+
+
+def _whole_number(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def probe_workflow(document: dict[str, Any]) -> diagnosis.Check:
+    """The substrate's counts and the loop's heartbeat (ADR 0226, ADR 0227).
+
+    `probe_agent_record`'s shape exactly: one `psql` round trip over the
+    container socket as the superuser, the statement a module constant, the
+    verdict computed by `diagnosis` from values parsed here.
+
+    **A pre-0034 cluster is UNKNOWN and says which function was missing**, and
+    the sentence is this program's -- `psql`'s own words about an undefined
+    function are never repeated, for the reason `probe_repository` gives about
+    `pgbackrest` (ADR 0159). What an operator needs is the name of the thing to
+    go and look for, which this program knows without being told.
+    """
+    db = document.get("database") or {}
+    container = db.get("container")
+    name = db.get("name")
+    if not container or not name:
+        return diagnosis.workflow_record(
+            definitions=None,
+            runs="",
+            steps="",
+            oldest_claimed_lease_age_seconds=None,
+            heartbeat_age_seconds=None,
+            heartbeat_holder=None,
+            detail="the document names no container",
+        )
+
+    read = run(
+        "docker", "exec", "-i", container, "psql", "-U", "postgres", "-d", name,
+        "-X", "-qtA", "-c", WORKFLOW_QUERY,
+        timeout=30,
+    )  # fmt: skip
+    if read is None or read.returncode != 0:
+        return diagnosis.workflow_record(
+            definitions=None,
+            runs="",
+            steps="",
+            oldest_claimed_lease_age_seconds=None,
+            heartbeat_age_seconds=None,
+            heartbeat_holder=None,
+            detail=(
+                "a deployment below 1.10.0 has no such function, and a cluster that is "
+                "down does not answer either"
+            ),
+        )
+
+    try:
+        counts = json.loads(read.stdout.strip() or "null")
+    except ValueError:
+        counts = None
+    if not isinstance(counts, dict):
+        return diagnosis.workflow_record(
+            definitions=None,
+            runs="",
+            steps="",
+            oldest_claimed_lease_age_seconds=None,
+            heartbeat_age_seconds=None,
+            heartbeat_holder=None,
+            detail="the reading did not arrive in the shape it was asked for",
+        )
+
+    holder = counts.get("heartbeat_holder")
+    return diagnosis.workflow_record(
+        definitions=_whole_number(counts.get("definitions")),
+        runs=_by_status(counts.get("runs")),
+        steps=_by_status(counts.get("steps")),
+        oldest_claimed_lease_age_seconds=_whole_number(
+            counts.get("oldest_claimed_lease_age_seconds")
+        ),
+        heartbeat_age_seconds=_whole_number(counts.get("heartbeat_age_seconds")),
+        heartbeat_holder=(holder if isinstance(holder, str) and _HOLDER.match(holder) else None),
+        detail="the reading did not arrive in the shape it was asked for",
+    )
+
+
+# ---------------------------------------------------------------------------
 # The node -- capacity (Session 31, ADR 0221)
 # ---------------------------------------------------------------------------
 
@@ -992,6 +1125,10 @@ def diagnose(
     checks.append(probe_disk(document, warn_copies=warn_copies, problem_copies=problem_copies))
     checks.append(probe_capability_drift(document, lock_file=lock_file))
     checks.append(probe_agent_record(document))
+    # Session 32, the twelfth (ADR 0226). Last, like the eleventh before it:
+    # a check appended is a check every existing reader keeps finding where
+    # it was, and the doctor's order is the order an operator reads.
+    checks.append(probe_workflow(document))
     return tuple(checks)
 
 
@@ -1003,7 +1140,7 @@ def _render(
     There is no verbose or json branch in any probe, which is what keeps "a
     third party's bytes are never printed" a property of the shape rather than
     a rule each probe obeys (ADR 0159). Lifted out of `main` in Session 31 so
-    that the two readings and the eleven checks print through one function
+    that the two readings and the twelve checks print through one function
     rather than three copies of it.
     """
     if arguments.json:
@@ -1022,7 +1159,7 @@ def main(argv: list[str] | None = None) -> int:
     # is conditional is worth stating in one place a reader can find.
     parser.add_argument("--project", default=None)
     # Session 31: the two readings, selected by a verb that `bin/doctor.sh`
-    # maps to this flag. Absent, the eleven checks run exactly as before --
+    # maps to this flag. Absent, the twelve checks run exactly as before --
     # which is what keeps `bin/fleet.py` and `rehearsal._doctor`, both of which
     # invoke `--project KEY --json`, working untouched.
     parser.add_argument("--reading", choices=("capacity", "usage"), default=None)

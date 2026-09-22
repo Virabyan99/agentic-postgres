@@ -274,7 +274,7 @@ archiver died yesterday still publishes the status it had then (ADR 0158).
 ```bash
 sudo bin/fleet.sh                       # every project: release, live health, backup timers, denials by boundary (24 h)
 sudo bin/fleet.sh --json --window 168   # the same, as a document, denials over a week
-sudo bin/doctor.sh --project alpha-dev            # the eleven checks; 0 well, 6 a check failed or could not run
+sudo bin/doctor.sh --project alpha-dev            # the twelve checks; 0 well, 6 a check failed or could not run
 sudo bin/doctor.sh --project alpha-dev --verbose  # the numbers behind each verdict, no third party's bytes
 sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json info --json
 sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json schedule status
@@ -1272,3 +1272,116 @@ measured**, and disk I/O is bounded by nothing at all: there is no `blkio`
 limit and the two projects share one device. `THR-NOISY-NEIGHBOUR` in
 `docs/threat-model.md` states the bound and states the gap; the measurement
 belongs to a later session.
+
+## 17. Workflows, on a deployment
+
+Since `1.10.0`. A definition is installed by the deploy; a run is started by an
+agent; the loop that executes it is **inside the `auth` process** (ADR 0226).
+There is no workflow container, role or secret to operate, and the four things
+an operator actually does with one are below.
+
+`docs/workflows.md` is the developer's half -- what a definition is and what the
+six verbs do. This section is what you read on the host.
+
+### The twelfth check
+
+```bash
+sudo bin/doctor.sh --project alpha-dev            # twelve checks now
+sudo bin/doctor.sh --project alpha-dev --verbose  # with the numbers behind each
+```
+
+`workflow` is the twelfth, and it has **no threshold** -- `agent record`'s shape
+and its reason (D1441, ADR 0213). It answers with counts and ages, or it
+answers that it could not read them:
+
+```
+workflow    ok    2 definitions; runs queued=1 succeeded=3; steps queued=3
+                  succeeded=9; the loop last asked for work 4s ago; counts and
+                  ages only, no threshold (ADR 0226)
+```
+
+Six figures under `--verbose` or in `--json`: `definitions`, `runs` and `steps`
+by status, `oldest_claimed_lease_age_seconds`, `heartbeat_age_seconds` and
+`heartbeat_holder`.
+
+Two of them are the ones to read together, and neither is a verdict:
+
+- **`heartbeat_age_seconds`** grows by five per poll the loop misses. A number
+  in the hundreds on a project whose `auth` container has a restart count that
+  has not moved is a loop that stopped without the process stopping.
+- **`oldest_claimed_lease_age_seconds`** is `null` unless some step's lease is
+  already in the past. A number here means a step was claimed by a holder that
+  never finished it -- which is what a dead worker looks like, **and also what a
+  worker restarted four seconds ago looks like**. The heartbeat beside it is
+  the difference, which is why neither is a threshold.
+
+`unknown` on this check on a deployment below `1.10.0` is correct:
+`app_private.workflow_counts` arrives with migration 0034.
+
+### The rehearsal
+
+```bash
+sudo bin/rehearse.sh worker-restart \
+  --outputs /etc/agentic-postgres/projects/<key>/outputs.json --plan
+sudo bin/rehearse.sh worker-restart \
+  --outputs /etc/agentic-postgres/projects/<key>/outputs.json
+```
+
+SIGKILL to the `auth` container's main process -- never `docker kill`, which the
+daemon records as a manual stop that no restart policy restarts (D1015). The
+reading is the heartbeat's **holder**: read before the kill, polled after it,
+and a *new* holder is the loop having come back rather than never having
+stopped. The container's restart count is the control.
+
+**Rehearse it when no run is in flight.** A step claimed by the loop that died
+is a true finding and it is not this reader's; the verdict reads `unread` and
+says so, which is correct and is not a defect to go and fix.
+
+It refuses when the `workflow` check reads no holder before the kill -- either
+0034 is not applied, or no loop has ever asked for work here.
+
+### The restore drill's member
+
+`evidence/restore-<key>-<id>.json` carries `workflow_runs`: counts by status
+from the restored cluster, or `{"value": null, "reason": ...}` when the restored
+cluster has no such function. A backup taken before 0034 restores a cluster
+without one, and that is a fact about the backup rather than a failed drill.
+
+No run id, no input and no result: a run's own document is the agent's, and
+this record is yours.
+
+### An agent's own run
+
+An operator does not read another principal's run through a product surface,
+and there is no admin route that does. What you can do is hand the agent's
+holder the one line:
+
+```bash
+APG_AGENT_TOKEN=... bin/workflow.sh status --run "$RUN" --project-outputs outputs.json
+```
+
+### If something goes wrong
+
+**A run is `stopped`.** The agent stopped being able to act -- revoked, expired,
+or narrowed out of a scope a later step needs. `stopped_reason` says which. It
+is not a failure of the run and it is not fixed by restarting anything: it is
+fixed by reauthorising the agent, and then by starting a new run. A `stopped`
+run does not resume.
+
+**A run is `parked`.** A step failed retryably and `resume_after` says when it
+comes back. Nothing is running and nothing is lost. Read it again after that
+instant before touching anything.
+
+**A lease is overdue and the heartbeat is old.** The loop is not running.
+`auth` is what holds it, so this is `service-termination`'s recovery with a
+different container: read `docker inspect -f '{{.State.Running}}
+{{.RestartCount}}'` on the `auth` container, and if the restart policy has run
+out of attempts, `docker start` it. The step the dead loop was holding is
+re-claimed by the new one when its lease expires -- no operator action moves it,
+and none should.
+
+**A definition will not install at a deploy's step 6d.** The deploy refuses
+rather than installing half a project's definitions. `(name, version)` is
+immutable, so the usual cause is an edited definition whose version did not
+move: publish a new version. `bin/workflow.sh validate --project <manifest>`
+gives the same answer in the checkout, before the trip.

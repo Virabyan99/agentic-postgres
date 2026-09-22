@@ -1,6 +1,8 @@
 """`OPS-REHEARSE-001`..`008`, offline (ADR 0190, ADR 0193, Session 18 Run 4).
 
-The plans `bin/rehearse.sh` builds for eight scenarios and what each refuses;
+The plans `bin/rehearse.sh` builds for every scenario in `SCENARIOS` (the
+number is not spelled here; it was wrong twice when it was, D1595 and D1664)
+and what each refuses;
 the command driven against a recorded runner with REAL files where the
 scenario moves one (the port registry, the foreign lock), so that "reversed"
 is a property of the filesystem after the run and not of a flag; the
@@ -46,6 +48,11 @@ LISTED_RULE = (
     "-m comment --comment {comment} -j REJECT --reject-with tcp-reset"
 )
 FOREIGN_RULE = "-A DOCKER-USER -s 10.0.0.0/8 -m comment --comment apg-rehearsal-other -j RETURN"
+#: The heartbeat's holder, in `workflow_worker.worker_identity()`'s shape:
+#: `<nodename>:<pid>:<8 hex>`. Two of them, because the reading IS the
+#: comparison -- a holder after the restart means nothing without one before.
+HOLDER_BEFORE = "apg-host-01:41:deadbeef"
+HOLDER_AFTER = "apg-host-01:77:cafe0000"
 
 
 def load_command(name: str) -> Any:
@@ -68,8 +75,15 @@ def facts(**overrides: Any) -> rehearsal.Facts:
             "edge-probe": f"{COMPOSE}-edge-probe-1",
             "postgres": f"{COMPOSE}-postgres-1",
             "pgbouncer": f"{COMPOSE}-pgbouncer-1",
+            # Session 32: the process the workflow loop lives inside (ADR 0226).
+            "auth": f"{COMPOSE}-auth-1",
         },
-        "container_pids": {"edge-probe": 4242, "postgres": 4300, "pgbouncer": 4301},
+        "container_pids": {
+            "edge-probe": 4242,
+            "postgres": 4300,
+            "pgbouncer": 4301,
+            "auth": 4400,
+        },
         "restart_counts": {f"{COMPOSE}-edge-probe-1": 0, f"{COMPOSE}-postgres-1": 0},
         "health_url": "https://x.example.test/__apg/healthz",
         "mcp_url": "https://x.example.test/mcp",
@@ -94,6 +108,10 @@ def facts(**overrides: Any) -> rehearsal.Facts:
         "host_manifest": str(REPO_ROOT / "host.example.yaml"),
         "project_manifest": str(REPO_ROOT / "project.example.yaml"),
         "admit_py": str(REPO_ROOT / "bin" / "admit.py"),
+        # Session 32: `worker-restart` refuses without it, which is asserted
+        # below. Present in the base for the two parametrised sweeps' sake, the
+        # same reason the two manifests above are.
+        "workflow_heartbeat": HOLDER_BEFORE,
     }
     base.update(overrides)
     return rehearsal.Facts(**base)
@@ -380,6 +398,14 @@ def test_the_check_names_the_module_reads_are_the_doctors_own() -> None:
         diagnosis.mirror(enabled=False, status=None, last_copied_at=None, age_days=None).name,
         diagnosis.disk_headroom(cluster_kb=1, available_kb=9, mount="/m").name,
         diagnosis.capability_drift(recorded=False, present=False, matches=None, plane=None).name,
+        diagnosis.workflow_record(
+            definitions=0,
+            runs="none",
+            steps="none",
+            oldest_claimed_lease_age_seconds=None,
+            heartbeat_age_seconds=None,
+            heartbeat_holder=None,
+        ).name,
     }
     assert set(rehearsal.DEPLOYED_DOCTOR_CHECKS.values()) == produced
     document = diagnosis.render_json(
@@ -465,16 +491,23 @@ class Recorded:
             if "Label" in argv[-1]:
                 return answer(
                     f"edge-probe\t{COMPOSE}-edge-probe-1\npostgres\t{COMPOSE}-postgres-1\n"
-                    f"pgbouncer\t{COMPOSE}-pgbouncer-1\n"
+                    f"pgbouncer\t{COMPOSE}-pgbouncer-1\nauth\t{COMPOSE}-auth-1\n"
                 )
-            return answer(f"{COMPOSE}-edge-probe-1\n{COMPOSE}-postgres-1\n{COMPOSE}-pgbouncer-1\n")
+            return answer(
+                f"{COMPOSE}-edge-probe-1\n{COMPOSE}-postgres-1\n"
+                f"{COMPOSE}-pgbouncer-1\n{COMPOSE}-auth-1\n"
+            )
         if argv[:2] == ["docker", "inspect"]:
             template, name = argv[3], argv[4]
-            edge = "edge-probe" in name
-            restarts = 1 if (edge and self.killed and self.restart_on_kill) else 0
+            # The two containers a scenario kills. `auth` joins the set in
+            # Session 32 because `worker-restart` signals it (ADR 0226), and
+            # its state has to MOVE or the rehearsal's control reads nothing.
+            killable = "edge-probe" in name or "auth" in name
+            restarts = 1 if (killable and self.killed and self.restart_on_kill) else 0
             if "Pid" in template:
-                return answer(f"4242 {restarts}\n")
-            running = self.back if edge else True
+                pid = 4400 if "auth" in name else 4242
+                return answer(f"{pid} {restarts}\n")
+            running = self.back if killable else True
             return answer(f"{'true' if running else 'false'} {restarts}\n")
         if argv[:3] == ["docker", "network", "inspect"]:
             return answer(f"{SUBNET}\n")
@@ -555,6 +588,21 @@ class Recorded:
                 ("disk headroom", disk),
                 ("capability drift", drift),
             )
+        )
+        # Session 32's twelfth. Built apart from the tuple above because it is
+        # the one check whose EVIDENCE is read rather than its verdict: the
+        # holder is what `worker-restart` compares, and it moves only after the
+        # process was killed and the policy brought it back.
+        checks = (
+            *checks,
+            diagnosis.workflow_record(
+                definitions=1,
+                runs="running=1",
+                steps="claimed=1",
+                oldest_claimed_lease_age_seconds=None,
+                heartbeat_age_seconds=3,
+                heartbeat_holder=(HOLDER_AFTER if self.killed and self.back else HOLDER_BEFORE),
+            ),
         )
         return diagnosis.render_json(checks, project_key=KEY, observed_at="2026-09-06T00:00:00Z")
 
@@ -1316,3 +1364,254 @@ def test_admission_refused_has_a_verdict_arm() -> None:
     )
     assert confused == "unread"
     assert "told apart" in why
+
+
+# ---------------------------------------------------------------------------
+# The tenth scenario: worker-restart (Session 32, ADR 0226)
+# ---------------------------------------------------------------------------
+
+
+def test_worker_restart_signals_the_auth_process_and_reads_the_heartbeat() -> None:
+    """The scenario ADR 0226's decision earned, and the shape it must keep.
+
+    The worker is a loop in the `auth` process, so a worker restart is an auth
+    restart -- ADR 0226 said so when it chose a loop over a container, and this
+    is that cost rehearsed. `service-termination`'s induce exactly: SIGKILL to
+    the main process from the host's PID namespace, never `docker kill`, which
+    the daemon records as a manual stop that no policy restarts (rig 4, D1015).
+
+    The READER is the heartbeat's holder and not the check's verdict, because
+    the check has no threshold and reads `ok` throughout (ADR 0226). A verdict
+    could not tell a loop that came back from one that never stopped.
+    """
+    plan = rehearsal.plan("worker-restart", facts())
+    assert [a.argv for a in plan.induce] == [("kill", "-KILL", "4400")]
+    assert not any(argv[:2] == ("docker", "kill") for argv in argvs(plan))
+    assert "D1015" in plan.induce[0].what and "docker kill" in plan.induce[0].what
+    assert rehearsal.WORKER_SERVICE == "auth"
+    assert plan.bound_seconds == rehearsal.BOUNDS["worker-restart"]
+
+    names = [o.name for o in plan.observe]
+    assert names == ["state_after_kill", "heartbeat_after_restart", "steps_after_restart"]
+    # The control is the restart count: a holder that changed while the
+    # process never died would be a loop that never stopped.
+    assert [o.name for o in plan.observe if o.control] == ["state_after_kill"]
+    # The holder is a host identity and stays OUT of the printed plan: it is
+    # a value the reading compares, not one an operator has to read, and
+    # `--plan` has not taken the reading yet in any case (D1694).
+    assert HOLDER_BEFORE not in rehearsal.render_plan(plan, facts())
+
+    fallback = [a for a in plan.reverse if a.kind == "run"]
+    assert [a.argv for a in fallback] == [("docker", "start", f"{COMPOSE}-auth-1")]
+    assert fallback[0].conditional == "restarted"
+
+
+def test_worker_restart_refuses_when_the_reader_did_not_read_before_the_kill() -> None:
+    """**The reader must read before the kill** (ADR 0195's rule at the plan).
+
+    A rehearsal whose "after" has no "before" would report `read` for a worker
+    that never died: any holder at all would look like a new one. `Facts`
+    carries `None` when the doctor's `workflow` check read nothing -- a
+    deployment below 1.10.0, or one no loop has asked for work on.
+
+    The refusal is `refuse_without_a_reading` and NOT the planner, because
+    `--plan` takes no readings and would otherwise refuse every deployment
+    (D1694). The planner's own refusals -- the container and the pid -- are
+    facts `--plan` can check for free, and they stay there.
+    """
+    plan = rehearsal.plan("worker-restart", facts())
+    rehearsal.refuse_without_a_reading(plan, facts())
+    with pytest.raises(rehearsal.RehearsalError, match="no heartbeat holder"):
+        rehearsal.refuse_without_a_reading(plan, facts(workflow_heartbeat=None))
+    # Every other scenario passes with no reading at all, which is what keeps
+    # this a precondition of one rehearsal rather than a new global one.
+    for other in rehearsal.SCENARIOS:
+        if other != "worker-restart":
+            rehearsal.refuse_without_a_reading(
+                rehearsal.plan(other, facts()), facts(workflow_heartbeat=None)
+            )
+
+    with pytest.raises(rehearsal.RehearsalError, match="no running auth container"):
+        rehearsal.plan("worker-restart", facts(containers={"postgres": "x"}))
+    with pytest.raises(rehearsal.RehearsalError, match="no main process"):
+        rehearsal.plan("worker-restart", facts(container_pids={}))
+
+
+def test_worker_restart_has_a_verdict_arm_that_needs_a_holder_that_moved() -> None:
+    """`verdict()` raises for a scenario with no arm, so a scenario added
+    without one fails at the end of a real rehearsal -- on the host, after the
+    reading, which is the most expensive place to find it.
+
+    The arm's own subject is the comparison: a holder that came back UNCHANGED
+    is the failure this rehearsal exists to catch, and it must not read `read`.
+    """
+    read, why = rehearsal.verdict(
+        "worker-restart",
+        {
+            "restarted": True,
+            "heartbeat_holder_before": HOLDER_BEFORE,
+            "heartbeat_holder_after": HOLDER_AFTER,
+            "oldest_claimed_lease_age_seconds": None,
+            "seconds_to_holder": 7.4,
+        },
+    )
+    assert read == "read", why
+
+    unchanged, why = rehearsal.verdict(
+        "worker-restart",
+        {
+            "restarted": True,
+            "heartbeat_holder_before": HOLDER_BEFORE,
+            "heartbeat_holder_after": HOLDER_BEFORE,
+            "oldest_claimed_lease_age_seconds": None,
+        },
+    )
+    assert unchanged == "unread"
+    assert "never stopped" in why
+
+    absent, why = rehearsal.verdict(
+        "worker-restart",
+        {
+            "restarted": True,
+            "heartbeat_holder_before": HOLDER_BEFORE,
+            "heartbeat_holder_after": None,
+        },
+    )
+    assert absent == "unread"
+    assert "no heartbeat holder" in why
+
+    down, why = rehearsal.verdict(
+        "worker-restart",
+        {
+            "restarted": False,
+            "heartbeat_holder_before": HOLDER_BEFORE,
+            "heartbeat_holder_after": HOLDER_AFTER,
+        },
+    )
+    assert down == "unread"
+    assert "did not come back" in why
+
+    # A step still claimed past its lease after the restart is a true finding
+    # and is reported as one, not folded into the holder having moved.
+    stuck, why = rehearsal.verdict(
+        "worker-restart",
+        {
+            "restarted": True,
+            "heartbeat_holder_before": HOLDER_BEFORE,
+            "heartbeat_holder_after": HOLDER_AFTER,
+            "oldest_claimed_lease_age_seconds": 240,
+        },
+    )
+    assert stuck == "unread"
+    assert "240s past its lease" in why
+
+
+def test_worker_restart_driven_end_to_end_kills_polls_and_reads_the_new_holder(
+    rehearse: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The observer arm, driven the way the host will drive it.
+
+    `service-termination`'s end-to-end proof with a different reader: the
+    process is signalled, the policy brings it back, the poll reads the
+    heartbeat until the HOLDER moves, and the verdict is `read`. The control is
+    in the readings -- `restart_count_after` -- because a holder that changed
+    while the process never died would be a loop that never stopped.
+
+    The fact-gathering doctor call is here too, and it is the one that makes
+    `heartbeat_holder_before` a reading rather than a hope.
+    """
+    code, runner = drive(rehearse, monkeypatch, "worker-restart")
+    assert code == 0
+    assert ["kill", "-KILL", "4400"] in runner.calls
+    assert not any(argv[:2] == ["docker", "kill"] for argv in runner.calls)
+    assert not any(argv[:2] == ["docker", "start"] for argv in runner.calls), (
+        "the policy restarted it"
+    )
+    record = evidence(rehearse, "worker-restart")
+    readings = record["readings"]
+    assert readings["heartbeat_holder_before"] == HOLDER_BEFORE
+    assert readings["heartbeat_holder_after"] == HOLDER_AFTER
+    assert readings["restarted"] is True
+    assert readings["restart_count_after"] == 1
+    assert readings["oldest_claimed_lease_age_seconds"] is None
+    assert readings["workflow_after"] == {"workflow": "ok"}
+    assert record["verdict"] == "read" and record["reversed"] is True
+    assert not rehearse.PATHS["state_file"].exists()
+
+
+def test_worker_restart_takes_its_before_reading_only_when_it_will_induce(
+    rehearse: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--plan` prints the phases and takes NO readings (D1694).
+
+    The heartbeat is a reading: it runs the doctor. Gathering it under `--plan`
+    would make the one verb that promises to run nothing run the reader, which
+    is the property `test_plan_reads_the_facts_and_runs_writes_and_moves_nothing`
+    asserts for every scenario. So `--plan` gathers nothing and the refusal for
+    a reading that did not come back happens after `--plan` has returned.
+    """
+    code, planned = drive(rehearse, monkeypatch, "worker-restart", "--plan")
+    assert code == 0
+    assert not any(len(argv) > 1 and argv[1].endswith("doctor.py") for argv in planned.calls)
+
+    code, ran = drive(rehearse, monkeypatch, "worker-restart")
+    assert code == 0
+    assert any(len(argv) > 1 and argv[1].endswith("doctor.py") for argv in ran.calls)
+
+
+def test_a_worker_that_comes_back_as_the_same_holder_is_reported_unread(
+    rehearse: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The failure this rehearsal exists to catch, driven rather than asserted
+    on a dict: the container restarts, the doctor answers, and the holder is
+    the one that was there before -- so nothing distinguishes a loop that came
+    back from one that never stopped. Exit 6, reversed, and a finding.
+    """
+
+    class SameHolder(Recorded):
+        def doctor(self, argv: list[str]) -> str:
+            document = json.loads(super().doctor(argv))
+            for entry in document["checks"]:
+                if entry["name"] == "workflow":
+                    entry["evidence"]["heartbeat_holder"] = HOLDER_BEFORE
+            return json.dumps(document)
+
+    code, _ = drive(rehearse, monkeypatch, "worker-restart", runner=SameHolder())
+    assert code == 6
+    record = evidence(rehearse, "worker-restart")
+    assert record["verdict"] == "unread"
+    assert "never stopped" in record["why"]
+    assert record["reversed"] is True
+    assert not rehearse.PATHS["state_file"].exists()
+
+
+def test_a_null_evidence_value_reads_as_absent_rather_than_as_the_word() -> None:
+    """`diagnosis._pairs` renders an unread value as the STRING `"null"`, so a
+    reader comparing two of them would otherwise compare two four-letter words
+    and call them equal (D600).
+
+    The control is the first assertion: a reader that returned `None` for
+    everything would satisfy the refusals and fail it.
+    """
+    document = json.dumps(
+        {
+            "checks": [
+                {
+                    "name": "workflow",
+                    "verdict": "ok",
+                    "detail": "",
+                    "evidence": {
+                        "heartbeat_holder": HOLDER_BEFORE,
+                        "oldest_claimed_lease_age_seconds": "null",
+                    },
+                }
+            ]
+        }
+    )
+    assert rehearsal.doctor_evidence(document, "workflow", "heartbeat_holder") == HOLDER_BEFORE
+    assert (
+        rehearsal.doctor_evidence(document, "workflow", "oldest_claimed_lease_age_seconds") is None
+    )
+    assert rehearsal.doctor_evidence(document, "workflow", "not_a_key") is None
+    assert rehearsal.doctor_evidence(document, "agent record", "heartbeat_holder") is None
+    assert rehearsal.doctor_evidence("not json", "workflow", "heartbeat_holder") is None

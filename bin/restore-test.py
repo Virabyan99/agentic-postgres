@@ -487,6 +487,29 @@ def observe_restored_instance(plan: restore_drill.DrillPlan) -> dict[str, Any]:
     for name in ("timeline_id", "schema_migration_count"):
         if observed[name] is not None:
             observed[name] = int(observed[name])
+
+    # Session 32 (ADR 0227). Not in `reads` above, because its absence is an
+    # ANSWER rather than a `None`: a cluster restored from a backup taken before
+    # migration 0034 has no such function, and a drill against it is a perfectly
+    # good drill. `{"value": null, "reason": ...}` says which of the two happened,
+    # where a bare `None` beside eleven other `None`s would not (ADR 0195, D600).
+    code, answer = query(plan, "SELECT app_private.workflow_counts() ->> 'runs'")
+    if code != 0 or answer == "":
+        observed["workflow_runs"] = {
+            "value": None,
+            "reason": (
+                "app_private.workflow_counts is not present in the restored cluster; "
+                "the backup predates migration 0034"
+            ),
+        }
+    else:
+        try:
+            observed["workflow_runs"] = {"value": json.loads(answer), "reason": ""}
+        except ValueError:
+            observed["workflow_runs"] = {
+                "value": None,
+                "reason": "the reading did not arrive in the shape it was asked for",
+            }
     return observed
 
 

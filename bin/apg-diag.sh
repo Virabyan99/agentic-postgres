@@ -137,11 +137,14 @@ allowlisted() {
 # identities, and re-deriving one here would make this script a second authority
 # on a name (ADR 0002).
 #
-# **Not `apg.project.key`.** That label is on three of thirteen services --
-# edge-probe, postgrest and docs, the three that carry Traefik labels -- so it
-# means "this container is routed", not "this container belongs to this
-# project". Filtering on it found half a deployment and no cluster at all
-# (D210).
+# **Not `apg.project.key`.** That label is on nine of the twenty services
+# compose.yaml defines -- auth, backup-mirror, docs, edge-probe, mcp, metrics,
+# postgrest, storage and store -- and on neither postgres nor pgbouncer, so it
+# still means "this container is routed or observed", not "this container
+# belongs to this project". Filtering on it found half a deployment and no
+# cluster at all (D210). The count was `three of thirteen` until 2026-09-22
+# and had been wrong since Session 14 (D1620, D1664); D210's finding never
+# depended on it.
 compose_project_for() {
   local key="$1" container project
   container="$(python3 -c '

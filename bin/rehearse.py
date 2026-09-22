@@ -217,6 +217,33 @@ def gather_facts(
     observed = (document.get("database") or {}).get("observed") or {}
     instance_uuid = observed.get("instance_uuid") if isinstance(observed, dict) else None
 
+    doctor_argv = (
+        sys.executable,
+        str(REPO_ROOT / "bin" / "doctor.py"),
+        "--root",
+        str(arguments.state_root),
+    )
+    # Session 32 (ADR 0226). Gathered for ONE scenario, before anything is
+    # signalled, and left `None` for the other nine: `worker-restart` compares
+    # the holder after the restart with this one, and a rehearsal that read
+    # the holder only afterwards would report a restart it never saw. The
+    # planner refuses on `None` rather than planning around it, which is the
+    # rule `--host` and `--manifest` already follow.
+    #
+    # NOT under `--plan`: that verb prints the phases and takes no readings,
+    # and a doctor run here would be one (D1694). The refusal for a reading
+    # that did not come back is `rehearsal.refuse_without_a_reading`, called
+    # after `--plan` has returned.
+    workflow_heartbeat = (
+        doctor_evidence(
+            (*doctor_argv, "--project", key, "--json"),
+            rehearsal.DEPLOYED_DOCTOR_CHECKS["workflow"],
+            "heartbeat_holder",
+        )
+        if arguments.scenario == "worker-restart" and not arguments.plan
+        else None
+    )
+
     registry = Path(arguments.registry)
     lock_path = deployed_output.rendered_path(key, root=arguments.rendered_root) / (
         runtime_override.MCP_LOCK_FILENAME
@@ -227,12 +254,7 @@ def gather_facts(
         project_key=key,
         rehearsal_id=rehearsal_id,
         outputs_path=str(arguments.outputs),
-        doctor_argv=(
-            sys.executable,
-            str(REPO_ROOT / "bin" / "doctor.py"),
-            "--root",
-            str(arguments.state_root),
-        ),
+        doctor_argv=doctor_argv,
         backup_sh=str(REPO_ROOT / "bin" / "backup.sh"),
         database_ports_sh=str(REPO_ROOT / "bin" / "database-ports.sh"),
         containers=containers,
@@ -268,6 +290,7 @@ def gather_facts(
         host_manifest=str(arguments.host) if arguments.host else None,
         project_manifest=str(arguments.manifest) if arguments.manifest else None,
         admit_py=str(REPO_ROOT / "bin" / "admit.py"),
+        workflow_heartbeat=workflow_heartbeat,
     )
 
 
@@ -334,6 +357,18 @@ def doctor_document(argv: tuple[str, ...]) -> dict[str, Any] | None:
     except ValueError:
         return None
     return document if isinstance(document, dict) else None
+
+
+def doctor_evidence(argv: tuple[str, ...], check: str, key: str) -> str | None:
+    """One value out of one check's evidence, read through the doctor itself.
+
+    A reading, not a verdict: `worker-restart` compares the heartbeat's holder
+    before the kill with the holder after it, and a verdict cannot tell those
+    apart -- the check reads `ok` either way, which is the point of it having
+    no threshold (ADR 0226).
+    """
+    result = run(*argv, timeout=DOCTOR_TIMEOUT_SECONDS)
+    return rehearsal.doctor_evidence(result.stdout if result is not None else "", check, key)
 
 
 def observations(plan: rehearsal.Plan) -> dict[str, rehearsal.Observation]:
@@ -500,6 +535,55 @@ def observe(plan: rehearsal.Plan, facts: rehearsal.Facts) -> dict[str, Any]:
                 readings["control_declaration_injected"] = decision.get("declaration_injected")
         return readings
 
+    if plan.scenario == "worker-restart":
+        # The control and the reading are polled in ONE loop, because they are
+        # two facts about the same moment: a holder that changed while the
+        # container never restarted would be a loop that never stopped, and
+        # reading them at different times would let both be true in turn.
+        container = facts.containers[rehearsal.WORKER_SERVICE]
+        before = facts.restart_counts.get(container, 0)
+        started = time.monotonic()
+        state = run(*by_name["state_after_kill"].argv)
+        running, count = rehearsal.inspect_state(state.stdout if state else "")
+        readings["state_after_kill"] = {"running": running, "restart_count": count}
+        readings["restart_count_before"] = before
+        readings["heartbeat_holder_before"] = facts.workflow_heartbeat
+        readings["restarted"] = False
+        readings["heartbeat_holder_after"] = None
+        deadline = started + plan.bound_seconds
+        while time.monotonic() < deadline:
+            if not readings["restarted"]:
+                state = run(*by_name["state_after_kill"].argv)
+                running, count = rehearsal.inspect_state(state.stdout if state else "")
+                if running and count is not None and count > before:
+                    readings["restarted"] = True
+                    readings["restart_count_after"] = count
+            holder = doctor_evidence(
+                by_name["heartbeat_after_restart"].argv, checks["workflow"], "heartbeat_holder"
+            )
+            # Recorded on EVERY poll, not only on the one that differs: a
+            # holder that never changed and a check that never read one are
+            # different findings, and a reading that kept only the changed
+            # value would report the second for both (ADR 0195).
+            if holder is not None:
+                readings["heartbeat_holder_after"] = holder
+            if holder is not None and holder != facts.workflow_heartbeat:
+                readings["seconds_to_holder"] = round(time.monotonic() - started, 1)
+                break
+            time.sleep(POLL_SECONDS)
+        # Taken AFTER the holder moved, not beside it: a lease overdue while the
+        # old loop's container is still down says nothing about the new one.
+        overdue = doctor_evidence(
+            by_name["steps_after_restart"].argv,
+            checks["workflow"],
+            "oldest_claimed_lease_age_seconds",
+        )
+        readings["oldest_claimed_lease_age_seconds"] = None if overdue is None else int(overdue)
+        readings["workflow_after"] = doctor_checks(
+            by_name["steps_after_restart"].argv, checks["workflow"]
+        )
+        return readings
+
     if plan.scenario == "provider-loss":
         readings["record"] = rehearsal.PROVIDER_LOSS_RECORD
         return readings
@@ -551,12 +635,12 @@ def reverse(
                     result.stdout if result else "", checks["mirror"]
                 )
 
-    if plan.scenario in {"service-termination", "database-restart"}:
-        service = (
-            rehearsal.HEALTH_SERVICE
-            if plan.scenario == "service-termination"
-            else rehearsal.DATABASE_SERVICE
-        )
+    if plan.scenario in {"service-termination", "database-restart", "worker-restart"}:
+        service = {
+            "service-termination": rehearsal.HEALTH_SERVICE,
+            "database-restart": rehearsal.DATABASE_SERVICE,
+            "worker-restart": rehearsal.WORKER_SERVICE,
+        }[plan.scenario]
         container = facts.containers[service]
         state = run("docker", "inspect", "-f", "{{.State.Running}} {{.RestartCount}}", container)
         running, _ = rehearsal.inspect_state(state.stdout if state else "")
@@ -637,6 +721,14 @@ def rehearse(arguments: argparse.Namespace) -> int:
         print(rehearsal.render_plan(plan, facts))
         print("\nplan only: nothing was run, written or moved.")
         return 0
+
+    # Every reading a scenario must already have taken. After the `--plan`
+    # return above and before the in-progress file, so a refusal here leaves
+    # the host exactly as it was and nothing to reverse.
+    try:
+        rehearsal.refuse_without_a_reading(plan, facts)
+    except rehearsal.RehearsalError as error:
+        raise OperatorError(EXIT_REFUSED, str(error)) from error
 
     progress = state_path(arguments.state_root)
     refuse_if_in_progress(progress)

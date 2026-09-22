@@ -565,3 +565,109 @@ def test_the_agent_record_check_has_no_threshold_anywhere() -> None:
             f"{rows} rows produced {check.verdict}. If a threshold is wanted, it is "
             "measured first and ADR 0213 is amended -- it is not chosen here"
         )
+
+
+# ---------------------------------------------------------------------------
+# The twelfth check: the workflow substrate (Session 32, ADR 0226)
+# ---------------------------------------------------------------------------
+
+
+def test_the_workflow_reading_is_ok_with_the_counts_behind_it() -> None:
+    check = diagnosis.workflow_record(
+        definitions=2,
+        runs="queued=1 succeeded=3",
+        steps="queued=3 succeeded=9",
+        oldest_claimed_lease_age_seconds=None,
+        heartbeat_age_seconds=4,
+        heartbeat_holder="apg-host:41:deadbeef",
+    )
+    assert check.verdict == diagnosis.OK
+    assert check.name == "workflow"
+    evidence = dict(check.evidence)
+    assert evidence["definitions"] == "2"
+    assert evidence["runs"] == "queued=1 succeeded=3"
+    assert evidence["heartbeat_holder"] == "apg-host:41:deadbeef"
+    assert "4s ago" in check.detail
+
+
+def test_a_deployment_no_loop_has_asked_on_says_so_rather_than_reading_zero() -> None:
+    """The heartbeat's age is `None` until some loop has asked for work, and
+    `0` would read as *four seconds ago* rather than *never* (D600)."""
+    check = diagnosis.workflow_record(
+        definitions=0,
+        runs="none",
+        steps="none",
+        oldest_claimed_lease_age_seconds=None,
+        heartbeat_age_seconds=None,
+        heartbeat_holder=None,
+    )
+    assert check.verdict == diagnosis.OK
+    assert "no loop has asked for work" in check.detail
+    assert dict(check.evidence)["heartbeat_age_seconds"] == "null"
+
+
+def test_an_unread_workflow_count_is_unknown_and_names_the_function() -> None:
+    check = diagnosis.workflow_record(
+        definitions=None,
+        runs="",
+        steps="",
+        oldest_claimed_lease_age_seconds=None,
+        heartbeat_age_seconds=None,
+        heartbeat_holder=None,
+        detail="a deployment below 1.10.0 has no such function",
+    )
+    assert check.verdict == diagnosis.UNKNOWN
+    assert "app_private.workflow_counts" in check.detail
+    assert "1.10.0" in check.detail
+
+
+def test_the_workflow_check_reports_counts_and_ages_with_no_threshold() -> None:
+    """**The decision, asserted rather than trusted** (ADR 0226, D1441's reason
+    one session on).
+
+    The two values most likely to acquire a verdict are an overdue lease and a
+    stale heartbeat, and both are numbers here at every magnitude. An overdue
+    lease is what a dead worker looks like AND what a worker restarted four
+    seconds ago looks like, so a `PROBLEM` on it would fail a deployment that
+    is recovering exactly as designed. A future edit that wants one deletes
+    this test, which is where the argument is.
+    """
+    for age in (0, 1, 60, 3600, 10**6):
+        for parked in (0, 1, 500):
+            check = diagnosis.workflow_record(
+                definitions=1,
+                runs=f"queued={parked} failed={parked} stopped={parked}",
+                steps=f"parked={parked} failed={parked}",
+                oldest_claimed_lease_age_seconds=age,
+                heartbeat_age_seconds=age,
+                heartbeat_holder="apg-host:41:deadbeef",
+            )
+            assert check.verdict == diagnosis.OK, (
+                f"a heartbeat {age}s old with {parked} parked produced {check.verdict}. "
+                "If a threshold is wanted it is measured first and ADR 0226 is amended "
+                "-- it is not chosen here"
+            )
+
+
+def test_an_overdue_lease_is_reported_in_the_detail_rather_than_only_in_the_evidence() -> None:
+    """An operator reading the table sees `ok` either way, so the one fact that
+    tells them to look is in the sentence beside it."""
+    quiet = diagnosis.workflow_record(
+        definitions=1,
+        runs="succeeded=1",
+        steps="succeeded=1",
+        oldest_claimed_lease_age_seconds=None,
+        heartbeat_age_seconds=3,
+        heartbeat_holder="apg-host:41:deadbeef",
+    )
+    overdue = diagnosis.workflow_record(
+        definitions=1,
+        runs="running=1",
+        steps="claimed=1",
+        oldest_claimed_lease_age_seconds=91,
+        heartbeat_age_seconds=3,
+        heartbeat_holder="apg-host:41:deadbeef",
+    )
+    assert "past its lease" not in quiet.detail
+    assert "91s past its lease" in overdue.detail
+    assert quiet.verdict == overdue.verdict == diagnosis.OK

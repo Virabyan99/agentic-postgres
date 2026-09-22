@@ -195,6 +195,27 @@ def poisoned_run(monkeypatch: pytest.MonkeyPatch, doctor: Any) -> None:
             # report, which is what `test_a_cluster_timestamp_that_is_not_one`
             # measures.
             stdout = f"1204|2026-08-01 00:00:00+00|88|{SUBPROCESS}\n"
+        elif "workflow_counts" in joined:
+            # Session 32's twelfth check. The canary goes in the two places a
+            # CLUSTER value reaches the report: a status NAME (which the probe
+            # renders into `runs`) and the heartbeat HOLDER. Both are values
+            # this product wrote and read back, which is exactly the shape
+            # `_timestamp` already guards for the agent record -- so both are
+            # dropped, and the well-formed entries beside them are kept, which
+            # is what stops "it refuses" standing in for "it discriminates".
+            stdout = (
+                json.dumps(
+                    {
+                        "definitions": 2,
+                        "runs": {"succeeded": 3, SUBPROCESS: 1},
+                        "steps": {"succeeded": 9},
+                        "oldest_claimed_lease_age_seconds": None,
+                        "heartbeat_age_seconds": 4,
+                        "heartbeat_holder": SUBPROCESS,
+                    }
+                )
+                + "\n"
+            )
         elif "pg_stat_archiver" in joined:
             stdout = "5|2026-08-27 00:00:00+00|0||\n"
         elif "du" in command:
@@ -266,6 +287,10 @@ def render(doctor: Any, *, mode: str) -> str:
     # agent record starts. Everything else here is a number this program parsed
     # or an enum it chose, so this is the probe the timestamp scan is for.
     checks.append(doctor.probe_agent_record(doc))
+    # Session 32's twelfth, and the SECOND probe that repeats values the
+    # cluster produced -- a status name and the heartbeat's holder. The scan
+    # covers it for the same reason it covers the agent record.
+    checks.append(doctor.probe_workflow(doc))
     if mode == "json":
         return diagnosis.render_json(
             tuple(checks), project_key="apg-canary-dev", observed_at="2026-09-04T12:00:00Z"
@@ -736,5 +761,99 @@ def test_the_agent_record_probe_reports_a_document_with_no_container(doctor: Any
     doc = document()
     doc["database"] = {}
     check = doctor.probe_agent_record(doc)
+    assert check.verdict == diagnosis.UNKNOWN
+    assert "names no container" in check.detail
+
+
+@pytest.mark.usefixtures("poisoned_run")
+def test_the_workflow_probe_reports_counts_when_the_cluster_answers(doctor: Any) -> None:
+    """The twelfth check's parsing path, and the control for the leak scans.
+
+    Without this the probe could be returning UNKNOWN for every mode above and
+    the scans would be scanning a refusal -- D605's rule, the same one the
+    agent record's control was written for one session earlier.
+    """
+    check = doctor.probe_workflow(document())
+    assert check.verdict == diagnosis.OK, check.detail
+    evidence = dict(check.evidence)
+    assert evidence["definitions"] == "2"
+    assert evidence["heartbeat_age_seconds"] == "4"
+    # The overdue lease is absent, which is a fact and not a failure: nothing
+    # is claimed past its lease on a healthy deployment.
+    assert evidence["oldest_claimed_lease_age_seconds"] == "null"
+
+
+@pytest.mark.usefixtures("poisoned_run")
+def test_a_status_name_and_a_holder_the_cluster_invented_are_dropped(doctor: Any) -> None:
+    """The twelfth check repeats TWO values the cluster produced, and this is
+    the guard on both (ADR 0159, ADR 0226).
+
+    `runs` and `steps` are keyed by a status NAME and `heartbeat_holder` is a
+    worker identity -- both written by this product and read back through the
+    cluster, which is `_timestamp`'s situation exactly. The canary is planted
+    in one status name beside a well-formed one, and in the holder.
+
+    **The control is the well-formed entry that survives**: a guard that
+    rejected everything would satisfy the two refusals and fail the first
+    assertion.
+    """
+    check = doctor.probe_workflow(document())
+    evidence = dict(check.evidence)
+    assert evidence["runs"] == "succeeded=3", "the well-formed status was dropped too"
+    assert SUBPROCESS not in evidence["runs"]
+    assert evidence["heartbeat_holder"] == "null"
+    assert SUBPROCESS not in check.detail
+
+
+def test_a_heartbeat_holder_that_is_not_one_is_dropped_rather_than_printed(
+    doctor: Any,
+) -> None:
+    """The holder guard is a SHAPE, and this is what keeps it one (D1693).
+
+    `worker_identity()` builds `<nodename>:<pid>:<8 hex>` and nothing else, so
+    the guard asks for those three parts. The first version of it asked only
+    that the value be drawn from that alphabet -- which admits any sentence
+    without a space in it, and the leak scan above went red on the canary.
+
+    **The control is the first assertion**, as it is for `_timestamp`: a guard
+    that rejected everything would satisfy the four refusals and fail it.
+    """
+    assert doctor._HOLDER.match("apg-host-01:41:deadbeef")
+    assert not doctor._HOLDER.match(SUBPROCESS)
+    assert not doctor._HOLDER.match("")
+    # No pid, no token: two of the three parts is not the shape.
+    assert not doctor._HOLDER.match("apg-host-01")
+    # A second value smuggled in after a space is still one string to psql.
+    assert not doctor._HOLDER.match("apg-host-01:41:deadbeef password=hunter2")
+
+
+def test_the_workflow_probe_reports_a_cluster_below_the_release(
+    doctor: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`app_private.workflow_counts` arrives with migration 0034, so every
+    deployment below 1.10.0 answers with an error -- reported as UNKNOWN naming
+    the release, never folded into zero definitions (ADR 0195, D600).
+
+    And the sentence is this program's: `psql`'s own words about an undefined
+    function are not repeated, which the leak scans above assert over the whole
+    report and this asserts at the one check.
+    """
+    monkeypatch.setattr(
+        doctor,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(
+            args=list(a), returncode=1, stdout="", stderr=f"ERROR: {SUBPROCESS}\n"
+        ),
+    )
+    check = doctor.probe_workflow(document())
+    assert check.verdict == diagnosis.UNKNOWN
+    assert "1.10.0" in check.detail
+    assert SUBPROCESS not in check.detail
+
+
+def test_the_workflow_probe_reports_a_document_with_no_container(doctor: Any) -> None:
+    doc = document()
+    doc["database"] = {}
+    check = doctor.probe_workflow(doc)
     assert check.verdict == diagnosis.UNKNOWN
     assert "names no container" in check.detail

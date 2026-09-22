@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #
 # Rehearse one bounded, reversible failure and read the detection that exists
-# (ADR 0190, ADR 0193). Eight scenarios; each induces exactly what it names,
+# (ADR 0190, ADR 0193). The scenarios are listed under `--help` and nowhere
+# counted here -- a number in this comment went stale twice (D1595, D1664).
+# Each induces exactly what it names,
 # reads the reader that exists for it, reverses, verifies the reversal, and
 # writes evidence/rehearsal-<key>-<scenario>-<id>.json. --plan prints the
 # three phases and does nothing.
@@ -56,6 +58,16 @@ Scenarios, each with its reader:
   capability-drift           a lock with a foreign hash beside the deployed
                              document; the doctor's capability drift check.
   provider-loss              recorded (D976), not induced; prints the record.
+  worker-restart             SIGKILL to the auth process, which holds the
+                             workflow loop (ADR 0226); the doctor's workflow
+                             check before and after, and the heartbeat's
+                             HOLDER is the reading -- a new holder is the loop
+                             having come back rather than never having
+                             stopped. The container's restart count is the
+                             control. Refused when the check reads no holder
+                             before the kill. Rehearse it when no run is in
+                             flight: a step claimed by the loop that died is
+                             a true finding, and it is not this reader's.
   admission-refused          bin/admit.py with --reserve-memory-mb injected, so
                              that nothing can fit; the host's own declaration is
                              the control. Nothing is changed and no memory is

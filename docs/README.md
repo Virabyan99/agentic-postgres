@@ -60,6 +60,7 @@ Before a deployment exists, and on a machine that is not one.
 |---|---|
 | [The developer loop](dev-environment.md) | `apg dev`: a disposable local cluster built from the render and the release, the six verbs, the seed door, what it costs, and what to do when a migration fails as the migration user |
 | [Generated clients](generated-clients.md) | `apg generate`: a typed TypeScript client over your surface, what `init()` checks and its four answers, the two result unions, how the version is derived, and what to do when a client and a deployment disagree |
+| [Workflows](workflows.md) | `apg workflow`: a reviewed sequence over your own capabilities, the six verbs, what a run's status document says, what `parked`, `stopped` and `replayed` mean, what the worker is and what a run may never do |
 | [Studio](studio.md) | `apg studio`: a loopback page over your own deployment, holding your token and never handing it to the browser — the four launch answers and why an administrator always sees `stale_contract`, what each of the six views shows and what it cannot, the typed revocation, and what Studio never does |
 
 ## Running a deployment
