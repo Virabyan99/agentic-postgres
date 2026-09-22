@@ -1,0 +1,45 @@
+# The example project's first workflow: write, read back, write again.
+#
+# What it is FOR: the smallest run that proves the substrate end to end on a
+# real deployment. Three steps over three capabilities of this project's lock,
+# one of them a read between two writes -- so a run that reports success has
+# exercised a claim, a lease, an idempotency key, a committed write, a read
+# that can see the write before it, and a completion, in that order.
+#
+# It takes NO input and carries NO {{reference}}, deliberately. This is the
+# definition the session's trip runs on beta, and a trip's run should fail for
+# reasons about the substrate and not about what the operator typed into a
+# request body. `notes-retry.yaml` is where a reference is exercised.
+#
+# A step names a CAPABILITY as name@version, never a tool: `query_notes@1.0.0`
+# is served by `query_resource`, which also serves `query_tasks` and this
+# project's own `query_note_embeddings`, and the three move independently.
+---
+schema_version: 1
+name: notes-roundtrip
+version: 1
+description: >-
+  Creates a note, reads the five most recent notes back, and records a second
+  note. The example project's end-to-end proof that a run does work.
+timeout_seconds: 300
+
+steps:
+  - name: create_the_first_note
+    capability: create_note@1.0.0
+    arguments:
+      p_title: workflow roundtrip, first note
+      p_content: Written by the workflow worker as the agent that started the run.
+
+  # A relation read takes `columns`, `filters`, `order_by` and `limit`. It does
+  # NOT take `resource`: the compiler derives that from the capability, and a
+  # definition that named it would be naming something already decided.
+  - name: read_the_notes_back
+    capability: query_notes@1.0.0
+    arguments:
+      limit: 5
+
+  - name: create_the_second_note
+    capability: create_note@1.0.0
+    arguments:
+      p_title: workflow roundtrip, second note
+      p_content: Written after the read, so the order of the run is visible in the rows.

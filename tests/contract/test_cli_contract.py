@@ -185,6 +185,12 @@ SHELL_COMMANDS = (
     "bin/storage-admin.sh",
     "bin/studio.sh",
     "bin/upgrade.sh",
+    # Session 32 (ADR 0228, ADR 0229): a project's workflows -- scaffold one,
+    # compile them against the project's lock, and start, read or stop a run.
+    # Listed here the run it landed (D1014) and `git add`ed before this module
+    # runs, because `test_commands_are_executable_in_the_git_index` reads the
+    # INDEX's mode and not the working tree's (D1188).
+    "bin/workflow.sh",
 )
 
 PYTHON_COMMANDS = (
@@ -242,6 +248,10 @@ PYTHON_COMMANDS = (
     "bin/storage-admin.py",
     "bin/studio.py",
     "bin/upgrade.py",
+    # Session 32 (ADR 0228). Two verbs answered in this checkout -- `init` and
+    # `validate`, both pure reads -- and four declared with real help that
+    # refuse with exit 3 until Run 5 builds the routes behind them.
+    "bin/workflow.py",
     "bin/write-session-evidence.py",
 )
 
@@ -442,6 +452,10 @@ COMMANDS_WITH_VERBS = {
     "bin/mcp-contract.sh",
     "bin/rehearse.sh",
     "bin/upgrade.sh",
+    # Session 32: six verbs, all six documented from the day the command lands.
+    # Four of them refuse with exit 3 in this checkout and their `--help` still
+    # answers -- which is the whole point of the proof below.
+    "bin/workflow.sh",
 }
 
 

@@ -473,6 +473,10 @@ at the close to say which run added which.
 | **D1678** | 3 | §5 Run 3 lists the targeted modules; nothing says a new migration invalidates the rendered fixtures. | **The rendered fixtures are an INPUT to two of them.** `test_rendered_migrations::test_one_file_per_declared_migration` compares `.generated/fixture-alpha-dev/migrations/rendered-manifest.json` against `migrations.sets_for(document)`, and a render taken before 0034 exists is short by one. Re-rendering ONLY alpha then failed `test_project_migration_sets::test_the_rendered_document_records_the_set_it_applied` with *"two projects rendered by one release disagree about the release lock"* -- the second fixture still carried the old digest. | **A run that adds a migration re-renders BOTH example projects** (`project.example.yaml` and `project.second.example.yaml`, `--render-only`) before its targeted list, and says so. The gate reads FOUR renders (D1507); a run that renders one has told itself something the gate will not believe. |
 | **D1679** | 3 | §5 Run 3: the template carries prose in the house voice. | **A migration template may not contain `{{` in its COMMENTS.** `migrations.render`'s residue check refuses any `{{...}}` surviving substitution -- *"A marker the substitution pattern did not match is a typo, not a literal"* -- and it fired on a comment describing the compiler's `{{steps.<name>.<field>}}` reference syntax. | **The prose says "a step reference by name" instead.** Recorded because the guard is right and the next writer will hit it: the template language has no escape, and a migration explaining a placeholder syntax must describe it in words. The guard working is the finding; no change to `migrations.py`. |
 | **D1680** | 3 (repair) | §5 Run 3 writes migration 0034 **with its grants**; §5 Run 5 writes `workflow_repository.py`, the module that calls them. | **A grant may not ship a run ahead of its caller.** `test_migrations.py::test_every_granted_function_has_a_caller` refuses a `GRANT EXECUTE` on a function no Python and no other migration calls -- *"a grant nobody can audit against a caller that does not exist"*, 0011's rule, guarded as a CLASS since D837 -- and its docstring names this failure shape exactly: *"the shape of a plane half-built one run early."* Run 3's first push went **red in CI** on seven of the eight (`workflow_run_status` escaped only because the identically-named ENUM TYPE appears in the table definitions, which is a blind spot worth knowing and not worth acting on). The targeted list could not see it: `test_migrations.py` was in neither the plan's list nor D1674's addition. | **`services/auth-api/app/workflow_repository.py` ships in Run 3, beside the grants it audits**, with `tests/contract/test_workflow_repository.py`. It is pure plumbing -- eight statements, every value a parameter, no decision in it -- so moving it earlier costs Run 5 nothing but the file. **The alternative was worse in both directions**: splitting the grants into a later migration would put a function's privileges in a different file from the function (and 0034 is a floor once applied, D912), and there is no allowlist in this guard by design. Run 5 now writes the loop, the routes and `step_token` against a repository that already exists and is proved. |
+| **D1681** | 4 | §5 Run 4 *Read first*: `src/agentic_postgres/rendering.py:1-120` (**the `{{name}}` substitution helper's name and where it lives**); §5 Run 4 item 2: *"placeholders resolved with the renderer's `{{name}}` substitution"*. | **There is no substitution helper in `rendering.py`.** That module publishes a render transactionally; it interpolates nothing. The tree's one `{{name}}` substituter is `migrations.render` over `PLACEHOLDER = \{\{([a-z][a-z0-9_]*)\}\}` -- and it is SQL's: the pattern cannot match a dotted name like `{{input.title}}`, the `RESIDUE` guard then refuses the whole text for carrying `{{`, every value is `quote_identifier`ed or `quote_literal`ed, and the error is `MigrationError`. Reusing it would mean widening the migration renderer's accepted set so a non-SQL caller could use it. | **`workflow_definition` carries its own `REFERENCE`/`BRACES` pair and its own `DefinitionError`**, with `migrations.render`'s residue DISCIPLINE borrowed rather than its code: a `{{` the reference pattern did not consume is a typo, not a literal (D1679 from the other side). A reference is VALIDATED at compile time and resolved at run time -- `input` arrives at enqueue and a prior step's field arrives in the `prior` object `workflow_claim_step` already returns -- so the compiler refuses only what could never resolve: a step that runs later, and a step that does not exist. | Widening `PLACEHOLDER` to admit a dot is a loosening of a guard D1679 had just proved valuable, for the benefit of a caller that is not SQL. Two patterns, each strict about its own grammar, is the cheaper honesty. | 0228 |
+| **D1682** | 4 | §5 Run 4 item 2 and ADR 0228: the compiler refuses *"an argument the tool does not declare"*. | **Only a WRITE declares one.** Measured over the release's approved contract joined with the example project's: a write tool carries `arguments` (`create_note` → `p_title, p_content`), and a read carries none at all. What a read accepts is the signature the runtime REGISTERS its closure with (`mcp_tools.register_relation_read` → `resource, columns, filters, order_by, limit`; `register_rpc_read` → nothing), chosen by `Tool.read_shape`, which is derived from whether every resource behind the tool is reached by `get`. | **The compiler derives the accepted names by SHAPE, the same rule the runtime registers by** (ADR 0200): a write's are the tool's declared list, a relation read's are the runtime's four, an RPC read's are none, and a metadata tool is refused before the question arises. **`resource` is deliberately NOT among the four** -- the compiler derives it from the capability, so an author naming it would be naming something already decided. Because the rule is duplicated across the `src/`-service boundary (ADR 0093 forbids importing `app.mcp_lock` here), a proof parses one real lock with BOTH readers and requires every tool's `read_shape` to agree, with at least one `relation` and one `rpc` present or the comparison proves nothing. | The alternatives were to refuse every argument on a read -- which makes `limit: 5` unwritable, and the trip's own definition needs it -- or to accept anything, which is an unbounded surface reached from a stored artefact. Deriving by the runtime's own rule is the only one of the three that cannot drift from what the plane will accept. | 0228 |
+| **D1683** | 4 | §5 Run 4 item 1: `arguments` is an *"object of string/number/boolean/null"*. | That type set cannot express a relation read. `columns` is a list of strings and `filters` is a list of small objects (`{column, op, value}`), which is what the runtime's closure takes. | **A step argument is a scalar, or a LIST of scalars and objects, and nothing deeper.** An argument document the reviewed surface cannot receive is one the compiler would have to guess at, and `filters` -- the one argument with structure -- is checked by the plane against the lock on every call, which is where that check belongs. | 0228 |
+| **D1684** | 4 | §5 Run 4 item 3: the statement is `psql -v name=… -v body=… -c "SELECT app_private.workflow_install_definition(:'name', …)"`. | **`-c` does not interpolate a psql variable at all.** Rig 32g, against the locked image with every released migration applied: that exact invocation fails with `ERROR: syntax error at or near ":"` and the `:'body'` reaches the server as text, because a `-c` string is sent without passing through psql's own lexer -- and the lexer is what performs the substitution. Every arm failed, including the function call itself. | **The statement goes to STDIN through `-f -`**, which is the path `postgres-bootstrap.psql` already takes for everything that is not read-only. Re-measured there (rig 32g second pass, every arm green with its control): the value survives a `'`, a `\`, a newline, a `"` and a `$$`; `:'scopes'::text[]` reads back as two elements; the function is idempotent under an identical source, raises `AP409` under a different one and installs a new row under a new version; and -- the property that matters most -- an UNSET variable produces the same syntax error rather than substituting an empty string, so a missing value cannot become a silently installed empty definition. The `-c` spelling is kept as a recorded negative control in the same rig. | `InstallStatement.stdin` is therefore load-bearing rather than decorative, and a proof refuses `-c` in the argv by name. This is §7 question 2 answered before the fact instead of after: the plan's spelling had never been executed anywhere, and it would have failed at step 6d on the host with the cluster already migrated. | 0228 |
 
 ---
 
@@ -1257,9 +1261,91 @@ Targeted: the three new modules, `test_dev_environment_cluster.py`,
 (`Session 32 Run 4: a workflow definition, compiled against the lock and
 installed by the deploy`), push, read CI.
 
-**Done.** *(the substitution helper reused; the join function called; the
-skeleton `init` printed; the two definitions' compiled `required_scopes`;
-the stub arrangement for the four HTTP verbs; the battery; CI)*
+**Done.** Measured, in this order.
+
+**The substitution helper was NOT reused, because there is none** (D1681):
+`rendering.py` interpolates nothing and `migrations.render` is SQL's, with a
+pattern that cannot match a dotted name and a residue guard that would then
+refuse the whole text. `workflow_definition` carries its own `REFERENCE` and
+`BRACES` pair and borrows the DISCIPLINE -- a `{{` the pattern did not consume
+is a typo, not a literal.
+
+**The join function was called** (D1114): `lock_view_for_project` walks the
+same chain `bin/mcp-contract.py lock` walks -- `capability_manifest.project_
+inputs` → `compile_joint_contract` → `capability_compiler.compile_lock` --
+and both branches are exercised by the two example manifests, the one that
+declares capabilities of its own and the one that does not. The one input a
+checkout genuinely lacks is the deployment's address, so the lock is compiled
+with `UNDEPLOYED_UPSTREAM` and **discarded**, which is what `mcp-contract.sh
+check --project` already does with a narrowed contract. A proof compiles the
+same contract under two different upstreams and requires one `tools_sha256`,
+so the digest a definition RECORDS does not depend on the placeholder.
+
+**The skeleton `init` printed** is derived from that lock and round-trips: a
+proof fills only the `TODO`s its own comments ask for and requires the result
+to `validate` at exit 0. It never names `set_note_embedding@1.0.0`, because a
+scaffold whose first suggestion the compiler refuses is a scaffold that teaches
+the wrong thing.
+
+**The two definitions' compiled `required_scopes`:** `notes-roundtrip` →
+`notes:read, notes:write` over `create_note@1.0.0` → `query_notes@1.0.0`
+(`limit: 5`, resolved to the `notes` resource) → `create_note@1.0.0`;
+`notes-retry` → `notes:write, tasks:write`, its first step
+`update_task_status@1.0.0` with `retry: {max: 1, backoff_seconds: 45}`. That
+step's `p_task_id` is `{{input.task_id}}` and not a literal uuid, because
+`api.update_task_status` raises **PT404** for a task that does not exist --
+terminal, and the run would end without ever parking -- and **PT409** only for
+a task that exists in another status, which is the retryable `write_conflict`
+the rehearsal needs. A uuid committed to that file would be right on no
+deployment at all.
+
+**The stub arrangement for the four HTTP verbs:** all six verbs are documented
+with a real per-verb `--help` answered by the wrapper BEFORE the verb is
+dispatched (D1395/D1402/D1405's shape), each exiting 0 with 441-907 characters;
+the four exit **3** without `--help`, naming Session 32 Run 5. Exit 3 and never
+10: ADR 0017's stub lifecycle is closed and `FUTURE_STUBS` is empty, and a 10
+would reopen it. `bin/apg.sh` needed no edit, exactly as D1659 said -- its verb
+table is derived from `bin/*.sh` -- and `apg workflow validate --project
+project.example.yaml` exits 0.
+
+**Two measurements changed the design** and both are rows. `-c` does not
+interpolate a psql variable at all (**D1684**, rig 32g: `syntax error at or
+near ":"`, every arm), so the statement goes to stdin through `-f -`; and only
+a WRITE declares an argument list, so a read's accepted names are derived by
+the runtime's own shape rule (**D1682**), with a proof parsing one real lock
+through `ToolView.read_shape` AND `mcp_lock.Tool.read_shape` and requiring
+agreement. `compile` takes `source_sha256` as a keyword rather than computing
+it, because the plan's own signature takes a parsed document and the digest is
+over the FILE's bytes; `compile_file` is the pairing.
+
+**The battery: five mutations, five kills, five controls green, no survivors.**
+(m1) the approval refusal deleted → `test_a_capability_that_requires_approval_
+is_refused` FAILED while `test_the_example_projects_definitions_compile` stayed
+PASSED in the same invocation; (m2) a reference allowed to name a later step →
+FAILED, control `..._to_an_earlier_step_compiles` PASSED; (m3) step 6d MOVED
+after step 6b in `bin/deploy-project.py` → the AST ordering proof FAILED,
+control `..._as_the_superuser_over_the_socket` PASSED; (m4) `resource` added to
+`RELATION_READ_ARGUMENTS` → FAILED, control `..._an_rpc_read_takes_no_
+arguments_at_all` PASSED; (m5) `-f -` replaced by `-c` → FAILED, control
+`..._names_as_many_values_as_the_migration_declares` PASSED. Anchors
+pre-flighted to exactly one match, restore by copy with `cmp`, `__pycache__`
+cleared before every run, 59 passed after the reverts.
+
+**The install path was EXECUTED, not scanned.** `apg dev up` compiles and
+installs both definitions through `workflow_install_definition` on a real
+cluster: `test_dev_up_installs_the_example_projects_definitions` reads two rows
+back, the body's prose through `:'body'` and the scopes as a two-element array
+rather than one element containing a comma. The dev module is 9 passed.
+
+**Targeted:** the three new modules plus `test_workflow_repository`,
+`test_dev_environment_cluster`, `test_dev_command`, `test_deploy_command`,
+`test_cli_contract`, `test_printed_commands`, `test_session12_documented_path`,
+`test_acceptance_registry`, `test_evidence_claims`, `test_container_selectors`,
+`test_migrations` and `test_documentation_index` -- the last five carried over
+from D1674's and D1680's lessons rather than from this run's diff. **913
+passed.**
+
+**Rows added: D1681, D1682, D1683, D1684. NEXT FREE: D1685.**
 
 ### Run 5 — the worker loop, the three routes, `step_token`, and the four HTTP verbs
 

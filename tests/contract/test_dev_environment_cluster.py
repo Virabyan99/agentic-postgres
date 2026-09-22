@@ -183,6 +183,54 @@ def test_up_applies_every_planned_migration_as_the_migration_user_and_records_bo
         assert recorded[version] == digest, f"{version}'s ledger digest is not the rendered one"
 
 
+def test_dev_up_installs_the_example_projects_definitions(
+    environment: dict[str, Any],
+) -> None:
+    """**Session 32 (ADR 0228): the install path, executed rather than scanned.**
+
+    `apg dev up` compiles the project's definitions and installs them through
+    `app_private.workflow_install_definition` -- the same compiler and the same
+    statement builder the deploy's step 6d uses -- so a definition that will
+    not install at step 6d fails here, on a disposable container, instead of on
+    a host with the cluster already migrated.
+
+    It is also the only place in this release where the psql invocation rig 32g
+    designed is *run*: the statement on stdin through `-f -`, every value a
+    `-v` variable, and a body carrying an author's prose through both. A `-c`
+    here would fail with `syntax error at or near ":"` (D1684).
+    """
+    state = environment["state"]
+    installed = as_superuser(
+        state,
+        "SELECT name || ' v' || version FROM app_private.workflow_definition ORDER BY name",
+    )
+    assert installed.splitlines() == ["notes-retry v1", "notes-roundtrip v1"], (
+        f"the example project ships two definitions and the cluster holds: {installed!r}"
+    )
+
+    # The BODY made the round trip, not just the row: the prose carries commas
+    # and apostrophes, and psql's `:'body'` is what quotes it.
+    description = as_superuser(
+        state,
+        "SELECT body ->> 'description' FROM app_private.workflow_definition "
+        "WHERE name = 'notes-roundtrip'",
+    )
+    assert description.startswith("Creates a note"), description
+
+    # And the scopes arrived as an ARRAY, not as one element containing a comma.
+    scopes = as_superuser(
+        state,
+        "SELECT array_to_string(required_scopes, '|') FROM app_private.workflow_definition "
+        "WHERE name = 'notes-roundtrip'",
+    )
+    assert scopes == "notes:read|notes:write", scopes
+
+    assert "workflows   2 definition(s) installed" in environment["stdout"], (
+        "up does not say what it installed, so an operator cannot tell an empty "
+        "workflows/ directory from one that failed to be read"
+    )
+
+
 def test_exactly_two_roles_can_log_in_and_the_object_owner_is_not_one(
     environment: dict[str, Any],
 ) -> None:

@@ -1,0 +1,46 @@
+# The rehearsal's workflow: a step that fails RETRYABLY, on purpose.
+#
+# What it is FOR: the `worker-restart` rehearsal needs a run parked long enough
+# for the process under it to be killed and restarted, and a park has to be
+# earned -- a step that simply slept would be rehearsing a sleep. So the first
+# step asks `update_task_status` to move a task out of a status it is not in.
+#
+# MEASURED, in `api.update_task_status` itself: a task that exists and is in
+# another status raises AP409/PT409, which the plane names `write_conflict` and
+# calls a retry instruction (D1661) -- retryable, so the step parks for 45
+# seconds and comes back. A task id that names NOTHING raises AP404 instead,
+# which is terminal and would end the run without ever parking. The difference
+# is why `p_task_id` is a reference and not a literal: the rehearsal passes a
+# task id that exists on the deployment it is run against, and a uuid committed
+# into this file would be right on no deployment at all.
+#
+# `p_expected_status` is `cancelled` and `p_new_status` is `completed`: the two
+# must differ (AP422 otherwise, terminal), and a task the rehearsal creates is
+# `pending`, so the expectation cannot hold.
+---
+schema_version: 1
+name: notes-retry
+version: 1
+description: >-
+  Asks for a task transition whose expected status cannot hold, so the step
+  fails retryably and parks. The rehearsal kills the worker while it is parked.
+timeout_seconds: 600
+
+steps:
+  - name: expect_a_status_the_task_is_not_in
+    capability: update_task_status@1.0.0
+    arguments:
+      p_task_id: "{{input.task_id}}"
+      p_expected_status: cancelled
+      p_new_status: completed
+    retry:
+      max: 1
+      backoff_seconds: 45
+
+  # Never reached while the first step is failing, and that is the point: a run
+  # whose second step ran would mean the park was not a park.
+  - name: record_that_the_run_resumed
+    capability: create_note@1.0.0
+    arguments:
+      p_title: workflow retry rehearsal
+      p_content: Reached only if the transition above ever succeeds.

@@ -74,6 +74,8 @@ from agentic_postgres import (
     rendering,
     runtime_override,
     secrets_contract,
+    workflow_definition,
+    workflow_install,
 )
 from agentic_postgres.bootstrap_state import load_state, state_path
 from agentic_postgres.config import ManifestError, load_project_manifest
@@ -153,6 +155,15 @@ BACKUP_PLANE_SESSION = 10
 #: carries `profiles: [session14]`, so a deployment through 13 renders the
 #: route, names it in the document, and starts nothing behind it.
 METRICS_PLANE_SESSION = 14
+
+#: The session that gives a project workflow definitions (ADR 0228).
+#:
+#: Migration 0034 is a RELEASED migration and applies at every through-session,
+#: so the install function exists on a cluster deployed through 31. What this
+#: gates is step 6d -- installing rows into it -- because a deploy declared to
+#: be through an earlier session should converge the plane that session had,
+#: and a definition installed by it would be state that session never named.
+WORKFLOW_SESSION = 32
 
 #: The bootstrap issuer's credential, named once because two readers need it:
 #: `jwt.temporary` in the deployed document, and the retirement that decides it
@@ -847,6 +858,89 @@ def require_secret_generation(project_key: str) -> dict[str, Any]:
         "fresh": True,
         "materialized_at": manifest["materialized_at"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Workflow definitions (step 6d)
+# ---------------------------------------------------------------------------
+
+
+def install_workflow_definitions(
+    *, release: Path, manifest_path: Path, lock_path: Path, database: dict[str, Any]
+) -> None:
+    """Compile every definition the project publishes, and install it (ADR 0228).
+
+    A definition is a project artefact like a migration set: reviewed in the
+    checkout, compiled against the lock THIS deploy just wrote, and immutable
+    per (name, version). Re-installing an unchanged one returns the row that is
+    already there; re-installing a CHANGED one raises `PT409` and refuses the
+    deploy, which is D912's rule applied to a definition.
+
+    The set root is resolved from the INSTALLED manifest against the INSTALLED
+    release, exactly as step 6's `migrate.sh --project` resolves it -- the same
+    two inputs, so the directory the definitions come from is the directory the
+    migrations came from and not a second derivation of it.
+
+    The statements run as the bootstrap superuser over the container's own
+    socket, because `workflow_install_definition` is granted to nobody: a grant
+    to the role the HTTP routes run as would put a definition-writing authority
+    behind an identity reachable over the network.
+    """
+    try:
+        manifest = load_project_manifest(manifest_path)
+    except ManifestError as error:
+        fail(EXIT_VALIDATION, f"the installed project manifest cannot be read: {error}")
+
+    named = config.project_migration_set(manifest)
+    if named is None:
+        print("  no workflow definitions (the project declares no migration set)")
+        return
+
+    paths = workflow_definition.definitions_of(release / named)
+    if not paths:
+        print("  no workflow definitions (the project declares none)")
+        return
+
+    try:
+        lock = workflow_definition.LockView.from_json(lock_path.read_bytes())
+    except OSError as error:
+        fail(EXIT_VALIDATION, f"the capability lock this deploy wrote cannot be read: {error}")
+    except workflow_definition.DefinitionError as error:
+        fail(EXIT_VALIDATION, f"the capability lock this deploy wrote: {error}")
+
+    container = database["container"]
+    for path in paths:
+        try:
+            compiled = workflow_definition.compile_file(path, lock)
+        except workflow_definition.DefinitionError as error:
+            where = (
+                f"step {error.step_name}: {error.reason}"
+                if error.step_name is not None
+                else error.reason
+            )
+            fail(EXIT_VALIDATION, f"{path.name} does not compile against this lock: {where}")
+        for statement in workflow_install.statements(compiled):
+            result = container_exec.run(
+                container,
+                "psql",
+                "-U",
+                "postgres",
+                "-d",
+                database["name"],
+                *statement.argv,
+                input=statement.stdin,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                message = (result.stderr or result.stdout).strip().splitlines()
+                fail(
+                    EXIT_VALIDATION,
+                    f"{path.name} was not installed: "
+                    f"{message[0] if message else 'no output'}. A definition already "
+                    "installed under this name and version with a different source is a "
+                    "PT409: publish a new version rather than editing an installed one.",
+                )
+        print(f"  {path.name:<28} {compiled.name} v{compiled.version}  {len(compiled.steps)} steps")
 
 
 # ---------------------------------------------------------------------------
@@ -2347,6 +2441,22 @@ def main(argv: list[str] | None = None) -> int:
             fail(EXIT_VALIDATION, f"migrations did not apply:\n{migrated.stderr}")
 
         database_observed = observe_database(rendered["database"])
+
+        # **6d, and inside step 6's guard**: the function it calls is a released
+        # migration's, so the definitions can only be installed on a cluster
+        # this deploy has just migrated. It is before 6b rather than after
+        # because a definition is state the plane may serve the moment the
+        # plane starts, and installing it after the service is up is a window
+        # in which `POST /workflows/runs` answers "no such definition" about a
+        # definition this deploy is about to install.
+        if arguments.through_session >= WORKFLOW_SESSION:
+            step("6d. Install the project's workflow definitions")
+            install_workflow_definitions(
+                release=release,
+                manifest_path=manifest_copy,
+                lock_path=deployed_output.rendered_path(key) / runtime_override.MCP_LOCK_FILENAME,
+                database=rendered["database"],
+            )
 
     require_mounts_exist(override_payload, runtime_override.DEFERRED_SERVICES, when="step 6b")
     step("6b. Start the deferred services and attach the edge")

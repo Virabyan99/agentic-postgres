@@ -56,6 +56,8 @@ from agentic_postgres import (
     migrations,
     naming,
     rendering,
+    workflow_definition,
+    workflow_install,
 )
 
 READY_ROUNDS = 2
@@ -440,6 +442,10 @@ def up(arguments: argparse.Namespace) -> int:
         fail(dev_environment.EXIT_CONTRACT, f"the development subject: {result.stderr}")
     subject = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else None
 
+    installed = install_workflow_definitions(
+        Path(arguments.project), Path(arguments.capabilities), container, database
+    )
+
     environment = dev_environment.Environment(
         **{**{f: getattr(environment, f) for f in environment.__dataclass_fields__},
            "subject_id": subject}
@@ -451,10 +457,64 @@ def up(arguments: argparse.Namespace) -> int:
     print(f"  container   {container}")
     print(f"  database    {database}  on 127.0.0.1:{port}")
     print(f"  migrations  {len(applied)}, ledger recorded")
+    print(f"  workflows   {installed} definition(s) installed")
     print(f"  subject     {subject}  ({len(vocabulary)} scopes)")
     print(f"  roles       {roles['migration_user']}, {roles['app_runtime']}")
     print(f"  passwords   in {directory} (0600); nothing here prints one")
     return 0
+
+
+def install_workflow_definitions(
+    project: Path, capabilities: Path, container: str, database: str
+) -> int:
+    """Compile and install the project's definitions, the way a deploy does.
+
+    The same two functions the deploy's step 6d calls -- one compiler, one
+    statement builder -- over a disposable cluster and as the superuser, which
+    is what `apg dev` is for: a definition that will not install here will not
+    install at step 6d either, and finding that out costs a container instead
+    of a trip.
+
+    The lock is computed in the checkout rather than read from a file, because
+    `apg dev` renders no lock: there is no plane here to serve one (ADR 0203).
+    """
+    document = config.load_project_manifest(project)
+    named = config.project_migration_set(document)
+    if named is None:
+        return 0
+    paths = workflow_definition.definitions_of(REPO_ROOT / named)
+    if not paths:
+        return 0
+
+    try:
+        lock = workflow_definition.lock_view_for_project(project, capabilities)
+    except (config.ManifestError, config.CapabilityContractError) as error:
+        fail(dev_environment.EXIT_CONTRACT, f"the project's lock does not compile: {error}")
+
+    for path in paths:
+        try:
+            compiled = workflow_definition.compile_file(path, lock)
+        except workflow_definition.DefinitionError as error:
+            fail(dev_environment.EXIT_CONTRACT, f"{path.name}: {error}")
+        for statement in workflow_install.statements(compiled):
+            result = docker(
+                "exec",
+                "-i",
+                container,
+                "psql",
+                "-U",
+                "postgres",
+                "-d",
+                database,
+                *statement.argv,
+                stdin=statement.stdin,
+            )
+            if result.returncode != 0:
+                fail(
+                    dev_environment.EXIT_CONTRACT,
+                    f"{path.name} was not installed: {result.stderr.strip()[:400]}",
+                )
+    return len(paths)
 
 
 # ---------------------------------------------------------------------------
