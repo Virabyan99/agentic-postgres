@@ -1,25 +1,30 @@
 #!/usr/bin/env python3
 """The work behind `bin/workflow.sh` (ADR 0228, ADR 0229).
 
-Two verbs are answered here in this checkout -- `init` and `validate` -- and
-both are pure reads of a project manifest, its lock and its own files. Neither
-reaches a host, a root or a render.
+Two verbs are pure reads of a project manifest, its lock and its own files:
+`init` and `validate` reach no host, no root and no render.
 
-The other four (`run`, `dry-run`, `status`, `cancel`) call the auth service's
-workflow routes. They are DECLARED here, with real help, and they refuse with
-exit 3 until Session 32 Run 5 builds the routes: a verb that is documented and
-silently missing is worse than one that says which release serves it.
+The other four call the auth service's three workflow routes. They hold no SQL,
+no route that `ROUTES` does not enumerate, and **no token**: the credential
+comes from `APG_AGENT_TOKEN` in this process's environment and is never an
+argument, because an argument is a value `ps` can read (D105, D1160). That is
+`bin/api.sh`'s shape, and the reason is the same.
 
 This command imports `agentic_postgres` and `yaml` and nothing else (ADR 0093).
-It holds no SQL, no token and no route.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
+from typing import Any
+from urllib.parse import quote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -30,19 +35,35 @@ EXIT_INPUT = 2
 EXIT_PREREQUISITE = 3
 EXIT_REFUSED = 5
 
-#: The verbs that reach the deployment. Run 5 replaces this with the routes.
+#: The verbs that reach the deployment.
 HTTP_VERBS = ("run", "dry-run", "status", "cancel")
 
-#: What a verb this checkout does not serve says. One sentence, naming the run
-#: that serves it, so an operator reading it knows whether to upgrade or to
-#: stop looking for a flag they got wrong.
-NOT_YET = (
-    "{verb} is not yet available in this checkout (Session 32 Run 5). "
-    "The definition half -- init and validate -- is complete, and a definition "
-    "this checkout validates is installed by a deploy at step 6d."
-)
+#: **The closed table** (ADR 0093's spirit, `bin/api.py`'s `OPERATIONS`). Four
+#: verbs over THREE routes -- `dry-run` is `run` with a flag, not a fourth
+#: address -- and a path this table does not name is a path this command
+#: cannot reach. A proof reads it and refuses any other URL construction in the
+#: module.
+ROUTES: dict[str, tuple[str, str]] = {
+    "run": ("POST", "/workflows/runs"),
+    "status": ("GET", "/workflows/runs/{run_id}"),
+    "cancel": ("POST", "/workflows/runs/{run_id}/cancel"),
+}
+
+#: Where the token comes from, and it is never an argument.
+#:
+#: (S105 matches on the NAME. This is the name of an environment variable, not
+#: a credential; `bin/api.py:31` carries the same comment for the same reason.)
+TOKEN_VARIABLE = "APG_AGENT_TOKEN"  # noqa: S105
+
+REQUEST_TIMEOUT_SECONDS = 30
 
 DEFAULT_SKELETON_NAME = "example-workflow"
+
+#: `name@version`, the spelling a step uses for a capability. One string rather
+#: than two flags, because a definition is identified by the pair and a caller
+#: that could give one without the other would be a caller that could ask for
+#: "the latest", which no table in this product has.
+DEFINITION_REFERENCE = re.compile(r"^([a-z][a-z0-9-]{0,62})@([0-9]+)$")
 
 #: `app_private.workflow_definition.name`'s own CHECK, restated so `init`
 #: refuses a name the deploy would refuse rather than scaffolding one.
@@ -280,9 +301,132 @@ def command_validate(arguments: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def command_not_yet(arguments: argparse.Namespace) -> int:
-    fail(EXIT_PREREQUISITE, NOT_YET.format(verb=arguments.command))
+def _app_base(path: Path) -> str:
+    """The deployment's app route, read from a rendered outputs document.
+
+    Read, never derived. `outputs.json` is the one place every derived identity
+    is published (ADR 0002), and a command that rebuilt the URL would be a
+    second derivation of an address `naming` owns.
+    """
+    if not path.is_file():
+        fail(EXIT_INPUT, f"outputs document not found: {path}")
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        fail(EXIT_INPUT, f"cannot read {path}: {error}")
+
+    route = (document.get("routes") or {}).get("app")
+    url = route.get("url") if isinstance(route, dict) else route
+    if not isinstance(url, str) or not url:
+        fail(
+            EXIT_REFUSED,
+            "this document publishes no app route. A project deployed through a "
+            "session before 6 is in that state, and so is one whose deploy has not "
+            "observed its routes yet.",
+        )
+    if urlsplit(url).scheme not in ("https", "http"):
+        fail(EXIT_REFUSED, f"routes.app is not a URL: {url!r}")
+    return url.rstrip("/")
+
+
+def _token() -> str:
+    token = os.environ.get(TOKEN_VARIABLE, "")
+    if not token:
+        fail(
+            EXIT_PREREQUISITE,
+            f"{TOKEN_VARIABLE} is empty. A run is started AS AN AGENT, so this command "
+            "needs an agent token in its environment -- and never as an argument, "
+            "because an argument is a value `ps` can read. Mint one with "
+            "`bin/api.sh`'s sibling flow: POST /auth/agent-token with the agent's id "
+            "and the secret it was shown once.",
+        )
+    return token
+
+
+def _call(
+    base: str, verb: str, *, run_id: str | None = None, body: dict[str, Any] | None = None
+) -> tuple[int, str]:
+    """One request against ONE of the three enumerated routes."""
+    method, template = ROUTES[verb]
+    path = template.format(run_id=quote(run_id, safe="")) if run_id is not None else template
+    payload = json.dumps(body).encode("utf-8") if body is not None else None
+    request = urllib.request.Request(base + path, data=payload, method=method)  # noqa: S310
+    request.add_header("Accept", "application/json")
+    request.add_header("Authorization", f"Bearer {_token()}")
+    if payload is not None:
+        request.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:  # noqa: S310
+            return response.status, response.read().decode("utf-8")
+    except urllib.error.HTTPError as error:
+        return error.code, error.read().decode("utf-8")
+    except urllib.error.URLError as error:
+        fail(EXIT_PREREQUISITE, f"cannot reach the auth service: {error.reason}")
     raise AssertionError("unreachable")
+
+
+def _report(status: int, body: str) -> int:
+    """Print the answer, and exit 5 when the service refused.
+
+    The service's own error WORD is printed and its status is not relayed as
+    this command's exit code (D433): a caller reads `no_such_workflow` or
+    `scope_not_held`, which are the two words the surface publishes.
+    """
+    try:
+        document = json.loads(body)
+    except ValueError:
+        document = None
+    if status >= 400:
+        word = document.get("error") if isinstance(document, dict) else None
+        fail(EXIT_REFUSED, f"the service refused: {word or body.strip()[:200]}")
+    print(json.dumps(document if document is not None else body, indent=2, sort_keys=True))
+    return EXIT_OK
+
+
+def command_http(arguments: argparse.Namespace) -> int:
+    if arguments.project_outputs is None:
+        fail(EXIT_INPUT, f"{arguments.command} requires --project-outputs FILE")
+    base = _app_base(Path(arguments.project_outputs))
+
+    if arguments.command in ("run", "dry-run"):
+        if arguments.definition is None:
+            fail(EXIT_INPUT, f"{arguments.command} requires --definition NAME@VERSION")
+        matched = DEFINITION_REFERENCE.match(arguments.definition)
+        if matched is None:
+            fail(
+                EXIT_INPUT,
+                f"{arguments.definition!r} is not a definition reference; a run names "
+                "one as name@version, the way a step names a capability",
+            )
+        try:
+            document = json.loads(arguments.input_document or "{}")
+        except ValueError as error:
+            fail(EXIT_INPUT, f"--input is not JSON: {error}")
+        if not isinstance(document, dict):
+            fail(
+                EXIT_INPUT,
+                "--input is a JSON object, and every key is a name a "
+                "definition's {{input.<key>}} reference can read",
+            )
+        status, body = _call(
+            base,
+            "run",
+            body={
+                "name": matched.group(1),
+                "version": int(matched.group(2)),
+                "input": document,
+                # **`dry-run` is `run` with a flag, not a fourth route.** One
+                # address, one handler, one audit shape -- a separate endpoint
+                # would be a second path to the same authority.
+                "dry_run": arguments.command == "dry-run",
+            },
+        )
+        return _report(status, body)
+
+    if arguments.run is None:
+        fail(EXIT_INPUT, f"{arguments.command} requires --run RUN_ID")
+    status, body = _call(base, arguments.command, run_id=arguments.run)
+    return _report(status, body)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -294,8 +438,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--file", default=None)
     parser.add_argument("--name", default=None)
     parser.add_argument("--input", dest="input_document", default=None)
-    parser.add_argument("--definition-version", dest="definition_version", default=None)
-    parser.add_argument("--subject", default=None)
+    parser.add_argument("--definition", default=None)
+    parser.add_argument("--run", default=None)
     return parser
 
 
@@ -303,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
 
     if arguments.command in HTTP_VERBS:
-        return command_not_yet(arguments)
+        return command_http(arguments)
 
     if arguments.project is None:
         fail(EXIT_INPUT, f"{arguments.command} requires --project FILE")

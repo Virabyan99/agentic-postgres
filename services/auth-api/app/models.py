@@ -306,3 +306,55 @@ class UpdateAgentRequest(_Strict):
     role: str | None = Field(default=None, min_length=1, max_length=64)
     scopes: list[str] | None = Field(default=None, min_length=1, max_length=32)
     status: Literal["active", "revoked"] | None = None
+
+
+class WorkflowRunRequest(_Strict):
+    """Start a run of an INSTALLED definition, by name and version (ADR 0228).
+
+    Four fields, and there is deliberately no fifth. There is no `steps`, no
+    `arguments` and no `scopes`: a run is a run of a definition a deploy
+    installed and a reviewer read, and a body that could describe the work
+    would be a body that could describe work nobody reviewed.
+
+    `input` is the one caller value, and it is a document the DEFINITION's own
+    `{{input.<key>}}` references read -- a value, never an instruction. It is
+    bounded at 32 members because `parse_object` bounds the body's bytes and
+    nothing else would bound its shape.
+
+    `name`'s ceiling is 63, which is `workflow_definition.name`'s own CHECK.
+    """
+
+    name: str = Field(min_length=1, max_length=63)
+    version: int = Field(default=1, ge=1)
+    input: dict[str, object] = Field(default_factory=dict, max_length=32)
+    dry_run: bool = False
+
+
+class WorkflowRunResponse(BaseModel):
+    """What enqueueing answers: the id to read the run by, and its status."""
+
+    run_id: str
+    status: str
+
+
+class NoSuchWorkflowResponse(BaseModel):
+    """Returned for a definition nobody installed and for a run that is not yours.
+
+    **Three causes, one answer** (ADR 0229): a definition this deployment has
+    not installed, a run id that names nothing, and a run belonging to another
+    agent. There is nothing to branch on. An answer that distinguished the
+    third would make a run id an ownership oracle.
+    """
+
+    error: Literal["no_such_workflow"]
+
+
+class ScopeNotHeldResponse(BaseModel):
+    """Returned when the agent's stored scopes do not cover the definition's.
+
+    The check is against the RECORD and not against the token (ADR 0229), so an
+    agent narrowed since its token was minted is refused here even though the
+    token it presented still carries the wider set.
+    """
+
+    error: Literal["scope_not_held"]

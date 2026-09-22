@@ -134,6 +134,21 @@
         "title": "MalformedRequestResponse",
         "type": "object"
       },
+      "NoSuchWorkflowResponse": {
+        "description": "Returned for a definition nobody installed and for a run that is not yours.\n\n**Three causes, one answer** (ADR 0229): a definition this deployment has\nnot installed, a run id that names nothing, and a run belonging to another\nagent. There is nothing to branch on. An answer that distinguished the\nthird would make a run id an ownership oracle.",
+        "properties": {
+          "error": {
+            "const": "no_such_workflow",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "NoSuchWorkflowResponse",
+        "type": "object"
+      },
       "ObjectStateConflictResponse": {
         "description": "Returned when the caller's own object cannot make the requested transition.\n\nCarries `state`, and doing so is safe for one specific reason: this answer\nis unreachable unless the database matched the row **on owner id**. Every\nnon-owned case comes back indistinguishable from absent and becomes a 404\ninstead, so naming the state tells the caller only about an object it owns.",
         "properties": {
@@ -191,6 +206,21 @@
           "expires_at"
         ],
         "title": "PasswordResetResponse",
+        "type": "object"
+      },
+      "ScopeNotHeldResponse": {
+        "description": "Returned when the agent's stored scopes do not cover the definition's.\n\nThe check is against the RECORD and not against the token (ADR 0229), so an\nagent narrowed since its token was minted is refused here even though the\ntoken it presented still carries the wider set.",
+        "properties": {
+          "error": {
+            "const": "scope_not_held",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ScopeNotHeldResponse",
         "type": "object"
       },
       "SessionResponse": {
@@ -405,6 +435,25 @@
           "required_headers"
         ],
         "title": "UploadIntentResponse",
+        "type": "object"
+      },
+      "WorkflowRunResponse": {
+        "description": "What enqueueing answers: the id to read the run by, and its status.",
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "WorkflowRunResponse",
         "type": "object"
       }
     }
@@ -1914,6 +1963,212 @@
           }
         },
         "summary": "Verify the uploaded bytes and make the object available"
+      }
+    },
+    "/workflows/runs": {
+      "post": {
+        "description": "Requires an AGENT token, not an access token. The run is started as that agent and the agent's STORED scopes are what authorise it -- not the token's -- so an agent narrowed since its token was minted is refused. A definition this deployment has not installed is `no_such_workflow`.",
+        "operationId": "start_run_workflows_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Start a run of an INSTALLED definition, by name and version (ADR 0228).\n\nFour fields, and there is deliberately no fifth. There is no `steps`, no\n`arguments` and no `scopes`: a run is a run of a definition a deploy\ninstalled and a reviewer read, and a body that could describe the work\nwould be a body that could describe work nobody reviewed.\n\n`input` is the one caller value, and it is a document the DEFINITION's own\n`{{input.<key>}}` references read -- a value, never an instruction. It is\nbounded at 32 members because `parse_object` bounds the body's bytes and\nnothing else would bound its shape.\n\n`name`'s ceiling is 63, which is `workflow_definition.name`'s own CHECK.",
+                "properties": {
+                  "dry_run": {
+                    "default": false,
+                    "title": "Dry Run",
+                    "type": "boolean"
+                  },
+                  "input": {
+                    "additionalProperties": true,
+                    "maxProperties": 32,
+                    "title": "Input",
+                    "type": "object"
+                  },
+                  "name": {
+                    "maxLength": 63,
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "version": {
+                    "default": 1,
+                    "minimum": 1.0,
+                    "title": "Version",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "title": "WorkflowRunRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowRunResponse"
+                }
+              }
+            },
+            "description": "The run was enqueued."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeNotHeldResponse"
+                }
+              }
+            },
+            "description": "The agent's record does not carry every scope the definition's steps require. Checked against the record, never against the token."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoSuchWorkflowResponse"
+                }
+              }
+            },
+            "description": "No definition of that name and version is installed on this deployment."
+          }
+        },
+        "summary": "Start a run of an installed workflow definition"
+      }
+    },
+    "/workflows/runs/{run_id}": {
+      "get": {
+        "description": "The agent's own run, whole: its status, the definition and version it is a run of, the lock digest `validate` compiled against, and each step's position, name, status, attempt, outcome and request id. Another agent's run is the same 404 a missing one gets.",
+        "operationId": "read_run_workflows_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The run and its steps."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoSuchWorkflowResponse"
+                }
+              }
+            },
+            "description": "No such run, or a run belonging to another agent. One answer."
+          }
+        },
+        "summary": "Read one run and every step of it"
+      }
+    },
+    "/workflows/runs/{run_id}/cancel": {
+      "post": {
+        "description": "A queued run is cancelled at once; a running one records an intent the next claim honours, because a tool call already upstream cannot be recalled. A run that has already finished is returned unchanged rather than refused.",
+        "operationId": "cancel_run_workflows_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowRunResponse"
+                }
+              }
+            },
+            "description": "The run's status after the request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoSuchWorkflowResponse"
+                }
+              }
+            },
+            "description": "No such run, or a run belonging to another agent. One answer."
+          }
+        },
+        "summary": "Ask for a run to stop at its next step boundary"
       }
     }
   }

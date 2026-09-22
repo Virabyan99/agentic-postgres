@@ -482,15 +482,34 @@ COMMENT ON FUNCTION app_private.workflow_enqueue(uuid, text, integer, jsonb, boo
 -- The claim selects the lowest position of its run whose earlier positions are
 -- all `succeeded` -- so a run is sequential by construction and no second
 -- mechanism is needed to make it so.
+--
+-- **The caller supplies a MARGIN, not a lease** (D1687). The lease is
+-- `s.timeout_seconds + p_lease_margin_seconds`, computed here, because the two
+-- halves are known in two different places: the step's own timeout is in the
+-- row this function is about to select, and the margin is a function of the
+-- WORKER's HTTP client (`workflow_worker.lease_margin_seconds`). A caller
+-- passing an absolute lease could not have read the step's timeout yet -- it
+-- arrives in this function's own result -- so it would have to pass the
+-- CEILING, 600 plus a margin, and a worker that died mid-call would leave its
+-- step unclaimable for ten minutes. The margin is the only half a caller can
+-- honestly know before the claim.
 CREATE FUNCTION app_private.workflow_claim_step(
-  p_holder        text,
-  p_lease_seconds integer
+  p_holder               text,
+  p_lease_margin_seconds integer
 ) RETURNS TABLE (
   step_id         uuid,
   run_id          uuid,
   step_position   integer,
   step_name       text,
   attempt         integer,
+  -- **Returned, not only written** (D1686). The UPDATE below mints a fresh
+  -- `request_id` for this attempt and the column's own comment calls it *what
+  -- correlates this row to the plane's audit* -- which only holds if the
+  -- caller can READ it and put it in the request's `X-Request-Id`. Writing it
+  -- and withholding it would have left the worker minting a second id of its
+  -- own, and the two sides of the correlation would have carried different
+  -- values with nothing to say so.
+  request_id      uuid,
   agent_id        uuid,
   dry_run         boolean,
   step            jsonb,
@@ -511,8 +530,12 @@ BEGIN
     RAISE EXCEPTION 'AP422: a claim requires a holder'
       USING ERRCODE = 'PT422';
   END IF;
-  IF p_lease_seconds IS NULL OR p_lease_seconds < 1 THEN
-    RAISE EXCEPTION 'AP422: a lease is at least one second'
+  -- Zero is legal and negative is not: a margin of zero leases the step for
+  -- exactly its own timeout, which is what a proof driving an expiry wants,
+  -- and a negative one would lease it for less than the call it is about to
+  -- make.
+  IF p_lease_margin_seconds IS NULL OR p_lease_margin_seconds < 0 THEN
+    RAISE EXCEPTION 'AP422: a lease margin is zero or more seconds'
       USING ERRCODE = 'PT422';
   END IF;
 
@@ -561,7 +584,9 @@ BEGIN
   UPDATE app_private.workflow_step s
      SET status = 'claimed',
          claimed_by = p_holder,
-         lease_until = pg_catalog.now() + pg_catalog.make_interval(secs => p_lease_seconds),
+         lease_until = pg_catalog.now()
+                       + pg_catalog.make_interval(
+                           secs => s.timeout_seconds + p_lease_margin_seconds),
          attempt = s.attempt + 1,
          request_id = gen_random_uuid(),
          resume_after = NULL,
@@ -585,6 +610,7 @@ BEGIN
          s.position,
          s.name,
          s.attempt,
+         s.request_id,
          r.agent_id,
          r.dry_run,
          (d.body -> 'steps') -> (s.position - 1),
@@ -610,7 +636,11 @@ COMMENT ON FUNCTION app_private.workflow_claim_step(text, integer) IS
   'syntax error as a bare OUT parameter. The LEASE PREDICATE is the correctness '
   'mechanism and SKIP LOCKED is throughput (ADR 0104, rig 32e). A step is '
   'claimable only when every earlier position of its run has succeeded, which '
-  'is what makes a run sequential without a second mechanism.';
+  'is what makes a run sequential without a second mechanism. The second '
+  'argument is a MARGIN, not a lease: the lease is the step''s own '
+  'timeout_seconds plus it, because the step''s timeout is in the row this '
+  'function selects and the margin is a function of the caller''s HTTP client '
+  '(D1687). A caller passing an absolute lease would have to pass the ceiling.';
 
 -- ---------------------------------------------------------------------------
 -- Finishing a step

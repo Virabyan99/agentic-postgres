@@ -84,6 +84,49 @@ OBJECT_UNAVAILABLE: Final = {"error": "object_unavailable"}
 #: object and about nobody else's.
 OBJECT_STATE_CONFLICT: Final = {"error": "object_state_conflict"}
 
+#: Session 32. The one answer the workflow surface gives for a definition or a
+#: run the caller cannot be told about: a definition nobody installed, a run
+#: that does not exist, and ANOTHER AGENT'S run are all this (ADR 0229).
+#:
+#: The third is why it is one token rather than two. `workflow_cancel` and
+#: `workflow_run_status` raise the same `PT404` for a missing run and for one
+#: belonging to another agent, so a run id cannot be used to discover whose it
+#: is -- 0013's rule about a revoked agent, applied to a run.
+NO_SUCH_WORKFLOW: Final = {"error": "no_such_workflow"}
+
+#: Session 32. The agent's STORED scopes do not cover the definition's
+#: `required_scopes` (ADR 0229).
+#:
+#: Named rather than folded into `authorization_failed`, and the word is the
+#: substrate's own: `workflow_enqueue` raises `scope_not_held`, which is one of
+#: the nine denial boundaries `mcp_errors.DENIAL_REASONS` already carries, so a
+#: caller reads vocabulary it has seen before rather than a tenth word invented
+#: at this route.
+SCOPE_NOT_HELD: Final = {"error": "scope_not_held"}
+
+
+class NoSuchWorkflow(Exception):
+    """A definition nobody installed, or a run that is not this agent's."""
+
+
+class ScopeNotHeld(Exception):
+    """The definition needs a scope the agent's record does not carry."""
+
+
+def no_such_workflow() -> JSONResponse:
+    """404, and the same 404 for three causes (ADR 0229).
+
+    `no-store` for `object_unavailable`'s reason: a cache that remembered this
+    answer for a run id would keep answering it after the run existed, and
+    could serve one agent's 404 about a run another agent owns.
+    """
+    return JSONResponse(NO_SUCH_WORKFLOW, status_code=404, headers={"Cache-Control": "no-store"})
+
+
+def scope_not_held() -> JSONResponse:
+    """403. The agent is known, its record is current, and it may not run this."""
+    return JSONResponse(SCOPE_NOT_HELD, status_code=403, headers={"Cache-Control": "no-store"})
+
 
 class AuthenticationFailed(Exception):
     """Any of the four. Carries a reason for the log and never for the caller."""

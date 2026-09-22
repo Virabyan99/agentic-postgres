@@ -325,6 +325,44 @@ def test_the_compose_service_supplies_every_setting_the_service_requires(
     )
 
 
+def test_the_auth_mode_reads_no_new_variable(compose_model: dict[str, Any]) -> None:
+    """**Session 32 (ADR 0226): the workflow loop added no setting, and this is
+    a NEW proof rather than an existing one made stricter.**
+
+    `test_the_compose_service_supplies_every_setting_the_service_requires`
+    already compares `REQUIRED_VARIABLES` with the compose service's
+    environment in both directions, so a variable the loop needed and nobody
+    set would fail there. What it cannot see is a module reading `os.environ`
+    DIRECTLY, around `settings.load` -- and that is the shape this asks about,
+    because a loop configured by an environment variable nothing declares is a
+    deployment whose behaviour is not in its document.
+
+    D1645 is the decision being held: *no new container, role, secret,
+    claimant or document field*. A setting is the sixth thing on that list in
+    all but name.
+    """
+    supplied = set(compose_model["services"]["auth"]["environment"])
+    assert supplied == set(settings_module.REQUIRED_VARIABLES) | {"APP_MODE"}
+
+    for relative in (
+        "app/workflow_worker.py",
+        "app/workflow_routes.py",
+        "app/workflow_repository.py",
+    ):
+        names = _referenced_names((SERVICE_ROOT / relative).read_text(encoding="utf-8"))
+        assert not names & {"environ", "getenv"}, (
+            f"{relative} reads the environment directly; every setting this service "
+            "has comes through `settings.load`, which declares what it requires"
+        )
+
+    # `os` itself IS named by the loop -- `os.getpid()` and `os.uname()`, both
+    # for the holder string -- so the assertion above is on the two attributes
+    # and not on the module. A ban on `os` would have been a ban on the thing
+    # that replaced `socket` (D1668).
+    worker_names = _referenced_names((SERVICE_ROOT / "app/workflow_worker.py").read_text("utf-8"))
+    assert {"getpid", "uname"} <= worker_names
+
+
 def test_each_mode_is_denied_the_other_s_credential_settings(
     compose_model: dict[str, Any],
 ) -> None:
@@ -665,6 +703,15 @@ TRANSPORT_ALLOWLIST: dict[str, frozenset[str]] = {
     # the guard this allowlist replaced (D429); the row is what it was
     # waiting for.
     "app/mcp_health.py": frozenset({"urllib"}),
+    # Session 32 (ADR 0226, D1669): the workflow loop's ONE call -- to the
+    # agent plane, inside the project's own network, carrying the step's own
+    # token. **A widening to a measured set, which CLAUDE.md §6 distinguishes
+    # from a weakening**: the loop reaches exactly one address, built from
+    # three constants a proof binds to the deploy's own. `socket` is
+    # deliberately NOT granted; the holder's host comes from
+    # `os.uname().nodename`, which is `storage_cleanup.worker_identity`'s
+    # choice and its reason.
+    "app/workflow_worker.py": frozenset({"urllib"}),
 }
 
 #: How a key set may be built. Both are local reads; neither can reach a network.
@@ -762,10 +809,16 @@ def test_the_allowlist_describes_modules_that_exist_and_use_what_they_declare() 
         )
 
     # `urllib` covers both `urllib.parse` (encoding) and `urllib.request`
-    # (sending), and only two modules may send. Asserted separately because the
-    # package name alone cannot tell them apart -- and a query builder that grew
-    # a `urlopen` would otherwise be covered by its own row.
-    senders = {"app/mcp_upstream.py", "app/mcp_health.py"}
+    # (sending), and only three modules may send. Asserted separately because
+    # the package name alone cannot tell them apart -- and a query builder that
+    # grew a `urlopen` would otherwise be covered by its own row.
+    #
+    # `workflow_worker.py` joined the list in Session 32 (ADR 0226): the loop
+    # makes the tool call itself, which is the whole of what it does that the
+    # plane does not. The list is a WIDENING to a measured set and the count in
+    # the sentence above moved with it -- a list that grew while its own prose
+    # still said "two" is how an allowlist stops being read.
+    senders = {"app/mcp_upstream.py", "app/mcp_health.py", "app/workflow_worker.py"}
     for relative in sorted(TRANSPORT_ALLOWLIST):
         names = _referenced_names((SERVICE_ROOT / relative).read_text(encoding="utf-8"))
         if relative in senders:
@@ -865,9 +918,15 @@ def test_no_health_path_is_in_the_public_list() -> None:
 
 
 def test_the_admin_surface_is_reachable_only_under_admin() -> None:
-    """Every published path is one of the two prefixes the plan names (§6)."""
+    """Every published path is one of the THREE prefixes now (§6, ADR 0229).
+
+    `/workflows/` is the third and it arrived in Session 32 with an ADR that
+    names it: three routes behind a second authenticator, for agent tokens.
+    Widened to a measured set rather than loosened to a substring check --
+    CLAUDE.md §6's distinction -- so a path under a fourth prefix still fails.
+    """
     for path in main_module.public_paths():
-        assert path.startswith(("/auth/", "/admin/")), path
+        assert path.startswith(("/auth/", "/admin/", "/workflows/")), path
 
 
 def test_the_application_generates_no_openapi_document() -> None:
@@ -920,16 +979,51 @@ def test_every_state_check_happens_after_the_hash_comparison() -> None:
     asserted those two things stayed green -- while the property its docstring
     claimed was gone. Asserted over the AST rather than the text, because the
     subject is an ORDER of statements and a string scan cannot see one.
+
+    **Session 32 widened it to follow one call** (D1688). `agent_token`'s two
+    state checks moved into `AuthService._refuse_unless_issuable` so that
+    `step_token` refuses with the same words -- their POSITION did not move,
+    but a reader that walks one function's body cannot see that. Read as it
+    was, this proof said *"agent_token no longer reads status"*, which is a
+    guard going quiet in the reassuring direction: the checks were still there
+    and still after the hash, and the proof had simply stopped being able to
+    tell.
+
+    So the reads are looked for in the function AND in the helper it calls, and
+    the helper's CALL SITE is what has to come after the verify. That is
+    stricter than before rather than looser -- the old version could not have
+    caught a helper invoked before the hash comparison, because there was no
+    helper to invoke.
     """
     source = ast.parse(
         (REPO_ROOT / "services" / "auth-api" / "app" / "service.py").read_text("utf-8")
     )
+
+    #: A function whose body carries some of another's state checks, and the
+    #: name of the call that reaches it. Listed rather than discovered: a scan
+    #: that followed every call would follow `self.issue` into the signer.
+    delegates = {"agent_token": "_refuse_unless_issuable"}
 
     for name, checks in (
         ("login", ("status",)),
         ("agent_token", ("status", "secret_expired")),
     ):
         body = _function(source, name)
+        delegate = delegates.get(name)
+        bodies = [body]
+        if delegate is not None:
+            call_lines = [
+                node.lineno
+                for node in ast.walk(body)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == delegate
+            ]
+            assert len(call_lines) == 1, (
+                f"{name} calls {delegate} {len(call_lines)} times; this proof reads one "
+                "call site and would compare against the wrong line"
+            )
+            bodies.append(_function(source, delegate))
         # `max`, not `min`. `agent_token` verifies TWICE -- once against the
         # dummy in the non-UUID branch, which exists for this very timing
         # property -- and that call is earlier than the lookup. Anchoring on the
@@ -944,12 +1038,21 @@ def test_every_state_check_happens_after_the_hash_comparison() -> None:
             and node.func.attr == "verify"
         )
         for attribute in checks:
-            reads = [
-                node.lineno
-                for node in ast.walk(body)
-                if isinstance(node, ast.Attribute) and node.attr == attribute
-            ]
-            assert reads, f"{name} no longer reads {attribute}"
+            # A read inside the FUNCTION is compared against the verify's line.
+            # A read inside the DELEGATE is compared against the line the
+            # delegate is called from, because that is when it happens.
+            reads: list[int] = []
+            for index, scope in enumerate(bodies):
+                found = [
+                    node.lineno
+                    for node in ast.walk(scope)
+                    if isinstance(node, ast.Attribute) and node.attr == attribute
+                ]
+                reads.extend(found if index == 0 else [call_lines[0]] * len(found))
+            assert reads, (
+                f"{name} no longer reads {attribute}, in its own body or in the helper "
+                "it delegates to"
+            )
             assert min(reads) > verify_line, (
                 f"{name} reads `{attribute}` at line {min(reads)}, before the credential is "
                 f"verified at line {verify_line}. The cheap failures become measurable by "

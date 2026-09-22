@@ -477,6 +477,11 @@ at the close to say which run added which.
 | **D1682** | 4 | §5 Run 4 item 2 and ADR 0228: the compiler refuses *"an argument the tool does not declare"*. | **Only a WRITE declares one.** Measured over the release's approved contract joined with the example project's: a write tool carries `arguments` (`create_note` → `p_title, p_content`), and a read carries none at all. What a read accepts is the signature the runtime REGISTERS its closure with (`mcp_tools.register_relation_read` → `resource, columns, filters, order_by, limit`; `register_rpc_read` → nothing), chosen by `Tool.read_shape`, which is derived from whether every resource behind the tool is reached by `get`. | **The compiler derives the accepted names by SHAPE, the same rule the runtime registers by** (ADR 0200): a write's are the tool's declared list, a relation read's are the runtime's four, an RPC read's are none, and a metadata tool is refused before the question arises. **`resource` is deliberately NOT among the four** -- the compiler derives it from the capability, so an author naming it would be naming something already decided. Because the rule is duplicated across the `src/`-service boundary (ADR 0093 forbids importing `app.mcp_lock` here), a proof parses one real lock with BOTH readers and requires every tool's `read_shape` to agree, with at least one `relation` and one `rpc` present or the comparison proves nothing. | The alternatives were to refuse every argument on a read -- which makes `limit: 5` unwritable, and the trip's own definition needs it -- or to accept anything, which is an unbounded surface reached from a stored artefact. Deriving by the runtime's own rule is the only one of the three that cannot drift from what the plane will accept. | 0228 |
 | **D1683** | 4 | §5 Run 4 item 1: `arguments` is an *"object of string/number/boolean/null"*. | That type set cannot express a relation read. `columns` is a list of strings and `filters` is a list of small objects (`{column, op, value}`), which is what the runtime's closure takes. | **A step argument is a scalar, or a LIST of scalars and objects, and nothing deeper.** An argument document the reviewed surface cannot receive is one the compiler would have to guess at, and `filters` -- the one argument with structure -- is checked by the plane against the lock on every call, which is where that check belongs. | 0228 |
 | **D1684** | 4 | §5 Run 4 item 3: the statement is `psql -v name=… -v body=… -c "SELECT app_private.workflow_install_definition(:'name', …)"`. | **`-c` does not interpolate a psql variable at all.** Rig 32g, against the locked image with every released migration applied: that exact invocation fails with `ERROR: syntax error at or near ":"` and the `:'body'` reaches the server as text, because a `-c` string is sent without passing through psql's own lexer -- and the lexer is what performs the substitution. Every arm failed, including the function call itself. | **The statement goes to STDIN through `-f -`**, which is the path `postgres-bootstrap.psql` already takes for everything that is not read-only. Re-measured there (rig 32g second pass, every arm green with its control): the value survives a `'`, a `\`, a newline, a `"` and a `$$`; `:'scopes'::text[]` reads back as two elements; the function is idempotent under an identical source, raises `AP409` under a different one and installs a new row under a new version; and -- the property that matters most -- an UNSET variable produces the same syntax error rather than substituting an empty string, so a missing value cannot become a silently installed empty definition. The `-c` spelling is kept as a recorded negative control in the same rig. | `InstallStatement.stdin` is therefore load-bearing rather than decorative, and a proof refuses `-c` in the argv by name. This is §7 question 2 answered before the fact instead of after: the plan's spelling had never been executed anywhere, and it would have failed at step 6d on the host with the cluster already migrated. | 0228 |
+| **D1685** | 5 | §5 Run 5: *"the plane's URL is derived: `http://{runtime_override.MCP_SERVICE}:{APG_LISTEN_PORT}{MCP_ROUTE_PATH}`"*. | **Neither authority is importable from inside the image, and the third value is the wrong one.** `runtime_override` is `src/agentic_postgres`, which is NOT in the auth image at all -- `test_the_service_never_imports_the_repository` refuses it by name, and the build context is `services/auth-api` so the import would pass every test and fail at container start. `MCP_ROUTE_PATH` is `app.mcp_runtime`'s (`:96`), and importing that module builds the whole FastMCP server, which `auth` mode never loads. And `APG_LISTEN_PORT` is the AUTH service's own port: it happens to equal the plane's because they are one image, which is a coincidence and not a derivation. | **Three constants in `workflow_worker.py` -- `PLANE_SERVICE`, `PLANE_PORT`, `PLANE_PATH` -- BOUND by a proof.** `test_the_planes_address_is_the_one_the_deploy_publishes` imports `runtime_override.MCP_SERVICE` and `MCP_SERVICE_PORT`, reads `MCP_ROUTE_PATH` out of `mcp_runtime.py` as TEXT (so the framework is never constructed), and requires equality. That is the tree's own pattern for a fact that must hold on both sides of the image boundary: `profile.py`, `scopes.py` and `strict_json.py` each say *two enforcement points, one number* and each is held by a guard. | An environment variable would have been the other answer and D1645 forbids it -- *no new document field* -- and a variable naming the plane would make the loop's target a deployment input rather than a property of the image. | 0226 |
+| **D1686** | 5 | §5 Run 5: the call carries `X-Request-Id: <step.request_id>`; §2 `WF-RUN-001`: *"each step's audit row is found by its request id"*. | **`workflow_claim_step` MINTED a `request_id` per attempt and did not RETURN it.** The column's own comment in 0034 calls it *what correlates this row to the plane's audit* (D1667) -- and that only holds if the caller can read it. Written and withheld, the worker would have had to mint a second id of its own, and the two sides of the correlation would have carried different values with nothing to say so. **Found by writing the caller**, which is D348's rule and `storage_cleanup.py`'s own first paragraph: *a plane is complete when a caller can be written against it, not when its tests pass.* | **Migration 0034 amended** -- it is frozen and NOT APPLIED anywhere, so this is a fix and not a fix-forward (D912 governs an APPLIED migration) -- to add `request_id uuid` to the claim's `RETURNS TABLE` and to its `RETURN QUERY`. The lock was re-frozen, both example projects re-rendered (D1678), and two proofs added: the claim returns the id the row holds, and a SECOND attempt mints a different one. `ClaimedStep` and the repository's `SELECT` list moved with it. | **The window was named at Run 3's close and this is it being used.** After the Run 8 deploy applies 0034 on alpha it becomes a floor and the same repair would be a 0035. | 0227 |
+| **D1687** | 5 | §5 Run 5: *"claim with `lease = step.timeout_seconds + lease_margin_seconds()`"*. | **The caller cannot compute that sum: `step.timeout_seconds` arrives in the claim's own RESULT.** A worker that must pass an absolute lease can only pass the CEILING -- the schema's 600, plus a margin -- and a worker killed mid-call would then leave its step unclaimable for ten minutes. `WF-RESUME-001`'s first proof (*a run whose worker died after step 2's upstream committed resumes*) would have spent that entire wait inside a fifteen-minute sweep. | **`workflow_claim_step`'s second argument is a MARGIN**, and the lease is `s.timeout_seconds + p_lease_margin_seconds`, computed inside the function where both halves are known. Zero is legal (a proof driving an expiry wants exactly the step's own timeout) and negative is not. `test_the_lease_is_the_steps_own_timeout_plus_the_margin` measures it over two different step timeouts with one margin and requires the DIFFERENCE to be the difference between the timeouts -- a function ignoring the step would produce two equal leases and pass any check that read only one. | The margin is the only half a caller can honestly know before the claim: it is a function of the WORKER's HTTP client, and the timeout is a property of the row. | 0227 |
+| **D1688** | 5 | §5 Run 5: *"write it as two helpers, `_agent_record(agent_id)` and `_refuse_unless_issuable(credential)`"*, with the split explicitly required not to reorder. | **The split did not reorder anything and it still broke a contract test** -- `test_every_state_check_happens_after_the_hash_comparison` walks ONE function's AST and asserts that `status` and `secret_expired` are read after every `verify`. Moving those two reads into a helper made them invisible to it, and the failure message was *"agent_token no longer reads status"*: a guard going quiet in the reassuring direction, because the checks were still there, still after the hash, and the proof had simply stopped being able to tell. | **The proof follows ONE named call.** It reads the delegate's body as well, compares a read inside the delegate against the line the delegate is CALLED from, and refuses a function that calls it more than once. Strictly stronger than before: the old version could not have caught a helper invoked before the hash comparison, because there was no helper. The delegate is listed rather than discovered -- a scan following every call would follow `self.issue` into the signer. | This is D1486's shape inside one file: a reader derived from one function cannot see a caller that function does not contain. | 0229 |
+| **D1689** | 5 | D1669: *"`workflow_worker.py` still needs its own allowlist row for `urllib`"*. | **The transport scan has a SECOND list and the row alone does not satisfy it.** `test_the_allowlist_describes_modules_that_exist_and_use_what_they_declare` carries `senders = {"app/mcp_upstream.py", "app/mcp_health.py"}` and requires every OTHER allowlisted module to name no `urlopen`, `Request` or `urlretrieve` -- because `urllib` covers both `urllib.parse` (encoding) and `urllib.request` (sending), and the package name cannot tell them apart. A row without a `senders` entry fails with *"allowlisted for encoding and names a sender"*. | **Both lists gained the module**, and the prose that said *only two modules may send* was corrected to three in the same edit: a list that grows while its own sentence still says "two" is how an allowlist stops being read. Both are WIDENINGS to a measured set, which CLAUDE.md §6 distinguishes from weakenings, and ADR 0226 authorises the sender -- the loop makes the tool call itself, which is the whole of what it does that the plane does not. | 0226 |
 
 ---
 
@@ -1499,9 +1504,106 @@ module runs `app-contract.sh --check` — `grep -rln app-contract tests/
 contract`). Commit (`Session 32 Run 5: the worker loop in the auth process,
 and the run surface`), push, read CI.
 
-**Done.** *(the plane's client constants imported; where `replayed`
-appears in a result; the message list before/after the split; rig 32a's
-loop delta and what the first end-to-end run found; the battery; CI)*
+**Done.** Measured, in this order.
+
+**The plane's client constant is IMPORTED and the address is not** (D1685).
+`lease_margin_seconds()` is `2 * mcp_upstream.UPSTREAM_TIMEOUT_SECONDS`, an
+import of the plane's own one constant -- never the `CONNECT_`/`READ_` pair,
+which belongs to `storage_client` and to boto3 (D1670), and a proof reads the
+module's AST rather than its text to say so, because the docstring NAMES
+`storage_client` to explain what it is not reading and the first spelling of
+that proof failed on that sentence (D680's shape). The ADDRESS could not be
+imported at all: `runtime_override` is not in the image and `mcp_runtime` pulls
+in the agent framework, so three constants are spelled in the loop and bound by
+a proof to the deploy's own.
+
+**Where `replayed` appears: nowhere the loop can see it** (D1671). A successful
+call finishes `succeeded`, and `test_a_successful_call_finishes_the_step_and_
+the_replay_is_not_the_loops_to_see` asserts both halves -- the outcome, and
+that the string `"replayed"` does not occur in the module. ADR 0195's rule: a
+reader that cannot determine something reports that rather than assigning the
+likelier answer.
+
+**The message list before and after the split** is identical, and
+`_refuse_unless_issuable` is where the two checks LIVE rather than a second
+copy written to look like them: `no such agent`, `agent is <status>`, `agent
+secret has expired`. `agent_token` keeps its own `None` check in its own place,
+because *"no such agent"* has to answer before *"secret mismatch"* -- an
+unknown agent has no stored hash, so `matched` is False for it. The one
+asymmetry is the one that must exist: `step_token` pays no hash, because there
+is no secret to compare.
+
+**Rig 32a's loop delta was Run 1's** (7.8 MiB RSS idle, against a 32 MiB
+criterion) and Run 5 owed the second arm: **the loop's first end-to-end
+execution anywhere, rig 32j.** The released image in `auth` mode with the real
+loop in it, a cluster carrying all 34 migrations, a definition installed, an
+agent registered, a run enqueued, and a fake plane answering at
+`http://mcp:8080/mcp` in rig 32b's measured shape and recording every request.
+
+**It found nothing, and that is the finding.** Fifteen arms, all green on first
+execution: the container starts READY with the loop in it; the heartbeat
+reaches the table within four seconds; a three-step run completes with every
+step `succeeded`; the plane receives exactly three calls; each carries the
+step's OWN `request_id` as `X-Request-Id` (which is D1686's repair, executed);
+each write carries the substrate's derived key and the read carries the
+compiler's `resource` and neither a key nor a `dry_run`; the third step's
+`{{input.title}}` resolves from the run's input; **three calls carry three
+distinct bearers**, each decoding as `token_use: agent` for that agent with the
+agent's STORED scopes. The control: a REVOKED agent's run stops as `stopped
+agent_not_active` with `token_refused` on its first step and **no additional
+call to the plane**. §7 question 2 expected a first execution to fail and it
+did not -- because Run 1's rigs had already found the three things that would
+have broken it (D1668, D1671, D1672) and this run was written against those
+measurements rather than against the plan's sketch.
+
+**Two measurements amended migration 0034, which is frozen and unapplied.**
+D1686: the claim minted a `request_id` and did not return it, so the two sides
+of the correlation would have carried different values. D1687: the claim cannot
+take an absolute lease, because the step's timeout arrives in its own result --
+it takes a MARGIN now, and the lease is the step's timeout plus it. The lock
+was re-frozen and BOTH example projects re-rendered (D1678). After Run 8's
+deploy this window closes and the same repair is a 0035.
+
+**The battery: six mutations, five kills, one recorded survivor, every control
+green in the same invocation.** (m1) mint once and reuse → the token proof
+FAILED; (m2) the `del token` removed → FAILED; (m3) `scope_not_held` made
+retryable → the terminal proof FAILED; (m4) `authenticate_agent` widened to
+accept an access token → FAILED; (m5) the `isError` branch disabled, which is
+D1672's own shape → FAILED; (m6) the route's `agent_id` taken from the request
+body → **SURVIVED, and it is informative** (D493): `WorkflowRunRequest` is
+`extra="forbid"`, so a body carrying `agent_id` is a 400 before the handler
+runs and the fallback is unreachable. The model's closure is what makes the
+route's agent id unspoofable, not the route's code.
+
+**Two of those mutations were kills only after the proofs were repaired**, and
+the battery is what said so. m1 survived a proof that drove ONE step -- *one
+token for one step* and *one token PER step* are different sentences, and only
+the second is the property, so it now drives `process` twice. m4 survived a
+proof that read the two `token_use` constants and the source; what can see a
+widened comparison is a token minted with `token_use="access"` and driven
+through the real `AuthService`, so the module now builds one with a generated
+key and a fake repository, rig 32f's shape.
+
+**Two smaller notes.** The plan's *"grep `TestClient` under `tests/contract/
+test_auth_*`"* finds nothing: this tree drives an application over
+`httpx.ASGITransport`, which is what `test_auth_endpoints.py` does, and the
+route proofs follow it with the LIFESPAN not run and the two state members set
+directly -- stated in the module's docstring rather than hidden, with
+`test_the_loop_starts_in_auth_mode_only` as the half that reads the assembly.
+And `bin/workflow.sh`'s Run 4 positional argument is replaced by the plan's own
+Run 5 spelling, `--definition NAME@VERSION` and `--run RUN_ID`, so no value
+this command takes can be swapped by position.
+
+**Targeted:** the four new and edited service modules' proofs, plus
+`test_workflow_repository`, `test_auth_service_shape`,
+`test_auth_service_database_access`, `test_agent_plane_contract`,
+`test_cli_contract`, `test_app_contract_aggregate`, `test_printed_commands`,
+`test_acceptance_registry`, `test_evidence_claims`, `test_migrations`,
+`test_container_selectors`, `test_documentation_index`,
+`test_session12_documented_path` and `tests/security/test_session9_revocation`.
+**975 passed.**
+
+**Rows added: D1685, D1686, D1687, D1688, D1689. NEXT FREE: D1690.**
 
 ### Run 6 — the readers: the doctor's twelfth check, `worker-restart`, the restore member, the docs, the threat row
 

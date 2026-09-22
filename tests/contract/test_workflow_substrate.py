@@ -574,11 +574,17 @@ def test_enqueue_derives_one_key_per_step_inside_the_pattern(
 # ---------------------------------------------------------------------------
 
 
-def _claim(applied: dict[str, Any], holder: str, lease: int = 60):
+def _claim(applied: dict[str, Any], holder: str, margin: int = 60):
+    """The second argument is a MARGIN, not a lease (D1687).
+
+    The lease the function takes is the step's own `timeout_seconds` plus
+    this, because the step's timeout arrives in the claim's own result and a
+    caller could otherwise only pass the ceiling.
+    """
     return _as_role(
         applied,
         applied["roles"]["auth_service"],
-        f"SELECT * FROM app_private.workflow_claim_step('{holder}', {lease});",
+        f"SELECT * FROM app_private.workflow_claim_step('{holder}', {margin});",
     )
 
 
@@ -640,17 +646,27 @@ def test_claim_returns_the_lowest_unfinished_step_once_and_leases_it(
 def test_an_expired_lease_is_reclaimed_with_the_attempt_incremented(
     applied: dict[str, Any], run_id: str
 ) -> None:
-    """Rig 32e's third arm, as a proof: two seconds of lease, three of sleep.
+    """Rig 32e's third arm, as a proof: a one-second lease, two of sleep.
 
     The sleep is real time and not a held transaction, because
     `pg_catalog.now()` is the TRANSACTION START time -- rig 32e's first pass
     held a transaction open and expired its own lease by doing so.
-    """
-    first = _claim(applied, "A", lease=2)
-    assert first.stdout.strip(), first.stderr
-    time.sleep(3)
 
-    reclaimed = _claim(applied, "B", lease=60)
+    The step's own timeout is set to one second first, because the lease is
+    now `timeout_seconds + margin` (D1687): a margin of zero over a
+    one-second step is a one-second lease, and there is no other way for a
+    caller to ask for a short one.
+    """
+    _superuser(
+        applied,
+        "UPDATE app_private.workflow_step SET timeout_seconds = 1 "
+        f"WHERE run_id = '{run_id}' AND position = 1;",
+    )
+    first = _claim(applied, "A", margin=0)
+    assert first.stdout.strip(), first.stderr
+    time.sleep(2)
+
+    reclaimed = _claim(applied, "B", margin=60)
     assert reclaimed.stdout.strip(), "an expired lease was not reclaimed"
     columns = reclaimed.stdout.strip().splitlines()[-1].split("|")
     assert columns[4] == "2", f"attempt is {columns[4]}, not 2"
@@ -661,6 +677,71 @@ def test_an_expired_lease_is_reclaimed_with_the_attempt_incremented(
         f"WHERE run_id = '{run_id}' AND position = 1;",
     )
     assert holder == "B", holder
+
+
+def test_the_claim_returns_the_request_id_it_minted(applied: dict[str, Any], run_id: str) -> None:
+    """**D1686.** The column's comment calls `request_id` *what correlates this
+    row to the plane's audit*, and that only holds if the caller can read it.
+
+    Written and withheld, the worker would have minted a second id of its own
+    and the two sides of the correlation would have carried different values
+    with nothing to say so. Found by writing the caller, which is D348's rule:
+    a plane is complete when a caller can be written against it.
+    """
+    first = _claim(applied, "A")
+    returned = first.stdout.strip().splitlines()[-1].split("|")
+    step_id, request_id = returned[0], returned[5]
+    assert len(request_id) == 36, f"the claim returned {request_id!r} for request_id"
+
+    stored = _scalar(
+        applied,
+        f"SELECT request_id::text FROM app_private.workflow_step WHERE id = '{step_id}';",
+    )
+    assert stored == request_id, f"the row holds {stored} and the claim returned {request_id}"
+
+    # A SECOND attempt mints a new one. Per attempt, not per step: the audit row
+    # a retry writes is a different row and must be findable separately.
+    _as_role(
+        applied,
+        applied["roles"]["auth_service"],
+        f"SELECT app_private.workflow_park('{step_id}', 'A', 'x', now() - interval '1 second');",
+    )
+    again = _claim(applied, "B")
+    assert again.stdout.strip().splitlines()[-1].split("|")[5] != request_id
+
+
+def test_the_lease_is_the_steps_own_timeout_plus_the_margin(
+    applied: dict[str, Any], run_id: str
+) -> None:
+    """**D1687**, measured rather than asserted about the signature.
+
+    Two claims of the same step with the same margin and two different step
+    timeouts, and the difference between the leases is the difference between
+    the timeouts. The control is that direction: a function ignoring the step's
+    timeout would produce two equal leases and pass any check that only read
+    one of them.
+    """
+    margins: dict[int, float] = {}
+    for timeout in (5, 40):
+        _superuser(
+            applied,
+            f"UPDATE app_private.workflow_step SET timeout_seconds = {timeout}, "
+            "status = 'queued', claimed_by = NULL, lease_until = NULL "
+            f"WHERE run_id = '{run_id}' AND position = 1;",
+        )
+        _claim(applied, "A", margin=10)
+        held = _scalar(
+            applied,
+            "SELECT round(extract(epoch FROM lease_until - now()))::text "
+            f"FROM app_private.workflow_step WHERE run_id = '{run_id}' AND position = 1;",
+        )
+        margins[timeout] = float(held)
+
+    assert margins[40] - margins[5] == 35, (
+        f"the leases are {margins}; a 35-second difference in the steps' own "
+        "timeouts did not reach the lease"
+    )
+    assert 14 <= margins[5] <= 15, f"a 5s step with a 10s margin leased for {margins[5]}s"
 
 
 def test_finish_by_a_holder_that_lost_its_lease_is_refused(
@@ -921,7 +1002,7 @@ def test_a_run_past_its_timeout_is_failed_at_the_next_claim(
     assert _install(applied, name, 1).returncode == 0
     identifier = _enqueue(applied, agents["wide"], name).stdout.strip().splitlines()[-1]
 
-    claimed = _claim(applied, "A", lease=1)
+    claimed = _claim(applied, "A", margin=1)
     step = claimed.stdout.strip().splitlines()[-1].split("|")[0]
     _as_role(
         applied,

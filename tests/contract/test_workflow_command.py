@@ -13,9 +13,12 @@ below run in a temporary directory with no rendered document anywhere.
 
 from __future__ import annotations
 
+import ast
+import json
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -197,22 +200,163 @@ def test_a_definition_name_the_column_would_refuse_is_refused_here() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The four this checkout does not serve
+# The four that reach a deployment
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("verb", ["run", "dry-run", "status", "cancel"])
-def test_a_verb_this_checkout_does_not_serve_says_which_run_serves_it(verb: str) -> None:
-    """Exit 3 -- *a missing local prerequisite* -- and never 10.
+@pytest.fixture
+def outputs(tmp_path: Path) -> Path:
+    """A rendered outputs document naming an address nothing answers on.
 
-    ADR 0017's stub lifecycle is over and `FUTURE_STUBS` is empty; a 10 here
-    would reopen it. What this is instead is a verb whose ROUTES do not exist
-    yet in this release, which is a prerequisite and says so.
+    Nothing here dials anything: every arm below asserts what the command
+    BUILDS -- which route, which method, which body -- and the one arm that
+    does reach a socket asserts the refusal, which is exit 3 and a sentence.
     """
-    result = run(verb, "something", "--project-outputs", str(EXAMPLE))
+    path = tmp_path / "outputs.json"
+    path.write_text(
+        json.dumps({"routes": {"app": {"url": "http://127.0.0.1:9/app", "status": "ready"}}}),
+        encoding="utf-8",
+    )
+    return path
+
+
+def workflow_module() -> Any:
+    """`bin/workflow.py`, loaded by path -- it is a command, not a package."""
+    import importlib.util
+
+    specification = importlib.util.spec_from_file_location(
+        "apg_workflow_command", REPO_ROOT / "bin" / "workflow.py"
+    )
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def test_the_three_http_verbs_call_the_enumerated_routes_and_nothing_else() -> None:
+    """**The closed table**, `bin/api.py`'s `OPERATIONS` shape.
+
+    Four verbs over THREE routes, because `dry-run` is `run` with a flag rather
+    than a fourth address. A path this table does not name is a path this
+    command cannot reach -- asserted by reading every string literal in the
+    module and requiring that no other path-shaped one exists.
+    """
+    module = workflow_module()
+    assert module.ROUTES == {
+        "run": ("POST", "/workflows/runs"),
+        "status": ("GET", "/workflows/runs/{run_id}"),
+        "cancel": ("POST", "/workflows/runs/{run_id}/cancel"),
+    }
+
+    tree = ast.parse((REPO_ROOT / "bin" / "workflow.py").read_text(encoding="utf-8"))
+    declared = {path for _, path in module.ROUTES.values()}
+    literals = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value.startswith("/")
+        and len(node.value) > 1
+        and " " not in node.value
+    }
+    assert literals <= declared, (
+        f"the module names {sorted(literals - declared)}, which `ROUTES` does not"
+    )
+
+
+def test_the_token_comes_from_the_environment_and_never_an_argument(
+    outputs: Path, monkeypatch: Any
+) -> None:
+    """A value in an argument vector is a value `ps` can read (D105, D1160).
+
+    Two halves: the command refuses with exit 3 and a sentence when the
+    variable is empty, and the parser has no flag that would accept one.
+    """
+    module = workflow_module()
+    assert module.TOKEN_VARIABLE == "APG_AGENT_TOKEN"  # noqa: S105
+
+    flags = {
+        action.option_strings[0]
+        for action in module.build_parser()._actions
+        if action.option_strings
+    }
+    assert not {flag for flag in flags if "token" in flag or "secret" in flag}
+
+    monkeypatch.delenv("APG_AGENT_TOKEN", raising=False)
+    result = run("run", "--definition", "notes-roundtrip@1", "--project-outputs", str(outputs))
     assert result.returncode == 3, result.stdout + result.stderr
-    assert "Session 32 Run 5" in result.stderr
-    assert verb in result.stderr
+    assert "APG_AGENT_TOKEN is empty" in result.stderr
+
+
+def test_dry_run_is_run_with_the_flag_set() -> None:
+    """One route, one handler, one audit shape.
+
+    Read from the module rather than by dialling: `dry-run` resolves to
+    `ROUTES["run"]` and sets `dry_run` from the verb's own name.
+    """
+    source = (REPO_ROOT / "bin" / "workflow.py").read_text(encoding="utf-8")
+    assert '"dry_run": arguments.command == "dry-run"' in source
+    assert '_call(\n            base,\n            "run",' in source, (
+        "dry-run reaches something other than the `run` route"
+    )
+
+
+def test_a_definition_reference_is_name_at_version(outputs: Path, monkeypatch: Any) -> None:
+    """A run names the pair, because no table here holds "the latest"."""
+    monkeypatch.setenv("APG_AGENT_TOKEN", "a.token")
+    for bad in ("notes-roundtrip", "notes-roundtrip@", "@1", "Notes@1", "notes@1.0.0"):
+        result = run("run", "--definition", bad, "--project-outputs", str(outputs))
+        assert result.returncode == 2, f"{bad!r} was accepted: {result.stdout}{result.stderr}"
+        assert "is not a definition reference" in result.stderr
+
+
+def test_the_command_holds_no_sql() -> None:
+    """A command that could run SQL would be a command a human runs SQL through.
+
+    Asserted over string literals, not over prose: the module's own comments
+    name `app_private.workflow_install_definition` to say the deploy calls it.
+    """
+    tree = ast.parse((REPO_ROOT / "bin" / "workflow.py").read_text(encoding="utf-8"))
+    keywords = re.compile(r"\b(select|insert|update|delete|app_private)\b", re.IGNORECASE)
+    offenders = [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and keywords.search(node.value)
+        and not _is_a_docstring(tree, node)
+    ]
+    assert not offenders, offenders
+
+
+def _is_a_docstring(tree: ast.Module, node: ast.Constant) -> bool:
+    docstrings = set()
+    for scope in ast.walk(tree):
+        if isinstance(scope, ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            first = scope.body[0] if scope.body else None
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                docstrings.add(id(first.value))
+    return id(node) in docstrings
+
+
+def test_an_unreachable_service_is_a_prerequisite_and_not_a_refusal(
+    outputs: Path, monkeypatch: Any
+) -> None:
+    """Exit 3, because the deployment could not be asked -- not 5, which would
+    say it answered and refused (ADR 0195: a report may not fold an unknown)."""
+    monkeypatch.setenv("APG_AGENT_TOKEN", "a.token")
+    result = run("status", "--run", "abc", "--project-outputs", str(outputs))
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "cannot reach the auth service" in result.stderr
+
+
+def test_a_document_with_no_app_route_is_reported_rather_than_guessed(tmp_path: Path) -> None:
+    """The app route is READ from the document, never rebuilt (ADR 0002)."""
+    path = tmp_path / "outputs.json"
+    path.write_text(json.dumps({"routes": {}}), encoding="utf-8")
+    result = run("status", "--run", "abc", "--project-outputs", str(path))
+    assert result.returncode == 5
+    assert "publishes no app route" in result.stderr
 
 
 @pytest.mark.parametrize("verb", ["init", "validate", "run", "dry-run", "status", "cancel"])
@@ -238,13 +382,9 @@ def test_no_verb_is_an_input_error_and_prints_the_usage() -> None:
     assert "Usage:" in result.stderr
 
 
-def test_the_command_holds_no_token_and_no_route() -> None:
-    """The token comes from the environment and the base URL from a rendered
-    document; a URL or a token spelled in the command would be a second
-    authority for an address `naming` owns (ADR 0002)."""
+def test_the_command_spells_no_address_of_its_own() -> None:
+    """The base URL comes from a rendered document; a URL in the command would
+    be a second authority for an address `naming` owns (ADR 0002)."""
     source = (REPO_ROOT / "bin" / "workflow.py").read_text(encoding="utf-8")
     assert "https://" not in source
-    assert "Bearer" not in source
-    assert "APG_AGENT_TOKEN" not in source, (
-        "the token is read by the HTTP verbs Run 5 builds, not by this checkout's two"
-    )
+    assert "http://" not in source

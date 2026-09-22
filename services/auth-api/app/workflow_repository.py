@@ -66,6 +66,12 @@ class ClaimedStep:
     position: int
     name: str
     attempt: int
+    #: Minted by the CLAIM, one per attempt, and sent as `X-Request-Id` on the
+    #: tool call. It is the only thing that correlates this step to the plane's
+    #: own audit row (D1667), which is why the claim RETURNS it rather than
+    #: only writing it: a worker minting an id of its own would put a different
+    #: value on each side of the correlation, and nothing would say so (D1686).
+    request_id: UUID
     agent_id: UUID
     dry_run: bool
     step: dict[str, Any]
@@ -96,7 +102,7 @@ class WorkflowRepository:
         """
         await self._one("SELECT app_private.workflow_heartbeat(%s)", (holder,))
 
-    async def claim(self, *, holder: str, lease_seconds: int) -> ClaimedStep | None:
+    async def claim(self, *, holder: str, lease_margin_seconds: int) -> ClaimedStep | None:
         """Lease at most one step. `None` means there is nothing to do.
 
         The lease outlives this round trip and that is the point (ADR 0104, ADR
@@ -104,16 +110,19 @@ class WorkflowRepository:
         released at COMMIT and at crash. A worker that dies mid-call loses its
         hold by EXPIRY, which is the only mechanism that survives the process.
 
-        `lease_seconds` is the caller's, derived from the step's own timeout
-        plus a margin that is a function of the client's timeout -- never a
-        constant here, because two numbers with one true relationship between
-        them is the shape that goes stale.
+        **A MARGIN, not a lease** (D1687). The lease the function takes is the
+        step's own `timeout_seconds` plus this, computed inside the function,
+        because the step's timeout arrives in this call's own RESULT -- a
+        caller passing an absolute lease could only pass the ceiling, and a
+        worker that died mid-call would leave its step unclaimable for ten
+        minutes. The margin is a function of the worker's HTTP client
+        (`workflow_worker.lease_margin_seconds`), never a constant here.
         """
         row = await self._one(
-            "SELECT step_id, run_id, step_position, step_name, attempt, agent_id, "
-            "dry_run, step, input, prior, timeout_seconds, idempotency_key "
+            "SELECT step_id, run_id, step_position, step_name, attempt, request_id, "
+            "agent_id, dry_run, step, input, prior, timeout_seconds, idempotency_key "
             "FROM app_private.workflow_claim_step(%s, %s)",
-            (holder, lease_seconds),
+            (holder, lease_margin_seconds),
         )
         if row is None:
             return None
@@ -126,6 +135,7 @@ class WorkflowRepository:
             position=int(row["step_position"]),
             name=row["step_name"],
             attempt=int(row["attempt"]),
+            request_id=row["request_id"],
             agent_id=row["agent_id"],
             dry_run=bool(row["dry_run"]),
             step=row["step"] or {},

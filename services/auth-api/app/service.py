@@ -52,6 +52,21 @@ TOKEN_TTL_SECONDS = claim_contract.MAX_TTL_SECONDS
 #: noqa sits on `issue`'s call sites for the same reason.)
 ACCEPTED_TOKEN_USE = "access"  # noqa: S105
 
+#: The one `token_use` the WORKFLOW surface authenticates (ADR 0229, amending
+#: ADR 0114).
+#:
+#: The two constants are mutually exclusive on purpose and neither is a
+#: superset of the other: an access token is refused by `authenticate_agent`
+#: and an agent token is still refused by `authenticate`, so the surface a
+#: token reaches is decided by the claim it was minted with rather than by
+#: which handler happened to be mounted. ADR 0114 said *this API is human-only*
+#: and that sentence is now false of three routes and true of every other one;
+#: the amendment is the named constant, not a loosened check.
+#:
+#: (S105 matches on the NAME. "agent" is a `token_use` discriminator from the
+#: claim contract and is published in every agent token this service issues.)
+AGENT_TOKEN_USE = "agent"  # noqa: S105
+
 
 @dataclass(frozen=True, slots=True)
 class IssuedToken:
@@ -68,6 +83,27 @@ class Principal:
     role_name: str
     scopes: list[str]
     state: SubjectState
+
+
+@dataclass(frozen=True, slots=True)
+class AgentPrincipal:
+    """An AGENT whose token verified and whose agent row still matches it.
+
+    A separate type from `Principal` rather than a widened one, and the reason
+    is the field `Principal` has that this cannot: `state` is a `SubjectState`
+    read from `auth_user_state`, which knows only humans. A single type with a
+    nullable `state` would be a type whose readers all have to remember which
+    half they are holding -- and `require_scope` would silently accept either.
+
+    No `owner_id`: the substrate copies the agent's owner onto the run at
+    enqueue and answers with it, so nothing here needs to carry a second copy
+    of a fact the database already joins (ADR 0229).
+    """
+
+    agent_id: UUID
+    role_name: str
+    scopes: list[str]
+    authz_version: int
 
 
 #: How long an agent's secret is accepted, and the bounds a caller may name
@@ -446,6 +482,151 @@ class AuthService:
 
     # -- agents ------------------------------------------------------------
 
+    async def _agent_record(self, agent_id: str) -> AgentCredential | None:
+        """Parse the id and look the agent up. **No refusal here at all.**
+
+        Split out of `agent_token` in Session 32 so that `step_token` can reach
+        the same lookup, and split at exactly this line because of what must
+        NOT move: `agent_token` verifies the secret against the stored hash
+        BEFORE it consults the status, and pays for a hash even when the id is
+        not a uuid or the agent is unknown (ADR 0172). A split that pulled the
+        status check up here would have reordered that, and the reordering is
+        invisible in every functional test -- what it changes is how long a
+        wrong answer takes.
+
+        So this returns the record and refuses nothing; `agent_token` keeps its
+        own uuid parse and hash comparison in its own order, and
+        `_refuse_unless_issuable` carries the two checks that follow. Rig 32f
+        measured the four refusal pairs byte-identical across the two callers.
+        """
+        try:
+            identifier = UUID(agent_id)
+        except ValueError:
+            return None
+        return await self.repository.lookup_agent(identifier)
+
+    @staticmethod
+    def _refuse_unless_issuable(credential: AgentCredential | None) -> AgentCredential:
+        """The two checks that stand between a found agent and a token.
+
+        In `agent_token`'s order and with `agent_token`'s messages, because they
+        ARE `agent_token`'s: this is where they moved to, not a second copy
+        written to look like them.
+        """
+        if credential is None:
+            raise AuthenticationFailed("no such agent")
+        if credential.status != "active":
+            raise AuthenticationFailed(f"agent is {credential.status}")
+        if credential.secret_expired:
+            raise AuthenticationFailed("agent secret has expired")
+        return credential
+
+    async def step_token(self, agent_id: str) -> IssuedToken:
+        """A token for ONE workflow step, as the agent whose run it is (ADR 0229).
+
+        **There is no secret here and that is the whole decision.** The worker
+        holds no agent credential -- it never sees one, and nothing in this
+        process stores one -- so a step's authority comes from the RUN's agent
+        row being current at the moment the step is about to be called. The run
+        was enqueued against the agent's stored scopes; this re-reads the same
+        row one attempt later, which is what makes a revocation stop a run at
+        its next boundary rather than at the next expiry.
+
+        **Byte-identical to `agent_token`'s token but for `jti`** (rig 32f):
+        the same `token_use`, `scope`, `role`, `authz_version`,
+        `credential_version`, `sub`, `iss` and `aud`. It is the same authority,
+        minted by the same issuer, for a caller that already proved the agent's
+        identity by holding the run.
+
+        It pays no hash, which is the one asymmetry with `agent_token` and is
+        correct: there is no secret to compare, and a dummy verification here
+        would be a timing defence against an attacker who would already be
+        inside this process.
+        """
+        issuable = self._refuse_unless_issuable(await self._agent_record(agent_id))
+        # (S106 matches on the argument name; "agent" is a token_use
+        # discriminator from the claim contract, published in every token.)
+        return self.issue(self._as_credential(issuable), token_use="agent")  # noqa: S106
+
+    async def authenticate_agent(self, authorization: str | None) -> AgentPrincipal:
+        """Verify an AGENT token and confirm the agent record still matches it.
+
+        `authenticate`'s shape, with one substitution and one addition (ADR
+        0229, amending ADR 0114). The substitution: `token_use` must be
+        `"agent"` here, where `authenticate` requires `"access"` -- so the two
+        are mutually exclusive by construction and a token minted for one
+        surface is refused by the other. `test_authenticate_still_refuses_an_
+        agent_token` is the control in the other direction.
+
+        The addition: the record consulted is `app_private.agents`, which is
+        where an agent's `status` and `authz_version` live. A revoked agent and
+        a reauthorised one are both refused on the call after the change --
+        SEC-REV-001's mechanism applied to the surface ADR 0114 previously left
+        with no agent half.
+
+        **`credential_version` is deliberately not compared.**
+        `_as_credential` publishes 0 for every agent, because an agent has no
+        password to have a version of; comparing a constant to a constant is a
+        check that cannot fail. The field that moves for an agent is
+        `authz_version`, and that is the one compared.
+        """
+        if not authorization or not authorization.startswith("Bearer "):
+            raise AuthenticationFailed("no bearer token")
+
+        try:
+            parsed = pre_parse(authorization[len("Bearer ") :].strip())
+            key = self.key_set.resolve(parsed)
+        except MalformedToken as exc:
+            raise AuthenticationFailed(f"malformed token: {exc}") from exc
+
+        try:
+            payload = jwt.decode(
+                parsed.token,
+                jwt.PyJWK.from_dict(key).key,
+                algorithms=[key_module.ALGORITHM],
+                audience=self.audience,
+                issuer=self.issuer,
+                options={"verify_exp": False, "verify_nbf": False},
+            )
+        except jwt.InvalidTokenError as exc:
+            raise AuthenticationFailed(f"signature or registered claim: {exc}") from exc
+
+        try:
+            verified = claim_contract.verify_claims(
+                payload, issuer=self.issuer, audience=self.audience, now=int(time.time())
+            )
+        except claim_contract.ClaimError as exc:
+            raise AuthenticationFailed(f"claim contract: {exc}") from exc
+
+        if verified["token_use"] != AGENT_TOKEN_USE:
+            raise AuthenticationFailed(
+                f"token_use {verified['token_use']!r} is not accepted by this API"
+            )
+
+        try:
+            agent_id = UUID(verified["sub"])
+        except ValueError as exc:
+            raise AuthenticationFailed("sub is not a uuid") from exc
+
+        credential = await self.repository.lookup_agent(agent_id)
+        if credential is None:
+            raise AuthenticationFailed("the subject no longer exists")
+        if credential.status != "active":
+            raise AuthenticationFailed(f"the subject is {credential.status}")
+        if verified["authz_version"] != credential.authz_version:
+            raise AuthenticationFailed("authz_version is stale")
+        if verified["role"] != credential.role_name:
+            raise AuthenticationFailed("the role has changed")
+        if list(verified["scope"]) != sorted(credential.scopes):
+            raise AuthenticationFailed("the scopes have changed")
+
+        return AgentPrincipal(
+            agent_id=agent_id,
+            role_name=credential.role_name,
+            scopes=sorted(credential.scopes),
+            authz_version=credential.authz_version,
+        )
+
     async def agent_token(self, agent_id: str, secret: str) -> IssuedToken:
         """Exchange an agent's id and secret for a token. Same shape as a login.
 
@@ -476,23 +657,30 @@ class AuthService:
         except StoredHashRejected as exc:
             raise AuthenticationFailed(f"stored hash unusable: {exc}") from exc
 
+        # **The `None` check is here AND in `_refuse_unless_issuable`, and the
+        # duplication is the ordering.** "no such agent" has to be answered
+        # before "secret mismatch" -- an unknown agent has no stored hash, so
+        # `matched` is False for it and the generic message would leak which of
+        # the two it was. The shared helper cannot carry this one, because
+        # between it and the two checks that follow sits a comparison only this
+        # caller performs.
         if credential is None:
             raise AuthenticationFailed("no such agent")
         if not matched:
             raise AuthenticationFailed("secret mismatch")
-        if credential.status != "active":
-            raise AuthenticationFailed(f"agent is {credential.status}")
-        if credential.secret_expired:
-            # **After the hash comparison, beside the status check** (ADR 0172).
-            # An expired credential costs the same Argon2 verification as a wrong
-            # secret and answers with the same bytes, so it is indistinguishable
-            # from an unknown agent -- which is what the ordering above exists to
-            # guarantee and what a check before the hash would destroy.
-            raise AuthenticationFailed("agent secret has expired")
+
+        # **After the hash comparison** (ADR 0172). An expired credential costs
+        # the same Argon2 verification as a wrong secret and answers with the
+        # same bytes, so it is indistinguishable from an unknown agent -- which
+        # is what the ordering above exists to guarantee and what a check
+        # before the hash would destroy. The two checks themselves moved to
+        # `_refuse_unless_issuable` in Session 32 so that `step_token` refuses
+        # with the same words; their POSITION did not move.
+        issuable = self._refuse_unless_issuable(credential)
 
         # (S106 matches on the argument name; "agent" is a token_use
         # discriminator from the claim contract, published in every token.)
-        return self.issue(self._as_credential(credential), token_use="agent")  # noqa: S106
+        return self.issue(self._as_credential(issuable), token_use="agent")  # noqa: S106
 
     @staticmethod
     def agent_secret_deadline(ttl_seconds: int | None) -> datetime:

@@ -386,14 +386,14 @@
       "version": "20260917120033"
     },
     {
-      "canonical_render_sha256": "18ad4cf9f508b0ae60b93805d789a7e69e7f8d63a71dc68a10bc20aba814f67f",
+      "canonical_render_sha256": "f7e0ebf32d1696afd1d2204884fa2ba23c84101b7c034d7474dc133f0b6ae081",
       "name": "workflow_substrate",
       "placeholders": [
         "auth_service",
         "object_owner"
       ],
       "template": "templates/0034-workflow-substrate.sql",
-      "template_sha256": "42d43af8013d6dfcc736ec574ba71e6cee011d6e0a24a4485caf1c0a266ccb5f",
+      "template_sha256": "7ab149fc333d2e849c12e7e2a1facb6d103caff8bce46d34374719677b3aa431",
       "version": "20260917120034"
     }
   ],

@@ -24,6 +24,7 @@ means the pool hands out a connection that answers.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -34,7 +35,16 @@ from typing import TYPE_CHECKING, Any
 from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 
-from app import db, keys, openapi_docs, routes, storage_client, storage_routes
+from app import (
+    db,
+    keys,
+    openapi_docs,
+    routes,
+    storage_client,
+    storage_routes,
+    workflow_routes,
+    workflow_worker,
+)
 from app import scopes as scope_map
 from app import settings as settings_module
 from app.hashing import BoundedHasher
@@ -46,6 +56,7 @@ from app.storage_client import BoundedR2, R2Adapter
 from app.storage_repository import StorageRepository
 from app.storage_service import StorageService
 from app.tokens import LocalKeySet
+from app.workflow_repository import WorkflowRepository
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -162,7 +173,43 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         )
         if mode == "storage":
             application.state.storage = _build_storage(pool)
-        yield
+
+        # **Session 32 (ADR 0226): the workflow loop, in `auth` mode only.**
+        #
+        # A task on this process's own event loop, sharing this pool and this
+        # `AuthService` -- no new container, no new role, no new secret and no
+        # new claimant against ADR 0070's connection budget. Rig 32a measured
+        # what it costs: 7.8 MiB RSS idle in the released image, against a
+        # 32 MiB flip criterion.
+        #
+        # Started AFTER the service is built and INSIDE `pool_lifespan`, so the
+        # loop never reaches a pool that is not open, and stopped before the
+        # pool closes, which is the order this function's own docstring
+        # requires.
+        worker: asyncio.Task[None] | None = None
+        if mode == "auth":
+            application.state.workflows = WorkflowRepository(pool)
+            worker = asyncio.create_task(
+                workflow_worker.supervise(
+                    repository=application.state.workflows,
+                    service=application.state.service,
+                )
+            )
+        try:
+            yield
+        finally:
+            if worker is not None:
+                # Cancelled and WAITED FOR. A task still running while the pool
+                # closes would have a connection taken out from under a step it
+                # is in the middle of finishing, and that step would stay
+                # leased until it expired. The wait is bounded below the
+                # container's own `stop_grace_period`, so Docker's timer is
+                # never what stops this.
+                worker.cancel()
+                try:
+                    await asyncio.wait_for(worker, workflow_worker.SHUTDOWN_GRACE_SECONDS)
+                except (TimeoutError, asyncio.CancelledError):
+                    pass
 
 
 def create_app(mode: str | None = None) -> Any:
@@ -247,6 +294,14 @@ def create_app(mode: str | None = None) -> Any:
         application.include_router(storage_routes.router)
     else:
         application.include_router(routes.router)
+        # **Session 32 (ADR 0229): the three agent-token routes, in `auth` mode
+        # only.** A second `include_router` rather than three routes added to
+        # `routes.router`, because the two sets authenticate differently: these
+        # call `authenticate_agent` and every route in `routes.router` calls
+        # `authenticate`, which still refuses an agent token. Keeping them in
+        # separate modules is what makes "which authenticator does this route
+        # use" a question with a one-word answer.
+        application.include_router(workflow_routes.router)
 
     # The document this application publishes, with FastAPI's unreachable `422`
     # removed (Run 9). Overridden here rather than in `bin/app-contract.py` so
@@ -396,6 +451,18 @@ def public_paths() -> tuple[str, ...]:
         # session rather than asserting an identity.
         "/auth/sessions",
         "/auth/sessions/{session_id}",
+        # Session 32 Run 5 (ADR 0229). The three workflow routes, published like
+        # every other path here -- and the only ones on this surface that take
+        # an AGENT token. `authenticate` still refuses one on every path above,
+        # and `authenticate_agent` refuses an access token on these three, so
+        # the two sets are disjoint by construction rather than by mounting.
+        #
+        # Published rather than kept container-local, for `/auth/agent-token`'s
+        # reason: an agent that can mint a token off the host and then cannot
+        # start a run with it has half a surface.
+        "/workflows/runs",
+        "/workflows/runs/{run_id}",
+        "/workflows/runs/{run_id}/cancel",
     )
 
 

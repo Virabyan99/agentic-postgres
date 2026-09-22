@@ -191,8 +191,8 @@ def test_a_claim_with_nothing_to_do_is_none_rather_than_an_empty_step() -> None:
     import asyncio
 
     repository, pool = _repository(row=None)
-    assert asyncio.run(repository.claim(holder="h", lease_seconds=30)) is None
-    assert pool.log[0][1] == ("h", 30)
+    assert asyncio.run(repository.claim(holder="h", lease_margin_seconds=20)) is None
+    assert pool.log[0][1] == ("h", 20)
 
 
 def test_a_claim_maps_the_functions_spelling_onto_the_dataclass() -> None:
@@ -208,6 +208,7 @@ def test_a_claim_maps_the_functions_spelling_onto_the_dataclass() -> None:
     run = uuid4()
     step = uuid4()
     agent = uuid4()
+    request = uuid4()
     repository, _ = _repository(
         row={
             "step_id": step,
@@ -215,6 +216,7 @@ def test_a_claim_maps_the_functions_spelling_onto_the_dataclass() -> None:
             "step_position": 2,
             "step_name": "second",
             "attempt": 1,
+            "request_id": request,
             "agent_id": agent,
             "dry_run": False,
             "step": {"tool": "create_note"},
@@ -224,12 +226,15 @@ def test_a_claim_maps_the_functions_spelling_onto_the_dataclass() -> None:
             "idempotency_key": f"wf-{run}-second",
         }
     )
-    claimed = asyncio.run(repository.claim(holder="h", lease_seconds=30))
+    claimed = asyncio.run(repository.claim(holder="h", lease_margin_seconds=20))
     assert claimed is not None
     assert claimed.position == 2
     assert claimed.name == "second"
     assert claimed.prior == {"first": {"row": 1}}
     assert claimed.idempotency_key == f"wf-{run}-second"
+    # D1686: minted by the CLAIM and returned, because it is the only thing
+    # that correlates this step to the plane's own audit row.
+    assert claimed.request_id == request
 
 
 def test_finish_and_park_return_the_words_the_substrate_returns() -> None:
