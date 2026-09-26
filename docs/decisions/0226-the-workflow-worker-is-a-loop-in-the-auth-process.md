@@ -159,3 +159,43 @@ cannot open a connection"*, and the holder string is derived the same way
 * **A host timer or systemd unit.** Rejected: `systemd/` holds backup units
   only, the unit would run as root on the host, and it would need an agent's
   token from outside every trust boundary the product has.
+
+## Amendment, Session 32 Run 8 (2026-09-26): the loop on production
+
+The loop ran on the deployment host for the first time on 2026-09-26, in
+both projects' `auth` containers at 1.10.0. Beta's container was read through
+its cgroup (`memory.current`, as root) on the trip's sheets:
+
+| Reading | `memory.current` |
+|---|---|
+| Before: the 1.9.0 container, five days old, no loop | **53.56 MiB** (56,164,352 B) |
+| With the loop: 1.10.0, three minutes after the deploy, idle | **54.91 MiB** (57,577,472 B) |
+| After `worker-restart` killed the process and the policy restarted it | **56.11 MiB** (58,830,848 B) |
+
+**The three flip criteria, against production:**
+
+* **Idle delta > 32 MiB: not tripped.** +1.35 MiB, and +2.54 MiB after the
+  restart. These are not the loop's cost alone: the two sides are different
+  processes of different ages, and `memory.current` counts page cache, so
+  rig 32a's +8.1 MiB, which held everything else still, stays the better
+  estimate of the loop's own cost. What production establishes is the
+  absolute: **56 MiB against the 384 MiB cap.**
+* **Under-load delta > 96 MiB: NOT READ.** No figure was taken while a run
+  executed (D1711). Every sweep recreates the services early, so the
+  container being sampled vanished, and the samples that were taken are of
+  a container created after the workflow proofs had finished. *A criterion
+  that was not read is not met*, which is this ADR's own rule, so it stands
+  as unanswered in `capacity.UNMEASURED`, not as cleared. The run proofs
+  passed under the cap, which says a run fits and says nothing about how
+  close it came. That is a floor, not the reading.
+* **More than one uvicorn process: not tripped where read.** Read as `op`
+  from `/proc/<pid>/cgroup` and `mountinfo` at three moments (15:47, 16:53
+  and after the cleanup), each `auth` container held exactly one `uvicorn`
+  process. Three samples, not a continuous reading.
+
+**And what the day showed about the loop coming back.** Three
+`worker-restart` kills (Sheet B4 and one in each sweep) returned a new
+heartbeat holder in **8.8 s, 8.4 s and 7.5 s**, with no lease overdue. Each
+landed on a container at restart count 0, because the sweeps recreate the
+services (D1711), so the restart policy's five-restart budget was never
+stacked.

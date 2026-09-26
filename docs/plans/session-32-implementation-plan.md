@@ -1,10 +1,27 @@
 # Session 32 — The durable step substrate and workflow execution
 
-**Status: PLANNED, not started.** Planned 2026-09-21 at `1948d21` (Session
-31's close, one documentation commit past the tagged and deployed `4344a1f`).
-Nine runs, all on `main` directly. **Nothing in this document has been
-executed.** Every number below was read from the tree at `1948d21` or is
-marked as the measurement the run owes.
+**Status: COMPLETE, 2026-09-26.** Planned 2026-09-21 at `1948d21`; executed
+2026-09-21 to 2026-09-26 in nine runs, all on `main` directly. **1.10.0 is
+deployed on both projects at `275a19e`, swept, merged and tagged there**
+(D1425), with one stated exception in the tag's message: the second sweep's
+instruments came from `176a7f0`, one test module past it (D1710, D1641's
+method). Evidence `evidence/session-32.json`: **158 claims, 152 passed, 5
+not_run, 1 failed** (`documented_path`, by decision); **all thirteen claims
+this session added passed**, the five host ones on their first execution
+anywhere.
+
+Runs and the rows each added (§1's second table): Run 1 the rigs and ADRs
+0226-0229, `f06fb8e`, D1668-D1672 -- Run 2 D1636, `e28381b` + `4560a40`,
+D1673-D1674 -- Run 3 migration 0034, `42672a0` + `86d4bb9`, D1675-D1680 --
+Run 4 the definition, `e6f6ef1`, D1681-D1684 -- Run 5 the loop and the routes,
+`8816d86` + `9b1e727`, D1685-D1690 -- Run 6 the readers, `7055fdd`,
+D1691-D1695 -- Run 7 the repair and the bump, `9a7fa4c`, `a44017b`, `c89d233`,
+D1696-D1705 -- Run 8 the trip, `176a7f0` + `c13fd76`, D1706-D1712 -- Run 9
+the close, D1713. The plan spent D1645-D1667; execution added
+**D1668-D1713**. **NEXT FREE: D1714, ADR 0230.** Three CI reds in the session (D1674, D1680,
+D1690), none after Run 5, each repaired forward. Everything below this
+paragraph is the plan as written, with each run's `**Done.**` recording what
+it measured.
 
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 32* whole (Builds /
 Already true / Must not / Measures / Closes), its rows **D1516** (one
@@ -505,6 +522,7 @@ at the close to say which run added which.
 | **D1710** | 8 | `test_the_ceilings_on_this_host_count_the_database` (Run 7): the unbounded count *"over every running container carrying that project's compose label"*. | **The first sweep failed `ceilings_read` on its LAST assertion, with the reading right.** What D1636 is about PASSED on production: each project's reading equals the independent sum of its containers' caps, 2240 MiB each, the database's among them, 4480 in all (1.9.0 read 2,944). The proof then counted unbounded containers over the two projects (8) where the reading counts every compose-labelled container -- and the shared edge is a compose project of its own (`infra/edge/compose.yaml`) whose `docker-socket-proxy` and `traefik` set no `mem_limit`: 8 + 2 = 10, which is what the reading said. A fixture holding a narrower definition than the code (CLAUDE.md §7 question 6). | **Instrument repaired at `176a7f0`** (the count taken over the reading's own population, asserted both ways), CI green, and a **second sweep** from that checkout with the deployment unmoved -- D1641's method: `git diff --name-only 275a19e..176a7f0` is one test module and nothing deployable, measured before the tag and stated in its message. `ceilings_read` then PASSED. The edge's two unbounded containers are recorded, not repaired: they are outside every project's budget by design, and no reading claimed otherwise. |
 | **D1711** | 8 | Sheet B5: *"the restart count on beta's `auth` is then two of `on-failure:5`'s five"*; and the plan's UNDER-RUN figure, *"the agent reads beta's auth `memory.current` twice more as `op`"* while the sweep runs. | **Each sweep RECREATES the services, early, on both projects** -- an inherited proof does it -- so the three worker-restart kills of the day each landed on a fresh container at restart count 0 (`e1c505345fb3` at B4, `31970c6d3e63` in sweep 1, `fde7fa3134a0` in sweep 2) and the budget was never stacked. And the id the agent was reading vanished mid-sweep (beta's auth recreated at 15:37:09 and again at 16:21:31). Found by reading `/proc/<pid>/cgroup` and `/proc/<pid>/mountinfo` as `op`, which names each `uvicorn` process's project and service without the Docker socket. **The consequence for Run 9: no figure was taken WHILE A RUN WAS EXECUTING.** The sweep-1 samples (15:48-15:55, 59,371,520 steady, one 64,188,416 at 15:54:05) are of a container created at 15:37, after the workflow proofs had finished. | Recorded. **Run 9's envelope may use BEFORE, AFTER-DEPLOY and AFTER-IDLE; it may NOT label any figure "under run".** A figure under a run needs a sample taken during one, which is a reading a later trip owes -- or a rig. |
 | **D1712** | 8 | Sheet B6 and D1643: *"`doctor usage --project beta-dev` → **exit 0 now**, `tool_calls_total` positive -- the sweep made beta's first agent tool call"*. | **Still exit 6**, `tool_calls_total could not be read: the store holds no such series yet` -- while the same reading shows beta's agent record grown from 44 audit rows / 0 idempotency claims to **100 / 12**, so tool calls certainly happened. The query is an INSTANT `sum(agent_tool_calls_total)`; D1609 measured that each `mcp` process mints its own series set, bounded by `metric_expiration: 60s`; and beta's current `mcp` process started at **16:21:25**, after the sweep's workflow proofs (its parked-run rehearsal ran at 16:18). **Consistent with, not proved:** the running `mcp` has had no call since it started, so there is no series to read -- the JUnit carries durations, not start times, so the order of the last call against 16:21:25 is not measured. | **The UNKNOWN is correct and reported, not folded** (ADR 0195). What is wrong is the word **"yet"**, which asserts *never*, and D1643's premise, which said the same: the reading is empty whenever no tool call has reached the CURRENT agent-plane process. Owed: the reason names that (or the query reads a window rather than an instant), and a later reading with a call made after the last recreate. |
+| **D1713** | 9 | D1665: *"a generation moves only if a secret is rotated, which nothing here does"*, so D1581 *"is NOT observable on this trip either"*. | **The premise is false and the conclusion survives by accident.** Every deploy materializes a new generation: alpha's went `14f76e5345ad1037` (the sentinel's reading) → `f9fc38674d700d4a` at the deploy (`materialize-secrets: wrote 29 file(s)`) → `9817eb0784fd2117` by the time the second sweep started, with no rotation anywhere. And the first sweep RECREATED `auth`, `mcp`, `storage` and `docs` on both projects with no image change (D1711): **the generation-only event D1581 is waiting for, observed once.** What did it -- which proof, and whether through a deploy or a `down`/`up` that recreates everything regardless of any digest -- is not identified. | **D1581 stays UNDETERMINED, now with a lead** (scope-closure §25). The next trip that wants it reads which inherited proof redeploys, and compares that redeploy's recreated set with the mount digests before and after. |
 
 ---
 
@@ -2260,6 +2278,33 @@ folder: §2's block (STAGE 4, RELEASE, EVIDENCE, CURRENT_SESSION, HOST, DR
 KITS), §8's sentence *"There is no worker, queue, outbox, scheduler or
 workflow"* rewritten to what exists now, §9's D1636 row removed and the
 D1581 row's note updated per D1665; the memory file. Commit, push, done.
+
+**Done.** 2026-09-26. **The code half**: `capacity.ENVELOPE` gained a
+`MACHINE` `Measurement` for the auth container with the loop, on the host --
+53.56 MiB before (1.9.0) → 54.91 with the loop idle → 56.11 after a worker
+restart, against the 384 MiB cap -- whose conditions say the deltas are not
+the loop's cost alone (different processes, different ages, page cache) and
+that rig 32a's +8.1 MiB remains the better estimate of it. `UNMEASURED` gained
+the figure the trip could not take: the container's memory WHILE a run
+executes (D1711). Session 31's usage note gained D1712's correction.
+`docs/capacity-envelope.md` regenerated. ADR 0226 gained an *Amendment*: the
+idle criterion not tripped, **the under-load criterion NOT READ** (and so
+unanswered, not cleared -- the ADR's own rule), the one-process criterion not
+tripped at the three moments it was read; three kills, a new holder in
+7.5-8.8 s. **Two of this run's own sentences were over-claims caught on
+re-reading and corrected before commit** (an OOM-kill nobody read, a
+continuous reading that was three samples), and one figure was in the
+wrong unit (59.4 for 56.6 MiB) until the conversion was printed.
+
+**The records**: this header rewritten; `docs/scope-closure.md` **§25**;
+`stage-4-plan.md`'s Status block (1.10.0, `CURRENT_SESSION` 32, 229 ADRs, 34
+migrations, 251 requirements, 158 claims / 32 offline -- each counted, not
+recalled; one schema ADDED, `workflow.schema.json`, none moved); CLAUDE.md
+in the launch folder; the memory file. **One row, D1713**: D1665's premise
+that a generation moves only on a rotation is false -- every deploy
+materializes one, and the first sweep moved alpha's again while recreating
+`auth` with no image change, which is D1581's event observed once and not
+yet explained. **Session 32 is COMPLETE.**
 
 ---
 

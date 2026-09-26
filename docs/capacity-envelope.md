@@ -316,7 +316,24 @@ Sampled under:
 
 **Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
 
-Four times the capacity reading, and the difference is where it goes: capacity reads manifests, a `df` and container labels, while usage reaches the database, the repository AND the store. Alpha returned `285 requests, 21 calls` -- **the sweep's own traffic, which is the first time this product has read its own telemetry back on production**. Beta returned `UNKNOWN: tool_calls_total could not be read; the store holds no such series yet` and the verb exited 6, because no agent tool call has ever been made there. That is the reading working: a Prometheus counter has no series until it is first incremented, and `exit_code` refuses to fold *no series* into *zero calls* (D1643, ADR 0195).
+Four times the capacity reading, and the difference is where it goes: capacity reads manifests, a `df` and container labels, while usage reaches the database, the repository AND the store. Alpha returned `285 requests, 21 calls` -- **the sweep's own traffic, which is the first time this product has read its own telemetry back on production**. Beta returned `UNKNOWN: tool_calls_total could not be read; the store holds no such series yet` and the verb exited 6, because no agent tool call has ever been made there. That is the reading working: a Prometheus counter has no series until it is first incremented, and `exit_code` refuses to fold *no series* into *zero calls* (D1643, ADR 0195). **Session 32 Run 8 found that premise too narrow** (D1712): beta still read no series AFTER its first tool calls, with 100 audit rows on record, because each `mcp` process mints its own series set (D1609) and the sweep had recreated `mcp` after its last call. The reading is empty whenever the CURRENT agent-plane process has served no call -- not only when none was ever made.
+
+### the auth container's memory with the workflow loop, on the host
+
+**53.56 MiB before (1.9.0, no loop) -> 54.91 MiB with the loop idle -> 56.11 MiB after a worker restart, against a 384 MiB cap**
+
+Sampled under:
+
+- the 3,814 MB deployment host, no swap, beta-dev's `auth` container
+- cgroup `memory.current`, read as root: 56,164,352 / 57,577,472 / 58,830,848 bytes
+- BEFORE: the 1.9.0 container, five days old, no loop, read on Sheet B1
+- WITH THE LOOP: the 1.10.0 container three minutes after its deploy, two definitions installed, no run ever made, heartbeat every poll
+- AFTER RESTART: the same container ~30 s after `rehearse.sh worker-restart` SIGKILLed the process and the restart policy brought it back
+- **NOT under a run** -- no figure was taken while a run executed (D1711); see UNMEASURED
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
++1.35 MiB with the loop and +2.54 MiB after the restart -- a fraction of rig 32a's +8.1 MiB and an order of magnitude inside ADR 0226's 32 MiB idle flip criterion. **The deltas are NOT the loop's cost alone**: the two sides are different processes of different ages, and `memory.current` counts page cache, which a five-day-old container has accumulated and a fresh one has not. What the figures DO establish is the absolute: 56 MiB against a 384 MiB cap, with the hash budget's four-concurrent 259 MiB the only other claimant on that headroom (`config.py:576-592`). The rig's delta stays the better estimate of the loop's own cost, because it held everything else still.
 
 ---
 
@@ -326,6 +343,12 @@ Listed rather than omitted. An envelope missing the scenarios nobody could
 run reads as an envelope of the whole system — which is the dishonest
 reporting this claim is most exposed to, arriving as a document that looks
 complete rather than as a claim that is false.
+
+### The auth container's memory WHILE a workflow run executes, on the host
+
+ADR 0226's second flip criterion is an under-load delta of 96 MiB, and Session 32's trip did not read it (D1711). The plan sampled beta's `auth` cgroup during the sweep, but every sweep RECREATES the services early -- an inherited proof does it -- so the container id being read vanished, and the samples that were taken (56.6 MiB steady, one 61.2 MiB) are of a container created AFTER the workflow proofs had finished: an idle loop, not a loaded one. A figure labelled 'under run' from them would be the value that looked measured and was not.
+
+*Unblocked by: a trip that samples beta's `auth` cgroup DURING `test_a_three_step_run_completes_as_the_invoking_agent`, finding the container by `/proc/<pid>/mountinfo` as `op` (it names the project and service without the Docker socket); or a rig that drives runs through the loop and reads the cgroup throughout.*
 
 ### The deployment's own numbers, on the deployment
 

@@ -981,3 +981,75 @@ against the real thing instead of the expected thing.
    administrative scopes and tenant grants cannot exist** any more than
    Session 24's auditor could.
 5. **D1248's audit filters** remain Session 33's, for the provenance reader.
+
+## 25. What Session 32 closed, what it left, and what Session 33 inherits
+
+**Session 32 is the session that gave this product a worker, and the worker
+holds nothing an agent identity does not hold.** Nine runs, `D1645`–`D1713`:
+twenty-three rows written at planning and **forty-six written by executing
+it**. `1.10.0` is deployed, swept, merged and tagged at `275a19e` (D1425, with
+D1641's method stated in the tag for D1710), and the merged evidence reads
+**158 claims: 152 passed, 5 not_run, 1 failed**. All thirteen claims the
+session added passed, and the five host ones did so on their first execution
+anywhere.
+
+**The sentence this session would most want carried forward: the defect that
+would have cost the trip was found by WRITING the proof, before the trip**
+(D1696). The loop recorded the request id it sent; the agent plane mints its
+own and ignores an inbound one (ADR 0160); so the live proof's join of step
+to audit row would have returned nothing on production. Run 5's end-to-end
+rig had passed because its plane was a fake that believed what the loop
+believed. The trip then found the opposite case: one proof failed while the
+product was right (D1710), because its fixture held a narrower definition of
+*unbounded* than the reading did. Both are CLAUDE.md §7's question 6: who
+wrote the fixture, and does it share a belief with the code?
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **D1636** — `ceilings` excluded the database | **Closed on production.** The reading groups by `com.docker.compose.project` and reads **4,480 MiB across 2 projects, by compose project**, where 1.9.0 read 2,944. `ceilings_read` passed: for each project the figure equals the independent sum of its running containers' caps, the database's among them. |
+| **D1516** — one durable substrate, not three | **Closed.** Migration 0034: `workflow_definition`, `workflow_run`, `workflow_step` and `workflow_worker` in `app_private`, no RLS and no request-role grant (D1647), reached only through nine definer functions. Sessions 33 and 34 build on it rather than beside it. |
+| **D1521's first half** — the spec's Sessions 61–62 | **Closed, as far as the proofs reach**: versioned definitions compiled against the capability lock and installed by the deploy (ADR 0228); durable run and step state (ADR 0227); restart safety (`workflow_resume`, three `worker-restart` kills on production, a new holder in 7.5–8.8 s); retries with backoff (a step parked and resumed at attempt 2); an idempotency key per (run, step), never per attempt, so a replay after a crash writes ONE row (D1646); cancellation; step timeouts through the lease (D1687); revocation checked at the step boundary (`workflow_revocation`); every step correlated to the plane's own audit row by the plane's request id (D1696). **Not in this half**: approval gates, compensation, external-event waits, provenance. Those are D1521's second half. |
+| **D1527** — `THR-WORKER` before code | **Closed.** The row is in `docs/threat-model.md` after `THR-NOISY-NEIGHBOUR`. |
+| **D1529** — the restore-test row | **Closed.** The drill carries the runs by status, and `workflow_restore` passed: a restored cluster holds the runs the live one held at the target. |
+| **The seventh claimant** (§24 item 1) | **Priced and found to be none** (D1653, ADR 0226). The worker is a loop inside the `auth` process: it uses the sixth claimant's pool, so `BUDGET_CLAIMANTS` is unchanged. On production the container reads **56 MiB against its 384 MiB cap**. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **D1707** — `migrate.sh … status` prints no ledger | **New, a product defect, recorded and left** (found on the trip; nothing deployable moves mid-trip). Since 1.8.0 dbmate's output goes through `container_exec.compose_run`, which always captures, and `run_dbmate` returns only the exit code, so the verb exits 0 having listed nothing. The doctor's `migrations` check and the deploy's ledger line are the readers meanwhile. Owed: the output printed, and a proof that the `[X]` lines appear. |
+| **D1711** — no memory figure under a run | **Unmeasured, and listed in `capacity.UNMEASURED`.** ADR 0226's second flip criterion (an under-load delta of 96 MiB) was not read: every sweep recreates the services early, so the sampled container vanished, and the samples taken were of an idle loop. A later trip samples during the run proof, finding the container through `/proc/<pid>/mountinfo` as `op`. |
+| **D1712** — `doctor usage` on beta still exits 6 | **The verdict is right and the wording is wrong.** Tool calls were made (100 audit rows), but each `mcp` process mints its own series (D1609), and the sweep recreated `mcp` after its last call. *"No such series **yet**"* asserts *never*; the truth is *none in this process*. D1643's premise, that it exits 6 until the first call, was too narrow. |
+| **D1713** — the generation moves on every deploy, and something inside the sweep moves it again | **A lead on D1581, not an answer.** D1665 assumed a generation moves only on a rotation. Measured: alpha's moved `14f76e…` → `f9fc38…` at the deploy and → `9817eb…` during the first sweep, with no rotation. The same sweep recreated `auth` with no image change: the event D1581 needs, observed once. Which proof did it, and whether it was a deploy or a `down`/`up` (which would recreate everything regardless), is not identified. **D1581 stays UNDETERMINED.** |
+| **D1705** — two behaviours of step 6d have no offline proof | *Nothing to install, saying which reason* and *an uninstallable definition refuses at exit 5*. Both were READ on the trip's transcripts (alpha's line, beta's two installs); neither is a proof. Owed by the next run in `bin/deploy-project.py`. |
+| **D1704** — a revoked agent cannot read the run its revocation stopped | `authenticate_agent` refuses a non-active agent before the route runs. Whose read that is (the owner's? an operator's?) is the second principal's question. Session 33. |
+| **D1700** — probe agents accumulate on beta | Four revoked agents and one subject nobody can log in as, per sweep: eight and two after this trip. They cannot be deleted while their runs reference them, and the runs are the substrate's record. A retention story for runs is owed before it matters. |
+| **D1642** — a DR kit names the checkout's commit | Happened twice on this trip (`-pre` names `275a19e`, `-post` names `176a7f0`, while the documents inside name the deployments). Harmless both times because the deployable diff was measured empty; still unguarded in general. |
+| **The edge's two containers are unbounded** | `docker-socket-proxy` and `traefik` set no `mem_limit` (D1710 found them). Outside every project's budget by design; noted for Session 35's hardening beside the edge's missing `pids_limit`/`cpus`. |
+| **D1547** — the sentinel row is removed by a root `psql` | Unchanged: this session moved the `app` OpenAPI contract, not the `api` one, so `delete_note` is still nobody's. |
+| `documented_path`, `port_allocation`, the rotation trio, `replacement_host_restore` | Unchanged and for the same reasons: a person's walk, no reboot, no rotations, D1028. |
+
+### What Session 33 inherits, in order
+
+1. **The substrate's API, by name**: `workflow_install_definition`,
+   `workflow_enqueue`, `workflow_claim_step`, `workflow_finish_step`,
+   `workflow_park`, `workflow_heartbeat`, `workflow_cancel`,
+   `workflow_run_status`, `workflow_counts` — nine definer functions in
+   `app_private`, eight granted to `auth_service` and the install to nobody.
+   **An approval gate is built ON these, not beside them.**
+2. **`approval_required` is still a terminal refusal**, and `validate` refuses
+   a definition naming such a capability. Session 33 turns the refusal into a
+   parked step resumed by an approval, under a scope the second principal
+   holds.
+3. **The `wait` step's park is already built**: `workflow_park` with no
+   `resume_after`. Session 33 adds the step kind; Session 34 adds the event
+   that resumes it.
+4. **D1248's audit filters, for `apg workflow inspect`**: provenance from
+   `agent_audit` by the plane's request id is the join the reader does not
+   yet make. The correlation itself is proved on production (D1696).
+5. **The second principal's scope**: it approves, it may not act. D1638 and
+   D1704 are the two places this product has already met the question —
+   a token whose stored scopes exceed its role's ceiling is refused at
+   issuance, and a revoked agent cannot read its own stopped run.
