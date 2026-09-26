@@ -497,6 +497,7 @@ at the close to say which run added which.
 | **D1702** | 7 | §5 Run 7 item 3: *"the correlation join (`SELECT count(*) FROM app_private.agent_audit a JOIN app_private.workflow_step s ON s.request_id = a.request_id WHERE s.run_id = …` = 3)"*. | **A write has TWO audit rows** -- `agent_plane` and `database`, joined by the same request id since 0022 -- and a read has one, so that join is **5** for the round trip, not 3. | **One `agent_plane` row per step**, naming the run's agent, plus one `committed` `database` row for each write. The property is *every step is findable in the audit by its id*, which a count of 3 would not even have stated correctly. |
 | **D1703** | 7 | §5 Run 7 item 6: the reading *"leaves `template_version` and `migrations.count` (33 → 34)"*. | **Two leaves differ and the second is `migrations.release_lock_sha256`.** The rendered document carries no migration COUNT; it carries the release lock's digest, which moved because 0034 is in the lock. 5,948 -> 5,949 bytes. `bump minor`; with `--also migration_added --also api_operation_added` **`requires minor`**, `changes [api_operation_added, migration_added]`; without them **`requires patch`** -- D1666's prediction measured. | The release paragraph lists both leaves and both readings; Sheet B1's `upgrade plan` lines carry the two `--also` flags. `upgrade_plan` is left alone: inferring `migration_added` from a lock digest moving is the inference its own docstring refuses (D1666). |
 | **D1704** | 7 | ADR 0229: status and cancel answer *"the agent's own run"*. | **A revoked agent cannot read the run its revocation stopped.** `authenticate_agent` refuses a non-active agent at the route, so `GET /workflows/runs/{id}` is a 401 for exactly the run whose `stopped_reason` is `agent_not_active`. Correct for the authority -- a revoked principal reads nothing -- and it leaves the operator the doctor's counts and no product reader of ONE run's record. | The live revocation proof reads the run through `workflow_run_status` as the superuser, and says why. **Recorded for Session 33**, whose `inspect` is an operator's provenance reader (D1248); no route is widened here. |
+| **D1705** | 7 | §2 `WF-INSTALL-001`: *"a project with no `workflows/` directory installs nothing and says so; an uninstallable definition refuses the deploy at exit 5"*, with the proposed node ids `::test_a_project_without_a_workflows_directory_installs_nothing_and_says_so` and `::test_an_uninstallable_definition_refuses_at_exit_five`; Sheet B2: alpha's step 6d prints *"(the project declares none)"*. | **Neither proof exists** -- Run 4 wrote seven proofs in `test_workflow_install.py` and none of them drives `install_workflow_definitions`' two early returns or its `fail(EXIT_VALIDATION, …)` paths. Found by measuring the plan's 84 proposed node ids against the registry: 27 are absent from it, because the registry was written from `--collect-only` rather than from the proposals, and walking those 27 for their properties found these two with no proof at all. And step 6d has TWO "nothing" lines: `(the project declares no migration set)` for a manifest with no set -- alpha -- and `(the project declares none)` for a set with no `workflows/`. | **The registry claims only what is proved**: `WF-INSTALL-001`'s description names both behaviours as NOT claimed and why. Both are READ on the trip, in the deploy transcripts (Sheets B2 and B3); a proof of each is owed and belongs to the next run that touches `bin/deploy-project.py`. Sheet B2 and Run 8 item 3 now expect alpha's line as the code prints it. |
 
 ---
 
@@ -1987,9 +1988,74 @@ proofs copy, including its `--setup-plan` history in D1637/D1639);
    json` with the eight new offline claims plus the 24 inherited, every one
    `passed` (the count read from the file). Push; CI by full SHA.
 
-**Done.** *(the collect-only listing; the tuple counts; every leaf of the
-upgrade reading; the flag diff (empty); the two gates' first-run defects
-as rows; the `--setup-plan` outputs' node counts; CI)*
+**Done.** Two commits, and the first is a repair the live proofs found by
+being WRITTEN.
+
+**Repair-first, `9a7fa4c` (D1696), CI green.** Writing
+`test_every_step_is_correlated_to_one_audit_row_by_request_id` meant reading
+where the audit's `request_id` comes from, and it comes from the PLANE:
+`StampRequestId` mints one per HTTP request and reads no inbound header, by
+decision (ADR 0160). The loop sent the claim's id as `X-Request-Id` and
+recorded the claim's id on the step, so the join would have returned zero rows
+on the host -- invisible offline because rig 32j's plane was a fake that
+believed the loop. 0034 amended while still applied nowhere: the claim clears
+the id and returns none, `finish` and `park` record the id off the plane's
+RESPONSE, `NULL` where no call was made. Three proofs replaced or added;
+**battery four kills, four controls green**, restored byte-identical, the lock
+re-frozen identical; ADR 0227 gained *Amendment, Run 7*.
+
+**The bump, `a44017b`.** `CURRENT_SESSION` 32, `VERSION` 1.10.0. **Node ids
+read from `pytest --collect-only`**, never the proposals: 382 collected across
+the offline modules, and the registry names every non-parametrised proof of
+the seven `test_workflow_*` modules plus the workflow proofs of
+`test_diagnosis`, `test_doctor_redaction`, `test_doctor_readings`,
+`test_rehearsal`, `test_restore_test_command`, `test_auth_service_shape` and
+`test_dev_environment_cluster`. **27 of the plan's 84 proposed names do not
+exist in the tree** (measured by a script over §2 against the registry): the
+runs named their proofs more precisely -- `..._is_a_different_refusal`,
+`..._that_needs_a_holder_that_moved` -- and two proposed properties have no
+proof at all, which the registry now says (D1705). **Tuple counts, measured**: requirements 238
+-> **251**, `CLAIMS` 145 -> **158**, `OFFLINE_CLAIMS` 24 -> **32**, ADRs
+**229**. `WF` joined `ID_PATTERN`; `THR-WORKER` pasted from Run 6's Done with
+its detection cell naming the plane's id (D1696).
+
+**`upgrade plan`, every leaf** (D1624's rig: a worktree at `4344a1f`, a
+`tar`-copy of the tree, neither rendering in the checkout): with `--also
+migration_added --also api_operation_added` -- `bump minor`, `requires
+minor`, `verdict ok`, `changes [api_operation_added, migration_added]`,
+`reasons []`, `operator_digests_moved []`; without them `requires patch`.
+**Two leaves**: `template_version` 1.9.0 -> 1.10.0 and
+`migrations.release_lock_sha256` (`9c56e9a0…` -> `435c32c4…`); 5,948 ->
+5,949 bytes. No `migrations.count` leaf exists (D1703).
+
+**The flag diff is EMPTY**: `diff <(grep -o -- '--[a-z-]*'
+bin/session-31-check.sh | sort -u) <(… 32 …)` exits 0 over 59 tokens. Header
+and usage rewritten whole; `readonly SESSION=32` the only literal;
+`run_suite "p0 and not future and not live_host and not external"` verbatim;
+`shellcheck` clean; `SHELL_COMMANDS` gained it; the modes test derived from
+thirty-one's with D1627's no-gap test carried and its literal moved.
+
+**`--setup-plan`**: with the five variables set, **13 proofs planned** (twelve
+in `test_session32_workflows.py`, one in the restore module) with the fixture
+chain `beta_owner` -> `beta_agents` -> `roundtrip`/`crash_state`/`parked_
+rehearsal`/`beta_admin`; with none set, **13 SKIP, 0 errors**.
+
+**The gates, first runs, no defects.** `bin/session-01-check.sh` at
+`a44017b`: **PASSED** -- 6428 passed, 0 failed, 3 skipped, 0 errors; P0
+collected 6831; 0 future placeholders; 0 identity collisions; 0 floating image
+refs. `bin/session-32-check.sh --mode offline`: **PASSED** -- suite 6437
+passed, 0 failed; `evidence/session-32-offline.json` **32 claims, 32 passed**,
+the eight new ones among them.
+
+**Before the gates, the targeted list found two classes, both repaired in the
+run:** the release paragraph's last paragraph must name `` `1.10.0` `` and say
+which schemas moved (`test_release_contract`), and **sixteen `--session` /
+`--through-session 31` literals on the documented path** across README, the
+operator, upgrade, API and pool pages (D678/D1484's class, for the fourth
+time in four bumps). Divergence rows **D1696-D1705**. **NEXT FREE: D1706,
+ADR 0230.**
+
+**CI on `a44017b`**: *(read below by full SHA)*.
 
 ### Run 8 — the trip: both projects redeploy with 0034, the worker's first run, one sweep, the tag
 
@@ -2027,7 +2093,7 @@ outcome, read before the next is issued (D1510):
    line is the value, count before write), then alpha's deploy under
    `script(1)`, nothing after it. Expect exit 0; step 0 `admitted`; **step
    6 applies 0034 (ledger 34, `Pending: 0`)**; step 6d prints `no workflow
-   definitions (the project declares none)`; `auth` recreated (image
+   definitions (the project declares no migration set)` (D1705); `auth` recreated (image
    moved), the other containers as Compose decides; `doctor.sh --project
    alpha-dev` → **12 ok** (`workflow` reading zero runs and a heartbeat
    younger than 10 s — the loop's first heartbeat on production).
@@ -2308,7 +2374,9 @@ exact line from `--help`, printed on the sheet by the agent).
    → exit 0. Step 0 `admitted` (six lines, unchanged from Session 31's
    numbers — write them down). **Step 6 applies one migration**: the
    migrator's line says `Applied`, and the ledger is what is read (D941).
-   Step 6d prints `no workflow definitions (the project declares none)`.
+   Step 6d prints `no workflow definitions (the project declares no
+   migration set)` -- alpha has no set, which is a different line from a set
+   with no `workflows/` (D1705).
    If step 6 fails: **STOP** (§9); read the ledger; never amend 0034.
 
 Then the reads: `sudo bin/migrate.sh --project project.alpha.yaml --runtime

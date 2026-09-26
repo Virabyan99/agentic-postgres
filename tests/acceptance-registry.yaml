@@ -4968,10 +4968,13 @@
     interpolate a variable at all (D1684, rig 32g) and an unset one then
     refuses rather than installing an empty definition. The statement names as
     many values as the migration declares; a scope name the compiler could not
-    have derived is refused before anything runs. A project with no
-    `workflows/` installs nothing and says so; an uninstallable definition
-    refuses the deploy at exit 5. `apg dev up` installs the example project's
-    definitions through the same statements.
+    have derived is refused before anything runs. `apg dev up` installs the
+    example project's definitions through the same statements. **Two of step
+    6d's behaviours are NOT claimed here, because nothing offline proves them**
+    (D1705): that a project with no set or no `workflows/` installs nothing
+    and prints which, and that a definition that does not compile or install
+    refuses the deploy at exit 5. Both are in `bin/deploy-project.py` and both
+    are READ on the trip's deploy transcripts; a proof of either is owed.
 
 - id: WF-READ-001
   priority: P0
