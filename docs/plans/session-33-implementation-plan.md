@@ -1,6 +1,7 @@
 # Session 33 — Gates, compensation and provenance
 
-**Status: PLANNED, 2026-09-26, at `7b0d308`. Not started.** Ten runs, all on
+**Status: IN EXECUTION since 2026-09-26 — Run 1 done (D1742 added; NEXT FREE
+D1743).** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
 `main` directly. This plan spends **D1714–D1741** in §1 and **ADR 0230–0234**.
 **NEXT FREE AFTER THIS PLAN: D1742, ADR 0235.** Rows the runs add go in §1's
 second table, below D1741, in execution order; the header's *Status*
@@ -459,6 +460,7 @@ second table below, in execution order.
 
 | # | Run | Plan says | Tree does / measured | Decision |
 |---|---|---|---|---|
+| **D1742** | 1 | §5 Run 1: append `THR-APPROVAL` before any code, its *Acceptance requirement IDs* `AGT-APPROVE-002`, `WF-GATE-001`, `WF-APPROVE-001` and two proposed node ids. | `test_acceptance_registry.py::test_threat_model_requirement_ids_exist_in_the_registry` and `::test_threat_model_node_ids_are_collectible` read EVERY threat row: a requirement id must exist in the registry and a node id must collect. None of the five exists until Run 8 lands the registry (D690), so the row as written would turn two passing proofs red in a documentation run. | **The row lands in Run 1 with the prevention, detection and residual cells whole, and cites what holds TODAY**: `AGT-APPROVE-001` and `test_mcp_tools.py::test_a_capability_requiring_approval_is_refused_before_any_dial` (the refusal without a claim, which ADR 0231 keeps byte-identical). Its residual cell says so. **Run 8 rewrites the two cells** to add the three new requirements and their collected node ids. D1527's *before code* is kept; neither proof is weakened. |
 
 ---
 
@@ -731,6 +733,68 @@ Run `pytest tests/contract/test_acceptance_registry.py tests/contract/
 test_documentation_index.py -q -p no:randomly` (the ADR index proofs and the
 page index). Commit (`Session 33 Run 1: the rigs, THR-APPROVAL, and ADRs
 0230-0234`), push. **No CI read** — documentation only.
+
+**Done.** 2026-09-26. **The deployable-diff filter at `2c0e9b1`** (§0's list
+plus `deploy.sh` and `VERSION`) names ONE file, `src/agentic_postgres/
+capacity.py` — the envelope's data, as §0 said. **The rigs ran as ONE script**
+(`/tmp/rig33.py`, copied to the scratchpad with its transcript and JSON
+report) on one stack: `apg dev up --project project.example.yaml` (10.8 s,
+PostgreSQL **18.4**, 34 release + 2 project migrations, `app.note_embeddings`
+present), PostgREST from the pinned `v14.16` digest verifying the auth
+application's own JWKS, and **both application modes run from the checkout as
+subprocesses** with the image's own entrypoint (`uvicorn --factory
+app.main:create_app`), each environment built from nothing so the plane's
+forbidden-variable guard saw what a container sees. That is a method choice,
+not the plan's *built image*: the claim path is source, and the venv's fastmcp
+is the pinned **3.4.0** (read before the rig). The lock was compiled by the
+product's own `bin/mcp-contract.sh lock` over the fixture: seven tools,
+`set_note_embedding` `requires_approval: true`, vocabulary `data` carrying
+`note_embeddings:read|write`. The owner, the agent (`agent_writer`, seven
+scopes) and three notes were made through `auth_create_user` /
+`auth_create_agent` as the auth service and one superuser `INSERT` each.
+**33a** — the agent token's twelve claims, header `RS256` + `kid` + `typ JWT`.
+Re-signed with the same key plus `apg_approval {id, tool: create_note, key:
+wf-rig-1}`: `claims.verify_claims` keeps the member **true**; the plane's own
+`AgentTokenVerifier.verify_token` returns it in `AccessToken.claims` **true**
+(control, the same token without it: **no member**); `tools/list` over HTTP
+**200 with the same seven tools** for the original, the re-signed plain and
+the claim-bearing token; PostgREST + the pre-request hook `GET /notes` **200,
+three rows** for all three. The same claim signed by a SECOND key under the
+same `kid`: verifier **None**, plane **401** `invalid_token`, PostgREST **401
+`PGRST301`**. **§9's 33a stop is not met.** **33b** — with the agent's own
+token, `POST /rpc/set_note_embedding` DIRECT to PostgREST with the 768-zero
+text literal: **200, the row written** (one row for the note). The same with
+`Idempotency-Key` + `Dry-Run: true` + `X-Request-Id`, the plane's exact
+headers: **200, the row WRITTEN** — the missing dry-run branch, measured.
+Control through the plane: **HTTP 200, `isError: true`, `approval_required:
+this capability requires an approval this deployment cannot grant`**, ONE
+`agent_plane`/`refused`/`approval_required` audit row, **no row written**. The
+audit row's `request_id` is the PLANE's own id, not the caller's
+`X-Request-Id` (ADR 0160, D1696 — the loop must keep reading it from the
+response). D1721 and D1722 are now *measured*; nothing refused the direct call,
+so D1721 stands as written. **33c** — `create_note` through the plane: `result`
+keys **`content`, `isError`, `structuredContent`**; `structuredContent` is
+`{tool, row_count, row, dry_run}` and **equals** `content[0].text` parsed as
+JSON; `query_resource` (control) has the same three keys. D1724's inference is
+confirmed and Run 5 takes the `structuredContent` branch; the SSE body is in
+the report for the fake. **33d** — 1,000 rows in one statement, **one**
+distinct `started_at`: the keyset with the id tie-break walked **11 pages,
+1,000 rows, 1,000 distinct** (= the unfiltered count); the control without it
+returned **100 and stopped**; `EXPLAIN` a Sort over a Seq Scan without the
+index, an **Index Only Scan** with `(started_at DESC, id DESC)`. **33e** — the
+first pass failed on the RIG (dbmate's default ledger in `public`, where
+`migration_user` may not create) and was re-run with the product's own
+`--migrations-table app_private.schema_migrations`: the control (`ADD VALUE
+'rig_control'` + a column `DEFAULT 'rig_control'`) **refused `55P04 unsafe use
+of new value`, rolled back, the enum unchanged** — and dbmate had printed
+`Applied:` for it first (D941, seen again); the positive (`ADD VALUE
+'compensating'` + a plpgsql definer function inserting and returning it)
+**applied, rc 0**, and after commit the function returned `compensating` and
+wrote one row. **No §9 stop condition was met.** **`THR-APPROVAL`** appended
+after `THR-WORKER` in nine columns, citing today's refusal (D1742).
+**ADRs 0230–0234 written and indexed** (234 rows); **ADR 0228's amendment is in
+0228's own file** under *Amendment, Session 33* (D1723, D1724), as 0227 was
+amended in Session 32. **Rows added: D1742. NEXT FREE: D1743.**
 
 ### Run 2 — the carried-in defects first: D1707, D1712, D1705, D1740
 

@@ -100,3 +100,33 @@ being load-bearing rather than decorative.
 * **A step naming a TOOL rather than a capability.** Rejected: a tool is not
   versioned, and `query_resource` is backed by two capabilities, so a
   tool-named step could not say which reviewed thing it meant.
+
+## Amendment, Session 33 (D1723, D1724; ADR 0233, 0234)
+
+**The compiler reads the EFFECTIVE approval** (D1723). `apply_profile` sets a
+profile-added approval on the TOOL only (`capability_compiler.py:780`), and
+this compiler read the CAPABILITY entry's field (`workflow_definition.py:227`)
+-- so `project.second.example.yaml`'s `update_task_status`, approval-required
+by profile, compiled as if it needed none, and would have been refused at run
+time. The effective approval is now `tool.requires_approval OR
+capability.requires_approval`, the field the plane enforces. The Session 32
+refusal of every approval-requiring capability is REPLACED by two: a step whose
+effective approval is true must declare `approval:` (ADR 0230), and a step
+declaring `approval:` whose tool needs none is refused.
+
+**A step's stored result is the tool's own return value** (D1724). The loop
+stored the JSON-RPC `result` envelope (`{content, isError, ...}`), so
+`{{steps.<name>.row}}` could not resolve against a real plane; the offline
+fakes stored `{"row": ...}` directly and agreed with the code. **Rig 33c
+measured the real plane**: a `create_note` result carries `structuredContent`
+equal to `{tool, row_count, row, dry_run}`, and `content[0].text` is the same
+object as JSON; a `query_resource` result has the same three keys
+(`content`, `isError`, `structuredContent`). The loop stores
+`structuredContent` when it is an object, else `content[0].text` parsed as a
+JSON object, else `null` with the reason *the plane's result carried no
+structured value*. The reference grammar is not deepened; rows already stored
+on production are records and are not rewritten.
+
+**A definition gains three optional keys** (`approval`, `compensation`,
+`wait`; ADR 0230 and 0233); `schema_version` stays 1, because every addition is
+optional and both existing definitions validate byte-for-byte unchanged.
