@@ -1,0 +1,68 @@
+# The approval workflow: a step a human releases, between two that need nobody.
+#
+# What it is FOR: the first definition in this release with an approval gate,
+# and the one Session 33's live proofs run. `set_note_embedding` is
+# `requires_approval: true` in `projects/example/capabilities.yaml`, so the
+# plane refuses its first call `approval_required` and the run PARKS there
+# until a human holding `admin_workflows:approve` -- never the agent's own
+# owner -- approves or rejects it (ADR 0230, ADR 0232). The approved call
+# carries the decision as a signed claim in its step token and is served once
+# (ADR 0231).
+#
+# The first step moves a task `pending` -> `in_progress` and declares its
+# COMPENSATION: the same capability with the two statuses swapped, which is
+# `update_task_status`'s own inverse and the only write in this lock that has
+# one (D1726). A rejection is a cancel, and a cancelled run with a succeeded
+# step undoes it -- so rejecting this run puts the task back in `pending`. The
+# approval step declares no compensation: a note's embedding is upserted and
+# its previous value is not returned, so there is nothing to put back.
+#
+# Every argument is a reference and not a literal, for `notes-retry.yaml`'s
+# reason: the task and the note must exist on the deployment the run is
+# started against, and a uuid committed into this file would be right on no
+# deployment at all. `embedding` is a whole-string reference, so it reaches
+# the plane as the input's own list of numbers and not as text.
+#
+# The approval's 900 seconds is less than the run's 1800 by rule (D1719): the
+# run must outlive the window in which it may be decided.
+---
+schema_version: 1
+name: tasks-approval
+version: 1
+description: >-
+  Starts a task, sets a note's embedding once a human approves it, and
+  completes the task. Rejecting the approval cancels the run and puts the task
+  back in pending.
+timeout_seconds: 1800
+
+steps:
+  - name: start_the_task
+    capability: update_task_status@1.0.0
+    arguments:
+      p_task_id: "{{input.task_id}}"
+      p_expected_status: pending
+      p_new_status: in_progress
+    compensation:
+      capability: update_task_status@1.0.0
+      arguments:
+        p_task_id: "{{input.task_id}}"
+        p_expected_status: in_progress
+        p_new_status: pending
+      retry:
+        max: 1
+        backoff_seconds: 5
+
+  - name: set_the_embedding
+    capability: set_note_embedding@1.0.0
+    arguments:
+      p_note_id: "{{input.note_id}}"
+      p_embedding: "{{input.embedding}}"
+    approval:
+      expires_after_seconds: 900
+
+  - name: finish_the_task
+    capability: update_task_status@1.0.0
+    arguments:
+      p_task_id: "{{input.task_id}}"
+      p_expected_status: in_progress
+      p_new_status: completed

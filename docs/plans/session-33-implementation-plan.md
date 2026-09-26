@@ -1,7 +1,7 @@
 # Session 33 — Gates, compensation and provenance
 
-**Status: IN EXECUTION since 2026-09-26 — Runs 1–3 done (D1742–D1748 added;
-NEXT FREE D1749). Run 4 is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
+**Status: IN EXECUTION since 2026-09-26 — Runs 1–4 done (D1742–D1751 added;
+NEXT FREE D1752). Run 5 is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
 `main` directly. This plan spends **D1714–D1741** in §1 and **ADR 0230–0234**.
 **NEXT FREE AFTER THIS PLAN: D1742, ADR 0235.** Rows the runs add go in §1's
 second table, below D1741, in execution order; the header's *Status*
@@ -467,6 +467,9 @@ second table below, in execution order.
 | **D1746** | 3 | §1 D1729: provenance returns the run's `input`; §2 WF-PROV-001: *"no field carries a redacted argument value"*. | A run's input is the agent's data and is what a step's arguments are resolved from — `tasks-approval`'s `embedding` is `set_note_embedding`'s `p_embedding`, which the example capability REDACTS (`capabilities.yaml:68`). Returning the input to an auditor would put back exactly what `audit.redact` kept out of the audit record. | **Provenance carries the input's KEYS (`input_keys`), never its values**, beside no `parameters` and no step `result`. Proved with three canaries (`test_provenance_carries_no_parameters_result_or_input_value`, battery arm m8). The agent's OWN read (`workflow_run_status`) still returns its input, as under 0034. |
 | **D1747** | 3 | §5 Run 3: the decide function's refusals are *owner, decided, expired, no such run*; the listing is *"pending, unexpired approvals"*; `workflow_counts` gains *"`approvals_pending` (count)"*. | A run can end while its approval is still `pending` — a timeout, the agent's own cancel — and nothing then waits on the decision. The plan's predicates would list it, count it and let a human approve a run nobody will resume. | **A decidable approval is pending, unexpired, on a RUNNING run.** The listing and `approvals_pending` count only those; a decision on an approval whose run has ended is refused with the same `no such run` a missing run gets (checked AFTER the owner, decided and expired refusals, so those words stay exact). No new refusal word. |
 | **D1748** | 3 | §5 Run 3: undo rows are named `undo-<forward position>` and keyed `wf-<run>-undo-<forward position>`; nothing says why that cannot collide with a forward step. | 0034's column CHECK admits `undo-1` (`^[a-z][a-z0-9_-]{0,62}$`), and a forward step so named would share the undo row's name and key, failing `UNIQUE (run_id, name)` inside a finish. **But `schemas/workflow.schema.json:67` admits no hyphen in a STEP name** (`^[a-z][a-z0-9_]{0,62}$`), so no compiled definition can carry one: the collision is impossible by construction. Found by checking the premise before writing the compiler refusal the first draft of this row asked for. | **The hyphen IS the separation, and Run 4 pins it**: a proof that the schema's step-name pattern refuses `undo-1` (so a later widening of that pattern has to look at this). No compiler refusal is added for a name the schema already refuses. |
+| **D1749** | 4 | §5 Run 4 item 4: *"`bin/workflow.sh validate --project project.second.example.yaml` (beta's shape) compiles four definitions; the release project (`project.example.yaml`) with no profile is the D1723 control"*. | **The two manifests are the other way round.** `project.example.yaml` (`fixture-alpha`) names `migrations.set: projects/example` -- beta's shape, where the definitions live -- and its profile does not touch `update_task_status`; `project.second.example.yaml` (`fixture-alpine`) names NO set (so `validate --project` on it says there is nothing to validate, exit 0) and is the one whose profile carries `update_task_status: {requires_approval: true}` (`:79-80`). Measured by compiling both locks: the second's `update_task_status` tool entry reads `requires_approval: true` and its capability entry `false`. §1's own D1723 row already had it the right way round. | **The four definitions compile under `project.example.yaml`** (`validate` exit 0, four lines) and **D1723's case is the second lock**: `test_a_profile_added_approval_is_seen` compiles against it, and `validate --project project.second.example.yaml --file projects/example/workflows/tasks-{approval,compensate}.yaml` exits 5 on `start_the_task` with the new sentence -- the defect's repair seen through the product's own command. `test_the_example_project_without_the_profile_is_the_control` is the example manifest. |
+| **D1750** | 4 | §2: *"Run 8 lands the YAML"*; its *Existing entries that move* list does not name WF-DEF-001. §5 Run 4 replaces `test_a_capability_that_requires_approval_is_refused` and (by the battery's control name) renames `test_the_example_projects_definitions_compile`. | `test_acceptance_registry.py::test_every_registered_node_id_is_collectible` failed on exactly those two WF-DEF-001 node ids the moment they were renamed. An EXISTING entry's node ids are not `CURRENT_SESSION`'s all-or-nothing move (D690): no new requirement, claim or target session is added. | **WF-DEF-001 moves in Run 4**: its two node ids become `test_an_approval_requiring_step_must_declare_approval` and `test_the_example_projects_four_definitions_compile` (both stricter than what they replace), and its two sentences that became false are corrected (*approval arrives in Session 33*; *two definitions compile*); `docs/acceptance-matrix.md` and `docs/product-contract.md` regenerated. WF-DEF-002 is still Run 8's. |
+| **D1751** | 4 | §5 Run 4 item 2: the compiled step carries *"`compensation: {kind: \"write\", tool, capability, version, arguments, retry, timeout_seconds}`"*. | 0035's claim hands the worker an undo row's `step` as the forward element's `compensation` block with the row's `name` merged in, and the worker reads a forward step's `tool`, `capability`, `capability_version`, `resource`, `kind`, `arguments`, `retry`, `timeout_seconds`. A block spelling `version` would make an undo row a step the worker's own reader does not recognise. | **The compensation block uses the forward step's key names exactly -- `capability_version`, and `resource: null` --** so Run 5 reads an undo row with the reader it already has. Three further compiler decisions the plan did not take: `approval` and `compensation` are emitted ONLY when declared (a Session 32 definition compiles to byte-identical JSON); a reference to a WAIT step is refused (*a wait records no result*), since it could never resolve; a compensation's refusals are the forward step's, prefixed *its compensation:*. |
 
 ---
 
@@ -1352,6 +1355,68 @@ moved), `test_documentation_index.py`, `test_session12_documented_path.py`,
 `test_acceptance_registry.py`, `test_evidence_claims.py`. Commit (`Session 33
 Run 4: the definition gains approval, compensation and wait; the compiler sees
 a profile's approval`), push, read CI.
+
+**Done.** 2026-09-26. **The schema** (`schemas/workflow.schema.json`,
+`schema_version` still 1): a step is `oneOf` a capability step or a wait step,
+the four shared shapes moved to `$defs` (`capability_reference`, `arguments`,
+`retry`, `step_timeout`) so `compensation` reuses them, and `approval`,
+`compensation`, `wait` added as the plan wrote them. **The compiler**
+(`src/agentic_postgres/workflow_definition.py`): `ToolView` gains the TOOL's
+`requires_approval` and `Resolved.requires_approval` is the tool's OR the
+capability's (**D1723 repaired**); Session 32's refusal sentence removed from
+`resolve` and replaced by the plan's two in `_approval`, with D1719's bound
+naming both numbers; `_compensation` (every refusal the plan lists, the
+scopes joined, the retry and the timeout through `_step_timeout` against the
+compensation's own tool); `_compile_wait` (`{name, kind: wait, seconds,
+timeout_seconds: 5, retry: {max: 0, backoff_seconds: 1}}`, the 5 s stated
+as the claim-to-park window in a `#:` comment; `event` refused naming
+Session 34). The compiled compensation block uses the forward step's key
+names (**D1751**). **`init`**: `_first_write` reads the effective approval
+(the skeleton is unchanged -- `create_note` sorts first on both locks).
+**The two example definitions** written as §5 lists; the manifests are the
+other way round from the plan's item 4 (**D1749**): four definitions compile
+under `project.example.yaml` (`validate` exit 0), and both new definitions
+exit 5 under `project.second.example.yaml` at `start_the_task` with the new
+sentence. **`docs/workflows.md`**: *Approval*, *Compensation* and *Wait*
+subsections, the D1726 sentence (a note cannot be un-created), `## Approvals`
+(D1718's three controls, D1720's listing, a rejection is a cancel, D1721 in
+one paragraph), `compensating` among the words, the *What is not here yet*
+table down to Session 34's one row. **Proofs** (`test_workflow_definition.
+py`): `test_a_capability_that_requires_approval_is_refused` REPLACED by
+`test_an_approval_requiring_step_must_declare_approval` (asserts the new
+sentence AND that the step compiles once `approval:` is added);
+`test_the_example_projects_definitions_compile` renamed `..._four_
+definitions_compile` and made to assert the compiled approval, the whole
+compensation block and the whole wait step; NEW `..._declared_approval_on_a_
+step_that_needs_none_is_refused`, `..._profile_added_approval_is_seen`
+(premise asserted first: tool `true`, capability `false`), `..._example_
+project_without_the_profile_is_the_control`, `..._approval_expiry_is_bounded_
+below_the_run_timeout`, `..._compensation_must_be_a_write_the_lock_compiles`,
+`..._compensation_on_a_read_step_is_refused`, `..._compensation_may_not_
+require_approval` (by the capability AND by a profile), `..._compensation_
+takes_only_declared_arguments`, `..._compensation_may_not_reference_a_later_
+step`, `test_compensation_scopes_join_the_required_scopes`, `..._wait_takes_
+no_capability_and_is_bounded`, `..._wait_on_an_event_is_refused_naming_
+session_thirty_four`, `..._reference_to_a_wait_step_is_refused`, `..._
+skeleton_skips_a_write_a_profile_made_approval_requiring` (loads `bin/
+workflow.py` by path), `test_an_undo_rows_name_can_never_be_a_step_name`
+(**D1748 pinned**), `test_the_schema_admits_a_capability_step_or_a_wait_step_
+and_never_both`, `test_the_session_32_definitions_are_byte_for_byte_
+unchanged` (the digests read at the `1.10.0` tag, which is what both
+projects installed). `test_dev_environment_cluster.py`'s install proof moved
+from two definitions to four and now reads the compensation's retry, the
+approval's expiry and the wait's seconds out of the INSTALLED bodies where
+0035 reads them. WF-DEF-001's two node ids and two sentences moved
+(**D1750**). **Battery 9/9 killed**, each `FAILED`, none `ERROR`, control
+`test_the_example_projects_four_definitions_compile` PASSED in every arm,
+anchors pre-flighted, restored by copy and `cmp`: the plan's (m1) D1723
+restored, (m2) a read admitted as a compensation, (m3) the compensation
+scopes dropped, (m4) a later reference admitted in a compensation, and
+(m5) a declared approval where none is required, (m6) D1719's bound at `>`,
+(m7) `wait: {event}` admitted, (m8) `init` on the capability's approval,
+(m9) a compensation that requires approval. **Targeted, once: 266 passed**
+(the plan's nine modules; `test_dev_environment_cluster` ran, Docker-backed).
+**Rows added: D1749–D1751. NEXT FREE: D1752.**
 
 ### Run 5 — the plane accepts an approved call, the loop learns gates and compensation
 

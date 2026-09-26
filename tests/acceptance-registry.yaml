@@ -4718,7 +4718,7 @@
     - tests/contract/test_workflow_definition.py::test_a_tool_name_is_not_a_capability_reference
     - tests/contract/test_workflow_definition.py::test_a_capability_whose_lifecycle_is_not_active_is_refused
     - tests/contract/test_workflow_definition.py::test_a_metadata_tools_capability_is_refused
-    - tests/contract/test_workflow_definition.py::test_a_capability_that_requires_approval_is_refused
+    - tests/contract/test_workflow_definition.py::test_an_approval_requiring_step_must_declare_approval
     - tests/contract/test_workflow_definition.py::test_an_argument_a_write_does_not_declare_is_refused
     - tests/contract/test_workflow_definition.py::test_a_relation_read_takes_the_runtimes_four_and_not_resource
     - tests/contract/test_workflow_definition.py::test_an_rpc_read_takes_no_arguments_at_all
@@ -4736,7 +4736,7 @@
     - tests/contract/test_workflow_definition.py::test_a_step_name_may_not_carry_a_hyphen_although_the_table_allows_one
     - tests/contract/test_workflow_definition.py::test_a_file_that_is_not_yaml_is_reported_rather_than_crashing
     - tests/contract/test_workflow_definition.py::test_definitions_of_a_project_with_no_workflows_directory_is_empty
-    - tests/contract/test_workflow_definition.py::test_the_example_projects_definitions_compile
+    - tests/contract/test_workflow_definition.py::test_the_example_projects_four_definitions_compile
     - tests/contract/test_workflow_definition.py::test_every_compiled_body_carries_what_the_enqueue_reads
     - tests/contract/test_workflow_definition.py::test_a_project_with_no_capabilities_of_its_own_still_gets_a_lock
     - tests/contract/test_workflow_definition.py::test_the_source_digest_is_over_the_bytes_and_not_the_document
@@ -4749,7 +4749,8 @@
     its resource. Refused by name: a capability the lock does not serve, a
     version it does not carry (a different refusal), a tool name in place of a
     capability, a lifecycle other than `active`, a metadata tool's capability,
-    one with `requires_approval` (approval arrives in Session 33), an argument
+    one whose tool or capability requires approval and that declares no
+    `approval:` (since Session 33, ADR 0230; before it, any such one), an argument
     the tool does not accept -- derived by SHAPE, the rule the runtime
     registers by: a write's declared list, a relation read's four
     (`columns, filters, order_by, limit`, never `resource`), an RPC read's none
@@ -4757,8 +4758,8 @@
     reference (a typo, never a literal, D1681), duplicate step names and
     out-of-bound `retry`/`timeout` values. The compiled body carries
     `required_scopes` as the union of its steps', `lock_tools_sha256` and a
-    `source_sha256` over the YAML's BYTES; the example project's two
-    definitions compile.
+    `source_sha256` over the YAML's BYTES; the example project's definitions
+    compile (four since Session 33).
 
 - id: WF-STATE-001
   priority: P0

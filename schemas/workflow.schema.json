@@ -56,10 +56,61 @@
   "$defs": {
     "step": {
       "type": "object",
+      "description": "EITHER a capability step (`capability` required) OR a wait step (`wait` required, and none of `capability`, `arguments`, `retry`, `timeout_seconds`, `approval` or `compensation`).",
       "additionalProperties": false,
       "required": [
-        "name",
-        "capability"
+        "name"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "capability"
+          ],
+          "not": {
+            "required": [
+              "wait"
+            ]
+          }
+        },
+        {
+          "required": [
+            "wait"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "capability"
+                ]
+              },
+              {
+                "required": [
+                  "arguments"
+                ]
+              },
+              {
+                "required": [
+                  "retry"
+                ]
+              },
+              {
+                "required": [
+                  "timeout_seconds"
+                ]
+              },
+              {
+                "required": [
+                  "approval"
+                ]
+              },
+              {
+                "required": [
+                  "compensation"
+                ]
+              }
+            ]
+          }
+        }
       ],
       "properties": {
         "name": {
@@ -68,45 +119,112 @@
           "description": "The step's name, unique within the definition. NARROWER than the table's CHECK, which also admits a hyphen: a step's name is what a `{{steps.<name>.<field>}}` reference spells, and a reference grammar that admitted a hyphen could not be told from an expression."
         },
         "capability": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9_]*@[0-9]+\\.[0-9]+\\.[0-9]+$",
-          "description": "The capability this step calls, as `name@version`. A CAPABILITY and not a tool: a tool may be backed by several capabilities that move independently (`query_resource` is `query_notes` and `query_tasks`), so the tool name is not the versioned thing. The compiler resolves it to the tool that serves it, and to the resource for a relation read."
+          "$ref": "#/$defs/capability_reference"
         },
         "arguments": {
-          "type": "object",
-          "description": "The arguments this step passes. Which names are accepted is decided by the lock, not here: a write's are the tool's declared argument list, a relation read's are `columns`, `filters`, `order_by` and `limit`, and an RPC read takes none. A string value may carry `{{input.<key>}}` or `{{steps.<name>.<field>}}` references, resolved per attempt by the worker.",
-          "additionalProperties": {
-            "$ref": "#/$defs/argument"
-          }
+          "$ref": "#/$defs/arguments"
         },
         "retry": {
+          "$ref": "#/$defs/retry"
+        },
+        "timeout_seconds": {
+          "$ref": "#/$defs/step_timeout"
+        },
+        "approval": {
           "type": "object",
           "additionalProperties": false,
-          "description": "What to do with a RETRYABLE failure -- a transport error, a timeout, or the plane's own `write_conflict`. Every other outcome is terminal and is not retried, whatever this says.",
+          "required": [
+            "expires_after_seconds"
+          ],
+          "description": "Since Session 33 (ADR 0230). Declared on a step whose tool or capability requires approval, and required there: the run parks on the plane's own `approval_required` refusal until a human holding `admin_workflows:approve` decides. The compiler refuses it on a step that requires none, because the plane would serve the first call and no human would ever be asked.",
           "properties": {
-            "max": {
+            "expires_after_seconds": {
               "type": "integer",
-              "minimum": 0,
-              "maximum": 5,
-              "default": 0,
-              "description": "How many retries, beyond the first attempt."
-            },
-            "backoff_seconds": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 300,
-              "default": 30,
-              "description": "How long the step is PARKED before it becomes claimable again. The park is the backoff: nothing sleeps, and a worker killed during one loses nothing."
+              "minimum": 60,
+              "maximum": 3600,
+              "description": "How long the approval may stay undecided. Strictly less than the run's `timeout_seconds` -- the compiler refuses one that is not -- because an approval that outlived its run could never be used (D1719). An expired approval fails the step."
             }
           }
         },
-        "timeout_seconds": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 600,
-          "description": "How long this step's call may take. Defaulted by the compiler from the tool's own `timeout_ms` when it is omitted, and refused when it is below that floor: a step timeout under the tool's would fail a call the plane was still willing to serve."
+        "compensation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "capability"
+          ],
+          "description": "Since Session 33 (ADR 0233). A WRITE the worker makes, as the same agent, if this step succeeded and a later step fails terminally or the run is cancelled -- in reverse order, after the forward steps stop. Never a rollback: it is a reviewed forward action the author chose. It must be a write the lock compiles, it may not require approval, and its arguments may reference the run's input, this step's result and earlier steps'.",
+          "properties": {
+            "capability": {
+              "$ref": "#/$defs/capability_reference"
+            },
+            "arguments": {
+              "$ref": "#/$defs/arguments"
+            },
+            "retry": {
+              "$ref": "#/$defs/retry"
+            },
+            "timeout_seconds": {
+              "$ref": "#/$defs/step_timeout"
+            }
+          }
+        },
+        "wait": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "description": "Since Session 33 (ADR 0233). A step that calls nothing and parks for `seconds`, strictly less than the run's `timeout_seconds`. `event` is admitted by this schema only so that the compiler can refuse it with a sentence: a wait on an event arrives in Session 34 with the events that resume it.",
+          "properties": {
+            "seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "event": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       }
+    },
+    "capability_reference": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*@[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "The capability this step calls, as `name@version`. A CAPABILITY and not a tool: a tool may be backed by several capabilities that move independently (`query_resource` is `query_notes` and `query_tasks`), so the tool name is not the versioned thing. The compiler resolves it to the tool that serves it, and to the resource for a relation read."
+    },
+    "arguments": {
+      "type": "object",
+      "description": "The arguments this step passes. Which names are accepted is decided by the lock, not here: a write's are the tool's declared argument list, a relation read's are `columns`, `filters`, `order_by` and `limit`, and an RPC read takes none. A string value may carry `{{input.<key>}}` or `{{steps.<name>.<field>}}` references, resolved per attempt by the worker.",
+      "additionalProperties": {
+        "$ref": "#/$defs/argument"
+      }
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What to do with a RETRYABLE failure -- a transport error, a timeout, or the plane's own `write_conflict`. Every other outcome is terminal and is not retried, whatever this says.",
+      "properties": {
+        "max": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "default": 0,
+          "description": "How many retries, beyond the first attempt."
+        },
+        "backoff_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300,
+          "default": 30,
+          "description": "How long the step is PARKED before it becomes claimable again. The park is the backoff: nothing sleeps, and a worker killed during one loses nothing."
+        }
+      }
+    },
+    "step_timeout": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 600,
+      "description": "How long this step's call may take. Defaulted by the compiler from the tool's own `timeout_ms` when it is omitted, and refused when it is below that floor: a step timeout under the tool's would fail a call the plane was still willing to serve."
     },
     "argument": {
       "description": "A scalar, or a list of scalars. Not an object and not a nested list: an argument document the reviewed surface cannot receive is one the compiler would have to guess at, and `filters` -- the one argument with structure -- is a list of small objects the compiler checks by shape.",

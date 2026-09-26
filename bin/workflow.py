@@ -175,9 +175,12 @@ def _first_write(
 ) -> tuple[str, tuple[str, ...]] | None:
     """The first write that does NOT require approval, with its arguments.
 
-    Approval-requiring writes are skipped rather than scaffolded and commented
-    out: the compiler refuses them until Session 33, and a scaffold whose first
-    suggestion does not compile is a scaffold that teaches the wrong thing.
+    Approval-requiring writes are skipped rather than scaffolded: the skeleton
+    is the smallest definition that validates, and one that needed an
+    `approval:` block and a human to run it is not the smallest. **The
+    approval read is the EFFECTIVE one, the tool's or the capability's**
+    (D1723) -- the capability's alone missed a profile's, and would have
+    scaffolded a step the compiler then refuses.
     """
     for tool in sorted(lock.tools, key=lambda item: item.name):
         if tool.kind != "write":
@@ -185,7 +188,7 @@ def _first_write(
         for capability in sorted(tool.capabilities, key=lambda item: item.name):
             if capability.lifecycle != workflow_definition.ACTIVE:
                 continue
-            if capability.requires_approval:
+            if workflow_definition.Resolved(tool, capability, None).requires_approval:
                 continue
             return f"{capability.name}@{capability.version}", tool.arguments
     return None

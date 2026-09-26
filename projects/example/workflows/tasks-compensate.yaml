@@ -1,0 +1,57 @@
+# The compensation workflow: a run that fails on purpose after a wait.
+#
+# What it is FOR: Session 33's live proof that a terminal failure undoes the
+# steps before it, in reverse, as the same agent (ADR 0233). The first step
+# moves a task `pending` -> `in_progress` and declares its compensation -- the
+# same capability with the statuses swapped, `update_task_status`'s own
+# inverse (D1726). The second step is a WAIT: it calls nothing, mints no token
+# and parks the run for five seconds (D1727). The third step fails, and the
+# failure is terminal, so the run becomes `compensating`, the first step is
+# undone, and the run ends `failed` with the outcome `complete`.
+#
+# MEASURED, in `api.update_task_status` itself: a task id that names NOTHING
+# raises AP404/PT404, which the plane names `row_not_found` -- not retryable,
+# unlike `notes-retry.yaml`'s `write_conflict`. That is why the third step's
+# task is `missing_task_id`, a uuid the caller chooses to name no task, and not
+# the run's own task: a transition that merely could not hold would park and
+# retry instead of failing.
+#
+# Both task ids are references and not literals, for `notes-retry.yaml`'s
+# reason: a uuid committed into this file would be right on no deployment.
+---
+schema_version: 1
+name: tasks-compensate
+version: 1
+description: >-
+  Starts a task, waits five seconds, then fails terminally on a task that does
+  not exist, so the first step is compensated and the task goes back to
+  pending.
+timeout_seconds: 600
+
+steps:
+  - name: start_the_task
+    capability: update_task_status@1.0.0
+    arguments:
+      p_task_id: "{{input.task_id}}"
+      p_expected_status: pending
+      p_new_status: in_progress
+    compensation:
+      capability: update_task_status@1.0.0
+      arguments:
+        p_task_id: "{{input.task_id}}"
+        p_expected_status: in_progress
+        p_new_status: pending
+      retry:
+        max: 1
+        backoff_seconds: 5
+
+  - name: pause
+    wait:
+      seconds: 5
+
+  - name: touch_a_missing_task
+    capability: update_task_status@1.0.0
+    arguments:
+      p_task_id: "{{input.missing_task_id}}"
+      p_expected_status: pending
+      p_new_status: in_progress

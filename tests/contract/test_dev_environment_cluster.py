@@ -204,9 +204,27 @@ def test_dev_up_installs_the_example_projects_definitions(
         state,
         "SELECT name || ' v' || version FROM app_private.workflow_definition ORDER BY name",
     )
-    assert installed.splitlines() == ["notes-retry v1", "notes-roundtrip v1"], (
-        f"the example project ships two definitions and the cluster holds: {installed!r}"
+    assert installed.splitlines() == [
+        "notes-retry v1",
+        "notes-roundtrip v1",
+        "tasks-approval v1",
+        "tasks-compensate v1",
+    ], f"the example project ships four definitions and the cluster holds: {installed!r}"
+
+    # Session 33: the blocks 0035 reads out of an installed body arrived where
+    # it reads them -- `workflow_begin_compensation` the compensation's retry,
+    # `workflow_request_approval` the step's approval, and a wait its seconds.
+    gates = as_superuser(
+        state,
+        "SELECT concat_ws('|', "
+        "(SELECT body #>> '{steps,0,compensation,retry,max}' FROM "
+        "app_private.workflow_definition WHERE name = 'tasks-approval'), "
+        "(SELECT body #>> '{steps,1,approval,expires_after_seconds}' FROM "
+        "app_private.workflow_definition WHERE name = 'tasks-approval'), "
+        "(SELECT body #>> '{steps,1,kind}' || ':' || (body #>> '{steps,1,seconds}') FROM "
+        "app_private.workflow_definition WHERE name = 'tasks-compensate'))",
     )
+    assert gates == "1|900|wait:5", gates
 
     # The BODY made the round trip, not just the row: the prose carries commas
     # and apostrophes, and psql's `:'body'` is what quotes it.
@@ -225,7 +243,7 @@ def test_dev_up_installs_the_example_projects_definitions(
     )
     assert scopes == "notes:read|notes:write", scopes
 
-    assert "workflows   2 definition(s) installed" in environment["stdout"], (
+    assert "workflows   4 definition(s) installed" in environment["stdout"], (
         "up does not say what it installed, so an operator cannot tell an empty "
         "workflows/ directory from one that failed to be read"
     )

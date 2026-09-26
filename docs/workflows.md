@@ -83,7 +83,83 @@ thing a string can hold.
 The second example project definition, `notes-retry.yaml`, exists to exercise
 the retry path: it asks for a task transition whose expected status cannot
 hold, which the plane names `write_conflict` and treats as retryable, so the
-step parks and comes back.
+step parks and comes back. `tasks-approval.yaml` and `tasks-compensate.yaml`
+exercise the three sections below.
+
+### Approval
+
+```yaml
+  - name: set_the_embedding
+    capability: set_note_embedding@1.0.0
+    arguments:
+      p_note_id: "{{input.note_id}}"
+      p_embedding: "{{input.embedding}}"
+    approval:
+      expires_after_seconds: 900
+```
+
+A step whose capability requires approval — declared by the capability, **or
+added by your project's `mcp.profile`** — must say so with `approval:`, and a
+step whose capability requires none may not. The compiler refuses both
+mistakes: the first because the plane would refuse every call and the run
+could never pass the step, the second because the plane would serve the first
+call and no human would ever be asked.
+
+`expires_after_seconds` is 60–3600 and **strictly less than the run's
+`timeout_seconds`**: an approval that outlived its run could never be used.
+When the run reaches the step, the plane refuses the call `approval_required`
+and the run **parks** there until a person decides (see *Approvals* below). An
+approval that expires undecided fails the step.
+
+### Compensation
+
+```yaml
+  - name: start_the_task
+    capability: update_task_status@1.0.0
+    arguments: {p_task_id: "{{input.task_id}}", p_expected_status: pending, p_new_status: in_progress}
+    compensation:
+      capability: update_task_status@1.0.0
+      arguments: {p_task_id: "{{input.task_id}}", p_expected_status: in_progress, p_new_status: pending}
+      retry: {max: 1, backoff_seconds: 5}
+```
+
+A compensation is a **write the worker makes if this step succeeded and a
+later step fails terminally, or the run is cancelled** — as the same agent,
+after the forward steps stop, in reverse order. The run reads `compensating`
+while it happens and then ends at its cause (`failed` or `cancelled`) with a
+`compensation_outcome` of `complete` or `incomplete`. A failed compensation
+does not stop the ones after it.
+
+It takes `capability`, `arguments`, `retry` and `timeout_seconds`, with a
+step's own bounds. The compiler refuses a compensation that is not a write the
+lock compiles, one that requires approval (a failing run cannot wait for a
+person to answer), one on a read step (a read changed nothing to undo), an
+argument its tool does not take, and a reference to a step that runs later —
+it may reference the run's input, **this step's own result** and earlier
+steps'. Its scopes are added to the run's, so an agent that could not run the
+undo is refused before the first step, not in the middle of a failure.
+
+**It is not a rollback.** The compiler does not know what an inverse is: a
+compensation is a forward action you chose and reviewed.
+`update_task_status` is its own inverse, which is why the examples use it; **a
+note cannot be un-created in this release**, because there is no
+`delete_note` capability to compensate `create_note` with, and a note's
+embedding is upserted without returning the value it replaced.
+
+### Wait
+
+```yaml
+  - name: pause
+    wait:
+      seconds: 5
+```
+
+A wait step names no capability, makes no call and mints no token: the run
+parks for `seconds` (1–3600, strictly less than the run's `timeout_seconds`)
+and then continues. A crash during the wait does not restart it. A wait
+records no result, so `{{steps.pause.…}}` is a compile error. **`wait:
+{event: …}` is refused**: a wait on an event arrives in Session 34 with the
+events that resume it.
 
 ## The six verbs
 
@@ -127,8 +203,12 @@ whether your lock has moved since.
 
 ### The words
 
-A **run** is `queued`, `running`, `succeeded`, `failed`, `cancelled` or
-`stopped`.
+A **run** is `queued`, `running`, `compensating`, `succeeded`, `failed`,
+`cancelled` or `stopped`.
+
+- **`compensating`** — a step failed terminally or the run was cancelled, and
+  the worker is running the compensations of the steps that succeeded. It
+  ends at its cause, `failed` or `cancelled`.
 
 - **`failed`** — a step refused and the run is over.
 - **`stopped`** — *the agent* stopped being able to act: revoked, expired, or
@@ -148,6 +228,40 @@ A **step** is `queued`, `claimed`, `parked`, `succeeded` or `failed`.
   plane as a replay — but the plane's result for a first write and a replay are
   indistinguishable to the caller, so the loop does not guess. The word lives
   in the audit record, joined by request id.
+
+## Approvals
+
+A run parked at an approval step waits for **a person**, never an agent, and
+never the agent's own owner (ADR 0232):
+
+- **An agent cannot approve anything.** The approval routes take a human's
+  token, and an agent token is refused before the scope is read — so the
+  requester cannot hold the authority for its own run because it cannot hold
+  a human token at all.
+- **The approver holds `admin_workflows:approve`**, an administrative scope
+  only a project administrator's role can carry.
+- **The run's owner may not decide it** (`approver_is_owner`). An
+  administrator who created an agent owns it, so a second administrator
+  approves that agent's runs.
+
+**What the approver sees** is who, what and until when — the run, the
+definition and its version, the step, the capability and tool, the agent and
+its owner, when approval was requested and when it expires. **Never an
+argument value and never the run's input**: those are the agent's data, a
+capability may redact them from its own audit, and an approval listing that
+showed them would be a reader of tenant rows for an identity that is kept out
+of them. What the step does is in the reviewed definition in your checkout.
+
+**Approving** makes the step claimable at once, and the call it retries
+carries the decision as a signed claim, so the plane serves it once. **A
+rejection is a cancel**: the run's cancel is requested, the next claim applies
+it, and any succeeded steps with a compensation are undone.
+
+**Approval governs the agent plane and workflows; the database's authority is
+the SQL grant.** An agent holding a capability's scope and its own token can
+still call the underlying function through the REST API directly, where no
+approval is checked — that predates workflows, and it is recorded rather than
+repaired in this release (ADR 0231).
 
 ## The worker
 
@@ -187,11 +301,7 @@ stopped.
 
 | Not yet | Where |
 |---|---|
-| Approval gates — a step a human releases | Session 33 |
-| Compensation — undoing the steps before a failure | Session 33 |
-| A provenance reader over a run's audit rows | Session 33 |
-| `wait` — a step that sleeps on purpose | Session 33 |
-| Events — a run started by something other than a call | Session 34 |
+| Events — a run started by something other than a call, and `wait: {event}` | Session 34 |
 | Outbound delivery and inbound connectors | Session 34 |
 
 A run cannot branch, loop, fan out or call another run, and none of those is on

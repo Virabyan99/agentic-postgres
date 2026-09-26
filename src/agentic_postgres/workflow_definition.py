@@ -32,6 +32,12 @@ step that does not exist, or one naming a step that runs LATER -- and refuse a
 lesson borrowed from the migration renderer: a marker the pattern did not match
 is a typo, not a literal, and a definition that installs one would pass it to
 the upstream as text.
+
+**Since Session 33** a step may also declare an `approval` (required exactly
+when the tool OR its capability requires one, D1723), a `compensation` (a
+write, never approval-gated, whose scopes join the run's, ADR 0233), or be a
+`wait` step that names no capability at all (D1727). Each is compiled here and
+executed by the worker; nothing here decides what a compensation MEANS.
 """
 
 from __future__ import annotations
@@ -103,6 +109,32 @@ MAX_RETRIES = 5
 DEFAULT_BACKOFF_SECONDS = 30
 MAX_BACKOFF_SECONDS = 300
 
+#: An approval's window, `workflow_request_approval`'s own bounds (ADR 0230).
+MIN_APPROVAL_EXPIRY_SECONDS = 60
+MAX_APPROVAL_EXPIRY_SECONDS = 3600
+
+#: A wait's bounds, and the step values a wait step is compiled with (ADR
+#: 0233). A wait step calls nothing, but `workflow_enqueue` casts every step's
+#: `timeout_seconds` and `retry` into NOT NULL columns under the table's
+#: CHECKs. **The 5 seconds is the claim-to-park window**: the time the worker
+#: may hold the lease between claiming a wait step and parking it, which is a
+#: database round trip and not a call. No retry: a wait that could not park is
+#: a worker that could not reach its own database.
+MIN_WAIT_SECONDS = 1
+MAX_WAIT_SECONDS = 3600
+WAIT_STEP_TIMEOUT_SECONDS = 5
+WAIT_STEP_RETRY = {"max": 0, "backoff_seconds": 1}
+
+#: The keys a wait step may not carry: it calls nothing, so there is nothing
+#: for them to describe. The schema refuses them too; the compiler repeats it
+#: because `compile` takes a document that did not necessarily come through
+#: `load`.
+NOT_ON_A_WAIT = ("capability", "arguments", "retry", "timeout_seconds", "approval", "compensation")
+
+#: A compiled wait step's `kind`. Not a tool kind: the lock has `read`,
+#: `write` and `metadata`, and a step of this kind names no tool at all.
+WAIT = "wait"
+
 
 class DefinitionError(Exception):
     """One refusal, and the step it is about.
@@ -165,6 +197,12 @@ class ToolView:
     arguments: tuple[str, ...]
     required_scopes: tuple[str, ...]
     resources: tuple[ResourceView, ...]
+    #: The TOOL's own `requires_approval`, which is the field the plane enforces
+    #: (`mcp_tools` reads the tool entry's) and the only one a project's
+    #: profile can set (`capability_compiler.apply_profile`). `False` by
+    #: absence, for `CapabilityView`'s reason: a read's entry carries no such
+    #: field at all.
+    requires_approval: bool = False
 
     @property
     def read_shape(self) -> str | None:
@@ -190,6 +228,18 @@ class Resolved:
     tool: ToolView
     capability: CapabilityView
     resource: ResourceView | None
+
+    @property
+    def requires_approval(self) -> bool:
+        """**The effective approval: the tool's OR the capability's** (D1723).
+
+        The plane refuses a call on the TOOL's field, and a profile narrows the
+        tool's field only -- so a compiler that read the capability alone
+        passed a step the plane would refuse on every call. Either source is
+        enough: `requires_approval` is a restriction, and a restriction folds
+        with `or` (`capability_compiler`'s own polarity rule).
+        """
+        return self.tool.requires_approval or self.capability.requires_approval
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +297,7 @@ class LockView:
                     arguments=tuple(entry.get("arguments") or ()),
                     required_scopes=tuple(entry.get("required_scopes") or ()),
                     resources=resources,
+                    requires_approval=bool(entry.get("requires_approval", False)),
                 )
             )
         return cls(tools=tuple(tools), tools_sha256=digest)
@@ -321,12 +372,6 @@ class LockView:
                 "stored and outlives the session that wrote it, so installing one over a "
                 "capability already on its way out is how a deprecation becomes invisible",
             )
-        if capability.requires_approval:
-            raise DefinitionError(
-                step_name,
-                f"{name}@{version} requires approval, and approval steps arrive in Session 33. "
-                "A worker that ran it would be an approval gate nobody passed",
-            )
 
         resource: ResourceView | None = None
         if tool.kind == "read":
@@ -349,20 +394,38 @@ class LockView:
 
 @dataclass(frozen=True, slots=True)
 class CompiledStep:
-    """One step, with every question the lock can answer already answered."""
+    """One step, with every question the lock can answer already answered.
+
+    A wait step (`kind` `wait`) names no tool and carries `seconds`; every
+    other step names the tool, and may carry an `approval` and a
+    `compensation`. **`as_json` emits `approval` and `compensation` only when
+    they are declared**, so a Session 32 definition compiles to exactly the
+    body it did then.
+    """
 
     name: str
-    tool: str
-    capability: str
-    capability_version: str
+    tool: str | None
+    capability: str | None
+    capability_version: str | None
     resource: str | None
     kind: str
     arguments: dict[str, Any]
     retry: dict[str, int]
     timeout_seconds: int
+    seconds: int | None = None
+    approval: dict[str, int] | None = None
+    compensation: dict[str, Any] | None = None
 
     def as_json(self) -> dict[str, Any]:
-        return {
+        if self.kind == WAIT:
+            return {
+                "name": self.name,
+                "kind": WAIT,
+                "seconds": self.seconds,
+                "timeout_seconds": self.timeout_seconds,
+                "retry": dict(self.retry),
+            }
+        body: dict[str, Any] = {
             "name": self.name,
             "tool": self.tool,
             "capability": self.capability,
@@ -373,6 +436,11 @@ class CompiledStep:
             "retry": dict(self.retry),
             "timeout_seconds": self.timeout_seconds,
         }
+        if self.approval is not None:
+            body["approval"] = dict(self.approval)
+        if self.compensation is not None:
+            body["compensation"] = dict(self.compensation)
+        return body
 
 
 @dataclass(frozen=True, slots=True)
@@ -543,6 +611,219 @@ def _retry(document: dict[str, Any], step_name: str) -> dict[str, int]:
     return {"max": maximum, "backoff_seconds": backoff}
 
 
+def _check_arguments(resolved: Resolved, arguments: dict[str, Any], step_name: str) -> None:
+    accepted = _accepted_arguments(resolved, step_name)
+    undeclared = sorted(set(arguments) - set(accepted))
+    if undeclared:
+        offered = ", ".join(accepted) if accepted else "none"
+        raise DefinitionError(
+            step_name,
+            f"{resolved.tool.name} does not take {', '.join(undeclared)}; it takes {offered}",
+        )
+
+
+def _check_references(
+    arguments: dict[str, Any],
+    step_name: str,
+    definition: dict[str, Any],
+    seen: list[str],
+    waits: set[str],
+    *,
+    allow_self: bool,
+) -> None:
+    """Refuse a reference that could never resolve.
+
+    `allow_self` is the one difference between a step and its compensation: a
+    compensation runs after its own step succeeded, so `{{steps.<self>.x}}` is
+    a recorded result there and a reference to nothing in the step itself.
+    """
+    for reference in _references(arguments, step_name):
+        namespace, _, rest = reference.partition(".")
+        if namespace == "input":
+            # A run's input arrives at enqueue. There is nothing here to
+            # check it against, and inventing a declared input block so
+            # that there would be is a second contract nobody writes.
+            continue
+        referenced = rest.split(".")[0]
+        if referenced == step_name and not allow_self:
+            raise DefinitionError(step_name, f"{{{{{reference}}}}} refers to itself")
+        if referenced != step_name and referenced not in seen:
+            later = any(step["name"] == referenced for step in definition["steps"])
+            where = "runs later" if later else "is not a step of this definition"
+            raise DefinitionError(step_name, f"{{{{{reference}}}}} names a step that {where}")
+        if referenced in waits:
+            raise DefinitionError(
+                step_name,
+                f"{{{{{reference}}}}} names a wait step, which calls nothing and records no "
+                "result for a reference to read",
+            )
+
+
+def _scopes_of(resolved: Resolved) -> tuple[str, ...]:
+    if resolved.tool.kind == "write":
+        return resolved.tool.required_scopes
+    return resolved.resource.required_scopes if resolved.resource else ()
+
+
+def _approval(
+    entry: dict[str, Any], resolved: Resolved, run_timeout: int, step_name: str
+) -> dict[str, int] | None:
+    """The step's declared approval, which must agree with the lock's (D1723).
+
+    Both directions are refusals. A step the plane will refuse without an
+    approval must say how long a human has to decide; a step that declares one
+    the plane would never ask for is a gate nobody passes, because the plane
+    serves the first call and the run never parks.
+    """
+    reference = f"{resolved.capability.name}@{resolved.capability.version}"
+    declared = entry.get("approval")
+    if declared is None:
+        if resolved.requires_approval:
+            raise DefinitionError(
+                step_name,
+                f"{reference} requires approval; declare `approval: {{expires_after_seconds: "
+                "N}` on this step, and a human holding admin_workflows:approve will decide "
+                "each run",
+            )
+        return None
+    if not resolved.requires_approval:
+        raise DefinitionError(
+            step_name,
+            f"{reference} does not require approval, so the plane would serve the first call "
+            "and no human would ever be asked -- remove `approval:`",
+        )
+    expires = int(declared["expires_after_seconds"])
+    if not MIN_APPROVAL_EXPIRY_SECONDS <= expires <= MAX_APPROVAL_EXPIRY_SECONDS:
+        raise DefinitionError(
+            step_name,
+            f"approval.expires_after_seconds {expires} is outside "
+            f"{MIN_APPROVAL_EXPIRY_SECONDS}..{MAX_APPROVAL_EXPIRY_SECONDS}",
+        )
+    if expires >= run_timeout:
+        raise DefinitionError(
+            step_name,
+            f"approval.expires_after_seconds {expires} is not less than the run's "
+            f"timeout_seconds {run_timeout}; the run would time out before the approval could "
+            "expire, and a decision nobody could use is not a decision (D1719)",
+        )
+    return {"expires_after_seconds": expires}
+
+
+def _compensation(
+    entry: dict[str, Any],
+    forward: Resolved,
+    lock: LockView,
+    definition: dict[str, Any],
+    seen: list[str],
+    waits: set[str],
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """A step's compensation, compiled, and the scopes it adds (ADR 0233).
+
+    **The compiler does not know what an inverse is and does not try** (D1726).
+    It checks that the compensation is a write the lock compiles, that no human
+    has to be asked before it runs, that its arguments are the tool's own, and
+    that its references resolve by the time it runs -- the run's input, this
+    step's result, and earlier steps'. What the write MEANS is the author's
+    review, which is why the word is compensation and never rollback.
+
+    Its scopes join the definition's, so `workflow_enqueue` refuses an agent
+    that could not run the undo before the first forward step (D1725), and
+    nothing is ever widened to run it.
+    """
+    step_name = entry["name"]
+    if forward.tool.kind != "write":
+        raise DefinitionError(
+            step_name,
+            f"declares a compensation, and {forward.tool.name} is a {forward.tool.kind}: a read "
+            "changed nothing to undo",
+        )
+
+    declared = entry["compensation"]
+    reference = declared["capability"]
+    try:
+        resolved = lock.resolve(step_name, reference)
+    except DefinitionError as error:
+        raise DefinitionError(step_name, f"its compensation: {error.reason}") from error
+    if resolved.tool.kind != "write":
+        raise DefinitionError(
+            step_name,
+            f"a compensation undoes a write with a write; {reference} is a {resolved.tool.kind}",
+        )
+    if resolved.requires_approval:
+        raise DefinitionError(
+            step_name,
+            f"its compensation {reference} requires approval. A compensation may not wait for "
+            "a human; a run that is failing cannot be left half-undone until someone answers",
+        )
+
+    arguments = declared.get("arguments") or {}
+    try:
+        _check_arguments(resolved, arguments, step_name)
+    except DefinitionError as error:
+        raise DefinitionError(step_name, f"its compensation: {error.reason}") from error
+    try:
+        _check_references(arguments, step_name, definition, seen, waits, allow_self=True)
+    except DefinitionError as error:
+        raise DefinitionError(step_name, f"its compensation: {error.reason}") from error
+
+    compiled = {
+        "tool": resolved.tool.name,
+        "capability": resolved.capability.name,
+        "capability_version": resolved.capability.version,
+        "resource": None,
+        "kind": "write",
+        "arguments": dict(arguments),
+        "retry": _retry(declared, step_name),
+        "timeout_seconds": _step_timeout(declared, resolved, step_name),
+    }
+    return compiled, _scopes_of(resolved)
+
+
+def _compile_wait(entry: dict[str, Any], run_timeout: int) -> CompiledStep:
+    """A wait step: no capability, no call, no token (D1727)."""
+    step_name = entry["name"]
+    carried = [key for key in NOT_ON_A_WAIT if key in entry]
+    if carried:
+        raise DefinitionError(
+            step_name,
+            f"is a wait step and carries {', '.join(carried)}; a wait calls nothing, so there "
+            "is nothing for them to describe",
+        )
+    wait = entry["wait"] or {}
+    if "event" in wait:
+        raise DefinitionError(
+            step_name,
+            "a wait on an event arrives in Session 34 with the events that resume it; this "
+            "release waits on a time only",
+        )
+    if "seconds" not in wait:
+        raise DefinitionError(step_name, "is a wait step and says for how long in no `seconds`")
+    seconds = int(wait["seconds"])
+    if not MIN_WAIT_SECONDS <= seconds <= MAX_WAIT_SECONDS:
+        raise DefinitionError(
+            step_name,
+            f"wait.seconds {seconds} is outside {MIN_WAIT_SECONDS}..{MAX_WAIT_SECONDS}",
+        )
+    if seconds >= run_timeout:
+        raise DefinitionError(
+            step_name,
+            f"wait.seconds {seconds} is not less than the run's timeout_seconds {run_timeout}; "
+            "the run would time out inside its own wait",
+        )
+    return CompiledStep(
+        name=step_name,
+        tool=None,
+        capability=None,
+        capability_version=None,
+        resource=None,
+        kind=WAIT,
+        arguments={},
+        retry=dict(WAIT_STEP_RETRY),
+        timeout_seconds=WAIT_STEP_TIMEOUT_SECONDS,
+        seconds=seconds,
+    )
+
+
 def compile(definition: dict[str, Any], lock: LockView, *, source_sha256: str) -> Compiled:
     """Resolve every step against the lock, or refuse naming the step and why.
 
@@ -560,44 +841,32 @@ def compile(definition: dict[str, Any], lock: LockView, *, source_sha256: str) -
     steps: list[CompiledStep] = []
     scopes: set[str] = set()
     seen: list[str] = []
+    waits = {entry["name"] for entry in definition["steps"] if "wait" in entry}
 
     for entry in definition["steps"]:
         name = entry["name"]
         if name in seen:
             raise DefinitionError(name, "names a step this definition already has")
 
+        if "wait" in entry:
+            steps.append(_compile_wait(entry, run_timeout))
+            seen.append(name)
+            continue
+
         resolved = lock.resolve(name, entry["capability"])
         arguments = entry.get("arguments") or {}
+        _check_arguments(resolved, arguments, name)
+        _check_references(arguments, name, definition, seen, waits, allow_self=False)
 
-        accepted = _accepted_arguments(resolved, name)
-        undeclared = sorted(set(arguments) - set(accepted))
-        if undeclared:
-            offered = ", ".join(accepted) if accepted else "none"
-            raise DefinitionError(
-                name,
-                f"{resolved.tool.name} does not take {', '.join(undeclared)}; it takes {offered}",
+        approval = _approval(entry, resolved, run_timeout, name)
+        compensation = None
+        if "compensation" in entry:
+            compensation, compensation_scopes = _compensation(
+                entry, resolved, lock, definition, seen, waits
             )
+            scopes.update(compensation_scopes)
 
-        for reference in _references(arguments, name):
-            namespace, _, rest = reference.partition(".")
-            if namespace == "input":
-                # A run's input arrives at enqueue. There is nothing here to
-                # check it against, and inventing a declared input block so
-                # that there would be is a second contract nobody writes.
-                continue
-            referenced = rest.split(".")[0]
-            if referenced == name:
-                raise DefinitionError(name, f"{{{{{reference}}}}} refers to itself")
-            if referenced not in seen:
-                later = any(step["name"] == referenced for step in definition["steps"])
-                where = "runs later" if later else "is not a step of this definition"
-                raise DefinitionError(name, f"{{{{{reference}}}}} names a step that {where}")
-
-        scopes.update(
-            resolved.tool.required_scopes
-            if resolved.tool.kind == "write"
-            else (resolved.resource.required_scopes if resolved.resource else ())
-        )
+        scopes.update(_scopes_of(resolved))
 
         steps.append(
             CompiledStep(
@@ -610,6 +879,8 @@ def compile(definition: dict[str, Any], lock: LockView, *, source_sha256: str) -
                 arguments=dict(arguments),
                 retry=_retry(entry, name),
                 timeout_seconds=_step_timeout(entry, resolved, name),
+                approval=approval,
+                compensation=compensation,
             )
         )
         seen.append(name)
@@ -719,9 +990,16 @@ __all__ = [
     "CANONICAL_CONTRACT",
     "CAPABILITY",
     "DEFAULT_CAPABILITIES",
+    "MAX_APPROVAL_EXPIRY_SECONDS",
+    "MAX_WAIT_SECONDS",
+    "MIN_APPROVAL_EXPIRY_SECONDS",
+    "MIN_WAIT_SECONDS",
     "RELATION_READ_ARGUMENTS",
     "SCHEMA_NAME",
     "UNDEPLOYED_UPSTREAM",
+    "WAIT",
+    "WAIT_STEP_RETRY",
+    "WAIT_STEP_TIMEOUT_SECONDS",
     "WORKFLOWS_SUBDIR",
     "CapabilityView",
     "Compiled",

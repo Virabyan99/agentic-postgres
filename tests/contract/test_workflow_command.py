@@ -163,9 +163,10 @@ def test_the_skeleton_names_only_capabilities_the_lock_really_serves() -> None:
 
 
 def test_the_skeleton_never_names_a_capability_that_requires_approval() -> None:
-    """`set_note_embedding@1.0.0` is `requires_approval: true` and the compiler
-    refuses it until Session 33. A scaffold that suggested it would not
-    compile, which is the one thing a scaffold must do."""
+    """`set_note_embedding@1.0.0` is `requires_approval: true`, so a step
+    naming it compiles only with an `approval:` block and runs only when a
+    human decides. The skeleton is the smallest definition that validates, and
+    that is not it."""
     result = run("init", "--project", str(EXAMPLE))
     document = yaml.safe_load(result.stdout)
     assert "set_note_embedding@1.0.0" not in {step["capability"] for step in document["steps"]}

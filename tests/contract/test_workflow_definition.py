@@ -10,8 +10,8 @@ tool list is a compiler proved against a belief about the lock.
 The load-bearing tests are the REFUSALS. A compiler that accepted everything
 would pass a test that only showed the two shipped definitions compiling, so
 each refusal in D1660's list has its own case, and `test_the_example_projects_
-definitions_compile` is the control that the refusals are not simply a compiler
-that refuses everything.
+four_definitions_compile` is the control that the refusals are not simply a
+compiler that refuses everything.
 
 Nothing here reaches a database, a network or a container.
 """
@@ -219,16 +219,31 @@ def test_a_metadata_tools_capability_is_refused(lock: wd.LockView) -> None:
     assert "a metadata tool" in refused.value.reason
 
 
-def test_a_capability_that_requires_approval_is_refused(lock: wd.LockView) -> None:
-    """**The example project ships one, and it is not a hypothetical.**
+def test_an_approval_requiring_step_must_declare_approval(lock: wd.LockView) -> None:
+    """**Replaces Session 32's *"approval arrives in Session 33"* refusal, and
+    is stricter than it** (ADR 0228 as amended): the refusal now says what to
+    declare, AND the same step compiles once it is declared -- so a compiler
+    that still refused every approval-requiring step fails the second half.
+
     `set_note_embedding@1.0.0` is `requires_approval: true` in
-    `projects/example/capabilities.yaml`, so this refusal fires against the
-    real lock rather than against a mutated one (D1657).
+    `projects/example/capabilities.yaml`, so this fires against the real lock
+    rather than a mutated one (D1657).
     """
+    step = {
+        "name": "a",
+        "capability": "set_note_embedding@1.0.0",
+        "arguments": {"p_note_id": "{{input.note_id}}", "p_embedding": "{{input.embedding}}"},
+    }
     with pytest.raises(wd.DefinitionError) as refused:
-        compile_it(definition([{"name": "a", "capability": "set_note_embedding@1.0.0"}]), lock)
-    assert "requires approval" in refused.value.reason
-    assert "Session 33" in refused.value.reason
+        compile_it(definition([step]), lock)
+    assert refused.value.step_name == "a"
+    assert "set_note_embedding@1.0.0 requires approval" in refused.value.reason
+    assert "expires_after_seconds" in refused.value.reason
+    assert "admin_workflows:approve" in refused.value.reason
+
+    compiled = compile_it(definition([{**step, "approval": {"expires_after_seconds": 300}}]), lock)
+    assert compiled.steps[0].approval == {"expires_after_seconds": 300}
+    assert compiled.body()["steps"][0]["approval"] == {"expires_after_seconds": 300}
 
 
 def test_an_argument_a_write_does_not_declare_is_refused(lock: wd.LockView) -> None:
@@ -452,6 +467,331 @@ def test_two_steps_may_not_share_a_name(lock: wd.LockView) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Session 33: approval, compensation, wait (ADR 0230, ADR 0233, D1723)
+# ---------------------------------------------------------------------------
+
+#: A step whose tool requires nothing, and a compensation that is its inverse.
+START = {
+    "name": "start",
+    "capability": "update_task_status@1.0.0",
+    "arguments": {
+        "p_task_id": "{{input.task_id}}",
+        "p_expected_status": "pending",
+        "p_new_status": "in_progress",
+    },
+}
+UNDO = {
+    "capability": "update_task_status@1.0.0",
+    "arguments": {
+        "p_task_id": "{{input.task_id}}",
+        "p_expected_status": "in_progress",
+        "p_new_status": "pending",
+    },
+}
+
+
+def _tool(view: wd.LockView, name: str) -> wd.ToolView:
+    return next(tool for tool in view.tools if tool.name == name)
+
+
+def test_a_declared_approval_on_a_step_that_needs_none_is_refused(lock: wd.LockView) -> None:
+    """A gate the plane would not enforce is a gate nobody passes: the plane
+    serves the first call and the run never parks."""
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(definition([{**START, "approval": {"expires_after_seconds": 300}}]), lock)
+    assert refused.value.step_name == "start"
+    assert "update_task_status@1.0.0 does not require approval" in refused.value.reason
+    assert "remove `approval:`" in refused.value.reason
+
+
+def test_a_profile_added_approval_is_seen() -> None:
+    """**D1723, the defect this run repairs.** `project.second.example.yaml`'s
+    profile sets `update_task_status: {requires_approval: true}`, which
+    `apply_profile` writes on the TOOL entry only -- the field the plane
+    enforces. The capability entry still says `False`, and a compiler that read
+    it alone validated a step the plane then refused on every call.
+
+    The premise is asserted first, so this proof cannot pass by the profile
+    having moved the capability's field too.
+    """
+    second = wd.lock_view_for_project(SECOND)
+    tool = _tool(second, "update_task_status")
+    assert tool.requires_approval is True
+    assert [capability.requires_approval for capability in tool.capabilities] == [False]
+
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(definition([START]), second)
+    assert "update_task_status@1.0.0 requires approval" in refused.value.reason
+
+    compiled = compile_it(
+        definition([{**START, "approval": {"expires_after_seconds": 300}}]), second
+    )
+    assert compiled.steps[0].approval == {"expires_after_seconds": 300}
+
+
+def test_the_example_project_without_the_profile_is_the_control(lock: wd.LockView) -> None:
+    """**The control for the proof above**: the same step against the manifest
+    whose profile does not touch `update_task_status` compiles with no
+    approval. Without it, a compiler that required approval on every write
+    would pass the profile proof."""
+    tool = _tool(lock, "update_task_status")
+    assert tool.requires_approval is False
+    compiled = compile_it(definition([START]), lock)
+    assert compiled.steps[0].approval is None
+    assert "approval" not in compiled.body()["steps"][0]
+
+
+def test_the_approval_expiry_is_bounded_below_the_run_timeout(lock: wd.LockView) -> None:
+    """D1719: an approval may not outlive its run, whose timeout fails it."""
+    step = {
+        "name": "a",
+        "capability": "set_note_embedding@1.0.0",
+        "approval": {"expires_after_seconds": 600},
+    }
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(definition([step], timeout_seconds=600), lock)
+    assert "expires_after_seconds 600 is not less than the run's timeout_seconds 600" in (
+        refused.value.reason
+    )
+    assert compile_it(definition([step], timeout_seconds=601), lock)
+
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(
+            definition([{**step, "approval": {"expires_after_seconds": 59}}]),
+            lock,
+        )
+    assert "outside 60..3600" in refused.value.reason
+
+
+def test_a_compensation_must_be_a_write_the_lock_compiles(lock: wd.LockView) -> None:
+    """Resolved exactly as a step's capability is, so every resolve refusal is
+    reused -- and then refused unless it is a write."""
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(
+            definition([{**START, "compensation": {"capability": "no_such_thing@1.0.0"}}]),
+            lock,
+        )
+    assert refused.value.step_name == "start"
+    assert refused.value.reason.startswith("its compensation: ")
+    assert "compiles no capability named 'no_such_thing'" in refused.value.reason
+
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(
+            definition([{**START, "compensation": {"capability": "query_notes@1.0.0"}}]),
+            lock,
+        )
+    assert "a compensation undoes a write with a write; query_notes@1.0.0 is a read" in (
+        refused.value.reason
+    )
+
+    # The control: the inverse this lock has compiles.
+    compiled = compile_it(definition([{**START, "compensation": UNDO}]), lock)
+    assert compiled.steps[0].compensation is not None
+
+
+def test_a_compensation_on_a_read_step_is_refused(lock: wd.LockView) -> None:
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(
+            definition([{"name": "read", "capability": "query_notes@1.0.0", "compensation": UNDO}]),
+            lock,
+        )
+    assert "a read changed nothing to undo" in refused.value.reason
+
+
+def test_a_compensation_may_not_require_approval(lock: wd.LockView) -> None:
+    """By the capability's own field (the example lock's `set_note_embedding`)
+    and by a profile's (the second lock's `update_task_status`, D1723)."""
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(
+            definition(
+                [
+                    {
+                        **START,
+                        "compensation": {"capability": "set_note_embedding@1.0.0"},
+                    }
+                ]
+            ),
+            lock,
+        )
+    assert "may not wait for a human" in refused.value.reason
+
+    second = wd.lock_view_for_project(SECOND)
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(
+            definition(
+                [
+                    {
+                        "name": "note",
+                        "capability": "create_note@1.0.0",
+                        "arguments": {"p_title": "x"},
+                        "compensation": UNDO,
+                    }
+                ]
+            ),
+            second,
+        )
+    assert "its compensation update_task_status@1.0.0 requires approval" in (refused.value.reason)
+
+
+def test_a_compensation_takes_only_declared_arguments(lock: wd.LockView) -> None:
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(
+            definition(
+                [
+                    {
+                        **START,
+                        "compensation": {
+                            **UNDO,
+                            "arguments": {**UNDO["arguments"], "p_smuggled": "y"},
+                        },
+                    }
+                ]
+            ),
+            lock,
+        )
+    assert "its compensation: update_task_status does not take p_smuggled" in (refused.value.reason)
+
+
+def test_a_compensation_may_not_reference_a_later_step(lock: wd.LockView) -> None:
+    """A compensation runs after its own step succeeded, so it may read that
+    step's result and earlier steps' -- and never a later step's, which may not
+    have run when the undo does."""
+    later = {
+        **START,
+        "compensation": {
+            **UNDO,
+            "arguments": {**UNDO["arguments"], "p_task_id": "{{steps.second.row}}"},
+        },
+    }
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(definition([later, {"name": "second", "capability": "create_note@1.0.0"}]), lock)
+    assert refused.value.step_name == "start"
+    assert "its compensation: {{steps.second.row}} names a step that runs later" in (
+        refused.value.reason
+    )
+
+    # The control, inside the proof: its own step and an earlier one resolve.
+    earlier = {
+        **START,
+        "name": "second",
+        "compensation": {
+            **UNDO,
+            "arguments": {
+                **UNDO["arguments"],
+                "p_task_id": "{{steps.first.row}}",
+                "p_expected_status": "{{steps.second.row}}",
+            },
+        },
+    }
+    compiled = compile_it(
+        definition([{"name": "first", "capability": "create_note@1.0.0"}, earlier]), lock
+    )
+    assert compiled.steps[1].compensation is not None
+
+
+def test_compensation_scopes_join_the_required_scopes(lock: wd.LockView) -> None:
+    """So `workflow_enqueue` refuses an agent that could not run the undo
+    BEFORE the first forward step (D1725). `create_note` needs `notes:write`
+    only; its compensation here needs `tasks:write`."""
+    plain = compile_it(definition([{"name": "note", "capability": "create_note@1.0.0"}]), lock)
+    assert plain.required_scopes == ("notes:write",)
+    compensated = compile_it(
+        definition([{"name": "note", "capability": "create_note@1.0.0", "compensation": UNDO}]),
+        lock,
+    )
+    assert compensated.required_scopes == ("notes:write", "tasks:write")
+
+
+def test_a_wait_takes_no_capability_and_is_bounded(lock: wd.LockView) -> None:
+    """A wait calls nothing, so it compiles to a step with no tool and the
+    table's bounds satisfied by constants (D1727); it may not outlast the
+    run, and it may not carry a call's keys."""
+    compiled = compile_it(
+        definition([{"name": "pause", "wait": {"seconds": 30}}], timeout_seconds=60), lock
+    )
+    assert compiled.body()["steps"] == [
+        {
+            "name": "pause",
+            "kind": "wait",
+            "seconds": 30,
+            "timeout_seconds": 5,
+            "retry": {"max": 0, "backoff_seconds": 1},
+        }
+    ]
+    assert compiled.required_scopes == ()
+
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(
+            definition([{"name": "pause", "wait": {"seconds": 60}}], timeout_seconds=60), lock
+        )
+    assert "wait.seconds 60 is not less than the run's timeout_seconds 60" in (refused.value.reason)
+
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(
+            definition(
+                [{"name": "pause", "wait": {"seconds": 5}, "capability": "create_note@1.0.0"}]
+            ),
+            lock,
+        )
+    assert "is a wait step and carries capability" in refused.value.reason
+
+
+def test_a_wait_on_an_event_is_refused_naming_session_thirty_four(lock: wd.LockView) -> None:
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(definition([{"name": "pause", "wait": {"event": "task.created"}}]), lock)
+    assert "arrives in Session 34" in refused.value.reason
+
+
+def test_a_reference_to_a_wait_step_is_refused(lock: wd.LockView) -> None:
+    """A wait records no result, so a reference to one could never resolve."""
+    with pytest.raises(wd.DefinitionError) as refused:
+        compile_it(
+            definition(
+                [
+                    {"name": "pause", "wait": {"seconds": 5}},
+                    {
+                        "name": "note",
+                        "capability": "create_note@1.0.0",
+                        "arguments": {"p_title": "{{steps.pause.row}}"},
+                    },
+                ]
+            ),
+            lock,
+        )
+    assert "names a wait step" in refused.value.reason
+
+
+def test_the_skeleton_skips_a_write_a_profile_made_approval_requiring() -> None:
+    """`init`'s `_first_write` reads the EFFECTIVE approval (D1723). The
+    second lock is narrowed to its approval-requiring write alone, so the
+    capability-only reading would scaffold it and this one scaffolds nothing."""
+    import dataclasses
+    import importlib.util
+
+    specification = importlib.util.spec_from_file_location(
+        "apg_workflow_command", REPO_ROOT / "bin" / "workflow.py"
+    )
+    assert specification and specification.loader
+    command = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(command)
+
+    second = wd.lock_view_for_project(SECOND)
+    only = dataclasses.replace(
+        second, tools=tuple(tool for tool in second.tools if tool.name == "update_task_status")
+    )
+    assert command._first_write(only) is None
+
+    example = wd.lock_view_for_project(EXAMPLE)
+    control = dataclasses.replace(
+        example, tools=tuple(tool for tool in example.tools if tool.name == "update_task_status")
+    )
+    assert command._first_write(control) == (
+        "update_task_status@1.0.0",
+        ("p_task_id", "p_expected_status", "p_new_status"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # The shape, before the lock is consulted
 # ---------------------------------------------------------------------------
 
@@ -488,6 +828,67 @@ def test_a_step_name_may_not_carry_a_hyphen_although_the_table_allows_one(
         wd.load(path)
 
 
+def test_an_undo_rows_name_can_never_be_a_step_name(tmp_path: Any) -> None:
+    """**D1748, pinned.** 0035 names a compensation row `undo-<position>` and
+    keys it `wf-<run>-undo-<position>`; `workflow_step` is UNIQUE (run_id,
+    name). A forward step named `undo-1` would collide with the first undo row
+    inside a finish -- and cannot exist, because this schema admits no hyphen
+    in a step name. A later widening of that pattern has to look at this."""
+    path = tmp_path / "undo.yaml"
+    path.write_text(
+        "schema_version: 1\nname: fine\nversion: 1\ndescription: x\n"
+        "steps:\n  - name: undo-1\n    capability: create_note@1.0.0\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(wd.DefinitionError, match=r"workflow\.schema\.json"):
+        wd.load(path)
+
+
+def test_the_schema_admits_a_capability_step_or_a_wait_step_and_never_both(
+    tmp_path: Any,
+) -> None:
+    """`oneOf` over two `required` sets. Each rejected shape is paired with the
+    accepted one it differs from, so the refusals are not a schema that refuses
+    every step."""
+    head = "schema_version: 1\nname: fine\nversion: 1\ndescription: x\nsteps:\n"
+    cases = {
+        "  - name: a\n    wait: {seconds: 5}\n": True,
+        "  - name: a\n    capability: create_note@1.0.0\n": True,
+        "  - name: a\n    wait: {seconds: 5}\n    capability: create_note@1.0.0\n": False,
+        "  - name: a\n    wait: {seconds: 5}\n    retry: {max: 1}\n": False,
+        "  - name: a\n    wait: {seconds: 5}\n    approval: {expires_after_seconds: 60}\n": False,
+        "  - name: a\n": False,
+        "  - name: a\n    wait: {}\n": False,
+        "  - name: a\n    capability: create_note@1.0.0\n"
+        "    compensation: {capability: create_note@1.0.0, extra: 1}\n": False,
+        "  - name: a\n    capability: set_note_embedding@1.0.0\n"
+        "    approval: {expires_after_seconds: 30}\n": False,
+    }
+    for index, (step, admitted) in enumerate(cases.items()):
+        path = tmp_path / f"case-{index}.yaml"
+        path.write_text(head + step, encoding="utf-8")
+        if admitted:
+            wd.load(path)
+        else:
+            with pytest.raises(wd.DefinitionError, match=r"workflow\.schema\.json"):
+                wd.load(path)
+
+
+def test_the_session_32_definitions_are_byte_for_byte_unchanged() -> None:
+    """**`schema_version` stays 1 because nothing that validated before moved.**
+    These are the two files' digests at the `1.10.0` tag, which is what both
+    production projects have INSTALLED: a changed byte would be a new source
+    under an installed (name, version), and step 6d refuses that (PT409)."""
+    assert {
+        path.name: wd.source_digest(path)
+        for path in wd.definitions_of(PROJECT_ROOT)
+        if path.name.startswith("notes-")
+    } == {
+        "notes-retry.yaml": "d2bef7efbfcbd27d168bb78cabfb3500927f95b48518d4af5e844fd70e7a4eac",
+        "notes-roundtrip.yaml": "d5b2365d9040ed89b5b46c02802141454866c8fa7f1c89b3f0b4488cdeba5025",
+    }
+
+
 def test_a_file_that_is_not_yaml_is_reported_rather_than_crashing(tmp_path: Any) -> None:
     path = tmp_path / "broken.yaml"
     path.write_text("steps: [\n", encoding="utf-8")
@@ -507,17 +908,61 @@ def test_definitions_of_a_project_with_no_workflows_directory_is_empty(tmp_path:
 # ---------------------------------------------------------------------------
 
 
-def test_the_example_projects_definitions_compile(lock: wd.LockView) -> None:
+def test_the_example_projects_four_definitions_compile(lock: wd.LockView) -> None:
     """**The control for every refusal above.**
 
     Without it, a compiler that refused everything would pass this whole
     module. It is also the check that `bin/workflow.sh validate --project
-    project.example.yaml` exits 0, asserted here over the same two files.
+    project.example.yaml` exits 0, asserted here over the same four files --
+    `project.example.yaml` is the manifest that names `projects/example` (beta's
+    shape); `project.second.example.yaml` names no set (D1749).
     """
     paths = wd.definitions_of(PROJECT_ROOT)
-    assert [path.name for path in paths] == ["notes-retry.yaml", "notes-roundtrip.yaml"]
+    assert [path.name for path in paths] == [
+        "notes-retry.yaml",
+        "notes-roundtrip.yaml",
+        "tasks-approval.yaml",
+        "tasks-compensate.yaml",
+    ]
 
     compiled = {path.name: wd.compile_file(path, lock) for path in paths}
+
+    approval = compiled["tasks-approval.yaml"]
+    assert [step.name for step in approval.steps] == [
+        "start_the_task",
+        "set_the_embedding",
+        "finish_the_task",
+    ]
+    assert approval.steps[1].approval == {"expires_after_seconds": 900}
+    assert approval.steps[0].approval is None
+    # The compensation block carries every key the claim hands the worker as
+    # an undo row's `step` (0035's `workflow_claim_step`), and the retry and
+    # timeout `workflow_begin_compensation` reads into the row.
+    assert approval.steps[0].compensation == {
+        "tool": "update_task_status",
+        "capability": "update_task_status",
+        "capability_version": "1.0.0",
+        "resource": None,
+        "kind": "write",
+        "arguments": {
+            "p_task_id": "{{input.task_id}}",
+            "p_expected_status": "in_progress",
+            "p_new_status": "pending",
+        },
+        "retry": {"max": 1, "backoff_seconds": 5},
+        "timeout_seconds": wd.DEFAULT_STEP_TIMEOUT_SECONDS,
+    }
+    assert approval.required_scopes == ("note_embeddings:write", "tasks:write")
+
+    compensate = compiled["tasks-compensate.yaml"]
+    assert compensate.body()["steps"][1] == {
+        "name": "pause",
+        "kind": "wait",
+        "seconds": 5,
+        "timeout_seconds": wd.WAIT_STEP_TIMEOUT_SECONDS,
+        "retry": {"max": 0, "backoff_seconds": 1},
+    }
+    assert compensate.steps[2].arguments["p_task_id"] == "{{input.missing_task_id}}"
 
     roundtrip = compiled["notes-roundtrip.yaml"]
     assert [step.name for step in roundtrip.steps] == [
