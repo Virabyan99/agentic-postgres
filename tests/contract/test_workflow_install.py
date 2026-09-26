@@ -24,7 +24,11 @@ Nothing here reaches a database. Whether the function behaves is
 from __future__ import annotations
 
 import ast
+import importlib.util
 import re
+import subprocess
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -222,3 +226,124 @@ def test_the_deploy_installs_definitions_as_the_superuser_over_the_socket() -> N
         "the statement's stdin is not passed, so psql would read nothing from -f - "
         "and exit 0 having executed nothing"
     )
+
+
+# ---------------------------------------------------------------------------
+# D1705: the two arms of step 6d that had been read only on a host's transcript
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def deploy() -> Any:
+    """`bin/deploy-project.py` imported by path -- `bin/` is not a package."""
+    spec = importlib.util.spec_from_file_location("_apg_deploy_under_test", DEPLOY)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _refuse_every_container(deploy: Any, monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    reached: list[Any] = []
+
+    def refuse(*arguments: Any, **options: Any) -> Any:
+        reached.append(arguments)
+        return subprocess.CompletedProcess(list(arguments), 0, "", "")
+
+    monkeypatch.setattr(deploy.container_exec, "run", refuse)
+    return reached
+
+
+def test_a_project_with_nothing_to_install_says_which_of_the_two_reasons(
+    deploy: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No set, and a set with no `workflows/` directory, are two sentences.
+
+    Alpha is the first (it declares no migration set) and has printed it on
+    every trip since Session 32; the second had never been printed anywhere.
+    Neither may reach a container, and neither may read the lock -- the lock
+    path here does not exist, so a read would raise.
+    """
+    reached = _refuse_every_container(deploy, monkeypatch)
+    database = {"container": "never-reached", "name": "never"}
+    arguments = {
+        "release": tmp_path,
+        "manifest_path": tmp_path / "project.yaml",
+        "lock_path": tmp_path / "no-such-lock.json",
+        "database": database,
+    }
+
+    monkeypatch.setattr(deploy, "load_project_manifest", lambda path: {})
+    deploy.install_workflow_definitions(**arguments)
+    no_set = capsys.readouterr().out
+
+    (tmp_path / "projects" / "bare").mkdir(parents=True)
+    monkeypatch.setattr(
+        deploy, "load_project_manifest", lambda path: {"migrations": {"set": "projects/bare"}}
+    )
+    deploy.install_workflow_definitions(**arguments)
+    no_directory = capsys.readouterr().out
+
+    assert "no workflow definitions (the project declares no migration set)" in no_set, no_set
+    assert "no workflow definitions (the project declares none)" in no_directory, no_directory
+    assert no_set.strip() != no_directory.strip()
+    assert reached == []
+
+
+def test_a_definition_that_does_not_compile_refuses_the_deploy_at_exit_five(
+    deploy: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Exit 5 from the helper step 6d calls, before anything is installed.
+
+    Reachable without a host through the helper itself; that the helper runs
+    before step 6b is `test_step_6d_installs_definitions_after_the_migration_
+    and_before_the_services`. The lock is the example project's real one; the
+    definition is the example's own with one capability renamed. The control,
+    in the same test: the unmodified definition compiles and is installed.
+    """
+    reached = _refuse_every_container(deploy, monkeypatch)
+    view = wd.lock_view_for_project(REPO_ROOT / "project.example.yaml")
+    monkeypatch.setattr(deploy.workflow_definition.LockView, "from_json", lambda raw: view)
+    lock_path = tmp_path / "lock.json"
+    lock_path.write_text("{}", encoding="utf-8")
+    source = (REPO_ROOT / "projects" / "example" / "workflows" / "notes-roundtrip.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "create_note@1.0.0" in source
+
+    arguments = {
+        "release": tmp_path,
+        "manifest_path": tmp_path / "project.yaml",
+        "lock_path": lock_path,
+        "database": {"container": "apg-test-postgres-1", "name": "test"},
+    }
+    for label, text in (
+        ("broken", source.replace("create_note@1.0.0", "no_such_capability@1.0.0")),
+        ("sound", source),
+    ):
+        workflows = tmp_path / "projects" / label / "workflows"
+        workflows.mkdir(parents=True)
+        (workflows / f"{label}.yaml").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(
+        deploy, "load_project_manifest", lambda path: {"migrations": {"set": "projects/broken"}}
+    )
+    with pytest.raises(SystemExit) as raised:
+        deploy.install_workflow_definitions(**arguments)
+    assert raised.value.code == deploy.EXIT_VALIDATION == 5
+    refused = capsys.readouterr().err
+    assert "broken.yaml does not compile against this lock" in refused, refused
+    assert reached == [], "a definition that does not compile reached the cluster"
+
+    monkeypatch.setattr(
+        deploy, "load_project_manifest", lambda path: {"migrations": {"set": "projects/sound"}}
+    )
+    deploy.install_workflow_definitions(**arguments)
+    assert reached, "the control installed nothing, so the refusal above proves nothing"
+    assert "sound.yaml" in capsys.readouterr().out

@@ -913,8 +913,25 @@ STORE_QUERIES = {
     "tool_calls_total": "sum(agent_tool_calls_total)",
 }
 
+#: What an EMPTY answer means, per figure (D1712). One sentence served both
+#: until Session 33 -- *"the store holds no such series yet"* -- and its "yet"
+#: was wrong for the tool-call figure: `agent_tool_calls_total` is minted per
+#: `mcp` PROCESS (D1609), and an instant query sees only the live process's
+#: series, so a project whose agents HAVE called tools reads empty whenever
+#: the current process has served none -- after every recreate, however much
+#: history the store holds. The UNKNOWN stays right; the reason now says why.
+STORE_EMPTY_REASONS = {
+    "requests_total": "the store holds no such series yet",
+    "tool_calls_total": (
+        "the store holds no such series in the current mcp process (each process "
+        "mints its own series, and a recreated mcp has served no call yet)"
+    ),
+}
 
-def probe_store(project_key: str, query: str) -> tuple[int | None, str]:
+
+def probe_store(
+    project_key: str, query: str, *, empty: str = "the store holds no such series yet"
+) -> tuple[int | None, str]:
     """One instant query against THIS project's store. `(value, reason)`.
 
     **Read through the container, because the store is routed nowhere** (ADR
@@ -958,8 +975,9 @@ def probe_store(project_key: str, query: str) -> tuple[int | None, str]:
         # Truthfully zero is NOT this case: a `sum()` over no series returns
         # an empty result, and so does a query for a metric that has never
         # existed. The two are indistinguishable from here, so the honest
-        # answer is that nothing was measured.
-        return None, "the store holds no such series yet"
+        # answer is that nothing was measured. The sentence is the figure's
+        # own (`STORE_EMPTY_REASONS`, D1712).
+        return None, empty
 
     for series in results:
         labelled = (series.get("metric") or {}).get("project")
@@ -1059,7 +1077,11 @@ def probe_usage(
 
     store: dict[str, tuple[int | None, str]] = {}
     for figure, query in STORE_QUERIES.items():
-        store[figure] = probe_store(key, query) if key else (None, "no project key")
+        store[figure] = (
+            probe_store(key, query, empty=STORE_EMPTY_REASONS[figure])
+            if key
+            else (None, "no project key")
+        )
 
     return capacity_reading.UsageFigures(
         database_bytes=_figure(*database_bytes),

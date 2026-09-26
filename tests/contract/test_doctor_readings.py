@@ -652,3 +652,38 @@ def test_the_store_query_sums_across_instances(doctor: Any) -> None:
     for query in doctor.STORE_QUERIES.values():
         assert query.startswith("sum("), query
     assert set(doctor.STORE_QUERIES) == {"requests_total", "tool_calls_total"}
+
+
+def test_an_empty_tool_call_answer_names_the_current_mcp_process(
+    doctor: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D1712: the UNKNOWN was right and its "yet" was wrong.
+
+    `agent_tool_calls_total` is minted per mcp PROCESS (D1609) and an instant
+    query sees only the live one, so a project whose agents have called tools
+    reads empty after every recreate. The reason must say that, and must not
+    be the sentence the traefik figure keeps. Driven through `probe_store`
+    with a store that answers success and no series.
+    """
+    assert set(doctor.STORE_EMPTY_REASONS) == set(doctor.STORE_QUERIES)
+
+    empty = subprocess.CompletedProcess([], 0, '{"status": "success", "data": {"result": []}}', "")
+    monkeypatch.setattr(doctor.container_exec, "run", lambda *a, **k: empty)
+
+    calls_value, calls_reason = doctor.probe_store(
+        "beta-dev",
+        doctor.STORE_QUERIES["tool_calls_total"],
+        empty=doctor.STORE_EMPTY_REASONS["tool_calls_total"],
+    )
+    requests_value, requests_reason = doctor.probe_store(
+        "beta-dev",
+        doctor.STORE_QUERIES["requests_total"],
+        empty=doctor.STORE_EMPTY_REASONS["requests_total"],
+    )
+    assert calls_value is None and requests_value is None
+    assert "current mcp process" in calls_reason, calls_reason
+    assert "each process mints its own series" in calls_reason, calls_reason
+    assert "mcp" not in requests_reason, requests_reason
+    # The caller passes the figure's own sentence, never the default.
+    source = DOCTOR_PY.read_text(encoding="utf-8")
+    assert "empty=STORE_EMPTY_REASONS[figure]" in source

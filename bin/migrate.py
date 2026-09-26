@@ -167,6 +167,17 @@ def run_dbmate(mode: str, document: dict, rendered_dir: str, service: str = "dbm
     # and D1505's own cause is still not established (D1544). Closed anyway:
     # nothing reads it, and a child that cannot reach a terminal cannot stop.
     result = container_exec.compose_run(command[0], command[1], *command[3:], text=False)
+    # **Relayed, not swallowed** (D1707). `compose_run` always captures, and
+    # from 1.8.0 until Session 33 this returned the exit code alone -- so
+    # `status` printed no ledger and exited 0, and a failed `up` reached the
+    # deploy's step 6 with an empty stderr. dbmate's own lines are the
+    # operator's to read; they are still not the verdict (D941: read the
+    # ledger, never the migrator's line). Bytes, because `text=False`; a byte
+    # that is not UTF-8 is replaced rather than allowed to fail the relay.
+    sys.stdout.write((result.stdout or b"").decode("utf-8", errors="replace"))
+    sys.stdout.flush()
+    sys.stderr.write((result.stderr or b"").decode("utf-8", errors="replace"))
+    sys.stderr.flush()
     return result.returncode
 
 

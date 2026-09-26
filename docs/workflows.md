@@ -72,9 +72,13 @@ Two things can be substituted into an argument:
 ```
 
 A reference to a step that comes *later*, or to one that does not exist, is a
-compile error and not a run-time surprise. `{{` or `}}` anywhere else in a
-definition is refused outright — there is no partial interpolation, and a
-value is either a literal or one whole reference.
+compile error and not a run-time surprise. A `{{` or `}}` that is not part of
+a well-formed reference is refused outright — a marker the pattern did not
+match is a typo, not a literal. **A whole-string reference yields the
+referenced value with its type** — `"{{input.limit}}"` over `{"limit": 5}` is
+the integer 5, not `"5"`. **A reference inside a longer string is interpolated
+as its JSON rendering** (a string value as itself), because that is the only
+thing a string can hold.
 
 The second example project definition, `notes-retry.yaml`, exists to exercise
 the retry path: it asks for a task transition whose expected status cannot
