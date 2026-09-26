@@ -1416,7 +1416,8 @@ scopes dropped, (m4) a later reference admitted in a compensation, and
 (m7) `wait: {event}` admitted, (m8) `init` on the capability's approval,
 (m9) a compensation that requires approval. **Targeted, once: 266 passed**
 (the plan's nine modules; `test_dev_environment_cluster` ran, Docker-backed).
-**Rows added: D1749–D1751. NEXT FREE: D1752.**
+**Rows added: D1749–D1751. NEXT FREE: D1752.** **CI:**
+`6fd8f093c7aa794b7ee277762c19438a5dcf6a1f` → `contract` **success**.
 
 ### Run 5 — the plane accepts an approved call, the loop learns gates and compensation
 
