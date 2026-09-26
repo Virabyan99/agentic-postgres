@@ -479,7 +479,6 @@ def test_the_ceilings_on_this_host_count_the_database(as_root: None) -> None:
     ceilings = next(check for check in reading["checks"] if check["name"] == "ceilings")
     assert "by compose project" in ceilings["detail"], ceilings
 
-    unbounded_total = 0
     for variable in ("APG_PROJECT_A_OUTPUTS", "APG_PROJECT_B_OUTPUTS"):
         document = json.loads(Path(os.environ[variable]).read_text(encoding="utf-8"))
         key = document["project"]["key"]
@@ -499,7 +498,6 @@ def test_the_ceilings_on_this_host_count_the_database(as_root: None) -> None:
         caps = {
             entry["Name"].lstrip("/"): int(entry["HostConfig"]["Memory"]) for entry in inspected
         }
-        unbounded_total += sum(1 for cap in caps.values() if cap == 0)
         database = document["database"]["container"]
         assert caps.get(database, 0) > 0, (
             f"{key}'s database container {database} is not among the containers "
@@ -517,9 +515,34 @@ def test_the_ceilings_on_this_host_count_the_database(as_root: None) -> None:
         )
         print(f"ceilings {key}: {reported} MiB across {len(caps)} containers")
 
-    if unbounded_total:
-        assert f"{unbounded_total} unbounded" in ceilings["detail"], ceilings
-    print(f"ceilings: {ceilings['detail']}")
+    # **The unbounded count is the HOST's, not the two projects'** (D1710). The
+    # reading selects every container carrying ANY compose project label, and
+    # the shared edge is a compose project of its own (`infra/edge/compose.yaml`)
+    # whose two services set no `mem_limit`. The first sweep counted only the
+    # two projects' containers, found 8 against the reading's 10, and failed a
+    # reading that was right. So it is counted here over the reading's own
+    # population, read independently -- and asserted both ways, because the
+    # detail names no unbounded count at all when there are none.
+    everything = subprocess.run(
+        ["docker", "ps", "-q", "--filter", "label=com.docker.compose.project"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    unbounded = sorted(
+        entry["Name"].lstrip("/")
+        for entry in json.loads(
+            subprocess.run(
+                ["docker", "inspect", *everything], capture_output=True, text=True, check=True
+            ).stdout
+        )
+        if int(entry["HostConfig"]["Memory"]) == 0
+    )
+    if unbounded:
+        assert f", {len(unbounded)} unbounded," in ceilings["detail"], (ceilings, unbounded)
+    else:
+        assert "unbounded" not in ceilings["detail"], ceilings
+    print(f"ceilings: {ceilings['detail']}; unbounded: {', '.join(unbounded) or 'none'}")
 
 
 # ---------------------------------------------------------------------------
