@@ -2055,7 +2055,11 @@ operator, upgrade, API and pool pages (D678/D1484's class, for the fourth
 time in four bumps). Divergence rows **D1696-D1705**. **NEXT FREE: D1706,
 ADR 0230.**
 
-**CI on `a44017b`**: *(read below by full SHA)*.
+**CI, by full SHA**: `9a7fa4c` (the repair) **success**; `a44017b` (the
+bump) **cancelled** -- superseded by the next push, which is not a failure
+(D1059); `c89d233` (this Done and D1705, containing the bump) **success**.
+Green on the first push of every commit in the run -- the first run of this
+session with no CI red at all.
 
 ### Run 8 — the trip: both projects redeploy with 0034, the worker's first run, one sweep, the tag
 
