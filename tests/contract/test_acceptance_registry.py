@@ -81,7 +81,17 @@ ID_PATTERN = re.compile(
     # document. None of those is a question about a finite resource, and a
     # family of its own is what makes "the node as a finite resource"
     # countable -- the same argument `STU` records for Session 24.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE)-[A-Z0-9]+(-\d+)?$"
+    # `WF` is Session 32's (ADR 0226-0229): a WORKFLOW -- durable work an
+    # agent starts and a loop executes step by step, surviving the death of
+    # the process that runs it. Not `AGT`, whose subject is one call by one
+    # agent through the plane and whose every property holds for the length
+    # of a request; a workflow's properties -- a lease, a replay, a park, a
+    # resumption after a crash -- hold ACROSS requests and across processes,
+    # and none of them is a question about a single call. Not `OPS` either:
+    # the worker is not how an operator reads a deployment but a second
+    # thing an agent's authority can do on one. A family of its own is what
+    # makes *at-least-once plus an idempotent upstream* countable.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF)-[A-Z0-9]+(-\d+)?$"
 )
 
 

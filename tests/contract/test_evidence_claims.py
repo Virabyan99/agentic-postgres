@@ -1121,6 +1121,22 @@ CLAIM_INTRODUCED_IN = {
     "usage_read": 31,
     "secret_kind_checked": 31,
     "agent_write_method": 31,
+    # Session 32 (ADR 0226-0229). THIRTEEN, eight offline and five host,
+    # landing with the constant (D690): the durable step substrate and the
+    # loop that executes it, plus D1636's reading repaired and read live.
+    "capacity_ceilings": 32,
+    "ceilings_read": 32,
+    "workflow_definition": 32,
+    "workflow_substrate": 32,
+    "workflow_worker": 32,
+    "workflow_surface": 32,
+    "workflow_command": 32,
+    "workflow_install": 32,
+    "workflow_reading": 32,
+    "workflow_run": 32,
+    "workflow_resume": 32,
+    "workflow_revocation": 32,
+    "workflow_restore": 32,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

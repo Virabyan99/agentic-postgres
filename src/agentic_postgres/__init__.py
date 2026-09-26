@@ -551,7 +551,76 @@ from pathlib import Path
 #: confirmed against a DEPLOYMENT in the same session: Run 7's `upgrade plan`
 #: on both projects before the deploy, and a `major` required there is a stop
 #: condition rather than a number to write down.
-CURRENT_SESSION = 31
+#:
+#: **Session 32 moves it to 32, all-or-nothing again** (D690): THIRTEEN
+#: requirements and thirteen claims -- `CLAIMS` 145 -> 158 and `OFFLINE_CLAIMS`
+#: 24 -> 32, counted from the tuples rather than by hand (D1628) -- eight
+#: declared offline and five host, with every offline half written in the run
+#: that built its plane (Runs 2-6) and every live half here.
+#:
+#: **The session's subject is durable work an agent starts and a loop
+#: executes**, and the four ADRs are its shape. ADR 0226: the worker is a loop
+#: INSIDE the auth process, using that service's own role, pool and token
+#: issuance -- no container, role, secret, claimant or document field is
+#: added, and the loop's idle cost measured 7.8 MiB. ADR 0227: the state is
+#: four `app_private` tables nobody may read and nine definer functions; a
+#: step's idempotency key is per (run, step) and never per attempt, so a
+#: replay after a crash is re-read rather than written twice; and -- amended
+#: in Run 7 (D1696) -- a step records the request id the PLANE minted, read off
+#: its response, because the plane ignores one a caller sends (ADR 0160).
+#: ADR 0228: a definition is a reviewed artefact compiled against the
+#: project's lock and installed by a deploy's step 6d, immutable per name and
+#: version. ADR 0229: three routes for AGENT tokens behind a second
+#: authenticator, amending ADR 0114. And D1636 is repaired first: the ceilings
+#: reading counts the database.
+#:
+#: `WF` is a new requirement family and the argument is `NODE`'s: its subject
+#: is a WORKFLOW -- properties that hold ACROSS requests and across processes,
+#: a lease, a replay, a park, a resumption after a crash -- and `AGT`, whose
+#: every property holds for the length of one call, does not name them.
+#:
+#: **One migration, 0034, and it is the floor once applied** (ADR 0162 §3). It
+#: was amended three times while applied nowhere -- the claim returning its
+#: request id (D1686), taking a margin rather than a lease (D1687), and then
+#: returning none, because the id that correlates is the plane's (D1696) --
+#: and after this session's deploy it is fixed forward like every other. **No
+#: outputs, capability, lock, project-manifest, secret or host schema moves**,
+#: and outputs stays v18 with no new field (D1654).
+#:
+#: **`VERSION` moves to `1.10.0`.** What moved: migration 0034; three
+#: operations on the auth service's application API (`POST /workflows/runs`,
+#: `GET /workflows/runs/{run_id}`, `POST /workflows/runs/{run_id}/cancel`); a
+#: loop in the auth process, so the `auth` image moves and a deploy recreates
+#: it; one new command, `bin/workflow.sh`, with six verbs; a deploy step 6d; a
+#: twelfth doctor check; a tenth rehearsal; one member in the restore drill's
+#: evidence; `doctor capacity`'s ceilings grouped by compose project; and one
+#: new page, `docs/workflows.md`.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig: a git
+#: worktree at `4344a1f`, the commit that IS deployed, and a `tar`-piped copy
+#: of this working tree, each rendering the example project outside the
+#: checkout. **Two readings, because the command prices only what a document
+#: shows** (D1666). With `--also migration_added --also api_operation_added`:
+#: `bump minor`, **`requires minor`**, verdict `ok`, `changes
+#: [api_operation_added, migration_added]`, `reasons []`,
+#: `operator_digests_moved []`. Without the declarations: `requires patch` --
+#: the floor the documents alone establish, wrong in the reassuring direction,
+#: which is why the declaration exists. **Exactly two leaves differ, and the
+#: plan predicted a different second one** (D1703): `template_version` 1.9.0 ->
+#: 1.10.0 and `migrations.release_lock_sha256`; the rendered document carries
+#: no migration COUNT, so there was never a `migrations.count` leaf to move.
+#: 5,948 bytes -> 5,949. **ADR 0162 prices it a MINOR, and here the minor is
+#: the floor rather than a judgement above it**: a new released migration and
+#: a new API operation are each a minor by the table, and the first makes a
+#: rollback by image impossible past it. `1.10.0` is that floor exactly. **No
+#: outputs, capability, lock, project-manifest, secret or host schema moves**,
+#: so an operator supplies nothing new to take it -- what they must know is
+#: that 0034 is applied at step 6 and cannot be taken back by an image.
+#: **This session takes a host trip**, so
+#: the class is confirmed against a DEPLOYMENT in the same session: Run 8's
+#: `upgrade plan` on both projects, with the same two declarations, before the
+#: deploy -- and a `major` there is a stop condition.
+CURRENT_SESSION = 32
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

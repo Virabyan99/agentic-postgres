@@ -202,6 +202,33 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "process_limits",
         "telemetry_bounded",
         "secret_kind_checked",
+        # Session 32 (ADR 0226-0229). EIGHT, and each is a property of a
+        # CHECKOUT. `capacity_ceilings` is a pure grouping over an inspect
+        # payload this suite builds. `workflow_definition` is a schema and a
+        # compiler over a committed lock. `workflow_substrate` is migration
+        # 0034 under a real cluster this workstation starts -- the gate
+        # refuses an absent daemon, and a skip is not a pass.
+        # `workflow_worker` is the loop over fakes that RECORD. `workflow_
+        # surface` is `create_app('auth')` with fakes behind it.
+        # `workflow_command` is a command's closed tables and its argv.
+        # `workflow_install` is an AST scan of the deploy and a statement's
+        # shape, plus `apg dev up` on this machine. `workflow_reading` is three
+        # readers over canned inputs and a rehearsal driven against a rig.
+        #
+        # The session's other FIVE claims are deliberately not here:
+        # `ceilings_read`, `workflow_run`, `workflow_resume`,
+        # `workflow_revocation` and `workflow_restore` each need a running
+        # loop, a running plane or a restored drill -- and the one defect this
+        # session found before its trip (D1696) was invisible to every offline
+        # proof because the plane the loop was proved against was a fake.
+        "capacity_ceilings",
+        "workflow_definition",
+        "workflow_substrate",
+        "workflow_worker",
+        "workflow_surface",
+        "workflow_command",
+        "workflow_install",
+        "workflow_reading",
     }
 )
 
@@ -455,6 +482,27 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "usage_read": ("NODE-USAGE-001",),
     "secret_kind_checked": ("SEC-KIND-001",),
     "agent_write_method": ("AGT-METHOD-001",),
+    # Session 32 (ADR 0226-0229). THIRTEEN claims, landing with the constant
+    # (D690), eight offline and five host -- counted from these tuples and
+    # from `OFFLINE_CLAIMS`, never by hand (D1628). Each requirement is its
+    # own claim (ADR 0089, D1150). The session's subject is durable work:
+    # a definition compiled against the lock, a substrate of four tables
+    # nobody may read, a loop in the auth process, three routes for agent
+    # tokens, and the readers. The five HOST claims are the first time any
+    # of it executes against a real plane.
+    "capacity_ceilings": ("NODE-READ-002",),
+    "ceilings_read": ("NODE-READ-003",),
+    "workflow_definition": ("WF-DEF-001",),
+    "workflow_substrate": ("WF-STATE-001",),
+    "workflow_worker": ("WF-WORK-001",),
+    "workflow_surface": ("WF-ROUTE-001",),
+    "workflow_command": ("WF-CMD-001",),
+    "workflow_install": ("WF-INSTALL-001",),
+    "workflow_reading": ("WF-READ-001",),
+    "workflow_run": ("WF-RUN-001",),
+    "workflow_resume": ("WF-RESUME-001",),
+    "workflow_revocation": ("WF-REVOKE-001",),
+    "workflow_restore": ("REC-WF-001",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

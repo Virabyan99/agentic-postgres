@@ -177,6 +177,12 @@ SHELL_COMMANDS = (
     # the first time: admission and the capacity reading are the first things
     # in this product that read the HOST's manifest rather than a project's.
     "bin/session-31-check.sh",
+    # Session 32 (ADR 0226-0229). Derived from 31's by diff with NO flag added
+    # or removed -- the sorted flag sets were compared (D1133) -- and 31 -> 32
+    # is consecutive again. Its offline half reports EIGHT claims, two more
+    # than any session has declared; its host sweep runs `worker-restart`
+    # against beta itself, under a parked run.
+    "bin/session-32-check.sh",
     "bin/smoke-test.sh",
     # Session 24 (ADR 0205). A loopback client of a deployment's own
     # surfaces, holding the human's token in one process and handing the
