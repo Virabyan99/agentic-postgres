@@ -1231,7 +1231,8 @@ once: 518 passed** (the fifteen modules of the plan's list plus
 E501s ruff found after it were marked and `test_agent_audit_plane` re-run
 alone: 66 passed. **The sweep-selector guard passes vacuously for the new
 module until Run 8 lands the registry.** **Rows added: D1744–D1748. NEXT
-FREE: D1749.**
+FREE: D1749.** **CI:** `c369236cb8fbc19e27b1fddf781d13e1c1a54de2` →
+`contract` **success**.
 
 ### Run 4 — the definition: `approval`, `compensation`, `wait`, the profile fix, the two example definitions
 
