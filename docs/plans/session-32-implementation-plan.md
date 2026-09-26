@@ -498,6 +498,13 @@ at the close to say which run added which.
 | **D1703** | 7 | §5 Run 7 item 6: the reading *"leaves `template_version` and `migrations.count` (33 → 34)"*. | **Two leaves differ and the second is `migrations.release_lock_sha256`.** The rendered document carries no migration COUNT; it carries the release lock's digest, which moved because 0034 is in the lock. 5,948 -> 5,949 bytes. `bump minor`; with `--also migration_added --also api_operation_added` **`requires minor`**, `changes [api_operation_added, migration_added]`; without them **`requires patch`** -- D1666's prediction measured. | The release paragraph lists both leaves and both readings; Sheet B1's `upgrade plan` lines carry the two `--also` flags. `upgrade_plan` is left alone: inferring `migration_added` from a lock digest moving is the inference its own docstring refuses (D1666). |
 | **D1704** | 7 | ADR 0229: status and cancel answer *"the agent's own run"*. | **A revoked agent cannot read the run its revocation stopped.** `authenticate_agent` refuses a non-active agent at the route, so `GET /workflows/runs/{id}` is a 401 for exactly the run whose `stopped_reason` is `agent_not_active`. Correct for the authority -- a revoked principal reads nothing -- and it leaves the operator the doctor's counts and no product reader of ONE run's record. | The live revocation proof reads the run through `workflow_run_status` as the superuser, and says why. **Recorded for Session 33**, whose `inspect` is an operator's provenance reader (D1248); no route is widened here. |
 | **D1705** | 7 | §2 `WF-INSTALL-001`: *"a project with no `workflows/` directory installs nothing and says so; an uninstallable definition refuses the deploy at exit 5"*, with the proposed node ids `::test_a_project_without_a_workflows_directory_installs_nothing_and_says_so` and `::test_an_uninstallable_definition_refuses_at_exit_five`; Sheet B2: alpha's step 6d prints *"(the project declares none)"*. | **Neither proof exists** -- Run 4 wrote seven proofs in `test_workflow_install.py` and none of them drives `install_workflow_definitions`' two early returns or its `fail(EXIT_VALIDATION, …)` paths. Found by measuring the plan's 84 proposed node ids against the registry: 27 are absent from it, because the registry was written from `--collect-only` rather than from the proposals, and walking those 27 for their properties found these two with no proof at all. And step 6d has TWO "nothing" lines: `(the project declares no migration set)` for a manifest with no set -- alpha -- and `(the project declares none)` for a set with no `workflows/`. | **The registry claims only what is proved**: `WF-INSTALL-001`'s description names both behaviours as NOT claimed and why. Both are READ on the trip, in the deploy transcripts (Sheets B2 and B3); a proof of each is owed and belongs to the next run that touches `bin/deploy-project.py`. Sheet B2 and Run 8 item 3 now expect alpha's line as the code prints it. |
+| **D1706** | 8 | Sheet B1: *"`doctor.sh` both → **11 ok** (the twelfth check arrives with the deploy)"*. | **10 ok / 1 PROBLEM / 1 UNKNOWN on both**, because the doctor that ran is the 1.10.0 checkout's and the deployments were still 1.9.0: `migrations — 33 of 34` (alpha) and `35 of 36` (beta), and `workflow — app_private.workflow_counts did not answer`. Both are true readings of a deployment one release behind the doctor reading it, and the UNKNOWN is reported, not folded (ADR 0195). | **The sheet's expectation was wrong, the reading right.** A pre-deploy doctor read from the NEW checkout measures the deployment against the new release; the plan priced it as the old doctor. After each deploy both read 12 ok. |
+| **D1707** | 8 | Sheet B2: *"`sudo bin/migrate.sh --project project.alpha.yaml --runtime status` … → **34** `[X]`, `Pending: 0`"*; and Session 31's Sheet A3, which expected `33 [X]` from the same verb. | **`migrate.sh … status` prints NO ledger and exits 0, and has since 1.8.0.** Session 30 Run 3 routed `run_dbmate` through `container_exec.compose_run`, which always captures output (`container_exec.py:146-157`), and `run_dbmate` returns only the exit code (`bin/migrate.py:169-170`). So the verb documented as *"List applied and pending migrations"* prints the rendered set, `migrate: status dbmate as …`, and nothing dbmate said. Nothing recorded Session 31's sheet coming back empty. | **Recorded and left** (a product defect found on a trip, D1425: nothing deployable moves mid-trip). The ledger was read by its other readers, both inside the cluster: the doctor's `migrations` check (**all 34** on alpha, **all 36** on beta) and the deploy's own `ledger recorded for 34 / 36 migrations`. **Owed:** `status` prints dbmate's output; a proof that asserts the `[X]` lines appear. |
+| **D1708** | 8 | Sheet B3 and Run 8 item 4: step 6d *"prints `installed 2 workflow definitions`"*; Run 8 item 1: *"`git checkout -B main FETCH_HEAD`"*. | Step 6d prints **one line per definition** -- `notes-retry.yaml  notes-retry v1  2 steps` and `notes-roundtrip.yaml  notes-roundtrip v1  3 steps` -- and no total. And the checkouts ran `git checkout --detach`, as Session 31's two did: the parent script is what ran, and the host has been detached since Session 30. | Wording only; what 6d says is right and complete. The detach is kept (a derivation changes named values, not the shape). |
+| **D1709** | 8 | Sheet B4 step 4: *"the id moved with the restart -- `docker ps` again first"*. | **A restart-policy restart keeps the container.** Sheet B4's rehearsal killed `e1c505345fb3`'s process and the same container came back (restart count 0 → 1). | The id does not move with a policy restart. It DOES move when something recreates the container -- D1711. |
+| **D1710** | 8 | `test_the_ceilings_on_this_host_count_the_database` (Run 7): the unbounded count *"over every running container carrying that project's compose label"*. | **The first sweep failed `ceilings_read` on its LAST assertion, with the reading right.** What D1636 is about PASSED on production: each project's reading equals the independent sum of its containers' caps, 2240 MiB each, the database's among them, 4480 in all (1.9.0 read 2,944). The proof then counted unbounded containers over the two projects (8) where the reading counts every compose-labelled container -- and the shared edge is a compose project of its own (`infra/edge/compose.yaml`) whose `docker-socket-proxy` and `traefik` set no `mem_limit`: 8 + 2 = 10, which is what the reading said. A fixture holding a narrower definition than the code (CLAUDE.md §7 question 6). | **Instrument repaired at `176a7f0`** (the count taken over the reading's own population, asserted both ways), CI green, and a **second sweep** from that checkout with the deployment unmoved -- D1641's method: `git diff --name-only 275a19e..176a7f0` is one test module and nothing deployable, measured before the tag and stated in its message. `ceilings_read` then PASSED. The edge's two unbounded containers are recorded, not repaired: they are outside every project's budget by design, and no reading claimed otherwise. |
+| **D1711** | 8 | Sheet B5: *"the restart count on beta's `auth` is then two of `on-failure:5`'s five"*; and the plan's UNDER-RUN figure, *"the agent reads beta's auth `memory.current` twice more as `op`"* while the sweep runs. | **Each sweep RECREATES the services, early, on both projects** -- an inherited proof does it -- so the three worker-restart kills of the day each landed on a fresh container at restart count 0 (`e1c505345fb3` at B4, `31970c6d3e63` in sweep 1, `fde7fa3134a0` in sweep 2) and the budget was never stacked. And the id the agent was reading vanished mid-sweep (beta's auth recreated at 15:37:09 and again at 16:21:31). Found by reading `/proc/<pid>/cgroup` and `/proc/<pid>/mountinfo` as `op`, which names each `uvicorn` process's project and service without the Docker socket. **The consequence for Run 9: no figure was taken WHILE A RUN WAS EXECUTING.** The sweep-1 samples (15:48-15:55, 59,371,520 steady, one 64,188,416 at 15:54:05) are of a container created at 15:37, after the workflow proofs had finished. | Recorded. **Run 9's envelope may use BEFORE, AFTER-DEPLOY and AFTER-IDLE; it may NOT label any figure "under run".** A figure under a run needs a sample taken during one, which is a reading a later trip owes -- or a rig. |
+| **D1712** | 8 | Sheet B6 and D1643: *"`doctor usage --project beta-dev` → **exit 0 now**, `tool_calls_total` positive -- the sweep made beta's first agent tool call"*. | **Still exit 6**, `tool_calls_total could not be read: the store holds no such series yet` -- while the same reading shows beta's agent record grown from 44 audit rows / 0 idempotency claims to **100 / 12**, so tool calls certainly happened. The query is an INSTANT `sum(agent_tool_calls_total)`; D1609 measured that each `mcp` process mints its own series set, bounded by `metric_expiration: 60s`; and beta's current `mcp` process started at **16:21:25**, after the sweep's workflow proofs (its parked-run rehearsal ran at 16:18). **Consistent with, not proved:** the running `mcp` has had no call since it started, so there is no series to read -- the JUnit carries durations, not start times, so the order of the last call against 16:21:25 is not measured. | **The UNKNOWN is correct and reported, not folded** (ADR 0195). What is wrong is the word **"yet"**, which asserts *never*, and D1643's premise, which said the same: the reading is empty whenever no tool call has reached the CURRENT agent-plane process. Owed: the reason names that (or the query reads a window rather than an instant), and a later reading with a call made after the last recreate. |
 
 ---
 
@@ -2143,7 +2150,95 @@ outcome, read before the next is issued (D1510):
    ceilings on production, the three `memory.current` figures (before,
    idle, under run) and the rehearsal's holder change.
 
-**Done.** *(the executor writes it)*
+**Done.** 2026-09-26, one day. **1.10.0 is deployed on both projects at
+`275a19e`, swept, merged and tagged**, in that order and on that commit
+(D1425), with D1641's one stated exception written into the tag's message
+(D1710).
+
+*Before the day.* WSL's outbound TCP held (ssh in 2.2 s). Ten host scripts
+derived from Session 31's by named substitution, every count asserted --
+the assertions caught three of this run's own miscounts before anything
+shipped; the gate's declaration block fourteen flags in, fourteen out, one
+value moved (`--redeploy-before-file` → `/root/s32-redeploy-before.json`).
+The external script was REBUILT from the record (31's lived in WSL's `/tmp`
+and died) with D1640's agent block and its no-`-i` control. Transport by
+bundle, FETCH_HEAD confirmed, porcelain 0, no `uv pip sync` (the dependency
+files unmoved since `4344a1f`); four renders exit 0, fixtures current at 34.
+
+*The reads (B1).* `upgrade plan` on both projects: **with** `--also
+migration_added --also api_operation_added` → `bump minor`, **`requires
+minor`**, `ok`, changes `api_operation_added, migration_added`; **without**
+them, the control → `requires patch`, no change classes (D1666, D1703). Two
+leaves each: `migrations.release_lock_sha256`, `template_version`. The
+doctor read 10 ok / 1 problem / 1 unknown, correctly, from the new checkout
+against the old deployment (D1706). `kit-2026-09-26-pre` exported and
+verified.
+
+*The deploys (B2, B3).* The sentinel written through the product's own RPC
+(`count: 1`, generation `14f76e5345ad1037`). **Alpha**: exit 0; step 0
+admitted (3814 declared / 2214 reserved / 304 committed / 304 requested /
+1296 safely available; disk 37 GiB, 21 free, 13 above the reserve); **ledger
+34**; step 6d `no workflow definitions (the project declares no migration
+set)`; `auth`, `mcp`, `storage`, `docs` recreated, the database untouched;
+**doctor 12 ok**, the loop's first heartbeat on production 3 s old. **Beta**:
+exit 0; **ledger 36 (34 + 2)**; step 6d installed `notes-retry v1` (2 steps)
+and `notes-roundtrip v1` (3 steps) (D1708); **doctor 12 ok**, `workflow — 2
+definitions`. The migrator's `status` verb printed no ledger at all -- a
+defect since 1.8.0, recorded and left (D1707); the doctor's `migrations`
+check and the deploy's ledger line are the readings.
+
+*The session's own reads (B4).* **`ceilings` 4480 MiB across 2 projects, 10
+unbounded, by compose project** -- D1636 closed on production (1.9.0 read
+2,944), 0.94 s. **The worker-restart rehearsal: verdict `read`**, holder
+`e1c505345fb3:1:1b4a60ef` → `e1c505345fb3:1:8367d0fd` **8.8 s** after the
+SIGKILL, no lease overdue, restart count 0 → 1, the policy the reversal.
+Doctor 12 ok after it. `usage` on beta exit 6, as expected then.
+
+*The sweeps (B5).* **The first**: 1044 passed / 2 failed / 7 skipped / 0
+errors, exit 5 -- `documented_path` by decision, and `ceilings_read`, whose
+proof held a narrower definition of *unbounded* than the reading (D1710).
+Repaired at `176a7f0`, CI **success**, the host's checkout moved with the
+deployment unmoved. **The second**: **1045 passed / 1 failed / 7 skipped / 0
+errors** in 20 m 48 s, exit 5 for `documented_path` alone. Each sweep ran
+worker-restart itself: `31970c6d3e63` 8.4 s, `fde7fa3134a0` 7.5 s -- each on a
+container the sweep had just recreated, at restart count 0 (D1711).
+
+*External and the merge.* `--mode external` **PASSED** (exit 0) with the
+agent block. **`evidence/session-32.json`: 158 claims -- 152 passed, 5
+not_run (`api_authorization`, `bootstrap_identity`,
+`credential_rotation_planes`, `port_allocation`,
+`replacement_host_restore`), 1 failed (`documented_path`)**, exit 5 for those
+reasons and no other -- the plan's prediction exactly. **All thirteen claims
+Session 32 added PASSED; the five host ones -- `ceilings_read`,
+`workflow_run`, `workflow_resume`, `workflow_revocation`, `workflow_restore`
+-- on their first execution anywhere**, and every inherited host claim
+unchanged. `source_commit` `275a19e`, `offline_checkout_commit` `a44017b`,
+the difference printed rather than folded.
+
+*The tag.* `release-reading --ref 275a19e` → `tag_is_owed` (18 commits, 84
+files, migrations 33 → 34, ADRs 225 → 229); `git tag -a 1.10.0 275a19e`,
+pushed, the remote tag resolving to `275a19e`.
+
+*The cleanup (B6).* The sentinel: `1`, `DELETE 1`, `0`.
+`host.yaml.pre-s31` removed. `kit-2026-09-26-post` exported and verified --
+its `release` names `176a7f0`, the checkout, while the documents inside name
+`275a19e` (D1642 again, harmless: the deployable diff is empty). Beta's
+`usage` **still exit 6** with 100 audit rows and 12 idempotency claims on
+record: no series in the CURRENT agent-plane process, and the word "yet" is
+wrong (D1712). Transcripts and the three rehearsal records are on the
+workstation.
+
+*Beta's auth `memory.current`*, for Run 9: **56,164,352** bytes before (the
+1.9.0 container); **57,577,472** after the deploy with the loop running;
+**58,830,848** after idle, post-rehearsal. **No figure was taken while a run
+executed** (D1711): the sweep recreated the container after its workflow
+proofs, and the samples taken during the sweep (59,371,520; one 64,188,416)
+are of an idle loop.
+
+*What the day left behind on beta, by design (D1700):* eight revoked probe
+agents, two subjects nobody can log in as, and the runs they made.
+
+Divergence rows **D1706-D1712**. **NEXT FREE: D1713, ADR 0230.**
 
 ### Run 9 — the close
 
