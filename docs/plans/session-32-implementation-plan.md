@@ -2304,7 +2304,9 @@ in the launch folder; the memory file. **One row, D1713**: D1665's premise
 that a generation moves only on a rotation is false -- every deploy
 materializes one, and the first sweep moved alpha's again while recreating
 `auth` with no image change, which is D1581's event observed once and not
-yet explained. **Session 32 is COMPLETE.**
+yet explained. `bin/session-01-check.sh` PASSED on `32edfed` (6428 passed, 0
+failed, 3 skipped; 0 identity collisions; 0 floating refs) and CI on
+`32edfed` read by full SHA: **success**. **Session 32 is COMPLETE.**
 
 ---
 
