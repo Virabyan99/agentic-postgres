@@ -1615,7 +1615,8 @@ decided row, (m4) a mint for a wait, (m5) approval requested in a dry run, and
 plan's list, the `test_mcp_*` modules naming approval -- `test_mcp_tools`,
 `test_mcp_runtime` -- plus `test_verifier_key_sets`, `test_workflow_routes`,
 `test_workflow_gates` and `test_deployment_module_shape`). **Rows added:
-D1752–D1754. NEXT FREE: D1755.**
+D1752–D1754. NEXT FREE: D1755.** **CI:**
+`67335fde392b24c607958e61f3f7cb4cfa2baa67` → `contract` **success**.
 
 ### Run 6 — the human surface: the scope, four admin routes, the audit filters, Studio, the four verbs
 
