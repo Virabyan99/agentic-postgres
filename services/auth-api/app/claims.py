@@ -18,15 +18,19 @@ with none of the service's dependencies installed.
 
 from __future__ import annotations
 
+import re
+import uuid
 from typing import Any
 
 __all__ = [
+    "APPROVAL_CLAIM",
     "CLOCK_SKEW_SECONDS",
     "MAX_TTL_SECONDS",
     "REQUIRED_CLAIMS",
     "TOKEN_TYPE",
     "TOKEN_USES",
     "ClaimError",
+    "approval_claim",
     "verify_claims",
 ]
 
@@ -78,6 +82,20 @@ CLOCK_SKEW_SECONDS = 30
 #: `MAX_TTL_SECONDS + CLOCK_SKEW_SECONDS`, and that sum -- not the TTL -- is the
 #: blast radius of a compromised token or a key cutover.
 MAX_TTL_SECONDS = 900
+
+#: A human's approval of ONE write, carried by ONE workflow step token (ADR
+#: 0231). **Optional, and deliberately not in `REQUIRED_CLAIMS`**: a token
+#: without it is every token there has ever been, and the database's literal of
+#: required claims does not move. Only `AuthService.step_token` mints it, and
+#: only from a decided row it reads itself; the plane serves a
+#: `requires_approval` write only when its `tool` and `key` name the call being
+#: made. Rig 33a measured that an extra claim passes this verifier, the plane's,
+#: PostgREST and the pre-request hook.
+APPROVAL_CLAIM = "apg_approval"
+
+#: The idempotency key's own shape (ADR 0181), which is what the claim's `key`
+#: must be to name one.
+_KEY = re.compile(r"^[\x21-\x7e]{8,255}$")
 
 
 def verify_claims(
@@ -153,3 +171,30 @@ def verify_claims(
             raise ClaimError(f"{name} is not a non-empty string")
 
     return dict(payload)
+
+
+def approval_claim(payload: Any) -> dict[str, str] | None:
+    """The token's approval, or `None` when it carries none.
+
+    A pure shape check over claims ALREADY verified: exactly `id` (a uuid),
+    `tool` and `key` (non-empty strings, the key in the idempotency key's own
+    shape). Anything else present under the name is a `ClaimError`, never a
+    `None` -- a malformed approval is not the absence of one, and the caller
+    turns it into the ordinary approval refusal rather than serving or
+    crashing.
+    """
+    if not isinstance(payload, dict) or APPROVAL_CLAIM not in payload:
+        return None
+    claim = payload[APPROVAL_CLAIM]
+    if not isinstance(claim, dict) or set(claim) != {"id", "tool", "key"}:
+        raise ClaimError(f"{APPROVAL_CLAIM} is not an object of exactly id, tool and key")
+    for name in ("id", "tool", "key"):
+        if not isinstance(claim[name], str) or not claim[name]:
+            raise ClaimError(f"{APPROVAL_CLAIM}.{name} is not a non-empty string")
+    try:
+        uuid.UUID(claim["id"])
+    except ValueError as error:
+        raise ClaimError(f"{APPROVAL_CLAIM}.id is not a uuid") from error
+    if not _KEY.fullmatch(claim["key"]):
+        raise ClaimError(f"{APPROVAL_CLAIM}.key is not an idempotency key")
+    return {"id": claim["id"], "tool": claim["tool"], "key": claim["key"]}

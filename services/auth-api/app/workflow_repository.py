@@ -1,8 +1,10 @@
-"""The workflow calls: eight of migration 0034's substrate and seven of 0035's.
+"""The workflow calls: eight of migration 0034's substrate and six of 0035's.
 
 Since Session 33 the gates -- requesting, reading, expiring and deciding an
-approval -- the approvals listing, the signer's lookup and provenance are here
-too (ADR 0230-0234), each one definer function like the eight before them.
+approval -- the approvals listing and provenance are here too (ADR 0230-0234),
+each one definer function like the eight before them. The seventh 0035 grant,
+`workflow_approval_for_token`, is the SIGNER's call and lives in
+`repository.py` beside the other calls `AuthService` makes (D1752).
 
 `auth_service` holds **no privilege of any kind on the four workflow tables** --
 not SELECT, not INSERT, not UPDATE, not DELETE (0034, and
@@ -261,10 +263,11 @@ class WorkflowRepository:
 
     # -- the gates, and provenance (migration 0035, ADR 0230-0234) ----------
     #
-    # Seven more calls, each one definer function, shipped in the same commit
-    # as the grants that name them (D1680). `workflow_begin_compensation` is
-    # the one 0035 function with NO method here, and that is its grant's
-    # absence stated a second time: only 0035's own functions call it.
+    # Six more calls, each one definer function, shipped in the same commit
+    # as the grants that name them (D1680); the seventh is `repository.py`'s.
+    # `workflow_begin_compensation` is the one 0035 function with NO method
+    # here, and that is its grant's absence stated a second time: only 0035's
+    # own functions call it.
 
     async def request_approval(
         self, *, step_id: UUID, holder: str, request_id: UUID | None, expires_after_seconds: int
@@ -319,23 +322,6 @@ class WorkflowRepository:
         )
         assert row is not None
         return list(row["approvals"])
-
-    async def approval_for_token(
-        self, *, approval_id: UUID, agent_id: UUID
-    ) -> dict[str, str] | None:
-        """The tool and key of an APPROVED approval of this agent's running run.
-
-        `None` means refuse (ADR 0231). The signer reads this before it adds
-        `apg_approval` to one step token, so the claim's content comes from a
-        decided row and never from the loop's own variables.
-        """
-        row = await self._one(
-            "SELECT tool, idempotency_key FROM app_private.workflow_approval_for_token(%s, %s)",
-            (approval_id, agent_id),
-        )
-        if row is None:
-            return None
-        return {"tool": row["tool"], "key": row["idempotency_key"]}
 
     async def provenance(self, *, run_id: UUID) -> dict[str, Any]:
         """One run, for an auditor (ADR 0234). Never parameters, never a result."""

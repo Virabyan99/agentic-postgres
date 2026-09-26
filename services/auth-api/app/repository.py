@@ -266,6 +266,25 @@ class Repository:
             secret_expired=bool(row["secret_expired"]),
         )
 
+    async def approval_for_token(
+        self, *, approval_id: UUID, agent_id: UUID
+    ) -> dict[str, str] | None:
+        """The tool and key of an APPROVED approval of this agent's running run.
+
+        `None` means refuse (ADR 0231). `AuthService.step_token` reads this
+        before it adds `apg_approval` to one step token, so the claim's content
+        comes from a decided row and never from the loop's own variables. Here
+        rather than in `WorkflowRepository` because the SIGNER makes the call,
+        and the signer reaches the database through this module (D1752).
+        """
+        row = await self._one(
+            "SELECT tool, idempotency_key FROM app_private.workflow_approval_for_token(%s, %s)",
+            (approval_id, agent_id),
+        )
+        if row is None:
+            return None
+        return {"tool": row["tool"], "key": row["idempotency_key"]}
+
     async def list_agents(self) -> list[dict[str, Any]]:
         return await self._all("SELECT * FROM app_private.auth_list_agents()", ())
 

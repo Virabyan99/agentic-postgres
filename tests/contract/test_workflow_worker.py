@@ -71,9 +71,24 @@ class FakeStep:
 class FakeRepository:
     """Records every call, in order, with its keyword arguments."""
 
-    def __init__(self, steps: list[Any] | None = None) -> None:
+    def __init__(self, steps: list[Any] | None = None, gate: Any = None) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self._steps = list(steps or [])
+        #: What `workflow_gate_state` answers (Session 33): no approval and no
+        #: served wait unless a proof says otherwise.
+        self.gate = gate if gate is not None else {"approval": None, "waited": False}
+
+    async def gate_state(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(("gate_state", kwargs))
+        return self.gate
+
+    async def request_approval(self, **kwargs: Any) -> str:
+        self.calls.append(("request_approval", kwargs))
+        return "parked"
+
+    async def expire_approval(self, **kwargs: Any) -> str:
+        self.calls.append(("expire_approval", kwargs))
+        return "expired"
 
     async def heartbeat(self, **kwargs: Any) -> None:
         self.calls.append(("heartbeat", kwargs))
@@ -112,10 +127,13 @@ class FakeService:
 
     def __init__(self, refuse: Exception | None = None) -> None:
         self.minted: list[str] = []
+        #: The `approval_id` each mint asked for, in order (Session 33).
+        self.approvals: list[str | None] = []
         self._refuse = refuse
 
-    async def step_token(self, agent_id: str) -> FakeIssued:
+    async def step_token(self, agent_id: str, *, approval_id: str | None = None) -> FakeIssued:
         self.minted.append(agent_id)
+        self.approvals.append(approval_id)
         if self._refuse is not None:
             raise self._refuse
         return FakeIssued()
@@ -132,14 +150,26 @@ def sse(payload: dict[str, Any]) -> bytes:
 PLANE_ID = "7b0c2a1e-5d3f-4c6b-9a8e-00000000d696"
 
 
-OK_RESULT = {
-    "jsonrpc": "2.0",
-    "id": 1,
-    "result": {
-        "content": [{"type": "text", "text": '{"tool":"create_note","row_count":1}'}],
-        "isError": False,
-    },
-}
+#: **Rig 33c's bytes, verbatim** -- `create_note` served by the real plane
+#: (`uvicorn` in `mcp` mode over `apg dev` and the pinned PostgREST), framed as
+#: it framed them (D1724). Session 32's `OK_RESULT` was written here to match
+#: what the classifier expected and carried no `structuredContent`, so the
+#: offline suite shared the loop's belief about the result's shape (question
+#: 6); this is what a step's stored value is read out of now.
+RIG_33C_WRITE_BODY = (
+    b'event: message\r\ndata: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text",'
+    b'"text":"{\\"tool\\":\\"create_note\\",\\"row_count\\":1,\\"row\\":{\\"id\\":'
+    b'\\"485acb10-8e00-4b99-a9f6-7568da992bcb\\",\\"owner_id\\":'
+    b'\\"468e91c5-6b82-40e5-8408-8a1905cb78e9\\",\\"title\\":\\"rig33c\\",\\"content\\":'
+    b'\\"measured\\",\\"created_at\\":\\"2026-09-26T18:21:14.099751+00:00\\",\\"updated_at\\":'
+    b'\\"2026-09-26T18:21:14.099751+00:00\\"},\\"dry_run\\":false}"}],"structuredContent":'
+    b'{"tool":"create_note","row_count":1,"row":{"id":"485acb10-8e00-4b99-a9f6-7568da992bcb",'
+    b'"owner_id":"468e91c5-6b82-40e5-8408-8a1905cb78e9","title":"rig33c","content":"measured",'
+    b'"created_at":"2026-09-26T18:21:14.099751+00:00","updated_at":'
+    b'"2026-09-26T18:21:14.099751+00:00"},"dry_run":false},"isError":false}}\r\n\r\n'
+)
+
+OK_RESULT = json.loads(RIG_33C_WRITE_BODY.decode().split("data: ", 1)[1])
 
 
 def refusal(token: str, detail: str = "a detail") -> dict[str, Any]:
@@ -157,9 +187,10 @@ def drive(
     service: FakeService | None = None,
     send: Any = None,
     monkeypatch: Any,
+    gate: Any = None,
 ) -> tuple[FakeRepository, FakeService]:
     """One turn of the loop, with the transport replaced."""
-    repository = FakeRepository([step] if step is not None else [])
+    repository = FakeRepository([step] if step is not None else [], gate=gate)
     used = service or FakeService()
     if send is not None:
         monkeypatch.setattr(worker, "_send", send)
@@ -879,3 +910,279 @@ def test_the_worker_names_no_banned_transport_and_takes_its_host_from_uname() ->
     holder = worker.worker_identity()
     assert holder.count(":") == 2, holder
     assert len(holder.split(":")[0]) <= 40
+
+
+# ---------------------------------------------------------------------------
+# Session 33: gates, waits, compensation, the stored value (WF-WORK-002)
+# ---------------------------------------------------------------------------
+
+APPROVAL_ID = "5c1d0a2e-7a3b-4c6d-9e8f-0000000a9901"
+
+
+def gated_step(**changes: Any) -> FakeStep:
+    """`tasks-approval.yaml`'s second step, as the claim hands it over."""
+    step = FakeStep(
+        name="set_the_embedding",
+        idempotency_key="wf-abc-set_the_embedding",
+        step={
+            "name": "set_the_embedding",
+            "tool": "set_note_embedding",
+            "capability": "set_note_embedding",
+            "capability_version": "1.0.0",
+            "resource": None,
+            "kind": "write",
+            "arguments": {"p_note_id": "{{input.note_id}}", "p_embedding": "{{input.embedding}}"},
+            "retry": {"max": 0, "backoff_seconds": 30},
+            "timeout_seconds": 60,
+            "approval": {"expires_after_seconds": 900},
+        },
+        input={"note_id": "n-1", "embedding": [0.1, 0.2]},
+    )
+    for name, value in changes.items():
+        setattr(step, name, value)
+    return step
+
+
+def _recording_send(sent: list[dict[str, Any]], payload: dict[str, Any]) -> Any:
+    def send(url: str, token: str, body: bytes, **kwargs: Any) -> tuple[int, bytes, str]:
+        sent.append(json.loads(body))
+        return 200, sse(payload), PLANE_ID
+
+    return send
+
+
+def test_an_approval_step_parks_on_the_planes_refusal_with_its_request_id(
+    monkeypatch: Any,
+) -> None:
+    """**The gate reads first, then the ordinary path** (ADR 0230). With no
+    approval yet, the step is minted WITHOUT one and called; the plane refuses
+    it `approval_required`, and the step parks on that refusal carrying the
+    plane's id of the refused call -- the join to its audit row."""
+    sent: list[dict[str, Any]] = []
+    repository, service = drive(
+        step=gated_step(),
+        send=_recording_send(sent, refusal("approval_required")),
+        monkeypatch=monkeypatch,
+    )
+    assert repository.names == ["heartbeat", "claim", "gate_state", "request_approval"]
+    requested = repository.one("request_approval")
+    assert requested["request_id"] == UUID(PLANE_ID)
+    assert requested["expires_after_seconds"] == 900
+    assert service.approvals == [None], "the first attempt was minted with an approval"
+    assert len(sent) == 1
+
+
+def test_an_approved_step_is_minted_with_the_approval_and_called(monkeypatch: Any) -> None:
+    """The signer is asked for the approval by id -- it reads the tool and key
+    itself -- and the call is made; the served step succeeds."""
+    sent: list[dict[str, Any]] = []
+    repository, service = drive(
+        step=gated_step(attempt=2),
+        send=_recording_send(sent, OK_RESULT),
+        gate={"approval": {"id": APPROVAL_ID, "status": "approved"}, "waited": False},
+        monkeypatch=monkeypatch,
+    )
+    assert service.approvals == [APPROVAL_ID]
+    assert sent[0]["params"]["arguments"]["idempotency_key"] == "wf-abc-set_the_embedding"
+    assert "request_approval" not in repository.names
+    assert repository.one("finish")["outcome"] == "succeeded"
+
+
+def test_a_pending_approval_past_its_expiry_fails_the_run(monkeypatch: Any) -> None:
+    """The claim fires a pending step only at its expiry, so `pending` and
+    `expired` both mean nobody decided in time: marked expired, failed
+    `approval_expired`, and NOTHING minted or called."""
+    for status in ("pending", "expired"):
+        sent: list[dict[str, Any]] = []
+        repository, service = drive(
+            step=gated_step(attempt=2),
+            send=_recording_send(sent, OK_RESULT),
+            gate={"approval": {"id": APPROVAL_ID, "status": status}, "waited": False},
+            monkeypatch=monkeypatch,
+        )
+        assert repository.names.index("expire_approval") < repository.names.index("finish")
+        finished = repository.one("finish")
+        assert (finished["outcome"], finished["reason"]) == ("failed", "approval_expired")
+        assert service.minted == [] and sent == [], status
+
+
+def test_a_dry_run_never_requests_approval(monkeypatch: Any) -> None:
+    """D1722: a rehearsal asks no human and calls no gated write."""
+    sent: list[dict[str, Any]] = []
+    repository, service = drive(
+        step=gated_step(dry_run=True),
+        send=_recording_send(sent, refusal("approval_required")),
+        monkeypatch=monkeypatch,
+    )
+    assert "request_approval" not in repository.names
+    finished = repository.one("finish")
+    assert (finished["outcome"], finished["reason"]) == (
+        "dry_run",
+        "approval steps are not rehearsed",
+    )
+    assert service.minted == [] and sent == []
+
+
+def test_a_wait_step_parks_once_then_finishes_and_mints_nothing(monkeypatch: Any) -> None:
+    """D1727: parked with the reason `waiting` for its seconds; once the gate
+    reports the park served, finished `succeeded`/`waited`. **No token either
+    time**, because a wait calls nothing."""
+    from datetime import UTC, datetime, timedelta
+
+    def wait_step() -> FakeStep:
+        return FakeStep(
+            name="pause",
+            step={
+                "name": "pause",
+                "kind": "wait",
+                "seconds": 5,
+                "timeout_seconds": 5,
+                "retry": {"max": 0, "backoff_seconds": 1},
+            },
+        )
+
+    sent: list[dict[str, Any]] = []
+    before = datetime.now(UTC)
+    repository, service = drive(
+        step=wait_step(), send=_recording_send(sent, OK_RESULT), monkeypatch=monkeypatch
+    )
+    parked = repository.one("park")
+    assert parked["reason"] == "waiting" and parked["request_id"] is None
+    assert (
+        before + timedelta(seconds=5)
+        <= parked["resume_after"]
+        <= datetime.now(UTC) + (timedelta(seconds=5))
+    )
+    assert "finish" not in repository.names
+
+    repository, service_after = drive(
+        step=wait_step(),
+        service=service,
+        send=_recording_send(sent, OK_RESULT),
+        gate={"approval": None, "waited": True},
+        monkeypatch=monkeypatch,
+    )
+    finished = repository.one("finish")
+    assert (finished["outcome"], finished["reason"]) == ("succeeded", "waited")
+    assert "park" not in repository.names
+    assert service_after.minted == [], "a token was minted for a step that calls nothing"
+    assert sent == []
+
+
+def test_a_compensation_row_is_called_as_a_write_with_its_own_key(monkeypatch: Any) -> None:
+    """An undo row's claimed `step` is the forward element's compensation
+    block with the row's name merged in (0035): it is a write, so it carries
+    its OWN derived key and the run's dry-run flag, and nothing about it is
+    new to the loop."""
+    sent: list[dict[str, Any]] = []
+    undo = FakeStep(
+        name="undo-1",
+        position=1001,
+        idempotency_key="wf-abc-undo-1",
+        input={"task_id": "t-1"},
+        step={
+            "name": "undo-1",
+            "tool": "update_task_status",
+            "capability": "update_task_status",
+            "capability_version": "1.0.0",
+            "resource": None,
+            "kind": "write",
+            "arguments": {
+                "p_task_id": "{{input.task_id}}",
+                "p_expected_status": "in_progress",
+                "p_new_status": "pending",
+            },
+            "retry": {"max": 1, "backoff_seconds": 5},
+            "timeout_seconds": 60,
+        },
+    )
+    repository, service = drive(
+        step=undo, send=_recording_send(sent, OK_RESULT), monkeypatch=monkeypatch
+    )
+    params = sent[0]["params"]
+    assert params["name"] == "update_task_status"
+    assert params["arguments"] == {
+        "p_task_id": "t-1",
+        "p_expected_status": "in_progress",
+        "p_new_status": "pending",
+        "idempotency_key": "wf-abc-undo-1",
+        "dry_run": False,
+    }
+    assert service.approvals == [None]
+    assert repository.one("finish")["outcome"] == "succeeded"
+
+
+def test_the_stored_result_is_the_tools_own_return_value(monkeypatch: Any) -> None:
+    """**D1724.** The step stores the tool's dictionary -- rig 33c's
+    `structuredContent` -- so `{{steps.<name>.row}}` resolves on a real plane.
+    The text branch is the fallback, and a result carrying neither is stored
+    as no value WITH a reason, never as the envelope."""
+    repository, _ = drive(
+        step=FakeStep(),
+        send=lambda *a, **k: (200, RIG_33C_WRITE_BODY, PLANE_ID),
+        monkeypatch=monkeypatch,
+    )
+    finished = repository.one("finish")
+    stored = json.loads(finished["result"])
+    assert stored == OK_RESULT["result"]["structuredContent"]
+    assert finished["reason"] is None
+    assert (
+        worker.resolve("{{steps.first.row}}", run_input={}, prior={"first": stored})
+        == stored["row"]
+    )
+
+    text_only = {
+        **OK_RESULT,
+        "result": {k: v for k, v in OK_RESULT["result"].items() if k != "structuredContent"},
+    }
+    repository, _ = drive(
+        step=FakeStep(),
+        send=lambda *a, **k: (200, sse(text_only), PLANE_ID),
+        monkeypatch=monkeypatch,
+    )
+    assert json.loads(repository.one("finish")["result"]) == stored
+
+    bare = {"jsonrpc": "2.0", "id": 1, "result": {"content": [], "isError": False}}
+    repository, _ = drive(
+        step=FakeStep(),
+        send=lambda *a, **k: (200, sse(bare), PLANE_ID),
+        monkeypatch=monkeypatch,
+    )
+    finished = repository.one("finish")
+    assert finished["outcome"] == "succeeded"
+    assert finished["result"] is None
+    assert finished["reason"] == "the plane's result carried no structured value"
+
+
+def test_a_scope_narrowed_after_enqueue_fails_the_run_naming_it(monkeypatch: Any) -> None:
+    """The enqueue checked the agent's scopes; a narrowing after it is met by
+    the PLANE's scope check at the step, and the step says which boundary."""
+    repository, _ = drive(
+        step=FakeStep(),
+        send=lambda *a, **k: (200, sse(refusal("scope_not_held")), PLANE_ID),
+        monkeypatch=monkeypatch,
+    )
+    finished = repository.one("finish")
+    assert (finished["outcome"], finished["reason"]) == ("refused", "scope_not_held")
+
+
+def test_the_plane_serving_an_approval_step_unasked_finishes_it_succeeded(
+    monkeypatch: Any, caplog: Any
+) -> None:
+    """D1714's last sentence: the plane is the authority. A first call it
+    served is a step that succeeded -- with a warning naming the step and the
+    capability, and no approval requested."""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="app.workflow_worker"):
+        repository, _ = drive(
+            step=gated_step(),
+            send=lambda *a, **k: (200, sse(OK_RESULT), PLANE_ID),
+            monkeypatch=monkeypatch,
+        )
+    assert "request_approval" not in repository.names
+    assert repository.one("finish")["outcome"] == "succeeded"
+    assert any(
+        "set_the_embedding" in record.getMessage() and "set_note_embedding" in record.getMessage()
+        for record in caplog.records
+    )

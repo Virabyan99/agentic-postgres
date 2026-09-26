@@ -1,7 +1,7 @@
 # Session 33 — Gates, compensation and provenance
 
-**Status: IN EXECUTION since 2026-09-26 — Runs 1–4 done (D1742–D1751 added;
-NEXT FREE D1752). Run 5 is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
+**Status: IN EXECUTION since 2026-09-26 — Runs 1–5 done (D1742–D1754 added;
+NEXT FREE D1755). Run 6 is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
 `main` directly. This plan spends **D1714–D1741** in §1 and **ADR 0230–0234**.
 **NEXT FREE AFTER THIS PLAN: D1742, ADR 0235.** Rows the runs add go in §1's
 second table, below D1741, in execution order; the header's *Status*
@@ -470,6 +470,9 @@ second table below, in execution order.
 | **D1749** | 4 | §5 Run 4 item 4: *"`bin/workflow.sh validate --project project.second.example.yaml` (beta's shape) compiles four definitions; the release project (`project.example.yaml`) with no profile is the D1723 control"*. | **The two manifests are the other way round.** `project.example.yaml` (`fixture-alpha`) names `migrations.set: projects/example` -- beta's shape, where the definitions live -- and its profile does not touch `update_task_status`; `project.second.example.yaml` (`fixture-alpine`) names NO set (so `validate --project` on it says there is nothing to validate, exit 0) and is the one whose profile carries `update_task_status: {requires_approval: true}` (`:79-80`). Measured by compiling both locks: the second's `update_task_status` tool entry reads `requires_approval: true` and its capability entry `false`. §1's own D1723 row already had it the right way round. | **The four definitions compile under `project.example.yaml`** (`validate` exit 0, four lines) and **D1723's case is the second lock**: `test_a_profile_added_approval_is_seen` compiles against it, and `validate --project project.second.example.yaml --file projects/example/workflows/tasks-{approval,compensate}.yaml` exits 5 on `start_the_task` with the new sentence -- the defect's repair seen through the product's own command. `test_the_example_project_without_the_profile_is_the_control` is the example manifest. |
 | **D1750** | 4 | §2: *"Run 8 lands the YAML"*; its *Existing entries that move* list does not name WF-DEF-001. §5 Run 4 replaces `test_a_capability_that_requires_approval_is_refused` and (by the battery's control name) renames `test_the_example_projects_definitions_compile`. | `test_acceptance_registry.py::test_every_registered_node_id_is_collectible` failed on exactly those two WF-DEF-001 node ids the moment they were renamed. An EXISTING entry's node ids are not `CURRENT_SESSION`'s all-or-nothing move (D690): no new requirement, claim or target session is added. | **WF-DEF-001 moves in Run 4**: its two node ids become `test_an_approval_requiring_step_must_declare_approval` and `test_the_example_projects_four_definitions_compile` (both stricter than what they replace), and its two sentences that became false are corrected (*approval arrives in Session 33*; *two definitions compile*); `docs/acceptance-matrix.md` and `docs/product-contract.md` regenerated. WF-DEF-002 is still Run 8's. |
 | **D1751** | 4 | §5 Run 4 item 2: the compiled step carries *"`compensation: {kind: \"write\", tool, capability, version, arguments, retry, timeout_seconds}`"*. | 0035's claim hands the worker an undo row's `step` as the forward element's `compensation` block with the row's `name` merged in, and the worker reads a forward step's `tool`, `capability`, `capability_version`, `resource`, `kind`, `arguments`, `retry`, `timeout_seconds`. A block spelling `version` would make an undo row a step the worker's own reader does not recognise. | **The compensation block uses the forward step's key names exactly -- `capability_version`, and `resource: null` --** so Run 5 reads an undo row with the reader it already has. Three further compiler decisions the plan did not take: `approval` and `compensation` are emitted ONLY when declared (a Session 32 definition compiles to byte-identical JSON); a reference to a WAIT step is refused (*a wait records no result*), since it could never resolve; a compensation's refusals are the forward step's, prefixed *its compensation:*. |
+| **D1752** | 5 | §5 Run 5 item 2: `step_token` calls *"a new `Repository` method over `workflow_approval_for_token` -- the auth service's `Repository` in `repository.py` ... the loop's `WorkflowRepository` got its own in Run 3"*. | Run 3 put `approval_for_token` in `WorkflowRepository` (D1680: the grant shipped with a caller), and its guard `test_every_workflow_function_0035_grants_is_called_by_this_module` required all seven 0035 grants to be called THERE. Two methods over one definer function would be two callers of the signer's lookup, one of which nothing calls. | **Moved, not copied**: the method is `Repository.approval_for_token` and `WorkflowRepository` no longer has it. The guard now names BOTH modules -- six 0035 grants called by `workflow_repository.py`, `workflow_approval_for_token` called by `repository.py` and NOT by the loop's module -- which is stricter than a union and keeps its node id. |
+| **D1753** | 5 | §5 Run 5 item 5: rig 33g runs *"the built image in `auth` mode with the real loop"*, rig 32j's recipe. | The loop dials `http://mcp:8080/mcp`, three constants bound by a proof to the deploy's address (D1685), and `supervise` passes no URL; a fake plane reachable at that name needs the image on a Docker network, which rig 32j already paid for and whose subject (the image starts READY with the loop in it) Run 5 did not move. rig 32j's script died with `/tmp`. | **Rig 33g drives the REAL `workflow_worker.process` over the REAL `WorkflowRepository.claim`** (the body of `run_forever`, one step per turn), the REAL `Repository` and `AuthService` signing with a generated key, a psycopg pool as the auth service's own role on an `apg dev` cluster (35 migrations + the example set, four definitions installed), and a fake plane on 127.0.0.1 that VERIFIES every bearer with the signer's public key. Five scenarios, **22/22 checks on first execution** (the rig's own state reader was wrong once -- a `coalesce` of an enum with `'-'` -- and was fixed before any product check was read). The image arm is not re-run and is said not to be. |
+| **D1754** | 5 | §5 Run 5 item 4 lists the gate's branches: none, pending/expired, approved, and `rejected` *"never reaches a claim"*. | Three cases the plan does not decide. (1) An APPROVED step whose call is refused `approval_required` anyway (a lock that moved, a claim the plane would not honour): requesting approval again raises PT409 inside the loop -- one request per step. (2) A `rejected` approval reaching a claim anyway. (3) The signer's lookup finding no row after the gate read `approved`: `AuthenticationFailed`, which the loop finishes `token_refused`, i.e. `stopped`/`agent_not_active`. | (1) **Terminal**: the step is finished `refused`/`approval_required` -- a request is made only when the gate reads NO approval. (2) Finished `failed` with reason `approval_<status>`, its own word rather than folded into `approval_expired` (ADR 0195). (3) **Left as it is, and why it is unreachable**: a decided row never changes (D1747's predicate), the lookup does not re-check the window (D1745), so the only way to miss is a run that stopped being `running` between the gate and the mint -- and a finish on an ended run does not move it (D1744). **Two readings of the plan made explicit:** ONE name `token` for both mints (a single `step_token` call with an optional `approval_id`), so the AST proof is unchanged; and `current_approval()` answers `None` when the verified token's digest is not the one the request's context was resolved for, `current_token`'s own guard. A wait step in a dry run parks and finishes exactly as in a real run: it calls nothing, so there is nothing to rehearse. |
 
 ---
 
@@ -1550,6 +1553,69 @@ no new transport, D1668/D1689), `test_auth_service_database_access.py`,
 `test_acceptance_registry.py`, `test_evidence_claims.py`. Commit (`Session 33
 Run 5: an approved call carries a signed claim; the loop learns approval,
 wait and compensation`), push, read CI.
+
+**Done.** 2026-09-27. **The claim** (`claims.py`): `APPROVAL_CLAIM =
+"apg_approval"` with its `#:` comment and `approval_claim(payload)` -- `None`
+when absent, `ClaimError` unless exactly `id` (a uuid), `tool`, `key` (the
+idempotency key's own shape); `REQUIRED_CLAIMS` unmoved (`test_jwt_claims`
+green). **The signer** (`service.py`): `issue(..., extra_claims=None)` refuses
+an extra naming a required claim and merges the rest BEFORE `verify_claims`;
+`step_token(agent_id, *, approval_id=None)` runs the agent's own checks first,
+then reads `Repository.approval_for_token` (moved there from the loop's
+repository, **D1752**) and refuses `AuthenticationFailed` on no row or a
+malformed id. **The plane**: `mcp_authorization.current_approval()` reads the
+VERIFIED claims through `get_access_token()` (a `ClaimError` or a digest
+mismatch is `None`); `register_write`'s closure passes `approval=` to
+`invoke_write`, which serves a `requires_approval` write only for a claim
+naming this tool and this key, refuses any claim with `dry_run` as
+`input_not_permitted`/*an approved call is not rehearsed*, and otherwise
+refuses with the EXISTING bytes; the comment and `mcp_errors.py`'s sentence
+rewritten (0034's is released and untouched). **The loop**: a fifth ordering in
+the docstring (*read the gate before minting*); `_wait` (park `waiting`, then
+`succeeded`/`waited`, no token); the gate read before the mint, `_close_gate`
+for pending/expired (`approval_expired`) and anything else by its own word,
+`request_approval` on the plane's `approval_required` when the gate read no
+approval, the served-unasked warning, and `tool_value` storing the tool's own
+dictionary (rig 33c's `structuredContent` branch, cited). ONE name `token`
+kept for both mints (**D1754** with the three undecided cases). **Proofs:** NEW
+`tests/contract/test_approval_claim.py` (`pytestmark` first), the nine of §2
+AGT-APPROVE-002 under the proposed names, the plane half through
+`invoke_write` AND the registered closure; `test_workflow_worker.py` gains the
+nine of WF-WORK-002 under the proposed names over fakes extended with
+`gate_state`/`request_approval`/`expire_approval` and an `approval_id`-
+recording `step_token`; **`OK_RESULT` is now rig 33c's recorded bytes**
+(`RIG_33C_WRITE_BODY`, verbatim) -- the one existing fixture that changed, and
+every Session 32 proof in the module stayed green over it.
+`test_workflow_repository.py`'s 0035 guard names both modules (D1752).
+**Rig 33g (D1753): 22/22 on first execution** -- (A) the first embedding call
+refused and parked with a PENDING approval carrying that call's request id;
+the OWNER's decision refused `AP403 approver_is_owner`; a second admin's
+approval, then ONE call carrying `apg_approval {id, tool, key}` equal to the
+decision's row, `dry_run` false, the embedding a list; run `succeeded`, every
+bearer verified as the agent, exactly one bearer carrying a claim, the stored
+result the tool's dictionary. (B) rejected → `cancelled|complete`, ONE undo
+call keyed `wf-<run>-undo-1`, in_progress→pending; the rejected step stays
+`parked` and the third `queued`, as D1719 decided. (C, control) expiry forced
+past → `failed|complete|approval_expired`, the approval `expired`, no
+embedding call after it, then the undo. (D) `tasks-compensate`: the wait
+parked `waiting`, served after 6 s → `succeeded/waited`; the missing task
+`refused/row_not_found`; `failed|complete`; three calls, none for the wait.
+(E) a dry run: no approval requested, no embedding call, the step
+`dry_run`/*approval steps are not rehearsed*. §7 question 2 expected a first
+execution to find something; it found the rig's own reader. **Battery 10/10
+killed**, each `FAILED`, none `ERROR`, BOTH controls
+(`test_a_token_without_the_claim_is_refused_as_before`,
+`test_one_token_per_step_attempt_and_none_outlives_the_step`) PASSED in every
+arm, anchors pre-flighted, restored by copy and `cmp`: the plan's (m1) tool
+without key, (m2) an approved dry run admitted, (m3) a claim signed with no
+decided row, (m4) a mint for a wait, (m5) approval requested in a dry run, and
+(m6) the closure passing `approval=None`, (m7) the envelope stored, (m8)
+`pending` at expiry not expired, (m9) an extra claim replacing a required one,
+(m10) no park on the plane's refusal. **Targeted, once: 450 passed** (the
+plan's list, the `test_mcp_*` modules naming approval -- `test_mcp_tools`,
+`test_mcp_runtime` -- plus `test_verifier_key_sets`, `test_workflow_routes`,
+`test_workflow_gates` and `test_deployment_module_shape`). **Rows added:
+D1752–D1754. NEXT FREE: D1755.**
 
 ### Run 6 — the human surface: the scope, four admin routes, the audit filters, Studio, the four verbs
 

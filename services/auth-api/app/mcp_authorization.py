@@ -135,6 +135,35 @@ def current_request_id() -> str:
     return held.request_id
 
 
+def current_approval() -> dict[str, str] | None:
+    """The `apg_approval` the verified token carries, or `None` (ADR 0231).
+
+    Read from the claims the VERIFIER accepted for this request -- the same
+    `get_access_token()` the context was resolved from -- and never from an
+    argument or a header, which are the caller's to set. Only the signer can
+    put the claim in a token, and only from a decided row.
+
+    **A malformed claim is `None`, never a 500**: the write it would have
+    authorised then meets the ordinary `approval_required` refusal, which is
+    audited. A token whose digest is not the one this request's context was
+    resolved for is `None` too, for `current_token`'s reason.
+    """
+    from fastmcp.server.dependencies import get_access_token
+
+    from app.claims import ClaimError, approval_claim
+
+    granted = get_access_token()
+    if granted is None:
+        return None
+    held = _CURRENT.get()
+    if held is not None and fingerprint(granted.token) != held.fingerprint:
+        return None
+    try:
+        return approval_claim(granted.claims)
+    except ClaimError:
+        return None
+
+
 def _resolve(base_url: str, token: str) -> _Held:
     """Take the id for this HTTP request, then resolve the context WITH it.
 

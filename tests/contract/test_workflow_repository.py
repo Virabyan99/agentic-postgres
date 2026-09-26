@@ -76,6 +76,11 @@ def test_every_workflow_function_0035_grants_is_called_by_this_module() -> None:
     counter, whose caller is `repository.py` (the auth service's own module),
     and `workflow_begin_compensation` is granted to nobody -- so it must NOT
     have a caller here, which is asserted beside the seven.
+
+    **Six here and ONE in `repository.py`, each named** (D1752, Run 5): the
+    signer's lookup `workflow_approval_for_token` is `AuthService.step_token`'s
+    call, and the service reaches the database through its own repository. It
+    must be there and must NOT be here -- one caller, the signer.
     """
     text = GATES_TEMPLATE.read_text(encoding="utf-8")
     granted: set[str] = set()
@@ -83,12 +88,22 @@ def test_every_workflow_function_0035_grants_is_called_by_this_module() -> None:
         if GRANTED_TO_THE_SERVICE in statement:
             granted.update(re.findall(r"app_private\.(workflow_\w+)\s*\(", statement))
     assert len(granted) == 7, sorted(granted)
+    signers = {"workflow_approval_for_token"}
+    assert signers <= granted
 
-    source = MODULE.read_text(encoding="utf-8")
-    called = set(re.findall(r"SELECT[^\"']*app_private\.(\w+)\s*\(", source))
-    called.update(re.findall(r"FROM app_private\.(\w+)\s*\(", source))
-    missing = sorted(granted - called)
+    def called_by(path: Any) -> set[str]:
+        source = path.read_text(encoding="utf-8")
+        found = set(re.findall(r"SELECT[^\"']*app_private\.(\w+)\s*\(", source))
+        found.update(re.findall(r"FROM app_private\.(\w+)\s*\(", source))
+        return found
+
+    called = called_by(MODULE)
+    missing = sorted(granted - signers - called)
     assert not missing, f"0035 grants {missing} and this repository calls none of them"
+    assert not (signers & called), "the signer's lookup is called by the loop's repository"
+    assert signers <= called_by(MODULE.with_name("repository.py")), (
+        "0035 grants the signer's lookup and the auth service's repository does not call it"
+    )
     assert "workflow_begin_compensation" not in called, (
         "the repository reaches workflow_begin_compensation, which is granted to nobody"
     )

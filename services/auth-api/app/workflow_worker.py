@@ -1,6 +1,17 @@
 """The workflow loop: one step at a time, inside the auth process (ADR 0226).
 
-**Four orderings here are correctness, and none of them is arithmetic.**
+**Five orderings here are correctness, and none of them is arithmetic.**
+
+*Read the gate before minting* (Session 33, ADR 0230, ADR 0233). A WAIT step
+calls nothing, so it is parked or finished from `workflow_gate_state` alone
+and no token is minted for it at all. An APPROVAL step reads the same state
+first: nothing requested yet is the ordinary path (the plane refuses it
+`approval_required` and the step parks on that refusal); an approved decision
+is minted WITH the approval, which the signer reads from the database itself;
+a pending one past its expiry fails the step `approval_expired`. In a dry run
+an approval step is never requested and never called (D1722). The plane, not
+this loop, is the authority on whether approval is required: a first call it
+serves is a step that succeeded.
 
 *Claim before mint.* A token is minted for a step this loop already holds a
 lease on. Minting first and then finding nothing to do would spend an agent's
@@ -26,6 +37,13 @@ the token is minted, the step is finished `abandoned` and returns to `queued`
 with its attempt already incremented -- the next claim takes it. Nothing
 happened, so nothing is retried; what is recorded is that a worker held it and
 ran out of time, which is the signal that the lease margin is wrong.
+
+**A step stores the TOOL's return value, not the JSON-RPC envelope** (D1724).
+Rig 33c measured the real plane's result for `create_note` and for a read:
+`{content, isError, structuredContent}`, with `structuredContent` the tool's
+own dictionary and equal to `content[0].text` parsed. `tool_value` takes that
+branch, so `{{steps.<name>.row}}` resolves on a real plane; Session 32 stored
+the envelope, where only `content` could have.
 
 **What this loop cannot see.** A REPLAY is invisible in a plane result (D1671,
 rig 32c): `invoke_write` returns `{tool, row_count, row, dry_run}` and returns
@@ -93,6 +111,14 @@ SHUTDOWN_GRACE_SECONDS = 10
 #: *a retry instruction*; nothing here adds a judgement of its own to the
 #: plane's vocabulary.
 RETRYABLE_TOKENS = frozenset({"write_conflict"})
+
+#: The plane's refusal an approval step parks on (`mcp_errors.APPROVAL_REQUIRED`,
+#: spelled here for `PLANE_SERVICE`'s reason: that module is the agent plane's).
+APPROVAL_REQUIRED_TOKEN = "approval_required"  # noqa: S105 -- a refusal token
+
+#: A compiled wait step's `kind` (`agentic_postgres.workflow_definition.WAIT`,
+#: spelled here for the same reason).
+WAIT = "wait"
 
 #: Where the agent plane answers, from inside the project's own network.
 #:
@@ -340,6 +366,30 @@ def classify(status: int, body: bytes) -> tuple[str, str, dict[str, Any] | None]
     return "ok", "", result
 
 
+def tool_value(result: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """The tool's own return value out of a served result, and why when none.
+
+    `structuredContent` when it is an object -- the branch the real plane takes
+    (rig 33c) -- else `content[0].text` parsed, when that is a JSON object. A
+    result carrying neither stores no value and SAYS so in the step's reason,
+    rather than storing the envelope and letting a later reference fail on a
+    field it was never going to have (ADR 0195: reported, not guessed).
+    """
+    if isinstance(result, dict):
+        structured = result.get("structuredContent")
+        if isinstance(structured, dict):
+            return structured, None
+        content = result.get("content")
+        if isinstance(content, list) and content and isinstance(content[0], dict):
+            try:
+                parsed = json.loads(str(content[0].get("text", "")))
+            except ValueError:
+                parsed = None
+            if isinstance(parsed, dict):
+                return parsed, None
+    return None, "the plane's result carried no structured value"
+
+
 def _refusal_token(result: dict[str, Any]) -> str:
     """The caller-facing token out of a refusal's text.
 
@@ -402,9 +452,39 @@ async def process(
     """
     started = now()
     deadline = started + step.timeout_seconds
+    compiled = step.step
+
+    if compiled.get("kind") == WAIT:
+        await _wait(step, repository=repository, holder=holder)
+        return
+
+    # The gate, read BEFORE anything is minted (the fifth ordering).
+    gated = isinstance(compiled.get("approval"), dict)
+    approval: dict[str, Any] | None = None
+    if gated:
+        if step.dry_run:
+            # D1722: a rehearsal never asks a human and never calls a write
+            # whose dry run its SQL may not keep.
+            await repository.finish(
+                step_id=step.step_id,
+                holder=holder,
+                outcome="dry_run",
+                result=None,
+                reason="approval steps are not rehearsed",
+                request_id=None,
+            )
+            return
+        state = await repository.gate_state(step_id=step.step_id, holder=holder)
+        approval = state.get("approval") if isinstance(state, dict) else None
+        if approval is not None and approval.get("status") != "approved":
+            await _close_gate(step, approval, repository=repository, holder=holder)
+            return
 
     try:
-        issued = await service.step_token(str(step.agent_id))
+        if approval is None:
+            issued = await service.step_token(str(step.agent_id))
+        else:
+            issued = await service.step_token(str(step.agent_id), approval_id=str(approval["id"]))
     except AuthenticationFailed as exc:
         # The agent stopped being able to act. Finished `token_refused`, which
         # the substrate turns into a run `stopped` with `agent_not_active` --
@@ -480,14 +560,39 @@ async def process(
         del token
 
     if verdict == "ok":
-        outcome = "dry_run" if (step.dry_run and step.step.get("kind") == "write") else "succeeded"
+        if gated and approval is None:
+            # D1714's last sentence: the plane is the authority on whether
+            # approval is required. A first call it served is a step that
+            # succeeded -- and a lock that moved under a definition, which an
+            # operator should hear about. Names only, never a value.
+            log.warning(
+                "workflow step %s was served on its first call although it declares an "
+                "approval; %s no longer requires one in this lock",
+                step.name,
+                compiled.get("capability"),
+            )
+        outcome = "dry_run" if (step.dry_run and compiled.get("kind") == "write") else "succeeded"
+        value, unstructured = tool_value(result)
         await repository.finish(
             step_id=step.step_id,
             holder=holder,
             outcome=outcome,
-            result=json.dumps(result, default=str),
-            reason=None,
+            result=None if value is None else json.dumps(value, default=str),
+            reason=unstructured,
             request_id=request_id,
+        )
+        return
+
+    if verdict == "terminal" and reason == APPROVAL_REQUIRED_TOKEN and gated and approval is None:
+        # **Park on the plane's own refusal** (ADR 0230). The request id is
+        # the refused call's, which is what joins the approval to its
+        # `approval_required` audit row. The approval's expiry IS the park's
+        # time: nothing else waits.
+        await repository.request_approval(
+            step_id=step.step_id,
+            holder=holder,
+            request_id=request_id,
+            expires_after_seconds=int(compiled["approval"]["expires_after_seconds"]),
         )
         return
 
@@ -524,6 +629,58 @@ async def process(
         result=None,
         reason=reason,
         request_id=request_id,
+    )
+
+
+async def _wait(step: Any, *, repository: Any, holder: str) -> None:
+    """A wait step: parked once, then finished. **No token, no call** (D1727).
+
+    `workflow_gate_state` reports whether this step's `waiting` park has been
+    served -- an attempt row, not a flag this process holds -- so a reclaim
+    after a crash finishes the wait rather than starting it again.
+    """
+    state = await repository.gate_state(step_id=step.step_id, holder=holder)
+    if isinstance(state, dict) and state.get("waited"):
+        await repository.finish(
+            step_id=step.step_id,
+            holder=holder,
+            outcome="succeeded",
+            result=None,
+            reason="waited",
+            request_id=None,
+        )
+        return
+    await repository.park(
+        step_id=step.step_id,
+        holder=holder,
+        reason="waiting",
+        resume_after=datetime.now(UTC) + timedelta(seconds=int(step.step["seconds"])),
+        request_id=None,
+    )
+
+
+async def _close_gate(step: Any, approval: dict[str, Any], *, repository: Any, holder: str) -> None:
+    """An approval that will not be used: expired, or (never by the claim) rejected.
+
+    The claim fires a PENDING step only at its expiry, so `pending` here means
+    nobody decided in time; `workflow_gate_state` already reads that `expired`.
+    Either is marked expired and fails the step. A rejection cancels the run
+    and is never claimed (D1719); if one arrives anyway it is reported by its
+    own word rather than folded into the other (ADR 0195).
+    """
+    status = str(approval.get("status"))
+    if status in ("pending", "expired"):
+        await repository.expire_approval(step_id=step.step_id, holder=holder)
+        reason = "approval_expired"
+    else:
+        reason = f"approval_{status}"
+    await repository.finish(
+        step_id=step.step_id,
+        holder=holder,
+        outcome="failed",
+        result=None,
+        reason=reason,
+        request_id=None,
     )
 
 

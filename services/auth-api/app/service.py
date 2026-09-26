@@ -12,6 +12,7 @@ from __future__ import annotations
 import secrets
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -221,13 +222,26 @@ class AuthService:
 
     # -- issuance ----------------------------------------------------------
 
-    def issue(self, credential: Credential, *, token_use: str) -> IssuedToken:
+    def issue(
+        self,
+        credential: Credential,
+        *,
+        token_use: str,
+        extra_claims: Mapping[str, Any] | None = None,
+    ) -> IssuedToken:
         """Mint a token from the server-side record. Nothing here is requested.
 
         The scopes are the stored ones, intersected with nothing and validated
         against the ceiling: a stored value outside the role's ceiling is a
         refusal rather than a quiet truncation, because a subject holding a
         scope its role may not carry is a state somebody has to know about.
+
+        **`extra_claims` is `step_token`'s alone** (ADR 0231): the one caller
+        that passes it passes `apg_approval`, built from a decided row it read
+        itself. It may not name a REQUIRED claim -- an extra that replaced
+        `scope` or `sub` would be a second way to say who a token is for -- and
+        it is merged BEFORE `verify_claims`, so the issuer still cannot mint
+        what its own verifier refuses.
 
         **A verifier-only runtime refuses here, before any work** (ADR 0113).
         `/auth/login` is not mounted in storage mode, so there is no caller and
@@ -258,6 +272,9 @@ class AuthService:
             )
         if token_use not in claim_contract.TOKEN_USES:
             raise InvalidRequest(f"token_use must be one of {claim_contract.TOKEN_USES}")
+        colliding = sorted(set(extra_claims or {}) & set(claim_contract.REQUIRED_CLAIMS))
+        if colliding:
+            raise InvalidRequest(f"an extra claim may not name a required one: {colliding}")
 
         now = int(time.time())
         payload: dict[str, Any] = {
@@ -277,6 +294,7 @@ class AuthService:
             "credential_version": credential.credential_version,
             "authz_version": credential.authz_version,
         }
+        payload.update(extra_claims or {})
 
         # Verified before signing, against the same function the verifier runs.
         # An issuer that could mint a token its own verifier refuses is an
@@ -521,7 +539,7 @@ class AuthService:
             raise AuthenticationFailed("agent secret has expired")
         return credential
 
-    async def step_token(self, agent_id: str) -> IssuedToken:
+    async def step_token(self, agent_id: str, *, approval_id: str | None = None) -> IssuedToken:
         """A token for ONE workflow step, as the agent whose run it is (ADR 0229).
 
         **There is no secret here and that is the whole decision.** The worker
@@ -542,11 +560,41 @@ class AuthService:
         correct: there is no secret to compare, and a dummy verification here
         would be a timing defence against an attacker who would already be
         inside this process.
+
+        **`approval_id` adds `apg_approval`, and only from the database** (ADR
+        0231). The claim's tool and key are read from
+        `workflow_approval_for_token` -- an APPROVED decision on a running run
+        of THIS agent -- and never from the caller's arguments, so a worker
+        that asked for an approval it does not have gets a refusal, not a
+        token. The agent's own checks come first and are unchanged: a revoked
+        agent's approved step is refused exactly as its unapproved one is.
         """
         issuable = self._refuse_unless_issuable(await self._agent_record(agent_id))
+        extra: dict[str, Any] | None = None
+        if approval_id is not None:
+            try:
+                approval = UUID(approval_id)
+            except ValueError as error:
+                raise AuthenticationFailed("the approval is not decided for this agent") from error
+            decided = await self.repository.approval_for_token(
+                approval_id=approval, agent_id=issuable.agent_id
+            )
+            if decided is None:
+                raise AuthenticationFailed("the approval is not decided for this agent")
+            extra = {
+                claim_contract.APPROVAL_CLAIM: {
+                    "id": str(approval),
+                    "tool": decided["tool"],
+                    "key": decided["key"],
+                }
+            }
         # (S106 matches on the argument name; "agent" is a token_use
         # discriminator from the claim contract, published in every token.)
-        return self.issue(self._as_credential(issuable), token_use="agent")  # noqa: S106
+        return self.issue(
+            self._as_credential(issuable),
+            token_use="agent",  # noqa: S106
+            extra_claims=extra,
+        )
 
     async def authenticate_agent(self, authorization: str | None) -> AgentPrincipal:
         """Verify an AGENT token and confirm the agent record still matches it.

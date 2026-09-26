@@ -48,11 +48,12 @@ ROW_NOT_FOUND: Final = "row_not_found"
 #: is honest here: the caller HOLDS the scope, the input is permitted, and the
 #: budget is untouched. `scope_not_held` is the closest and would be a lie.
 #:
-#: **The refusal is the guarantee**, and it is terminal. Nothing about this token
-#: implies a pending request a caller should wait on -- approval in this product
-#: is a declaration and a named refusal, never a workflow, because a workflow
-#: needs durable pending state, a second principal, and a notification plane none
-#: of which exists.
+#: **The refusal is the guarantee**, and it is terminal for the caller that
+#: receives it: nothing about this token implies a pending request that caller
+#: should wait on. Since Session 33 a WORKFLOW's approval gate turns it into a
+#: parked step a human decides (ADR 0230), and the one call that passes carries
+#: a signed claim naming its tool and key (ADR 0231); every caller without that
+#: claim is refused exactly as before.
 APPROVAL_REQUIRED: Final = "approval_required"
 
 #: Every token a caller can see. Enumerated so a test can assert the set, and so

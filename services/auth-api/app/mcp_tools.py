@@ -554,6 +554,7 @@ def invoke_write(
     arguments: dict[str, Any],
     idempotency_key: str,
     dry_run: bool,
+    approval: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """One reviewed write, as the caller, and the row it committed.
 
@@ -584,16 +585,34 @@ def invoke_write(
     # 0182, D870). The record is already open, so the refusal is audited (ADR
     # 0141), and no upstream request is made for a call that cannot proceed.
     #
-    # **Terminal, not pending.** Nothing here implies a request a caller should
-    # wait on: approval in this product is a declaration and a named refusal,
-    # because a workflow needs durable pending state, a second principal and a
-    # notification plane, none of which exists.
+    # **Still terminal for every caller without a matching claim.** Since
+    # Session 33 a workflow's approval gate is the ONE path that carries one
+    # (ADR 0231): a step token the signer minted from a human's recorded
+    # decision, naming this tool and this idempotency key. It authorises ONE
+    # write -- a replay of that key is re-read (ADR 0181), and any other write
+    # the token could make is refused here as before. The refusal's text is
+    # unchanged byte for byte, because a caller holding no claim is exactly
+    # the caller it has always been said to.
+    #
+    # **An approved call is never rehearsed** (D1722): a capability may declare
+    # a dry run its SQL does not keep, and until now the refusal above made that
+    # unreachable. Any claim with `dry_run` is refused before anything is sent.
     if entry.requires_approval:
-        raise AgentVisible(
-            APPROVAL_REQUIRED,
-            "this capability requires an approval this deployment cannot grant",
-            APPROVAL_REQUIRED_REASON,
-        )
+        if approval is not None and dry_run:
+            raise AgentVisible(
+                INPUT_NOT_PERMITTED,
+                "an approved call is not rehearsed",
+                NOT_IN_ALLOWLIST,
+            )
+        if approval is None or (approval.get("tool"), approval.get("key")) != (
+            tool,
+            idempotency_key,
+        ):
+            raise AgentVisible(
+                APPROVAL_REQUIRED,
+                "this capability requires an approval this deployment cannot grant",
+                APPROVAL_REQUIRED_REASON,
+            )
 
     # A rehearsal of a write that cannot be rehearsed is an input the lock does
     # not permit -- existing vocabulary, no new concept. `None` is lock schema
@@ -691,7 +710,7 @@ def register(
     request. Nothing here holds a token between requests: `current_agent_context`
     is backed by a `ContextVar` that is reset in a `finally` (ADR 0125).
     """
-    from app.mcp_authorization import current_request_id, current_token
+    from app.mcp_authorization import current_approval, current_request_id, current_token
 
     read_slots = slots if slots is not None else ReadSlots(DEFAULT_MAX_CONCURRENT_READS)
 
@@ -1107,6 +1126,9 @@ def register(
                     arguments=values,
                     idempotency_key=kwargs["idempotency_key"],
                     dry_run=kwargs["dry_run"],
+                    # From the VERIFIED claims, never from an argument (ADR
+                    # 0231); `None` for every token but an approved step's.
+                    approval=current_approval(),
                 ),
                 kind=KIND_WRITE,
                 # The idempotency key is absent here on purpose. It is a caller
