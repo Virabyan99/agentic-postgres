@@ -779,6 +779,12 @@ def test_a_human_write_leaves_no_audit_row(cluster: dict[str, Any]) -> None:
 
 READER = "auth_list_agent_audit"
 
+#: The six filters 0035 added between the owner and the limit, all absent: a
+#: window's two ends, an outcome, a denial reason and the cursor's two halves
+#: (ADR 0234). Every call below that predates them passes these, which is a
+#: changed call spelling and not a changed assertion.
+SIX_NULLS = "NULL, NULL, NULL, NULL, NULL, NULL"
+
 
 def _reader_acl(cluster: dict[str, Any]) -> list[str]:
     """Every grantee in the reader's ACL, by name, excluding its owner."""
@@ -899,7 +905,7 @@ def test_the_auth_service_reads_the_record_only_through_the_reader(
     reachable = as_role(
         cluster,
         "auth_service",
-        f"SELECT count(*) FROM app_private.{READER}(NULL, NULL, 10)",
+        f"SELECT count(*) FROM app_private.{READER}(NULL, NULL, {SIX_NULLS}, 10)",
     )
     assert reachable.returncode == 0, (
         f"auth_service cannot call app_private.{READER}, which is the only statement "
@@ -927,7 +933,9 @@ def test_no_request_role_can_execute_the_audit_reader(cluster: dict[str, Any]) -
     assert request_roles, "no request role to refuse; this test would be vacuous"
     for role_key in request_roles:
         result = as_role(
-            cluster, role_key, f"SELECT count(*) FROM app_private.{READER}(NULL, NULL, 10)"
+            cluster,
+            role_key,
+            f"SELECT count(*) FROM app_private.{READER}(NULL, NULL, {SIX_NULLS}, 10)",
         )
         assert result.returncode != 0, (
             f"{role_key} can execute app_private.{READER}. An agent reading the audit "
@@ -976,7 +984,7 @@ def test_the_reader_returns_the_most_recent_first_and_breaks_ties_by_id(
         result = as_role(
             cluster,
             "auth_service",
-            f"SELECT id::text FROM app_private.{READER}('{agent}', NULL, {limit})",
+            f"SELECT id::text FROM app_private.{READER}('{agent}', NULL, {SIX_NULLS}, {limit})",
         )
         assert result.returncode == 0, result.stderr
         return [line for line in result.stdout.strip().splitlines() if line]
@@ -1031,12 +1039,12 @@ def test_the_audit_read_returns_the_boundary_exactly_on_refused_rows(
     is as wrong as a refused row without one. 0027's CHECK is what holds it at
     the table; this is what holds it at the read.
 
-    **The control is the arity, in the same invocation** (ADR 0175). The widening
-    had one alternative that would have broken every caller -- a fourth parameter
-    -- and `pronargs` is what tells the two apart. `repository.py` sends
-    `auth_list_agent_audit(%s, %s, %s)` and nothing in this session edits it, so a
-    reader with four arguments would fail at run time on a deployment while every
-    offline proof of the column passed.
+    **The control is the arity, in the same invocation** (ADR 0175). 0032 kept
+    three arguments so its one caller did not move; **0035 moved it to nine on
+    purpose** (ADR 0234, D1248) and moved `repository.py` in the same commit.
+    So the arity is still the control, now over the new number AND the caller's
+    placeholders: a reader and a caller that disagreed would fail at run time on
+    a deployment while every offline proof of the column passed.
     """
     agent = str(uuid.uuid4())
     owner = str(uuid.uuid4())
@@ -1060,7 +1068,7 @@ def test_the_audit_read_returns_the_boundary_exactly_on_refused_rows(
         cluster,
         "auth_service",
         "SELECT tool || '|' || outcome || '|' || coalesce(denial_reason::text, 'NULL') "
-        f"FROM app_private.{READER}('{agent}', NULL, 10) ORDER BY tool",
+        f"FROM app_private.{READER}('{agent}', NULL, {SIX_NULLS}, 10) ORDER BY tool",
     )
     assert read.returncode == 0, (
         "auth_service cannot read denial_reason through the reader, which is the whole of "
@@ -1077,10 +1085,18 @@ def test_the_audit_read_returns_the_boundary_exactly_on_refused_rows(
         "JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'app_private' "
         f"WHERE p.proname = '{READER}';",
     )
-    assert arity.stdout.strip() == "3", (
-        f"the reader takes {arity.stdout.strip()} arguments, not 3. Migration 0032 widens a "
-        "RESULT and must not move the signature: repository.py sends three parameters and "
-        "nothing in this session edits it (ADR 0175, D857)"
+    assert arity.stdout.strip() == "9", (
+        f"the reader takes {arity.stdout.strip()} arguments, not 9. 0032 widened a RESULT at "
+        "three; 0035 moved the arity to nine on purpose (ADR 0234) and its one caller with "
+        "it (ADR 0175, D857)"
+    )
+    repository = (REPO_ROOT / "services" / "auth-api" / "app" / "repository.py").read_text(
+        encoding="utf-8"
+    )
+    call = repository[repository.index(f"app_private.{READER}(") :]
+    call = call[: call.index(")")]
+    assert call.count("%s") == 9, (
+        f"repository.py sends {call.count('%s')} parameters to a nine-argument reader"
     )
 
 
@@ -1109,7 +1125,7 @@ def test_the_reader_filters_narrow_and_do_not_authorize(cluster: dict[str, Any])
         result = as_role(
             cluster,
             "auth_service",
-            f"SELECT count(*) FROM app_private.{READER}({agent_filter}, {owner_filter}, 500)",
+            f"SELECT count(*) FROM app_private.{READER}({agent_filter}, {owner_filter}, {SIX_NULLS}, 500)",  # noqa: E501
         )
         assert result.returncode == 0, result.stderr
         return int(result.stdout.strip())
@@ -1158,7 +1174,7 @@ def test_the_reader_applies_the_limit_it_is_given_without_clamping(
         got = as_role(
             cluster,
             "auth_service",
-            f"SELECT count(*) FROM app_private.{READER}('{agent}', NULL, {limit})",
+            f"SELECT count(*) FROM app_private.{READER}('{agent}', NULL, {SIX_NULLS}, {limit})",
         )
         assert got.returncode == 0, got.stderr
         return int(got.stdout.strip())
@@ -1166,6 +1182,188 @@ def test_the_reader_applies_the_limit_it_is_given_without_clamping(
     assert count(4) == 4
     assert count(2) == 2, "the limit is not applied"
     assert count(1) == 1
+
+
+# ---------------------------------------------------------------------------
+# Migration 0035: a window, a filter, a keyset cursor, and the window's counts
+# (AGT-AUDIT-003, ADR 0234, D1248)
+# ---------------------------------------------------------------------------
+
+COUNTER = "auth_count_agent_audit"
+
+
+def _plant(cluster: dict[str, Any], agent: str, rows: int, refused: int, age: str = "0") -> None:
+    """`rows` audit rows for one agent in ONE statement, so they share `started_at`.
+
+    Rig 33d's shape: `started_at` defaults to TRANSACTION time, so one INSERT
+    ... SELECT writes every row at one instant -- the tie a cursor without an id
+    tie-break loses rows over. The first `refused` of them are `scope_not_held`
+    refusals, the rest `committed`. `age` shifts the whole batch into the past.
+    """
+    planted = su(
+        cluster,
+        "INSERT INTO app_private.agent_audit (source, agent_id, owner_id, tool, request_id, "
+        "outcome, denial_reason, started_at) SELECT 'agent_plane', "
+        f"'{agent}', '{uuid.uuid4()}', 'create_note', gen_random_uuid(), "
+        f"CASE WHEN g <= {refused} THEN 'refused' ELSE 'committed' END"
+        "::app_private.agent_audit_outcome, "
+        f"CASE WHEN g <= {refused} THEN 'scope_not_held' END::app_private.agent_denial_reason, "
+        f"now() - interval '{age} hours' FROM generate_series(1, {rows}) g;",
+    )
+    assert planted.returncode == 0, planted.stderr[:300]
+
+
+def _counts(cluster: dict[str, Any], agent: str, since: str = "NULL") -> dict[str, Any]:
+    read = as_role(
+        cluster,
+        "auth_service",
+        f"SELECT app_private.{COUNTER}('{agent}', NULL, {since}, NULL)",
+    )
+    assert read.returncode == 0, read.stderr[:300]
+    return json.loads(read.stdout.strip().splitlines()[-1])
+
+
+def test_the_reader_pages_every_row_exactly_once_across_tied_timestamps(
+    cluster: dict[str, Any],
+) -> None:
+    """1,000 rows at ONE instant, walked 100 at a time: every row once (rig 33d).
+
+    The control is in the same invocation twice over: the rows DO share one
+    `started_at` (so the tie-break is what is being measured, not luck), and
+    the union of the pages equals the counter's total for the same window.
+    Rig 33d measured the arm this would catch -- the cursor on `started_at`
+    alone stops after ONE page.
+    """
+    agent = str(uuid.uuid4())
+    _plant(cluster, agent, rows=1000, refused=50)
+    distinct = su(
+        cluster,
+        f"SELECT count(DISTINCT started_at) FROM app_private.agent_audit WHERE agent_id = '{agent}'",  # noqa: E501
+    )
+    assert distinct.stdout.strip() == "1", f"the rows are not tied: {distinct.stdout.strip()}"
+
+    seen: list[str] = []
+    cursor: tuple[str, str] | None = None
+    pages = 0
+    while pages < 20:
+        before = "NULL, NULL" if cursor is None else f"'{cursor[1]}', '{cursor[0]}'"
+        page = as_role(
+            cluster,
+            "auth_service",
+            f"SELECT id::text || '|' || started_at::text FROM app_private.{READER}('{agent}', NULL, NULL, NULL, NULL, NULL, {before}, 100)",  # noqa: E501
+        )
+        assert page.returncode == 0, page.stderr[:300]
+        rows = [line.split("|", 1) for line in page.stdout.strip().splitlines() if line]
+        pages += 1
+        seen.extend(row[0] for row in rows)
+        if len(rows) < 100:
+            break
+        cursor = (rows[-1][0], rows[-1][1])
+
+    assert len(seen) == 1000, f"the walk returned {len(seen)} rows over {pages} pages"
+    assert len(set(seen)) == 1000, "a row appeared on two pages"
+    assert _counts(cluster, agent)["total"] == 1000
+
+
+def test_the_window_counts_ignore_the_outcome_filter_and_the_cursor(
+    cluster: dict[str, Any],
+) -> None:
+    """D1248's objection, answered: the counts are the WINDOW's, not the page's.
+
+    A page filtered to `committed` shows no refusal; the counter for the same
+    window still says how many there are. The counter takes no outcome, reason
+    or cursor argument at all -- asserted from the catalog -- and the window it
+    does take narrows it exactly as it narrows the reader.
+    """
+    agent = str(uuid.uuid4())
+    _plant(cluster, agent, rows=30, refused=10)
+    _plant(cluster, agent, rows=10, refused=0, age="2")
+
+    committed = as_role(
+        cluster,
+        "auth_service",
+        f"SELECT outcome::text FROM app_private.{READER}('{agent}', NULL, NULL, NULL, 'committed', NULL, NULL, NULL, 500)",  # noqa: E501
+    )
+    assert committed.returncode == 0, committed.stderr[:300]
+    outcomes = committed.stdout.split()
+    assert outcomes and set(outcomes) == {"committed"}, "the outcome filter did not filter"
+
+    whole = _counts(cluster, agent)
+    assert whole["total"] == 40
+    assert whole["by_outcome"] == {"refused": 10, "committed": 30}, whole
+    assert whole["by_denial_reason"] == {"scope_not_held": 10}, whole
+
+    recent = _counts(cluster, agent, since="now() - interval '1 hour'")
+    assert recent["total"] == 30, recent
+    assert recent["by_outcome"]["refused"] == 10
+
+    arity = su(
+        cluster,
+        "SELECT pronargs FROM pg_proc p "
+        "JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'app_private' "
+        f"WHERE p.proname = '{COUNTER}';",
+    )
+    assert arity.stdout.strip() == "4", (
+        "the counter takes more than an agent, an owner and a window; a filter or a cursor "
+        "there would let a filtered page carry filtered counts"
+    )
+
+
+def test_an_unknown_outcome_or_reason_is_refused_not_empty(cluster: dict[str, Any]) -> None:
+    """A typo answered with zero rows would report *no refusals* about a window
+    nobody filtered. The control: a KNOWN outcome with no rows is an empty page."""
+    agent = str(uuid.uuid4())
+    for arguments, word in (
+        ("NULL, NULL, 'servedd', NULL, NULL, NULL", "unknown outcome"),
+        ("NULL, NULL, NULL, 'no_such_boundary', NULL, NULL", "unknown denial reason"),
+        ("NULL, NULL, NULL, NULL, now(), NULL", "cursor"),
+    ):
+        refused = as_role(
+            cluster,
+            "auth_service",
+            f"SELECT count(*) FROM app_private.{READER}('{agent}', NULL, {arguments}, 10)",
+        )
+        assert refused.returncode != 0, f"{arguments} was answered with a page"
+        assert word in refused.stderr and "AP422" in refused.stderr, refused.stderr[:300]
+
+    known = as_role(
+        cluster,
+        "auth_service",
+        f"SELECT count(*) FROM app_private.{READER}('{agent}', NULL, NULL, NULL, 'served', NULL, NULL, NULL, 10)",  # noqa: E501
+    )
+    assert known.returncode == 0 and known.stdout.strip() == "0", known.stderr[:300]
+
+
+def test_the_new_reader_and_the_counter_are_granted_to_the_auth_service_alone(
+    cluster: dict[str, Any],
+) -> None:
+    """The DROP took 0032's grant with it; 0035 gives it back, and to nobody else.
+
+    A grant question, so it reads `aclexplode` (ADR 0134), with the owner
+    subtracted for the reason the reader's first proof gives, and PUBLIC
+    asserted absent for both.
+    """
+    owner = cluster["roles"]["object_owner"]
+    for function in (READER, COUNTER):
+        holders = su(
+            cluster,
+            "SELECT coalesce(string_agg(DISTINCT grantee.rolname, ','), '') FROM pg_proc p "
+            "JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'app_private' "
+            "CROSS JOIN LATERAL aclexplode(p.proacl) acl "
+            "JOIN pg_roles grantee ON grantee.oid = acl.grantee "
+            f"WHERE p.proname = '{function}';",
+        )
+        assert holders.returncode == 0, holders.stderr
+        named = {name for name in holders.stdout.strip().split(",") if name} - {owner}
+        assert named == {cluster["roles"]["auth_service"]}, f"{function}: {sorted(named)}"
+        public = su(
+            cluster,
+            "SELECT count(*) FROM pg_proc p "
+            "JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'app_private' "
+            "CROSS JOIN LATERAL aclexplode(p.proacl) acl "
+            f"WHERE p.proname = '{function}' AND acl.grantee = 0;",
+        )
+        assert public.stdout.strip() == "0", f"PUBLIC holds EXECUTE on {function}"
 
 
 # ---------------------------------------------------------------------------

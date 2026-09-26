@@ -1,4 +1,8 @@
-"""The eight workflow calls, each one function of migration 0034's substrate.
+"""The workflow calls: eight of migration 0034's substrate and seven of 0035's.
+
+Since Session 33 the gates -- requesting, reading, expiring and deciding an
+approval -- the approvals listing, the signer's lookup and provenance are here
+too (ADR 0230-0234), each one definer function like the eight before them.
 
 `auth_service` holds **no privilege of any kind on the four workflow tables** --
 not SELECT, not INSERT, not UPDATE, not DELETE (0034, and
@@ -254,3 +258,87 @@ class WorkflowRepository:
         row = await self._one("SELECT app_private.workflow_counts() AS counts", ())
         assert row is not None
         return dict(row["counts"])
+
+    # -- the gates, and provenance (migration 0035, ADR 0230-0234) ----------
+    #
+    # Seven more calls, each one definer function, shipped in the same commit
+    # as the grants that name them (D1680). `workflow_begin_compensation` is
+    # the one 0035 function with NO method here, and that is its grant's
+    # absence stated a second time: only 0035's own functions call it.
+
+    async def request_approval(
+        self, *, step_id: UUID, holder: str, request_id: UUID | None, expires_after_seconds: int
+    ) -> str:
+        """Park an approval step on the PLANE's `approval_required` refusal.
+
+        `request_id` is the plane's id of the refused call (D1696), which is
+        what joins the approval to its audit row. Returns `'parked'`, or
+        `'lease_lost'` on the terms `finish` does (ADR 0230).
+        """
+        row = await self._one(
+            "SELECT app_private.workflow_request_approval(%s, %s, %s, %s) AS outcome",
+            (step_id, holder, request_id, expires_after_seconds),
+        )
+        assert row is not None
+        return str(row["outcome"])
+
+    async def gate_state(self, *, step_id: UUID, holder: str) -> dict[str, Any]:
+        """The loop's ONE read at a gate: the approval, and whether a wait was served."""
+        row = await self._one(
+            "SELECT app_private.workflow_gate_state(%s, %s) AS state", (step_id, holder)
+        )
+        assert row is not None
+        return dict(row["state"])
+
+    async def expire_approval(self, *, step_id: UUID, holder: str) -> str:
+        """Mark a pending approval past its expiry `expired`; a decided one never moves."""
+        row = await self._one(
+            "SELECT app_private.workflow_expire_approval(%s, %s) AS outcome", (step_id, holder)
+        )
+        assert row is not None
+        return str(row["outcome"])
+
+    async def decide(self, *, run_id: UUID, step: str, user_id: UUID, decision: str) -> str:
+        """A human's decision, final (ADR 0230, ADR 0232).
+
+        The route's call, not the loop's. The function refuses the run's owner,
+        a decided approval and an expired one before it writes anything, and
+        the route reads its message for one word.
+        """
+        row = await self._one(
+            "SELECT app_private.workflow_decide_approval(%s, %s, %s, %s) AS approval",
+            (run_id, step, user_id, decision),
+        )
+        assert row is not None
+        return str(row["approval"])
+
+    async def pending_approvals(self, *, limit: int) -> list[dict[str, Any]]:
+        """What waits for a human, oldest first, with no argument value (D1720)."""
+        row = await self._one(
+            "SELECT app_private.workflow_pending_approvals(%s) AS approvals", (limit,)
+        )
+        assert row is not None
+        return list(row["approvals"])
+
+    async def approval_for_token(
+        self, *, approval_id: UUID, agent_id: UUID
+    ) -> dict[str, str] | None:
+        """The tool and key of an APPROVED approval of this agent's running run.
+
+        `None` means refuse (ADR 0231). The signer reads this before it adds
+        `apg_approval` to one step token, so the claim's content comes from a
+        decided row and never from the loop's own variables.
+        """
+        row = await self._one(
+            "SELECT tool, idempotency_key FROM app_private.workflow_approval_for_token(%s, %s)",
+            (approval_id, agent_id),
+        )
+        if row is None:
+            return None
+        return {"tool": row["tool"], "key": row["idempotency_key"]}
+
+    async def provenance(self, *, run_id: UUID) -> dict[str, Any]:
+        """One run, for an auditor (ADR 0234). Never parameters, never a result."""
+        row = await self._one("SELECT app_private.workflow_provenance(%s) AS document", (run_id,))
+        assert row is not None
+        return dict(row["document"])

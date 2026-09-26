@@ -31,6 +31,7 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
 
 MODULE = REPO_ROOT / "services" / "auth-api" / "app" / "workflow_repository.py"
 TEMPLATE = REPO_ROOT / "migrations" / "templates" / "0034-workflow-substrate.sql"
+GATES_TEMPLATE = REPO_ROOT / "migrations" / "templates" / "0035-workflow-gates.sql"
 
 #: The eight the migration grants to `{{auth_service}}`. Derived from the
 #: TEMPLATE below rather than written here, so a grant added later cannot leave
@@ -66,6 +67,31 @@ def test_every_function_0034_grants_is_called_by_this_module() -> None:
 
     missing = sorted(granted - called)
     assert not missing, f"0034 grants {missing} and this repository calls none of them"
+
+
+def test_every_workflow_function_0035_grants_is_called_by_this_module() -> None:
+    """Session 33's seven, by the same rule (D1680), derived from 0035's text.
+
+    Only the `workflow_*` grants: 0035 also grants the audit reader and its
+    counter, whose caller is `repository.py` (the auth service's own module),
+    and `workflow_begin_compensation` is granted to nobody -- so it must NOT
+    have a caller here, which is asserted beside the seven.
+    """
+    text = GATES_TEMPLATE.read_text(encoding="utf-8")
+    granted: set[str] = set()
+    for statement in re.findall(r"GRANT EXECUTE ON FUNCTION\s+(.*?);", text, re.DOTALL):
+        if GRANTED_TO_THE_SERVICE in statement:
+            granted.update(re.findall(r"app_private\.(workflow_\w+)\s*\(", statement))
+    assert len(granted) == 7, sorted(granted)
+
+    source = MODULE.read_text(encoding="utf-8")
+    called = set(re.findall(r"SELECT[^\"']*app_private\.(\w+)\s*\(", source))
+    called.update(re.findall(r"FROM app_private\.(\w+)\s*\(", source))
+    missing = sorted(granted - called)
+    assert not missing, f"0035 grants {missing} and this repository calls none of them"
+    assert "workflow_begin_compensation" not in called, (
+        "the repository reaches workflow_begin_compensation, which is granted to nobody"
+    )
 
 
 def test_the_install_function_is_not_reachable_from_this_module() -> None:
@@ -115,10 +141,14 @@ def test_every_statement_passes_a_placeholder_for_every_argument() -> None:
     """
     source = MODULE.read_text(encoding="utf-8")
     declared: dict[str, int] = {}
-    template = TEMPLATE.read_text(encoding="utf-8")
-    for match in re.finditer(r"CREATE FUNCTION app_private\.(\w+)\(([^)]*)\)", template):
-        name, arguments = match.group(1), match.group(2).strip()
-        declared[name] = 0 if not arguments else len(arguments.split(","))
+    # 0035 is read AFTER 0034, so a function it declares is held to 0035's
+    # arity; its `CREATE OR REPLACE`s keep 0034's and are not matched here.
+    for path in (TEMPLATE, GATES_TEMPLATE):
+        template = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"CREATE FUNCTION app_private\.(\w+)\(([^)]*)\)", template):
+            name, arguments = match.group(1), match.group(2).strip()
+            declared[name] = 0 if not arguments else len(arguments.split(","))
+    assert {"workflow_request_approval", "workflow_provenance"} <= set(declared), sorted(declared)
 
     for match in re.finditer(r"app_private\.(\w+)\(([^)]*)\)", source):
         name, arguments = match.group(1), match.group(2)

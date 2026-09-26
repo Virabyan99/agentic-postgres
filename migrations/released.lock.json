@@ -395,6 +395,17 @@
       "template": "templates/0034-workflow-substrate.sql",
       "template_sha256": "ed58b3cabdc6d553f0374deb2156136fa1e0196b4b68aea11476eb14003de1b8",
       "version": "20260917120034"
+    },
+    {
+      "canonical_render_sha256": "018001188a481e9cfa32ad9f95038d1a06686edc81b8a51cc0929bf10f4068d8",
+      "name": "workflow_gates",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0035-workflow-gates.sql",
+      "template_sha256": "6505cad9d6b55d136660924e196ad1445c15808a45e37377466814cb68344f43",
+      "version": "20260917120035"
     }
   ],
   "schema_version": 1

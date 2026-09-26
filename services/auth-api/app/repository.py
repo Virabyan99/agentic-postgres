@@ -318,7 +318,16 @@ class Repository:
         return None if row is None else row["version"]
 
     async def list_agent_audit(
-        self, *, agent_id: UUID | None, owner_id: UUID | None, limit: int
+        self,
+        *,
+        agent_id: UUID | None,
+        owner_id: UUID | None,
+        limit: int,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        outcome: str | None = None,
+        denial_reason: str | None = None,
+        before: tuple[datetime, UUID] | None = None,
     ) -> list[dict[str, Any]]:
         """The audit record, most recent first (migration 0020, ADR 0142).
 
@@ -338,11 +347,52 @@ class Repository:
         `limit` is bounded by the route, which answers 422 outside its range. It
         is re-bounded neither here nor in the function: two bounds over one rule
         drift the moment either moves (D495, D463).
+
+        **Nine arguments since migration 0035** (ADR 0234, D1248): a half-open
+        window `[since, until)`, an outcome, a denial reason, and a keyset
+        cursor `before = (started_at, id)` over the reader's own ordering. Each
+        goes through as `NULL` when absent, for the reason above. An unknown
+        outcome or reason is the FUNCTION's `PT422`, never an empty page: the
+        route validates first, and the function is the second line.
         """
+        before_started_at, before_id = before if before is not None else (None, None)
         return await self._all(
-            "SELECT * FROM app_private.auth_list_agent_audit(%s, %s, %s)",
-            (agent_id, owner_id, limit),
+            "SELECT * FROM app_private.auth_list_agent_audit(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                agent_id,
+                owner_id,
+                since,
+                until,
+                outcome,
+                denial_reason,
+                before_started_at,
+                before_id,
+                limit,
+            ),
         )
+
+    async def count_agent_audit(
+        self,
+        *,
+        agent_id: UUID | None,
+        owner_id: UUID | None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> dict[str, Any]:
+        """The window's counts by outcome and by denial reason (ADR 0234).
+
+        Over the same agent, owner and window as `list_agent_audit` and NOTHING
+        else -- not its outcome or reason filter, not its cursor -- so a page
+        filtered to `committed` still travels with the number of refusals the
+        window holds. That is D1248's objection answered: a filter can narrow
+        what is shown, and cannot hide that refusals exist.
+        """
+        row = await self._one(
+            "SELECT app_private.auth_count_agent_audit(%s, %s, %s, %s) AS counts",
+            (agent_id, owner_id, since, until),
+        )
+        assert row is not None
+        return dict(row["counts"])
 
     # -- the session plane (Session 15 Run 3, ADR 0171) ---------------------
 

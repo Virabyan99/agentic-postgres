@@ -195,6 +195,48 @@ def test_0032_reissues_the_reader_grant(manifest: dict[str, Any]) -> None:
     )
 
 
+def test_0035_reissues_the_reader_grant_at_its_new_arity(manifest: dict[str, Any]) -> None:
+    """0032's rule, at nine arguments (ADR 0234, D1248).
+
+    0035 drops the three-argument reader and creates the nine-argument one, so
+    the grant 0032 re-issued goes with the DROP and has to be given back to the
+    NEW signature -- and the `REVOKE ... FROM PUBLIC` re-issued, for 0020's
+    reason. A text scan, named as one (D464); the cluster's answer is
+    `test_agent_audit_plane.py`'s. Whitespace is collapsed because the new
+    signature does not fit on one line.
+
+    The counter that travels with the reader is held to the same order.
+    """
+    entry = next(
+        (item for item in manifest["migrations"] if item["name"] == "workflow_gates"), None
+    )
+    assert entry is not None, "the released manifest has no workflow_gates migration"
+    text = (migrations.MIGRATIONS_ROOT / entry["template"]).read_text(encoding="utf-8")
+    up = " ".join(text.split("-- migrate:down", 1)[0].split())
+
+    old = "app_private.auth_list_agent_audit(uuid, uuid, integer)"
+    new = (
+        "app_private.auth_list_agent_audit( uuid, uuid, timestamptz, timestamptz, text, text, "
+        "timestamptz, uuid, integer)"
+    )
+    dropped = up.index(f"DROP FUNCTION {old};")
+    created = up.index("CREATE FUNCTION app_private.auth_list_agent_audit(")
+    revoked = up.index(f"REVOKE ALL ON FUNCTION {new} FROM PUBLIC;")
+    granted = up.index(f"GRANT EXECUTE ON FUNCTION {new} TO {{{{auth_service}}}};")
+    assert dropped < created < revoked < granted, (
+        "0035 does not drop, create, revoke and grant the reader in that order: "
+        f"drop {dropped}, create {created}, revoke {revoked}, grant {granted}"
+    )
+    assert f"GRANT EXECUTE ON FUNCTION {old}" not in up, "0035 re-grants the dropped signature"
+
+    counter = "app_private.auth_count_agent_audit(uuid, uuid, timestamptz, timestamptz)"
+    assert (
+        up.index("CREATE FUNCTION app_private.auth_count_agent_audit(")
+        < up.index(f"REVOKE ALL ON FUNCTION {counter} FROM PUBLIC;")
+        < up.index(f"GRANT EXECUTE ON FUNCTION {counter} TO {{{{auth_service}}}};")
+    )
+
+
 def test_every_up_block_assumes_and_returns_the_owner_role(manifest: dict[str, Any]) -> None:
     """ADR 0026: objects are owned by object_owner, versions stamped by migration_user.
 

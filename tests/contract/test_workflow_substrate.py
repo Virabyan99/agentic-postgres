@@ -264,7 +264,10 @@ def test_the_migration_applies_as_the_migration_user_and_its_down_refuses(
     refusal nobody has executed is a refusal nobody has measured.
     """
     assert "20260917120034" in applied["versions"], applied["versions"][-3:]
-    assert len(applied["versions"]) == 34, len(applied["versions"])
+    # 35 since Session 33: 0035 replaces five of 0034's functions in place, so
+    # every proof below runs against the replaced bodies (D1744's timeout rule
+    # among them), and this module is part of 0035's evidence as well as 0034's.
+    assert len(applied["versions"]) == 35, len(applied["versions"])
 
     template = (REPO_ROOT / "migrations" / "templates" / "0034-workflow-substrate.sql").read_text(
         encoding="utf-8"
@@ -317,6 +320,11 @@ def test_the_four_tables_carry_no_row_level_security(applied: dict[str, Any]) ->
     returning ZERO ROWS and exiting 0 to its own definer function. It fails
     silently, in the reassuring direction. This asserts the tree's actual
     posture rather than the stage plan's sentence.
+
+    **Six tables since 0035** (Session 33), and the node id keeps its name so the
+    registry's claim does not move: `workflow_approval` and `workflow_attempt`
+    are in the same schema under the same posture, and an exact reading of every
+    `workflow%` table is what makes a seventh one look at this.
     """
     reading = _scalar(
         applied,
@@ -327,6 +335,7 @@ def test_the_four_tables_carry_no_row_level_security(applied: dict[str, Any]) ->
         "AND c.relname LIKE 'workflow%';",
     )
     assert reading == (
+        "workflow_approval:false:false workflow_attempt:false:false "
         "workflow_definition:false:false workflow_run:false:false "
         "workflow_step:false:false workflow_worker:false:false"
     ), reading
@@ -1094,7 +1103,9 @@ def test_counts_reports_numbers_and_no_verdict(applied: dict[str, Any]) -> None:
     Nobody has measured a run count at which a deployment is unwell, so this
     function reports and decides nothing. It also carries no URL, key, token or
     caller value: the assertion below is over the KEY SET, so a field added
-    later has to be looked at.
+    later has to be looked at. **Looked at in Session 33**: 0035 adds
+    `approvals_pending` and `oldest_pending_approval_age_seconds` -- a count and
+    an age, no verdict, no caller value (ADR 0230).
     """
     counts = json.loads(
         _scalar(
@@ -1109,6 +1120,8 @@ def test_counts_reports_numbers_and_no_verdict(applied: dict[str, Any]) -> None:
         "oldest_claimed_lease_age_seconds",
         "heartbeat_age_seconds",
         "heartbeat_holder",
+        "approvals_pending",
+        "oldest_pending_approval_age_seconds",
     }, sorted(counts)
     assert isinstance(counts["definitions"], int)
     assert isinstance(counts["runs"], dict)

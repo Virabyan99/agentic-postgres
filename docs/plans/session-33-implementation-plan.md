@@ -1,7 +1,7 @@
 # Session 33 — Gates, compensation and provenance
 
-**Status: IN EXECUTION since 2026-09-26 — Runs 1–2 done (D1742–D1743 added;
-NEXT FREE D1744).** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
+**Status: IN EXECUTION since 2026-09-26 — Runs 1–3 done (D1742–D1748 added;
+NEXT FREE D1749). Run 4 is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
 `main` directly. This plan spends **D1714–D1741** in §1 and **ADR 0230–0234**.
 **NEXT FREE AFTER THIS PLAN: D1742, ADR 0235.** Rows the runs add go in §1's
 second table, below D1741, in execution order; the header's *Status*
@@ -462,6 +462,11 @@ second table below, in execution order.
 |---|---|---|---|---|
 | **D1742** | 1 | §5 Run 1: append `THR-APPROVAL` before any code, its *Acceptance requirement IDs* `AGT-APPROVE-002`, `WF-GATE-001`, `WF-APPROVE-001` and two proposed node ids. | `test_acceptance_registry.py::test_threat_model_requirement_ids_exist_in_the_registry` and `::test_threat_model_node_ids_are_collectible` read EVERY threat row: a requirement id must exist in the registry and a node id must collect. None of the five exists until Run 8 lands the registry (D690), so the row as written would turn two passing proofs red in a documentation run. | **The row lands in Run 1 with the prevention, detection and residual cells whole, and cites what holds TODAY**: `AGT-APPROVE-001` and `test_mcp_tools.py::test_a_capability_requiring_approval_is_refused_before_any_dial` (the refusal without a claim, which ADR 0231 keeps byte-identical). Its residual cell says so. **Run 8 rewrites the two cells** to add the three new requirements and their collected node ids. D1527's *before code* is kept; neither proof is weakened. |
 | **D1743** | 2 | §5 Run 2 item 2: `bin/doctor.py:962`'s reason becomes *"the store holds no such series in the current mcp process …"*; *"the proof that reads the reason is made stricter"*. | `probe_store` answers BOTH store figures — `requests_total` (`sum(traefik_service_requests_total)`) and `tool_calls_total` — through one sentence, so the plan's wording would have told an operator that Traefik's request counter lives in an mcp process. **And no proof read the reason at all** (grep: `no such series` appears in `bin/doctor.py:962` and, as a quoted historical output, in `capacity.py:553`, nowhere under `tests/`). | **The empty-series reason is per figure**: `STORE_EMPTY_REASONS` beside `STORE_QUERIES`, `probe_store(…, empty=…)`, the caller passing the figure's own; `requests_total` keeps *"… yet"* (a counter no request has touched yet), `tool_calls_total` gets the mcp-process sentence. A NEW proof (`test_an_empty_tool_call_answer_names_the_current_mcp_process`) reads both. `capacity.py:553` is a record of what Session 32's reading printed and is not rewritten. |
+| **D1744** | 3 | §5 Run 3 item 5: the claim's timeout phase calls `workflow_begin_compensation(r.id, 'failed')` *"after setting `stopped_reason = 'timed_out'`"*, under 0034's predicate. | 0034 fails a timed-out RUNNING run **even while one of its steps is claimed under a live lease** — the call is upstream. With compensation that would append the undo rows while a forward write was still in flight, and that write, landing after, would be undone by nothing. And 0034's `finish_step` updated the run with no status guard, so a late forward success could mark a `failed` run `succeeded`. | **The timeout phase skips a run with a call in flight** — the cancel phase's own rule (0034:555-559), extended; the in-flight call's lease bounds the wait. **A forward step finishing on a run no longer queued or running records the step and leaves the run where it is.** Proved: `test_a_timed_out_run_with_a_call_in_flight_waits_for_the_call` (and battery arm m7); 0034's own `test_a_run_past_its_timeout_is_failed_at_the_next_claim` still passes (its step is parked). |
+| **D1745** | 3 | §1 D1715 and §5 Run 3: `workflow_approval_for_token` answers *"only when `status 'approved'`, `expires_at > now()` and the run's `agent_id = p_agent`"*. | The expiry bounds how long a HUMAN may take to decide. An approved step that meets a retryable `write_conflict` parks and is claimed again, possibly after the window; re-checking the expiry there would make `step_token` refuse, which the loop classifies `token_refused` and reports as *the agent stopped being able to act* — a false stop. | **Once approved, the decision window is not re-checked; the run must still be RUNNING and the agent the run's own.** What bounds an approved call is the step's own retry and the run's timeout, and the claim binds ONE write through its key. Proved by `test_the_token_lookup_answers_only_an_approved_approval_of_that_agents_running_run` (an approved row past its window still answers; a cancelled run does not). ADR 0231's text is unaffected (it names *approved, and this agent's run*). |
+| **D1746** | 3 | §1 D1729: provenance returns the run's `input`; §2 WF-PROV-001: *"no field carries a redacted argument value"*. | A run's input is the agent's data and is what a step's arguments are resolved from — `tasks-approval`'s `embedding` is `set_note_embedding`'s `p_embedding`, which the example capability REDACTS (`capabilities.yaml:68`). Returning the input to an auditor would put back exactly what `audit.redact` kept out of the audit record. | **Provenance carries the input's KEYS (`input_keys`), never its values**, beside no `parameters` and no step `result`. Proved with three canaries (`test_provenance_carries_no_parameters_result_or_input_value`, battery arm m8). The agent's OWN read (`workflow_run_status`) still returns its input, as under 0034. |
+| **D1747** | 3 | §5 Run 3: the decide function's refusals are *owner, decided, expired, no such run*; the listing is *"pending, unexpired approvals"*; `workflow_counts` gains *"`approvals_pending` (count)"*. | A run can end while its approval is still `pending` — a timeout, the agent's own cancel — and nothing then waits on the decision. The plan's predicates would list it, count it and let a human approve a run nobody will resume. | **A decidable approval is pending, unexpired, on a RUNNING run.** The listing and `approvals_pending` count only those; a decision on an approval whose run has ended is refused with the same `no such run` a missing run gets (checked AFTER the owner, decided and expired refusals, so those words stay exact). No new refusal word. |
+| **D1748** | 3 | §5 Run 3: undo rows are named `undo-<forward position>` and keyed `wf-<run>-undo-<forward position>`; nothing says why that cannot collide with a forward step. | 0034's column CHECK admits `undo-1` (`^[a-z][a-z0-9_-]{0,62}$`), and a forward step so named would share the undo row's name and key, failing `UNIQUE (run_id, name)` inside a finish. **But `schemas/workflow.schema.json:67` admits no hyphen in a STEP name** (`^[a-z][a-z0-9_]{0,62}$`), so no compiled definition can carry one: the collision is impossible by construction. Found by checking the premise before writing the compiler refusal the first draft of this row asked for. | **The hyphen IS the separation, and Run 4 pins it**: a proof that the schema's step-name pattern refuses `undo-1` (so a later widening of that pattern has to look at this). No compiler refusal is added for a name the schema already refuses. |
 
 ---
 
@@ -891,7 +896,12 @@ once: 809 passed** (the migrate module, `test_doctor_readings`,
 registry**: the two migrate proofs are `OPS-LEDGER-001`'s; the two D1705 proofs
 join `WF-INSTALL-001`; the D1712 proof joins the requirement that owns
 `doctor usage` (grep `test_the_store_query_sums_across_instances` in the
-registry). **Rows added: D1743. NEXT FREE: D1744.**
+registry). **Rows added: D1743. NEXT FREE: D1744.** **CI:** `446cf809322a935a32d7eeb16d05e9cd9dc33794`
+→ `contract` **success**. (`6bb2139`, pushed before it, carries this run's
+plan records under the PLANNING session's message: a stale
+`/tmp/s33-commit.sh` from planning ran in place of this run's script. Its
+diff is the plan file alone; it is left as pushed and `446cf80`'s message
+says so.)
 
 ### Run 3 — migration 0035: the gates, compensation, the attempt history, provenance and the audit reader, under a real cluster
 
@@ -1153,6 +1163,75 @@ Run 3: migration 0035 -- approvals, compensation, the attempt history,
 provenance and the audit reader`), push, read CI. **Until Run 9's deploy, 0035
 may be amended in place, re-frozen and both projects re-rendered (Session 32
 amended 0034 twice this way, D1686/D1687/D1696); after Run 9 it is the floor.**
+
+**Done.** 2026-09-26. **Migration 0035** (`20260917120035`, `workflow_gates`,
+placeholders `object_owner` and `auth_service`) written as §5 describes, with
+four decisions the plan did not take, each a row: the timeout phase skips a
+run with a call in flight and a late forward finish never moves an ended run
+(**D1744**); the signer's lookup does not re-check an APPROVED decision's
+window but requires a running run of that agent (**D1745**); provenance
+carries the input's KEYS only (**D1746**); a decidable approval is pending,
+unexpired, on a running run, for the listing, the count and the decision
+(**D1747**). **D1748**'s premise was checked and found false in the
+reassuring direction (a step name admits no hyphen, so `undo-<n>` cannot
+collide); Run 4 pins it. Refusal errcodes reused: PT403, PT404, PT409, PT422
+(no new one). An undo row's claimed `step` is the forward element's
+`compensation` block with the row's own `name` merged in; `prior` is
+forward results only. Manifest entry appended by a script that asserted the
+re-serialisation byte-identical first (34 → 35 entries); `bin/migrate.sh
+freeze-lock` appended ONE lock entry (11 insertions) and `verify-lock`
+agrees; both example projects re-rendered by the gate's own `./deploy.sh
+--render-only` invocation, exit 0 each (D1678). **`docs/migrations.md` lists
+no individual migration** (0034 has no line either), so the plan's *"gains
+0035's line"* had nothing to attach to; nothing was added. **The arity guard
+models the DROP + CREATE at its position** (`released_signatures`), so §9's
+stop did not fire. **Callers in the same commit (D1680):**
+`workflow_repository.py` gains `request_approval`, `gate_state`,
+`expire_approval`, `decide`, `pending_approvals`, `approval_for_token`,
+`provenance`; `repository.py`'s `list_agent_audit` sends nine parameters
+(the four new filters default to `None`, so the route is unchanged until
+Run 6) and gains `count_agent_audit`. **Proofs:** NEW
+`tests/contract/test_workflow_gates.py` (`pytestmark` before the first test;
+the cluster fixture COPIED from the substrate module), 32 proofs — the §2
+WF-GATE-001 and WF-COMP-001 sets (two renamed from the proposal:
+`test_the_token_lookup_answers_only_an_approved_approval_of_that_agents_
+running_run`, per D1745; `test_pending_approvals_list_no_argument_value_
+oldest_first` added), plus `test_a_step_that_declares_no_approval_cannot_
+open_a_gate`, `test_a_decision_on_an_unknown_step_or_run_is_the_one_refusal`,
+`test_a_timed_out_run_with_a_call_in_flight_waits_for_the_call` (D1744), the
+four provenance proofs (`..._joins_every_attempt_to_its_audit_rows`,
+`..._names_the_approvals_decider`, `..._reports_the_profile_absent_with_a_
+reason`, `..._carries_no_parameters_result_or_input_value`) and
+`test_provenance_refuses_a_missing_run`. In `test_agent_audit_plane.py`, the
+four AGT-AUDIT-003 proofs; the six existing reader call sites moved to the
+nine-argument form through one constant `SIX_NULLS` (lines 908, 936, 985,
+1069, 1126, 1175 at the time of the edit — a changed spelling, no assertion
+changed); `test_the_audit_read_returns_the_boundary_exactly_on_refused_rows`'s
+arity control moved from `"3"` to `"9"` AND now also asserts that
+`repository.py` sends nine placeholders (stricter, under ADR 0234). In
+`test_migrations.py`, `test_0035_reissues_the_reader_grant_at_its_new_arity`
+(the counter held to the same order). In `test_workflow_repository.py`, NEW
+`test_every_workflow_function_0035_grants_is_called_by_this_module` (seven,
+and `workflow_begin_compensation` NOT called) and the placeholder proof
+widened to read 0035's declarations too. **Three existing proofs moved to
+the measured sets, none weakened:** the substrate's count pin 34 → 35; its
+RLS reading of every `workflow%` table four → six (node id kept); its counts
+key set + `approvals_pending`, `oldest_pending_approval_age_seconds`.
+**Every proof in both cluster modules passed on first execution (56)**,
+which is why the battery mattered: **8/8 killed**, each `FAILED`, none
+`ERROR`, control `test_workflow_substrate.py::test_the_migration_applies_as_
+the_migration_user_and_its_down_refuses` PASSED in every arm, anchors
+pre-flighted, restored by copy and `cmp`: (m1) the owner check removed; (m2)
+the already-decided check removed; (m3) the token lookup without its agent
+predicate; (m4) undo rows ASC; (m5) the reader's id tie-break removed; (m6)
+`workflow_begin_compensation` granted to the auth service; (m7) the D1744
+in-flight guard removed; (m8) provenance returning the input. **Targeted,
+once: 518 passed** (the fifteen modules of the plan's list plus
+`test_auth_service_database_access` and `test_deployment_module_shape`); two
+E501s ruff found after it were marked and `test_agent_audit_plane` re-run
+alone: 66 passed. **The sweep-selector guard passes vacuously for the new
+module until Run 8 lands the registry.** **Rows added: D1744–D1748. NEXT
+FREE: D1749.**
 
 ### Run 4 — the definition: `approval`, `compensation`, `wait`, the profile fix, the two example definitions
 
