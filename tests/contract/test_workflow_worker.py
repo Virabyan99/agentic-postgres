@@ -50,7 +50,6 @@ class FakeStep:
     position: int = 1
     name: str = "first"
     attempt: int = 1
-    request_id: UUID = field(default_factory=uuid4)
     agent_id: UUID = field(default_factory=uuid4)
     dry_run: bool = False
     step: dict[str, Any] = field(
@@ -127,6 +126,12 @@ def sse(payload: dict[str, Any]) -> bytes:
     return f"event: message\r\ndata: {json.dumps(payload)}\r\n\r\n".encode()
 
 
+#: The id the PLANE mints for a request and returns on its response (ADR
+#: 0160). Every fake transport returns it, because the real one always does:
+#: `StampRequestId` wraps the whole application, refusals included.
+PLANE_ID = "7b0c2a1e-5d3f-4c6b-9a8e-00000000d696"
+
+
 OK_RESULT = {
     "jsonrpc": "2.0",
     "id": 1,
@@ -188,9 +193,9 @@ def test_a_step_is_claimed_then_minted_then_called_then_finished_in_that_order(
     authority on no work at all."""
     seen: list[str] = []
 
-    def send(url: str, token: str, body: bytes, **kwargs: Any) -> tuple[int, bytes]:
+    def send(url: str, token: str, body: bytes, **kwargs: Any) -> tuple[int, bytes, str]:
         seen.append("call")
-        return 200, sse(OK_RESULT)
+        return 200, sse(OK_RESULT), PLANE_ID
 
     service = FakeService()
     original = service.step_token
@@ -222,7 +227,7 @@ def test_one_token_per_step_attempt_and_none_outlives_the_step(monkeypatch: Any)
     #: it: a cache is invisible when there is only ever one call to cache.
     #: "One token for one step" and "one token PER step" are different
     #: sentences, and only the second is the property.
-    monkeypatch.setattr(worker, "_send", lambda *a, **k: (200, sse(OK_RESULT)))
+    monkeypatch.setattr(worker, "_send", lambda *a, **k: (200, sse(OK_RESULT), PLANE_ID))
     repository = FakeRepository()
     service = FakeService()
     first, second = FakeStep(), FakeStep()
@@ -271,27 +276,34 @@ def test_one_token_per_step_attempt_and_none_outlives_the_step(monkeypatch: Any)
     ), "the token is dropped on the happy path only"
 
 
-def test_the_call_carries_the_key_the_request_id_and_the_token(monkeypatch: Any) -> None:
-    """Three values, three reasons, and none of them is the loop's own.
+def test_the_call_carries_the_key_and_the_token_and_sends_no_request_id(
+    monkeypatch: Any,
+) -> None:
+    """Two values, two reasons, and neither is the loop's own -- and a third
+    value it must NOT send.
 
     The idempotency key is the SUBSTRATE's, derived per (run, step) at enqueue.
-    The request id is the CLAIM's, minted per attempt and returned so that both
-    sides of the correlation carry one value (D1686). The token is the
-    SERVICE's, for the agent whose run this is.
+    The token is the SERVICE's, for the agent whose run this is. **No request
+    id is sent** (D1696): the plane mints its own per HTTP request and ignores
+    an inbound one by decision (ADR 0160), so an id sent from here would be a
+    value that correlates nothing while looking as if it did.
     """
     captured: dict[str, Any] = {}
 
-    def send(url: str, token: str, body: bytes, **kwargs: Any) -> tuple[int, bytes]:
+    def send(url: str, token: str, body: bytes, **kwargs: Any) -> tuple[int, bytes, str]:
         captured.update(url=url, token=token, body=json.loads(body), **kwargs)
-        return 200, sse(OK_RESULT)
+        return 200, sse(OK_RESULT), PLANE_ID
 
     step = FakeStep()
     drive(step=step, send=send, monkeypatch=monkeypatch)
 
     assert captured["url"] == "http://mcp:8080/mcp"
     assert captured["token"] == "a.token.value"  # noqa: S105
-    assert captured["request_id"] == str(step.request_id)
     assert captured["timeout"] == float(step.timeout_seconds)
+    assert "request_id" not in captured, (
+        "the loop handed the transport a request id to send; the plane ignores "
+        "it (ADR 0160) and the step must record the plane's instead (D1696)"
+    )
 
     body = captured["body"]
     assert body["method"] == "tools/call"
@@ -300,6 +312,91 @@ def test_the_call_carries_the_key_the_request_id_and_the_token(monkeypatch: Any)
     assert arguments["idempotency_key"] == step.idempotency_key
     assert arguments["dry_run"] is False
     assert arguments["p_title"] == "one"
+
+    # And the one place a header could be added sends none of that name.
+    tree = ast.parse(WORKER_SOURCE.read_text(encoding="utf-8"))
+    sender = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_send"
+    )
+    sent = [
+        key
+        for node in ast.walk(sender)
+        if isinstance(node, ast.Dict)
+        for key in node.keys
+        if isinstance(key, ast.Name | ast.Constant)
+    ]
+    names = {getattr(key, "id", None) or getattr(key, "value", None) for key in sent}
+    assert "REQUEST_ID_HEADER" not in names and "X-Request-Id" not in names, (
+        f"`_send` builds a header named for the request id: {sorted(map(str, names))}"
+    )
+
+
+def test_the_step_records_the_request_id_the_plane_returned(monkeypatch: Any) -> None:
+    """**D1696.** The id that joins a step to `app_private.agent_audit` is the
+    one on the plane's RESPONSE -- recorded at finish AND at park, because a
+    parked step made a call the plane audited too.
+
+    The controls are the three paths where no id can exist and the step must
+    say so with `None` rather than carry a value that looks measured: a
+    refused mint (no call), a transport failure (nothing answered), and a
+    response whose header is not a uuid (an answer, but not the shape asked
+    for -- ADR 0195's third outcome, reported rather than failing the finish
+    that records the step's outcome).
+    """
+    plane = UUID(PLANE_ID)
+
+    repository, _ = drive(
+        step=FakeStep(),
+        send=lambda *a, **k: (200, sse(OK_RESULT), PLANE_ID),
+        monkeypatch=monkeypatch,
+    )
+    assert repository.one("finish")["request_id"] == plane
+
+    parked = FakeStep()
+    parked.step = {**parked.step, "retry": {"max": 1, "backoff_seconds": 5}}
+    repository, _ = drive(
+        step=parked,
+        send=lambda *a, **k: (200, sse(refusal("write_conflict")), PLANE_ID),
+        monkeypatch=monkeypatch,
+    )
+    assert repository.one("park")["request_id"] == plane
+
+    repository, _ = drive(
+        step=FakeStep(),
+        send=lambda *a, **k: (200, sse(refusal("scope_not_held")), PLANE_ID),
+        monkeypatch=monkeypatch,
+    )
+    assert repository.one("finish")["request_id"] == plane, (
+        "a refusal is audited under the plane's id as well; it must be recorded"
+    )
+
+    # -- the three controls --------------------------------------------------
+    repository, _ = drive(
+        step=FakeStep(),
+        service=FakeService(refuse=worker.AuthenticationFailed("revoked")),
+        send=lambda *a, **k: (200, sse(OK_RESULT), PLANE_ID),
+        monkeypatch=monkeypatch,
+    )
+    assert repository.one("finish")["request_id"] is None
+
+    def unreachable(*args: Any, **kwargs: Any) -> tuple[int, bytes, str]:
+        raise OSError("connection refused")
+
+    retried = FakeStep()
+    retried.step = {**retried.step, "retry": {"max": 1, "backoff_seconds": 5}}
+    repository, _ = drive(step=retried, send=unreachable, monkeypatch=monkeypatch)
+    assert repository.one("park")["request_id"] is None
+
+    repository, _ = drive(
+        step=FakeStep(),
+        send=lambda *a, **k: (200, sse(OK_RESULT), "not-a-uuid"),
+        monkeypatch=monkeypatch,
+    )
+    finished = repository.one("finish")
+    assert finished["request_id"] is None
+    assert finished["outcome"] == "succeeded", "a malformed id cost the step its outcome"
 
 
 def test_a_successful_call_finishes_the_step_and_the_replay_is_not_the_loops_to_see(
@@ -315,7 +412,9 @@ def test_a_successful_call_finishes_the_step_and_the_replay_is_not_the_loops_to_
     outcome it cannot determine (ADR 0195).
     """
     repository, _ = drive(
-        step=FakeStep(), send=lambda *a, **k: (200, sse(OK_RESULT)), monkeypatch=monkeypatch
+        step=FakeStep(),
+        send=lambda *a, **k: (200, sse(OK_RESULT), PLANE_ID),
+        monkeypatch=monkeypatch,
     )
     finished = repository.one("finish")
     assert finished["outcome"] == "succeeded"
@@ -338,7 +437,7 @@ def test_a_retryable_failure_parks_and_a_final_one_fails_the_run(monkeypatch: An
     step.step = {**step.step, "retry": {"max": 2, "backoff_seconds": 45}}
     repository, _ = drive(
         step=step,
-        send=lambda *a, **k: (200, sse(refusal("write_conflict"))),
+        send=lambda *a, **k: (200, sse(refusal("write_conflict")), PLANE_ID),
         monkeypatch=monkeypatch,
     )
     parked = repository.one("park")
@@ -351,7 +450,7 @@ def test_a_retryable_failure_parks_and_a_final_one_fails_the_run(monkeypatch: An
     exhausted.step = {**exhausted.step, "retry": {"max": 2, "backoff_seconds": 45}}
     repository, _ = drive(
         step=exhausted,
-        send=lambda *a, **k: (200, sse(refusal("write_conflict"))),
+        send=lambda *a, **k: (200, sse(refusal("write_conflict")), PLANE_ID),
         monkeypatch=monkeypatch,
     )
     assert "park" not in repository.names
@@ -372,7 +471,7 @@ def test_a_terminal_refusal_fails_the_run_naming_the_boundary(monkeypatch: Any) 
         step.step = {**step.step, "retry": {"max": 5, "backoff_seconds": 1}}
         repository, _ = drive(
             step=step,
-            send=lambda *a, _token=token, **k: (200, sse(refusal(_token))),
+            send=lambda *a, _token=token, **k: (200, sse(refusal(_token)), PLANE_ID),
             monkeypatch=monkeypatch,
         )
         assert "park" not in repository.names, f"{token} was retried and it is terminal"
@@ -391,10 +490,10 @@ def test_a_refused_mint_stops_the_run_and_makes_no_call(monkeypatch: Any) -> Non
     errors = service_source.load("errors")
     called = False
 
-    def send(*args: Any, **kwargs: Any) -> tuple[int, bytes]:
+    def send(*args: Any, **kwargs: Any) -> tuple[int, bytes, str]:
         nonlocal called
         called = True
-        return 200, sse(OK_RESULT)
+        return 200, sse(OK_RESULT), PLANE_ID
 
     service = FakeService(refuse=errors.AuthenticationFailed("agent is revoked"))
     repository, _ = drive(step=FakeStep(), service=service, send=send, monkeypatch=monkeypatch)
@@ -414,9 +513,9 @@ def test_a_dry_run_marks_writes_and_leaves_reads_alone(monkeypatch: Any) -> None
     """
     captured: list[dict[str, Any]] = []
 
-    def send(url: str, token: str, body: bytes, **kwargs: Any) -> tuple[int, bytes]:
+    def send(url: str, token: str, body: bytes, **kwargs: Any) -> tuple[int, bytes, str]:
         captured.append(json.loads(body)["params"]["arguments"])
-        return 200, sse(OK_RESULT)
+        return 200, sse(OK_RESULT), PLANE_ID
 
     write = FakeStep()
     write.dry_run = True
@@ -476,7 +575,9 @@ def test_the_claim_asks_for_a_margin_and_the_substrate_adds_the_steps_timeout(
     """**D1687.** The loop cannot compute the lease, because the step's own
     timeout arrives in the claim's result."""
     repository, _ = drive(
-        step=FakeStep(), send=lambda *a, **k: (200, sse(OK_RESULT)), monkeypatch=monkeypatch
+        step=FakeStep(),
+        send=lambda *a, **k: (200, sse(OK_RESULT), PLANE_ID),
+        monkeypatch=monkeypatch,
     )
     claimed = repository.one("claim")
     assert claimed == {"holder": "host:1:aa", "lease_margin_seconds": worker.lease_margin_seconds()}
@@ -490,10 +591,10 @@ def test_the_loop_stops_before_its_lease_does(monkeypatch: Any) -> None:
     """
     called = False
 
-    def send(*args: Any, **kwargs: Any) -> tuple[int, bytes]:
+    def send(*args: Any, **kwargs: Any) -> tuple[int, bytes, str]:
         nonlocal called
         called = True
-        return 200, sse(OK_RESULT)
+        return 200, sse(OK_RESULT), PLANE_ID
 
     monkeypatch.setattr(worker, "_send", send)
     repository = FakeRepository()
@@ -523,7 +624,7 @@ def test_a_transport_failure_is_retryable_and_a_four_hundred_is_not(monkeypatch:
         step = FakeStep()
         step.step = {**step.step, "retry": {"max": 1, "backoff_seconds": 5}}
 
-        def send(*args: Any, _failure: Any = failure, **kwargs: Any) -> tuple[int, bytes]:
+        def send(*args: Any, _failure: Any = failure, **kwargs: Any) -> tuple[int, bytes, str]:
             raise _failure
 
         repository, _ = drive(step=step, send=send, monkeypatch=monkeypatch)
@@ -531,7 +632,9 @@ def test_a_transport_failure_is_retryable_and_a_four_hundred_is_not(monkeypatch:
 
     step = FakeStep()
     step.step = {**step.step, "retry": {"max": 1, "backoff_seconds": 5}}
-    repository, _ = drive(step=step, send=lambda *a, **k: (404, b"{}"), monkeypatch=monkeypatch)
+    repository, _ = drive(
+        step=step, send=lambda *a, **k: (404, b"{}", PLANE_ID), monkeypatch=monkeypatch
+    )
     assert "park" not in repository.names
     assert repository.one("finish")["outcome"] == "refused"
 
@@ -549,7 +652,7 @@ def test_a_refused_bearer_stops_the_run_rather_than_failing_the_step(
     for status in (401, 403):
         repository, _ = drive(
             step=FakeStep(),
-            send=lambda *a, _status=status, **k: (_status, b""),
+            send=lambda *a, _status=status, **k: (_status, b"", PLANE_ID),
             monkeypatch=monkeypatch,
         )
         assert repository.one("finish")["outcome"] == "token_refused"
@@ -565,10 +668,10 @@ def test_an_unresolvable_reference_fails_the_step_and_makes_no_call(
     """
     called = False
 
-    def send(*args: Any, **kwargs: Any) -> tuple[int, bytes]:
+    def send(*args: Any, **kwargs: Any) -> tuple[int, bytes, str]:
         nonlocal called
         called = True
-        return 200, sse(OK_RESULT)
+        return 200, sse(OK_RESULT), PLANE_ID
 
     step = FakeStep()
     step.step = {**step.step, "arguments": {"p_title": "{{input.missing}}", "p_content": "x"}}
@@ -589,9 +692,9 @@ def test_a_reference_resolves_with_its_type_intact(monkeypatch: Any) -> None:
     """
     captured: list[dict[str, Any]] = []
 
-    def send(url: str, token: str, body: bytes, **kwargs: Any) -> tuple[int, bytes]:
+    def send(url: str, token: str, body: bytes, **kwargs: Any) -> tuple[int, bytes, str]:
         captured.append(json.loads(body)["params"]["arguments"])
-        return 200, sse(OK_RESULT)
+        return 200, sse(OK_RESULT), PLANE_ID
 
     step = FakeStep()
     step.input = {"title": "from the input", "limit": 5}

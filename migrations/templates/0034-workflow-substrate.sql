@@ -236,6 +236,17 @@ COMMENT ON TABLE app_private.workflow_run IS
 -- nobody holds, and a finished step keeps its `request_id`, `outcome` and
 -- `reason` -- the step row IS the record of what happened, and correlation to
 -- the plane's audit is `request_id` on both sides (D1667).
+--
+-- **`request_id` is the id the PLANE minted, never one this schema mints**
+-- (D1696). The plane ignores an inbound `X-Request-Id` by decision -- ADR
+-- 0160, *no caller value is ever trusted*, so one agent cannot stamp its
+-- calls with another's id -- and mints its own per HTTP request, writes it
+-- into both audit rows and returns it on the response. So the worker reads
+-- it off the response and hands it to `finish` or `park`, a claim clears it,
+-- and an attempt that made no call (a refused mint, an unresolvable
+-- reference, a spent margin) leaves it NULL -- which is itself the answer to
+-- *did this attempt reach the plane*. The row holds the LAST attempt's id;
+-- an earlier attempt's is in the audit under the same agent.
 CREATE TABLE app_private.workflow_step (
   id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   run_id          uuid        NOT NULL REFERENCES app_private.workflow_run (id),
@@ -271,8 +282,10 @@ COMMENT ON TABLE app_private.workflow_step IS
   '0227). idempotency_key is derived at enqueue from the run and the step and '
   'never from the attempt, so every attempt presents the same bytes and the '
   'upstream deduplicates a retry rather than writing a second row (ADR 0181). '
-  'request_id is minted per attempt and is what correlates this row to '
-  'app_private.agent_audit.';
+  'request_id is the id the PLANE minted for the last attempt''s call, read off '
+  'its response and recorded at finish or park; it correlates this row to '
+  'app_private.agent_audit, and it is NULL for an attempt that made no call '
+  '(D1696, ADR 0160: the plane never accepts a caller''s request id).';
 
 -- ---------------------------------------------------------------------------
 -- The heartbeat
@@ -502,14 +515,10 @@ CREATE FUNCTION app_private.workflow_claim_step(
   step_position   integer,
   step_name       text,
   attempt         integer,
-  -- **Returned, not only written** (D1686). The UPDATE below mints a fresh
-  -- `request_id` for this attempt and the column's own comment calls it *what
-  -- correlates this row to the plane's audit* -- which only holds if the
-  -- caller can READ it and put it in the request's `X-Request-Id`. Writing it
-  -- and withholding it would have left the worker minting a second id of its
-  -- own, and the two sides of the correlation would have carried different
-  -- values with nothing to say so.
-  request_id      uuid,
+  -- No `request_id` (D1696, which replaces D1686). The id that correlates a
+  -- step to the plane's audit is the one the PLANE mints, and it exists only
+  -- after the call; an id minted here would be sent as a header the plane
+  -- ignores by decision (ADR 0160) and would correlate nothing.
   agent_id        uuid,
   dry_run         boolean,
   step            jsonb,
@@ -588,7 +597,10 @@ BEGIN
                        + pg_catalog.make_interval(
                            secs => s.timeout_seconds + p_lease_margin_seconds),
          attempt = s.attempt + 1,
-         request_id = gen_random_uuid(),
+         -- Cleared, not minted (D1696): this attempt has reached nothing yet,
+         -- and an id left over from the previous one would correlate this
+         -- attempt to a call it did not make.
+         request_id = NULL,
          resume_after = NULL,
          started_at = coalesce(s.started_at, pg_catalog.now())
    WHERE s.id = chosen;
@@ -610,7 +622,6 @@ BEGIN
          s.position,
          s.name,
          s.attempt,
-         s.request_id,
          r.agent_id,
          r.dry_run,
          (d.body -> 'steps') -> (s.position - 1),
@@ -654,12 +665,18 @@ COMMENT ON FUNCTION app_private.workflow_claim_step(text, integer) IS
 --
 -- Returns the RUN's new status, so the caller learns in one round trip whether
 -- the run is over.
+--
+-- `p_request_id` is the id the PLANE returned on its response, or NULL when
+-- the attempt made no call (D1696). It is a parameter rather than something
+-- this function could derive: it exists only on the far side of an HTTP
+-- exchange this database never sees.
 CREATE FUNCTION app_private.workflow_finish_step(
-  p_step    uuid,
-  p_holder  text,
-  p_outcome app_private.workflow_step_outcome,
-  p_result  jsonb,
-  p_reason  text
+  p_step       uuid,
+  p_holder     text,
+  p_outcome    app_private.workflow_step_outcome,
+  p_result     jsonb,
+  p_reason     text,
+  p_request_id uuid
 ) RETURNS text
   LANGUAGE plpgsql
   VOLATILE
@@ -679,6 +696,7 @@ BEGIN
          outcome = p_outcome,
          result = p_result,
          reason = p_reason,
+         request_id = p_request_id,
          claimed_by = NULL,
          lease_until = NULL,
          finished_at = pg_catalog.now()
@@ -733,12 +751,14 @@ BEGIN
 END $fn$;
 
 COMMENT ON FUNCTION app_private.workflow_finish_step(
-  uuid, text, app_private.workflow_step_outcome, jsonb, text) IS
+  uuid, text, app_private.workflow_step_outcome, jsonb, text, uuid) IS
   'Closes one step held by one holder and returns the RUN''s new status (ADR '
   '0227). A holder that lost its lease gets ''lease_lost'', which is a fact '
   'and not an error: the work happened and a successor holds the row. '
   'token_refused stops the run rather than failing it, because nothing refused '
-  'the work; abandoned returns the step to queued, because nothing was done.';
+  'the work; abandoned returns the step to queued, because nothing was done. '
+  'p_request_id is the id the PLANE returned for the call, NULL when no call '
+  'was made (D1696).';
 
 -- ---------------------------------------------------------------------------
 -- Parking a step
@@ -754,7 +774,8 @@ CREATE FUNCTION app_private.workflow_park(
   p_step         uuid,
   p_holder       text,
   p_reason       text,
-  p_resume_after timestamptz
+  p_resume_after timestamptz,
+  p_request_id   uuid
 ) RETURNS text
   LANGUAGE plpgsql
   VOLATILE
@@ -769,7 +790,8 @@ BEGIN
          claimed_by = NULL,
          lease_until = NULL,
          resume_after = p_resume_after,
-         reason = p_reason
+         reason = p_reason,
+         request_id = p_request_id
    WHERE s.id = p_step AND s.claimed_by = p_holder AND s.status = 'claimed';
   GET DIAGNOSTICS parked = ROW_COUNT;
   IF parked = 0 THEN
@@ -778,11 +800,12 @@ BEGIN
   RETURN 'parked';
 END $fn$;
 
-COMMENT ON FUNCTION app_private.workflow_park(uuid, text, text, timestamptz) IS
+COMMENT ON FUNCTION app_private.workflow_park(uuid, text, text, timestamptz, uuid) IS
   'Defers one step until a time, releasing its lease (ADR 0227). Park is the '
   'backoff and a parked step is the pause -- there is no sleep in the worker '
   'and no second waiting mechanism. A holder that lost its lease gets '
-  '''lease_lost'', exactly as finishing does.';
+  '''lease_lost'', exactly as finishing does. A park follows a call the plane '
+  'answered, so it records the plane''s request id as finishing does (D1696).';
 
 -- ---------------------------------------------------------------------------
 -- Cancelling, and reading
@@ -1011,9 +1034,9 @@ REVOKE ALL ON FUNCTION
   app_private.workflow_enqueue(uuid, text, integer, jsonb, boolean) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_private.workflow_claim_step(text, integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_private.workflow_finish_step(
-  uuid, text, app_private.workflow_step_outcome, jsonb, text) FROM PUBLIC;
+  uuid, text, app_private.workflow_step_outcome, jsonb, text, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION
-  app_private.workflow_park(uuid, text, text, timestamptz) FROM PUBLIC;
+  app_private.workflow_park(uuid, text, text, timestamptz, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_private.workflow_cancel(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_private.workflow_run_status(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_private.workflow_heartbeat(text) FROM PUBLIC;
@@ -1024,9 +1047,9 @@ GRANT EXECUTE ON FUNCTION
 GRANT EXECUTE ON FUNCTION
   app_private.workflow_claim_step(text, integer) TO {{auth_service}};
 GRANT EXECUTE ON FUNCTION app_private.workflow_finish_step(
-  uuid, text, app_private.workflow_step_outcome, jsonb, text) TO {{auth_service}};
+  uuid, text, app_private.workflow_step_outcome, jsonb, text, uuid) TO {{auth_service}};
 GRANT EXECUTE ON FUNCTION
-  app_private.workflow_park(uuid, text, text, timestamptz) TO {{auth_service}};
+  app_private.workflow_park(uuid, text, text, timestamptz, uuid) TO {{auth_service}};
 GRANT EXECUTE ON FUNCTION app_private.workflow_cancel(uuid, uuid) TO {{auth_service}};
 GRANT EXECUTE ON FUNCTION app_private.workflow_run_status(uuid, uuid) TO {{auth_service}};
 GRANT EXECUTE ON FUNCTION app_private.workflow_heartbeat(text) TO {{auth_service}};

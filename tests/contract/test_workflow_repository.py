@@ -21,7 +21,7 @@ from __future__ import annotations
 import ast
 import re
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -208,7 +208,6 @@ def test_a_claim_maps_the_functions_spelling_onto_the_dataclass() -> None:
     run = uuid4()
     step = uuid4()
     agent = uuid4()
-    request = uuid4()
     repository, _ = _repository(
         row={
             "step_id": step,
@@ -216,7 +215,6 @@ def test_a_claim_maps_the_functions_spelling_onto_the_dataclass() -> None:
             "step_position": 2,
             "step_name": "second",
             "attempt": 1,
-            "request_id": request,
             "agent_id": agent,
             "dry_run": False,
             "step": {"tool": "create_note"},
@@ -232,9 +230,13 @@ def test_a_claim_maps_the_functions_spelling_onto_the_dataclass() -> None:
     assert claimed.name == "second"
     assert claimed.prior == {"first": {"row": 1}}
     assert claimed.idempotency_key == f"wf-{run}-second"
-    # D1686: minted by the CLAIM and returned, because it is the only thing
-    # that correlates this step to the plane's own audit row.
-    assert claimed.request_id == request
+    # D1696: the claim carries NO request id. The one that correlates a step
+    # to the plane's audit is the plane's own, known only after the call.
+    assert not hasattr(claimed, "request_id")
+
+
+#: An id as the PLANE would have minted it, handed in by the loop (D1696).
+PLANE_ID = UUID("00000000-0000-4000-8000-00000000d696")
 
 
 def test_finish_and_park_return_the_words_the_substrate_returns() -> None:
@@ -249,17 +251,30 @@ def test_finish_and_park_return_the_words_the_substrate_returns() -> None:
     assert (
         asyncio.run(
             repository.finish(
-                step_id=uuid4(), holder="h", outcome="succeeded", result=None, reason=None
+                step_id=uuid4(),
+                holder="h",
+                outcome="succeeded",
+                result=None,
+                reason=None,
+                request_id=PLANE_ID,
             )
         )
         == "lease_lost"
     )
     assert pool.log[0][1][2] == "succeeded"
+    # The plane's id travels LAST, where 0034 declares it (D1696).
+    assert pool.log[0][1][5] == PLANE_ID
 
     repository, _ = _repository(row={"outcome": "parked"})
     assert (
         asyncio.run(
-            repository.park(step_id=uuid4(), holder="h", reason="write_conflict", resume_after=None)
+            repository.park(
+                step_id=uuid4(),
+                holder="h",
+                reason="write_conflict",
+                resume_after=None,
+                request_id=PLANE_ID,
+            )
         )
         == "parked"
     )

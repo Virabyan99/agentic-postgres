@@ -344,8 +344,8 @@ def test_the_eight_functions_are_executable_by_the_auth_service_role_and_nobody_
     signatures = {
         "workflow_enqueue": "uuid, text, integer, jsonb, boolean",
         "workflow_claim_step": "text, integer",
-        "workflow_finish_step": "uuid, text, app_private.workflow_step_outcome, jsonb, text",
-        "workflow_park": "uuid, text, text, timestamptz",
+        "workflow_finish_step": "uuid, text, app_private.workflow_step_outcome, jsonb, text, uuid",
+        "workflow_park": "uuid, text, text, timestamptz, uuid",
         "workflow_cancel": "uuid, uuid",
         "workflow_run_status": "uuid, uuid",
         "workflow_heartbeat": "text",
@@ -679,35 +679,65 @@ def test_an_expired_lease_is_reclaimed_with_the_attempt_incremented(
     assert holder == "B", holder
 
 
-def test_the_claim_returns_the_request_id_it_minted(applied: dict[str, Any], run_id: str) -> None:
-    """**D1686.** The column's comment calls `request_id` *what correlates this
-    row to the plane's audit*, and that only holds if the caller can read it.
+def test_the_step_records_the_planes_request_id_and_a_claim_clears_it(
+    applied: dict[str, Any], run_id: str
+) -> None:
+    """**D1696, which replaces D1686.** The id on a step is the one the PLANE
+    minted, handed in at `park` or `finish` -- never one this schema minted.
 
-    Written and withheld, the worker would have minted a second id of its own
-    and the two sides of the correlation would have carried different values
-    with nothing to say so. Found by writing the caller, which is D348's rule:
-    a plane is complete when a caller can be written against it.
+    The plane ignores an inbound `X-Request-Id` by decision (ADR 0160) and
+    audits under its own, which it returns on the response. D1686 had the claim
+    mint one and return it so the worker could send it, and the correlation
+    join would have found nothing on a real deployment.
+
+    Three arms. The claim returns no id and leaves the column NULL -- the
+    attempt has reached nothing yet. `park` records the id it is given. A
+    SECOND claim clears it again, so a later attempt that makes no call cannot
+    carry the first attempt's id and be joined to a call it did not make; the
+    `finish` after it records the second attempt's own.
     """
+    auth = applied["roles"]["auth_service"]
     first = _claim(applied, "A")
     returned = first.stdout.strip().splitlines()[-1].split("|")
-    step_id, request_id = returned[0], returned[5]
-    assert len(request_id) == 36, f"the claim returned {request_id!r} for request_id"
-
-    stored = _scalar(
-        applied,
-        f"SELECT request_id::text FROM app_private.workflow_step WHERE id = '{step_id}';",
+    step_id = returned[0]
+    assert len(returned) == 12, (
+        f"the claim returned {len(returned)} columns; D1696 removed request_id and "
+        f"left twelve: {returned}"
     )
-    assert stored == request_id, f"the row holds {stored} and the claim returned {request_id}"
 
-    # A SECOND attempt mints a new one. Per attempt, not per step: the audit row
-    # a retry writes is a different row and must be findable separately.
+    def recorded() -> str:
+        return _scalar(
+            applied,
+            "SELECT coalesce(request_id::text, 'null') FROM app_private.workflow_step "
+            f"WHERE id = '{step_id}';",
+        )
+
+    assert recorded() == "null", "a claim wrote an id for a call that has not happened"
+
+    plane_first = "00000000-0000-4000-8000-00000000d696"
     _as_role(
         applied,
-        applied["roles"]["auth_service"],
-        f"SELECT app_private.workflow_park('{step_id}', 'A', 'x', now() - interval '1 second');",
+        auth,
+        f"SELECT app_private.workflow_park('{step_id}', 'A', 'write_conflict', "
+        f"now() - interval '1 second', '{plane_first}');",
     )
+    assert recorded() == plane_first, "park did not record the plane's id"
+
     again = _claim(applied, "B")
-    assert again.stdout.strip().splitlines()[-1].split("|")[5] != request_id
+    assert again.stdout.strip().splitlines()[-1].split("|")[0] == step_id
+    assert recorded() == "null", (
+        "the second claim left the first attempt's id on the step, so an attempt "
+        "that makes no call would be joined to a call it did not make"
+    )
+
+    plane_second = "00000000-0000-4000-8000-00000000d697"
+    _as_role(
+        applied,
+        auth,
+        f"SELECT app_private.workflow_finish_step('{step_id}', 'B', 'succeeded', "
+        f"'{{}}'::jsonb, NULL, '{plane_second}');",
+    )
+    assert recorded() == plane_second, "finish did not record the plane's id"
 
 
 def test_the_lease_is_the_steps_own_timeout_plus_the_margin(
@@ -759,7 +789,7 @@ def test_finish_by_a_holder_that_lost_its_lease_is_refused(
     lost = _as_role(
         applied,
         applied["roles"]["auth_service"],
-        f"SELECT app_private.workflow_finish_step('{step}', 'B', 'succeeded', NULL, NULL);",
+        f"SELECT app_private.workflow_finish_step('{step}', 'B', 'succeeded', NULL, NULL, NULL);",
     )
     assert lost.stdout.strip().splitlines()[-1] == "lease_lost", lost.stdout or lost.stderr
 
@@ -773,7 +803,7 @@ def test_finish_by_a_holder_that_lost_its_lease_is_refused(
         applied,
         applied["roles"]["auth_service"],
         f"SELECT app_private.workflow_finish_step('{step}', 'A', 'succeeded', "
-        "'{\"row\": 1}'::jsonb, NULL);",
+        "'{\"row\": 1}'::jsonb, NULL, NULL);",
     )
     assert kept.stdout.strip().splitlines()[-1] == "running", kept.stdout or kept.stderr
 
@@ -792,7 +822,7 @@ def test_park_defers_a_step_until_its_resume_time(applied: dict[str, Any], run_i
         applied,
         applied["roles"]["auth_service"],
         f"SELECT app_private.workflow_park('{step}', 'A', 'write_conflict', "
-        "now() + interval '30 seconds');",
+        "now() + interval '30 seconds', NULL);",
     )
     assert parked.stdout.strip().splitlines()[-1] == "parked", parked.stdout or parked.stderr
 
@@ -832,7 +862,7 @@ def test_the_last_step_succeeds_the_run_and_a_failure_fails_it(
             applied,
             applied["roles"]["auth_service"],
             f"SELECT app_private.workflow_finish_step('{step}', 'A', 'succeeded', "
-            "'{}'::jsonb, NULL);",
+            "'{}'::jsonb, NULL, NULL);",
         )
         assert finished.stdout.strip().splitlines()[-1] == expected, finished.stdout
 
@@ -869,7 +899,7 @@ def test_a_failed_step_fails_the_run_and_a_token_refusal_stops_it(
             applied,
             applied["roles"]["auth_service"],
             f"SELECT app_private.workflow_finish_step('{step}', 'A', '{outcome}', "
-            f"NULL, '{reason}');",
+            f"NULL, '{reason}', NULL);",
         )
         assert finished.stdout.strip().splitlines()[-1] == expected, finished.stdout
 
@@ -896,7 +926,7 @@ def test_an_abandoned_step_returns_to_queued_with_its_attempt_spent(
         applied,
         applied["roles"]["auth_service"],
         f"SELECT app_private.workflow_finish_step('{step}', 'A', 'abandoned', "
-        "NULL, 'out of lease');",
+        "NULL, 'out of lease', NULL);",
     )
     assert abandoned.returncode == 0, abandoned.stderr
 
@@ -1007,7 +1037,7 @@ def test_a_run_past_its_timeout_is_failed_at_the_next_claim(
     _as_role(
         applied,
         applied["roles"]["auth_service"],
-        f"SELECT app_private.workflow_park('{step}', 'A', 'x', now() - interval '1 second');",
+        f"SELECT app_private.workflow_park('{step}', 'A', 'x', now() - interval '1 second', NULL);",
     )
     _superuser(
         applied,

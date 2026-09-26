@@ -64,6 +64,7 @@ import urllib.request
 from datetime import UTC, datetime, timedelta
 from secrets import token_hex
 from typing import Any
+from uuid import UUID
 
 from app import mcp_upstream
 from app.errors import AuthenticationFailed
@@ -114,6 +115,15 @@ PLANE_PATH = "/mcp"
 #: frames even a single reply as an SSE event, and a request that accepted only
 #: JSON was refused.
 PLANE_ACCEPT = "application/json, text/event-stream"
+
+#: The header the plane puts ITS OWN request id in, on the RESPONSE (ADR
+#: 0160). **Read, never sent** (D1696): the plane mints one id per HTTP
+#: request, writes it into both audit rows and ignores any inbound header of
+#: this name -- no caller value is trusted, so one agent cannot stamp its calls
+#: with another's id. The first version of this loop sent a claim-minted id
+#: here and recorded THAT on the step, and the correlation join would have
+#: returned zero rows on the first real deployment: rig 32j's plane was a fake
+#: that believed what the loop believed.
 REQUEST_ID_HEADER = "X-Request-Id"
 
 #: The same grammar `agentic_postgres.workflow_definition.REFERENCE` compiles,
@@ -225,13 +235,14 @@ def _lookup(reference: str, *, run_input: dict[str, Any], prior: dict[str, Any])
 # ---------------------------------------------------------------------------
 
 
-def _send(
-    url: str, token: str, body: bytes, *, request_id: str, timeout: float
-) -> tuple[int, bytes]:
+def _send(url: str, token: str, body: bytes, *, timeout: float) -> tuple[int, bytes, str]:
     """One HTTP exchange with the plane. `urllib`, as the plane's own client uses.
 
     Kept separate from `process` so a proof can substitute it, and so that the
     ONE place this module reaches a network is one function a reader can find.
+
+    Returns the status, the body and the RESPONSE's `X-Request-Id` -- the id
+    the plane minted and audited under (D1696) -- or `""` when it sent none.
     """
     built = urllib.request.Request(  # noqa: S310 -- a container-local address from three constants
         url,
@@ -240,15 +251,33 @@ def _send(
             "Authorization": f"Bearer {token}",
             "Accept": PLANE_ACCEPT,
             "Content-Type": "application/json",
-            REQUEST_ID_HEADER: request_id,
         },
         method="POST",
     )
     try:
         with urllib.request.urlopen(built, timeout=timeout) as response:  # noqa: S310
-            return int(response.status), response.read()
+            return (
+                int(response.status),
+                response.read(),
+                response.headers.get(REQUEST_ID_HEADER) or "",
+            )
     except urllib.error.HTTPError as error:
-        return int(error.code), error.read()
+        return int(error.code), error.read(), error.headers.get(REQUEST_ID_HEADER) or ""
+
+
+def plane_request_id(value: str) -> UUID | None:
+    """The plane's request id, or `None` when what came back is not one.
+
+    Parsed rather than stored as text, because the column is a `uuid` and a
+    header is bytes from across a network: a value that is not a uuid is
+    reported as *no id* rather than failing the finish that would record the
+    step's outcome -- losing the outcome to save a correlation would be the
+    worse trade (ADR 0195: the third answer is reported, not folded).
+    """
+    try:
+        return UUID(value)
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 def sse_payload(body: bytes) -> dict[str, Any] | None:
@@ -386,6 +415,7 @@ async def process(
             outcome="token_refused",
             result=None,
             reason=str(exc),
+            request_id=None,
         )
         return
 
@@ -400,6 +430,7 @@ async def process(
                 outcome="failed",
                 result=None,
                 reason=str(exc),
+                request_id=None,
             )
             return
 
@@ -414,6 +445,7 @@ async def process(
                 outcome="abandoned",
                 result=None,
                 reason="the lease margin was spent before the call began",
+                request_id=None,
             )
             return
 
@@ -426,18 +458,21 @@ async def process(
             }
         ).encode("utf-8")
 
+        # `None` until the plane answers: a transport failure reached nothing
+        # that audited it, and the step says so by carrying no id (D1696).
+        request_id = None
         try:
-            status, answer = await asyncio.to_thread(
+            status, answer, stamped = await asyncio.to_thread(
                 _send,
                 url,
                 token,
                 body,
-                request_id=str(step.request_id),
                 timeout=float(step.timeout_seconds),
             )
         except (OSError, TimeoutError) as exc:
             verdict, reason, result = "retry", f"transport: {type(exc).__name__}", None
         else:
+            request_id = plane_request_id(stamped)
             verdict, reason, result = classify(status, answer)
     finally:
         # **Dropped on every path out of this function**, including the ones
@@ -452,6 +487,7 @@ async def process(
             outcome=outcome,
             result=json.dumps(result, default=str),
             reason=None,
+            request_id=request_id,
         )
         return
 
@@ -462,6 +498,7 @@ async def process(
             outcome="token_refused",
             result=None,
             reason=reason,
+            request_id=request_id,
         )
         return
 
@@ -476,6 +513,7 @@ async def process(
             holder=holder,
             reason=reason,
             resume_after=datetime.now(UTC) + timedelta(seconds=backoff),
+            request_id=request_id,
         )
         return
 
@@ -485,6 +523,7 @@ async def process(
         outcome="failed" if verdict == "retry" else "refused",
         result=None,
         reason=reason,
+        request_id=request_id,
     )
 
 

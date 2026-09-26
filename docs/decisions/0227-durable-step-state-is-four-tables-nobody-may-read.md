@@ -169,11 +169,13 @@ and abandons a step it cannot start in time rather than starting it late.
 
 ### Correlation and the heartbeat
 
-Each step attempt mints a `request_id` (uuid4), stores it on the step row at
-claim, and sends it as `X-Request-Id`. Correlation is
-`workflow_step.request_id = agent_audit.request_id` — the audit's own key,
-which the plane already supports. **No run id enters the audit table**; that
-is an audit schema move and it is Session 33's (D1248).
+*Superseded in its mechanism by the amendment at the foot of this record
+(D1696); the correlation key is unchanged.* ~~Each step attempt mints a
+`request_id` (uuid4), stores it on the step row at claim, and sends it as
+`X-Request-Id`.~~ Correlation is `workflow_step.request_id =
+agent_audit.request_id` — the audit's own key, which the plane already
+supports. **No run id enters the audit table**; that is an audit schema move
+and it is Session 33's (D1248).
 
 `workflow_heartbeat(p_holder)` upserts the single `workflow_worker` row at
 every poll, with `started_at` reset when the holder changes, so **a restart is
@@ -206,3 +208,46 @@ a caller supplied.
   startup-and-recovery overlap (D388's argument, one service over).
 * **Storing the outcome of a claim** rather than re-reading the row. Rejected;
   it is `0029`'s own decision and its reason is unchanged.
+
+## Amendment, Run 7 (D1696): the step records the PLANE's request id
+
+**The mechanism above could not have correlated anything.** The plane mints
+one request id per HTTP request in `StampRequestId`, writes it into both audit
+rows and returns it on the response — and ignores an inbound `X-Request-Id` by
+decision (ADR 0160: *no caller value is ever trusted*, so one agent cannot
+stamp its calls with another agent's id). The loop sent the claim's id as that
+header and recorded the claim's id on the step, so `workflow_step.request_id =
+agent_audit.request_id` would have joined **zero rows** on the first real
+deployment. Nothing offline could see it: rig 32j's plane was a fake written to
+the loop's own belief about the header, which is §7 question 6 exactly. Found
+while writing the trip's live correlation proof, before any cluster applied
+0034 — so 0034 was amended rather than fixed forward (D912 governs an APPLIED
+migration; D1686 and D1687 used the same window).
+
+**Decision.** The id on a step is the plane's, never one this schema or the
+loop mints:
+
+* `workflow_claim_step` **clears** `request_id` rather than minting one, and no
+  longer returns a `request_id` column (D1686's addition is withdrawn with the
+  premise it rested on).
+* `workflow_finish_step` gains a sixth parameter and `workflow_park` a fifth,
+  `p_request_id uuid`, and record it. A park follows a call the plane answered
+  and audited, so it records the id as finishing does.
+* The loop sends **no** `X-Request-Id`; it reads the response's, parses it as a
+  uuid, and passes it on every finish and park. An attempt that made no call —
+  a refused mint, an unresolvable reference, a spent margin, a transport
+  failure — passes `NULL`, and a header that is not a uuid is recorded as
+  `NULL` rather than failing the finish that records the step's outcome (ADR
+  0195: the third answer reported, not folded, and never at the cost of the
+  answer that was determined).
+
+**What the step row holds is therefore a MEASURED correlation or nothing.** A
+`NULL` answers *did this attempt reach the plane* with *no*; a value is one
+the plane itself wrote into `app_private.agent_audit`. The row holds the LAST
+attempt's id; an earlier attempt's audit rows remain, under the same agent.
+
+**Rejected:** keeping the claim's mint and overwriting it at finish — a step
+that got `token_refused` would then carry an id no audit row has, a value that
+looks measured and was not (D600); and having the plane accept the worker's id
+— that is ADR 0160 reversed for one caller, and the caller it would be reversed
+for is the one that can act as any active agent.

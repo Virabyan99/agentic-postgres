@@ -66,12 +66,10 @@ class ClaimedStep:
     position: int
     name: str
     attempt: int
-    #: Minted by the CLAIM, one per attempt, and sent as `X-Request-Id` on the
-    #: tool call. It is the only thing that correlates this step to the plane's
-    #: own audit row (D1667), which is why the claim RETURNS it rather than
-    #: only writing it: a worker minting an id of its own would put a different
-    #: value on each side of the correlation, and nothing would say so (D1686).
-    request_id: UUID
+    # No `request_id` (D1696). The id that correlates a step to the plane's
+    # audit is the one the PLANE mints for the call and returns on its
+    # response; it does not exist when a step is claimed, and the plane
+    # ignores any id a caller sends (ADR 0160). `finish` and `park` take it.
     agent_id: UUID
     dry_run: bool
     step: dict[str, Any]
@@ -119,7 +117,7 @@ class WorkflowRepository:
         (`workflow_worker.lease_margin_seconds`), never a constant here.
         """
         row = await self._one(
-            "SELECT step_id, run_id, step_position, step_name, attempt, request_id, "
+            "SELECT step_id, run_id, step_position, step_name, attempt, "
             "agent_id, dry_run, step, input, prior, timeout_seconds, idempotency_key "
             "FROM app_private.workflow_claim_step(%s, %s)",
             (holder, lease_margin_seconds),
@@ -135,7 +133,6 @@ class WorkflowRepository:
             position=int(row["step_position"]),
             name=row["step_name"],
             attempt=int(row["attempt"]),
-            request_id=row["request_id"],
             agent_id=row["agent_id"],
             dry_run=bool(row["dry_run"]),
             step=row["step"] or {},
@@ -153,6 +150,7 @@ class WorkflowRepository:
         outcome: str,
         result: str | None,
         reason: str | None,
+        request_id: UUID | None,
     ) -> str:
         """Close one step and learn the RUN's new status in the same round trip.
 
@@ -164,25 +162,38 @@ class WorkflowRepository:
         `result` is a JSON string rather than a dict because the parameter is
         cast to `jsonb` by the statement; serialising at the boundary keeps one
         serializer rather than two.
+
+        `request_id` is the id the PLANE returned on its response, or `None`
+        when this attempt made no call (D1696) -- the value that joins this
+        step to `app_private.agent_audit`.
         """
         row = await self._one(
-            "SELECT app_private.workflow_finish_step(%s, %s, %s, %s::jsonb, %s) AS status",
-            (step_id, holder, outcome, result, reason),
+            "SELECT app_private.workflow_finish_step(%s, %s, %s, %s::jsonb, %s, %s) AS status",
+            (step_id, holder, outcome, result, reason, request_id),
         )
         assert row is not None
         return str(row["status"])
 
-    async def park(self, *, step_id: UUID, holder: str, reason: str, resume_after: Any) -> str:
+    async def park(
+        self,
+        *,
+        step_id: UUID,
+        holder: str,
+        reason: str,
+        resume_after: Any,
+        request_id: UUID | None,
+    ) -> str:
         """Defer one step until a time, releasing its lease.
 
         **Park IS the backoff** (ADR 0227). There is no sleep in the loop and no
         second waiting mechanism: a retryable failure sets a time, and the
         claim's own predicate is what brings the step back. Returns
-        `'lease_lost'` on the same terms `finish` does.
+        `'lease_lost'` on the same terms `finish` does. A park follows a call
+        the plane answered, so it records the plane's id as `finish` does.
         """
         row = await self._one(
-            "SELECT app_private.workflow_park(%s, %s, %s, %s) AS outcome",
-            (step_id, holder, reason, resume_after),
+            "SELECT app_private.workflow_park(%s, %s, %s, %s, %s) AS outcome",
+            (step_id, holder, reason, resume_after, request_id),
         )
         assert row is not None
         return str(row["outcome"])
