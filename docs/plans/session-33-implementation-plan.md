@@ -1,7 +1,7 @@
 # Session 33 — Gates, compensation and provenance
 
-**Status: IN EXECUTION since 2026-09-26 — Run 1 done (D1742 added; NEXT FREE
-D1743).** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
+**Status: IN EXECUTION since 2026-09-26 — Runs 1–2 done (D1742–D1743 added;
+NEXT FREE D1744).** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
 `main` directly. This plan spends **D1714–D1741** in §1 and **ADR 0230–0234**.
 **NEXT FREE AFTER THIS PLAN: D1742, ADR 0235.** Rows the runs add go in §1's
 second table, below D1741, in execution order; the header's *Status*
@@ -461,6 +461,7 @@ second table below, in execution order.
 | # | Run | Plan says | Tree does / measured | Decision |
 |---|---|---|---|---|
 | **D1742** | 1 | §5 Run 1: append `THR-APPROVAL` before any code, its *Acceptance requirement IDs* `AGT-APPROVE-002`, `WF-GATE-001`, `WF-APPROVE-001` and two proposed node ids. | `test_acceptance_registry.py::test_threat_model_requirement_ids_exist_in_the_registry` and `::test_threat_model_node_ids_are_collectible` read EVERY threat row: a requirement id must exist in the registry and a node id must collect. None of the five exists until Run 8 lands the registry (D690), so the row as written would turn two passing proofs red in a documentation run. | **The row lands in Run 1 with the prevention, detection and residual cells whole, and cites what holds TODAY**: `AGT-APPROVE-001` and `test_mcp_tools.py::test_a_capability_requiring_approval_is_refused_before_any_dial` (the refusal without a claim, which ADR 0231 keeps byte-identical). Its residual cell says so. **Run 8 rewrites the two cells** to add the three new requirements and their collected node ids. D1527's *before code* is kept; neither proof is weakened. |
+| **D1743** | 2 | §5 Run 2 item 2: `bin/doctor.py:962`'s reason becomes *"the store holds no such series in the current mcp process …"*; *"the proof that reads the reason is made stricter"*. | `probe_store` answers BOTH store figures — `requests_total` (`sum(traefik_service_requests_total)`) and `tool_calls_total` — through one sentence, so the plan's wording would have told an operator that Traefik's request counter lives in an mcp process. **And no proof read the reason at all** (grep: `no such series` appears in `bin/doctor.py:962` and, as a quoted historical output, in `capacity.py:553`, nowhere under `tests/`). | **The empty-series reason is per figure**: `STORE_EMPTY_REASONS` beside `STORE_QUERIES`, `probe_store(…, empty=…)`, the caller passing the figure's own; `requests_total` keeps *"… yet"* (a counter no request has touched yet), `tool_calls_total` gets the mcp-process sentence. A NEW proof (`test_an_empty_tool_call_answer_names_the_current_mcp_process`) reads both. `capacity.py:553` is a record of what Session 32's reading printed and is not rewritten. |
 
 ---
 
@@ -849,6 +850,48 @@ in the same invocation.
 `test_acceptance_registry.py`, `test_evidence_claims.py`. Commit (`Session 33
 Run 2: the carried-in defects -- the ledger printed, the usage wording, step
 6d's two proofs`), push, read CI.
+
+**Done.** 2026-09-26. **D1707**: `run_dbmate` relays the captured stdout and
+stderr (decoded `errors="replace"`) before returning dbmate's exit; stdin
+closed and `-T` unchanged. Deploy step 6 already printed `migrate.sh`'s stdout
+and put its stderr into the failure message, so a deploy's transcript now
+carries dbmate's `Applying`/`Applied` lines again and a failed `up` names
+dbmate's error. **No module faked `compose_run` for `migrate.py`**, so
+`tests/contract/test_migrate_command.py` is NEW (`pytestmark` contract + p0
+before the first test, D1240): `test_status_prints_the_ledger_lines_dbmate_
+wrote` (the `[X]` line and `Pending: 0` reach stdout; one captured
+`text=False` call) and `test_the_exit_is_dbmates_and_stderr_is_not_swallowed`
+(exit 1 with dbmate's error on stderr; a non-UTF-8 byte replaced, exit 2
+carried). **D1712**: D1743 — the reason is per figure. **D1705**: two proofs in
+`test_workflow_install.py` over the helper step 6d calls, reachable offline
+through `install_workflow_definitions` itself with `load_project_manifest` and
+`container_exec.run` faked: `test_a_project_with_nothing_to_install_says_
+which_of_the_two_reasons` (*no migration set* and *declares none*, distinct,
+no container reached, the lock never read) and `test_a_definition_that_does_
+not_compile_refuses_the_deploy_at_exit_five` (the example lock, the example
+definition with one capability renamed → `SystemExit(5)` naming the file,
+nothing installed; control in the same test: the unmodified definition is
+installed). That the helper runs before 6b is the existing ordering proof.
+**D1740**: `docs/workflows.md` now states the compiler's rule (a malformed
+marker is refused) and the loop's (a whole reference keeps its type; an
+embedded one interpolates its JSON rendering) — the compiler ADMITS an
+embedded reference (`_references` consumes every well-formed one and refuses
+only the residue), so the page's *"there is no partial interpolation"* was
+wrong about the definition too. **Battery 5/5 killed**, each `FAILED`, none
+`ERROR`, control `test_validate_compiles_the_example_projects_definitions`
+PASSED in every arm, every anchor pre-flighted to one match, restored by copy
+and `cmp`: (m1) the stdout relay dropped; (m2) `return 0`; (m3) the two
+sentences identical; (m4) an uncompilable definition printed and skipped
+rather than refused; (m5) the caller passing the default sentence. **Targeted,
+once: 809 passed** (the migrate module, `test_doctor_readings`,
+`test_doctor_redaction`, `test_workflow_install`, `test_cli_contract`,
+`test_documentation_index`, `test_session12_documented_path`,
+`test_acceptance_registry`, `test_evidence_claims`, and the module-shape guard
+`test_deployment_module_shape` because a module was added). **For Run 8's
+registry**: the two migrate proofs are `OPS-LEDGER-001`'s; the two D1705 proofs
+join `WF-INSTALL-001`; the D1712 proof joins the requirement that owns
+`doctor usage` (grep `test_the_store_query_sums_across_instances` in the
+registry). **Rows added: D1743. NEXT FREE: D1744.**
 
 ### Run 3 — migration 0035: the gates, compensation, the attempt history, provenance and the audit reader, under a real cluster
 
