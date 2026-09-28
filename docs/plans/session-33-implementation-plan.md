@@ -494,6 +494,7 @@ second table below, in execution order.
 | **D1773** | 9 | Run 8's live proofs `test_a_second_user_approves_and_the_run_completes_once` and `test_inspect_reads_back_the_approved_run_complete`: the approved write leaves a `database`/`committed` audit row. | **The first sweep failed both on that belief, the proofs' and not the product's.** Only the release's own write functions write a `database` row (`create_note`, `update_task_status`; 0019/0022/0029). `api.set_note_embedding` is the PROJECT set's function (`projects/example` 0001:75), a project set may not write `app_private`, and its whole audit is the plane's `served` row. On beta the run succeeded, the approval read `approved`, the note held ONE embedding and the task `completed` -- every assertion before the audit line passed; the audit read `refused`/`approval_required` 18:08:58 then `served` 18:09:03. **And a third proof passed vacuously**: the park proof's *no `committed` row at park* could not go red for this tool (question 1 of CLAUDE.md §7). | Repaired at `e087bca` (test-only; CI success): the audit is exactly `(agent_plane, refused)` then `(agent_plane, served)`; the finished attempt's plane rows are exactly one `served`; the refusal is the ONLY row at park. `-k test_session33_gates` on the host: **12 passed**. Question 6's shape: the fixture was written by the author of the loop, who held the core write's picture of an audit. |
 | **D1774** | 9 | Run 9, *if something goes wrong*: a proof defect gets *"a `-k` iteration after the repair, never a second sweep for a fixture (one sweep per trip; a second only for a defect)"*. | The `-k` pass writes no evidence, so the merged document would have recorded `workflow_approval_live` and `workflow_provenance_live` FAILED on the session that built them. **The operator chose a second sweep** (D1710's precedent: Session 32 swept twice for an instrument defect). | Second sweep from `e087bca`, the declaration block byte-identical, the deployable diff `02ffbbd..e087bca` asserted NONE on the host (D1641's method); the tag is on `02ffbbd` and its message states the exception. The plan's rule stands as the default; a session that would record its own claims failed on a proof defect is the case it did not price. |
 | **D1775** | 9 | ADR 0230: a cancel or a stop ends the run; the doctor's `approvals pending` and the listing read what waits for a person. | **The approval table holds 3 `pending` rows while the doctor reads `approvals pending 0`** -- one per sweep, on runs that ended without a decision. Both readers count *pending, unexpired, on a run still running* (`0035:723-772`, `:1066-1068`), so neither shows them, correctly; but the stored row stays `pending` on a finished run, because the status enum has no `cancelled` and nothing moves an undecided approval when its run ends. | Recorded as an open item, not a defect of either reader: the provenance reader shows such a row as `pending` on a `cancelled` run. Whether a run's end should close its approval is a decision for the retention story D1700 already owes. |
+| **D1776** | 10 | Run 9's `**Done.**` as first written: *"every sample inside a Session 33 run (18:08:53-18:09:45) 59.6-60.1 MB; sweep 2, samples inside run windows 60.2, 127.8, 96.1, 60.4, 60.7 MB"* -- read by eye against C6's table. | **Classified by a script (`s33r10-classify.py`): NONE of the 513 samples lies wholly inside a run's window.** A sample is stamped `date +%FT%TZ` (the whole second) just before its read; each run lasted ~5.5 s against a 10 s cadence; seven samples overlap a window's LAST second, and `19:20:15`, counted inside the approval run, is 5 s before that run STARTED. The eye had matched a sample to the run nearest it -- the value that looked measured and was not, in this session's own record. | Run 9's `**Done.**` corrected in place (this row records that it was). **Run 10 adds NO under-run `Measurement`** and keeps `capacity.UNMEASURED`'s row -- its reason now carries Session 33's reading and its `unblocked_by` names the cadence a reading needs; ADR 0226's Session 33 amendment reports the criterion STILL NOT READ with ~66 MiB as an upper bound on a reading not taken. |
 
 ---
 
@@ -2255,18 +2256,21 @@ which two was not read -- the module keeps the owner, and the approver when
 verifies. Both new kits copied to WSL `~/dr-kits/` and verified there,
 0700/0600 kept; their `release` fields name the CHECKOUT (`02ffbbd` pre,
 `e087bca` post) while the documents inside name `02ffbbd` (D1642, a fifth
-time, harmless: no deployable diff). **Beta's `auth` memory WHILE RUNS
-EXECUTED -- the first such figures (D1711)**, 261 + 252 samples, 8 + 8
-`unresolved` during recreations, windows from C6 (**D1768**): sweep 1, every
-sample inside a Session 33 run (18:08:53-18:09:45) **59.6-60.1 MB**; sweep 2,
-samples inside run windows **60.2, 127.8, 96.1, 60.4, 60.7 MB**. **But the
-127 MB readings are single-sample spikes that occur equally with no Session
-33 run executing** (18:08:32, 19:18:51, 19:19:54), each back to ~60 MB at the
-next sample -- so no figure here is the loop's cost under a run. The largest,
-charged wholly to a run, is **~66 MiB above idle, inside ADR 0226's 96 MiB
-under-load criterion**. A password hash's memory (the human fixtures log in
-beside the runs; `config.py`'s four-concurrent budget is 259 MiB) is the
-hypothesis, NOT measured. **Rows D1766-D1775. NEXT FREE: D1776.**
+time, harmless: no deployable diff). **Beta's `auth` memory, sampled WHILE the
+sweeps ran (D1711) -- and still no figure under a run** (corrected at Run 10,
+**D1776**): 261 + 252 samples, 8 + 8 `unresolved` during recreations,
+windows from C6 (**D1768**). Classified strictly -- a sample is stamped to
+the whole second, so it is *inside* only if that whole second lies in a
+run's `started_at`..`finished_at` -- **none of the 513 is inside**: each run
+lasted ~5.5 s against a 10 s cadence. Seven fall on a window's last second:
+59.8-60.1 MB (sweep 1), 127.8, 96.1 and 60.4 MB (sweep 2). **The 127 MB
+readings are single-sample spikes that occur equally with no Session 33 run
+executing** (18:08:32, 19:18:51, 19:19:54), each back to ~60 MB at the next
+sample. Charged wholly to a run, the largest is **~66 MiB over the ~60 MB
+floor, inside ADR 0226's 96 MiB criterion -- an upper bound on a reading not
+taken**. A password hash's memory (the human fixtures log in beside the runs;
+`config.py`'s four-concurrent budget is 259 MiB) is the hypothesis, NOT
+measured. **Rows D1766-D1775. NEXT FREE: D1776.**
 
 ### Run 10 — the close
 

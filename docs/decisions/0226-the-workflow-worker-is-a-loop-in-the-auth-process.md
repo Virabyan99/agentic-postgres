@@ -199,3 +199,33 @@ heartbeat holder in **8.8 s, 8.4 s and 7.5 s**, with no lease overdue. Each
 landed on a container at restart count 0, because the sweeps recreate the
 services (D1711), so the restart policy's five-restart budget was never
 stacked.
+
+## Amendment, Session 33 Run 9 (2026-09-28): the under-load criterion, sampled and still unread
+
+Session 33 deployed 1.11.0 and swept twice on 2026-09-28. This time a
+sampler ran as `op` for both sweeps. It found beta's `auth` by its mountinfo
+(`/secrets/beta-dev/generations/<gen>/auth/`), read `memory.current` every
+10 s, and re-resolved the container at every sample, so it followed each
+recreation: **513 samples, 16 `unresolved`** while the sweep recreated the
+services. The windows came from the runs' own `started_at`/`finished_at`,
+read from `app_private.workflow_run`.
+
+* **Under-load delta > 96 MiB: STILL NOT READ.** Each Session 33 run lasted
+  about 5.5 s. A sample is stamped to the whole second, so it counts as
+  *under a run* only if its whole second lies inside the window, and **none
+  does**. Seven fall on a window's last second, reading 59.8–60.1 MB in the
+  first sweep and 127.8, 96.1 and 60.4 MB in the second.
+* **The 127 MB readings are not a run's.** They are single-sample spikes, back
+  to ~60 MB at the next sample, and they occur equally when no Session 33
+  run is executing (18:08:32, 19:18:51, 19:19:54). The human fixtures log in
+  beside the runs, and four concurrent password hashes are budgeted at
+  259 MiB in this container. That is the hypothesis, and it is not measured.
+* **Charged wholly to a run, the largest spike is ~66 MiB over the ~60 MB
+  floor**, inside the 96 MiB criterion. That is an upper bound on a reading
+  that was not taken, not the reading. The criterion stays *unanswered* in
+  `capacity.UNMEASURED` (D1776), which is this ADR's own rule.
+* **Idle, against the 384 MiB cap:** beta's `auth` read 59.3 MB before the
+  sweep (1.11.0, idle).
+
+**What reads it:** a sampler whose cadence is well under a run's length,
+with sub-second stamps, or a rig that holds everything else still.

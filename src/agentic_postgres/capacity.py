@@ -619,14 +619,24 @@ UNMEASURED: tuple[Unmeasured, ...] = (
             "vanished, and the samples that were taken (56.6 MiB steady, one 61.2 "
             "MiB) are of a container created AFTER the workflow proofs had finished: "
             "an idle loop, not a loaded one. A figure labelled 'under run' from "
-            "them would be the value that looked measured and was not."
+            "them would be the value that looked measured and was not. **Session 33 "
+            "Run 9 sampled it and still has no figure** (D1776): a sampler as `op` "
+            "followed beta's `auth` through every recreation, every 10 s over both "
+            "sweeps (513 samples), but each Session 33 run lasted ~5.5 s and a sample "
+            "is stamped to the whole second, so NONE lies wholly inside a run's "
+            "window; seven fall on a window's last second (59.8-127.8 MB). And the "
+            "127 MB readings are single-sample spikes that occur equally outside "
+            "every Session 33 run (18:08:32, 19:18:51, 19:19:54), against ~60 MB "
+            "otherwise -- so even the boundary figures cannot be charged to a run."
         ),
         unblocked_by=(
-            "a trip that samples beta's `auth` cgroup DURING "
-            "`test_a_three_step_run_completes_as_the_invoking_agent`, finding the "
-            "container by `/proc/<pid>/mountinfo` as `op` (it names the project and "
-            "service without the Docker socket); or a rig that drives runs through "
-            "the loop and reads the cgroup throughout"
+            "a sampler whose cadence is well under a run's ~5.5 s and whose stamps "
+            "are sub-second, read against the runs' own `started_at`/`finished_at` "
+            "(`app_private.workflow_run`) -- or a rig that drives runs through the "
+            "loop and reads the cgroup throughout. The container is found as `op` by "
+            "its mountinfo (`/secrets/<key>/generations/<gen>/auth/`); what the "
+            "127 MB spikes are (the human fixtures' password hashes is the "
+            "unmeasured hypothesis) is the same reading's other half"
         ),
     ),
     Unmeasured(
