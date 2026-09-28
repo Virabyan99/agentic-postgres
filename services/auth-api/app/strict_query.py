@@ -45,13 +45,14 @@ the caller is an administrator (ADR 0097's line, and `_body`'s).
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-__all__ = ["InvalidQuery", "as_bounded_int", "as_uuid", "parse"]
+__all__ = ["InvalidQuery", "as_bounded_int", "as_member", "as_timestamp", "as_uuid", "parse"]
 
 
 class InvalidQuery(ValueError):
@@ -134,3 +135,34 @@ def as_bounded_int(name: str, value: str, *, minimum: int, maximum: int) -> int:
     if not minimum <= parsed <= maximum:
         raise InvalidQuery(f"{name} must be between {minimum} and {maximum}")
     return parsed
+
+
+def as_timestamp(name: str, value: str) -> datetime:
+    """A supplied value that must be an ISO-8601 instant WITH its offset.
+
+    **A naive time is refused, never coerced** (Session 33, ADR 0234). A time
+    with no offset names a different instant in every zone, and a window whose
+    edge moved by the server's zone would be answering a question the caller
+    did not ask -- `as_bounded_int`'s reason, for a clock. `Z` is an offset,
+    so it is accepted; a date alone has none, so it is refused.
+    """
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise InvalidQuery(f"{name} is not an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise InvalidQuery(f"{name} carries no UTC offset; a naive time names no instant")
+    return parsed
+
+
+def as_member(name: str, value: str, members: Sequence[str]) -> str:
+    """A supplied value that must be one of a closed list, exactly.
+
+    No case folding and no trimming, for `parse`'s own reason about case: a
+    caller whose `Refused` is quietly read as `refused` is told nothing about
+    the next spelling that is not. The members are named in the refusal,
+    because by now the caller is an authenticated administrator.
+    """
+    if value not in members:
+        raise InvalidQuery(f"{name} must be one of {', '.join(members)}")
+    return value

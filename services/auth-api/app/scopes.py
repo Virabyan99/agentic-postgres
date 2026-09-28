@@ -127,6 +127,15 @@ ADMIN_AGENTS_READ = "admin_agents:read"
 #: by whoever first granted the roster scope.
 ADMIN_AUDIT_READ = "admin_audit:read"
 
+#: Session 33's administrative scope (ADR 0232), gating the approval routes:
+#: listing what waits for a human, and approving or rejecting it. A human's
+#: authority only -- an agent token is refused before any scope is read -- and
+#: in the administrative class, so `project_admin`'s ceiling alone may carry
+#: it. Granted by an operator with `PATCH /admin/users/{id}`; no existing
+#: administrator gains it on upgrade. Holding it is not enough on its own: the
+#: database refuses the run's OWNER (`approver_is_owner`).
+ADMIN_WORKFLOWS_APPROVE = "admin_workflows:approve"
+
 #: Session 7's storage class (ADR 0100), named here for the same reason as the
 #: four above: the endpoint, the registry and the test read one string.
 OBJECTS_READ = "objects:read"

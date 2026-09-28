@@ -39,6 +39,7 @@ from agentic_postgres.client_ir import IR
 
 __all__ = [
     "ASSET_ROOT",
+    "AUDIT_FORWARDED_FILTERS",
     "AUDIT_PAGE_LIMIT",
     "BIND_ADDRESS",
     "CAPABILITIES_NOTE",
@@ -107,6 +108,22 @@ STUDIO_MAX_ROWS = 1000
 #: documented maximum. The page is fetched whole and rendered whole; a view
 #: filter hides rows in the browser and the header says so (D1248).
 AUDIT_PAGE_LIMIT = 500
+
+#: What the audit view forwards to `GET /admin/audit`, and nothing else: the
+#: endpoint's own parameters less `limit`, which Studio sets. Session 33 (ADR
+#: 0234, D1730) widened it from the two identity filters to seven, and the
+#: reason the widening is safe is on the same response: `window_counts` counts
+#: the WINDOW whatever the filter, so a view filtered to `served` still says
+#: how many refusals it is not showing -- D1248's objection, answered.
+AUDIT_FORWARDED_FILTERS: tuple[str, ...] = (
+    "agent_id",
+    "owner_id",
+    "since",
+    "until",
+    "outcome",
+    "denial_reason",
+    "cursor",
+)
 
 #: How close to expiry the access token may get before Studio refreshes it. The
 #: token lives `claims.MAX_TTL_SECONDS` (900 s), so this is a margin and not a
@@ -775,16 +792,28 @@ def own_session(rows: list[dict[str, Any]], since: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def audit_view_header(shown: int, total: int) -> str:
+def audit_view_header(shown: int, total: int, window_counts: dict[str, Any] | None = None) -> str:
     """The sentence above the audit table, always visible (D1248).
 
     *No summarisation that hides denials* is satisfied by rendering the page
     whole and saying what the page is -- never by a filter that could let a
     viewer ask for `outcome=served` and never learn there were refusals. The
     count beside the filter is what makes a hidden row visible as a number.
+
+    **Since Session 33 the filters reach the endpoint** (ADR 0234), and what
+    keeps a refusal visible is the WINDOW's count on the same response: the
+    header says how many rows the window holds and how many of them were
+    refused, whatever the page was filtered to.
     """
-    return (
+    sentence = (
         f"showing {shown} of {total} rows on this page; the page is the newest {AUDIT_PAGE_LIMIT}"
+    )
+    if window_counts is None:
+        return sentence
+    refused = int((window_counts.get("by_outcome") or {}).get("refused", 0))
+    return (
+        f"{sentence}, in a window holding {int(window_counts.get('total', 0))} rows "
+        f"({refused} refused)"
     )
 
 

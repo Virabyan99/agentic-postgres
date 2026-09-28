@@ -1,7 +1,7 @@
 # Session 33 — Gates, compensation and provenance
 
-**Status: IN EXECUTION since 2026-09-26 — Runs 1–5 done (D1742–D1754 added;
-NEXT FREE D1755). Run 6 is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
+**Status: IN EXECUTION since 2026-09-26 — Runs 1–6 done (D1742–D1758 added;
+NEXT FREE D1759). Run 7 is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
 `main` directly. This plan spends **D1714–D1741** in §1 and **ADR 0230–0234**.
 **NEXT FREE AFTER THIS PLAN: D1742, ADR 0235.** Rows the runs add go in §1's
 second table, below D1741, in execution order; the header's *Status*
@@ -473,6 +473,10 @@ second table below, in execution order.
 | **D1752** | 5 | §5 Run 5 item 2: `step_token` calls *"a new `Repository` method over `workflow_approval_for_token` -- the auth service's `Repository` in `repository.py` ... the loop's `WorkflowRepository` got its own in Run 3"*. | Run 3 put `approval_for_token` in `WorkflowRepository` (D1680: the grant shipped with a caller), and its guard `test_every_workflow_function_0035_grants_is_called_by_this_module` required all seven 0035 grants to be called THERE. Two methods over one definer function would be two callers of the signer's lookup, one of which nothing calls. | **Moved, not copied**: the method is `Repository.approval_for_token` and `WorkflowRepository` no longer has it. The guard now names BOTH modules -- six 0035 grants called by `workflow_repository.py`, `workflow_approval_for_token` called by `repository.py` and NOT by the loop's module -- which is stricter than a union and keeps its node id. |
 | **D1753** | 5 | §5 Run 5 item 5: rig 33g runs *"the built image in `auth` mode with the real loop"*, rig 32j's recipe. | The loop dials `http://mcp:8080/mcp`, three constants bound by a proof to the deploy's address (D1685), and `supervise` passes no URL; a fake plane reachable at that name needs the image on a Docker network, which rig 32j already paid for and whose subject (the image starts READY with the loop in it) Run 5 did not move. rig 32j's script died with `/tmp`. | **Rig 33g drives the REAL `workflow_worker.process` over the REAL `WorkflowRepository.claim`** (the body of `run_forever`, one step per turn), the REAL `Repository` and `AuthService` signing with a generated key, a psycopg pool as the auth service's own role on an `apg dev` cluster (35 migrations + the example set, four definitions installed), and a fake plane on 127.0.0.1 that VERIFIES every bearer with the signer's public key. Five scenarios, **22/22 checks on first execution** (the rig's own state reader was wrong once -- a `coalesce` of an enum with `'-'` -- and was fixed before any product check was read). The image arm is not re-run and is said not to be. |
 | **D1754** | 5 | §5 Run 5 item 4 lists the gate's branches: none, pending/expired, approved, and `rejected` *"never reaches a claim"*. | Three cases the plan does not decide. (1) An APPROVED step whose call is refused `approval_required` anyway (a lock that moved, a claim the plane would not honour): requesting approval again raises PT409 inside the loop -- one request per step. (2) A `rejected` approval reaching a claim anyway. (3) The signer's lookup finding no row after the gate read `approved`: `AuthenticationFailed`, which the loop finishes `token_refused`, i.e. `stopped`/`agent_not_active`. | (1) **Terminal**: the step is finished `refused`/`approval_required` -- a request is made only when the gate reads NO approval. (2) Finished `failed` with reason `approval_<status>`, its own word rather than folded into `approval_expired` (ADR 0195). (3) **Left as it is, and why it is unreachable**: a decided row never changes (D1747's predicate), the lookup does not re-check the window (D1745), so the only way to miss is a run that stopped being `running` between the gate and the mint -- and a finish on an ended run does not move it (D1744). **Two readings of the plan made explicit:** ONE name `token` for both mints (a single `step_token` call with an optional `approval_id`), so the AST proof is unchanged; and `current_approval()` answers `None` when the verified token's digest is not the one the request's context was resolved for, `current_token`'s own guard. A wait step in a dry run parks and finishes exactly as in a real run: it calls nothing, so there is nothing to rehearse. |
+| **D1755** | 6 | §5 Run 6 item 4: the Studio forwarder *"accepts exactly `agent_id`, `owner_id`, `since`, `until`, `outcome`, `denial_reason`, `cursor` and still refuses anything else with 400"*. | The forwarder read its query through `bin/studio.py`'s shared `query()`, which keeps the FIRST value of a repeated key and DROPS an empty one (`parse_qs`, `keep_blank_values=False`). Harmless while it forwarded two identity filters; not once it forwards `outcome`: `outcome=` was forwarded as no filter at all -- the unfiltered page, to a viewer who believed they had filtered -- and `outcome=served&outcome=refused` as one of the two, silently. The endpoint's own strict parser (ADR 0143) refuses both; Studio hid them from it. | **The audit view reads its query strictly** (`parse_qsl`, blanks kept): a repeated parameter is refused with 400 naming it and nothing is sent; an empty value is FORWARDED, so the endpoint refuses it and Studio classifies that `invalid`. The other views keep `query()` -- none forwards a filter that narrows a count. Proved in `test_the_audit_view_forwards_the_five_filters_and_nothing_else` (battery m8). |
+| **D1756** | 6 | §5 Run 6 item 5: *"`COMMANDS_WITH_VERBS` in `test_cli_contract.py` gains them"* (the four verbs). | `COMMANDS_WITH_VERBS` is a set of COMMANDS, the control for a derivation that reads each command's verbs out of its own `--help` (D1395's guard). `bin/workflow.sh` is already in it since Session 32. | **It does not move**; its comment says why. The four verbs are derived from the usage block like the six, and `test_workflow_command.py::test_every_verbs_help_answers_without_a_project` -- a verb list -- gains the four. |
+| **D1757** | 6 | §2 names the replacement Studio proofs under `AGT-AUDIT-003` and says `STU-AUDIT-001`'s two refusal proofs are replaced; §2 also says the registry lands in Run 8. | Renaming a node id `STU-AUDIT-001` names breaks `test_acceptance_registry` in THIS run (D1119), as WF-DEF-001 did in Run 4 (D1750). And two OTHER `STU-AUDIT-001` proofs pinned the header's exact text, which the window counts change: `test_the_audit_view_renders_every_row_of_the_page_with_its_boundary` and `test_the_audit_page_count_equals_the_tables_newest_rows` (whose `endswith` would fail). | **STU-AUDIT-001 moves in Run 6**: its two replaced node ids and its description (*"exactly the endpoint's seven parameters"*, §2's sentence). The two pinning proofs are made STRICTER, not loosened: each asserts the whole header, and the 520-row proof now asserts the header NAMES 520 -- the number its old docstring said Studio could not know -- beside the superuser's count and a `next_cursor`. Whether the two new node ids are ALSO `AGT-AUDIT-003`'s is Run 8's to write. |
+| **D1758** | 6 | §5 Run 6 item 2: *"`models.py` the request and response models"*; the parked draft had one model per refusal. | OpenAPI keys a response by STATUS, and both `approval_already_decided` and `approval_expired` are 409: the draft named `ApprovalAlreadyDecidedResponse` under 409 and left `ApprovalExpiredResponse` with no reader (ruff F401 found it), so the published document said only one of the two words. | **One model, `ApprovalConflictResponse`, `error: Literal["approval_already_decided", "approval_expired"]`**, under 409; `approver_is_owner` keeps its own under 403. The canonical contract carries both words. |
 
 ---
 
@@ -1739,6 +1743,76 @@ in every invocation.
 `test_acceptance_registry.py`, `test_evidence_claims.py`. Commit (`Session 33
 Run 6: the human surface -- admin_workflows:approve, four admin routes, the
 audit filters, Studio, four verbs`), push, read CI.
+
+**Done.** The draft parked at Run 5's close (stash `session33-run6-wip`) was
+popped and read whole before a line was trusted; every name it calls was
+grepped in the tree (`WorkflowRepository.decide/pending_approvals/provenance`,
+`Repository.list_agent_audit`'s nine arguments and `count_agent_audit`, the
+three `openapi_docs` shapes, `_body`/`_guard`/`_service`, 0035's PT403/PT409
+words and the counter's `{total, by_outcome, by_denial_reason}` document).
+**The scope** (D1717, ADR 0232): `admin_workflows:approve` in both schema enums
+with one description sentence, `scopes.ADMIN_WORKFLOWS_APPROVE`; the
+administrative class moved from FIVE to SIX members (`admin_users:read|write`,
+`admin_agents:read|write`, `admin_audit:read` → the same plus
+`admin_workflows:approve`), the release ceiling likewise, and
+`test_an_administrative_scope_is_reachable_only_by_the_admin_role` made
+stricter -- EACH administrative scope reaches `project_admin` alone, over the
+release surface and a merged one; `reserved_resource_names()` gains
+`admin_workflows` (read from the schema; no example surface has such a
+relation -- the only occurrence under `projects/` is a comment in
+`tasks-approval.yaml`); both fixture lists gain it. **The routes**: NEW
+`workflow_admin_routes.py`, mounted in `auth` mode and published; the two 409
+words under ONE model (**D1758**). **The audit endpoint** (D1730, D1741): five
+parameters, `as_timestamp`/`as_member`, the two vocabularies as constants, the
+opaque cursor whose round trip IS the definition of *issued*, `window_counts`
+on every page and `next_cursor`; `since`'s description says to write `Z` or
+`%2B` because a bare `+` in a query string is a space. **Studio**: seven
+parameters forwarded verbatim, the header naming the window, and the audit
+view reading its query strictly (**D1755**). **The verbs**: four, over
+`ADMIN_ROUTES` with `APG_API_TOKEN`; `--limit` sent as the number, not as
+typed. **Contract and client**: `contracts/app-openapi.canonical.json`
+regenerated (+454 lines) and `--check` clean; `apg generate` rewrote
+`contract.ts` and `generated.json` and said *version 1.0.0 (no contract
+change)* -- the version did not move. **Proofs** (all passed on first
+execution): NEW `test_workflow_admin_routes.py` (`pytestmark` first), nine
+proofs over a REAL `AuthService` -- every token minted by `issue`, the
+approver's scope included, which is also the proof the lock's `project_admin`
+ceiling admits it -- with the workflow repository faked; the five `WF-ADMIN-001`
+names of §2 and the four `WF-PROV-001` route names. `test_auth_strict_query.py`
++3 (`test_as_timestamp_and_as_member_refuse_and_never_coerce`,
+`test_the_audit_vocabularies_are_the_migrations_enum_literals` -- the *two
+enforcement points, one list* proof, reading every template's `CREATE TYPE`
+and `ADD VALUE` in order and refusing a `BEFORE`/`AFTER`, and binding the
+reasons to `mcp_errors.DENIAL_REASONS` --, `test_a_cursor_decodes_only_what_
+this_endpoint_encoded`). `test_auth_endpoints.py` +3 live
+(`test_the_audit_endpoint_returns_window_counts_on_every_page`,
+`test_the_cursor_round_trips_and_a_forged_one_is_refused` over seven rows
+sharing one `started_at`, `test_a_timestamp_or_member_outside_its_contract_is_
+refused`, ten arms each with a served control), and
+`test_an_unknown_query_parameter_is_refused` kept its node id with `page=abc`.
+Studio: the two replacements under ADR 0234 and two pinning proofs made
+stricter (**D1757**, where `STU-AUDIT-001` moves in this run); `test_studio_
+core` gains the window form of the header. `test_workflow_command.py`: the
+four `WF-CMD-002` proofs, driving `bin/workflow.sh` against a loopback
+recorder; the route-literal proof widened to exactly `ROUTES ∪ ADMIN_ROUTES`;
+the help proof gains four verbs (**D1756** on `COMMANDS_WITH_VERBS`).
+`test_auth_service_shape`'s environment guard names the new module.
+**Battery 14/14 killed**, each `FAILED`, none `ERROR`, BOTH controls
+(`test_the_audit_endpoint_needs_its_own_scope_not_the_agent_roster_one`, live,
+and `test_workflow_routes.py::test_another_agents_run_and_a_missing_one_are_
+the_same_404`) PASSED in every arm, anchors pre-flighted, restored by copy
+and `cmp`: the plan's (m1) approve under the audit scope, (m2)
+`authenticate_agent`, (m3) window counts from the filtered page, (m4) no
+`--confirm` check; and (m5) a cursor without the round trip, (m6) a naive
+time accepted, (m7) `dry_run` dropped from the outcomes, (m8) Studio resolving
+a repeat, (m9) the header's refusal count constant, (m10) an expiry reported
+as decided, (m11) no `next_cursor`, (m12) a human verb falling back to the
+agent token, (m13) provenance under the approve scope, (m14) the decision not
+bound to the named step. **Targeted, once: 1114 passed, 0 skipped** (the
+plan's list plus `test_workflow_routes`, `test_approval_claim` -- both share
+the route rig -- and the two D1242 guards, `test_deployment_module_shape` and
+`tests/security/test_dx_surfaces_hardening.py`). **Rows added: D1755–D1758.
+NEXT FREE: D1759.**
 
 ### Run 7 — the readers and the pages: the doctor, the drill, the operator guide
 

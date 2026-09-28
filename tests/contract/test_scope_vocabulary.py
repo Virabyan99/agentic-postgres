@@ -231,6 +231,7 @@ def test_a_relation_named_for_an_enumerated_class_is_refused_at_load_and_at_merg
         "admin_users",
         "admin_agents",
         "admin_audit",
+        "admin_workflows",
     }
     release = api_surface.load_surface()
 

@@ -248,8 +248,9 @@ def reserved_resource_names() -> frozenset[str]:
     """The resource half of every enumerated storage and administrative scope.
 
     Read from the schema rather than restated (ADR 0006): `objects`,
-    `admin_users`, `admin_agents`, `admin_audit` today, and whatever a later
-    ADR adds to either enumerated class. A relation named for one would derive
+    `admin_users`, `admin_agents`, `admin_audit`, `admin_workflows` (Session
+    33, ADR 0232) today, and whatever a later ADR adds to either enumerated
+    class. A relation named for one would derive
     a data scope indistinguishable from an enumerated one, so the derived class
     could never name an administrative or storage scope only because no surface
     can be loaded that would make it (ADR 0200).

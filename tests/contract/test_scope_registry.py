@@ -71,7 +71,8 @@ def test_the_administrative_class_is_one_per_identity_resource_and_verb() -> Non
     Enumerated in the schema, not derived (ADR 0100), and an equality over a
     closed list is what makes an unreviewed addition to the vocabulary fail
     here; a `<=` would have admitted `admin_audit:read` silently and admitted
-    the next name silently too. Five members since Session 9 Run 7 (ADR 0142).
+    the next name silently too. Five members since Session 9 Run 7 (ADR 0142);
+    SIX since Session 33 (ADR 0232, D1717): `admin_workflows:approve`.
     """
     assert scope_registry.administrative_scopes() == {
         "admin_users:read",
@@ -79,12 +80,17 @@ def test_the_administrative_class_is_one_per_identity_resource_and_verb() -> Non
         "admin_agents:read",
         "admin_agents:write",
         "admin_audit:read",
+        "admin_workflows:approve",
     }
     assert scope_registry.administrative_scopes() <= scope_registry.approved_scopes()
 
     # The asymmetry is a decision and not an oversight (ADR 0142), so it is
     # asserted rather than left to the equality above to imply.
     assert "admin_audit:write" not in scope_registry.approved_scopes()
+    # And ADR 0232's: the approval listing is the SAME authority as the
+    # decision, so there is no read twin, and no write verb either.
+    for twin in ("admin_workflows:read", "admin_workflows:write"):
+        assert twin not in scope_registry.approved_scopes(), twin
 
 
 def test_the_storage_class_is_one_per_object_verb() -> None:
@@ -343,6 +349,7 @@ def test_the_ceilings_over_the_release_surface_are_what_they_were() -> None:
         "admin_agents:read",
         "admin_agents:write",
         "admin_audit:read",
+        "admin_workflows:approve",
     }
 
 
@@ -379,6 +386,10 @@ def test_the_documentation_role_carries_exactly_introspection() -> None:
 
 
 def test_an_administrative_scope_is_reachable_only_by_the_admin_role() -> None:
+    """Made stricter in Session 33 (ADR 0232): EACH administrative scope --
+    `admin_workflows:approve` among them -- is held by `project_admin` alone,
+    over the release surface AND a merged one, rather than the class as a
+    whole reaching one role."""
     administrative = scope_registry.administrative_scopes()
     holders = {
         role
@@ -386,6 +397,15 @@ def test_an_administrative_scope_is_reachable_only_by_the_admin_role() -> None:
         if scope_registry.permitted_scopes(role) & administrative
     }
     assert holders == {"project_admin"}
+    assert "admin_workflows:approve" in administrative
+    for surface in (None, merged_example_surface()):
+        for scope in sorted(administrative):
+            reaching = {
+                role
+                for role in scope_registry.ROLE_CLASSES
+                if scope in scope_registry.permitted_scopes(role, surface)
+            }
+            assert reaching == {"project_admin"}, (scope, reaching)
 
 
 def test_a_reader_agent_cannot_reach_a_write_scope() -> None:

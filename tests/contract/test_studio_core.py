@@ -724,6 +724,21 @@ def test_audit_view_header_carries_the_pages_own_count() -> None:
     assert header == "showing 3 of 57 rows on this page; the page is the newest 500"
     assert str(studio.AUDIT_PAGE_LIMIT) in header
 
+    # Session 33 (ADR 0234): given the endpoint's window counts, the sentence
+    # says what the WINDOW holds and how much of it was refused, whatever the
+    # page was filtered to. Two different numbers, so neither can be a constant.
+    counted = studio.audit_view_header(
+        3, 57, {"total": 812, "by_outcome": {"served": 790, "refused": 22}}
+    )
+    assert counted == (
+        "showing 3 of 57 rows on this page; the page is the newest 500, "
+        "in a window holding 812 rows (22 refused)"
+    )
+    # A window with no refusal says so as a zero, not by omission.
+    assert studio.audit_view_header(1, 1, {"total": 1, "by_outcome": {"served": 1}}).endswith(
+        "(0 refused)"
+    )
+
 
 def test_redact_for_log_drops_the_query_and_the_launch_key() -> None:
     """D1256: a method, a path without its query, and nothing else.

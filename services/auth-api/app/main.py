@@ -42,6 +42,7 @@ from app import (
     routes,
     storage_client,
     storage_routes,
+    workflow_admin_routes,
     workflow_routes,
     workflow_worker,
 )
@@ -302,6 +303,11 @@ def create_app(mode: str | None = None) -> Any:
         # separate modules is what makes "which authenticator does this route
         # use" a question with a one-word answer.
         application.include_router(workflow_routes.router)
+        # **Session 33 (ADR 0230-0234): the four HUMAN workflow routes**, in
+        # their own module for the reason above in the other direction: every
+        # one calls `authenticate`, so an agent token -- the requester of an
+        # approval among them -- is refused before any scope is read.
+        application.include_router(workflow_admin_routes.router)
 
     # The document this application publishes, with FastAPI's unreachable `422`
     # removed (Run 9). Overridden here rather than in `bin/app-contract.py` so
@@ -428,6 +434,14 @@ def public_paths() -> tuple[str, ...]:
         "/admin/users",
         "/admin/users/{user_id}",
         "/admin/users/{user_id}/reset-password",
+        # Session 33 (ADR 0230-0234). The approval routes under
+        # `admin_workflows:approve` and the provenance reader under
+        # `admin_audit:read`, published like every administrative path: an
+        # approver who cannot reach them from off the host cannot approve.
+        "/admin/workflows/approvals",
+        "/admin/workflows/runs/{run_id}",
+        "/admin/workflows/runs/{run_id}/approve",
+        "/admin/workflows/runs/{run_id}/reject",
         "/auth/agent-token",
         "/auth/jwks.json",
         "/auth/login",

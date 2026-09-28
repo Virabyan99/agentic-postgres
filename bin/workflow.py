@@ -4,11 +4,18 @@
 Two verbs are pure reads of a project manifest, its lock and its own files:
 `init` and `validate` reach no host, no root and no render.
 
-The other four call the auth service's three workflow routes. They hold no SQL,
-no route that `ROUTES` does not enumerate, and **no token**: the credential
-comes from `APG_AGENT_TOKEN` in this process's environment and is never an
-argument, because an argument is a value `ps` can read (D105, D1160). That is
-`bin/api.sh`'s shape, and the reason is the same.
+Four call the auth service's three workflow routes as an AGENT. They hold no
+SQL, no route that `ROUTES` does not enumerate, and **no token**: the
+credential comes from `APG_AGENT_TOKEN` in this process's environment and is
+never an argument, because an argument is a value `ps` can read (D105, D1160).
+That is `bin/api.sh`'s shape, and the reason is the same.
+
+**Four more, since Session 33, act as a HUMAN** (ADR 0230-0234): `approvals`,
+`approve`, `reject` and `inspect` call the four admin workflow routes that
+`ADMIN_ROUTES` enumerates, with the token from `APG_API_TOKEN` --
+`bin/api.sh`'s own variable, and never the agent's, because the agent whose
+run waits may not decide it. `approve` and `reject` refuse before any request
+unless `--confirm` repeats `--run`: a decision is final.
 
 This command imports `agentic_postgres` and `yaml` and nothing else (ADR 0093).
 """
@@ -24,7 +31,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -54,6 +61,26 @@ ROUTES: dict[str, tuple[str, str]] = {
 #: (S105 matches on the NAME. This is the name of an environment variable, not
 #: a credential; `bin/api.py:31` carries the same comment for the same reason.)
 TOKEN_VARIABLE = "APG_AGENT_TOKEN"  # noqa: S105
+
+#: The verbs a HUMAN runs (Session 33).
+HUMAN_VERBS = ("approvals", "approve", "reject", "inspect")
+
+#: **The second closed table**, for those four: the admin workflow routes and
+#: nothing else. `ROUTES` stays the agent's; a verb reaches the table of the
+#: principal it acts as, and a path in neither is a path this command cannot
+#: reach.
+ADMIN_ROUTES: dict[str, tuple[str, str]] = {
+    "approvals": ("GET", "/admin/workflows/approvals"),
+    "approve": ("POST", "/admin/workflows/runs/{run_id}/approve"),
+    "reject": ("POST", "/admin/workflows/runs/{run_id}/reject"),
+    "inspect": ("GET", "/admin/workflows/runs/{run_id}"),
+}
+
+#: A human administrator's access token, `bin/api.py`'s `TOKEN_VARIABLE`
+#: (`APG_API_TOKEN`). Never `APG_AGENT_TOKEN` for these four: an agent token
+#: is refused by every admin route, and a command that fell back to one would
+#: be a command that made the agent's credential the first thing it tried.
+HUMAN_TOKEN_VARIABLE = "APG_API_TOKEN"  # noqa: S105
 
 REQUEST_TIMEOUT_SECONDS = 30
 
@@ -332,12 +359,21 @@ def _app_base(path: Path) -> str:
     return url.rstrip("/")
 
 
-def _token() -> str:
-    token = os.environ.get(TOKEN_VARIABLE, "")
+def _token(variable: str = TOKEN_VARIABLE) -> str:
+    token = os.environ.get(variable, "")
+    if not token and variable == HUMAN_TOKEN_VARIABLE:
+        fail(
+            EXIT_PREREQUISITE,
+            f"{variable} is empty. Deciding or inspecting a run is a HUMAN "
+            "administrator's act, so this command needs an access token in its "
+            "environment -- `bin/api.sh`'s variable, never the agent's, and never as "
+            "an argument. Log in as an administrator holding admin_workflows:approve "
+            "(or admin_audit:read for inspect).",
+        )
     if not token:
         fail(
             EXIT_PREREQUISITE,
-            f"{TOKEN_VARIABLE} is empty. A run is started AS AN AGENT, so this command "
+            f"{variable} is empty. A run is started AS AN AGENT, so this command "
             "needs an agent token in its environment -- and never as an argument, "
             "because an argument is a value `ps` can read. Mint one with "
             "`bin/api.sh`'s sibling flow: POST /auth/agent-token with the agent's id "
@@ -347,15 +383,24 @@ def _token() -> str:
 
 
 def _call(
-    base: str, verb: str, *, run_id: str | None = None, body: dict[str, Any] | None = None
+    base: str,
+    verb: str,
+    *,
+    run_id: str | None = None,
+    body: dict[str, Any] | None = None,
+    query: dict[str, str] | None = None,
+    table: dict[str, tuple[str, str]] = ROUTES,
+    variable: str = TOKEN_VARIABLE,
 ) -> tuple[int, str]:
-    """One request against ONE of the three enumerated routes."""
-    method, template = ROUTES[verb]
+    """One request against ONE route of ONE of the two enumerated tables."""
+    method, template = table[verb]
     path = template.format(run_id=quote(run_id, safe="")) if run_id is not None else template
+    if query:
+        path = f"{path}?{urlencode(query)}"
     payload = json.dumps(body).encode("utf-8") if body is not None else None
     request = urllib.request.Request(base + path, data=payload, method=method)  # noqa: S310
     request.add_header("Accept", "application/json")
-    request.add_header("Authorization", f"Bearer {_token()}")
+    request.add_header("Authorization", f"Bearer {_token(variable)}")
     if payload is not None:
         request.add_header("Content-Type", "application/json")
     try:
@@ -372,8 +417,11 @@ def _report(status: int, body: str) -> int:
     """Print the answer, and exit 5 when the service refused.
 
     The service's own error WORD is printed and its status is not relayed as
-    this command's exit code (D433): a caller reads `no_such_workflow` or
-    `scope_not_held`, which are the two words the surface publishes.
+    this command's exit code (D433): a caller reads `no_such_workflow`,
+    `scope_not_held` -- and, from the human verbs, `approver_is_owner`,
+    `approval_already_decided` or `approval_expired` -- the words the surface
+    publishes. `inspect` prints its document whole, `indent=2`, and nothing
+    else.
     """
     try:
         document = json.loads(body)
@@ -432,9 +480,51 @@ def command_http(arguments: argparse.Namespace) -> int:
     return _report(status, body)
 
 
+def command_human(arguments: argparse.Namespace) -> int:
+    """`approvals`, `approve`, `reject`, `inspect`: a human's four (ADR 0230-0234).
+
+    Every refusal of input happens BEFORE the outputs document is read and
+    before any token is looked for, so a decision that could never be sent
+    costs nothing and reveals nothing.
+    """
+    verb = arguments.command
+    human = {"table": ADMIN_ROUTES, "variable": HUMAN_TOKEN_VARIABLE}
+
+    if verb == "approvals":
+        query = None
+        if arguments.limit is not None:
+            if not arguments.limit.isdigit() or not 1 <= int(arguments.limit) <= 100:
+                fail(EXIT_INPUT, "--limit is an integer from 1 to 100")
+            # Sent as the number, not as typed: `007` passes the check above and
+            # is a spelling the route's strict parser need not agree on.
+            query = {"limit": str(int(arguments.limit))}
+        if arguments.project_outputs is None:
+            fail(EXIT_INPUT, "approvals requires --project-outputs FILE")
+        base = _app_base(Path(arguments.project_outputs))
+        status, body = _call(base, "approvals", query=query, **human)
+        return _report(status, body)
+
+    if arguments.run is None:
+        fail(EXIT_INPUT, f"{verb} requires --run RUN_ID")
+    if verb in ("approve", "reject"):
+        if arguments.step is None:
+            fail(EXIT_INPUT, f"{verb} requires --step NAME, the parked step it decides")
+        if arguments.confirm != arguments.run:
+            fail(EXIT_INPUT, "--confirm must repeat the run id; a decision is final")
+    if arguments.project_outputs is None:
+        fail(EXIT_INPUT, f"{verb} requires --project-outputs FILE")
+    base = _app_base(Path(arguments.project_outputs))
+
+    if verb == "inspect":
+        status, body = _call(base, "inspect", run_id=arguments.run, **human)
+        return _report(status, body)
+    status, body = _call(base, verb, run_id=arguments.run, body={"step": arguments.step}, **human)
+    return _report(status, body)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bin/workflow.sh", add_help=False)
-    parser.add_argument("command", choices=("init", "validate", *HTTP_VERBS))
+    parser.add_argument("command", choices=("init", "validate", *HTTP_VERBS, *HUMAN_VERBS))
     parser.add_argument("--project", default=None)
     parser.add_argument("--project-outputs", dest="project_outputs", default=None)
     parser.add_argument("--capabilities", type=Path, default=None)
@@ -443,6 +533,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input", dest="input_document", default=None)
     parser.add_argument("--definition", default=None)
     parser.add_argument("--run", default=None)
+    parser.add_argument("--step", default=None)
+    parser.add_argument("--confirm", default=None)
+    parser.add_argument("--limit", default=None)
     return parser
 
 
@@ -451,6 +544,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if arguments.command in HTTP_VERBS:
         return command_http(arguments)
+    if arguments.command in HUMAN_VERBS:
+        return command_human(arguments)
 
     if arguments.project is None:
         fail(EXIT_INPUT, f"{arguments.command} requires --project FILE")

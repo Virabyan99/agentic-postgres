@@ -1,6 +1,39 @@
 {
   "components": {
     "schemas": {
+      "ApprovalConflictResponse": {
+        "description": "A decision that can no longer be made, and which of the two reasons.\n\nOne model for the one status: `approval_already_decided` (a decision is\nfinal) or `approval_expired` (the window closed before anyone decided).\nTwo models under one 409 would publish only whichever was named last.",
+        "properties": {
+          "error": {
+            "enum": [
+              "approval_already_decided",
+              "approval_expired"
+            ],
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ApprovalConflictResponse",
+        "type": "object"
+      },
+      "ApproverIsOwnerResponse": {
+        "description": "The approver owns the agent whose run this is (ADR 0232).",
+        "properties": {
+          "error": {
+            "const": "approver_is_owner",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ApproverIsOwnerResponse",
+        "type": "object"
+      },
       "AuthenticationFailedResponse": {
         "description": "Returned when no usable credential was presented.\n\nThe same body for every cause: unknown subject, wrong password, disabled\nsubject. Do not branch on it -- there is nothing else to read.",
         "properties": {
@@ -437,6 +470,34 @@
         "title": "UploadIntentResponse",
         "type": "object"
       },
+      "WorkflowDecisionResponse": {
+        "description": "What a decision answers: the run, the step, and what it now is.",
+        "properties": {
+          "approval": {
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Approval",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "step": {
+            "title": "Step",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "step",
+          "approval"
+        ],
+        "title": "WorkflowDecisionResponse",
+        "type": "object"
+      },
       "WorkflowRunResponse": {
         "description": "What enqueueing answers: the id to read the run by, and its status.",
         "properties": {
@@ -802,7 +863,7 @@
     },
     "/admin/audit": {
       "get": {
-        "description": "Requires the `admin_audit:read` scope, which is in `project_admin`'s ceiling and in no other -- an agent cannot be authorized to read the record that attributes it. Rows come back most recent first. Each carries a `source`: `agent_plane` is what an agent ATTEMPTED, including calls refused for a missing scope that never reached the database, and `database` is what actually CHANGED, including a write that reached PostgREST without going near the agent plane. The two answer different questions and a single agent write produces one of each. A refused row carries the `denial_reason` that refused it -- a member of the reviewed taxonomy, non-null exactly on `refused` rows (ADR 0178) -- except on a refusal recorded before that column existed, which carries null. A repeated query parameter is refused rather than resolved to its last value.",
+        "description": "Requires the `admin_audit:read` scope, which is in `project_admin`'s ceiling and in no other -- an agent cannot be authorized to read the record that attributes it. Rows come back most recent first. Each carries a `source`: `agent_plane` is what an agent ATTEMPTED, including calls refused for a missing scope that never reached the database, and `database` is what actually CHANGED, including a write that reached PostgREST without going near the agent plane. The two answer different questions and a single agent write produces one of each. A refused row carries the `denial_reason` that refused it -- a member of the reviewed taxonomy, non-null exactly on `refused` rows (ADR 0178) -- except on a refusal recorded before that column existed, which carries null. A repeated query parameter is refused rather than resolved to its last value. **Every page carries `window_counts`** -- the rows in the agent, owner and time window by outcome and by denial reason, ignoring `outcome`, `denial_reason` and `cursor` -- so a page filtered to one outcome still says how many refusals the window holds. `next_cursor` is set when the page is full and null when it is the last; pass it back as `cursor` for the next page.",
         "operationId": "list_agent_audit_admin_audit_get",
         "parameters": [
           {
@@ -835,6 +896,73 @@
               "maximum": 500,
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          {
+            "description": "The window's inclusive start, ISO-8601 WITH an offset. A naive time is refused with 422, never read in the server's zone. Write the offset as `Z`, or percent-encode its `+` as `%2B`: a bare `+` in a query string is a space.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The window's exclusive end, ISO-8601 with an offset; after `since`.",
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Narrow the page to one outcome. `window_counts` ignores it.",
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "enum": [
+                "started",
+                "served",
+                "refused",
+                "failed",
+                "committed",
+                "replayed",
+                "dry_run"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Narrow the page to one refusing boundary. `window_counts` ignores it.",
+            "in": "query",
+            "name": "denial_reason",
+            "required": false,
+            "schema": {
+              "enum": [
+                "scope_not_held",
+                "not_in_allowlist",
+                "input_malformed",
+                "budget_exceeded",
+                "contract_drift",
+                "upstream_refused",
+                "audit_unavailable",
+                "write_rejected",
+                "approval_required"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `next_cursor` of the previous page, opaque. A cursor this endpoint did not issue is refused with 422.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -1223,6 +1351,331 @@
           }
         },
         "summary": "Issue a one-time password reset for a subject"
+      }
+    },
+    "/admin/workflows/approvals": {
+      "get": {
+        "description": "Requires `admin_workflows:approve` and an ACCESS token; an agent token is refused before the scope is read. Pending, unexpired approvals on running runs, oldest first: the run, the definition and its version, the step and its position, the capability and tool, the agent and its owner, when approval was requested and when it expires. **Never an argument value, the run's input or a result** -- what the step does is in the reviewed definition.",
+        "operationId": "list_approvals_admin_workflows_approvals_get",
+        "parameters": [
+          {
+            "description": "Approvals to return, 1-100. Outside the range is refused with 422; it is never clamped.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Pending approvals, oldest first."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "List the approvals waiting for a human"
+      }
+    },
+    "/admin/workflows/runs/{run_id}": {
+      "get": {
+        "description": "Requires `admin_audit:read`. The run, every step with every attempt joined to its audit rows by request id, and every approval with the human who decided it. It answers for ANY agent's run -- a revoked agent's stopped run included -- because this is the audit's reader, not the agent's. The run's input is reported by its keys only, and no field carries an argument value or a result.",
+        "operationId": "read_provenance_admin_workflows_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The run's provenance."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoSuchWorkflowResponse"
+                }
+              }
+            },
+            "description": "No such run."
+          }
+        },
+        "summary": "Read one run's provenance"
+      }
+    },
+    "/admin/workflows/runs/{run_id}/approve": {
+      "post": {
+        "description": "Requires `admin_workflows:approve`. The step is named in the body and must be the one the approval is for. Approving makes it claimable at once, and the call it retries carries the decision as a signed claim, so the plane serves that one write.",
+        "operationId": "approve_admin_workflows_runs__run_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "A human's decision on ONE parked step of one run (ADR 0230, ADR 0232).\n\nThe run is in the path and the step is in the body, and the pair is what\nthe database decides on: an approval is bound to the step it names, so a\ndecision can never reach a different step of the same run by position or\nby accident. The pattern is the definition schema's own step-name pattern.",
+                "properties": {
+                  "step": {
+                    "pattern": "^[a-z][a-z0-9_]{0,62}$",
+                    "title": "Step",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "step"
+                ],
+                "title": "WorkflowDecisionRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowDecisionResponse"
+                }
+              }
+            },
+            "description": "The decision was recorded."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproverIsOwnerResponse"
+                }
+              }
+            },
+            "description": "Either the token lacks `admin_workflows:approve` (`authorization_failed`) or the approver owns the agent whose run this is (`approver_is_owner`): holding the scope is not enough to decide your own agent's run."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoSuchWorkflowResponse"
+                }
+              }
+            },
+            "description": "No approval for that step of that run, or a run that is no longer running. One answer, as the agent surface gives."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalConflictResponse"
+                }
+              }
+            },
+            "description": "`approval_already_decided` -- a decision is final -- or `approval_expired`: the window closed before anyone decided, and the run fails at its next claim."
+          }
+        },
+        "summary": "Approve one parked step of a run"
+      }
+    },
+    "/admin/workflows/runs/{run_id}/reject": {
+      "post": {
+        "description": "Requires `admin_workflows:approve`. **A rejection is a cancel**: the run's cancel is requested, the next claim applies it, and the steps that succeeded and declare a compensation are undone in reverse.",
+        "operationId": "reject_admin_workflows_runs__run_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "A human's decision on ONE parked step of one run (ADR 0230, ADR 0232).\n\nThe run is in the path and the step is in the body, and the pair is what\nthe database decides on: an approval is bound to the step it names, so a\ndecision can never reach a different step of the same run by position or\nby accident. The pattern is the definition schema's own step-name pattern.",
+                "properties": {
+                  "step": {
+                    "pattern": "^[a-z][a-z0-9_]{0,62}$",
+                    "title": "Step",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "step"
+                ],
+                "title": "WorkflowDecisionRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowDecisionResponse"
+                }
+              }
+            },
+            "description": "The decision was recorded."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproverIsOwnerResponse"
+                }
+              }
+            },
+            "description": "Either the token lacks `admin_workflows:approve` (`authorization_failed`) or the approver owns the agent whose run this is (`approver_is_owner`): holding the scope is not enough to decide your own agent's run."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoSuchWorkflowResponse"
+                }
+              }
+            },
+            "description": "No approval for that step of that run, or a run that is no longer running. One answer, as the agent surface gives."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalConflictResponse"
+                }
+              }
+            },
+            "description": "`approval_already_decided` -- a decision is final -- or `approval_expired`: the window closed before anyone decided, and the run fails at its next claim."
+          }
+        },
+        "summary": "Reject one parked step of a run"
       }
     },
     "/auth/agent-token": {

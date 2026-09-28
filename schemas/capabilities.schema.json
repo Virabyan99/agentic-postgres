@@ -245,7 +245,8 @@
         "admin_users:write",
         "admin_agents:read",
         "admin_agents:write",
-        "admin_audit:read"
+        "admin_audit:read",
+        "admin_workflows:approve"
       ],
       "description": "Every ENUMERATED scope name: the union of the three classes as they stood before ADR 0200, and still the union the partition check runs over (ADR 0079, ADR 0100). DATA scopes here are the five a manifest at schema version 3 or below may name; since ADR 0200 the data class is DERIVED from the reviewed surface -- one `<relation>:read` and `<relation>:write` per published relation plus meta:read -- and this enum is its floor, not its extent. STORAGE scopes are one per (object, verb) over the object-storage surface, closed by that surface. ADMINISTRATIVE scopes are one per (platform identity resource, verb) over the auth service's own surface, closed by that surface. A name added here and to no class raises where the registry is read: see scope_registry.assert_classes_partition_the_vocabulary."
     },
@@ -275,9 +276,10 @@
         "admin_users:write",
         "admin_agents:read",
         "admin_agents:write",
-        "admin_audit:read"
+        "admin_audit:read",
+        "admin_workflows:approve"
       ],
-      "description": "The platform identity class (ADR 0079), one per (platform identity resource, verb) over the auth service's own surface, closed by that surface. LISTED here since ADR 0100; it used to be derived as the union less the data class, which is correct for two classes and silently wrong for three -- a name in the union and in no class was absorbed into this one, classified by arithmetic rather than by a decision. Measured in Session 7 Run 1. The three classes are now checked against the union exactly: see scope_registry.assert_classes_partition_the_vocabulary. admin_audit:read joined in Session 9 Run 7 with no :write twin, and the asymmetry is the decision rather than an omission: app_private.agent_audit is append-only, its own COMMENT says so, and the only paths in are the definer functions that write it. A scope naming a write nobody can perform would be a name for an authority that does not exist."
+      "description": "The platform identity class (ADR 0079), one per (platform identity resource, verb) over the auth service's own surface, closed by that surface. LISTED here since ADR 0100; it used to be derived as the union less the data class, which is correct for two classes and silently wrong for three -- a name in the union and in no class was absorbed into this one, classified by arithmetic rather than by a decision. Measured in Session 7 Run 1. The three classes are now checked against the union exactly: see scope_registry.assert_classes_partition_the_vocabulary. admin_audit:read joined in Session 9 Run 7 with no :write twin, and the asymmetry is the decision rather than an omission: app_private.agent_audit is append-only, its own COMMENT says so, and the only paths in are the definer functions that write it. A scope naming a write nobody can perform would be a name for an authority that does not exist. admin_workflows:approve joined in Session 33 (ADR 0232) with no :read twin: the approval listing is part of the same authority, because an approver who could not see what waits for a decision could not make one, and a separate read scope would let a holder of it enumerate who waits on whom without being able to decide. `approve` is the verb because the authority is to release one parked write, which neither read nor write names; it is administrative because only a human principal may hold it (an agent token is refused before the scope is read), and the run's owner may still not decide their own agent's run."
     },
     "capability": {
       "type": "object",

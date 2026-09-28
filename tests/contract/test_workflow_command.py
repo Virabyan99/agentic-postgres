@@ -249,8 +249,18 @@ def test_the_three_http_verbs_call_the_enumerated_routes_and_nothing_else() -> N
         "cancel": ("POST", "/workflows/runs/{run_id}/cancel"),
     }
 
+    # Session 33: the HUMAN verbs' own closed table joins the allowed set --
+    # widened to exactly the four admin routes, each named in the equality
+    # below, never to "anything under /admin".
+    assert module.ADMIN_ROUTES == {
+        "approvals": ("GET", "/admin/workflows/approvals"),
+        "approve": ("POST", "/admin/workflows/runs/{run_id}/approve"),
+        "reject": ("POST", "/admin/workflows/runs/{run_id}/reject"),
+        "inspect": ("GET", "/admin/workflows/runs/{run_id}"),
+    }
+
     tree = ast.parse((REPO_ROOT / "bin" / "workflow.py").read_text(encoding="utf-8"))
-    declared = {path for _, path in module.ROUTES.values()}
+    declared = {path for _, path in (*module.ROUTES.values(), *module.ADMIN_ROUTES.values())}
     literals = {
         node.value
         for node in ast.walk(tree)
@@ -360,7 +370,21 @@ def test_a_document_with_no_app_route_is_reported_rather_than_guessed(tmp_path: 
     assert "publishes no app route" in result.stderr
 
 
-@pytest.mark.parametrize("verb", ["init", "validate", "run", "dry-run", "status", "cancel"])
+@pytest.mark.parametrize(
+    "verb",
+    [
+        "init",
+        "validate",
+        "run",
+        "dry-run",
+        "status",
+        "cancel",
+        "approvals",
+        "approve",
+        "reject",
+        "inspect",
+    ],
+)
 def test_every_verbs_help_answers_without_a_project(verb: str) -> None:
     """A verb's help is a READ (D1395, D1402, D1405). It is answered before the
     verb is dispatched, so no parser downstream can refuse it for a missing
@@ -369,6 +393,235 @@ def test_every_verbs_help_answers_without_a_project(verb: str) -> None:
     assert result.returncode == 0, result.stderr
     assert len(result.stdout.strip()) > 40
     assert verb.split("-")[0] in result.stdout.lower()
+
+
+# ---------------------------------------------------------------------------
+# The four HUMAN verbs (Session 33, ADR 0230-0234, WF-CMD-002)
+#
+# Driven through `bin/workflow.sh` itself against a loopback recorder that
+# answers whatever an arm tells it to and keeps what it was SENT: the method,
+# the request target, the Authorization header and the body. What is asserted
+# is the request the command made, not the one this module would have built.
+# ---------------------------------------------------------------------------
+
+API_TOKEN = "a-human-access-token-3c1d"  # noqa: S105
+AGENT_TOKEN = "an-agent-token-9e02"  # noqa: S105
+RUN_ID = "0b1c2d3e-4f50-4617-8293-a4b5c6d7e8f9"
+
+
+class Recorder:
+    """One loopback HTTP server: records every request, answers `answer`."""
+
+    def __init__(self) -> None:
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        outer = self
+        self.received: list[dict[str, Any]] = []
+        self.answer: tuple[int, Any] = (200, {"ok": True})
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: Any) -> None:
+                return
+
+            def handle_one(self) -> None:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length) if length else b""
+                outer.received.append(
+                    {
+                        "method": self.command,
+                        "target": self.path,
+                        "authorization": self.headers.get("Authorization"),
+                        "body": json.loads(body) if body else None,
+                    }
+                )
+                status, payload = outer.answer
+                encoded = json.dumps(payload).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+
+            do_GET = do_POST = handle_one
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def stop(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def recorder(tmp_path: Path) -> Any:
+    started = Recorder()
+    document = tmp_path / "outputs.json"
+    document.write_text(
+        json.dumps({"routes": {"app": {"url": started.url, "status": "ready"}}}), encoding="utf-8"
+    )
+    started.outputs = str(document)
+    yield started
+    started.stop()
+
+
+def test_the_four_human_verbs_call_the_enumerated_admin_routes_and_nothing_else(
+    recorder: Any, monkeypatch: Any
+) -> None:
+    """One request per verb, to the route `ADMIN_ROUTES` names for it.
+
+    `approve` and `reject` carry the step and NOTHING else in the body: the
+    run is the path's, and the decider is the token's (ADR 0232). The run id is
+    percent-encoded into the path, so a run id cannot climb out of it to a
+    route the table does not name.
+    """
+    monkeypatch.setenv("APG_API_TOKEN", API_TOKEN)
+    out = ("--project-outputs", recorder.outputs)
+    decided = ("--run", RUN_ID, "--step", "set_the_status", "--confirm", RUN_ID)
+    for arguments in (
+        ("approvals", "--limit", "7", *out),
+        ("approve", *decided, *out),
+        ("reject", *decided, *out),
+        ("inspect", "--run", RUN_ID, *out),
+    ):
+        result = run(*arguments)
+        assert result.returncode == 0, (arguments, result.stdout, result.stderr)
+
+    assert [(r["method"], r["target"], r["body"]) for r in recorder.received] == [
+        ("GET", "/admin/workflows/approvals?limit=7", None),
+        ("POST", f"/admin/workflows/runs/{RUN_ID}/approve", {"step": "set_the_status"}),
+        ("POST", f"/admin/workflows/runs/{RUN_ID}/reject", {"step": "set_the_status"}),
+        ("GET", f"/admin/workflows/runs/{RUN_ID}", None),
+    ]
+
+    recorder.received.clear()
+    climbing = "../../auth/login"
+    result = run("inspect", "--run", climbing, *out)
+    assert result.returncode == 0, result.stderr
+    assert [r["target"] for r in recorder.received] == [
+        "/admin/workflows/runs/..%2F..%2Fauth%2Flogin"
+    ]
+
+    for bad in ("0", "101", "ten", "-5"):
+        recorder.received.clear()
+        result = run("approvals", "--limit", bad, *out)
+        assert result.returncode == 2, (bad, result.stderr)
+        assert recorder.received == [], f"--limit {bad} was sent"
+
+
+def test_the_human_verbs_take_the_api_token_and_never_the_agent_token(
+    recorder: Any, monkeypatch: Any
+) -> None:
+    """`APG_API_TOKEN`, `bin/api.sh`'s variable -- and no fallback to the agent's.
+
+    With only the AGENT'S token in the environment, each human verb refuses
+    with exit 3 before any request: a command that fell back would make the
+    agent's credential the first thing it offered the admin routes. The
+    control is the agent verbs, which still send the agent token with both
+    variables set.
+    """
+    module = workflow_module()
+    assert module.HUMAN_TOKEN_VARIABLE == "APG_API_TOKEN"  # noqa: S105
+    assert module.TOKEN_VARIABLE == "APG_AGENT_TOKEN"  # noqa: S105
+
+    out = ("--project-outputs", recorder.outputs)
+    decided = ("--run", RUN_ID, "--step", "a_step", "--confirm", RUN_ID)
+    verbs = (("approvals", *out), ("approve", *decided, *out), ("inspect", "--run", RUN_ID, *out))
+
+    monkeypatch.delenv("APG_API_TOKEN", raising=False)
+    monkeypatch.setenv("APG_AGENT_TOKEN", AGENT_TOKEN)
+    for arguments in verbs:
+        result = run(*arguments)
+        assert result.returncode == 3, (arguments, result.stdout, result.stderr)
+        assert "APG_API_TOKEN is empty" in result.stderr
+    assert recorder.received == [], "a human verb sent a request with no human token"
+
+    monkeypatch.setenv("APG_API_TOKEN", API_TOKEN)
+    for arguments in verbs:
+        assert run(*arguments).returncode == 0
+    assert {r["authorization"] for r in recorder.received} == {f"Bearer {API_TOKEN}"}
+
+    recorder.received.clear()
+    assert run("status", "--run", RUN_ID, *out).returncode == 0
+    assert [r["authorization"] for r in recorder.received] == [f"Bearer {AGENT_TOKEN}"], (
+        "the control failed: the agent verbs no longer send the agent token"
+    )
+
+
+def test_approve_and_reject_refuse_without_a_matching_confirm(
+    recorder: Any, monkeypatch: Any
+) -> None:
+    """A decision is final, so it is typed twice (exit 2, before any request).
+
+    The refusal comes before the token is looked for, too: with no token at
+    all it is still exit 2, not 3 -- a decision that could never be sent costs
+    nothing and asks for nothing. The control is the same command with the
+    run repeated, which is sent.
+    """
+    monkeypatch.delenv("APG_API_TOKEN", raising=False)
+    out = ("--project-outputs", recorder.outputs)
+    for verb in ("approve", "reject"):
+        for confirm in (
+            (),
+            ("--confirm", "0b1c2d3e-4f50-4617-8293-a4b5c6d7e8f0"),
+            ("--confirm", ""),
+        ):
+            result = run(verb, "--run", RUN_ID, "--step", "a_step", *confirm, *out)
+            assert result.returncode == 2, (verb, confirm, result.stdout, result.stderr)
+            assert "--confirm must repeat the run id; a decision is final" in result.stderr
+        missing_step = run(verb, "--run", RUN_ID, "--confirm", RUN_ID, *out)
+        assert missing_step.returncode == 2
+        assert "--step" in missing_step.stderr
+    assert recorder.received == []
+
+    monkeypatch.setenv("APG_API_TOKEN", API_TOKEN)
+    for verb in ("approve", "reject"):
+        result = run(verb, "--run", RUN_ID, "--step", "a_step", "--confirm", RUN_ID, *out)
+        assert result.returncode == 0, result.stderr
+    assert len(recorder.received) == 2, "the control failed: a matching confirm was not sent"
+
+
+def test_inspect_prints_the_document_whole(recorder: Any, monkeypatch: Any) -> None:
+    """The provenance document, `indent=2`, and nothing else on stdout.
+
+    Parsed back, it is the document the service sent -- every nested attempt
+    and audit row, none summarised away. A refusal prints the service's error
+    WORD on stderr, exits 5, and prints nothing on stdout: a caller piping
+    `inspect` into a file gets a document or nothing.
+    """
+    monkeypatch.setenv("APG_API_TOKEN", API_TOKEN)
+    document = {
+        "run": {"id": RUN_ID, "status": "succeeded", "input_keys": ["task_id"]},
+        "steps": [
+            {
+                "name": "set_the_status",
+                "attempts": [
+                    {"attempt": 1, "outcome": "parked", "audit": [{"outcome": "refused"}]},
+                    {"attempt": 2, "outcome": "succeeded", "audit": [{"outcome": "committed"}]},
+                ],
+            }
+        ],
+        "approvals": [{"step": "set_the_status", "status": "approved", "decided_by": "u"}],
+        "profile": {"present": False, "reason": "not recorded on a run"},
+    }
+    recorder.answer = (200, document)
+    result = run("inspect", "--run", RUN_ID, "--project-outputs", recorder.outputs)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == document
+    assert result.stdout == json.dumps(document, indent=2, sort_keys=True) + "\n"
+
+    recorder.answer = (409, {"error": "approval_expired"})
+    refused = run(
+        "approve", "--run", RUN_ID, "--step", "s", "--confirm", RUN_ID,
+        "--project-outputs", recorder.outputs,
+    )  # fmt: skip
+    assert refused.returncode == 5, refused.stderr
+    assert "approval_expired" in refused.stderr
+    assert refused.stdout == ""
 
 
 # ---------------------------------------------------------------------------

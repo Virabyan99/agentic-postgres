@@ -289,3 +289,140 @@ def test_no_query_parameter_names_a_principal_the_caller_could_become() -> None:
 
     forbidden = {"role", "scope", "scopes", "act_as", "as_user", "as_owner", "token_use"}
     assert not forbidden & set(AUDIT_QUERY_PARAMETERS)
+
+
+# ---------------------------------------------------------------------------
+# Session 33 (ADR 0234, D1730): a window, two vocabularies and a cursor
+# ---------------------------------------------------------------------------
+
+
+def test_as_timestamp_and_as_member_refuse_and_never_coerce() -> None:
+    """A clock and a closed list, each with `as_bounded_int`'s rule: refuse, never adjust.
+
+    **A naive time is the arm that matters.** `datetime.fromisoformat` parses
+    `2026-09-28T10:00:00` without complaint and returns a time with no zone,
+    which the database would then read in ITS zone -- a window edge moved by a
+    setting nobody passed. A date alone is the same defect, shorter. `Z` and an
+    explicit offset are instants and are kept exactly as given.
+
+    A member is matched exactly: `Refused` is not `refused` and ` refused` is
+    not either, for `parse`'s own reason about case.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from app.strict_query import as_member, as_timestamp
+
+    assert as_timestamp("since", "2026-09-28T10:00:00Z") == datetime(2026, 9, 28, 10, tzinfo=UTC)
+    kept = as_timestamp("since", "2026-09-28T10:00:00+05:30")
+    assert kept.utcoffset() == timedelta(hours=5, minutes=30), "the offset was normalised away"
+    assert kept == datetime(2026, 9, 28, 4, 30, tzinfo=UTC)
+
+    # The default a naive value would otherwise get: parsed, and zoneless.
+    assert datetime.fromisoformat("2026-09-28T10:00:00").tzinfo is None
+    for value, reason in (
+        ("2026-09-28T10:00:00", "no UTC offset"),
+        ("2026-09-28", "no UTC offset"),
+        ("2026-09-28T10:00:00 00:00", "not an ISO-8601"),
+        ("yesterday", "not an ISO-8601"),
+        ("", "not an ISO-8601"),
+        ("1727517600", "not an ISO-8601"),
+    ):
+        with pytest.raises(InvalidQuery, match=reason):
+            as_timestamp("since", value)
+
+    members = ("served", "refused")
+    assert as_member("outcome", "refused", members) == "refused"
+    for value in ("Refused", " refused", "refused ", "", "refuse", "served,refused"):
+        with pytest.raises(InvalidQuery, match="must be one of served, refused"):
+            as_member("outcome", value, members)
+
+
+def _enum_literals(type_name: str) -> list[str]:
+    """Every value of an `app_private` enum, in the order the migrations gave it.
+
+    Read from the released templates in filename order: the `CREATE TYPE`'s own
+    list, then each `ALTER TYPE ... ADD VALUE`. A `BEFORE`/`AFTER` would move a
+    value, so its presence is refused rather than silently misordered.
+    """
+    import re
+
+    from agentic_postgres import REPO_ROOT
+
+    values: list[str] = []
+    for template in sorted((REPO_ROOT / "migrations" / "templates").glob("*.sql")):
+        text = template.read_text(encoding="utf-8")
+        created = re.search(
+            rf"CREATE TYPE app_private\.{type_name} AS ENUM\s*\(([^)]*)\)", text, re.IGNORECASE
+        )
+        if created:
+            values.extend(re.findall(r"'([^']+)'", created.group(1)))
+        for added, placement in re.findall(
+            rf"ALTER TYPE app_private\.{type_name} ADD VALUE '([^']+)'([^;]*);", text, re.IGNORECASE
+        ):
+            assert not placement.strip(), f"{template.name} places {added!r}: {placement!r}"
+            values.append(added)
+    return values
+
+
+def test_the_audit_vocabularies_are_the_migrations_enum_literals() -> None:
+    """**Two enforcement points, one list** (ADR 0234).
+
+    The route refuses an outcome or a reason outside its constant with 422
+    naming the members, and the reader refuses it again with PT422. If the
+    constant drifted from the enum, a real value would be refused at the route
+    -- a filter nobody could ask for -- or an invented one would reach the
+    database. Read from the migrations, in order, so neither side moves alone.
+    """
+    from app.routes import AUDIT_DENIAL_REASONS, AUDIT_OUTCOMES
+
+    outcomes = _enum_literals("agent_audit_outcome")
+    reasons = _enum_literals("agent_denial_reason")
+    assert len(outcomes) >= 7, f"the reader found {outcomes}, so it is not reading"
+    assert len(reasons) >= 9, f"the reader found {reasons}, so it is not reading"
+    assert AUDIT_OUTCOMES == tuple(outcomes)
+    assert AUDIT_DENIAL_REASONS == tuple(reasons)
+
+    from app import mcp_errors
+
+    assert set(AUDIT_DENIAL_REASONS) == set(mcp_errors.DENIAL_REASONS), (
+        "the plane's nine boundaries and the audit's denial vocabulary disagree"
+    )
+
+
+def test_a_cursor_decodes_only_what_this_endpoint_encoded() -> None:
+    """Opaque to the caller, strict to the endpoint (ADR 0234).
+
+    The round trip is the definition of *issued*: a value that decodes to a
+    time and an id but is not what `encode_audit_cursor` would have produced
+    for them -- re-padded, re-spelled, a naive time, a second separator -- is
+    refused with the one sentence, never read as a position somebody invented.
+    """
+    import base64
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from app.routes import decode_audit_cursor, encode_audit_cursor
+
+    position = datetime(2026, 9, 28, 10, 0, 0, 123456, tzinfo=UTC)
+    identifier = uuid4()
+    cursor = encode_audit_cursor(position, identifier)
+    assert "=" not in cursor
+    assert decode_audit_cursor(cursor) == (position, identifier)
+
+    def forged(text: str) -> str:
+        return base64.urlsafe_b64encode(text.encode()).decode().rstrip("=")
+
+    for bad in (
+        cursor + "=",
+        cursor[:-2],
+        cursor.upper(),
+        "",
+        "not base64 at all!",
+        forged(f"{position.isoformat()}"),
+        forged(f"{position.isoformat()}~not-a-uuid"),
+        forged(f"2026-09-28T10:00:00~{identifier}"),
+        forged(f"{position.isoformat()}~{identifier}~{identifier}"),
+        forged(f"{position.isoformat()}~{str(identifier).upper()}"),
+    ):
+        with pytest.raises(InvalidQuery, match="the cursor is not one this endpoint issued"):
+            decode_audit_cursor(bad)

@@ -87,6 +87,7 @@ ADMIN_SCOPES = [
     "admin_audit:read",
     "admin_users:read",
     "admin_users:write",
+    "admin_workflows:approve",
     "notes:read",
 ]
 PASSPHRASE = "a-correct-horse-battery-staple"  # noqa: S105
@@ -1129,8 +1130,13 @@ def test_the_audit_view_renders_every_row_of_the_page_with_its_boundary(
     rows = answer["rows"]
     assert len(rows) == 5, f"{len(rows)} rows for one owner: {rows}"
     assert answer["total"] == 5
-    assert answer["header"] == "showing 5 of 5 rows on this page; the page is the newest 500"
-    assert answer["header"] == studio.audit_view_header(5, 5)
+    # Since Session 33 the header carries the window's counts (ADR 0234): the
+    # five rows ARE the window here, two of them refused.
+    assert answer["header"] == (
+        "showing 5 of 5 rows on this page; the page is the newest 500, "
+        "in a window holding 5 rows (2 refused)"
+    )
+    assert answer["header"] == studio.audit_view_header(5, 5, answer["window_counts"])
 
     boundaries = {row["denial_reason"] for row in rows if row["outcome"] == "refused"}
     assert boundaries == {"scope_not_held", "budget_exceeded"}, (
@@ -1151,10 +1157,12 @@ def test_the_audit_page_count_equals_the_tables_newest_rows(
     header states that the page is the newest 500 rather than reporting 500 as
     a total.
 
-    **The number the header cannot show is read another way**: as the superuser,
-    over the table, in the same cluster. The point is not that 520 is right; it
-    is that Studio cannot know it and says so instead of implying otherwise.
-    This is the row `agent_audit` grows without bound on (ledger §9).
+    **The number the page cannot hold is read another way**: as the superuser,
+    over the table, in the same cluster. Until Session 33 the header could not
+    know it and said so; since ADR 0234 the endpoint counts the window on
+    every page, so the header NAMES 520 -- and the superuser's count is what
+    makes that number measured rather than echoed. This is the row
+    `agent_audit` grows without bound on (ledger §9).
     """
     agent = str(uuid_module.uuid4())
     owner = str(uuid_module.uuid4())
@@ -1165,7 +1173,11 @@ def test_the_audit_page_count_equals_the_tables_newest_rows(
     assert answer["status"] == "ok", answer
     assert len(answer["rows"]) == studio.AUDIT_PAGE_LIMIT == 500, len(answer["rows"])
     assert answer["page_limit"] == 500
-    assert answer["header"].endswith("the page is the newest 500"), answer["header"]
+    assert answer["header"] == (
+        "showing 500 of 500 rows on this page; the page is the newest 500, "
+        "in a window holding 520 rows (0 refused)"
+    ), answer["header"]
+    assert answer["next_cursor"], "a full page carried no cursor to the rest"
 
     counted = studio_rig["psql"](
         f"SELECT count(*) FROM app_private.agent_audit WHERE agent_id = '{agent}'::uuid;"
@@ -1181,29 +1193,43 @@ def test_the_audit_page_count_equals_the_tables_newest_rows(
 
 
 @requires_docker
-def test_a_view_filter_hides_no_row_from_the_pages_count(as_admin: Launched) -> None:
-    """**STU-AUDIT-001.** A filter cannot happen upstream of the count (D1248).
+def test_the_audit_header_carries_the_windows_counts(
+    studio_rig: dict[str, Any], as_admin: Launched
+) -> None:
+    """**STU-AUDIT-001**, replaced stricter under ADR 0234.
 
-    The page's filter boxes hide rows in the DOM. The proof that they CANNOT do
-    anything else is here: the forwarder takes the endpoint's own two filters
-    and refuses every other parameter with 400, so there is no request shape in
-    which `outcome=served` narrows what was read -- and therefore none in which
-    a viewer is shown a count that silently excludes refusals.
+    `test_a_view_filter_hides_no_row_from_the_pages_count` asserted that
+    `outcome=refused` was REFUSED, because a filter upstream of the page could
+    hide that refusals existed (D1248). Since Session 33 the filter reaches the
+    endpoint, and what keeps a refusal visible is the header: a page filtered
+    to `served` shows no refused row and still says how many the window holds.
 
-    `agent_id` alone is the control: it is accepted, so the 400 above is about
-    which parameter and not about parameters.
+    Through the real auth application, the real reader and the real counter:
+    four rows for one owner, three served and one refused. The page filtered
+    to `served` holds three rows and names ONE refusal; the page filtered to
+    `refused` names the same window. An upstream refusal of a malformed value
+    is still classified, never relayed.
     """
-    for parameter in ("outcome=refused", "denial_reason=scope_not_held", "since=2026-01-01"):
-        status, _, answer = json_call(as_admin, "GET", f"/__apg/audit?{parameter}")
-        assert status == 400, (parameter, status, answer)
-        assert answer["status"] == "invalid", answer
+    owner = str(uuid_module.uuid4())
+    seed_audit(studio_rig, str(uuid_module.uuid4()), owner, "served", None, times=3)
+    seed_audit(studio_rig, str(uuid_module.uuid4()), owner, "refused", "scope_not_held")
 
-    status, _, answer = json_call(as_admin, "GET", f"/__apg/audit?agent_id={uuid_module.uuid4()}")
-    assert status == 200, (status, answer)
-    assert answer["status"] == "ok", (
-        f"the control failed: an accepted filter was refused too, so the 400s above say "
-        f"nothing about which parameters this view takes -- {answer}"
-    )
+    status, _, served = json_call(as_admin, "GET", f"/__apg/audit?owner_id={owner}&outcome=served")
+    assert status == 200, served
+    assert served["status"] == "ok", served
+    assert [row["outcome"] for row in served["rows"]] == ["served"] * 3
+    assert served["header"] == (
+        "showing 3 of 3 rows on this page; the page is the newest 500, "
+        "in a window holding 4 rows (1 refused)"
+    ), served["header"]
+
+    _, _, refused = json_call(as_admin, "GET", f"/__apg/audit?owner_id={owner}&outcome=refused")
+    assert [row["outcome"] for row in refused["rows"]] == ["refused"]
+    assert refused["window_counts"] == served["window_counts"]
+
+    status, _, naive = json_call(as_admin, "GET", f"/__apg/audit?owner_id={owner}&since=2026-01-01")
+    assert status == 200, naive
+    assert naive == {"status": "invalid"}, naive
 
 
 @requires_docker

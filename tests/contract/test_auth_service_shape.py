@@ -347,6 +347,8 @@ def test_the_auth_mode_reads_no_new_variable(compose_model: dict[str, Any]) -> N
     for relative in (
         "app/workflow_worker.py",
         "app/workflow_routes.py",
+        # Session 33: the human half of the same surface, held to the same rule.
+        "app/workflow_admin_routes.py",
         "app/workflow_repository.py",
     ):
         names = _referenced_names((SERVICE_ROOT / relative).read_text(encoding="utf-8"))

@@ -358,3 +358,40 @@ class ScopeNotHeldResponse(BaseModel):
     """
 
     error: Literal["scope_not_held"]
+
+
+class WorkflowDecisionRequest(_Strict):
+    """A human's decision on ONE parked step of one run (ADR 0230, ADR 0232).
+
+    The run is in the path and the step is in the body, and the pair is what
+    the database decides on: an approval is bound to the step it names, so a
+    decision can never reach a different step of the same run by position or
+    by accident. The pattern is the definition schema's own step-name pattern.
+    """
+
+    step: str = Field(pattern=r"^[a-z][a-z0-9_]{0,62}$")
+
+
+class WorkflowDecisionResponse(BaseModel):
+    """What a decision answers: the run, the step, and what it now is."""
+
+    run_id: str
+    step: str
+    approval: Literal["approved", "rejected"]
+
+
+class ApproverIsOwnerResponse(BaseModel):
+    """The approver owns the agent whose run this is (ADR 0232)."""
+
+    error: Literal["approver_is_owner"]
+
+
+class ApprovalConflictResponse(BaseModel):
+    """A decision that can no longer be made, and which of the two reasons.
+
+    One model for the one status: `approval_already_decided` (a decision is
+    final) or `approval_expired` (the window closed before anyone decided).
+    Two models under one 409 would publish only whichever was named last.
+    """
+
+    error: Literal["approval_already_decided", "approval_expired"]

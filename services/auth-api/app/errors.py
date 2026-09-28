@@ -128,6 +128,45 @@ def scope_not_held() -> JSONResponse:
     return JSONResponse(SCOPE_NOT_HELD, status_code=403, headers={"Cache-Control": "no-store"})
 
 
+#: Session 33 (ADR 0232). The three refusals of a human's decision, each the
+#: word `workflow_decide_approval` itself raises, read from its message for one
+#: word and never relayed. A fixed document per refusal: an approver who is
+#: the run's owner, an approval already decided, and one past its window --
+#: three different things to do next, so three answers.
+APPROVER_IS_OWNER: Final = {"error": "approver_is_owner"}
+APPROVAL_ALREADY_DECIDED: Final = {"error": "approval_already_decided"}
+APPROVAL_EXPIRED: Final = {"error": "approval_expired"}
+
+
+class ApproverIsOwner(Exception):
+    """The approver owns the agent whose run this is (ADR 0232)."""
+
+
+class ApprovalAlreadyDecided(Exception):
+    """The approval was approved or rejected already; a decision is final."""
+
+
+class ApprovalExpired(Exception):
+    """The approval's window closed before anyone decided."""
+
+
+def approver_is_owner() -> JSONResponse:
+    """403. Holding the scope is not enough: the run's owner may not decide it."""
+    return JSONResponse(APPROVER_IS_OWNER, status_code=403, headers={"Cache-Control": "no-store"})
+
+
+def approval_already_decided() -> JSONResponse:
+    """409. A second decision changes nothing, and says so."""
+    return JSONResponse(
+        APPROVAL_ALREADY_DECIDED, status_code=409, headers={"Cache-Control": "no-store"}
+    )
+
+
+def approval_expired() -> JSONResponse:
+    """409. The run fails at its next claim; nothing a decision now could change."""
+    return JSONResponse(APPROVAL_EXPIRED, status_code=409, headers={"Cache-Control": "no-store"})
+
+
 class AuthenticationFailed(Exception):
     """Any of the four. Carries a reason for the log and never for the caller."""
 

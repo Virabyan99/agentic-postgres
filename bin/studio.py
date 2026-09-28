@@ -593,19 +593,41 @@ def make_handler(state: dict[str, Any]) -> type[http.server.BaseHTTPRequestHandl
             self.send_json(200, {"status": "ok", "body": payload})
 
         def audit(self) -> None:
-            supplied = self.query()
-            unknown = set(supplied) - {"agent_id", "owner_id"}
-            if unknown:
-                # The forwarder takes the endpoint's own two filters and no
-                # more. An `outcome` or a `since` here would be a filter applied
-                # UPSTREAM of the page's count, which is what D1248 refuses: a
-                # viewer could then ask for `outcome=served` and never learn
-                # there were refusals.
+            # Read strictly, not through `query()` (D1755). That helper keeps the
+            # FIRST of a repeated key and DROPS an empty one, which was harmless
+            # while this view forwarded two identity filters and is not now that
+            # it forwards `outcome`: `outcome=` would have been forwarded as no
+            # filter at all, and `outcome=served&outcome=refused` as one of the
+            # two, silently. A repeat is refused here; an empty value is sent on,
+            # so the endpoint's own strict parser refuses it (`invalid`).
+            raw = self.path.split("?", 1)
+            pairs = urllib.parse.parse_qsl(raw[1], keep_blank_values=True) if len(raw) == 2 else []
+            names = [name for name, _ in pairs]
+            repeated = sorted({name for name in names if names.count(name) > 1})
+            if repeated:
                 self.send_json(
                     400,
                     {
                         "status": "invalid",
-                        "reason": f"this view takes agent_id and owner_id; not {sorted(unknown)}",
+                        "reason": f"a parameter given twice is refused, not resolved: {repeated}",
+                    },
+                )
+                return
+            supplied = dict(pairs)
+            unknown = set(supplied) - set(studio.AUDIT_FORWARDED_FILTERS)
+            if unknown:
+                # The endpoint's own filters and no more (ADR 0234). Since
+                # Session 33 those include `outcome` and a window, and what
+                # D1248 refused -- a filter that could hide that refusals exist
+                # -- is answered by the endpoint's `window_counts`, which count
+                # the window whatever the page was filtered to and are rendered
+                # in the header below. Anything else is still refused.
+                accepted = ", ".join(studio.AUDIT_FORWARDED_FILTERS)
+                self.send_json(
+                    400,
+                    {
+                        "status": "invalid",
+                        "reason": f"this view takes {accepted}; not {sorted(unknown)}",
                     },
                 )
                 return
@@ -619,7 +641,8 @@ def make_handler(state: dict[str, Any]) -> type[http.server.BaseHTTPRequestHandl
             try:
                 payload = json.loads(body)
                 rows = payload["audit"]
-            except (json.JSONDecodeError, UnicodeDecodeError, KeyError, TypeError):
+                window = payload.get("window_counts")
+            except (json.JSONDecodeError, UnicodeDecodeError, KeyError, TypeError, AttributeError):
                 self.send_json(200, {"status": "upstream_failed"})
                 return
             self.send_json(
@@ -628,8 +651,12 @@ def make_handler(state: dict[str, Any]) -> type[http.server.BaseHTTPRequestHandl
                     "status": "ok",
                     "rows": rows,
                     "total": len(rows),
-                    "header": studio.audit_view_header(len(rows), len(rows)),
+                    "header": studio.audit_view_header(
+                        len(rows), len(rows), window if isinstance(window, dict) else None
+                    ),
                     "page_limit": studio.AUDIT_PAGE_LIMIT,
+                    "window_counts": window,
+                    "next_cursor": payload.get("next_cursor"),
                 },
             )
 

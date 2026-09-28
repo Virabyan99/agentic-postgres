@@ -14,8 +14,9 @@ because their caller has already proved who it is.
 
 from __future__ import annotations
 
+import base64
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Request, Response
@@ -308,10 +309,55 @@ RESP_UPDATE_AGENT = {
 #: -- one authority, not a docstring and an allowlist that agree today. An
 #: endpoint whose document names a filter the parser rejects is D274's shape: a
 #: claim living in an artifact nobody dereferences.
-AUDIT_QUERY_PARAMETERS: tuple[str, ...] = ("agent_id", "owner_id", "limit")
+AUDIT_QUERY_PARAMETERS: tuple[str, ...] = (
+    "agent_id",
+    "owner_id",
+    "limit",
+    # Session 33 (ADR 0234, D1730): a half-open window, a filter on each of the
+    # two reviewed vocabularies, and a keyset cursor over the reader's order.
+    "since",
+    "until",
+    "outcome",
+    "denial_reason",
+    "cursor",
+)
 
-#: The bound on `limit`, and the ONE place it is stated. Migration 0020's reader
-#: takes `p_limit` and applies it without clamping, deliberately: a second bound
+#: `app_private.agent_audit_outcome`'s members, in the enum's order: 0019's five,
+#: 0029's `replayed`, 0030's `dry_run`. **Two enforcement points, one list**:
+#: the route refuses a value outside it with 422 naming the members, and the
+#: reader refuses it again with PT422; a proof reads the migrations' literals
+#: and requires this tuple to equal them, so neither can move alone.
+AUDIT_OUTCOMES: tuple[str, ...] = (
+    "started",
+    "served",
+    "refused",
+    "failed",
+    "committed",
+    "replayed",
+    "dry_run",
+)
+
+#: `app_private.agent_denial_reason`'s members (ADR 0178): 0027's eight and
+#: 0030's `approval_required`, held to the migrations by the same proof.
+AUDIT_DENIAL_REASONS: tuple[str, ...] = (
+    "scope_not_held",
+    "not_in_allowlist",
+    "input_malformed",
+    "budget_exceeded",
+    "contract_drift",
+    "upstream_refused",
+    "audit_unavailable",
+    "write_rejected",
+    "approval_required",
+)
+
+#: What a cursor encodes between its two halves. Not a character a timestamp's
+#: ISO form or a uuid can contain, so a decoded cursor splits exactly once.
+AUDIT_CURSOR_SEPARATOR = "~"
+
+#: The bound on `limit`, and the ONE place it is stated. The reader (0020's,
+#: widened by 0032 and re-created by 0035) takes `p_limit` and applies it
+#: without clamping, deliberately: a second bound
 #: in the database would be a second authority over one rule, and the two drift
 #: the moment either moves (D495, D463). Out of range is a 422 naming the range,
 #: never a silent clamp -- a clamp answers a question the caller did not ask and
@@ -333,7 +379,12 @@ DOC_LIST_AUDIT = openapi_docs.described(
         "`denial_reason` that refused it -- a member of the reviewed taxonomy, non-null "
         "exactly on `refused` rows (ADR 0178) -- except on a refusal recorded before that "
         "column existed, which carries null. A repeated query parameter is refused "
-        "rather than resolved to its last value."
+        "rather than resolved to its last value. **Every page carries `window_counts`** -- "
+        "the rows in the agent, owner and time window by outcome and by denial reason, "
+        "ignoring `outcome`, `denial_reason` and `cursor` -- so a page filtered to one "
+        "outcome still says how many refusals the window holds. `next_cursor` is set when "
+        "the page is full and null when it is the last; pass it back as `cursor` for the "
+        "next page."
     ),
     query_parameters=[
         openapi_docs.query_parameter(
@@ -357,6 +408,39 @@ DOC_LIST_AUDIT = openapi_docs.described(
             description=(
                 f"Rows to return, {AUDIT_LIMIT_MIN}-{AUDIT_LIMIT_MAX}. A value outside the "
                 "range is refused with 422; it is never clamped."
+            ),
+        ),
+        openapi_docs.query_parameter(
+            "since",
+            schema={"type": "string", "format": "date-time"},
+            description=(
+                "The window's inclusive start, ISO-8601 WITH an offset. A naive time is "
+                "refused with 422, never read in the server's zone. Write the offset as "
+                "`Z`, or percent-encode its `+` as `%2B`: a bare `+` in a query string is "
+                "a space."
+            ),
+        ),
+        openapi_docs.query_parameter(
+            "until",
+            schema={"type": "string", "format": "date-time"},
+            description="The window's exclusive end, ISO-8601 with an offset; after `since`.",
+        ),
+        openapi_docs.query_parameter(
+            "outcome",
+            schema={"type": "string", "enum": list(AUDIT_OUTCOMES)},
+            description="Narrow the page to one outcome. `window_counts` ignores it.",
+        ),
+        openapi_docs.query_parameter(
+            "denial_reason",
+            schema={"type": "string", "enum": list(AUDIT_DENIAL_REASONS)},
+            description="Narrow the page to one refusing boundary. `window_counts` ignores it.",
+        ),
+        openapi_docs.query_parameter(
+            "cursor",
+            schema={"type": "string"},
+            description=(
+                "The `next_cursor` of the previous page, opaque. A cursor this endpoint "
+                "did not issue is refused with 422."
             ),
         ),
     ],
@@ -1008,11 +1092,55 @@ async def list_agent_audit(request: Request) -> Response:
                 if "limit" in supplied
                 else AUDIT_LIMIT_DEFAULT
             )
+            since = (
+                strict_query.as_timestamp("since", supplied["since"])
+                if "since" in supplied
+                else None
+            )
+            until = (
+                strict_query.as_timestamp("until", supplied["until"])
+                if "until" in supplied
+                else None
+            )
+            if since is not None and until is not None and since >= until:
+                raise strict_query.InvalidQuery("since must be before until")
+            outcome = (
+                strict_query.as_member("outcome", supplied["outcome"], AUDIT_OUTCOMES)
+                if "outcome" in supplied
+                else None
+            )
+            denial_reason = (
+                strict_query.as_member(
+                    "denial_reason", supplied["denial_reason"], AUDIT_DENIAL_REASONS
+                )
+                if "denial_reason" in supplied
+                else None
+            )
+            before = decode_audit_cursor(supplied["cursor"]) if "cursor" in supplied else None
         except strict_query.InvalidQuery as exc:
             raise errors.InvalidRequest(str(exc)) from exc
 
         rows = await service.repository.list_agent_audit(
-            agent_id=agent_id, owner_id=owner_id, limit=limit
+            agent_id=agent_id,
+            owner_id=owner_id,
+            limit=limit,
+            since=since,
+            until=until,
+            outcome=outcome,
+            denial_reason=denial_reason,
+            before=before,
+        )
+        # Over the WINDOW, never the page: the same agent, owner, since and
+        # until, and NOT the outcome, reason or cursor (ADR 0234). That is D1248's
+        # objection answered -- a filter narrows what is shown and cannot hide
+        # that refusals exist.
+        window_counts = await service.repository.count_agent_audit(
+            agent_id=agent_id, owner_id=owner_id, since=since, until=until
+        )
+        next_cursor = (
+            encode_audit_cursor(rows[-1]["started_at"], rows[-1]["id"])
+            if len(rows) == limit
+            else None
         )
         return JSONResponse(
             {
@@ -1023,12 +1151,15 @@ async def list_agent_audit(request: Request) -> Response:
                         "agent_id": str(row["agent_id"]),
                         "owner_id": str(row["owner_id"]),
                         "tool": row["tool"],
-                        # NULL on every `database` row, and that is D500 rather
-                        # than a serialization gap: migration 0019's write RPCs
-                        # insert no request id, so the two records for one MCP
-                        # write join by agent, tool and time. Rendered anyway,
-                        # because an absent key and a null one read the same to
-                        # a client and only one of them is honest.
+                        # The plane's id on an `agent_plane` row; on a `database`
+                        # row, the forwarded `X-Request-Id` that 0022's
+                        # `agent_request_id()` read -- NULL when the write came
+                        # with none (a direct PostgREST call) or with one that is
+                        # not a uuid (D633), and on rows written before 0022. The
+                        # sentence this replaced said NULL on EVERY database row,
+                        # which stopped being true at 0022 (D1741). Rendered
+                        # either way, because an absent key and a null one read
+                        # the same to a client and only one of them is honest.
                         "request_id": None if row["request_id"] is None else str(row["request_id"]),
                         # Already redacted, by the capability lock's
                         # `audit.redact` and in the runtime (D479). This service
@@ -1061,8 +1192,43 @@ async def list_agent_audit(request: Request) -> Response:
                     for row in rows
                 ],
                 "limit": limit,
+                "window_counts": window_counts,
+                "next_cursor": next_cursor,
             },
             headers={"Cache-Control": "no-store"},
         )
 
     return await _guard(run)
+
+
+def encode_audit_cursor(started_at: Any, row_id: Any) -> str:
+    """The keyset position after `row`, opaque to the caller (ADR 0234).
+
+    base64url over `<started_at ISO>~<id>`, unpadded. Opaque so a client pages
+    with what it was given rather than composing a position; decoded strictly,
+    so a cursor this endpoint did not issue is a 422, never a page read from
+    an invented position.
+    """
+    text = f"{started_at.isoformat()}{AUDIT_CURSOR_SEPARATOR}{row_id}"
+    return base64.urlsafe_b64encode(text.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def decode_audit_cursor(value: str) -> tuple[datetime, UUID]:
+    """`encode_audit_cursor`'s inverse, refusing anything it did not produce."""
+    refused = strict_query.InvalidQuery("the cursor is not one this endpoint issued")
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        text = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+        started, separator, row = text.partition(AUDIT_CURSOR_SEPARATOR)
+        if not separator:
+            raise refused
+        position = strict_query.as_timestamp("cursor", started)
+        identifier = UUID(row)
+    except (ValueError, UnicodeError, strict_query.InvalidQuery) as exc:
+        raise refused from exc
+    if encode_audit_cursor(position, identifier) != value:
+        # A value that decodes but is not what this endpoint would have issued
+        # for that position -- a re-padded or re-spelled cursor -- is refused
+        # too: the round trip is the definition of "issued".
+        raise refused
+    return position, identifier

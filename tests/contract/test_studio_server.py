@@ -66,6 +66,9 @@ class StandIn:
     def __init__(self) -> None:
         self.answers: dict[str, tuple[int, Any]] = {}
         self.requests: list[tuple[str, str]] = []
+        #: The whole request target, query included -- what a forwarder SENT,
+        #: which `requests` (the path alone) cannot say.
+        self.targets: list[str] = []
         self.server: ThreadingHTTPServer | None = None
         self.port = 0
 
@@ -106,6 +109,7 @@ class StandIn:
             def route(self) -> None:
                 path = self.path.split("?", 1)[0]
                 outer.requests.append((self.command, path))
+                outer.targets.append(self.path)
                 length = int(self.headers.get("Content-Length") or 0)
                 if length:
                     self.rfile.read(length)
@@ -602,19 +606,71 @@ def test_an_upstream_refusal_is_classified_and_its_body_is_not_relayed(running: 
     assert json.loads(started.call("GET", "/__apg/agents")[2])["status"] == "ok"
 
 
-def test_the_audit_view_takes_the_endpoints_own_filters_and_no_others(running: Any) -> None:
-    """D1248: a filter upstream of the page's count is the thing being refused.
+def test_the_audit_view_forwards_the_five_filters_and_nothing_else(running: Any) -> None:
+    """ADR 0234 replaces D1248's refusal with the endpoint's own window counts.
 
-    `agent_id` and `owner_id` are the endpoint's; an `outcome` or a `since` would
-    narrow the page BEFORE it is counted, which is how a viewer comes to ask for
-    `outcome=served` and never learn there were refusals.
+    **Replaced, stricter** (`test_the_audit_view_takes_the_endpoints_own_
+    filters_and_no_others`): that proof asserted `outcome` was refused with
+    400, which was right while a filter upstream of the page could hide that
+    refusals existed. Now the endpoint counts the WINDOW on every page, so the
+    view forwards the endpoint's seven parameters -- and this asserts each of
+    the five new ones REACHES the upstream verbatim, with Studio's own `limit`
+    and nothing else, which the old proof never looked at. Anything outside the
+    seven is still a 400 naming the accepted set, and sends nothing.
     """
-    started, _ = running
-    assert started.call("GET", "/__apg/audit")[0] == 200
-    assert started.call("GET", "/__apg/audit?agent_id=" + "0" * 8)[0] == 200
-    status, _, body = started.call("GET", "/__apg/audit?outcome=refused")
-    assert status == 400
+    started, stand_in = running
+    sent = {
+        "agent_id": "0" * 8,
+        "owner_id": "1" * 8,
+        "since": "2026-09-28T10:00:00+00:00",
+        "until": "2026-09-28T11:00:00Z",
+        "outcome": "refused",
+        "denial_reason": "scope_not_held",
+        "cursor": "MjAyNi0wOS0yOFQxMDowMDowMCswMDowMH4w",
+    }
+    import urllib.parse
+
+    before = len(stand_in.targets)
+    status, _, body = started.call("GET", "/__apg/audit?" + urllib.parse.urlencode(sent))
+    assert status == 200, body
+    forwarded = [
+        target for target in stand_in.targets[before:] if target.startswith("/admin/audit")
+    ]
+    assert len(forwarded) == 1, forwarded
+    path, _, query = forwarded[0].partition("?")
+    assert path == "/admin/audit"
+    received = urllib.parse.parse_qs(query, keep_blank_values=True)
+    assert received == {
+        **{name: [value] for name, value in sent.items()},
+        "limit": [str(studio.AUDIT_PAGE_LIMIT)],
+    }, received
+
+    for refused in ("color=red", "limit=5", "page=abc"):
+        before = len(stand_in.targets)
+        status, _, body = started.call("GET", f"/__apg/audit?{refused}")
+        assert status == 400, (refused, body)
+        reason = json.loads(body)["reason"]
+        assert refused.split("=")[0] in reason
+        assert ", ".join(studio.AUDIT_FORWARDED_FILTERS) in reason
+        assert stand_in.targets[before:] == [], f"{refused} reached the upstream"
+
+    # D1755: a repeated filter is refused rather than resolved to one of its
+    # values, and an EMPTY one is forwarded as empty -- for the endpoint to
+    # refuse -- rather than dropped, which would have served the unfiltered
+    # page to a viewer who believed they had filtered it.
+    before = len(stand_in.targets)
+    status, _, body = started.call("GET", "/__apg/audit?outcome=served&outcome=refused")
+    assert status == 400, body
     assert "outcome" in json.loads(body)["reason"]
+    assert stand_in.targets[before:] == []
+
+    status, _, body = started.call("GET", "/__apg/audit?outcome=")
+    assert status == 200, body
+    emptied = [target for target in stand_in.targets[before:] if target.startswith("/admin/audit")]
+    assert len(emptied) == 1, emptied
+    assert urllib.parse.parse_qs(emptied[0].partition("?")[2], keep_blank_values=True)[
+        "outcome"
+    ] == [""]
 
 
 def test_the_environment_is_not_read_for_a_credential() -> None:

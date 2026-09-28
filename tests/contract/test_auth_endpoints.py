@@ -61,6 +61,7 @@ ADMIN_SCOPES = [
     "admin_agents:write",
     "admin_users:read",
     "admin_users:write",
+    "admin_workflows:approve",
     "notes:read",
 ]
 
@@ -1673,12 +1674,15 @@ def test_an_unknown_query_parameter_is_refused(drive: Any) -> None:
     it otherwise. That is `models.py`'s stated measurement -- an unknown member
     leaves no trace at all -- and a silently ignored filter on an audit endpoint
     is the same failure with worse consequences.
+
+    The example was `cursor=abc` until Session 33 made `cursor` a parameter
+    (ADR 0234); `page` is the name a caller guessing at pagination would try.
     """
     admin = _login(drive).json()["access_token"]
     auditor = _auditor(drive, admin, "auditor-unknown")
     headers = {"Authorization": f"Bearer {auditor}"}
 
-    response = drive("GET", "/admin/audit?cursor=abc", headers=headers)
+    response = drive("GET", "/admin/audit?page=abc", headers=headers)
     assert response.status_code == 422, response.text
     assert "unknown query parameter" in response.json()["message"]
 
@@ -1823,6 +1827,189 @@ def test_the_filters_narrow_the_record_and_do_not_widen_it(
     assert rows(f"agent_id={mine}&owner_id={uuid_module.uuid4()}") == [], (
         "the filters are not conjunctive, so the counts above prove nothing"
     )
+
+
+# ---------------------------------------------------------------------------
+# Session 33 (ADR 0234, D1730): a window, two vocabularies, a cursor, and the
+# counts that keep a filter from hiding that refusals exist (D1248).
+# ---------------------------------------------------------------------------
+
+
+def _seed_audit_rows(
+    cluster: dict[str, Any],
+    agent_id: str,
+    owner_id: str,
+    outcome: str,
+    denial_reason: str | None,
+    times: int,
+) -> None:
+    """`times` finished rows in ONE transaction, so they share `started_at` exactly.
+
+    `_seed_completed_audit_row`'s statement over `generate_series`, for its
+    reason about `set_config(..., true)`. The shared timestamp is the point:
+    it is the tie a keyset cursor must break by id, and 0020's comment says
+    rows from one transaction are exactly where it happens.
+    """
+    reason = "NULL" if denial_reason is None else f"'{denial_reason}'"
+    # Every interpolated value is this module's own: two uuid4s, an enum
+    # literal and an int. No caller value reaches the statement.
+    statement = (
+        f'SET ROLE "{cluster["roles"]["agent_reader"]}"; '  # noqa: S608
+        f"SELECT set_config('app.agent_id', '{agent_id}', true); "
+        f"SELECT set_config('app.user_id', '{owner_id}', true); "
+        f"SELECT api.agent_audit_complete("
+        f"api.agent_audit_begin('list_resources', NULL, NULL, NULL, NULL), "
+        f"'{outcome}', 7, 1, {reason}) FROM generate_series(1, {times})"
+    )
+    cluster["cluster"].psql(statement)
+
+
+def test_the_audit_endpoint_returns_window_counts_on_every_page(
+    drive: Any, cluster: dict[str, Any]
+) -> None:
+    """D1248's objection, answered on the response rather than by refusing filters.
+
+    Five rows for one agent: three served, two refused at two boundaries. A
+    page filtered to `served` shows no refusal -- and carries `window_counts`
+    saying the window holds two, on the first page, on the page the cursor
+    reaches, and on a page filtered to one reason. The counts follow the
+    WINDOW (`agent_id`, `since`, `until`), so a window before the rows counts
+    none: they are counted, not constant.
+    """
+    admin = _login(drive).json()["access_token"]
+    auditor = _auditor(drive, admin, "auditor-window-counts")
+    headers = {"Authorization": f"Bearer {auditor}"}
+
+    agent, owner = str(uuid_module.uuid4()), str(uuid_module.uuid4())
+    _seed_audit_rows(cluster, agent, owner, "served", None, 3)
+    _seed_audit_rows(cluster, agent, owner, "refused", "scope_not_held", 1)
+    _seed_audit_rows(cluster, agent, owner, "refused", "budget_exceeded", 1)
+    expected = {
+        "total": 5,
+        "by_outcome": {"served": 3, "refused": 2},
+        "by_denial_reason": {"scope_not_held": 1, "budget_exceeded": 1},
+    }
+
+    def page(query: str) -> dict[str, Any]:
+        response = drive("GET", f"/admin/audit?agent_id={agent}&{query}", headers=headers)
+        assert response.status_code == 200, response.text
+        return dict(response.json())
+
+    first = page("outcome=served&limit=2")
+    assert [row["outcome"] for row in first["audit"]] == ["served", "served"]
+    assert first["window_counts"] == expected, first["window_counts"]
+    assert first["next_cursor"], "a full page carried no cursor"
+
+    second = page(f"outcome=served&limit=2&cursor={first['next_cursor']}")
+    assert [row["outcome"] for row in second["audit"]] == ["served"]
+    assert second["window_counts"] == expected, "the counts followed the cursor"
+    assert second["next_cursor"] is None, "the last page offered another"
+
+    one_reason = page("denial_reason=budget_exceeded")
+    assert [row["denial_reason"] for row in one_reason["audit"]] == ["budget_exceeded"]
+    assert one_reason["window_counts"] == expected, "the counts followed the reason filter"
+
+    oldest = min(row["started_at"] for row in page("limit=5")["audit"])
+    import urllib.parse
+
+    before = page(f"until={urllib.parse.quote(oldest, safe='')}")
+    assert before["audit"] == []
+    assert before["window_counts"] == {"total": 0, "by_outcome": {}, "by_denial_reason": {}}
+    assert page(f"since={urllib.parse.quote(oldest, safe='')}")["window_counts"] == expected
+
+
+def test_the_cursor_round_trips_and_a_forged_one_is_refused(
+    drive: Any, cluster: dict[str, Any]
+) -> None:
+    """Every row exactly once, across a tie, and nothing from an invented position.
+
+    Seven rows written in ONE transaction share `started_at` to the
+    microsecond, so a cursor holding the time alone would skip or repeat rows
+    at every page edge; walking them two at a time must visit each once, in
+    the unpaged read's order. A cursor the endpoint did not issue -- altered,
+    truncated, re-padded, or composed by the caller -- is a 422 with one
+    sentence, never a page.
+    """
+    admin = _login(drive).json()["access_token"]
+    auditor = _auditor(drive, admin, "auditor-cursor")
+    headers = {"Authorization": f"Bearer {auditor}"}
+
+    agent, owner = str(uuid_module.uuid4()), str(uuid_module.uuid4())
+    _seed_audit_rows(cluster, agent, owner, "served", None, 7)
+
+    whole = drive("GET", f"/admin/audit?agent_id={agent}", headers=headers).json()["audit"]
+    assert len(whole) == 7
+    assert len({row["started_at"] for row in whole}) == 1, "the rows do not share a timestamp"
+
+    visited: list[str] = []
+    cursor: str | None = None
+    for _ in range(10):
+        query = f"agent_id={agent}&limit=2" + (f"&cursor={cursor}" if cursor else "")
+        response = drive("GET", f"/admin/audit?{query}", headers=headers)
+        assert response.status_code == 200, response.text
+        visited.extend(row["id"] for row in response.json()["audit"])
+        cursor = response.json()["next_cursor"]
+        if cursor is None:
+            break
+    assert visited == [row["id"] for row in whole], "the cursor skipped, repeated or reordered"
+
+    issued = drive("GET", f"/admin/audit?agent_id={agent}&limit=2", headers=headers).json()[
+        "next_cursor"
+    ]
+    import base64
+
+    # A position a caller composed in the endpoint's own spelling, with the one
+    # thing an issued cursor never has: a time with no offset.
+    composed = (
+        base64.urlsafe_b64encode(f"2026-09-28T10:00:00~{whole[0]['id']}".encode())
+        .decode()
+        .rstrip("=")
+    )
+    for forged in (issued[:-3], issued + "=", issued + "AA", "abc", composed):
+        refused = drive("GET", f"/admin/audit?agent_id={agent}&cursor={forged}", headers=headers)
+        assert refused.status_code == 422, (forged, refused.text)
+        assert refused.json()["message"] == "the cursor is not one this endpoint issued"
+
+
+@pytest.mark.parametrize(
+    ("query", "why"),
+    [
+        ("since=2026-09-28T10:00:00", "a naive time"),
+        ("since=2026-09-28", "a date"),
+        ("until=yesterday", "not a time"),
+        ("since=2026-09-28T10:00:00Z&until=2026-09-28T10:00:00Z", "an empty window"),
+        ("since=2026-09-28T11:00:00Z&until=2026-09-28T10:00:00Z", "a window backwards"),
+        ("outcome=Refused", "a member in the wrong case"),
+        ("outcome=denied", "not a member"),
+        ("denial_reason=approval", "not a member"),
+        ("outcome=", "present and empty"),
+        ("cursor=", "present and empty"),
+    ],
+)
+def test_a_timestamp_or_member_outside_its_contract_is_refused(
+    drive: Any, query: str, why: str
+) -> None:
+    """The five parameters, each refused rather than read generously.
+
+    A naive time would be read in the database's zone; a member in the wrong
+    case would be a filter that matched nothing and looked like an empty
+    record. The control arm below is served, so the refusals are about the
+    values and not about the parameters.
+    """
+    admin = _login(drive).json()["access_token"]
+    auditor = _auditor(drive, admin, f"auditor-t{abs(hash(query)) % 100000}")
+    headers = {"Authorization": f"Bearer {auditor}"}
+    response = drive("GET", f"/admin/audit?{query}", headers=headers)
+    assert response.status_code == 422, f"{why}: {response.status_code} {response.text}"
+    assert response.json()["error"] == "invalid_request"
+
+    control = drive(
+        "GET",
+        "/admin/audit?since=2026-01-01T00:00:00Z&until=2026-01-02T00:00:00%2B00:00"
+        "&outcome=refused&denial_reason=approval_required",
+        headers=headers,
+    )
+    assert control.status_code == 200, f"the control was refused: {control.text}"
 
 
 def test_an_unauthenticated_caller_learns_nothing_about_the_parameters(drive: Any) -> None:

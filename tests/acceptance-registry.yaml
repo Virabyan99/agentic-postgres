@@ -3687,21 +3687,26 @@
   test_nodeids:
     - tests/contract/test_studio_runtime.py::test_the_audit_view_renders_every_row_of_the_page_with_its_boundary
     - tests/contract/test_studio_runtime.py::test_the_audit_page_count_equals_the_tables_newest_rows
-    - tests/contract/test_studio_runtime.py::test_a_view_filter_hides_no_row_from_the_pages_count
+    - tests/contract/test_studio_runtime.py::test_the_audit_header_carries_the_windows_counts
     - tests/contract/test_studio_runtime.py::test_a_token_without_the_audit_scope_is_refused_and_classified
-    - tests/contract/test_studio_server.py::test_the_audit_view_takes_the_endpoints_own_filters_and_no_others
+    - tests/contract/test_studio_server.py::test_the_audit_view_forwards_the_five_filters_and_nothing_else
     - tests/contract/test_studio_core.py::test_audit_view_header_carries_the_pages_own_count
   description: >-
     The audit view fetches `GET /admin/audit` at the endpoint's own ceiling --
-    plus `agent_id` or `owner_id` when chosen, and NO other parameter, which the
-    forwarder refuses with 400 -- and renders every row of the page, the denial
-    boundary included. The page's own count travels with it: *n of m rows on
-    this page; the page is the newest 500*, always visible, so a view filter
-    that hides rows in the browser cannot hide them from the count. There is
-    therefore no request shape in which a filter narrows what was READ, which is
-    what stops a viewer asking for `outcome=served` and never learning there
-    were refusals. The page's row count equals the newest-500 count read over
-    the table as the superuser, against a table holding more. A token without
+    plus exactly the endpoint's seven parameters when chosen (`agent_id`,
+    `owner_id`, `since`, `until`, `outcome`, `denial_reason`, `cursor`; ADR
+    0234), each forwarded verbatim; any other parameter, and any parameter
+    given twice, the forwarder refuses with 400 and sends nothing -- and renders
+    every row of the page, the denial boundary included. The page's own count
+    travels with it: *n of m rows on this page; the page is the newest 500*,
+    always visible, so a view filter that hides rows in the browser cannot hide
+    them from the count. **Since Session 33 a filter may narrow what was READ,
+    and what stops a viewer asking for `outcome=served` and never learning there
+    were refusals is the window's count on the same response**: the header adds
+    *in a window holding T rows (R refused)*, counted over the agent, owner and
+    time window whatever the page was filtered to. The page's row count equals
+    the newest-500 count read over the table as the superuser, against a table
+    holding more, and the header names the larger total. A token without
     `admin_audit:read` is served the endpoint's refusal, classified as a kind of
     no.
 - id: STU-REVOKE-001

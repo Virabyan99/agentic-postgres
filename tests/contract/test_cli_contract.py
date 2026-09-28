@@ -460,7 +460,9 @@ COMMANDS_WITH_VERBS = {
     "bin/upgrade.sh",
     # Session 32: six verbs, all six documented from the day the command lands.
     # Four of them refuse with exit 3 in this checkout and their `--help` still
-    # answers -- which is the whole point of the proof below.
+    # answers -- which is the whole point of the proof below. Session 33 adds
+    # four more (`approvals`, `approve`, `reject`, `inspect`), derived from the
+    # usage block like the six, so this entry does not move (D1756).
     "bin/workflow.sh",
 }
 
