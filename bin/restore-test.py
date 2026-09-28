@@ -510,7 +510,44 @@ def observe_restored_instance(plan: restore_drill.DrillPlan) -> dict[str, Any]:
                 "value": None,
                 "reason": "the reading did not arrive in the shape it was asked for",
             }
+
+    # Session 33 (ADR 0230): the approvals by status, INSIDE the same member,
+    # with the same two outcomes and a third reason. Read from the table
+    # directly, as `schema_migrations` is above: the drill is the superuser in a
+    # throwaway instance, and no definer function answers counts by status. A
+    # backup taken before migration 0035 restores a cluster with no such table,
+    # and that is said -- never `{}`, which would read as *nothing was ever
+    # waiting* (ADR 0195, D600).
+    code, answer = query(plan, APPROVALS_BY_STATUS)
+    if code != 0 or answer == "":
+        approvals: dict[str, Any] = {
+            "value": None,
+            "reason": (
+                "app_private.workflow_approval is not present in the restored cluster; "
+                "the backup predates migration 0035"
+            ),
+        }
+    else:
+        try:
+            approvals = {"value": json.loads(answer), "reason": ""}
+        except ValueError:
+            approvals = {
+                "value": None,
+                "reason": "the reading did not arrive in the shape it was asked for",
+            }
+    observed["workflow_runs"] = {**observed["workflow_runs"], "approvals": approvals}
     return observed
+
+
+#: Every approval in the restored cluster, counted by status -- `pending`,
+#: `approved`, `rejected`, `expired`. No run id, no step, no decider: the
+#: drill's record is the operator's, and who approved what is the provenance
+#: reader's (ADR 0234).
+APPROVALS_BY_STATUS = (
+    "SELECT coalesce(jsonb_object_agg(status, total), '{}'::jsonb) FROM "
+    "(SELECT status::text AS status, count(*) AS total "
+    "FROM app_private.workflow_approval GROUP BY status) counted"
+)
 
 
 def released_versions(document: dict[str, Any] | None = None) -> list[str]:

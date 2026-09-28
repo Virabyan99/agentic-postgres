@@ -589,6 +589,9 @@ def workflow_record(
     heartbeat_age_seconds: int | None,
     heartbeat_holder: str | None,
     detail: str = "",
+    approvals_pending: int | None = None,
+    oldest_pending_approval_age_seconds: int | None = None,
+    approvals_detail: str = "the substrate predates 1.11.0",
 ) -> Check:
     """What the workflow substrate holds, and how long ago the loop asked for work.
 
@@ -619,6 +622,16 @@ def workflow_record(
     third outcome and is reported rather than folded into a healthy-looking
     zero (ADR 0195, D600). A deployment carrying no definitions at all is `0`,
     which is a fact: a project may install none.
+
+    **Since 1.11.0 (Session 33): the approvals waiting for a human**, pending
+    and unexpired on running runs, and how long the oldest has waited -- two
+    more numbers with no threshold, for the reason above: nobody has measured
+    how long an approval may wait before a deployment is unwell, and a run
+    parked for a human over a weekend is the feature working. `None` is *not
+    read*, said with `approvals_detail` -- a 1.10.0 cluster's counts carry no
+    such keys, and reporting that as zero pending would be D600's reassuring
+    null (ADR 0195). A status `compensating` reaches `runs` like any other,
+    because the probe admits a status by its SHAPE (D1693).
     """
     facts = _pairs(
         definitions=definitions,
@@ -627,6 +640,8 @@ def workflow_record(
         oldest_claimed_lease_age_seconds=oldest_claimed_lease_age_seconds,
         heartbeat_age_seconds=heartbeat_age_seconds,
         heartbeat_holder=heartbeat_holder,
+        approvals_pending=approvals_pending,
+        oldest_pending_approval_age_seconds=oldest_pending_approval_age_seconds,
     )
     if definitions is None:
         return _check(
@@ -645,11 +660,20 @@ def workflow_record(
         if oldest_claimed_lease_age_seconds is not None
         else ""
     )
+    if approvals_pending is None:
+        approvals = f"approvals: not read ({approvals_detail})"
+    else:
+        oldest = (
+            f" (oldest {oldest_pending_approval_age_seconds}s)"
+            if oldest_pending_approval_age_seconds is not None
+            else ""
+        )
+        approvals = f"approvals pending {approvals_pending}{oldest}"
     return _check(
         "workflow",
         OK,
         f"{definitions} definitions; runs {runs}; steps {steps}; {heartbeat}{overdue}; "
-        "counts and ages only, no threshold (ADR 0226)",
+        f"{approvals}; counts and ages only, no threshold (ADR 0226)",
         facts,
     )
 

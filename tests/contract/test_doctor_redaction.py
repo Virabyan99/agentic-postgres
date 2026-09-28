@@ -207,11 +207,17 @@ def poisoned_run(monkeypatch: pytest.MonkeyPatch, doctor: Any) -> None:
                 json.dumps(
                     {
                         "definitions": 2,
-                        "runs": {"succeeded": 3, SUBPROCESS: 1},
+                        # `compensating` is 0035's run status, admitted by the
+                        # SHAPE with no code change (D1693) -- asserted below.
+                        "runs": {"succeeded": 3, "compensating": 1, SUBPROCESS: 1},
                         "steps": {"succeeded": 9},
                         "oldest_claimed_lease_age_seconds": None,
                         "heartbeat_age_seconds": 4,
                         "heartbeat_holder": SUBPROCESS,
+                        # Session 33's two keys, the canary in the one the
+                        # cluster computes, so the leak scans cover the line.
+                        "approvals_pending": 2,
+                        "oldest_pending_approval_age_seconds": SUBPROCESS,
                     }
                 )
                 + "\n"
@@ -781,6 +787,58 @@ def test_the_workflow_probe_reports_counts_when_the_cluster_answers(doctor: Any)
     # The overdue lease is absent, which is a fact and not a failure: nothing
     # is claimed past its lease on a healthy deployment.
     assert evidence["oldest_claimed_lease_age_seconds"] == "null"
+    # Session 33: the count is kept and the canary in the age is dropped.
+    assert evidence["approvals_pending"] == "2"
+    assert evidence["oldest_pending_approval_age_seconds"] == "null"
+    assert "approvals pending 2;" in check.detail
+
+
+def test_a_pre_gate_substrate_is_reported_not_zeroed(
+    doctor: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 1.10.0 cluster's counts carry no approval keys, and that is not zero.
+
+    Driven through the probe with the exact document 0034's `workflow_counts`
+    returns. *approvals pending 0* would tell an operator of a deployment that
+    predates approvals that none are waiting -- true by accident, and false
+    the day the reading is from a 1.11.0 cluster whose function failed to
+    carry them. The control is the same probe over 0035's document with a
+    count present, which IS read.
+    """
+
+    def answer(counts: dict[str, Any]) -> Any:
+        return lambda *a, **k: subprocess.CompletedProcess(
+            args=list(a), returncode=0, stdout=json.dumps(counts) + "\n", stderr=""
+        )
+
+    before_gates = {
+        "definitions": 1,
+        "runs": {"succeeded": 1},
+        "steps": {"succeeded": 2},
+        "oldest_claimed_lease_age_seconds": None,
+        "heartbeat_age_seconds": 3,
+        "heartbeat_holder": "apg-host-01:41:deadbeef",
+    }
+    monkeypatch.setattr(doctor, "run", answer(before_gates))
+    check = doctor.probe_workflow(document())
+    assert check.verdict == diagnosis.OK, check.detail
+    assert "approvals: not read (the substrate predates 1.11.0)" in check.detail
+    assert dict(check.evidence)["approvals_pending"] == "null"
+
+    malformed = {**before_gates, "approvals_pending": "3"}
+    monkeypatch.setattr(doctor, "run", answer(malformed))
+    check = doctor.probe_workflow(document())
+    assert "approvals: not read (the reading did not arrive in the shape" in check.detail
+
+    after_gates = {
+        **before_gates,
+        "approvals_pending": 0,
+        "oldest_pending_approval_age_seconds": None,
+    }
+    monkeypatch.setattr(doctor, "run", answer(after_gates))
+    check = doctor.probe_workflow(document())
+    assert "approvals pending 0;" in check.detail, "the control failed: a 1.11.0 count was not read"
+    assert dict(check.evidence)["approvals_pending"] == "0"
 
 
 @pytest.mark.usefixtures("poisoned_run")
@@ -799,7 +857,7 @@ def test_a_status_name_and_a_holder_the_cluster_invented_are_dropped(doctor: Any
     """
     check = doctor.probe_workflow(document())
     evidence = dict(check.evidence)
-    assert evidence["runs"] == "succeeded=3", "the well-formed status was dropped too"
+    assert evidence["runs"] == "compensating=1 succeeded=3", "a well-formed status was dropped too"
     assert SUBPROCESS not in evidence["runs"]
     assert evidence["heartbeat_holder"] == "null"
     assert SUBPROCESS not in check.detail

@@ -683,6 +683,9 @@ def evidence_document(
         # with no such function, and that is a fact about the backup rather
         # than a failure of the drill. No run id, no input, no result: a run's
         # own document is the agent's, and this record is the operator's.
+        # Since Session 33 the member carries `approvals` -- counts by status,
+        # or null with the reason (a backup before migration 0035) -- nested
+        # rather than a sibling, so the one member says what the substrate held.
         "workflow_runs": observed.get("workflow_runs"),
         "smoke": smoke,
         "verdict": drill_verdict(observed=observed, repository=repository, smoke=smoke),

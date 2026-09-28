@@ -860,7 +860,21 @@ def probe_workflow(document: dict[str, Any]) -> diagnosis.Check:
         )
 
     holder = counts.get("heartbeat_holder")
+    # Session 33: 0035's two keys. ABSENT is a 1.10.0 substrate and is said so;
+    # present but not a whole number is a reading in the wrong shape. Neither
+    # is zero pending (ADR 0195) -- and the age, a value the cluster computed,
+    # is repeated only as a whole number, `_whole_number`'s rule.
+    if "approvals_pending" not in counts:
+        pending, approvals_detail = None, "the substrate predates 1.11.0"
+    else:
+        pending = _whole_number(counts.get("approvals_pending"))
+        approvals_detail = "the reading did not arrive in the shape it was asked for"
     return diagnosis.workflow_record(
+        approvals_pending=pending,
+        oldest_pending_approval_age_seconds=_whole_number(
+            counts.get("oldest_pending_approval_age_seconds")
+        ),
+        approvals_detail=approvals_detail,
         definitions=_whole_number(counts.get("definitions")),
         runs=_by_status(counts.get("runs")),
         steps=_by_status(counts.get("steps")),

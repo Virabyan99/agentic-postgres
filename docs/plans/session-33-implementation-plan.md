@@ -1,7 +1,7 @@
 # Session 33 — Gates, compensation and provenance
 
-**Status: IN EXECUTION since 2026-09-26 — Runs 1–6 done (D1742–D1758 added;
-NEXT FREE D1759). Run 7 is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
+**Status: IN EXECUTION since 2026-09-26 — Runs 1–7 done (D1742–D1761 added;
+NEXT FREE D1762). Run 8 is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
 `main` directly. This plan spends **D1714–D1741** in §1 and **ADR 0230–0234**.
 **NEXT FREE AFTER THIS PLAN: D1742, ADR 0235.** Rows the runs add go in §1's
 second table, below D1741, in execution order; the header's *Status*
@@ -477,6 +477,9 @@ second table below, in execution order.
 | **D1756** | 6 | §5 Run 6 item 5: *"`COMMANDS_WITH_VERBS` in `test_cli_contract.py` gains them"* (the four verbs). | `COMMANDS_WITH_VERBS` is a set of COMMANDS, the control for a derivation that reads each command's verbs out of its own `--help` (D1395's guard). `bin/workflow.sh` is already in it since Session 32. | **It does not move**; its comment says why. The four verbs are derived from the usage block like the six, and `test_workflow_command.py::test_every_verbs_help_answers_without_a_project` -- a verb list -- gains the four. |
 | **D1757** | 6 | §2 names the replacement Studio proofs under `AGT-AUDIT-003` and says `STU-AUDIT-001`'s two refusal proofs are replaced; §2 also says the registry lands in Run 8. | Renaming a node id `STU-AUDIT-001` names breaks `test_acceptance_registry` in THIS run (D1119), as WF-DEF-001 did in Run 4 (D1750). And two OTHER `STU-AUDIT-001` proofs pinned the header's exact text, which the window counts change: `test_the_audit_view_renders_every_row_of_the_page_with_its_boundary` and `test_the_audit_page_count_equals_the_tables_newest_rows` (whose `endswith` would fail). | **STU-AUDIT-001 moves in Run 6**: its two replaced node ids and its description (*"exactly the endpoint's seven parameters"*, §2's sentence). The two pinning proofs are made STRICTER, not loosened: each asserts the whole header, and the 520-row proof now asserts the header NAMES 520 -- the number its old docstring said Studio could not know -- beside the superuser's count and a `next_cursor`. Whether the two new node ids are ALSO `AGT-AUDIT-003`'s is Run 8's to write. |
 | **D1758** | 6 | §5 Run 6 item 2: *"`models.py` the request and response models"*; the parked draft had one model per refusal. | OpenAPI keys a response by STATUS, and both `approval_already_decided` and `approval_expired` are 409: the draft named `ApprovalAlreadyDecidedResponse` under 409 and left `ApprovalExpiredResponse` with no reader (ruff F401 found it), so the published document said only one of the two words. | **One model, `ApprovalConflictResponse`, `error: Literal["approval_already_decided", "approval_expired"]`**, under 409; `approver_is_owner` keeps its own under 403. The canonical contract carries both words. |
+| **D1759** | 7 | §5 Run 7 *Proofs*: `test_doctor_readings.py::test_the_workflow_check_reports_pending_approvals_with_no_threshold` and `::test_a_pre_gate_substrate_is_reported_not_zeroed`; *Targeted*: `test_fleet_command.py`. | `test_doctor_readings.py` holds the two READINGS (`capacity`, `usage`); every proof of the twelfth CHECK lives in `test_diagnosis.py` (the pure verdict) and `test_doctor_redaction.py` (the probe, beside its poisoned rig and leak scans). There is no `test_fleet_command.py`; the module is `tests/contract/test_fleet.py`. | **The plan's names, placed beside their siblings**: the no-threshold proof in `test_diagnosis.py`, the pre-gate proof in `test_doctor_redaction.py` (driven through `probe_workflow`), plus a pure sibling `test_an_unread_approval_count_is_said_as_not_read_and_never_as_zero`; the poisoned rig gains the two keys with the canary in the age, so the existing leak scans cover the new line. `test_fleet.py` ran in the targeted list. Run 8 writes the node ids from `--collect-only` (D1236). |
+| **D1760** | 7 | §5 Run 7 items 3-4 name operator-guide §17's three new subsections, `:419`, `docs/studio.md:159` and `docs/README.md:63`. | Run 6 made three more sentences false that the list does not name: `docs/workflows.md`'s **The six verbs** (ten now, four with a human's token), §17's intro (*the four things an operator does*, *the six verbs*) and §17's **An agent's own run** -- *"there is no admin route that does"*, which `inspect` now is. | **All three rewritten in this run**: the verb section lists ten and says which token each half takes; §17's intro names approvals, compensation and provenance; *An agent's own run* is folded into **Provenance**, which keeps the agent's `status` line. The twelfth check's example and figure count (six → eight) moved with it. Historical records (`pre-stage-4-audit.md`, scope-closure §22-§25, the decision report) are left as they were; Run 10's §26 supersedes them. |
+| **D1761** | 7 | §5 Run 7 item 2: the drill member *"gains `approvals: {by_status}`"* and *"both files move"* (D1691). | No definer function counts approvals by status (`workflow_counts` returns pending and the oldest age only), and `restore_drill.evidence_document` passes `workflow_runs` through by NAME -- so a key nested inside the member needs no second selector. | **`bin/restore-test.py` reads `app_private.workflow_approval` directly** (`APPROVALS_BY_STATUS`), as the superuser in the throwaway drill instance -- the same way it already reads `schema_migrations` -- and nests `approvals: {value, reason}` inside `workflow_runs`, the member's own two-outcome shape; an absent table is `null` with *"the backup predates migration 0035"* while the runs' counts beside it are still read. `restore_drill.py` moves by its comment only; the host proof `test_session32_workflow_restore.py` reads `value` and `reason` and is unaffected. |
 
 ---
 
@@ -1866,6 +1869,37 @@ member drops the null arm's reason → its proof FAILS; control:
 `test_session12_documented_path.py`, `test_acceptance_registry.py`. Commit
 (`Session 33 Run 7: the readers -- pending approvals in the doctor, the drill
 member, the operator guide`), push, read CI.
+
+**Done.** **The doctor**: `diagnosis.workflow_record` takes
+`approvals_pending`, `oldest_pending_approval_age_seconds` and a reason; the
+sentence reads *approvals pending N (oldest Ts)*, or *approvals pending 0*
+with no invented age, or *approvals: not read (the substrate predates
+1.11.0)* with `null` in the evidence -- `probe_workflow` tells an ABSENT key
+(a 1.10.0 cluster) from a present one in the wrong shape, and repeats the
+age only as a whole number. `OK` at every count and age (asserted at 1 to
+10⁴ pending and 0 to 10⁶ s). `compensating` reaches `runs` through the
+status SHAPE with no code change -- asserted in the poisoned rig
+(`compensating=1 succeeded=3`), not assumed. **The drill**: `workflow_runs`
+nests `approvals` (**D1761**). **The pages**: §17 gains **Approvals** (the
+literal `PATCH /admin/users/$APPROVER_ID` with role and scopes together --
+read from `UpdateUserRequest` and the route's *set together or not at all*
+refusal -- the three verbs, the four refusal words, the expiry, D1721's
+residual), **Compensation** (`complete`/`incomplete`, and that `incomplete`
+is the operator's to finish by hand), **Provenance** (`inspect` under
+`admin_audit:read`, a revoked agent's run, D1704); the audit sentence,
+`docs/studio.md`'s header and filter paragraphs, and the README row
+rewritten; three more pages the tree contradicted after Run 6 (**D1760**).
+**Proofs** (first execution, all green): `test_diagnosis.py` +2, the
+redaction module +1 and its control extended, `test_restore_test_command.py`
++1 and the existing drive's equality widened to the nested member (**D1759**
+on where they live). **Battery 6/6 killed**, each `FAILED`, none `ERROR`,
+BOTH controls (`test_doctor_with_no_verb_runs_the_twelve_checks_unchanged`,
+`test_restore_test_command.py::test_the_document_records_who_measured_the_
+time`) PASSED in every arm: the plan's (m1) `0` for absent keys and (m2) the
+null arm's reason dropped; and (m3) a threshold at 3600 s, (m4) the count
+never read, (m5) the member without `approvals`, (m6) the sentence without
+the age. **Targeted, once: 271 passed** (the plan's list, `test_fleet.py` for
+its `test_fleet_command.py`). **Rows added: D1759–D1761. NEXT FREE: D1762.**
 
 ### Run 8 — the bump, the registry, the gate, and the trip's proofs
 

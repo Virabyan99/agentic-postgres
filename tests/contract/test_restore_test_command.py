@@ -820,6 +820,8 @@ sql_answer() {
     # Session 32. Above the `count(*)` arm because the function's NAME
     # contains `count`, and the arms are matched most specific first.
     *workflow_counts*)                printf '%s\n' "${APG_WORKFLOW_RUNS}" ;;
+    # Session 33, above `count(*)` for the same reason: the statement counts.
+    *workflow_approval*)              printf '%s\n' "${APG_WORKFLOW_APPROVALS}" ;;
     *"max(version)"*)                 printf '20260101000000\n' ;;
     *"count(*)"*)                     printf '21\n' ;;
     *"SELECT 1"*)                     printf '1\n' ;;
@@ -992,6 +994,9 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         ("APG_FOREIGN_OWNER", _foreign_owner()),
         ("APG_WRITTEN_NOTE_ID", "6f1c3a10-0000-4000-8000-00000000abcd"),
         ("APG_WORKFLOW_RUNS", '{"succeeded": 2}'),
+        # Session 33: the approvals by status, two statuses so neither can be
+        # a constant the command wrote itself.
+        ("APG_WORKFLOW_APPROVALS", '{"approved": 3, "expired": 1}'),
     ):
         monkeypatch.setenv(name, value)
 
@@ -1083,7 +1088,11 @@ def test_the_drill_reads_the_restored_clusters_workflow_runs_or_says_why_not(
     """
     assert _drive(rig) == 0
     document = _newest_evidence(rig)
-    assert document["workflow_runs"] == {"value": {"succeeded": 2}, "reason": ""}
+    assert document["workflow_runs"] == {
+        "value": {"succeeded": 2},
+        "reason": "",
+        "approvals": {"value": {"approved": 3, "expired": 1}, "reason": ""},
+    }
 
     monkeypatch.setenv("APG_WORKFLOW_RUNS", "")
     assert _drive(rig) == 0
@@ -1091,6 +1100,37 @@ def test_the_drill_reads_the_restored_clusters_workflow_runs_or_says_why_not(
     assert absent["workflow_runs"]["value"] is None
     assert "predates migration 0034" in absent["workflow_runs"]["reason"]
     assert absent["verdict"]["passed"] is True, "a substrate a backup predates is not a failure"
+
+
+def test_the_drill_evidence_carries_approvals_or_null_with_a_reason(
+    rig: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Session 33 (ADR 0230): the approvals by status, or null and why.
+
+    Through the real command, both branches of one code path: the stub counts
+    approvals by status and the member carries them; the stub then answers
+    nothing -- a cluster restored from a backup taken after 0034 and before
+    0035, which has runs and no approval table -- and the member carries
+    `null` WITH the reason, the runs' own counts untouched beside it. `{}`
+    would say *nothing was ever waiting*, which a backup that predates the
+    table cannot say (D600). The drill still passes: a substrate a backup
+    predates is not a failed restore.
+    """
+    assert _drive(rig) == 0
+    counted = _newest_evidence(rig)["workflow_runs"]["approvals"]
+    assert counted == {"value": {"approved": 3, "expired": 1}, "reason": ""}
+
+    monkeypatch.setenv("APG_WORKFLOW_APPROVALS", "")
+    assert _drive(rig) == 0
+    document = _newest_evidence(rig)
+    absent = document["workflow_runs"]["approvals"]
+    assert absent["value"] is None
+    assert absent["reason"] == (
+        "app_private.workflow_approval is not present in the restored cluster; "
+        "the backup predates migration 0035"
+    )
+    assert document["workflow_runs"]["value"] == {"succeeded": 2}
+    assert document["verdict"]["passed"] is True
 
 
 def test_the_command_never_hands_docker_the_live_volume(rig: dict[str, Any]) -> None:

@@ -649,6 +649,69 @@ def test_the_workflow_check_reports_counts_and_ages_with_no_threshold() -> None:
             )
 
 
+def test_the_workflow_check_reports_pending_approvals_with_no_threshold() -> None:
+    """Session 33 (ADR 0230): two more numbers, and still no verdict on them.
+
+    An approval waiting a week is the feature working -- a run parked for a
+    human over a holiday -- so `OK` at every count and every age, with both
+    numbers in the SENTENCE, where an operator reading `ok` in the table sees
+    them. With nothing pending there is no oldest, and the sentence says the
+    count alone rather than inventing an age of zero.
+    """
+    for pending in (1, 7, 10**4):
+        for age in (0, 59, 3599, 10**6):
+            check = diagnosis.workflow_record(
+                definitions=1,
+                runs="compensating=1 running=2",
+                steps="parked=2",
+                oldest_claimed_lease_age_seconds=None,
+                heartbeat_age_seconds=4,
+                heartbeat_holder="apg-host:41:deadbeef",
+                approvals_pending=pending,
+                oldest_pending_approval_age_seconds=age,
+            )
+            assert check.verdict == diagnosis.OK, (pending, age, check.verdict)
+            assert f"approvals pending {pending} (oldest {age}s)" in check.detail
+            evidence = dict(check.evidence)
+            assert evidence["approvals_pending"] == str(pending)
+            assert evidence["oldest_pending_approval_age_seconds"] == str(age)
+
+    none_waiting = diagnosis.workflow_record(
+        definitions=1,
+        runs="succeeded=1",
+        steps="succeeded=1",
+        oldest_claimed_lease_age_seconds=None,
+        heartbeat_age_seconds=4,
+        heartbeat_holder=None,
+        approvals_pending=0,
+        oldest_pending_approval_age_seconds=None,
+    )
+    assert "approvals pending 0;" in none_waiting.detail
+    assert "oldest" not in none_waiting.detail
+
+
+def test_an_unread_approval_count_is_said_as_not_read_and_never_as_zero() -> None:
+    """The pure half of `test_a_pre_gate_substrate_is_reported_not_zeroed`.
+
+    `None` renders *not read* with its reason and `null` in the evidence; the
+    check stays `OK` because the substrate itself WAS read -- the approvals are
+    a member it did not carry, not a failure of the reading (ADR 0195's third
+    outcome, reported at the member it belongs to).
+    """
+    check = diagnosis.workflow_record(
+        definitions=2,
+        runs="succeeded=3",
+        steps="succeeded=9",
+        oldest_claimed_lease_age_seconds=None,
+        heartbeat_age_seconds=4,
+        heartbeat_holder=None,
+    )
+    assert check.verdict == diagnosis.OK
+    assert "approvals: not read (the substrate predates 1.11.0)" in check.detail
+    assert "approvals pending" not in check.detail
+    assert dict(check.evidence)["approvals_pending"] == "null"
+
+
 def test_an_overdue_lease_is_reported_in_the_detail_rather_than_only_in_the_evidence() -> None:
     """An operator reading the table sees `ok` either way, so the one fact that
     tells them to look is in the sentence beside it."""

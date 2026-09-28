@@ -415,10 +415,13 @@ every deploy since:
    endpoint; a revoked secret exchanged again answers 401.
 5. **The audit** is written as the caller by `SECURITY DEFINER` functions
    (ADR 0135); a denial names its boundary (ADR 0178, `denial_reason` since
-   migration 0032). `GET /admin/audit` filters by agent, owner and limit only
-   (D1248 — a window, an outcome filter and a cursor are priced and not
-   built); Studio shows the newest 500 and says so; `fleet.sh` counts by
-   boundary.
+   migration 0032). `GET /admin/audit` filters by agent, owner, a half-open
+   window (`since`, `until` — ISO-8601 with an offset), `outcome` and
+   `denial_reason`, and pages with an opaque `cursor`; **every page carries
+   `window_counts`** — the window's rows by outcome and by reason, whatever
+   the page was filtered to — so a filter cannot hide that refusals exist
+   (D1248, ADR 0234, since 1.11.0). Studio shows the newest 500 and the
+   window's counts; `fleet.sh` counts by boundary.
 6. **The SQL grant is the project's** (§6 step 5). A tool over a view the set
    never granted is served by the lock and refused by the database with
    `upstream_refused` in the audit — measured on beta 2026-09-11 (D1156),
@@ -1277,11 +1280,13 @@ belongs to a later session.
 
 Since `1.10.0`. A definition is installed by the deploy; a run is started by an
 agent; the loop that executes it is **inside the `auth` process** (ADR 0226).
-There is no workflow container, role or secret to operate, and the four things
-an operator actually does with one are below.
+There is no workflow container, role or secret to operate, and what an
+operator actually does with one is below -- since `1.11.0` that includes
+deciding approvals, finishing an incomplete compensation and reading a run's
+provenance.
 
 `docs/workflows.md` is the developer's half -- what a definition is and what the
-six verbs do. This section is what you read on the host.
+ten verbs do. This section is what you read on the host.
 
 ### The twelfth check
 
@@ -1295,14 +1300,22 @@ and its reason (D1441, ADR 0213). It answers with counts and ages, or it
 answers that it could not read them:
 
 ```
-workflow    ok    2 definitions; runs queued=1 succeeded=3; steps queued=3
-                  succeeded=9; the loop last asked for work 4s ago; counts and
-                  ages only, no threshold (ADR 0226)
+workflow    ok    2 definitions; runs queued=1 running=1 succeeded=3; steps
+                  parked=1 queued=3 succeeded=9; the loop last asked for work 4s
+                  ago; approvals pending 1 (oldest 312s); counts and ages only,
+                  no threshold (ADR 0226)
 ```
 
-Six figures under `--verbose` or in `--json`: `definitions`, `runs` and `steps`
-by status, `oldest_claimed_lease_age_seconds`, `heartbeat_age_seconds` and
-`heartbeat_holder`.
+Eight figures under `--verbose` or in `--json`: `definitions`, `runs` and
+`steps` by status, `oldest_claimed_lease_age_seconds`, `heartbeat_age_seconds`,
+`heartbeat_holder`, and since `1.11.0` `approvals_pending` and
+`oldest_pending_approval_age_seconds` -- the approvals waiting for a person,
+pending and unexpired on running runs. **No threshold on those either**: a run
+parked for a human over a weekend is the feature working. On a `1.10.0`
+cluster the sentence says *approvals: not read (the substrate predates
+1.11.0)* and the figure is `null`, never `0` -- a deployment that has no
+approvals is not the same as one where none are waiting. A run that reads
+`compensating` appears in `runs` like any other status.
 
 Two of them are the ones to read together, and neither is a verdict:
 
@@ -1350,11 +1363,107 @@ without one, and that is a fact about the backup rather than a failed drill.
 No run id, no input and no result: a run's own document is the agent's, and
 this record is yours.
 
-### An agent's own run
+Since `1.11.0` the member also carries `approvals`: every approval in the
+restored cluster counted by status (`pending`, `approved`, `rejected`,
+`expired`), or `{"value": null, "reason": ...}` when the backup predates
+migration 0035 -- the runs' counts beside it are still read.
 
-An operator does not read another principal's run through a product surface,
-and there is no admin route that does. What you can do is hand the agent's
-holder the one line:
+### Approvals
+
+Since `1.11.0`. A run whose definition declares `approval:` on a step **parks
+there** when the plane refuses the call `approval_required`, and waits for a
+person (ADR 0230). Nobody is notified: an approver looks.
+
+**Grant the scope first.** `admin_workflows:approve` is administrative and only
+`project_admin` may carry it; no existing administrator gains it on upgrade.
+Role and scopes are set **together**, and `scopes` REPLACES the set, so name
+every scope the person keeps:
+
+```bash
+APP="$(jq -r '.routes.app.url' /etc/agentic-postgres/projects/<key>/outputs.json)"
+curl -sS -X PATCH "$APP/admin/users/$APPROVER_ID" \
+  -H "Authorization: Bearer $APG_API_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"role": "project_admin", "scopes": ["admin_users:read", "admin_workflows:approve"]}'
+```
+
+`$APG_API_TOKEN` is your own token, holding `admin_users:write`. The change
+moves the subject's `authz_version`, so the approver logs in again afterwards.
+
+**List, then decide**, as the approver, with the approver's token:
+
+```bash
+export APG_API_TOKEN=...     # the approver's, never an agent's
+bin/workflow.sh approvals --project-outputs outputs.json
+bin/workflow.sh approve --run "$RUN" --step set_the_embedding --confirm "$RUN" \
+  --project-outputs outputs.json
+bin/workflow.sh reject  --run "$RUN" --step set_the_embedding --confirm "$RUN" \
+  --project-outputs outputs.json
+```
+
+`--confirm` repeats the run id or nothing is sent (exit 2): a decision is
+final. What the listing shows is who, what and until when -- the run, the
+definition and version, the step, the capability and tool, the agent and its
+owner, when approval was requested and when it expires -- and **never an
+argument value or the run's input**; what the step does is in the reviewed
+definition.
+
+Four refusals, each a fixed word (exit 5):
+
+- **`authorization_failed`** -- the token lacks `admin_workflows:approve`.
+  `admin_audit:read` reads a run's provenance; it does not decide one.
+- **`approver_is_owner`** -- you own the agent whose run this is. An
+  administrator who created an agent owns it, so a SECOND administrator
+  approves that agent's runs. Holding the scope is not enough.
+- **`approval_already_decided`** -- somebody decided first. Final.
+- **`approval_expired`** -- the window (`expires_after_seconds`, 60-3600,
+  below the run's timeout) closed first; the run fails `approval_expired` at
+  its next claim. Start a new run if the work is still wanted.
+
+An approval makes the step claimable at once; its next call carries the
+decision as a signed claim naming that one tool and that one idempotency key,
+and the plane serves exactly that write (ADR 0231). A rejection is a cancel.
+
+**The residual, stated** (D1721): approval governs the agent plane and
+workflows; the database's authority is the SQL grant. An agent holding a
+capability's scope and its own token can still call the underlying function
+through the REST route directly, where no approval is checked. That predates
+workflows and is recorded, not repaired, in this release.
+
+### Compensation
+
+A step may declare a `compensation:` -- a write the worker makes, as the same
+agent, if that step succeeded and the run later fails terminally or is
+cancelled (a rejection included). The run reads **`compensating`** while the
+undos run, newest first, and then ends at its cause (`failed` or `cancelled`)
+with a `compensation_outcome`:
+
+- **`complete`** -- every compensation succeeded.
+- **`incomplete`** -- at least one did not, after its own declared retry. A
+  failed compensation does not stop the ones after it.
+
+**`incomplete` is yours to finish.** The product does not retry an undo beyond
+what the definition declared, because an undo it kept retrying would be a
+write nobody reviewed. Read the run's provenance (below) to see which
+compensation failed and why, and act by hand as the principal that should.
+A compensation is a forward action somebody chose, not a rollback: a note
+cannot be un-created in this release (there is no `delete_note`).
+
+### Provenance
+
+```bash
+export APG_API_TOKEN=...     # a human holding admin_audit:read
+bin/workflow.sh inspect --run "$RUN" --project-outputs outputs.json
+```
+
+One run, whole: the run, every step with **every attempt joined to its audit
+rows by request id**, every approval with the human who decided it and when,
+and the profile reported absent with a reason (a run does not record it). The
+run's input is reported by its keys only, and no field carries an argument
+value or a result. It is the audit's reader, under the audit's scope (ADR
+0234), so it answers for **any** agent's run -- a revoked agent's stopped run
+included, which that agent can no longer read itself (D1704).
+
+The agent's own read is still `status`, with the agent's token:
 
 ```bash
 APG_AGENT_TOKEN=... bin/workflow.sh status --run "$RUN" --project-outputs outputs.json

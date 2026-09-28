@@ -149,19 +149,23 @@ reader returns it.
 Above the table, always visible:
 
 ```
-showing 500 of 500 rows on this page; the page is the newest 500
+showing 500 of 500 rows on this page; the page is the newest 500, in a window holding 812 rows (22 refused)
 ```
 
 **The filter boxes hide rows in the page and nowhere else.** They do not become
-query parameters, and the forwarder refuses any parameter but `agent_id` and
-`owner_id` with a 400 — so there is no request shape in which a filter narrows
-what was *read*. A viewer who could ask for `outcome=served` and be shown a
-count would never learn there had been refusals (D1248).
+query parameters. What DOES reach the endpoint, since `1.11.0`, is exactly its
+own seven parameters — `agent_id`, `owner_id`, `since`, `until`, `outcome`,
+`denial_reason` and `cursor` — forwarded verbatim; any other parameter, or any
+parameter given twice, is a 400 and nothing is sent (D1755). A filter can now
+narrow what was *read*, and what stops a viewer asking for `outcome=served` and
+never learning there were refusals is the second half of the sentence above:
+**the window's counts**, which the endpoint computes over the agent, owner and
+time window whatever the page was filtered to (D1248, ADR 0234).
 
-**What this view cannot tell you is how many rows there are.** The page is the
-newest 500 and says so. `agent_audit` grows without bound and nothing prunes
-it; the total is a question for `bin/db.sh`, and a retention policy is a
-released migration nobody has written yet (D1255).
+**The window's total is a count, not a page.** The page is still the newest
+500 and says so; the response carries a `next_cursor` for the rest.
+`agent_audit` grows without bound and nothing prunes it; a retention policy is
+a released migration nobody has written yet (D1255).
 
 ### Capabilities
 

@@ -161,7 +161,7 @@ records no result, so `{{steps.pause.…}}` is a compile error. **`wait:
 {event: …}` is refused**: a wait on an event arrives in Session 34 with the
 events that resume it.
 
-## The six verbs
+## The ten verbs
 
 ```bash
 bin/workflow.sh init      --project project.example.yaml [--name NAME]
@@ -170,6 +170,11 @@ bin/workflow.sh run       --definition NAME@VERSION --project-outputs FILE [--in
 bin/workflow.sh dry-run   --definition NAME@VERSION --project-outputs FILE [--input JSON]
 bin/workflow.sh status    --run RUN_ID --project-outputs FILE
 bin/workflow.sh cancel    --run RUN_ID --project-outputs FILE
+# A human's four (since 1.11.0), with APG_API_TOKEN -- see "Approvals" below:
+bin/workflow.sh approvals --project-outputs FILE [--limit N]
+bin/workflow.sh approve   --run RUN_ID --step NAME --confirm RUN_ID --project-outputs FILE
+bin/workflow.sh reject    --run RUN_ID --step NAME --confirm RUN_ID --project-outputs FILE
+bin/workflow.sh inspect   --run RUN_ID --project-outputs FILE
 ```
 
 `init` prints a skeleton derived from your own lock — the first read capability
@@ -178,9 +183,14 @@ file. `validate` compiles every definition in the directory against the lock
 and exits 5 naming the file, the step and the reason. Those two need no
 deployment.
 
-The other four call a deployment, and they take the token from
-`APG_AGENT_TOKEN` — never an argument, because a value in an argument vector is
-a value `ps` can read.
+`run`, `dry-run`, `status` and `cancel` call a deployment as an AGENT, and
+they take the token from `APG_AGENT_TOKEN` — never an argument, because a
+value in an argument vector is a value `ps` can read. `approvals`, `approve`,
+`reject` and `inspect` call it as a HUMAN administrator, with the token from
+`APG_API_TOKEN` (`bin/api.sh`'s variable) and never the agent's: an agent
+token is refused by those routes, so the agent whose run waits cannot decide
+it. `approve` and `reject` refuse with exit 2, before sending anything, unless
+`--confirm` repeats `--run` — a decision is final.
 
 **A run is started as the agent that token was minted for, and the agent's
 stored scopes are what authorise it — not the token's.** An agent narrowed
