@@ -183,6 +183,11 @@ SHELL_COMMANDS = (
     # than any session has declared; its host sweep runs `worker-restart`
     # against beta itself, under a parked run.
     "bin/session-32-check.sh",
+    # Session 33 (ADR 0230-0234). Derived from 32's by diff with NO flag added
+    # or removed -- the sorted flag sets were compared and the diff is empty
+    # (D1133) -- and 32 -> 33 is consecutive again. Its offline half reports
+    # TEN claims; its host sweep creates the humans that decide beta's runs.
+    "bin/session-33-check.sh",
     "bin/smoke-test.sh",
     # Session 24 (ADR 0205). A loopback client of a deployment's own
     # surfaces, holding the human's token in one process and handing the

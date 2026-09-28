@@ -91,6 +91,10 @@ ID_PATTERN = re.compile(
     # the worker is not how an operator reads a deployment but a second
     # thing an agent's authority can do on one. A family of its own is what
     # makes *at-least-once plus an idempotent upstream* countable.
+    # Session 33 (ADR 0230-0234) adds no family: approval, compensation and
+    # provenance are a run's, so they are `WF`; the audit filters and the
+    # approval claim are the agent plane's, so they are `AGT`; the ledger
+    # print is an operator's, so it is `OPS`.
     r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF)-[A-Z0-9]+(-\d+)?$"
 )
 

@@ -2288,8 +2288,11 @@
   description: >-
     A capability declaring requires_approval is refused before anything is
     dialled, with its own taxonomy reason and its own caller-facing token, and
-    the refusal is audited. The refusal is the guarantee (D870): no pending
-    state, no second principal, no notification plane. The declaration folds
+    the refusal is audited. The refusal is the guarantee (D870) for every
+    caller whose token carries no approval claim naming the tool and the
+    key (ADR 0231) -- and those callers receive it byte for byte as before.
+    Since Session 33 a WORKFLOW step may wait for a human's recorded
+    decision (ADR 0230); there is still no notification plane. The declaration folds
     as a restriction across the capabilities behind a tool - any one requiring
     approval requires it - which is the opposite polarity from the dry-run
     permission (D925). The live half shows the declaration, the enum member and
@@ -3827,8 +3830,11 @@
     one surface out. Migration 0032 is a DROP and CREATE rather than a replace,
     because PostgreSQL refuses to change an existing function's return type, and
     it re-issues the `REVOKE ... FROM PUBLIC` and the `GRANT EXECUTE` that the
-    DROP took with it. The arity stays `(uuid, uuid, integer)`, so every
-    released call site is unchanged. Live, on the deployment: after a real
+    DROP took with it. The arity was `(uuid, uuid, integer)` through 0032;
+    migration 0035 re-creates the reader at nine arguments -- a window, an
+    outcome, a denial reason and a keyset cursor -- and re-issues the grant
+    at that arity, every released call site moving in the same release
+    (D1741, AGT-AUDIT-003). Live, on the deployment: after a real
     refusal on alpha the endpoint's row for it carries the boundary the plane
     recorded.
 
@@ -4568,6 +4574,7 @@
     - tests/contract/test_doctor_readings.py::test_doctor_sh_maps_the_usage_word_to_the_reading
     - tests/contract/test_doctor_readings.py::test_the_store_query_sums_across_instances
     - tests/contract/test_doctor_readings.py::test_the_usage_verb_needs_a_project_and_then_reads_its_document
+    - tests/contract/test_doctor_readings.py::test_an_empty_tool_call_answer_names_the_current_mcp_process
     - tests/contract/test_backup_repository_report.py::test_repository_bytes_is_the_sum_of_deltas
     - tests/contract/test_backup_repository_report.py::test_repository_bytes_is_none_when_a_backup_carries_no_delta
     - tests/contract/test_backup_repository_report.py::test_repository_bytes_is_not_published_in_the_deployed_document
@@ -4963,6 +4970,8 @@
     - tests/contract/test_workflow_install.py::test_a_scope_name_the_compiler_could_not_have_derived_is_refused
     - tests/contract/test_workflow_install.py::test_step_6d_installs_definitions_after_the_migration_and_before_the_services
     - tests/contract/test_workflow_install.py::test_the_deploy_installs_definitions_as_the_superuser_over_the_socket
+    - tests/contract/test_workflow_install.py::test_a_project_with_nothing_to_install_says_which_of_the_two_reasons
+    - tests/contract/test_workflow_install.py::test_a_definition_that_does_not_compile_refuses_the_deploy_at_exit_five
     - tests/contract/test_dev_environment_cluster.py::test_dev_up_installs_the_example_projects_definitions
   description: >-
     **The deploy installs a project's definitions at step 6d** (ADR 0228):
@@ -5098,3 +5107,330 @@
     live count must be positive or the comparison is two zeros. What the
     member carries is runs by status and nothing else (D1699): definitions
     are not in the reading and are not claimed.
+
+# ---------------------------------------------------------------------------
+# Session 33 -- approval gates, compensation, provenance (ADR 0230-0234)
+# ---------------------------------------------------------------------------
+
+- id: WF-GATE-001
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/contract/test_workflow_gates.py::test_the_two_tables_grant_nothing_to_any_role
+    - tests/contract/test_workflow_gates.py::test_the_new_functions_are_executable_by_the_auth_service_and_nobody_else
+    - tests/contract/test_workflow_gates.py::test_begin_compensation_is_executable_by_nobody
+    - tests/contract/test_workflow_gates.py::test_request_approval_records_pending_and_parks_until_expiry
+    - tests/contract/test_workflow_gates.py::test_a_step_that_declares_no_approval_cannot_open_a_gate
+    - tests/contract/test_workflow_gates.py::test_an_approval_park_holds_no_lease
+    - tests/contract/test_workflow_gates.py::test_approve_makes_the_step_claimable_at_once
+    - tests/contract/test_workflow_gates.py::test_reject_requests_the_runs_cancel
+    - tests/contract/test_workflow_gates.py::test_the_runs_owner_cannot_decide
+    - tests/contract/test_workflow_gates.py::test_a_second_decision_is_refused_and_changes_nothing
+    - tests/contract/test_workflow_gates.py::test_an_expired_approval_cannot_be_decided
+    - tests/contract/test_workflow_gates.py::test_a_decision_on_an_unknown_step_or_run_is_the_one_refusal
+    - tests/contract/test_workflow_gates.py::test_the_token_lookup_answers_only_an_approved_approval_of_that_agents_running_run
+    - tests/contract/test_workflow_gates.py::test_gate_state_reports_a_served_wait
+    - tests/contract/test_workflow_gates.py::test_expire_marks_only_a_pending_approval_past_its_expiry
+    - tests/contract/test_workflow_gates.py::test_pending_approvals_list_no_argument_value_oldest_first
+    - tests/contract/test_workflow_gates.py::test_the_replaced_substrate_functions_keep_their_signatures
+    - tests/contract/test_workflow_gates.py::test_every_finish_and_park_appends_an_attempt
+    - tests/contract/test_workflow_gates.py::test_a_timed_out_run_with_a_call_in_flight_waits_for_the_call
+    - tests/contract/test_workflow_repository.py::test_every_workflow_function_0035_grants_is_called_by_this_module
+    - tests/contract/test_diagnosis.py::test_the_workflow_check_reports_pending_approvals_with_no_threshold
+    - tests/contract/test_diagnosis.py::test_an_unread_approval_count_is_said_as_not_read_and_never_as_zero
+    - tests/contract/test_doctor_redaction.py::test_a_pre_gate_substrate_is_reported_not_zeroed
+    - tests/contract/test_restore_test_command.py::test_the_drill_evidence_carries_approvals_or_null_with_a_reason
+  description: >-
+    Migration 0035 creates `app_private.workflow_approval` and
+    `workflow_attempt` with no grant to any role, and the functions over them
+    are executable by `auth_service` alone. `workflow_request_approval`
+    records a pending approval carrying the refused call's request id and
+    parks the step until its expiry -- holding no lease -- and only a step
+    whose compiled element declares `approval` may open one.
+    `workflow_gate_state` reports none, pending, approved or expired and
+    whether a wait has been served. `workflow_decide_approval` approves (the
+    step becomes claimable at once) or rejects (the run's cancel is
+    requested); it refuses the run's OWNER (`approver_is_owner`), a second
+    decision (`approval_already_decided`), an expired approval
+    (`approval_expired`) and an unknown step or run with the one 404, and
+    changes nothing on a refusal. `workflow_approval_for_token` answers only
+    an approved approval of that agent's RUNNING run (D1745: a decided row
+    does not re-check its window). Every finish and park appends an attempt,
+    and a run timed out with a call in flight waits for the call (D1744). The
+    pending listing carries no argument value, oldest first (D1720). Read
+    without a threshold: the doctor's `workflow` check reports pending
+    approvals and the oldest one's age -- `not read` on a 1.10.0 substrate,
+    never zero -- and the restore drill's `workflow_runs` carries approvals
+    by status, or null with the reason when the backup predates 0035.
+
+- id: WF-COMP-001
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/contract/test_workflow_gates.py::test_a_failure_with_compensable_steps_becomes_compensating_in_reverse
+    - tests/contract/test_workflow_gates.py::test_a_compensation_row_waits_for_the_one_before_it
+    - tests/contract/test_workflow_gates.py::test_a_failed_compensation_does_not_stop_the_rest_and_ends_incomplete
+    - tests/contract/test_workflow_gates.py::test_all_compensations_succeeding_ends_complete_at_the_cause
+    - tests/contract/test_workflow_gates.py::test_a_cancel_with_nothing_to_compensate_is_cancelled_directly
+    - tests/contract/test_workflow_gates.py::test_a_compensating_run_is_not_timed_out
+    - tests/contract/test_workflow_gates.py::test_a_refused_mint_during_compensation_stops_the_run_incomplete
+    - tests/contract/test_workflow_gates.py::test_the_compensation_key_is_derived_from_the_run_and_the_forward_position
+  description: >-
+    A run that fails or is cancelled with succeeded forward steps declaring a
+    compensation becomes `compensating` with its cause; one compensation row
+    per such step is appended in REVERSE order with its own derived key; a
+    compensation row is claimed only when every earlier one is finished; a
+    failed compensation does not stop the rest; the run ends at its cause
+    with `compensation_outcome` `complete` or `incomplete`. A run with
+    nothing to compensate takes its cause directly, a compensating run is not
+    timed out, and a refused mint during compensation stops the run
+    `incomplete` (ADR 0233).
+
+- id: WF-DEF-002
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/contract/test_workflow_definition.py::test_an_approval_requiring_step_must_declare_approval
+    - tests/contract/test_workflow_definition.py::test_a_declared_approval_on_a_step_that_needs_none_is_refused
+    - tests/contract/test_workflow_definition.py::test_a_profile_added_approval_is_seen
+    - tests/contract/test_workflow_definition.py::test_the_example_project_without_the_profile_is_the_control
+    - tests/contract/test_workflow_definition.py::test_the_approval_expiry_is_bounded_below_the_run_timeout
+    - tests/contract/test_workflow_definition.py::test_a_compensation_must_be_a_write_the_lock_compiles
+    - tests/contract/test_workflow_definition.py::test_a_compensation_may_not_require_approval
+    - tests/contract/test_workflow_definition.py::test_a_compensation_on_a_read_step_is_refused
+    - tests/contract/test_workflow_definition.py::test_a_compensation_takes_only_declared_arguments
+    - tests/contract/test_workflow_definition.py::test_a_compensation_may_not_reference_a_later_step
+    - tests/contract/test_workflow_definition.py::test_compensation_scopes_join_the_required_scopes
+    - tests/contract/test_workflow_definition.py::test_an_undo_rows_name_can_never_be_a_step_name
+    - tests/contract/test_workflow_definition.py::test_a_wait_takes_no_capability_and_is_bounded
+    - tests/contract/test_workflow_definition.py::test_a_wait_on_an_event_is_refused_naming_session_thirty_four
+    - tests/contract/test_workflow_definition.py::test_a_reference_to_a_wait_step_is_refused
+    - tests/contract/test_workflow_definition.py::test_the_schema_admits_a_capability_step_or_a_wait_step_and_never_both
+    - tests/contract/test_workflow_definition.py::test_the_skeleton_skips_a_write_a_profile_made_approval_requiring
+    - tests/contract/test_workflow_definition.py::test_the_session_32_definitions_are_byte_for_byte_unchanged
+    - tests/contract/test_workflow_definition.py::test_the_example_projects_four_definitions_compile
+  description: >-
+    A definition may declare `approval: {expires_after_seconds}` on a step
+    whose tool OR capability requires approval, and must; a step declaring
+    approval whose tool requires none is refused; a profile-added approval is
+    seen (D1723, the second example project), with the project without the
+    profile as the control; the expiry is bounded below the run's timeout. A
+    `compensation` must be a write the lock compiles, must not require
+    approval, may not sit on a read step, takes only declared arguments and
+    references the run's input or steps at or before its own; its scopes
+    join `required_scopes`. `wait: {seconds}` takes no capability, is bounded
+    below the run timeout, is referenced by nothing, and `wait: {event}` is
+    refused naming Session 34. A step is a capability step or a wait step and
+    never both; `init`'s skeleton skips a write a profile made
+    approval-requiring; Session 32's definitions are unchanged and the
+    example project's four definitions compile (ADR 0230, ADR 0233).
+
+- id: WF-WORK-002
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/contract/test_workflow_worker.py::test_an_approval_step_parks_on_the_planes_refusal_with_its_request_id
+    - tests/contract/test_workflow_worker.py::test_an_approved_step_is_minted_with_the_approval_and_called
+    - tests/contract/test_workflow_worker.py::test_a_pending_approval_past_its_expiry_fails_the_run
+    - tests/contract/test_workflow_worker.py::test_a_dry_run_never_requests_approval
+    - tests/contract/test_workflow_worker.py::test_a_wait_step_parks_once_then_finishes_and_mints_nothing
+    - tests/contract/test_workflow_worker.py::test_a_compensation_row_is_called_as_a_write_with_its_own_key
+    - tests/contract/test_workflow_worker.py::test_the_stored_result_is_the_tools_own_return_value
+    - tests/contract/test_workflow_worker.py::test_a_scope_narrowed_after_enqueue_fails_the_run_naming_it
+    - tests/contract/test_workflow_worker.py::test_the_plane_serving_an_approval_step_unasked_finishes_it_succeeded
+  description: >-
+    The loop reads the gate before minting. It parks an approval step on the
+    plane's own `approval_required` refusal and records the plane's request
+    id; an approved step is minted WITH the approval and called; a pending
+    step past its expiry fails the run `approval_expired`; a dry run never
+    requests approval and makes no call for an approval step; a wait step is
+    parked once and then finished `waited`, with no token minted; a
+    compensation row is called as a write with its own key; a step's stored
+    result is the tool's own return value, measured from the real plane's
+    bytes (rig 33c); a scope narrowed after enqueue fails the run naming
+    `scope_not_held`; and a plane that serves an approval step unasked
+    finishes it `succeeded` with a warning (D1754).
+
+- id: AGT-APPROVE-002
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/contract/test_approval_claim.py::test_step_token_adds_the_claim_only_from_an_approved_decision
+    - tests/contract/test_approval_claim.py::test_step_token_refuses_an_undecided_or_foreign_approval
+    - tests/contract/test_approval_claim.py::test_agent_token_never_carries_the_claim
+    - tests/contract/test_approval_claim.py::test_issue_refuses_an_extra_claim_naming_a_required_one
+    - tests/contract/test_approval_claim.py::test_the_plane_serves_an_approved_write_for_its_tool_and_key
+    - tests/contract/test_approval_claim.py::test_the_plane_refuses_a_claim_for_another_tool_or_key
+    - tests/contract/test_approval_claim.py::test_the_plane_refuses_an_approved_dry_run
+    - tests/contract/test_approval_claim.py::test_a_token_without_the_claim_is_refused_as_before
+    - tests/contract/test_approval_claim.py::test_a_malformed_claim_is_a_claim_error
+  description: >-
+    `step_token` adds `apg_approval {id, tool, key}` only from an approved
+    decision it reads from the database itself, and refuses otherwise;
+    `agent_token` never adds it; `issue` refuses an extra claim that names a
+    required one. The plane serves a `requires_approval` write only when the
+    claim names the tool called AND the idempotency key presented, refuses a
+    claim for another tool or key and any claim with `dry_run`, audited; a
+    malformed claim is a claim error; and a token without the claim is
+    refused exactly as before, byte for byte -- the control (ADR 0231).
+
+- id: AGT-AUDIT-003
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/contract/test_agent_audit_plane.py::test_the_reader_pages_every_row_exactly_once_across_tied_timestamps
+    - tests/contract/test_agent_audit_plane.py::test_the_window_counts_ignore_the_outcome_filter_and_the_cursor
+    - tests/contract/test_agent_audit_plane.py::test_an_unknown_outcome_or_reason_is_refused_not_empty
+    - tests/contract/test_agent_audit_plane.py::test_the_new_reader_and_the_counter_are_granted_to_the_auth_service_alone
+    - tests/contract/test_migrations.py::test_0035_reissues_the_reader_grant_at_its_new_arity
+    - tests/contract/test_auth_endpoints.py::test_the_audit_endpoint_returns_window_counts_on_every_page
+    - tests/contract/test_auth_endpoints.py::test_the_cursor_round_trips_and_a_forged_one_is_refused
+    - tests/contract/test_auth_endpoints.py::test_a_timestamp_or_member_outside_its_contract_is_refused
+    - tests/contract/test_auth_strict_query.py::test_as_timestamp_and_as_member_refuse_and_never_coerce
+    - tests/contract/test_auth_strict_query.py::test_the_audit_vocabularies_are_the_migrations_enum_literals
+    - tests/contract/test_auth_strict_query.py::test_a_cursor_decodes_only_what_this_endpoint_encoded
+    - tests/contract/test_studio_server.py::test_the_audit_view_forwards_the_five_filters_and_nothing_else
+    - tests/contract/test_studio_runtime.py::test_the_audit_header_carries_the_windows_counts
+  description: >-
+    The audit reader takes a half-open window, an outcome, a denial reason
+    and a keyset cursor, orders by `(started_at, id)` descending, refuses an
+    unknown outcome or reason with `PT422` rather than answering empty, and
+    is granted to `auth_service` alone at its new arity;
+    `auth_count_agent_audit` counts the window by outcome and by reason,
+    ignoring the filters and the cursor. `GET /admin/audit` parses the five
+    new parameters strictly -- a naive time and a member in the wrong case
+    refused, never coerced -- with the two vocabularies bound to the
+    migrations' enum literals; returns `window_counts` on every page and a
+    `next_cursor` when the page is full; and a cursor walks every row exactly
+    once when rows share a `started_at`, a cursor it did not issue refused.
+    Studio forwards exactly the endpoint's seven parameters and shows the
+    window's counts in its header (ADR 0234, D1248).
+
+- id: WF-PROV-001
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/contract/test_workflow_gates.py::test_provenance_joins_every_attempt_to_its_audit_rows
+    - tests/contract/test_workflow_gates.py::test_provenance_names_the_approvals_decider
+    - tests/contract/test_workflow_gates.py::test_provenance_reports_the_profile_absent_with_a_reason
+    - tests/contract/test_workflow_gates.py::test_provenance_carries_no_parameters_result_or_input_value
+    - tests/contract/test_workflow_gates.py::test_provenance_refuses_a_missing_run
+    - tests/contract/test_workflow_admin_routes.py::test_provenance_is_served_under_the_audit_scope_only
+    - tests/contract/test_workflow_admin_routes.py::test_an_agent_token_is_refused_by_every_admin_workflow_route
+    - tests/contract/test_workflow_admin_routes.py::test_provenance_answers_a_revoked_agents_stopped_run
+    - tests/contract/test_workflow_admin_routes.py::test_no_admin_workflow_response_carries_an_argument_value
+  description: >-
+    `workflow_provenance` returns the run, every step with every attempt
+    joined to its audit rows by the plane's request id, every approval with
+    its decider, and `profile` reported absent with a reason; it carries no
+    parameters, no result and the run's input by key only (D1746), and a
+    missing run is the one 404. `GET /admin/workflows/runs/{id}` serves it
+    under `admin_audit:read` -- the audit's reader, under the audit's scope
+    -- refuses an agent token and a token without the scope, answers a
+    revoked agent's stopped run (D1704), and no admin workflow response
+    carries an argument value (ADR 0234).
+
+- id: WF-ADMIN-001
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/contract/test_workflow_admin_routes.py::test_the_four_routes_are_mounted_in_auth_mode_and_named_by_the_openapi_document
+    - tests/contract/test_workflow_admin_routes.py::test_approvals_list_pending_with_no_argument_values
+    - tests/contract/test_workflow_admin_routes.py::test_approve_and_reject_need_the_approve_scope
+    - tests/contract/test_workflow_admin_routes.py::test_each_refusal_is_a_fixed_document
+    - tests/contract/test_workflow_admin_routes.py::test_the_decision_is_bound_to_the_named_step
+    - tests/contract/test_scope_registry.py::test_the_administrative_class_is_one_per_identity_resource_and_verb
+    - tests/contract/test_scope_registry.py::test_an_administrative_scope_is_reachable_only_by_the_admin_role
+  description: >-
+    The approval routes list pending approvals with no argument values,
+    approve and reject under `admin_workflows:approve`, translate
+    `approver_is_owner`, `approval_already_decided`, `approval_expired` and
+    `no_such_workflow` to fixed documents, bind the decision to the step
+    named in the body, and are mounted in `auth` mode and named by the
+    OpenAPI document. `admin_workflows:approve` is in the administrative
+    class, with no read or write twin, and `project_admin`'s ceiling alone
+    reaches it (ADR 0232).
+
+- id: WF-CMD-002
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/contract/test_workflow_command.py::test_the_four_human_verbs_call_the_enumerated_admin_routes_and_nothing_else
+    - tests/contract/test_workflow_command.py::test_the_human_verbs_take_the_api_token_and_never_the_agent_token
+    - tests/contract/test_workflow_command.py::test_approve_and_reject_refuse_without_a_matching_confirm
+    - tests/contract/test_workflow_command.py::test_inspect_prints_the_document_whole
+    - tests/contract/test_workflow_command.py::test_the_three_http_verbs_call_the_enumerated_routes_and_nothing_else
+    - tests/contract/test_workflow_command.py::test_the_command_holds_no_sql
+  description: >-
+    `bin/workflow.sh` has ten verbs. `approvals`, `approve`, `reject` and
+    `inspect` call the four admin routes -- a second closed table -- and
+    nothing else, with the token from `APG_API_TOKEN` and never the agent's;
+    `approve` and `reject` refuse with exit 2, before any request, unless
+    `--confirm` equals `--run`; `inspect` prints the document whole; and the
+    command still holds no SQL.
+
+- id: OPS-LEDGER-001
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/contract/test_migrate_command.py::test_status_prints_the_ledger_lines_dbmate_wrote
+    - tests/contract/test_migrate_command.py::test_the_exit_is_dbmates_and_stderr_is_not_swallowed
+  description: >-
+    `bin/migrate.sh --runtime status` prints dbmate's own `[X]` lines and the
+    exit is dbmate's, with its stderr not swallowed (D1707: since 1.8.0 the
+    ledger was captured and never printed).
+
+- id: WF-APPROVE-001
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/deployment/test_session33_gates.py::test_an_approval_step_parks_with_one_refusal_in_the_audit
+    - tests/deployment/test_session33_gates.py::test_the_requesting_agent_cannot_approve
+    - tests/deployment/test_session33_gates.py::test_the_runs_owner_cannot_approve
+    - tests/deployment/test_session33_gates.py::test_an_administrator_without_the_scope_cannot_approve
+    - tests/deployment/test_session33_gates.py::test_a_second_user_approves_and_the_run_completes_once
+    - tests/deployment/test_session33_gates.py::test_the_project_without_a_set_lists_no_approvals
+  description: >-
+    On the deployment: an approval step parks with ONE `approval_required`
+    row in the audit; an agent token is refused by the approve route; the
+    run's owner is refused `approver_is_owner`; an administrator without the
+    scope is refused and the approval stays pending; a second user holding
+    the scope approves and the run completes with ONE committed write; alpha,
+    which installs no definition, lists no approvals.
+
+- id: WF-COMP-002
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/deployment/test_session33_gates.py::test_a_rejection_cancels_the_run_and_compensates
+    - tests/deployment/test_session33_gates.py::test_a_terminal_failure_after_a_wait_compensates_in_reverse
+  description: >-
+    On the deployment: a rejected run is cancelled and its first step
+    compensated -- the task back in `pending`, outcome `complete`, no
+    embedding written; a terminal failure after a served wait compensates in
+    reverse, the wait step `waited` and the outcome `complete`.
+
+- id: WF-PROV-002
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/deployment/test_session33_gates.py::test_inspect_reads_back_the_approved_run_complete
+    - tests/deployment/test_session33_gates.py::test_an_auditor_reads_a_revoked_agents_stopped_run
+  description: >-
+    On the deployment: `bin/workflow.sh inspect` reads back an approved run
+    with the approval step's refused and committed attempts each joined to
+    its audit rows and the approver named; a revoked agent's stopped run,
+    which that agent can no longer read, is read whole by an auditor
+    (D1704).
+
+- id: AGT-AUDIT-004
+  priority: P0
+  target_session: 33
+  test_nodeids:
+    - tests/deployment/test_session33_gates.py::test_a_cursor_pages_the_deployments_audit_once_each
+    - tests/deployment/test_session33_gates.py::test_a_filtered_page_reports_the_refusals_it_did_not_show
+  description: >-
+    On the deployment: a cursor over beta's whole audit record up to a fixed
+    `until` returns every row exactly once, as many as the window's own
+    count; a page filtered to `committed` carries the window's refusal count
+    (D1248).

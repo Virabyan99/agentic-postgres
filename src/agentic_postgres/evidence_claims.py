@@ -229,6 +229,33 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "workflow_command",
         "workflow_install",
         "workflow_reading",
+        # Session 33 (ADR 0230-0234). TEN, and each is a property of a
+        # CHECKOUT. `workflow_gates`, `workflow_compensation` and
+        # `workflow_provenance` are migration 0035 under a real cluster this
+        # workstation starts, plus the route over fakes behind a REAL
+        # `AuthService`. `workflow_definition_gates` is the compiler over a
+        # committed lock. `workflow_worker_gates` is the loop over fakes that
+        # RECORD, its stored result measured from the real plane's bytes.
+        # `approval_claim` is the real signer and the real plane function.
+        # `audit_filters` is the reader under a cluster and the endpoint
+        # under one. `workflow_admin` and `workflow_command_human` are
+        # routes and a command's closed tables. `migrate_status_ledger` is
+        # dbmate's own output through `bin/migrate.sh`.
+        #
+        # The session's other FOUR claims are deliberately not here:
+        # `workflow_approval_live`, `workflow_compensation_live`,
+        # `workflow_provenance_live` and `audit_filters_live` each need a
+        # person-shaped principal deciding a real run on a real plane.
+        "workflow_gates",
+        "workflow_compensation",
+        "workflow_definition_gates",
+        "workflow_worker_gates",
+        "approval_claim",
+        "audit_filters",
+        "workflow_provenance",
+        "workflow_admin",
+        "workflow_command_human",
+        "migrate_status_ledger",
     }
 )
 
@@ -503,6 +530,28 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "workflow_resume": ("WF-RESUME-001",),
     "workflow_revocation": ("WF-REVOKE-001",),
     "workflow_restore": ("REC-WF-001",),
+    # Session 33 (ADR 0230-0234). FOURTEEN claims, landing with the
+    # constant (D690), ten offline and four host -- counted from these
+    # tuples and from `OFFLINE_CLAIMS`, never by hand (D1628). Each
+    # requirement is its own claim (ADR 0089, D1150). The session's subject
+    # is a human in the loop: a step that waits for a person's decision, a
+    # signed claim that releases exactly the one write decided, the undo of
+    # what a failed or rejected run already did, and the record of who
+    # decided what -- plus D1248's audit filters and D1707's ledger.
+    "workflow_gates": ("WF-GATE-001",),
+    "workflow_compensation": ("WF-COMP-001",),
+    "workflow_definition_gates": ("WF-DEF-002",),
+    "workflow_worker_gates": ("WF-WORK-002",),
+    "approval_claim": ("AGT-APPROVE-002",),
+    "audit_filters": ("AGT-AUDIT-003",),
+    "workflow_provenance": ("WF-PROV-001",),
+    "workflow_admin": ("WF-ADMIN-001",),
+    "workflow_command_human": ("WF-CMD-002",),
+    "migrate_status_ledger": ("OPS-LEDGER-001",),
+    "workflow_approval_live": ("WF-APPROVE-001",),
+    "workflow_compensation_live": ("WF-COMP-002",),
+    "workflow_provenance_live": ("WF-PROV-002",),
+    "audit_filters_live": ("AGT-AUDIT-004",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

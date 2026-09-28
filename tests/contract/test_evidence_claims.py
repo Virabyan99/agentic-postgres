@@ -1137,6 +1137,23 @@ CLAIM_INTRODUCED_IN = {
     "workflow_resume": 32,
     "workflow_revocation": 32,
     "workflow_restore": 32,
+    # Session 33 (ADR 0230-0234). FOURTEEN, ten offline and four host,
+    # landing with the constant (D690): approval gates, compensation,
+    # provenance, D1248's audit filters and D1707's ledger.
+    "workflow_gates": 33,
+    "workflow_compensation": 33,
+    "workflow_definition_gates": 33,
+    "workflow_worker_gates": 33,
+    "approval_claim": 33,
+    "audit_filters": 33,
+    "workflow_provenance": 33,
+    "workflow_admin": 33,
+    "workflow_command_human": 33,
+    "migrate_status_ledger": 33,
+    "workflow_approval_live": 33,
+    "workflow_compensation_live": 33,
+    "workflow_provenance_live": 33,
+    "audit_filters_live": 33,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

@@ -1899,7 +1899,8 @@ time`) PASSED in every arm: the plan's (m1) `0` for absent keys and (m2) the
 null arm's reason dropped; and (m3) a threshold at 3600 s, (m4) the count
 never read, (m5) the member without `approvals`, (m6) the sentence without
 the age. **Targeted, once: 271 passed** (the plan's list, `test_fleet.py` for
-its `test_fleet_command.py`). **Rows added: D1759–D1761. NEXT FREE: D1762.**
+its `test_fleet_command.py`). **Rows added: D1759–D1761. NEXT FREE: D1762.** **CI:**
+`e48b4a7aa8954545e2031030d0a9e6d21aa0e4ec` → `contract` **success**.
 
 ### Run 8 — the bump, the registry, the gate, and the trip's proofs
 

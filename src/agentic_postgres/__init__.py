@@ -620,7 +620,74 @@ from pathlib import Path
 #: the class is confirmed against a DEPLOYMENT in the same session: Run 8's
 #: `upgrade plan` on both projects, with the same two declarations, before the
 #: deploy -- and a `major` there is a stop condition.
-CURRENT_SESSION = 32
+#:
+#: **Session 33 moves it to 33, all-or-nothing again** (D690): FOURTEEN
+#: requirements and fourteen claims -- `CLAIMS` 158 -> 172 and `OFFLINE_CLAIMS`
+#: 32 -> 42, counted from the tuples rather than by hand (D1628) -- ten
+#: declared offline and four host, with every offline half written in the run
+#: that built its plane (Runs 2-7) and every live half here.
+#:
+#: **The session's subject is a human in the loop of durable work**, and the
+#: five ADRs are its shape. ADR 0230: an approval is a PARKED step and a
+#: human's recorded decision -- the plane's own `approval_required` refusal
+#: parks it, a decision releases or rejects it, and a rejection is a cancel.
+#: ADR 0231: an approved call carries a signed `apg_approval {id, tool, key}`
+#: claim that only the signer builds, from a decided row it reads itself, and
+#: the plane serves a gated write only for that tool and that key -- every
+#: caller without the claim is refused byte for byte as before. ADR 0232: the
+#: decision is an administrative scope, `admin_workflows:approve`, that
+#: `project_admin` alone may carry and the run's OWNER may not use. ADR 0233:
+#: compensation is reverse-ordered forward steps appended at failure or cancel,
+#: and a wait is a park. ADR 0234: provenance is one reader joined by the
+#: plane's request id, under the audit's own scope, and the audit reader pages
+#: by keyset with the window's counts on every page (D1248 answered, not
+#: refused). No family is added: the gates are a run's (`WF`), the claim and
+#: the filters the agent plane's (`AGT`), the ledger print an operator's
+#: (`OPS`, D1707).
+#:
+#: **One migration, 0035, and it is the floor once applied** (ADR 0162 §3):
+#: two `app_private` tables nobody may read, the approval functions, a run
+#: status `compensating`, and the audit reader re-created at nine arguments.
+#: **No outputs, capability, lock, project-manifest, secret or host schema
+#: moves**; the capability schema's administrative enum gains one member
+#: without its `schema_version` moving, the way `admin_audit:read` joined it
+#: in Session 9.
+#:
+#: **`VERSION` moves to `1.11.0`.** What moved: migration 0035; four
+#: operations on the auth service's application API for HUMAN tokens (`GET
+#: /admin/workflows/approvals`, `POST /admin/workflows/runs/{run_id}/approve`
+#: and `/reject`, `GET /admin/workflows/runs/{run_id}`) and five new query
+#: parameters on `GET /admin/audit`; one administrative scope; the loop's
+#: gates, waits and compensations, so the `services/auth-api` image moves and
+#: a deploy recreates `auth`, `storage` and `mcp`; `bin/workflow.sh` gains four
+#: verbs (ten); the doctor's `workflow` check reports pending approvals; the
+#: drill member carries approvals; `migrate.sh --runtime status` prints the
+#: ledger again.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig: a git
+#: worktree at `275a19e`, the commit that IS deployed, and a `tar`-piped copy
+#: of this working tree, each rendering the example project outside the
+#: checkout. With `--also migration_added --also api_operation_added`: `bump
+#: minor`, **`requires minor`**, verdict `ok`, `changes [api_operation_added,
+#: migration_added]`, `reasons []`, `operator_digests_moved []`. Without the
+#: declarations: `requires patch` -- the documents' own floor, wrong in the
+#: reassuring direction, which is why the declaration exists (D1666). **Exactly
+#: two leaves differ, the two the plan predicted**: `template_version` 1.10.0
+#: -> 1.11.0 and `migrations.release_lock_sha256`; 5,949 bytes on both sides.
+#: **ADR 0162 prices it a MINOR, and the minor is the floor**: a released
+#: migration and new API operations are each a minor by the table, and
+#: `1.11.0` is that floor exactly. **No outputs, capability, lock,
+#: project-manifest, secret or host schema moves**, so an operator supplies
+#: nothing new to take it. What an operator must KNOW is two things the
+#: reading cannot show: 0035
+#: cannot be taken back by an image, and **no existing administrator gains the
+#: new scope** -- it is granted with `PATCH /admin/users/{id}`, role and scopes
+#: together, or nobody on the deployment can decide an approval. **This
+#: session takes a host trip, ON BETA** (D1733) -- alpha installs no
+#: definition -- so the class is confirmed against a DEPLOYMENT in the same
+#: session: Run 9's `upgrade plan` on both projects, with the same two
+#: declarations, before the deploy -- and a `major` there is a stop condition.
+CURRENT_SESSION = 33
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere
