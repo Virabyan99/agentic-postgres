@@ -546,7 +546,10 @@ def test_an_approval_step_parks_with_one_refusal_in_the_audit(
     ]
     assert len(refusals) == 1, approved_run["audit_at_park"]
     assert refusals[0]["denial_reason"] == "approval_required", refusals[0]
-    assert not [r for r in approved_run["audit_at_park"] if r["outcome"] == "committed"], (
+    # The refusal is the ONLY row: no `served` either. A project-set write never
+    # writes a `database`/`committed` row (D1773), so asking for no `committed`
+    # row could not have gone red.
+    assert [r["outcome"] for r in approved_run["audit_at_park"]] == ["refused"], (
         f"the embedding was written before anybody approved it: {approved_run['audit_at_park']}"
     )
 
@@ -575,7 +578,7 @@ def test_a_second_user_approves_and_the_run_completes_once(
     psql: Callable[..., tuple[int, str, str]],
 ) -> None:
     """The approver's decision releases ONE write: the run succeeds, the note
-    has one embedding, and the database committed the step's write once."""
+    has one embedding, and the plane served the step's write once."""
     answer = approved_run["by_approver"]
     assert answer.status == 200, f"{answer.status}: {answer.body[:300]}"
     assert json.loads(answer.body) == {
@@ -592,8 +595,14 @@ def test_a_second_user_approves_and_the_run_completes_once(
 
     agent = approved_run["agent"].agent_id
     rows = _audit(psql, project_b, f"agent_id = '{agent}' AND tool = 'set_note_embedding'")
-    committed = [r for r in rows if r["source"] == "database" and r["outcome"] == "committed"]
-    assert len(committed) == 1, f"the approved write committed {len(committed)} times: {rows}"
+    # `api.set_note_embedding` is the PROJECT set's function, and a project set may
+    # not write `app_private` -- so unlike `create_note` it records no `database`
+    # row, and the plane's `served` row is the write's whole audit (D1773). The
+    # write itself is counted by the table above.
+    assert [(r["source"], r["outcome"]) for r in rows] == [
+        ("agent_plane", "refused"),
+        ("agent_plane", "served"),
+    ], f"the approved write was not served exactly once after its refusal: {rows}"
 
 
 def test_the_runs_owner_cannot_approve(
@@ -760,7 +769,7 @@ def test_inspect_reads_back_the_approved_run_complete(
     approved_run: dict[str, Any], approver: dict[str, str]
 ) -> None:
     """The approval step's two attempts, each joined to its audit rows by the
-    plane's request id: the refused call and the committed one -- and the
+    plane's request id: the refused call and the served one -- and the
     approver named. `profile` is absent WITH its reason (ADR 0195)."""
     document = _inspect(approved_run["run_id"], approver["token"])
     assert document["run"]["status"] == "succeeded", json.dumps(document["run"])
@@ -774,7 +783,9 @@ def test_inspect_reads_back_the_approved_run_complete(
     refusal = [a for a in requested[0]["audit"] if a["source"] == "agent_plane"]
     assert len(refusal) == 1 and refusal[0]["outcome"] == "refused", requested[0]
     assert refusal[0]["denial_reason"] == "approval_required", refusal[0]
-    assert "committed" in {a["outcome"] for a in finished[0]["audit"]}, finished[0]
+    # A project-set write's whole audit is the plane's `served` row (D1773).
+    served = [a for a in finished[0]["audit"] if a["source"] == "agent_plane"]
+    assert [a["outcome"] for a in served] == ["served"], finished[0]
     assert finished[0]["attempt"] > requested[0]["attempt"], step["attempts"]
 
     assert len(document["approvals"]) == 1, document["approvals"]
