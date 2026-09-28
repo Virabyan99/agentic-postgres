@@ -1812,7 +1812,8 @@ bound to the named step. **Targeted, once: 1114 passed, 0 skipped** (the
 plan's list plus `test_workflow_routes`, `test_approval_claim` -- both share
 the route rig -- and the two D1242 guards, `test_deployment_module_shape` and
 `tests/security/test_dx_surfaces_hardening.py`). **Rows added: D1755–D1758.
-NEXT FREE: D1759.**
+NEXT FREE: D1759.** **CI:**
+`14f986517a0c1507369832030f77ffd936f77d33` → `contract` **success**.
 
 ### Run 7 — the readers and the pages: the doctor, the drill, the operator guide
 
