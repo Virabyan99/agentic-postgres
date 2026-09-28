@@ -1,7 +1,7 @@
 # Session 33 — Gates, compensation and provenance
 
-**Status: IN EXECUTION since 2026-09-26 — Runs 1–8 done (D1742–D1765 added;
-NEXT FREE D1766). Run 9, the trip, is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
+**Status: IN EXECUTION since 2026-09-26 — Runs 1–9 done (D1742–D1775 added;
+NEXT FREE D1776). 1.11.0 deployed, swept and tagged on `02ffbbd`. Run 10, the close, is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
 `main` directly. This plan spends **D1714–D1741** in §1 and **ADR 0230–0234**.
 **NEXT FREE AFTER THIS PLAN: D1742, ADR 0235.** Rows the runs add go in §1's
 second table, below D1741, in execution order; the header's *Status*
@@ -484,6 +484,16 @@ second table below, in execution order.
 | **D1763** | 8 | §5 Run 8 item 2 lists what the bump moves: `CURRENT_SESSION`, the paragraph, `VERSION`, `README.md:7`, the release table, the `--session` literals, the client. | Two more things move with `VERSION` and the plan does not name them, and the first targeted run failed four proofs on them: `test_release_contract` requires the FINAL paragraph to name `` `1.11.0` `` and to say which schemas did not move; `test_documentation_index` requires both operator pages' *This page is part of release `N`* line to equal `VERSION` -- and the operator guide's line says *the table below it* moves too. | The pricing paragraph (last, D1629) names `1.11.0` as the floor and says no outputs, capability, lock, project-manifest, secret or host schema moves; both pages' release line and the operator guide's §1 table (1.11.0 / 33, 35 migrations, 0035's sentence) moved. Both modules then 49 passed; the gate passed first time after. |
 | **D1764** | 8 | Session 32's release row: *"**`auth` is recreated** because its image moved"*. | `compose.yaml` builds THREE services from `./services/auth-api` -- `auth`, `storage` and `mcp` (`APP_MODE` auth/storage/mcp) -- so an image move recreates all three, and 1.11.0's moves it. | The 1.11.0 row, the Session 33 paragraph and the gate's header say `auth`, `storage` and `mcp` are recreated. Session 32's row is history and is left; Run 9's Sheet reads which containers actually moved rather than trusting either sentence. |
 | **D1765** | 8 | §5 Run 8 item 3: the `embedding` fixture is *"the text literal of 768 zeros (rig 33b's measured shape)"*; `tasks-approval.yaml`'s comment says the reference makes it reach the plane *"as the input's own list of numbers and not as text"*. | A whole-string reference keeps the input's own TYPE, so the two agree for different inputs: the comment describes a list, the plan passes a string. The reviewed surface types `p_embedding` as `"type": "string"` (`format: extensions.vector`), and rig 33b measured the text literal accepted by PostgREST. | **The live proofs pass the text literal**, the measured shape; the definition is unchanged. Whether a LIST also reaches PostgREST intact is not measured and not needed. |
+| **D1766** | 9 | §5 Run 9, the op side: *"`uv sync` (PATH exported in the script)"*. | The parent `s32-r8-checkout.sh` runs no sync (D1491), and the dependency files did not move `176a7f0..02ffbbd` -- measured on the workstation and re-checked by the host's own checkout script (empty diff). | No sync. The checkout script prints the dependency diff on the host every time, so a move is seen, not assumed. |
+| **D1767** | 9 | Sheet C5: the two `install`s of the op-owned copies, *"the agent confirms both name Run 8's `source_commit` before the next line"*, then the launch -- one sheet. | That is a sheet whose third line's precondition is a reading taken after its first (D1510). Session 32 had already moved the installs to the END of the readings script for this reason. | Kept at the end of `s33-r9-readings.sh` (Sheet C4); both copies read `02ffbbd` by the agent between C4 and C5; C5 was the launch alone. |
+| **D1768** | 9 | Run 9: the memory samples are *"matched against the JUnit timestamps"* of two proofs. | pytest's JUnit carries a suite timestamp and per-case DURATIONS -- no per-case start. | Sheet C6 read every Session 33 run's `created_at`/`started_at`/`finished_at` from `app_private.workflow_run` (a root `psql` SELECT): the run's own window, not an estimate of a test's. |
+| **D1769** | 9 | The Session 33 paragraph (Run 8, D1763): no outputs, *capability*, lock, project-manifest, secret or host schema moves. | `schemas/capabilities.schema.json`'s two scope enums GAINED `admin_workflows:approve` at `14f9865` -- seen in the host checkout's deployable-path list. Additive: the manifest version stays 4 and every existing manifest still validates. | Harmless to the deploy; the sentence is imprecise. Run 10's close words it as *no schema VERSION moved; the capability schema's scope enum gained one name*. |
+| **D1770** | 9 | Sheet C1: `doctor.sh` both → *"**12 ok**"*. | D1706 again: the NEW checkout's doctor reads the OLD deployment against the new release -- **11 ok + `migrations` PROBLEM, 34 of 35 (alpha) and 36 of 37 (beta)**, rc 6, and the `workflow` line *approvals: not read (the substrate predates 1.11.0)* -- never zero (Run 7). | Corrected in `s33-r9-c1.sh` before it was handed over; read exactly so. After each deploy both read 12 ok. A sheet that reads a doctor before a deploy must price it as the new doctor on the old substrate. |
+| **D1771** | 9 | The sheets as written: C1 wraps `s33-r9-c1.sh` in `script(1)` writing `/home/op/s33-r9-c1.txt`; C2 is the sentinel AND the deploy. | The C1 script `tee`s that same file itself -- two writers on one path (so do `after`, `readings`). And C2's deploy has the sentinel's success as its precondition: the before-generation must be recorded first (D1510). | The `tee`ing read scripts were handed as `sudo bash <script>` alone; `script(1)` kept for the deploys, the sentinel and the cleanup, which write no transcript themselves. C2 handed as C2a (sentinel) and C2b (deploy + its reads). |
+| **D1772** | 9 | D1764: an image move recreates `auth`, `storage` and `mcp`. | Both deploys ALSO recreated `docs` (up ~1 min against the three's 45-56 s): the published app contract moved with 1.11.0, and `docs` mounts it. | Recorded; four services moved, the rest were up 2 days. Not investigated further -- ADR 0155's digest is the mechanism, and the reason is the contract. |
+| **D1773** | 9 | Run 8's live proofs `test_a_second_user_approves_and_the_run_completes_once` and `test_inspect_reads_back_the_approved_run_complete`: the approved write leaves a `database`/`committed` audit row. | **The first sweep failed both on that belief, the proofs' and not the product's.** Only the release's own write functions write a `database` row (`create_note`, `update_task_status`; 0019/0022/0029). `api.set_note_embedding` is the PROJECT set's function (`projects/example` 0001:75), a project set may not write `app_private`, and its whole audit is the plane's `served` row. On beta the run succeeded, the approval read `approved`, the note held ONE embedding and the task `completed` -- every assertion before the audit line passed; the audit read `refused`/`approval_required` 18:08:58 then `served` 18:09:03. **And a third proof passed vacuously**: the park proof's *no `committed` row at park* could not go red for this tool (question 1 of CLAUDE.md §7). | Repaired at `e087bca` (test-only; CI success): the audit is exactly `(agent_plane, refused)` then `(agent_plane, served)`; the finished attempt's plane rows are exactly one `served`; the refusal is the ONLY row at park. `-k test_session33_gates` on the host: **12 passed**. Question 6's shape: the fixture was written by the author of the loop, who held the core write's picture of an audit. |
+| **D1774** | 9 | Run 9, *if something goes wrong*: a proof defect gets *"a `-k` iteration after the repair, never a second sweep for a fixture (one sweep per trip; a second only for a defect)"*. | The `-k` pass writes no evidence, so the merged document would have recorded `workflow_approval_live` and `workflow_provenance_live` FAILED on the session that built them. **The operator chose a second sweep** (D1710's precedent: Session 32 swept twice for an instrument defect). | Second sweep from `e087bca`, the declaration block byte-identical, the deployable diff `02ffbbd..e087bca` asserted NONE on the host (D1641's method); the tag is on `02ffbbd` and its message states the exception. The plan's rule stands as the default; a session that would record its own claims failed on a proof defect is the case it did not price. |
+| **D1775** | 9 | ADR 0230: a cancel or a stop ends the run; the doctor's `approvals pending` and the listing read what waits for a person. | **The approval table holds 3 `pending` rows while the doctor reads `approvals pending 0`** -- one per sweep, on runs that ended without a decision. Both readers count *pending, unexpired, on a run still running* (`0035:723-772`, `:1066-1068`), so neither shows them, correctly; but the stored row stays `pending` on a finished run, because the status enum has no `cancelled` and nothing moves an undecided approval when its run ends. | Recorded as an open item, not a defect of either reader: the provenance reader shows such a row as `pending` on a `cancelled` run. Whether a run's end should close its approval is a decision for the retention story D1700 already owes. |
 
 ---
 
@@ -2175,6 +2185,88 @@ doctor's `workflow` line before and after (approvals pending 0 → 0), the
 sweep's JUnit counts, every new claim's status, the merged document's totals,
 the memory samples and which fell inside a run proof's window, the probe
 agents and humans left on beta, the tag and its message.
+
+**Done.** 2026-09-28, on beta with alpha the control. **Before the day**: WSL's
+TCP alive (host :22 0.11 s, github :443 0.21 s, timed connects read inside a
+script); the `s32-r8*` parents' sha256 equal to the host's (12/12); ten
+scripts derived by counted substitution (`s33r9-derive.py`, every count
+asserted) plus one new -- the memory sampler, which names beta's `auth` as
+`op` by its mountinfo (`/secrets/beta-dev/generations/<gen>/auth/`; `storage`
+mounts `.../storage/`, `mcp` none) and re-resolves at EVERY sample; the
+gate's declaration **15 tokens (14 flags + `--mode`) identical in order**,
+each accepted by `session-33-check.sh`; `shellcheck -S warning` 0 on every
+child; CI **success** on `02ffbbd` read by full SHA. **The op side**: bundle
+`176a7f0..main`, sha256 equal both sides; checkout `176a7f0 -> 02ffbbd` with
+`FETCH_HEAD` confirmed first, 35 released migrations, every artefact present,
+no sync (**D1766**); four renders exit 0 at 1.11.0, fixtures `current`
+(release set 35); `--setup-plan` for the new module **11 setups, 0 errors**
+on the host. **C1** (**D1770**, **D1771**): upgrade check both rc 0; doctor
+**11 ok + `migrations` 34 of 35 / 36 of 37**, approvals *not read*; fleet 2
+projects at `275a19e`; a full backup on both (2026-09-27); `upgrade plan`
+both **`bump minor`, `requires minor` with the two `--also`, `requires patch`
+without, 2 leaves** (`migrations.release_lock_sha256`, `template_version`);
+beta `auth` BEFORE **65,511,424** B; `kit-2026-09-28-pre` verifies.
+**C2a** the sentinel (generation `320f8fec54a05a82`, row written, count 1).
+**C2b alpha**: exit 0; step 0 `admitted` (304 requested / 1,296 MiB safe, 304
+committed by beta; 13 GiB disk above the reserve); step 6 **`Applied:
+20260917120035_workflow_gates.sql in 137 ms`**, *ledger recorded for 35*;
+6d *no workflow definitions (the project declares no migration set)*;
+**`migrate.sh --runtime status` printed 35 `[X]` lines, `Applied: 35`,
+`Pending: 0` -- D1707 closed on production**; doctor **12 ok**, *approvals
+pending 0*. **C3 beta**: exit 0; 0035 applied in 97 ms, *ledger recorded for
+37*; **6d: `notes-retry` v1 2 steps, `notes-roundtrip` v1 3, `tasks-approval`
+v1 3, `tasks-compensate` v1 3**; 35 `[X]` + 2 `[X]`, `Pending: 0` twice;
+doctor 12 ok, 4 definitions. `auth`, `storage`, `mcp` AND `docs` recreated
+on both (**D1772**). **C4**: ceilings **4,480 MiB, 10 unbounded** (unchanged),
+608 MiB committed; no rehearsal; beta `auth` **59,301,888** B pre-sweep;
+`usage` exit 6 with **D1712's new wording on production** (*the store holds
+no such series in the current mcp process (each process mints its own
+series, and a recreated mcp has served no call yet)*); both op-owned copies
+installed and read at `02ffbbd` (**D1767**). **The first sweep** (17:58-18:44,
+exit 5): 1,056 passed / 3 failed / 7 skipped / 0 errors -- `documented_path`
+by decision and two Session 33 proofs on ONE belief of the proofs'
+(**D1773**; a third passed vacuously). Repaired at `e087bca`, CI success,
+host checkout moved with the deployable diff asserted NONE; **`-k
+test_session33_gates`: 12 passed**. **The second sweep, by the operator's
+decision (D1774)** (19:09:51-19:52:04, 37 m 48 s of suite, exit 5): **1,058
+passed / 1 failed / 7 skipped / 0 errors**, the failure `documented_path`.
+**All four host claims Session 33 added PASSED on their first execution** --
+`workflow_approval_live`, `workflow_compensation_live`,
+`workflow_provenance_live`, `audit_filters_live` -- with
+`audit_boundary_reported` re-run and passed, and every Session 32 workflow
+claim passing again over the functions 0035 replaced. **External** from WSL
+(the ssh-agent block, the no-`-i` control rc 0): **PASSED**, 25 passed / 8
+skipped (no public IPv6). **`evidence/session-33.json`: 172 claims -- 166
+passed, 5 not_run (`api_authorization`, `bootstrap_identity`,
+`credential_rotation_planes`, `port_allocation`,
+`replacement_host_restore`), 1 failed (`documented_path`)**, merge exit 5 for
+those reasons alone -- §7's prediction exactly; every half names `02ffbbd`,
+`offline_checkout_commit` `31f8fcb` printed, not folded. **The tag**:
+`release-reading --ref 02ffbbd` → `tag_is_owed` (19 commits, 97 files,
+migrations 34 → 35, ADRs 229 → 234); `git tag -a 1.11.0 02ffbbd`, its message
+stating D1641's exception; the remote tag `ed06f56` peels to `02ffbbd`.
+**C6**: the sentinel `1`, `DELETE 1`, `0`; beta's doctor **12 ok, approvals
+pending 0**, runs `cancelled=6 failed=7 stopped=7 succeeded=19`; `usage` exit
+6; the approval table **pending 3 / approved 6 / rejected 3** (**D1775**);
+left on beta, by design (D1700): **12 revoked `apg-s33-*` agents** (three
+module runs of four) and **6 active `apg-s33-*` humans** (two per module run;
+which two was not read -- the module keeps the owner, and the approver when
+`decided_by` refuses its delete), beside Session 32's 16 revoked agents and 4 humans; `kit-2026-09-28-post`
+verifies. Both new kits copied to WSL `~/dr-kits/` and verified there,
+0700/0600 kept; their `release` fields name the CHECKOUT (`02ffbbd` pre,
+`e087bca` post) while the documents inside name `02ffbbd` (D1642, a fifth
+time, harmless: no deployable diff). **Beta's `auth` memory WHILE RUNS
+EXECUTED -- the first such figures (D1711)**, 261 + 252 samples, 8 + 8
+`unresolved` during recreations, windows from C6 (**D1768**): sweep 1, every
+sample inside a Session 33 run (18:08:53-18:09:45) **59.6-60.1 MB**; sweep 2,
+samples inside run windows **60.2, 127.8, 96.1, 60.4, 60.7 MB**. **But the
+127 MB readings are single-sample spikes that occur equally with no Session
+33 run executing** (18:08:32, 19:18:51, 19:19:54), each back to ~60 MB at the
+next sample -- so no figure here is the loop's cost under a run. The largest,
+charged wholly to a run, is **~66 MiB above idle, inside ADR 0226's 96 MiB
+under-load criterion**. A password hash's memory (the human fixtures log in
+beside the runs; `config.py`'s four-concurrent budget is 259 MiB) is the
+hypothesis, NOT measured. **Rows D1766-D1775. NEXT FREE: D1776.**
 
 ### Run 10 — the close
 
