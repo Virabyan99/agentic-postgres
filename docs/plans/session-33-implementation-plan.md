@@ -1,7 +1,7 @@
 # Session 33 — Gates, compensation and provenance
 
-**Status: IN EXECUTION since 2026-09-26 — Runs 1–7 done (D1742–D1761 added;
-NEXT FREE D1762). Run 8 is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
+**Status: IN EXECUTION since 2026-09-26 — Runs 1–8 done (D1742–D1765 added;
+NEXT FREE D1766). Run 9, the trip, is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
 `main` directly. This plan spends **D1714–D1741** in §1 and **ADR 0230–0234**.
 **NEXT FREE AFTER THIS PLAN: D1742, ADR 0235.** Rows the runs add go in §1's
 second table, below D1741, in execution order; the header's *Status*
@@ -480,6 +480,10 @@ second table below, in execution order.
 | **D1759** | 7 | §5 Run 7 *Proofs*: `test_doctor_readings.py::test_the_workflow_check_reports_pending_approvals_with_no_threshold` and `::test_a_pre_gate_substrate_is_reported_not_zeroed`; *Targeted*: `test_fleet_command.py`. | `test_doctor_readings.py` holds the two READINGS (`capacity`, `usage`); every proof of the twelfth CHECK lives in `test_diagnosis.py` (the pure verdict) and `test_doctor_redaction.py` (the probe, beside its poisoned rig and leak scans). There is no `test_fleet_command.py`; the module is `tests/contract/test_fleet.py`. | **The plan's names, placed beside their siblings**: the no-threshold proof in `test_diagnosis.py`, the pre-gate proof in `test_doctor_redaction.py` (driven through `probe_workflow`), plus a pure sibling `test_an_unread_approval_count_is_said_as_not_read_and_never_as_zero`; the poisoned rig gains the two keys with the canary in the age, so the existing leak scans cover the new line. `test_fleet.py` ran in the targeted list. Run 8 writes the node ids from `--collect-only` (D1236). |
 | **D1760** | 7 | §5 Run 7 items 3-4 name operator-guide §17's three new subsections, `:419`, `docs/studio.md:159` and `docs/README.md:63`. | Run 6 made three more sentences false that the list does not name: `docs/workflows.md`'s **The six verbs** (ten now, four with a human's token), §17's intro (*the four things an operator does*, *the six verbs*) and §17's **An agent's own run** -- *"there is no admin route that does"*, which `inspect` now is. | **All three rewritten in this run**: the verb section lists ten and says which token each half takes; §17's intro names approvals, compensation and provenance; *An agent's own run* is folded into **Provenance**, which keeps the agent's `status` line. The twelfth check's example and figure count (six → eight) moved with it. Historical records (`pre-stage-4-audit.md`, scope-closure §22-§25, the decision report) are left as they were; Run 10's §26 supersedes them. |
 | **D1761** | 7 | §5 Run 7 item 2: the drill member *"gains `approvals: {by_status}`"* and *"both files move"* (D1691). | No definer function counts approvals by status (`workflow_counts` returns pending and the oldest age only), and `restore_drill.evidence_document` passes `workflow_runs` through by NAME -- so a key nested inside the member needs no second selector. | **`bin/restore-test.py` reads `app_private.workflow_approval` directly** (`APPROVALS_BY_STATUS`), as the superuser in the throwaway drill instance -- the same way it already reads `schema_migrations` -- and nests `approvals: {value, reason}` inside `workflow_runs`, the member's own two-outcome shape; an absent table is `null` with *"the backup predates migration 0035"* while the runs' counts beside it are still read. `restore_drill.py` moves by its comment only; the host proof `test_session32_workflow_restore.py` reads `value` and `reason` and is unaffected. |
+| **D1762** | 8 | §2: node ids are proposed; Run 8 writes what the runs wrote, read with `--collect-only` (D1236). | Resolved by a script against the collected tree: **83 of the 84 proposed names exist as written**; one was renamed in Run 3 -- `test_the_token_lookup_answers_only_an_approved_approval_of_that_agents_running_run`, D1745's word (a decided row does not re-check its window). And **23 proofs Runs 2-7 added are in no §2 row**. | The renamed id is written as collected. The 23 are assigned by subject: six to `WF-DEF-002` (a compensation on a read step, a reference to a wait step, an undo row's name, the schema's `oneOf`, the Session 32 definitions unchanged, the skeleton skipping a profile-gated write), two to `AGT-AUDIT-003` (the cursor's round trip, the vocabularies bound to the enum literals), two to `WF-PROV-001`, and four gate proofs plus Run 7's four readers and 0035's grant-caller guard to `WF-GATE-001`; D1705's two to `WF-INSTALL-001` and D1712's wording proof to `NODE-USAGE-001`, as §2 said. `test_an_approval_requiring_step_must_declare_approval` is in BOTH `WF-DEF-001` (D1750) and `WF-DEF-002`: the registry refuses a duplicate requirement id, not a node id shared by two. `WF-CMD-002` also names the route-literal and no-SQL proofs, which Run 6 widened to the new table. |
+| **D1763** | 8 | §5 Run 8 item 2 lists what the bump moves: `CURRENT_SESSION`, the paragraph, `VERSION`, `README.md:7`, the release table, the `--session` literals, the client. | Two more things move with `VERSION` and the plan does not name them, and the first targeted run failed four proofs on them: `test_release_contract` requires the FINAL paragraph to name `` `1.11.0` `` and to say which schemas did not move; `test_documentation_index` requires both operator pages' *This page is part of release `N`* line to equal `VERSION` -- and the operator guide's line says *the table below it* moves too. | The pricing paragraph (last, D1629) names `1.11.0` as the floor and says no outputs, capability, lock, project-manifest, secret or host schema moves; both pages' release line and the operator guide's §1 table (1.11.0 / 33, 35 migrations, 0035's sentence) moved. Both modules then 49 passed; the gate passed first time after. |
+| **D1764** | 8 | Session 32's release row: *"**`auth` is recreated** because its image moved"*. | `compose.yaml` builds THREE services from `./services/auth-api` -- `auth`, `storage` and `mcp` (`APP_MODE` auth/storage/mcp) -- so an image move recreates all three, and 1.11.0's moves it. | The 1.11.0 row, the Session 33 paragraph and the gate's header say `auth`, `storage` and `mcp` are recreated. Session 32's row is history and is left; Run 9's Sheet reads which containers actually moved rather than trusting either sentence. |
+| **D1765** | 8 | §5 Run 8 item 3: the `embedding` fixture is *"the text literal of 768 zeros (rig 33b's measured shape)"*; `tasks-approval.yaml`'s comment says the reference makes it reach the plane *"as the input's own list of numbers and not as text"*. | A whole-string reference keeps the input's own TYPE, so the two agree for different inputs: the comment describes a list, the plan passes a string. The reviewed surface types `p_embedding` as `"type": "string"` (`format: extensions.vector`), and rig 33b measured the text literal accepted by PostgREST. | **The live proofs pass the text literal**, the measured shape; the definition is unchanged. Whether a LIST also reaches PostgREST intact is not measured and not needed. |
 
 ---
 
@@ -2045,6 +2049,58 @@ login helpers).
 Commit (`Session 33 Run 8: the bump to 1.11.0, the registry, the gate, the
 trip's proofs`), push, read CI. **Nothing goes to the host until this commit's
 CI is green by full SHA.**
+
+**Done.** Committed as `31f8fcb`. **The registry**: fourteen requirements,
+fourteen claims, ten in `OFFLINE_CLAIMS` -- **265 requirements, 172 claims,
+42 offline**, read from the gate's own lines and the offline file, not from
+this prose (D1628); node ids resolved against the collected tree (**D1762**);
+AGT-AUDIT-002's arity sentence, AGT-APPROVE-001's guarantee sentence (the
+refusal holds for every caller WITHOUT the claim, and *no pending state, no
+second principal* was no longer true), WF-INSTALL-001 +2 and NODE-USAGE-001 +1
+moved; the `WF` paragraph gains its Session 33 sentence; `THR-APPROVAL` names
+`AGT-APPROVE-001`, `-002`, `WF-GATE-001` and `WF-APPROVE-001` with three
+collected proofs, and its *until Run 8* sentence is gone. **The bump**:
+`CURRENT_SESSION = 33`, `VERSION` 1.11.0, the Session 33 paragraph with the
+pricing paragraph last (D1629); README's status line; the release table's
+1.11.0 row (the scope no administrator gains on upgrade; **D1764** on which
+containers are recreated); **sixteen** `--session`/`--through-session`
+literals moved in five files, each file's count asserted; both operator
+pages' release line and §1's table (**D1763**); `apg generate` rewrote
+`contract.ts` and `generated.json` and said *version 1.0.0 (no contract
+change)*, `--check` clean. **The trip's proofs**:
+`tests/deployment/test_session33_gates.py`, twelve proofs under the §2 names,
+`pytestmark` first, fixtures copied from `test_session32_workflows.py`,
+`compensating` not terminal, a `SWEEP` canary in every name and title, beta's
+deployed lock read for `note_embeddings:*` before anything is created, the
+embedding the measured text literal (**D1765**). **`--setup-plan` with
+`APG_LIVE_HOST=1` and both op-owned copies from `~/s32r8/` set: exit 0, 11
+setups, 0 errors; with none set: 12 skipped, 0 errors.** **The gate**:
+`bin/session-33-check.sh` derived from 32's -- header and the three mode
+paragraphs rewritten whole, the body differing from its parent in `readonly
+SESSION=33` alone (both halves diffed), and **the flag-set diff EMPTY** (the
+first derivation's prose named `migrate.sh --runtime status` and the diff
+caught `--runtime`; reworded); `SHELL_COMMANDS` gains it;
+`test_session_thirty_three_gate_modes.py` derived from thirty-two's with the
+no-gap test carried (32 -> 33) and the ten offline names. **`upgrade plan`
+offline** (D1624's rig, derived from `s32r7-upgrade.sh` with both
+substitutions counted): installed a worktree at `275a19e`, candidate a
+`tar`-piped copy, both `project.example.yaml` renders exiting 0. Declared:
+`bump minor`, **`requires minor`**, verdict `ok`, `changes
+[api_operation_added, migration_added]`, `reasons []`,
+`operator_digests_moved []`. Undeclared: `requires patch`, verdict `ok`.
+**Every differing leaf: `migrations.release_lock_sha256` (435c32c4… ->
+999ef446…) and `template_version` (1.10.0 -> 1.11.0)** -- the two predicted;
+5,949 bytes on both sides. **The gates, on the clean tree at `31f8fcb`, each
+on its FIRST run**: `bin/session-01-check.sh` **PASSED** -- 6,576 contract
+tests passed, 0 failed, 3 skipped, 6,991 P0 collected, 265 requirements
+current, 0 collisions; `bin/session-33-check.sh --mode offline` **PASSED**
+-- 6,585 passed, 0 failed, 3 skipped, and `evidence/session-33-offline.json`
+carries **42 claims, 42 `passed`** (counted from the file), the ten new ones
+among them. **Targeted, once: 1,669 collected, 4 failed on the first run
+(D1763), the two modules re-run after the repair: 49 passed.** **Rows added:
+D1762–D1765. NEXT FREE: D1766.** **CI:**
+`31f8fcb296832cae75edee525abffead19449c06` → `contract` **success** -- the
+condition for anything going to the host is met.
 
 ### Run 9 — the trip: both projects redeploy with 0035, the first approval by a person-shaped principal, one sweep, the tag
 
