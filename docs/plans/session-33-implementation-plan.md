@@ -1,7 +1,9 @@
 # Session 33 — Gates, compensation and provenance
 
-**Status: IN EXECUTION since 2026-09-26 — Runs 1–9 done (D1742–D1775 added;
-NEXT FREE D1776). 1.11.0 deployed, swept and tagged on `02ffbbd`. Run 10, the close, is next.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
+**Status: COMPLETE, 2026-09-26 to 2026-09-29 — ten runs; 1.11.0 deployed on
+both projects, swept, merged and tagged on `02ffbbd` (2026-09-28). Rows
+D1714–D1741 at planning, D1742–D1777 by executing (Run 9: D1766–D1775; Run
+10: D1776–D1777). NEXT FREE D1778, ADR 0235.** Planned 2026-09-26 at `7b0d308`. Ten runs, all on
 `main` directly. This plan spends **D1714–D1741** in §1 and **ADR 0230–0234**.
 **NEXT FREE AFTER THIS PLAN: D1742, ADR 0235.** Rows the runs add go in §1's
 second table, below D1741, in execution order; the header's *Status*
@@ -495,6 +497,7 @@ second table below, in execution order.
 | **D1774** | 9 | Run 9, *if something goes wrong*: a proof defect gets *"a `-k` iteration after the repair, never a second sweep for a fixture (one sweep per trip; a second only for a defect)"*. | The `-k` pass writes no evidence, so the merged document would have recorded `workflow_approval_live` and `workflow_provenance_live` FAILED on the session that built them. **The operator chose a second sweep** (D1710's precedent: Session 32 swept twice for an instrument defect). | Second sweep from `e087bca`, the declaration block byte-identical, the deployable diff `02ffbbd..e087bca` asserted NONE on the host (D1641's method); the tag is on `02ffbbd` and its message states the exception. The plan's rule stands as the default; a session that would record its own claims failed on a proof defect is the case it did not price. |
 | **D1775** | 9 | ADR 0230: a cancel or a stop ends the run; the doctor's `approvals pending` and the listing read what waits for a person. | **The approval table holds 3 `pending` rows while the doctor reads `approvals pending 0`** -- one per sweep, on runs that ended without a decision. Both readers count *pending, unexpired, on a run still running* (`0035:723-772`, `:1066-1068`), so neither shows them, correctly; but the stored row stays `pending` on a finished run, because the status enum has no `cancelled` and nothing moves an undecided approval when its run ends. | Recorded as an open item, not a defect of either reader: the provenance reader shows such a row as `pending` on a `cancelled` run. Whether a run's end should close its approval is a decision for the retention story D1700 already owes. |
 | **D1776** | 10 | Run 9's `**Done.**` as first written: *"every sample inside a Session 33 run (18:08:53-18:09:45) 59.6-60.1 MB; sweep 2, samples inside run windows 60.2, 127.8, 96.1, 60.4, 60.7 MB"* -- read by eye against C6's table. | **Classified by a script (`s33r10-classify.py`): NONE of the 513 samples lies wholly inside a run's window.** A sample is stamped `date +%FT%TZ` (the whole second) just before its read; each run lasted ~5.5 s against a 10 s cadence; seven samples overlap a window's LAST second, and `19:20:15`, counted inside the approval run, is 5 s before that run STARTED. The eye had matched a sample to the run nearest it -- the value that looked measured and was not, in this session's own record. | Run 9's `**Done.**` corrected in place (this row records that it was). **Run 10 adds NO under-run `Measurement`** and keeps `capacity.UNMEASURED`'s row -- its reason now carries Session 33's reading and its `unblocked_by` names the cadence a reading needs; ADR 0226's Session 33 amendment reports the criterion STILL NOT READ with ~66 MiB as an upper bound on a reading not taken. |
+| **D1777** | 10 | CLAUDE.md §5: *CI is the full check*; the local gate passed `24d0e13` (6,576 / 0). | **CI's first verdict on `24d0e13` was failure**: `test_connect_command.py::test_a_live_tunnel_is_reported_live` read `stale` for a live record, and `connect.sh` quarantined it (*the recorded process is gone or is not the one recorded*). The fixture's `sleeper` is `subprocess.Popen(["sleep", "300"])` and `process_identity` reads `ps -o lstart=,args=` immediately -- `Popen` returns after the FORK, so a `ps` that runs before the child's `exec` records the Python parent's `args`, and the helper's later read of `sleep 300` correctly calls it another process. A fixture race, first seen here; the commit touches nothing the command reads. | The failed job re-run once for the commit's own verdict; **the fixture is left as it is and owed a repair** (wait until `ps -o args=` reads `sleep 300` before recording) -- a test change belongs to a run that can batter it, not to a close. Open item in CLAUDE.md §9. |
 
 ---
 
@@ -2300,6 +2303,31 @@ NEXT FREE); CLAUDE.md §2/§8/§9 in the launch folder rewritten compactly
 (**copy it to the scratchpad first** — it is not in git) and the project
 memory updated. Documentation commit(s) after the code commit: push, no CI
 read.
+
+**Done.** **The code** (`24d0e13`): D1711's rule decided it -- the plan gave
+`capacity.py` a `MACHINE` `Measurement` *only for samples inside a run
+proof's window*, and a script (`s33r10-classify.py`, a sample *inside* only if
+its whole stamped second lies in a run's `started_at`..`finished_at`) found
+**none of the 513** (**D1776**, which also corrects Run 9's `**Done.**`, whose
+eye had matched samples to the nearest run). So **no Measurement was added and
+`capacity.UNMEASURED`'s row stays**, its reason carrying Session 33's reading
+and its `unblocked_by` naming the cadence a reading needs;
+`docs/capacity-envelope.md` re-rendered; ADR 0226 gained *Amendment, Session
+33 Run 9*: the under-load criterion **still not read**, ~66 MiB over the floor
+as an upper bound on a reading not taken. Targeted (`test_capacity_envelope`,
+`test_capacity_reading`, `test_documentation_index`,
+`test_session12_documented_path`, `test_acceptance_registry`,
+`test_repository_contract`): **360 passed**. `bin/session-01-check.sh` on the
+clean tree at `24d0e13`: **PASSED** -- 6,576 contract tests passed, 0 failed,
+3 skipped, 265 requirements current, 0 collisions. CI's first verdict on
+`24d0e13fc770029a47750eb61730c09037582aea` was **failure** on one proof the
+commit does not touch (**D1777**, a fork/exec race in the fixture); the
+failed job re-run once → `contract` **success** (attempt 2). **The records**: this
+header; `docs/scope-closure.md` **§26**; `docs/plans/stage-4-plan.md`'s Status
+block (CURRENT_SESSION 33, 1.11.0, 172/166/5/1, 234 ADRs, 35 migrations, 265
+requirements, next free D1778); CLAUDE.md §2/§8/§9 in the launch folder
+rewritten (copied to the scratchpad first); the project memory. **Session 33
+is COMPLETE. NEXT FREE: D1778, ADR 0235.**
 
 ---
 

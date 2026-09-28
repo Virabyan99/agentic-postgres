@@ -1053,3 +1053,74 @@ wrote the fixture, and does it share a belief with the code?
    D1704 are the two places this product has already met the question —
    a token whose stored scopes exceed its role's ceiling is refused at
    issuance, and a revoked agent cannot read its own stopped run.
+
+## 26. What Session 33 closed, what it left, and what Session 34 inherits
+
+**Session 33 is the session whose second principal is a person, and the person
+releases one write and holds nothing else.** Ten runs, `D1714`–`D1777`:
+twenty-eight rows written at planning and **thirty-six written by executing
+it**. `1.11.0` is deployed, swept, merged and tagged at `02ffbbd` (D1425, with
+D1641's method stated in the tag for D1773), and the merged evidence reads
+**172 claims: 166 passed, 5 not_run, 1 failed**. All fourteen claims the
+session added passed, and the four host ones did so on their first execution
+anywhere: `workflow_approval_live`, `workflow_compensation_live`,
+`workflow_provenance_live`, `audit_filters_live`.
+
+**The sentence this session would most want carried forward: a proof that
+cannot go red is a finding, not a pass.** The first sweep failed two
+never-executed proofs on one belief of their author's (D1773): that the
+project set's approved `set_note_embedding` write leaves a `database`/
+`committed` audit row. Only the release's own write functions write that row;
+a project set may not touch `app_private`, so the plane's `served` row is such
+a write's whole audit. The product was right, and every assertion before the
+audit line passed. And a THIRD proof had passed on the same belief: *no
+`committed` row at park* could not go red for a tool that never writes one.
+Then the session's own record did it too. Run 9 matched memory samples to runs
+by eye; a script found none inside a run's window (D1776). CLAUDE.md §7's
+first question, asked of a proof and of a record.
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **D1521's second half** — approval gates, compensation, provenance | **Closed, as far as the proofs reach.** An approval step parks on the plane's own `approval_required` refusal and resumes on a person's recorded decision (`app_private.workflow_approval`, migration 0035). The released call carries a signed `apg_approval {id, tool, key}` claim, built only by `step_token`, which the plane checks against the tool and the idempotency key (ADR 0230–0232). Proved on production: a SECOND user approved over HTTP and the write was served once; the requesting agent, a scopeless administrator and the run's owner were each refused. Compensation runs in reverse on a terminal failure or a rejection (`workflow_compensation_live`). Provenance joins every attempt to the plane's audit rows by request id, under `admin_audit:read` (`workflow_provenance_live`). **The `wait` step's park is built; its `event` is refused by name** -- Session 34's. |
+| **D1248** — the audit reader filters by agent, owner and limit only | **Closed on production.** `since`, `until`, `outcome`, `denial_reason` and an opaque keyset cursor, with `window_counts` on every page, so a filtered page reports what it did not show (`audit_filters_live`). Studio forwards exactly those filters (D1755). |
+| **D1704** — a revoked agent cannot read the run its revocation stopped | **Answered by an operator's reader, not the agent's.** `GET /admin/workflows/runs/{id}` under `admin_audit:read` reads a revoked agent's stopped run (`test_an_auditor_reads_a_revoked_agents_stopped_run`). The revoked agent still reads nothing, which is right. |
+| **D1707** — `migrate.sh … status` printed no ledger | **Closed on production.** Both deploys' reads printed the rendered set and the `[X]` lines, `Applied: 35` / `Pending: 0` (beta's project set: 2 / 0). |
+| **D1712** — `doctor usage`'s *"yet"* | **Closed on production.** The reason now reads *"the store holds no such series in the current mcp process (each process mints its own series, and a recreated mcp has served no call yet)"*. |
+| **D1705** — two behaviours of step 6d had no offline proof | **Closed** (Run 2): *nothing to install, saying which reason* and *an uninstallable definition refuses at exit 5* are proved offline; on production alpha printed *no workflow definitions (the project declares no migration set)* and beta installed four. |
+| **D1740, D1741** — prose the code had made false | **Corrected** in the runs that made each sentence false (the embedded reference, the `database` row's request id, the reader's arity, AGT-APPROVE-001's *no second principal*). |
+| **`THR-APPROVAL`** — an approval forged or replayed | **Written and proved.** The row names `AGT-APPROVE-001`, `-002`, `WF-GATE-001` and `WF-APPROVE-001`; a claim for another tool or key is refused, and a decided approval cannot be decided again. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **D1721** — approval is a PLANE control only | **Left by decision, recorded.** An agent holding `note_embeddings:write` and its own token can call `api.set_note_embedding` through PostgREST and never meet an approval (rig 33b measured it). This predates Session 33 (ADR 0179). The database half would be a tenant-set change to every gated function, and that is the example project's change to make, not the release's. |
+| **D1722** — the example project's `set_note_embedding` has no dry-run branch | **Two belts, not a fix.** A dry-run run never requests approval, and the plane refuses a dry run on an approved claim. The function itself would still write under a `Dry-Run` header, and that is the example project's SQL. |
+| **D1711** — no memory figure under a run | **Sampled and still unread** (D1776). 513 samples followed beta's `auth` through every recreation, and none lies inside a run's ~5.5 s window. The 127 MB spikes occur outside runs too. `capacity.UNMEASURED` keeps the row; ADR 0226's Session 33 amendment gives ~66 MiB as an upper bound on a reading not taken. |
+| **D1775** — an undecided approval stays `pending` when its run ends | **New.** Three such rows on beta, one per sweep. The doctor and the listing correctly exclude them, since both count *pending, unexpired, on a running run*. But nothing closes the row, and there is no `cancelled` approval status. This belongs to the retention story D1700 already owes. |
+| **D1700** — probe identities accumulate on beta | **Now humans too.** Twelve revoked `apg-s33-*` agents and six `apg-s33-*` humans, beside Session 32's sixteen and four. A run references its agent, and an approval references its approver (`decided_by`). |
+| **Approvals longer than an hour** | An approval's expiry is bounded below its run's timeout (at most 3,600 s). A decision that waits for a person longer than that needs a run that can outlive the bound. Not in Stage 4's brief. |
+| **D1642** — a DR kit names the checkout's commit | Seen a fifth time (`-pre` names `02ffbbd`, `-post` names `e087bca`, while the documents inside name `02ffbbd`). Harmless again; still unguarded. |
+| **D1581 / D1713** — why a sweep recreates `auth` | Still UNDETERMINED. Both deploys recreated `docs` too (D1772). |
+| **D1547** — the sentinel row is removed by a root `psql` | Unchanged: this session moved the `app` contract, not the `api` one. |
+| **The edge's two containers are unbounded** | Unchanged; Session 35's hardening. |
+| `documented_path`, `port_allocation`, the rotation trio, `replacement_host_restore` | Unchanged, and for the same reasons. |
+
+### What Session 34 inherits, in order
+
+1. **The `wait` step's `event` is refused by name.** The park, its expiry and
+   the resume are built; Session 34 adds the event that resumes it.
+2. **`workflow_gate_state` is the one gate read.** An event gate is a new
+   state in it, not a second reader.
+3. **The compensation mechanism**: reverse order, the same agent, outcome
+   `complete|incomplete`, never a rollback. An outbound delivery that fails
+   terminally may reuse it.
+4. **The approval claim as the pattern** for any other signed, single-write
+   authority: built only from the database by `step_token`, and checked by the
+   plane against the tool and the key.
+5. **`admin_workflows:approve` as the precedent** for a connector's
+   administrative scope. It is held by `project_admin` alone, NO existing
+   administrator gains it on upgrade, and the run's owner may not use it on
+   their own agent's run.
