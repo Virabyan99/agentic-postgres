@@ -190,10 +190,26 @@ def test_the_project_lock_is_frozen_and_verified_apart_from_the_release_lock(
             f"carry {field_name}; from schema 3 the record says how it was obtained "
             "(ADR 0210)"
         )
-    assert project_lock["follows_release_version_source"] == migrations.FOLLOWS_COMPUTED, (
-        "the committed example lock was written by a freeze on this checkout, so its "
-        "record is computed; a `declared` value here would be an unexplained assertion "
-        "in the release's own example"
+    # ADR 0240: the example set outlived the release it was frozen against.
+    # Release migration 0036 sorts above this set's first two, so a computed
+    # freeze on this checkout refuses (measured, exit 5) and the record is
+    # DECLARED -- at the value its last computed freeze recorded. The third
+    # assertion is what makes the declaration an explained one: the day every
+    # set version sorts above the release's newest again, a computed freeze
+    # could say this and the declaration would be an assertion nobody needed.
+    assert project_lock["follows_release_version_source"] == migrations.FOLLOWS_DECLARED, (
+        "the committed example lock's record is not declared; ADR 0240 says why it is"
+    )
+    assert project_lock["follows_release_version"] == "20260912120031", (
+        "the declared record moved; it is the value the set's last computed freeze "
+        "recorded, and nothing in the set's first two migrations changed"
+    )
+    newest_release = max(entry["version"] for entry in release_lock["migrations"])
+    oldest_project = min(entry["version"] for entry in project_lock["migrations"])
+    assert newest_release > oldest_project, (
+        f"every example-set version sorts above the release's newest ({newest_release}), "
+        "so a computed freeze would record this lock's truth again -- the declaration "
+        "ADR 0240 made is no longer needed; re-freeze without --follows"
     )
 
     release_versions = {entry["version"] for entry in release_lock["migrations"]}
@@ -1294,14 +1310,72 @@ def test_a_project_set_that_publishes_nothing_is_caught_by_the_reader(
     assert sql_surface.published_names(real_surface)
 
 
-def test_the_example_lock_records_two_migrations_in_order(
+def test_the_example_sets_third_migration_keeps_the_signature(
     example: migrations.MigrationSet,
 ) -> None:
-    """The set is fix-forward, so D1156's grant arrived as a second migration.
+    """**D1781, EVT-LINT-001.** `0003` replaces `api.set_note_embedding` with
+    0001's signature, `search_path` and body BYTE FOR BYTE plus one line: the
+    emitter's call after the upsert, whose payload names the note and never
+    the embedding. The lint passes it -- a project may replace its OWN
+    function and call the release's emitter; what it may not replace is a
+    release function (`test_a_project_set_may_not_replace_a_release_function`).
+
+    Offline, this is the half a file can prove. That `CREATE OR REPLACE` kept
+    the grants 0001 and 0002 made is measured on a cluster the product's own
+    `apg dev up` built: `test_dev_environment_cluster.py::test_the_example_sets_
+    third_migration_kept_its_grants`.
+
+    Goes red if: the body drifts from 0001's in any line but the emit, the
+    signature changes (the project's reviewed surface would move), the payload
+    gains the vector, a second placeholder is read, or the lint refuses it.
+    """
+    migrations.lint_project_set(example)
+
+    templates = example.root / "templates"
+    first = (templates / "0001-note-embeddings.sql").read_text(encoding="utf-8")
+    third = (templates / "0003-note-embedding-events.sql").read_text(encoding="utf-8")
+
+    def function(text: str, opener: str) -> str:
+        start = text.index(opener)
+        return text[start : text.index("END $fn$;\n", start)]
+
+    original = function(first, "CREATE FUNCTION api.set_note_embedding(")
+    replaced = function(third, "CREATE OR REPLACE FUNCTION api.set_note_embedding(")
+    emit = (
+        "  PERFORM app.emit_event('note_embedding.set', 1, "
+        "pg_catalog.jsonb_build_object('note_id', p_note_id));\n"
+    )
+    assert replaced.count(emit) == 1, "0003 does not emit exactly once"
+    assert replaced.replace(emit, "").replace("CREATE OR REPLACE", "CREATE", 1) == original, (
+        "0003's function differs from 0001's in a line other than the emit"
+    )
+    upsert_end = "  RETURNING note_id, owner_id, embedding, updated_at INTO written;\n"
+    assert replaced.index(upsert_end) + len(upsert_end) == replaced.index(emit), (
+        "the emit is not directly after the upsert"
+    )
+    assert "p_embedding" not in emit and "embedding" not in emit.split("jsonb_build_object")[1]
+
+    # Nothing but the preamble's placeholder, and nothing re-granted: the
+    # grants are the OID's, and the cluster proof reads them.
+    manifest = example.load_manifest()
+    (entry,) = [item for item in manifest["migrations"] if item["version"] == "20260930120003"]
+    assert entry["placeholders"] == ["object_owner"]
+    granting = [line for line in third.splitlines() if line.lstrip().upper().startswith("GRANT")]
+    assert granting == [], (
+        "0003 re-grants; CREATE OR REPLACE keeps the OID and its ACL, and a restated grant "
+        "would hide a replace that dropped one"
+    )
+
+
+def test_the_example_lock_records_its_migrations_in_order(
+    example: migrations.MigrationSet,
+) -> None:
+    """The set is fix-forward, so D1156's grant arrived as a second migration
+    and Session 34's event as a third (D1781).
 
     20260914120001 is frozen and applied on beta; a grant added by editing it
-    would be an amended applied migration (D912). So the lock must carry two
-    entries, in version order, both sorting after `follows_release_version` --
+    would be an amended applied migration (D912). So the lock carries each
+    change as its own entry, in version order, both sorting after `follows_release_version` --
     which dbmate needs, because it is handed one directory and orders the whole
     of it by filename (D1098).
 
@@ -1320,9 +1394,10 @@ def test_the_example_lock_records_two_migrations_in_order(
     manifest = example.load_manifest()
 
     versions = [entry["version"] for entry in lock["migrations"]]
-    assert versions == ["20260914120001", "20260914120002"], (
+    assert versions == ["20260914120001", "20260914120002", "20260930120003"], (
         f"the example set's lock records {versions}; the grant migration D1156 needs "
-        "is a SECOND entry, because the first is frozen and applied"
+        "is a SECOND entry and the event Session 34 adds a THIRD, because each one "
+        "before it is frozen and applied"
     )
     assert versions == sorted(versions), "the lock records the set out of version order"
     assert versions == [entry["version"] for entry in manifest["migrations"]], (

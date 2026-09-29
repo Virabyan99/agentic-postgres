@@ -1,0 +1,29 @@
+# The inbound connector's workflow: a signed request becomes one note.
+#
+# What it is FOR: `connectors/notes-inbox.yaml` starts a run of this
+# definition for each correctly signed `POST /connectors/notes-inbox`, as the
+# agent an administrator bound to it, with the request's body as the run's
+# input (ADR 0237). One step, one governed write -- the plane's scope check,
+# budgets, audit and idempotency key, exactly as for any agent call (D1781:
+# the release's `create_task` is not a capability, so the host proof creates
+# a note).
+#
+# Both arguments are whole references to the input, and the connector's body
+# declares exactly those two members and requires both: the body IS the input,
+# so a member nothing reads, or a reference to a member the body cannot
+# carry, is refused when the connector compiles (D1787, D1831).
+---
+schema_version: 1
+name: notes-inbox
+version: 1
+description: >-
+  Creates one note from a signed inbound request's title and content, as the
+  agent bound to the notes-inbox connector.
+timeout_seconds: 120
+
+steps:
+  - name: create
+    capability: create_note@1.0.0
+    arguments:
+      p_title: "{{input.title}}"
+      p_content: "{{input.content}}"

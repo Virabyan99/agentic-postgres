@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/connector.schema.json",
+  "title": "Agentic Postgres connector",
+  "description": "One connector a project publishes (ADR 0236): WHAT it does -- the event an outbound connector delivers, or the definition an inbound or scheduled connector starts and the input it starts it with. Never WHERE: an outbound connector's endpoint is a per-deployment value in the project manifest's `connectors.endpoints` (D1786), because a committed file is shared by every deployment of its set. This schema is the shape; `connector_definition.compile` is the meaning, and it refuses a member of another kind by name.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "name",
+    "version",
+    "description",
+    "kind"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "1, the only version. A connector is installed as a row and is immutable per (name, version) except for its endpoint, so a second schema version is a decision about migrating rows."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$",
+      "description": "The connector's name, unique across the project: `app_private.connector.name`'s CHECK, the key of its endpoint in the manifest, and the last segment of an inbound connector's route `POST /connectors/{name}`."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9999,
+      "description": "The connector's version. The same (name, version) with a different source refuses the deploy (PT409); a higher version that changes what the connector does is installed DISABLED and unbound, because the agent an administrator bound was bound to the old one."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What this connector is for, in the author's own words."
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "outbound",
+        "inbound",
+        "scheduled"
+      ],
+      "description": "`outbound` delivers an event to this deployment's endpoint (ADR 0238); `inbound` starts a run of a definition from a signed request (ADR 0237); `scheduled` starts one on an interval (ADR 0236)."
+    },
+    "event": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,62}(\\.[a-z][a-z0-9_]{0,62}){0,3}@[1-9][0-9]{0,2}$",
+      "description": "Outbound only. The event delivered, as `name@version` -- `app.emit_event`'s name rule and a version always."
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max",
+        "backoff_seconds"
+      ],
+      "description": "Outbound only. How many times a delivery is retried after its first attempt, and how long it waits between attempts. The table's own bounds.",
+      "properties": {
+        "max": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "backoff_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        }
+      }
+    },
+    "workflow": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}@[1-9][0-9]{0,3}$",
+      "description": "Inbound and scheduled only. The definition started, as `name@version`, which must be a definition in the SAME set's `workflows/` at that version. The connector records that definition's required scopes, and the agent an administrator binds must hold exactly those."
+    },
+    "body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "members"
+      ],
+      "description": "Inbound only. The request body, in a CLOSED subset (ADR 0237, D1787): named members, no nesting, nothing undeclared. The body IS the run's input, so every member must be one the definition references as `{{input.<member>}}` and every such reference must be a member.",
+      "properties": {
+        "members": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 16,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,62}$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/member"
+          }
+        }
+      }
+    },
+    "schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "every_seconds"
+      ],
+      "description": "Scheduled only. The interval, from the moment an administrator enables it; missed fires coalesce to one.",
+      "properties": {
+        "every_seconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "maxProperties": 16,
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]{0,62}$"
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
+      },
+      "description": "Scheduled only. The run's input: literals, exactly the keys the definition references as `{{input.<key>}}`."
+    }
+  },
+  "$defs": {
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "required"
+      ],
+      "description": "One body member. A string declares its `max_length`; an integer its `minimum` and `maximum`; a boolean neither.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "string",
+            "integer",
+            "boolean"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "max_length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "minimum": {
+          "type": "integer"
+        },
+        "maximum": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

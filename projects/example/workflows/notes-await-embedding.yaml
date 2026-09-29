@@ -1,0 +1,40 @@
+# The event wait's workflow: park until the owner embeds a given note.
+#
+# What it is FOR: Session 34's event wait (ADR 0239), run on a deployment. The
+# first step parks on `note_embedding.set@1` -- the event this project's own
+# `api.set_note_embedding` emits since its migration 0003 -- until an event
+# whose payload CONTAINS `{note_id: <the input's note>}` is emitted by the
+# run's OWNER, or 300 seconds pass and the step fails `event_timeout`. An
+# embedding written for another note, or by another user, leaves it parked.
+#
+# The note is the INPUT's, not a note an earlier step created (D1832). A
+# write step's recorded result is `{row: {...}}`, and a reference reaches ONE
+# field of it -- `{{steps.<name>.row}}` is the whole row, which a `{note_id}`
+# payload never contains, and `{{steps.<name>.row.id}}` is not a reference the
+# grammar admits. So the proof creates the note, starts this run with its id,
+# then writes the embedding.
+#
+# The second step records that the wait was served. It cannot reference the
+# wait's payload: a wait step is not a reference target (Session 33's rule).
+---
+schema_version: 1
+name: notes-await-embedding
+version: 1
+description: >-
+  Waits for the owner to set the embedding of the input's note, then records
+  a note saying it arrived. Fails event_timeout after 300 seconds.
+timeout_seconds: 600
+
+steps:
+  - name: embedded
+    wait:
+      event: note_embedding.set@1
+      match:
+        note_id: "{{input.note_id}}"
+      seconds: 300
+
+  - name: record
+    capability: create_note@1.0.0
+    arguments:
+      p_title: embedding arrived
+      p_content: "The embedding for {{input.note_id}} was set while this run waited."

@@ -1,0 +1,29 @@
+# A signed request becomes a run of `notes-inbox@1` (ADR 0237).
+#
+# `POST /connectors/notes-inbox`, signed with the key derived from the
+# project's `connector_signing_key` and this name. The signature is checked
+# before anything else; then the body is checked against the members below,
+# and a run of the definition starts as the agent an administrator bound --
+# whose stored scopes must equal the definition's (`notes:write`).
+#
+# The body IS the run's input: exactly the two members the definition reads,
+# both required (D1787, D1831).
+---
+schema_version: 1
+name: notes-inbox
+version: 1
+description: >-
+  Starts one notes-inbox run per correctly signed request, creating one note
+  from the request's title and content.
+kind: inbound
+workflow: notes-inbox@1
+body:
+  members:
+    title:
+      type: string
+      required: true
+      max_length: 200
+    content:
+      type: string
+      required: true
+      max_length: 4000

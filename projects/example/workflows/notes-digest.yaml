@@ -1,0 +1,28 @@
+# The scheduled connector's workflow: read the newest note, once an interval.
+#
+# What it is FOR: `connectors/notes-digest.yaml` starts a run of this
+# definition every `every_seconds` once an administrator enables it, as the
+# agent bound to it, with the connector's literal input (ADR 0236). A read,
+# so a schedule left running changes nothing.
+#
+# `limit` is a whole reference to the input and not a literal: the compiler
+# admits a reference in a relation read's `limit` (it checks argument NAMES
+# against the runtime's four, and a string value may be a reference), and the
+# worker resolves a whole-string reference to the input's value with its type
+# intact -- the integer 1, not "1". The scheduled connector supplies it, so
+# the pair exercises a schedule's input end to end.
+---
+schema_version: 1
+name: notes-digest
+version: 1
+description: >-
+  Reads the most recent notes, as many as the input's limit, as the agent
+  bound to the notes-digest schedule.
+timeout_seconds: 120
+
+steps:
+  - name: read
+    capability: query_notes@1.0.0
+    arguments:
+      columns: [id]
+      limit: "{{input.limit}}"

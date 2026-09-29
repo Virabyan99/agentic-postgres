@@ -736,10 +736,201 @@ def test_a_wait_takes_no_capability_and_is_bounded(lock: wd.LockView) -> None:
     assert "is a wait step and carries capability" in refused.value.reason
 
 
-def test_a_wait_on_an_event_is_refused_naming_session_thirty_four(lock: wd.LockView) -> None:
+# ---------------------------------------------------------------------------
+# Session 34: a wait on an event (ADR 0239, EVT-WAIT-001)
+# ---------------------------------------------------------------------------
+
+NOTE = {
+    "name": "note",
+    "capability": "create_note@1.0.0",
+    "arguments": {"p_title": "{{input.title}}", "p_content": "x"},
+}
+
+
+def test_a_wait_on_an_event_compiles_with_its_match(lock: wd.LockView) -> None:
+    """**The Session 33 refusal is gone** (ADR 0239 replaces it). An event
+    wait compiles to a time wait's body plus `event` and `match`, calls
+    nothing and adds no scope; a wait on a time compiles to exactly the body
+    it did in Session 33, with neither key."""
+    compiled = compile_it(
+        definition(
+            [
+                NOTE,
+                {
+                    "name": "embedded",
+                    "wait": {
+                        "event": "note_embedding.set@1",
+                        "match": {"note_id": "{{input.note_id}}", "kind": "vector", "n": 2},
+                        "seconds": 300,
+                    },
+                },
+            ],
+            timeout_seconds=600,
+        ),
+        lock,
+    )
+    assert compiled.body()["steps"][1] == {
+        "name": "embedded",
+        "kind": "wait",
+        "seconds": 300,
+        "timeout_seconds": wd.WAIT_STEP_TIMEOUT_SECONDS,
+        "retry": {"max": 0, "backoff_seconds": 1},
+        "event": "note_embedding.set@1",
+        "match": {"note_id": "{{input.note_id}}", "kind": "vector", "n": 2},
+    }
+    assert compiled.required_scopes == ("notes:write",)
+    assert wd.input_references(compiled) == {"title", "note_id"}
+
+    # No match is an empty one: the emitter's containment of `{}` holds for
+    # every payload, so the wait is served by any event of that name.
+    bare = compile_it(definition([{"name": "any", "wait": {"event": "a.b@1", "seconds": 5}}]), lock)
+    assert bare.body()["steps"][0]["match"] == {}
+
+    # The control: a time wait carries neither key.
+    timed = compile_it(definition([{"name": "pause", "wait": {"seconds": 5}}]), lock)
+    assert "event" not in timed.body()["steps"][0]
+    assert "match" not in timed.body()["steps"][0]
+
+    # And an event wait still says for how long, and still not past the run.
+    for wait, sentence in (
+        ({"event": "a.b@1"}, "says for how long in no `seconds`"),
+        ({"event": "a.b@1", "seconds": 600}, "not less than the run's timeout_seconds"),
+        ({"match": {"k": 1}, "seconds": 5}, "wait.match without wait.event"),
+    ):
+        with pytest.raises(wd.DefinitionError) as refused:
+            compile_it(definition([{"name": "w", "wait": wait}], timeout_seconds=600), lock)
+        assert sentence in refused.value.reason, (wait, refused.value.reason)
+
+
+def test_a_match_may_reference_only_the_input_or_an_earlier_step(lock: wd.LockView) -> None:
+    """The match is resolved ONCE, when the wait parks, so a later step has
+    recorded nothing and the wait itself records nothing until it is served."""
+    earlier = compile_it(
+        definition(
+            [
+                NOTE,
+                {
+                    "name": "w",
+                    "wait": {
+                        "event": "a.b@1",
+                        "match": {"row": "{{steps.note.row}}"},
+                        "seconds": 5,
+                    },
+                },
+            ]
+        ),
+        lock,
+    )
+    assert earlier.steps[1].match == {"row": "{{steps.note.row}}"}
+
+    for reference, sentence in (
+        ("{{steps.later.row}}", "names a step that runs later"),
+        ("{{steps.nowhere.row}}", "is not a step of this definition"),
+        ("{{steps.w.row}}", "refers to itself"),
+        ("{{steps.pause.row}}", "names a wait step"),
+    ):
+        steps = [
+            {"name": "pause", "wait": {"seconds": 5}},
+            {"name": "w", "wait": {"event": "a.b@1", "match": {"k": reference}, "seconds": 5}},
+            {**NOTE, "name": "later"},
+        ]
+        with pytest.raises(wd.DefinitionError) as refused:
+            compile_it(definition(steps), lock)
+        assert refused.value.step_name == "w"
+        assert sentence in refused.value.reason, (reference, refused.value.reason)
+
+
+def test_a_match_value_must_be_a_literal_or_a_whole_reference(lock: wd.LockView) -> None:
+    """Whole, because the emitter compares by containment: an embedded
+    reference interpolates a rendering no payload was written to equal."""
+    for value in ("note-{{input.note_id}}", "{{input.a}}{{input.b}}", "{{input.note_id}} "):
+        with pytest.raises(wd.DefinitionError) as refused:
+            compile_it(
+                definition(
+                    [{"name": "w", "wait": {"event": "a.b@1", "match": {"k": value}, "seconds": 5}}]
+                ),
+                lock,
+            )
+        assert "ONE whole reference" in refused.value.reason, (value, refused.value.reason)
+
+    for value in (1.5, None, [1], {"a": 1}):
+        with pytest.raises(wd.DefinitionError) as refused:
+            compile_it(
+                definition(
+                    [{"name": "w", "wait": {"event": "a.b@1", "match": {"k": value}, "seconds": 5}}]
+                ),
+                lock,
+            )
+        assert "a match member is a string, an integer or a boolean" in refused.value.reason
+
     with pytest.raises(wd.DefinitionError) as refused:
-        compile_it(definition([{"name": "pause", "wait": {"event": "task.created"}}]), lock)
-    assert "arrives in Session 34" in refused.value.reason
+        compile_it(
+            definition(
+                [
+                    {
+                        "name": "w",
+                        "wait": {"event": "a.b@1", "match": {"k": "{{input.x}"}, "seconds": 5},
+                    }
+                ]
+            ),
+            lock,
+        )
+    assert "ONE whole reference" in refused.value.reason or "typo" in refused.value.reason
+
+    many = {f"k{index}": index for index in range(wd.MAX_MATCH_MEMBERS + 1)}
+    with pytest.raises(wd.DefinitionError, match="at most 8"):
+        compile_it(
+            definition([{"name": "w", "wait": {"event": "a.b@1", "match": many, "seconds": 5}}]),
+            lock,
+        )
+
+    # The control: every literal kind, and a whole reference, at the bound.
+    literals = {"s": "plain", "i": 7, "b": True, "r": "{{input.x}}"}
+    literals.update({f"k{index}": index for index in range(wd.MAX_MATCH_MEMBERS - len(literals))})
+    compiled = compile_it(
+        definition([{"name": "w", "wait": {"event": "a.b@1", "match": literals, "seconds": 5}}]),
+        lock,
+    )
+    assert compiled.steps[0].match == literals
+
+
+def test_an_event_reference_must_name_a_version(lock: wd.LockView) -> None:
+    """`name@version`, the emitter's own name rule, the version from 1: an
+    event whose shape changed is a new version, and a wait on a bare name
+    would be served by a payload it was never written against. The schema
+    refuses the same strings, so a file never reaches the compiler with one."""
+    refused_references = (
+        "task.created",
+        "task.created@0",
+        "task.created@1000",
+        "Task.created@1",
+        "a.b.c.d.e@1",
+        "task-created@1",
+        "@1",
+    )
+    for event in refused_references:
+        with pytest.raises(wd.DefinitionError) as refused:
+            compile_it(definition([{"name": "w", "wait": {"event": event, "seconds": 5}}]), lock)
+        assert "is not an event reference" in refused.value.reason, (event, refused.value.reason)
+
+    for event in ("note_embedding.set@1", "a@999", "a.b.c.d@12"):
+        assert (
+            compile_it(definition([{"name": "w", "wait": {"event": event, "seconds": 5}}]), lock)
+            .steps[0]
+            .event
+            == event
+        )
+
+    from agentic_postgres import config
+
+    for event in refused_references:
+        document = definition([{"name": "w", "wait": {"event": event, "seconds": 5}}])
+        with pytest.raises(config.ManifestError):
+            config.validate_against_schema(document, wd.SCHEMA_NAME)
+    config.validate_against_schema(
+        definition([{"name": "w", "wait": {"event": "note_embedding.set@1", "seconds": 5}}]),
+        wd.SCHEMA_NAME,
+    )
 
 
 def test_a_reference_to_a_wait_step_is_refused(lock: wd.LockView) -> None:
@@ -882,7 +1073,7 @@ def test_the_session_32_definitions_are_byte_for_byte_unchanged() -> None:
     assert {
         path.name: wd.source_digest(path)
         for path in wd.definitions_of(PROJECT_ROOT)
-        if path.name.startswith("notes-")
+        if path.name in ("notes-retry.yaml", "notes-roundtrip.yaml")
     } == {
         "notes-retry.yaml": "d2bef7efbfcbd27d168bb78cabfb3500927f95b48518d4af5e844fd70e7a4eac",
         "notes-roundtrip.yaml": "d5b2365d9040ed89b5b46c02802141454866c8fa7f1c89b3f0b4488cdeba5025",
@@ -908,17 +1099,20 @@ def test_definitions_of_a_project_with_no_workflows_directory_is_empty(tmp_path:
 # ---------------------------------------------------------------------------
 
 
-def test_the_example_projects_four_definitions_compile(lock: wd.LockView) -> None:
+def test_the_example_projects_seven_definitions_compile(lock: wd.LockView) -> None:
     """**The control for every refusal above.**
 
     Without it, a compiler that refused everything would pass this whole
     module. It is also the check that `bin/workflow.sh validate --project
-    project.example.yaml` exits 0, asserted here over the same four files --
+    project.example.yaml` exits 0, asserted here over the same seven files --
     `project.example.yaml` is the manifest that names `projects/example` (beta's
     shape); `project.second.example.yaml` names no set (D1749).
     """
     paths = wd.definitions_of(PROJECT_ROOT)
     assert [path.name for path in paths] == [
+        "notes-await-embedding.yaml",
+        "notes-digest.yaml",
+        "notes-inbox.yaml",
         "notes-retry.yaml",
         "notes-roundtrip.yaml",
         "tasks-approval.yaml",
@@ -977,6 +1171,30 @@ def test_the_example_projects_four_definitions_compile(lock: wd.LockView) -> Non
     ]
     assert roundtrip.steps[1].resource == "notes"
     assert roundtrip.required_scopes == ("notes:read", "notes:write")
+
+    # Session 34's three: the connectors' two, and the event wait.
+    awaiting = compiled["notes-await-embedding.yaml"]
+    assert awaiting.body()["steps"][0] == {
+        "name": "embedded",
+        "kind": "wait",
+        "seconds": 300,
+        "timeout_seconds": wd.WAIT_STEP_TIMEOUT_SECONDS,
+        "retry": {"max": 0, "backoff_seconds": 1},
+        "event": "note_embedding.set@1",
+        "match": {"note_id": "{{input.note_id}}"},
+    }
+    assert awaiting.required_scopes == ("notes:write",)
+    inbox = compiled["notes-inbox.yaml"]
+    assert wd.input_references(inbox) == {"title", "content"}
+    assert inbox.required_scopes == ("notes:write",)
+    digest = compiled["notes-digest.yaml"]
+    assert digest.steps[0].tool == "query_resource"
+    assert digest.steps[0].resource == "notes"
+    # The compiler admits a reference in a relation read's `limit` (it checks
+    # NAMES, and a string value may be a whole reference); the worker resolves
+    # it to the input's integer.
+    assert digest.steps[0].arguments["limit"] == "{{input.limit}}"
+    assert digest.required_scopes == ("notes:read",)
 
     retry = compiled["notes-retry.yaml"]
     assert retry.steps[0].retry == {"max": 1, "backoff_seconds": 45}

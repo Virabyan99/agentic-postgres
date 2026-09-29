@@ -1,0 +1,19 @@
+# Starts a run of `notes-digest@1` every minute, once enabled (ADR 0236).
+#
+# The interval counts from the moment an administrator enables it; a worker
+# that was down fires once when it returns, not once per missed minute. The
+# input is literal -- a schedule has no request and no prior step -- and gives
+# exactly the key the definition reads.
+---
+schema_version: 1
+name: notes-digest
+version: 1
+description: >-
+  Reads the newest note every minute, as the agent bound to it. A read, so a
+  schedule left running changes nothing.
+kind: scheduled
+workflow: notes-digest@1
+schedule:
+  every_seconds: 60
+input:
+  limit: 1

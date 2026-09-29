@@ -1,6 +1,6 @@
 {
   "follows_release_version": "20260912120031",
-  "follows_release_version_source": "computed",
+  "follows_release_version_source": "declared",
   "migrations": [
     {
       "canonical_render_sha256": "a757664826f2e6ff9762359195f2fbd686b49a468f15776b9b59c30c919b90e7",
@@ -27,6 +27,16 @@
       "template": "templates/0002-agent-grants.sql",
       "template_sha256": "019d2d0cca65d75c6ea3bb80710b0d6f92b3b6d12c807f7f1378b98ab87d0c3d",
       "version": "20260914120002"
+    },
+    {
+      "canonical_render_sha256": "912dec5b7c8c2614dce4086e657b7cd7ba3e2a691228c61a83a5d98ccfdda0e5",
+      "name": "note_embedding_events",
+      "placeholders": [
+        "object_owner"
+      ],
+      "template": "templates/0003-note-embedding-events.sql",
+      "template_sha256": "0ca771d046a26dc609b02bac2bc8a36a478cdb0933cf21959cc764f15aceec03",
+      "version": "20260930120003"
     }
   ],
   "schema_version": 3

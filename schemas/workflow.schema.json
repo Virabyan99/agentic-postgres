@@ -172,7 +172,7 @@
           "type": "object",
           "additionalProperties": false,
           "minProperties": 1,
-          "description": "Since Session 33 (ADR 0233). A step that calls nothing and parks for `seconds`, strictly less than the run's `timeout_seconds`. `event` is admitted by this schema only so that the compiler can refuse it with a sentence: a wait on an event arrives in Session 34 with the events that resume it.",
+          "description": "Since Session 33 (ADR 0233). A step that calls nothing and parks for `seconds`, strictly less than the run's `timeout_seconds`. Since Session 34 (ADR 0239) it may instead wait on an EVENT, `name@version`, and a `match` the event's payload must contain: it resumes when a reviewed function of the run's OWNER emits a matching event after the wait began, and fails `event_timeout` when `seconds` -- then the longest it waits -- pass first. `seconds` is required either way; `match` without `event` is refused.",
           "properties": {
             "seconds": {
               "type": "integer",
@@ -181,7 +181,29 @@
             },
             "event": {
               "type": "string",
-              "minLength": 1
+              "pattern": "^[a-z][a-z0-9_]{0,62}(\\.[a-z][a-z0-9_]{0,62}){0,3}@[1-9][0-9]{0,2}$",
+              "description": "The event this wait resumes on, as `name@version`: `app.emit_event`'s own name rule, and a version always, because an event whose shape changed is a new version."
+            },
+            "match": {
+              "type": "object",
+              "maxProperties": 8,
+              "propertyNames": {
+                "pattern": "^[a-z][a-z0-9_]{0,62}$"
+              },
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "description": "Payload members the event must carry with these values (the emitter compares by containment). Each is a literal, or ONE whole `{{input.<key>}}` or `{{steps.<earlier>.<field>}}` reference resolved once when the wait parks."
             }
           }
         }

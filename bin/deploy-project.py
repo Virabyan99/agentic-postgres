@@ -60,6 +60,8 @@ from agentic_postgres import (
     capacity_probe,
     capacity_reading,
     config,
+    connector_definition,
+    connector_install,
     container_exec,
     database_observation,
     deployed_output,
@@ -164,6 +166,11 @@ METRICS_PLANE_SESSION = 14
 #: be through an earlier session should converge the plane that session had,
 #: and a definition installed by it would be state that session never named.
 WORKFLOW_SESSION = 32
+
+#: The session that gives a project connectors (ADR 0236): step 6e, gated
+#: exactly as step 6d is and for its reason -- migration 0036 applies at every
+#: through-session, and what this gates is installing rows into it.
+CONNECTOR_SESSION = 34
 
 #: The bootstrap issuer's credential, named once because two readers need it:
 #: `jwt.temporary` in the deployed document, and the retirement that decides it
@@ -941,6 +948,104 @@ def install_workflow_definitions(
                     "PT409: publish a new version rather than editing an installed one.",
                 )
         print(f"  {path.name:<28} {compiled.name} v{compiled.version}  {len(compiled.steps)} steps")
+
+
+# ---------------------------------------------------------------------------
+# Connectors (step 6e)
+# ---------------------------------------------------------------------------
+
+
+def install_connectors(
+    *, release: Path, manifest_path: Path, lock_path: Path, database: dict[str, Any]
+) -> None:
+    """Compile every connector the project publishes, and install it DISABLED (ADR 0236).
+
+    Step 6d's shape: the INSTALLED manifest and the INSTALLED release resolve
+    the set, the lock is the one this deploy wrote, and each connector is
+    compiled against the set's definitions -- compiled again here with the same
+    compiler, so the scopes a connector records are the ones 6d installed.
+    Nothing is installed without the facility: a project that has not enabled
+    connectors owes no key (ADR 0237), and a connector whose deliveries nothing
+    could sign is state with no use.
+
+    An outbound connector whose endpoint is not in the manifest is installed
+    WITHOUT one and the line says so. That is a report and not a refusal (ADR
+    0195): the deploy converges what it was given, and `enable` is the
+    decision that refuses a connector with nowhere to send (`no_endpoint`).
+    An endpoint that names no outbound connector of the set is reported the
+    same way and installed nowhere. The endpoint itself is never printed.
+    """
+    try:
+        manifest = load_project_manifest(manifest_path)
+    except ManifestError as error:
+        fail(EXIT_VALIDATION, f"the installed project manifest cannot be read: {error}")
+
+    named = config.project_migration_set(manifest)
+    if named is None:
+        print("  no connectors (the project declares no migration set)")
+        return
+    if not config.connectors_enabled(manifest):
+        print("  no connectors (the manifest's connectors.enabled is false)")
+        return
+
+    paths = connector_definition.connectors_of(release / named)
+    if not paths:
+        print("  no connectors (the project declares none)")
+        return
+
+    try:
+        lock = workflow_definition.LockView.from_json(lock_path.read_bytes())
+    except OSError as error:
+        fail(EXIT_VALIDATION, f"the capability lock this deploy wrote cannot be read: {error}")
+    except workflow_definition.DefinitionError as error:
+        fail(EXIT_VALIDATION, f"the capability lock this deploy wrote: {error}")
+    try:
+        definitions = connector_definition.definitions_for(release / named, lock)
+    except workflow_definition.DefinitionError as error:
+        fail(EXIT_VALIDATION, f"a definition the connectors start does not compile: {error}")
+
+    endpoints = config.connector_endpoints(manifest)
+    compiled_all = []
+    for path in paths:
+        try:
+            compiled_all.append((path, connector_definition.compile_file(path, lock, definitions)))
+        except connector_definition.ConnectorError as error:
+            fail(EXIT_VALIDATION, f"{path.name} does not compile: {error}")
+
+    outbound = {compiled.name for _, compiled in compiled_all if compiled.kind == "outbound"}
+    container = database["container"]
+    for path, compiled in compiled_all:
+        endpoint = endpoints.get(compiled.name) if compiled.kind == "outbound" else None
+        for statement in connector_install.statements(compiled, endpoint):
+            result = container_exec.run(
+                container,
+                "psql",
+                "-U",
+                "postgres",
+                "-d",
+                database["name"],
+                *statement.argv,
+                input=statement.stdin,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                message = (result.stderr or result.stdout).strip().splitlines()
+                fail(
+                    EXIT_VALIDATION,
+                    f"{path.name} was not installed: "
+                    f"{message[0] if message else 'no output'}. A connector already "
+                    "installed under this name and version with a different source is a "
+                    "PT409: publish a new version rather than editing an installed one.",
+                )
+            word = (result.stdout or "").strip().splitlines()
+            word = word[-1] if word else "no result"
+        line = f"  {path.name:<28} {compiled.name} v{compiled.version}  {compiled.kind}  {word}"
+        if compiled.kind == "outbound" and endpoint is None:
+            line += " -- no endpoint in the manifest; `enable` will refuse it"
+        print(line)
+
+    for name in sorted(set(endpoints) - outbound):
+        print(f"  endpoint for {name}: names no outbound connector of this set; installed nowhere")
 
 
 # ---------------------------------------------------------------------------
@@ -2452,6 +2557,19 @@ def main(argv: list[str] | None = None) -> int:
         if arguments.through_session >= WORKFLOW_SESSION:
             step("6d. Install the project's workflow definitions")
             install_workflow_definitions(
+                release=release,
+                manifest_path=manifest_copy,
+                lock_path=deployed_output.rendered_path(key) / runtime_override.MCP_LOCK_FILENAME,
+                database=rendered["database"],
+            )
+
+        # **6e, directly after 6d and for 6d's reasons**: `connector_install` is
+        # migration 0036's, and an inbound or scheduled connector names a
+        # definition 6d has just installed. Before 6b, so the route never
+        # answers `no_such_connector` about a connector this deploy installs.
+        if arguments.through_session >= CONNECTOR_SESSION:
+            step("6e. Install the project's connectors")
+            install_connectors(
                 release=release,
                 manifest_path=manifest_copy,
                 lock_path=deployed_output.rendered_path(key) / runtime_override.MCP_LOCK_FILENAME,

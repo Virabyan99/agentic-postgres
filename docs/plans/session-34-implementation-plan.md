@@ -619,6 +619,12 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1828** | 4 | §5 Run 4 item 5: `src/agentic_postgres/connector_keys.py` in Run 4 and `test_the_two_key_derivations_agree`. | `test_repository_contract.py::test_no_module_is_imported_only_by_its_own_tests` (D204) refused it: *"a module with no caller is a feature that does not exist"* — its one caller, `bin/connector.py key`, is Run 7's. | **The host copy ships in Run 7 with its caller**, and the two-copy agreement proof with it. Run 4 proves the image's derivation against an HMAC the test writes itself on ten vectors (`test_the_key_derivation_matches_an_independent_hmac`) and `sign` against rig 34b's openssl-measured vector; the battery's label mutation is killed there. | 0237 |
 | **D1829** | 4 | — | Moving outputs to 19 made three pins of the version name the wrong one: `test_the_chain_ends_at_version_18_with_nothing_of_a_projects_own` (registered, `acceptance-registry.yaml:2886`), `test_a_current_version_document_is_not_migrated_again` (`already version 18`), and `test_v17_to_v18_…`'s schema validation (the current schema is 19's). | **Renamed to `…_at_version_19_…` with its registry node id moved in the same commit** (D1757's precedent; a name saying 18 over an assertion of 19 is a proof that reads as measuring what it does not); the no-op pin reads 19; the v17→v18 proof validates its output after the last step. A `v18` fixture is derived from the chain (`v17` now derives from it), and the v18→v19 step gets its four proofs. `docs/acceptance-matrix.md` regenerated. | — |
 | **D1830** | 4 | §5 Run 4's targeted list (grep-derived). | **CI RED on `5005c37`** (`contract`, run 36623650516), seven modules the list did not name — D1486's class again, a targeted list derived from a diff cannot see a reader the diff does not touch: `test_auth_endpoints` (176 setup errors) and `test_studio_runtime` (34) build the AUTH environment by hand and lacked the now-required `APG_CONNECTOR_KEY_FILE` (D1827's variable, missed in its fixtures); and five guards each asking for a deliberate extension — `test_backup_mirror` (the facility-bound set and `FACILITIES`), `test_bootstrap_state` (the bootstrap may record only what its enum names), `test_disaster_kit` (`_previous_version` moves with the outputs version), `test_doctor_redaction` (every schema block classified), `test_project_agent_surface` (the fixtures "at six"). | **Repaired at the next commit**: both builders set the path to a file that does not exist (the facility off, which every proof there is); the facility-bound set gains `connector_signing_key` and `FACILITIES` both names; `bootstrap-state.schema.json` gains `connector_signing_key` with a sentence (generated, so destroyable, and what destroying it costs); the kit helper subtracts `connectors` at 19; `connectors` is a PRINTABLE block (one boolean); the fixture proof is renamed `…_are_at_the_newest_version_and_one_names_capabilities` (unregistered; its old name was untrue) and asserts `max(SUPPORTED) == 7`. The seven modules re-run alone: **258 + 42 passed**. The production DR-kit reader needed nothing: `verify_deployed_document` is version-generic (D1141). | — |
+| **D1831** | 5 | §5 Run 5 item 4: `connectors/notes-inbox.yaml`'s body *"`content: {type: string, required: false, max_length: 4000}`"*; item 2: *"an inbound body declaring a member the definition's steps never reference … refused"* (both directions). | The worker fails a step whose run input lacks a referenced key (`workflow_worker.resolve` → `input_unresolved`, `services/auth-api/app/workflow_worker.py:248`), and item 2 makes every declared member a referenced one. So an OPTIONAL member is one a request may omit and the run then fails on its first step -- after the route answered 202. | **The compiler refuses a body member declared `required: false`** (every member is read, and the worker has no default to resolve an absent key to), naming D1831; the schema keeps `required` as ADR 0237 states it, and the service validator honours it, so a future worker with defaults has nothing to migrate. The example's `content` is `required: true`. A scheduled `input` is checked in BOTH directions too (missing AND unread keys), the body's rule, where the plan said only *"covers"*. | 0237 |
+| **D1832** | 5 | §5 Run 5 item 4: `notes-await-embedding.yaml` -- *"`create` (`create_note@1.0.0` from `{{input.title}}`), `embedded` (`wait: {event: note_embedding.set@1, match: {note_id: "{{steps.create.row.id}}"}, seconds: 300}`)"*. | **`{{steps.create.row.id}}` is not a reference.** The grammar reaches ONE field of a step's result (`REFERENCE`, `workflow_definition.py:77`, the worker's the same), so the compiler refuses the trailing `.id` as a typo (D1679). A write step records `{row: {...}}` (D1724, rig 33c), so `{{steps.create.row}}` is the whole row -- which a `{note_id}` payload never contains. | **The definition waits on `{{input.note_id}}`**: `embedded` (the event wait) first, then `record` (`create_note@1.0.0`, a note saying it arrived). The host proof creates the note, starts the run with its id, then writes the embedding -- EVT-WAIT-002's *"a run waiting … for its own note"* is unchanged. Widening the grammar would move the worker's resolver and D1724's contract for one example. | 0239 |
+| **D1833** | 5 | §5 Run 5 item 4: *"`bin/migrate.sh freeze-lock --project project.example.yaml`"*; *"name the version `0003` took and the rule that decided it"*. | **Measured: the freeze exits 5.** Without `--follows` it records this checkout's newest release version, `20260929120036` (0036), and the set's `20260914120001`/`…002` sort below it. `test_project_migration_sets.py::test_the_project_lock_is_frozen_and_verified_apart_from_the_release_lock` pinned the committed record as `computed`. | **Frozen with `--follows 20260912120031`** -- the value the set's last computed freeze recorded -- so the lock says `declared` (ADR 0210's remedy, the refusal's own advice); the proof is replaced by a stricter one: `declared`, the exact value, AND the release's newest above the set's oldest (the condition that makes the declaration necessary). **`0003` is `20260930120003`**: after the set's own newest (ADR 0206, the only ordering a set has), in its `YYYYMMDD12000N` convention; nothing orders it against 0036 and nothing needs to -- a PL/pgSQL body resolves `app.emit_event` when it runs. | **0240** |
+| **D1834** | 5 | §5 Run 5 item 7: *"`test_project_migration_sets.py::test_the_example_sets_third_migration_keeps_the_signature` (… `CREATE OR REPLACE` keeps `has_function_privilege` for `authenticated` and `agent_writer` -- under the cluster fixture)"*. | `test_project_migration_sets.py` has no cluster fixture; the one cluster that applies the example set is the one `apg dev up` builds (`test_dev_environment_cluster.py`'s `environment`). | **Two proofs**: `test_the_example_sets_third_migration_keeps_the_signature` (offline: the lint passes, the function is 0001's byte for byte but `OR REPLACE` and the one emit directly after the upsert, the payload carries no vector, `object_owner` alone, no GRANT restated) and `test_dev_environment_cluster.py::test_the_example_sets_third_migration_kept_its_grants` (EXECUTE held by `authenticated`, `agent_writer`, `api_documentation`, not `anon` -- the control; 0001's comment kept; the running body emits; the project ledger ends at `20260930120003`), through the product's own command (D1114). Run 9 registers both under EVT-LINT-001. | — |
+| **D1835** | 5 | §2: *"The registry entries cannot be committed before Run 9"*; *"WF-DEF-002 … leaves its node ids"* (listed as Run 9's). | Deleting `test_a_wait_on_an_event_is_refused_naming_session_thirty_four` in Run 5 (ADR 0239) leaves a registry node id with no test, which `test_acceptance_registry` refuses; and three proofs pinned the example set's COUNTS -- two by name (`…two_migrations_in_order`, `…four_definitions_compile`) and one by a `notes-` prefix filter that the new `notes-*` definitions entered. | **Moved in Run 5, not Run 9**: WF-DEF-002 loses the deleted node id and its sentence becomes *"since Session 34 a wait may name an event (EVT-WAIT-001, ADR 0239)"*; the two count-named proofs are renamed (`test_the_example_lock_records_its_migrations_in_order`, 3 versions; `test_the_example_projects_seven_definitions_compile`, 7 files) with their node ids moved in AGT-TENANT-002, WF-DEF-001 and WF-DEF-002 and WF-DEF-001's *"four since Session 33"* now seven; the byte-for-byte proof names its two files instead of a prefix (same two digests). No NEW entry is committed -- `CURRENT_SESSION` still moves in Run 9 alone (D690). | 0239 |
+| **D1836** | 5 | §5 Run 5 item 5: step 6e's three reasons and the missing-endpoint line; §2 CONN-DEF-001's `test_the_init_skeletons_validate`. | The plan names no case for an endpoint in the manifest that belongs to NO outbound connector (a typo, or an endpoint given to an inbound one, which the table's CHECK would refuse at psql); and `init` is `bin/connector.sh`'s verb, which Run 7 writes. | **6e reports each such endpoint** (*"endpoint for <name>: names no outbound connector of this set; installed nowhere"*) and sends it nowhere -- a report, like the missing endpoint (ADR 0195); `connector_install.statements` refuses an endpoint for a non-outbound connector before psql could. **No line prints an endpoint** (proved). `test_the_init_skeletons_validate` moves to Run 7 with `init`. The dev path's enabled arm is a contract proof over a recording `docker` (`test_deploy_connectors.py::test_dev_up_installs_connectors_only_with_the_facility`, a tmp schema-7 manifest), D1808's disabled sentence read off the real `up`. | — |
 
 ---
 
@@ -1681,8 +1687,70 @@ migration_sets`, `test_rendered_migrations`, `test_api_contract*` (grep),
 connector files, the event wait, the example set's events, step 6e`), push,
 CI.
 
-**Done.** *(the executor writes it; name the version `0003` took and the rule
-that decided it.)*
+**Done.** 2026-09-30. **The event wait** (`workflow_definition.py`,
+`workflow.schema.json`): the Session 33 refusal is gone (ADR 0239); `wait:
+{event, match, seconds}` compiles to the time wait's body plus `event` and
+`match` (a time wait's body is byte-identical to Session 33's); `event` is
+`EVENT_REFERENCE` (the emitter's name rule and a version 1..999, schema and
+compiler both); `match` holds at most 8 members, each a literal or ONE whole
+reference under a step argument's rules; `match` without `event` is refused;
+`input_references(compiled)` reads every `{{input.<k>}}` off a compiled
+definition (arguments, compensations, matches). **The connector compiler**
+(`schemas/connector.schema.json`, `src/agentic_postgres/connector_definition.py`:
+`connectors_of`, `load`, `definitions_for`, `compile`, `compile_file`,
+`check_body`, `CompiledConnector.body()`/`as_install()`): three kinds, a member
+of another kind refused by name, the definition compiled with the workflow
+compiler and its `required_scopes` COPIED, definitions from another lock
+refused, the body checked in both directions and no optional member (D1831), a
+scheduled input literal and exact. **The service's validator**
+`services/auth-api/app/connector_body.py` (standard library only) and
+`connector_install.py` (one constant statement, thirteen psql variables, a NULL
+as an empty variable under `NULLIF`, an endpoint refused for a non-outbound
+connector). **The example set**: `0003-note-embedding-events.sql` — **version
+`20260930120003`, by ADR 0206's rule: after the set's own newest
+(`20260914120002`), in the set's `YYYYMMDD12000N` convention; nothing orders it
+against release 0036 and nothing needs to** — 0001's function byte for byte but
+`OR REPLACE` and one `PERFORM app.emit_event('note_embedding.set', 1,
+{note_id})` directly after the upsert, `object_owner` alone, no grant restated.
+**Measured: `freeze-lock --project` without `--follows` exits 5** (0036 sorts
+above the set's first two), so the lock is frozen with `--follows
+20260912120031` and records `declared` (D1833, **ADR 0240**; the `computed` pin
+replaced by a stricter one). `bin/api-contract.sh --check --project
+project.example.yaml` exit 0 (*"the committed snapshot matches the reviewed
+surface (7 objects)"*) — the project's surface did not move. Three definitions
+(`notes-inbox`, `notes-digest` — `limit: "{{input.limit}}"`, which the compiler
+ADMITS, the worker resolving it to the integer — and `notes-await-embedding`,
+which waits on `{{input.note_id}}` because `{{steps.create.row.id}}` is not a
+reference, D1832); `bin/workflow.sh validate --project project.example.yaml`:
+7 definitions compile. Four connectors (`note-embedded`, `notes-deadletter`,
+`notes-inbox`, `notes-digest`), no endpoint in any file. **Step 6e**
+(`install_connectors`, `CONNECTOR_SESSION = 34`, between 6d and 6b): the
+facility read before the directory, three reasons, exit 5 naming the file
+before any connector reaches the cluster, a missing endpoint and an endpoint
+naming no outbound connector each REPORTED, no endpoint printed (D1836).
+**`apg dev`** prints `connectors  not enabled (the manifest's
+connectors.enabled is false)` for both examples and installs the four,
+disabled, with the facility on (D1808). **Proofs**: `test_connector_definition.py`
+(NEW, 10) and `test_deploy_connectors.py` (NEW, 7), `pytestmark` first;
+`test_workflow_definition.py` loses the Session 34 refusal and gains
+EVT-WAIT-001's four; the third-migration proof in two halves (D1834); the
+registry moves and renames of D1835; the matrix regenerated. **Battery 5/5
+kills, 0 errors**, control green before and after in the same invocation,
+restored by copy and `cmp`: the old refusal re-admitted; a later-step
+reference allowed in `match`; the body declaring a member no step reads; the
+facility check dropped from 6e; the service validator accepting an extra
+member. Targeted, once: the five modules the run wrote into — 131 passed —
+then `test_workflow_command`, `test_rendered_migrations`, `test_api_*`,
+`test_acceptance_registry`, `test_evidence_claims`, `test_cli_contract`,
+`test_auth_service_shape`, `test_deploy_project*`, `test_workflow_worker`,
+`test_migrations`, `test_documentation_index`, `test_session12_documented_path`
+and eleven more: **1383 passed**. Both examples re-rendered (the rendered
+document's `project_set.count` is 3). Rows D1831–D1836. `test_the_init_
+skeletons_validate` is Run 7's (D1836). (Docker, once): `test_dev_environment_cluster` (10, the grants proof among
+them), `test_migrations_apply_as_the_migration_user` (3, the example set now
+with `0003` applied as `migration_user`), `test_connectivity_substrate` (30),
+`test_deployment_module_shape` and `test_printed_commands` (the D1242 guard) —
+**49 passed, 0 skipped**. CI: CI_PENDING
 
 ### Run 6 — the loop: the delivery pass, the schedule pass, the event wait
 

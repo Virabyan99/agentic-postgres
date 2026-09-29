@@ -38,6 +38,11 @@ when the tool OR its capability requires one, D1723), a `compensation` (a
 write, never approval-gated, whose scopes join the run's, ADR 0233), or be a
 `wait` step that names no capability at all (D1727). Each is compiled here and
 executed by the worker; nothing here decides what a compensation MEANS.
+
+**Since Session 34** a wait may name an EVENT, `name@version`, and a `match`
+the event's payload must contain (ADR 0239); `seconds` is then the longest it
+waits. The match is resolved once, when the wait parks, so its references
+follow a step argument's rules.
 """
 
 from __future__ import annotations
@@ -134,6 +139,18 @@ NOT_ON_A_WAIT = ("capability", "arguments", "retry", "timeout_seconds", "approva
 #: A compiled wait step's `kind`. Not a tool kind: the lock has `read`,
 #: `write` and `metadata`, and a step of this kind names no tool at all.
 WAIT = "wait"
+
+#: An event a wait may name, since Session 34 (ADR 0239): the emitter's own
+#: name rule (`app.emit_event` refuses any other name) and a version, always --
+#: an event whose shape changed is a new version, and a wait on an unversioned
+#: name would be served by a payload it was never written against. The
+#: connector compiler reads the same constant for an outbound `event`.
+EVENT_REFERENCE = re.compile(r"^[a-z][a-z0-9_]{0,62}(\.[a-z][a-z0-9_]{0,62}){0,3}@[1-9][0-9]{0,2}$")
+
+#: A wait's `match`: at most eight members, each a literal or one whole
+#: reference. The emitter serves a wait whose resolved match the payload
+#: CONTAINS (`@>`), so a member is an equality on one payload key.
+MAX_MATCH_MEMBERS = 8
 
 
 class DefinitionError(Exception):
@@ -415,16 +432,24 @@ class CompiledStep:
     seconds: int | None = None
     approval: dict[str, int] | None = None
     compensation: dict[str, Any] | None = None
+    event: str | None = None
+    match: dict[str, Any] | None = None
 
     def as_json(self) -> dict[str, Any]:
         if self.kind == WAIT:
-            return {
+            body: dict[str, Any] = {
                 "name": self.name,
                 "kind": WAIT,
                 "seconds": self.seconds,
                 "timeout_seconds": self.timeout_seconds,
                 "retry": dict(self.retry),
             }
+            # Only on an event wait, so a Session 33 time wait compiles to
+            # exactly the body it did then.
+            if self.event is not None:
+                body["event"] = self.event
+                body["match"] = dict(self.match or {})
+            return body
         body: dict[str, Any] = {
             "name": self.name,
             "tool": self.tool,
@@ -779,8 +804,63 @@ def _compensation(
     return compiled, _scopes_of(resolved)
 
 
-def _compile_wait(entry: dict[str, Any], run_timeout: int) -> CompiledStep:
-    """A wait step: no capability, no call, no token (D1727)."""
+def _event_match(
+    wait: dict[str, Any],
+    step_name: str,
+    definition: dict[str, Any],
+    seen: list[str],
+    waits: set[str],
+) -> dict[str, Any]:
+    """An event wait's `match`, each member a literal or ONE whole reference.
+
+    Whole, because the emitter compares by containment: `{{input.note_id}}`
+    resolves to the input's value with its type intact, while a reference
+    embedded in a longer string interpolates a rendering no payload was ever
+    written to equal. The reference rules are a step argument's -- the input,
+    or an EARLIER step -- because the match is resolved once, when the wait
+    parks, and a later step has recorded nothing by then.
+    """
+    match = wait.get("match") or {}
+    if not isinstance(match, dict):
+        raise DefinitionError(step_name, "wait.match is not a mapping")
+    if len(match) > MAX_MATCH_MEMBERS:
+        raise DefinitionError(
+            step_name,
+            f"wait.match names {len(match)} members; at most {MAX_MATCH_MEMBERS}",
+        )
+    for key, value in match.items():
+        if isinstance(value, bool | int) or (isinstance(value, str) and not BRACES.search(value)):
+            continue
+        if not isinstance(value, str):
+            raise DefinitionError(
+                step_name,
+                f"wait.match.{key} is a {type(value).__name__}; a match member is a string, an "
+                "integer or a boolean",
+            )
+        if REFERENCE.fullmatch(value) is None:
+            raise DefinitionError(
+                step_name,
+                f"wait.match.{key} carries a reference inside a longer string; a match member "
+                "that references is ONE whole reference, so it resolves to the value itself",
+            )
+    _check_references(match, step_name, definition, seen, waits, allow_self=False)
+    return dict(match)
+
+
+def _compile_wait(
+    entry: dict[str, Any],
+    run_timeout: int,
+    definition: dict[str, Any],
+    seen: list[str],
+    waits: set[str],
+) -> CompiledStep:
+    """A wait step: no capability, no call, no token (D1727).
+
+    Since Session 34 it may wait on an EVENT (ADR 0239): `seconds` is then the
+    longest it waits, and the step fails `event_timeout` when nothing served
+    it. An event wait still calls nothing and mints no token; the emitter
+    serves it inside the transaction of the write that happened.
+    """
     step_name = entry["name"]
     carried = [key for key in NOT_ON_A_WAIT if key in entry]
     if carried:
@@ -790,14 +870,30 @@ def _compile_wait(entry: dict[str, Any], run_timeout: int) -> CompiledStep:
             "is nothing for them to describe",
         )
     wait = entry["wait"] or {}
+    event: str | None = None
+    match: dict[str, Any] | None = None
     if "event" in wait:
+        event = str(wait["event"])
+        if EVENT_REFERENCE.fullmatch(event) is None:
+            raise DefinitionError(
+                step_name,
+                f"wait.event {event!r} is not an event reference; it names one as "
+                "name@version, the version from 1, because an event whose shape changed is "
+                "a new version",
+            )
+        match = _event_match(wait, step_name, definition, seen, waits)
+    elif "match" in wait:
         raise DefinitionError(
             step_name,
-            "a wait on an event arrives in Session 34 with the events that resume it; this "
-            "release waits on a time only",
+            "wait.match without wait.event: a match is what an EVENT's payload must contain, "
+            "and a wait on a time has no payload",
         )
     if "seconds" not in wait:
-        raise DefinitionError(step_name, "is a wait step and says for how long in no `seconds`")
+        raise DefinitionError(
+            step_name,
+            "is a wait step and says for how long in no `seconds`"
+            + ("; an event wait's `seconds` is the longest it waits" if event else ""),
+        )
     seconds = int(wait["seconds"])
     if not MIN_WAIT_SECONDS <= seconds <= MAX_WAIT_SECONDS:
         raise DefinitionError(
@@ -821,6 +917,8 @@ def _compile_wait(entry: dict[str, Any], run_timeout: int) -> CompiledStep:
         retry=dict(WAIT_STEP_RETRY),
         timeout_seconds=WAIT_STEP_TIMEOUT_SECONDS,
         seconds=seconds,
+        event=event,
+        match=match,
     )
 
 
@@ -849,7 +947,7 @@ def compile(definition: dict[str, Any], lock: LockView, *, source_sha256: str) -
             raise DefinitionError(name, "names a step this definition already has")
 
         if "wait" in entry:
-            steps.append(_compile_wait(entry, run_timeout))
+            steps.append(_compile_wait(entry, run_timeout, definition, seen, waits))
             seen.append(name)
             continue
 
@@ -901,6 +999,28 @@ def compile_file(path: Path, lock: LockView) -> Compiled:
     """`load` + `compile`, with the digest taken from the bytes that were read."""
     document = load(path)
     return compile(document, lock, source_sha256=source_digest(path))
+
+
+def input_references(compiled: Compiled) -> frozenset[str]:
+    """Every `{{input.<key>}}` key a compiled definition reads, anywhere.
+
+    A step's arguments, its compensation's, and an event wait's match -- the
+    three places the worker resolves a reference. Read off the COMPILED form,
+    so a connector that starts this definition is checked against what the
+    worker will actually resolve and not against a second reading of the file
+    (ADR 0236: a connector's body IS the run's input).
+    """
+    keys: set[str] = set()
+    for step in compiled.steps:
+        sources: list[Any] = [step.arguments, step.match or {}]
+        if step.compensation is not None:
+            sources.append(step.compensation.get("arguments") or {})
+        for source in sources:
+            for reference in _references(source, step.name):
+                namespace, _, rest = reference.partition(".")
+                if namespace == "input":
+                    keys.add(rest)
+    return frozenset(keys)
 
 
 # ---------------------------------------------------------------------------
@@ -990,7 +1110,9 @@ __all__ = [
     "CANONICAL_CONTRACT",
     "CAPABILITY",
     "DEFAULT_CAPABILITIES",
+    "EVENT_REFERENCE",
     "MAX_APPROVAL_EXPIRY_SECONDS",
+    "MAX_MATCH_MEMBERS",
     "MAX_WAIT_SECONDS",
     "MIN_APPROVAL_EXPIRY_SECONDS",
     "MIN_WAIT_SECONDS",
@@ -1012,6 +1134,7 @@ __all__ = [
     "compile",
     "compile_file",
     "definitions_of",
+    "input_references",
     "load",
     "lock_view_for_project",
     "source_digest",

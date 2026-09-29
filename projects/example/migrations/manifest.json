@@ -51,6 +51,15 @@
         "agent_writer"
       ],
       "description": "The grant that makes this project tool answer rather than refuse upstream (D1156), and the grant 20260914120001 omitted (D1189). Session 21 put note_embeddings:read and note_embeddings:write in the vocabulary and the roster; neither the capability compiler nor the project snapshot can see a GRANT, and neither should -- a grant is an authorization decision and PostgreSQL is the authority that takes it. So an agent holding the scope was served the tool and refused by the database. This migration grants the view to the two agent roles AND grants the underlying table to every role that may read it: api.note_embeddings is declared security_invoker, so PostgreSQL checks the caller privileges on app.note_embeddings, and the first migration granted only the view -- which refused every caller, including the authenticated role it did grant, with permission denied for table note_embeddings. The release does both halves in one line for its own objects (migration 0004). Fix forward rather than an edit to 20260914120001, which is frozen and applied (D912), and sorted after it."
+    },
+    {
+      "version": "20260930120003",
+      "name": "note_embedding_events",
+      "template": "templates/0003-note-embedding-events.sql",
+      "placeholders": [
+        "object_owner"
+      ],
+      "description": "The example project's write says what happened (D1781, ADR 0235): api.set_note_embedding is replaced with its signature, search_path and body unchanged plus one PERFORM app.emit_event('note_embedding.set', 1, {note_id}) after the upsert, so a parked wait of the same owner is served and an enabled outbound connector receives one delivery -- inside the caller's transaction, and only when something listens. The payload names the note and never carries the embedding. CREATE OR REPLACE keeps the function's OID, so the grants 20260914120001 and 20260914120002 made stand, and a proof reads has_function_privilege rather than assuming it. The stamp sorts after this set's own newest, which is the only ordering a project set has had since ADR 0206; release migration 0036, which creates the emitter, applies before any project set on every cluster that runs this one."
     }
   ]
 }

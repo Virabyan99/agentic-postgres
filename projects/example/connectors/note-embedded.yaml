@@ -1,0 +1,22 @@
+# Delivers `note_embedding.set@1` to this deployment's receiver (ADR 0238).
+#
+# The file says WHAT is delivered and how persistently; WHERE is the
+# deployment's: `connectors.endpoints.note-embedded` in the project manifest
+# (D1786), because this file is shared by every deployment of the set. With no
+# endpoint the deploy installs it anyway and says so, and `enable` refuses it.
+#
+# Each delivery is POSTed signed (`X-Apg-Signature`, a key derived from the
+# project's `connector_signing_key` and this name) and retried after 2
+# seconds, twice, before it is dead-lettered: three attempts in all.
+---
+schema_version: 1
+name: note-embedded
+version: 1
+description: >-
+  Delivers each note_embedding.set event -- the note's id, never the vector --
+  to this deployment's receiver, signed, at least once.
+kind: outbound
+event: note_embedding.set@1
+retry:
+  max: 2
+  backoff_seconds: 2

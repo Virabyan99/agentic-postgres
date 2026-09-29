@@ -51,6 +51,8 @@ from agentic_postgres import (
     REPO_ROOT,
     bootstrap_statements,
     config,
+    connector_definition,
+    connector_install,
     deployed_output,
     dev_environment,
     migrations,
@@ -445,6 +447,9 @@ def up(arguments: argparse.Namespace) -> int:
     installed = install_workflow_definitions(
         Path(arguments.project), Path(arguments.capabilities), container, database
     )
+    connectors = install_connectors(
+        Path(arguments.project), Path(arguments.capabilities), container, database
+    )
 
     environment = dev_environment.Environment(
         **{**{f: getattr(environment, f) for f in environment.__dataclass_fields__},
@@ -458,6 +463,7 @@ def up(arguments: argparse.Namespace) -> int:
     print(f"  database    {database}  on 127.0.0.1:{port}")
     print(f"  migrations  {len(applied)}, ledger recorded")
     print(f"  workflows   {installed} definition(s) installed")
+    print(f"  connectors  {connectors}")
     print(f"  subject     {subject}  ({len(vocabulary)} scopes)")
     print(f"  roles       {roles['migration_user']}, {roles['app_runtime']}")
     print(f"  passwords   in {directory} (0600); nothing here prints one")
@@ -515,6 +521,62 @@ def install_workflow_definitions(
                     f"{path.name} was not installed: {result.stderr.strip()[:400]}",
                 )
     return len(paths)
+
+
+def install_connectors(project: Path, capabilities: Path, container: str, database: str) -> str:
+    """Install the project's connectors, the way step 6e does -- or say why not (D1808).
+
+    Only when the manifest enables the facility: the dev loop is the database
+    alone (ADR 0203), and a facility nobody enabled installs nothing and says
+    so. The same compiler and statement builder as step 6e, the lock computed
+    in the checkout as `install_workflow_definitions` computes it, and the
+    manifest's endpoints -- the dev cluster has no worker, so nothing is sent.
+    Returns the sentence `up` prints after `connectors`.
+    """
+    document = config.load_project_manifest(project)
+    named = config.project_migration_set(document)
+    if named is None:
+        return "none (the project declares no migration set)"
+    if not config.connectors_enabled(document):
+        return "not enabled (the manifest's connectors.enabled is false)"
+    paths = connector_definition.connectors_of(REPO_ROOT / named)
+    if not paths:
+        return "none (the project declares none)"
+
+    try:
+        lock = workflow_definition.lock_view_for_project(project, capabilities)
+        definitions = connector_definition.definitions_for(REPO_ROOT / named, lock)
+    except (config.ManifestError, config.CapabilityContractError) as error:
+        fail(dev_environment.EXIT_CONTRACT, f"the project's lock does not compile: {error}")
+    except workflow_definition.DefinitionError as error:
+        fail(dev_environment.EXIT_CONTRACT, f"a definition does not compile: {error}")
+
+    endpoints = config.connector_endpoints(document)
+    for path in paths:
+        try:
+            compiled = connector_definition.compile_file(path, lock, definitions)
+        except connector_definition.ConnectorError as error:
+            fail(dev_environment.EXIT_CONTRACT, f"{path.name}: {error}")
+        endpoint = endpoints.get(compiled.name) if compiled.kind == "outbound" else None
+        for statement in connector_install.statements(compiled, endpoint):
+            result = docker(
+                "exec",
+                "-i",
+                container,
+                "psql",
+                "-U",
+                "postgres",
+                "-d",
+                database,
+                *statement.argv,
+                stdin=statement.stdin,
+            )
+            if result.returncode != 0:
+                fail(
+                    dev_environment.EXIT_CONTRACT,
+                    f"{path.name} was not installed: {result.stderr.strip()[:400]}",
+                )
+    return f"{len(paths)} connector(s) installed, disabled"
 
 
 # ---------------------------------------------------------------------------

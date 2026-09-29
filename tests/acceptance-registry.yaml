@@ -3340,7 +3340,7 @@
   target_session: 22
   test_nodeids:
     - tests/contract/test_migrations_apply_as_the_migration_user.py::test_the_example_sets_grants_reach_the_agent_roles_and_not_anon
-    - tests/contract/test_project_migration_sets.py::test_the_example_lock_records_two_migrations_in_order
+    - tests/contract/test_project_migration_sets.py::test_the_example_lock_records_its_migrations_in_order
     - tests/deployment/test_session22_plane.py::test_an_agent_reads_rows_through_a_tenant_tool_on_beta
   description: >-
     The example project's migration set grants its view and its write function
@@ -4748,7 +4748,7 @@
     - tests/contract/test_workflow_definition.py::test_a_step_name_may_not_carry_a_hyphen_although_the_table_allows_one
     - tests/contract/test_workflow_definition.py::test_a_file_that_is_not_yaml_is_reported_rather_than_crashing
     - tests/contract/test_workflow_definition.py::test_definitions_of_a_project_with_no_workflows_directory_is_empty
-    - tests/contract/test_workflow_definition.py::test_the_example_projects_four_definitions_compile
+    - tests/contract/test_workflow_definition.py::test_the_example_projects_seven_definitions_compile
     - tests/contract/test_workflow_definition.py::test_every_compiled_body_carries_what_the_enqueue_reads
     - tests/contract/test_workflow_definition.py::test_a_project_with_no_capabilities_of_its_own_still_gets_a_lock
     - tests/contract/test_workflow_definition.py::test_the_source_digest_is_over_the_bytes_and_not_the_document
@@ -4771,7 +4771,7 @@
     out-of-bound `retry`/`timeout` values. The compiled body carries
     `required_scopes` as the union of its steps', `lock_tools_sha256` and a
     `source_sha256` over the YAML's BYTES; the example project's definitions
-    compile (four since Session 33).
+    compile (seven since Session 34).
 
 - id: WF-STATE-001
   priority: P0
@@ -5203,12 +5203,11 @@
     - tests/contract/test_workflow_definition.py::test_compensation_scopes_join_the_required_scopes
     - tests/contract/test_workflow_definition.py::test_an_undo_rows_name_can_never_be_a_step_name
     - tests/contract/test_workflow_definition.py::test_a_wait_takes_no_capability_and_is_bounded
-    - tests/contract/test_workflow_definition.py::test_a_wait_on_an_event_is_refused_naming_session_thirty_four
     - tests/contract/test_workflow_definition.py::test_a_reference_to_a_wait_step_is_refused
     - tests/contract/test_workflow_definition.py::test_the_schema_admits_a_capability_step_or_a_wait_step_and_never_both
     - tests/contract/test_workflow_definition.py::test_the_skeleton_skips_a_write_a_profile_made_approval_requiring
     - tests/contract/test_workflow_definition.py::test_the_session_32_definitions_are_byte_for_byte_unchanged
-    - tests/contract/test_workflow_definition.py::test_the_example_projects_four_definitions_compile
+    - tests/contract/test_workflow_definition.py::test_the_example_projects_seven_definitions_compile
   description: >-
     A definition may declare `approval: {expires_after_seconds}` on a step
     whose tool OR capability requires approval, and must; a step declaring
@@ -5219,11 +5218,11 @@
     approval, may not sit on a read step, takes only declared arguments and
     references the run's input or steps at or before its own; its scopes
     join `required_scopes`. `wait: {seconds}` takes no capability, is bounded
-    below the run timeout, is referenced by nothing, and `wait: {event}` is
-    refused naming Session 34. A step is a capability step or a wait step and
-    never both; `init`'s skeleton skips a write a profile made
-    approval-requiring; Session 32's definitions are unchanged and the
-    example project's four definitions compile (ADR 0230, ADR 0233).
+    below the run timeout, and is referenced by nothing; since Session 34 a
+    wait may name an event (EVT-WAIT-001, ADR 0239). A step is a capability
+    step or a wait step and never both; `init`'s skeleton skips a write a
+    profile made approval-requiring; Session 32's definitions are unchanged
+    and the example project's seven definitions compile (ADR 0230, ADR 0233).
 
 - id: WF-WORK-002
   priority: P0

@@ -205,11 +205,14 @@ def test_dev_up_installs_the_example_projects_definitions(
         "SELECT name || ' v' || version FROM app_private.workflow_definition ORDER BY name",
     )
     assert installed.splitlines() == [
+        "notes-await-embedding v1",
+        "notes-digest v1",
+        "notes-inbox v1",
         "notes-retry v1",
         "notes-roundtrip v1",
         "tasks-approval v1",
         "tasks-compensate v1",
-    ], f"the example project ships four definitions and the cluster holds: {installed!r}"
+    ], f"the example project ships seven definitions and the cluster holds: {installed!r}"
 
     # Session 33: the blocks 0035 reads out of an installed body arrived where
     # it reads them -- `workflow_begin_compensation` the compensation's retry,
@@ -243,10 +246,64 @@ def test_dev_up_installs_the_example_projects_definitions(
     )
     assert scopes == "notes:read|notes:write", scopes
 
-    assert "workflows   4 definition(s) installed" in environment["stdout"], (
+    assert "workflows   7 definition(s) installed" in environment["stdout"], (
         "up does not say what it installed, so an operator cannot tell an empty "
         "workflows/ directory from one that failed to be read"
     )
+
+    # Session 34 (D1808): the example manifest does not enable the facility,
+    # so the set's four connectors are NOT installed, and `up` says why.
+    assert (
+        "connectors  not enabled (the manifest's connectors.enabled is false)"
+        in environment["stdout"]
+    ), environment["stdout"]
+    assert as_superuser(state, "SELECT count(*) FROM app_private.connector") == "0"
+
+    # An event wait's body arrived with its event and its match (ADR 0239).
+    awaited = as_superuser(
+        state,
+        "SELECT (body #>> '{steps,0,event}') || '|' || (body #> '{steps,0,match}')::text "
+        "FROM app_private.workflow_definition WHERE name = 'notes-await-embedding'",
+    )
+    assert awaited == 'note_embedding.set@1|{"note_id": "{{input.note_id}}"}', awaited
+
+
+def test_the_example_sets_third_migration_kept_its_grants(environment: dict[str, Any]) -> None:
+    """**D1781, EVT-LINT-001's cluster half.** `0003` replaced
+    `api.set_note_embedding` with `CREATE OR REPLACE` and restated no grant.
+    PostgreSQL keeps the OID, so the ACL 0001 and 0002 wrote and 0001's comment
+    stand -- measured here on the cluster `apg dev up` built, never assumed.
+    The control is `anon`, which neither migration granted. The body that
+    runs is 0003's: it calls the emitter."""
+    state = environment["state"]
+    roles = state["roles"]
+    function = "'api.set_note_embedding(uuid, extensions.vector)'"
+    for role, expected in (
+        ("authenticated", "t"),
+        ("agent_writer", "t"),
+        ("api_documentation", "t"),
+        ("anon", "f"),
+    ):
+        assert role in roles, f"the dev state names no {role} role: {sorted(roles)}"
+        held = as_superuser(
+            state, f"SELECT has_function_privilege('{roles[role]}', {function}, 'EXECUTE')"
+        )
+        assert held == expected, f"{role} EXECUTE is {held!r} after 0003, not {expected!r}"
+
+    assert (
+        as_superuser(
+            state, f"SELECT obj_description({function}::regprocedure, 'pg_proc') IS NOT NULL"
+        )
+        == "t"
+    ), "0001's comment did not survive the replace"
+    source = as_superuser(state, f"SELECT prosrc FROM pg_proc WHERE oid = {function}::regprocedure")
+    assert "PERFORM app.emit_event('note_embedding.set', 1," in source, source
+    ledger = as_superuser(
+        state,
+        "SELECT string_agg(version, ',' ORDER BY version) "
+        "FROM app_private.project_schema_migrations",
+    )
+    assert ledger.endswith("20260930120003"), ledger
 
 
 def test_exactly_two_roles_can_log_in_and_the_object_owner_is_not_one(

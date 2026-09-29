@@ -1,0 +1,20 @@
+# The same event, to a receiver that always fails: the dead letter, on purpose.
+#
+# What it is FOR: Session 34's trip points this connector's endpoint at the
+# sink's `/fail`, which answers 500, so a delivery is attempted exactly three
+# times at the 2-second backoff and then recorded dead with `http_500` --
+# visible in `apg connector status` with no URL and no payload. On a
+# deployment that does not want a dead letter, leave it disabled: installed is
+# not enabled (ADR 0236).
+---
+schema_version: 1
+name: notes-deadletter
+version: 1
+description: >-
+  Delivers the same note_embedding.set event to a second receiver; the trip
+  points it at an endpoint that fails, to show a delivery dead-lettered.
+kind: outbound
+event: note_embedding.set@1
+retry:
+  max: 2
+  backoff_seconds: 2
