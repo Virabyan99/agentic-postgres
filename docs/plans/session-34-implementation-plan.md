@@ -600,6 +600,11 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 
 | # | Run | Plan says | Tree does / measured | Decision | ADR |
 |---|---|---|---|---|---|
+| **D1812** | 1 | D1791 / rig 34b: *"`urllib`'s default opener follows redirects"*; *"the DEFAULT `urllib` opener → record whether it re-POSTs (and to where)"*. | **Rig 34b, inside the auth image built from this checkout** (`sha256:4a7a337e…`), a POST with a JSON body: the default opener follows **301, 302 and 303 as a GET with NO body** to the `Location` and returns the Location's **200 as the response**; it **refuses 307 and 308** with `HTTPError(307/308)` and never follows them. It never re-POSTs the body. **The follow-up (`bis.py`) measured that the followed GET still carries `X-Apg-Signature`** (custom headers survive; only `Content-Type` is dropped). The refusing opener (`redirect_request` → `None`) surfaces all five as `HTTPError(<code>)`. | **The refusing handler stays, for a sharper reason than the plan gave**: the default opener would record a 301/302/303 as *delivered* (a 200 from an address nobody declared) after sending the signature header there. A 3xx is `http_3xx` and is retried like any non-2xx. Run 6's proof uses a 302 (the case the default FOLLOWS), not only a 307, so the mutation that drops the handler is killed. | 0238 |
+| **D1813** | 1 | D1800: error tokens `timeout`, `connect_failed`, `tls_failed`, `dns_failed` mapped *"from MEASURED exception types"*. | **Rig 34b + `bis.py`**: refused → `URLError(.reason=ConnectionRefusedError, errno 111)`; connect timeout → `URLError(.reason=TimeoutError)`; unresolvable → `URLError(.reason=socket.gaierror, errno -2)` (-5 on a network with no resolver entry, 34d's control); self-signed → `URLError(.reason=ssl.SSLCertVerificationError ⊂ ssl.SSLError ⊂ OSError, ValueError)`; **a READ timeout (the server accepts, never answers) → a BARE `TimeoutError`, not a `URLError`** (2.0 s at `timeout=2`). | **The classifier reads `.reason` when the exception is a `URLError` that is not an `HTTPError`, and the exception itself otherwise**, in this order: `HTTPError` → `http_<code>`; `ssl.SSLError` → `tls_failed`; `TimeoutError` → `timeout`; `socket.gaierror` → `dns_failed`; `ConnectionError` → `connect_failed`; anything else → `unknown`. `ssl.SSLError` is checked before the `OSError` family because it IS one. Run 6's proof drives each of the five cases, the bare read timeout included. | 0238 |
+| **D1814** | 1 | §2 EVT-EMIT-001: *"a request role and `auth_service` are refused `42501`"*. | **Rig 34a**: `authenticated`, `agent_writer`, `auth_service` and `anon` each get **`42501 permission denied for schema app`** — the SCHEMA's refusal (none holds `USAGE` on `app`) — and `has_function_privilege(role, 'app.emit_event(text,integer,jsonb)', 'EXECUTE')` is **false** for all four. PostgREST answers `POST /rpc/emit_event` **404 `PGRST202`** for a human and an agent token (control `POST /rpc/create_note` 200). Through a definer RPC the row carries the GUC's owner; through PostgREST with an agent token it carries the agent's owner AND the agent's id. A rolled-back caller left 3 rows at 3. | **The prediction holds, and the proof must measure the function's grant, not only the schema's**: a proof asserting only `42501` passes vacuously while `app` stays closed, and would still pass if 0036 granted the function to PUBLIC. `test_emit_event_is_executable_by_no_role` asserts `has_function_privilege` false for every login and request role AND the `42501`. | 0235 |
+| **D1815** | 1 | D1780: the hole is *"`CREATE OR REPLACE FUNCTION api.create_note(...)`"* and *"the same hole would let a project replace `app.emit_event`"*. | **Rig 34a, `lint_project_set` over a scratch set**: PASSED `CREATE OR REPLACE FUNCTION api.create_note(…)`, `CREATE OR REPLACE FUNCTION app.emit_event(…)`, `ALTER FUNCTION api.create_note(text, text) SECURITY INVOKER`, and **`CREATE OR REPLACE FUNCTION app.current_user_id()` — the function every row policy in `app` reads**. Applied as the owner, `api.create_note`'s `pg_get_functiondef` md5 moved `c0cdcc57…` → `0d4f9729…`. Controls: a body naming `app_private` refused; `DROP FUNCTION api.create_note` refused; a project RPC calling `app.emit_event` passed. | **The hole is wider than the row named and its worst member is `app.current_user_id()`** (a project could make every policy answer for any owner). Run 2's rule is as planned — `CREATE [OR REPLACE]`, `ALTER` or `DROP` of any FUNCTION the release creates in `api` or `app` — and its proofs include the `ALTER` case and `app.current_user_id()` by name, beside the two the plan lists. The names are derived from the release templates; **if `sql_surface` derives only `api` names today, Run 2 widens the derivation to `app`, and the proof `test_the_release_function_names_are_derived_from_the_templates` asserts `current_user_id` is among them.** | 0235 |
+| **D1816** | 1 | §5 Run 1: the three `THR-*` rows cite `CONN-IN-001`, `CONN-IN-002`, `CONN-ADMIN-001`, `CONN-OUT-001`, `CONN-OUT-002`, `CONN-STORM-001` and proposed node ids. | `test_acceptance_registry.py::test_threat_model_requirement_ids_exist_in_the_registry` and `::test_threat_model_node_ids_are_collectible` read EVERY threat row; none of those requirements exists until Run 9 lands the registry (D690), and none of the node ids collects — D1742's shape exactly. | **The rows land in Run 1 with the prevention, detection and residual cells whole and cite what holds TODAY**: `THR-CONNECTOR-INPUT` → `API-AUTH-002` (the strict input the route reuses after the signature) + `test_auth_strict_json.py::test_an_oversized_body_is_refused_before_it_is_parsed` + `test_auth_service_shape.py::test_the_application_serves_exactly_the_declared_paths` (no connector path is served yet); `THR-WEBHOOK-REPLAY` → `AGT-IDEM-001` + `test_agent_audit_plane.py::test_a_replayed_write_performs_the_work_once_and_returns_the_same_row` + the path equality; `THR-DELIVERY` → `WF-WORK-001` + `test_auth_service_shape.py::test_every_transport_in_the_service_is_declared_with_a_reason` + `test_workflow_worker.py::test_the_loop_starts_in_auth_mode_only`. Each residual cell says so. **Run 9 rewrites the two ID cells of all three rows** with the §2 requirements and their collected node ids. | — |
 
 ---
 
@@ -931,10 +936,66 @@ test_documentation_index.py -q -p no:randomly` (the ADR index proofs and the
 page index). Commit (`Session 34 Run 1: the rigs, three THR rows, and ADRs
 0235-0239`), push. **No CI read** — documentation only.
 
-**Done.** *(the executor writes it: the deployable-diff answer; each rig's
-numbers and exit status, the error-token mapping table from 34b, 34c's one
-sentence; the three rows; the five ADRs indexed (239 rows); rows added; NEXT
-FREE.)*
+**Done.** 2026-09-29. **The deployable-diff filter at `5523873`** (§0's list
+plus `deploy.sh` and `VERSION`) names ONE file, `src/agentic_postgres/
+capacity.py` — as §0 predicted. **The rigs ran as ONE script** (`/tmp/rig34/
+rig34.py`, rig 33's method: `apg dev up --project project.example.yaml` in
+20.5 s, PostgreSQL **18.4**, 35 release + 2 project migrations, 4 definitions;
+PostgREST from the pinned `v14.16` digest verifying the auth application's own
+JWKS; both application modes from the checkout as subprocesses with the image's
+entrypoint, each environment built from nothing), **exit 0**, plus one
+follow-up `bis.py` (exit 0). 34b and 34d ran INSIDE an auth image built from
+this checkout with all fifteen build arguments read from `versions.env`
+(`apg-rig34-auth:local`, `sha256:4a7a337ee3d5…`, 37 s). Scripts, transcripts
+and `report.json` are in the session scratchpad (`rig34/`). **34a** — as
+`authenticated`, `agent_writer`, `auth_service` and `anon`: **`42501 permission
+denied for schema app`**, `has_function_privilege` false for all four (D1814:
+the schema refuses first; the proof must read the function's grant too);
+through a definer RPC one row carrying the GUC's owner; through PostgREST with
+an agent token one row carrying the agent's OWNER and the agent's id;
+`POST /rpc/emit_event` **404 `PGRST202`** for a human and an agent token
+(control `/rpc/create_note` **200**); a rolled-back caller **3 → 3**. **The
+lint's hole, both halves**: `CREATE OR REPLACE` of `api.create_note`,
+`app.emit_event` and **`app.current_user_id()`**, and `ALTER FUNCTION
+api.create_note … SECURITY INVOKER`, all PASSED; applied as the owner,
+`api.create_note`'s definition changed (md5 `c0cdcc57…` → `0d4f9729…`);
+controls refused (`app_private`, `DROP`), the emitter-calling RPC passed
+(D1815). **34b** — HMAC-SHA256 over `1727600000.<uuid>.<body>`: image Python,
+workstation Python and `openssl dgst -mac HMAC` all `3c87822a…`; a one-byte
+change `0c80f3a0…` from all three. Redirects: the DEFAULT opener follows
+301/302/303 as a bodiless GET that still carries `X-Apg-Signature` and returns
+the Location's 200, and refuses 307/308 — it never re-POSTs (D1812); the
+refusing opener surfaces all five as `HTTPError`. **The error-token table**
+(D1813):
+
+| Case (measured) | Exception | Token |
+|---|---|---|
+| 500 from the endpoint (34d `/fail`) | `HTTPError(500)` | `http_500` |
+| 3xx with the refusing opener | `HTTPError(3xx)` | `http_3xx` |
+| `127.0.0.1:9` refused | `URLError`, `.reason` `ConnectionRefusedError` (errno 111) | `connect_failed` |
+| `10.255.255.1` connect timeout | `URLError`, `.reason` `TimeoutError` | `timeout` |
+| accepts, never answers (read timeout) | bare `TimeoutError` (no `URLError`) | `timeout` |
+| `apg-no-such-host.invalid` | `URLError`, `.reason` `socket.gaierror` (errno −2; −5 in 34d's control) | `dns_failed` |
+| `self-signed.badssl.com` | `URLError`, `.reason` `ssl.SSLCertVerificationError` ⊂ `ssl.SSLError` | `tls_failed` |
+| anything else | — | `unknown` |
+
+**34c** — an `agent_writer` agent whose stored scopes are exactly
+`["notes:write"]` was SERVED `tools/call create_note` (200, `isError: false`,
+one note, audit `served` + `committed`) and its `tools/list` named
+`create_note` alone; control `["meta:read", "notes:write"]` served the same
+and listed two metadata tools more. **One sentence: a tool call needs only the
+tool's own scope, so `meta:read` does not join the equality** (ADR 0236).
+**34d** — a sink from the auth image on an `internal: true` network with alias
+`apg-s34-sink` answered `/ok` **200** and `/fail` **500** to a client on that
+network and a second one, and printed the three `X-Apg-*` headers exactly as
+sent; control, a client on the second network alone: `gaierror`. `sink.py`
+(the 30-line server) is the text Run 9 commits. **The three `THR-*` rows** are
+appended after `THR-APPROVAL`, citing what holds today (D1816, D1742's shape);
+Run 9 rewrites their ID cells. **ADRs 0235–0239** written and indexed (239
+rows). Rows **D1812–D1816**. One environment note: the image build briefly
+made WSL unreachable from the Bash tool (`Wsl/Service/0x8007274c`) while the
+rig itself ran on; a second call 20 s later reached it. **NEXT FREE: D1817,
+ADR 0240.**
 
 ### Run 2 — the carried-in defect and the lint's missing rule: D1805, D1780
 
