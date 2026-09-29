@@ -534,6 +534,10 @@ def build_outputs(
         # THIS document -- ADR 0002's rule, so a second reader of the manifest
         # never becomes a second derivation path.
         "migrations": _migrations_block(project),
+        # Version 19 (ADR 0237, D1785). The facility and nothing else: three
+        # callers decide a project's facilities from a rendered or deployed
+        # document, so the boolean is here; the endpoints never are (D1786).
+        "connectors": {"enabled": config.connectors_enabled(project)},
     }
 
 

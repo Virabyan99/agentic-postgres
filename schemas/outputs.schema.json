@@ -30,13 +30,14 @@
         "backup",
         "capabilities",
         "template_version",
-        "migrations"
+        "migrations",
+        "connectors"
       ],
       "properties": {
         "schema_version": {
           "type": "integer",
           "enum": [
-            18
+            19
           ]
         },
         "document_kind": {
@@ -292,6 +293,9 @@
         },
         "migrations": {
           "$ref": "#/$defs/migrationSets"
+        },
+        "connectors": {
+          "$ref": "#/$defs/connectorsFacility"
         }
       }
     },
@@ -320,14 +324,15 @@
         "mcp",
         "backup",
         "backup_state",
-        "migrations"
+        "migrations",
+        "connectors"
       ],
       "description": "Root-owned, mode 0600, written under /etc/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
       "properties": {
         "schema_version": {
           "type": "integer",
           "enum": [
-            18
+            19
           ]
         },
         "document_kind": {
@@ -682,6 +687,9 @@
         },
         "migrations": {
           "$ref": "#/$defs/migrationSets"
+        },
+        "connectors": {
+          "$ref": "#/$defs/connectorsFacility"
         }
       }
     },
@@ -2348,6 +2356,19 @@
         }
       ],
       "description": "Version 18 (ADR 0201). Whether this project declares a capability manifest of its own, where it lives, what its committed contract digests to and what it compiles to. Null and not an empty object when the manifest names none (D600): an empty object would say a manifest with nothing in it. Rendered as `capabilities.project` from the manifest; carried to the deployed document as `mcp.project_capabilities`, where the lock's `capability_contract_sha256` beside it is the digest of the JOINT contract the lock was compiled from."
+    },
+    "connectorsFacility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "description": "Version 19 (ADR 0237). Whether the project has the connectors facility, read from the manifest's `connectors.enabled` by `config.connectors_enabled` -- the one reader, which reads a manifest and a document at the same place. Carried whole to the deployed document, because three callers decide a project's facilities from a rendered or deployed document (D1785). The endpoints are NOT here: they are per-deployment values that leave the installed manifest only for the connector's row (D1786). A boolean facility flag is not a project-scoped identity and joins no isolation pointer."
     }
   }
 }

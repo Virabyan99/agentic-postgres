@@ -194,6 +194,14 @@ class Settings:
     #: container exactly as the agent plane mounts it. `None` in storage mode,
     #: which verifies and never issues, and refused there rather than ignored.
     capability_lock_file: Path | None
+    #: Session 34 (ADR 0237). Where the auth service finds the connectors
+    #: facility's master key. The PATH is always set in auth mode; the FILE is
+    #: the optional part -- it is materialized and mounted only for a project
+    #: that enables the facility (a facility-gated secret, ADR 0188), and its
+    #: absence is how the service knows there are no connectors: the inbound
+    #: route answers 404 and the delivery pass does not run. `None` in storage
+    #: mode, which holds no credential of the auth service's.
+    connector_key_file: Path | None
 
     @property
     def conninfo(self) -> str:
@@ -388,6 +396,14 @@ def load(environ: dict[str, str] | None = None, *, mode: str = "auth") -> Settin
                 "no ceiling, so the lock is a document nothing there would read (ADR 0200)"
             )
         capability_lock_file: Path | None = None
+        # The connector master is the auth service's alone (ADR 0237): a
+        # verifier handed it could sign deliveries nobody declared.
+        if os.environ.get("APG_CONNECTOR_KEY_FILE"):
+            raise MissingSetting(
+                "APG_CONNECTOR_KEY_FILE is set in storage mode; the connector master belongs "
+                "to the auth service alone (ADR 0237)"
+            )
+        connector_key_file: Path | None = None
     else:
         signing_key_file = Path(_required("APG_SIGNING_KEY_FILE"))
         # Absent in auth mode, and refused rather than ignored, for the same
@@ -405,6 +421,10 @@ def load(environ: dict[str, str] | None = None, *, mode: str = "auth") -> Settin
         # reason: an issuer with no vocabulary would refuse every grant and
         # look deployed.
         capability_lock_file = Path(_required("APG_MCP_LOCK_FILE"))
+        # Required as a PATH, optional as a file (see the field): compose sets
+        # it for every project, and the facility decides whether anything is
+        # mounted there.
+        connector_key_file = Path(_required("APG_CONNECTOR_KEY_FILE"))
 
     return Settings(
         project_key=_required("APG_PROJECT_KEY"),
@@ -422,6 +442,7 @@ def load(environ: dict[str, str] | None = None, *, mode: str = "auth") -> Settin
         listen_port=_required_int("APG_LISTEN_PORT"),
         role_names=_required_role_names("APG_ROLE_NAMES"),
         capability_lock_file=capability_lock_file,
+        connector_key_file=connector_key_file,
     )
 
 
@@ -454,6 +475,9 @@ REQUIRED_VARIABLES: tuple[str, ...] = (
     *SHARED_VARIABLES,
     "APG_SIGNING_KEY_FILE",
     "APG_MCP_LOCK_FILE",
+    # Session 34 (ADR 0237): the connectors facility's master, a path always
+    # and a file only with the facility.
+    "APG_CONNECTOR_KEY_FILE",
 )
 
 #: Session 7. What the storage mode reads INSTEAD of the signing key, plus the
@@ -525,7 +549,7 @@ FORBIDDEN_VARIABLES: dict[str, tuple[str, ...]] = {
     # An issuer verifies with what it signs with, so a second key set is
     # refused rather than ignored (ADR 0113).
     "auth": ("APG_JWKS_FILE",),
-    "storage": ("APG_SIGNING_KEY_FILE", "APG_MCP_LOCK_FILE"),
+    "storage": ("APG_SIGNING_KEY_FILE", "APG_MCP_LOCK_FILE", "APG_CONNECTOR_KEY_FILE"),
     # The longest list, and every entry is load-bearing. A signing key would
     # make a verifier into an undeclared issuer (ADR 0098); a database setting
     # would make ADR 0099's considered zero into an oversight (D407). D309 was
@@ -534,6 +558,8 @@ FORBIDDEN_VARIABLES: dict[str, tuple[str, ...]] = {
     # something refuses to start.
     "mcp": (
         "APG_SIGNING_KEY_FILE",
+        # Session 34: the plane holds no credential, the connector master least.
+        "APG_CONNECTOR_KEY_FILE",
         "APG_DATABASE_HOST",
         "APG_DATABASE_PORT",
         "APG_DATABASE_NAME",

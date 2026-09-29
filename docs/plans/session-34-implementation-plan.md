@@ -612,6 +612,12 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1821** | 3 | §5 Run 3 item 9: `connector_install` with thirteen parameters, laid out like 0034/0035's aligned declarations. | **Measured on first run**: `test_every_sql_signature_names_a_declaration_that_is_live_at_that_point` reported both `connector_install(...)` references (the `COMMENT` and the `REVOKE`) as naming *"no declaration"*. `_arguments` reads an argument list within **400 characters** of its paren (D1450's bound against runaway parses), and the column-aligned thirteen-parameter list was longer, so the walk skipped the DECLARATION and then called every reference stale. | **The declaration is written unaligned**, four lines, with a comment saying why; the bound is not widened (it exists for D1450's reason, and every other declaration fits). A function with a longer parameter list than this would meet the same wall — the comment in 0036 names the bound so the next one is not a surprise. | — |
 | **D1822** | 3 | §5 Run 3 items 2, 3, 8, 9, 10, 16. | Four places where the plan's sketch was silent or looser than the tree allows: (1) `workflow_run.owner_id` exists (0034:196-210) and is COPIED from the agent at enqueue (0034:443) — the owner a wait belongs to is on the run itself; (2) a higher-version install that changes the connector's EVENT or its definition's REQUIRED SCOPES changes what the bound agent was bound to, as a changed kind or definition does; (3) a delivery whose lease expires on its LAST attempt is excluded by `attempts < max_attempts` and would stay `pending` forever; (4) the rehearsal's event has no owner, and `connector_event.owner_id NOT NULL` would force a nil uuid that looks measured (D600). | (1) **The emitter matches `r.owner_id = caller`** — the same owner, without a join through `agents`. (2) **`connector_install` returns `replaced_disabled` (disabled, unbound) when the kind, event, definition name or version, or required scopes change.** (3) **The claim first retires such a delivery as `dead`** (`last_error` kept, else `unknown`) before it leases anything. (4) **`owner_id` is nullable with `CHECK (owner_id IS NOT NULL OR name = 'apg.rehearsal')`.** `connector_status` also carries `endpoint_declared` (a boolean, never the value), `enabled_by/at`, `disabled_by/at`, and binding values `not_applicable` (outbound) and `agent_not_active` beside the plan's three. | 0236, 0238 |
 | **D1823** | 3 | §5 Run 3 battery: *"make `connector_accept` insert the receipt AFTER the enqueue without the single transaction"*. | A plpgsql function body IS one transaction; there is no way to write "not one transaction" inside it. The failure the mutation stands for is a refused enqueue that leaves a receipt behind. | **The mutation is written as the expressible form of that failure**: the enqueue wrapped in `BEGIN … EXCEPTION WHEN OTHERS THEN RETURN NULL; END`, which keeps the receipt and swallows the refusal. `test_a_refused_enqueue_leaves_no_receipt` must FAIL on it. | — |
+| **D1824** | 4 | D1808: *"The example manifests are schema 6 with no facility"*; §5 Run 4 item 1 widens the schema to 7 and says nothing of the fixtures. | `tests/contract/test_project_manifest.py::test_example_manifest_is_valid` asserts both example manifests are at `max(SUPPORTED_PROJECT_SCHEMA_VERSIONS)` (ADR 0183: the shipped fixtures exercise the newest shape, D927's lesson). | **`project.example.yaml` and `project.second.example.yaml` move to schema 7, both WITHOUT `connectors`** (the facility off — the measurement that keeps the release minor), each with a comment saying so; `downgrade_to_five` and `downgrade_to_two` in `test_project_manifest.py` pop `connectors`. Both renders are re-rendered; no document carries the facility. | 0237 |
+| **D1825** | 4 | D1784: *"A new `required: true` secret moves every rendered document's `secrets.required_names` and is auto-classified `secret_required_added` → major"*; §2 CONN-FAC-001: *"its rendered `required_names` is unchanged"*; D1811: *"no `secret_required_added` on the example renders"*. | **`rendering.RENDER_SESSION = 2`** (`rendering.py:51`): the rendered `secrets.required_names` is computed from `active_secrets(contract, RENDER_SESSION, …)`, so it lists ONLY secrets introduced by Session 2 — no secret declared since (metrics, the prepared key, the mirror's, this one) can ever appear there, gated or not. The premise that a required secret would move it is FALSE; `upgrade plan`'s auto-classification cannot see ANY post-Session-2 secret. Where the requirement actually bites is deploy step 0 (`_secrets_the_provider_is_missing(state, through_session, enabled_facilities(rendered))`, `deploy-project.py:754-780`), the bootstrap and the materializer/override. | **The facility gating stays — for the reason that holds**: without it, every deploy `--through-session 34` (alpha's included) would demand `bootstrap-providers --apply` at step 0 and materialize a key nothing reads. The proofs measure the project's view where it bites — step 0's selection at session 34 with and without the facility, and the secret override's mounts — plus the rendered `required_names` for both examples. Run 9's *"no `secret_required_added`"* will hold, and its Done must say it holds because `RENDER_SESSION` is 2, not because of the gate. **§10 gains the blind spot**: `upgrade plan` cannot price a secret added after Session 2. | 0237, 0162 |
+| **D1826** | 4 | §5 Run 4 item 3: append the secret to `secrets.required.yaml`. | `schemas/secret-contract.schema.json` caps `introduced_in_session` at **18** — *"it tracks the newest declaration, not CURRENT_SESSION"* — so `introduced_in_session: 34` failed the contract's own validation and took 35 `test_secret_contract` proofs to `ERROR` at setup. | **The cap moves to 34** with a sentence in the description, the schema's own rule; the facility enum gains `connectors` at the secret level (the consumer-level enum is unmoved — no consumer of another secret is gated by it). | 0237 |
+| **D1827** | 4 | §5 Run 4 item 4: *"`connector_key_file: Path \| None` from `APG_CONNECTOR_KEY_FILE` (OPTIONAL — absent on a deployment without the facility)"*. | `test_auth_service_shape.py::test_the_auth_mode_reads_no_new_variable` (WF-WORK-001) asserts the compose auth environment EQUALS `REQUIRED_VARIABLES ∪ {APP_MODE}`; an optional variable set in `compose.yaml` would break the equality, and one set only by an override would be a setting no document declares. The secret override mounts each secret per FILE, and a facility-gated secret only for a project with the facility (**item 4's measurement**: rendered with the facility on, `connector_signing_key` is mounted into `auth` and no other service; off, nowhere — `test_a_project_with_the_facility_requires_the_key`). | **The PATH is required, the FILE is optional**: `APG_CONNECTOR_KEY_FILE` joins `REQUIRED_VARIABLES`, `compose.yaml` sets it to `/run/secrets/connector_signing_key` for every project, `Settings.connector_key_file` is that path in auth mode, and the file's absence is how the service reads *no connectors* (the route's step (2), 404; no delivery pass). Storage refuses the variable; `FORBIDDEN_VARIABLES["mcp"]` gains it. | 0237 |
+| **D1828** | 4 | §5 Run 4 item 5: `src/agentic_postgres/connector_keys.py` in Run 4 and `test_the_two_key_derivations_agree`. | `test_repository_contract.py::test_no_module_is_imported_only_by_its_own_tests` (D204) refused it: *"a module with no caller is a feature that does not exist"* — its one caller, `bin/connector.py key`, is Run 7's. | **The host copy ships in Run 7 with its caller**, and the two-copy agreement proof with it. Run 4 proves the image's derivation against an HMAC the test writes itself on ten vectors (`test_the_key_derivation_matches_an_independent_hmac`) and `sign` against rig 34b's openssl-measured vector; the battery's label mutation is killed there. | 0237 |
+| **D1829** | 4 | — | Moving outputs to 19 made three pins of the version name the wrong one: `test_the_chain_ends_at_version_18_with_nothing_of_a_projects_own` (registered, `acceptance-registry.yaml:2886`), `test_a_current_version_document_is_not_migrated_again` (`already version 18`), and `test_v17_to_v18_…`'s schema validation (the current schema is 19's). | **Renamed to `…_at_version_19_…` with its registry node id moved in the same commit** (D1757's precedent; a name saying 18 over an assertion of 19 is a proof that reads as measuring what it does not); the no-op pin reads 19; the v17→v18 proof validates its output after the last step. A `v18` fixture is derived from the chain (`v17` now derives from it), and the v18→v19 step gets its four proofs. `docs/acceptance-matrix.md` regenerated. | — |
 
 ---
 
@@ -1477,8 +1483,54 @@ Targeted (fast): `test_connector_facility`, `test_output_migrations`,
 Run 4: the connectors facility -- manifest 7, outputs 19, one gated secret,
 two derivations held together`), push, CI.
 
-**Done.** *(the executor writes it, including the override diff's answer to
-item 4.)*
+**Done.** 2026-09-30. **Project manifest schema 7** (`connectors: {enabled,
+endpoints}`, endpoints `^https?://host(:port)?(/path)?$` — no userinfo, query
+or fragment; the version-7 gate forbids the block below 7);
+`config.PROJECT_CONNECTORS_FROM = 7`, `SUPPORTED_PROJECT_SCHEMA_VERSIONS`
+1..7, **`config.connectors_enabled(document)`** (the one reader, manifest and
+document at the same place) and `config.connector_endpoints(manifest)`. Both
+example manifests at 7 without the facility (D1824). **Outputs 19**:
+`connectors: {enabled}` on both branches (`$defs/connectorsFacility`),
+written by the renderer from the manifest and carried whole to the deployed
+document; `deployed_output.SCHEMA_VERSION = 19`, `CURRENT_VERSION = 19`,
+`output_migrations.migrate_v18_to_v19` (`{"enabled": false}`, no argument,
+`NO_CONNECTORS`) chained in `migrate_rendered` and `outputs_chain.STEPS`.
+**The facility**: `secrets_contract.FACILITY_CONNECTORS`, `enabled_facilities`
+reads it through `connectors_enabled`; `connector_signing_key` appended to
+`secrets.required.yaml` with its comment block (why a facility, who holds a
+derived key, the rotation's consequence); the contract schema's
+`introduced_in_session` cap 18 → 34 (D1826). **The service's reader**:
+`APG_CONNECTOR_KEY_FILE` required as a path, optional as a file (D1827);
+**item 4's measurement** — the override mounts `connector_signing_key` per
+file, into `auth` ALONE with the facility and nowhere without it.
+**`services/auth-api/app/connector_signature.py`** (`derive`, `signed_bytes`,
+`sign`, `header`, `parse`, `verify`, `TIMESTAMP_TOLERANCE_SECONDS = 300`,
+`hmac.compare_digest`; no transport); the host copy moved to Run 7 with its
+caller (D1828). **Measured: `RENDER_SESSION = 2`**, so no post-Session-2
+secret ever reaches a rendered `required_names` — D1784's pricing premise was
+false and the gate matters at deploy step 0 instead (D1825). **Proofs**:
+`tests/contract/test_connector_facility.py` (NEW, `pytestmark` first) — schema
+7 admits / 6 forbids, six endpoint refusals with the sink's address as the
+control, the one reader over a manifest and a v19 rendered document, nothing
+owed without the facility (both renders' `required_names` AND step 0's set at
+34), exactly `connector_signing_key` owed with it and mounted into `auth`
+alone, the derivation against an independent HMAC on ten vectors and `sign`
+against rig 34b's `3c87822a…`, and the refusals carrying no value;
+`test_output_migrations.py` gains a `v18` fixture and four v19 proofs; three
+version pins moved (D1829). **Battery 4/4 kills**, control green before and
+after: the secret gated on nothing; the facility read from a manifest only;
+one byte of the label in the image's derivation; the endpoint pattern
+admitting a query. Targeted, once: `test_connector_facility`,
+`test_output_migrations`, `test_project_manifest`, `test_secret_contract`,
+`test_auth_service_shape` (504 passed after D1826/D1829's repairs), then
+`test_render_isolation`, `test_evidence_*`, `test_upgrade_plan*`,
+`test_node_restore*`, `test_dr_kit*`, `test_rendered_migrations`,
+`test_acceptance_registry`, `test_evidence_claims`, `test_secret_origin`,
+`test_secret_generation_manifest`, `test_repository_contract`,
+`test_capability_compiler`, `test_backup_plane`, `test_deploy_project*`,
+`test_workflow_worker` and others — 616 passed, 2 failed (the matrix, the
+orphan module); the three modules re-run after the repairs: **274 passed**.
+Bounds doc unchanged. Rows D1824–D1829. CI: *(below)*.
 
 ### Run 5 — the definitions: connector files, the event wait, the example set, step 6e and `apg dev`
 

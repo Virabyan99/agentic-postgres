@@ -101,7 +101,7 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 18
+CURRENT_VERSION = 19
 
 #: What a project with no capability manifest of its own records at version 18
 #: (ADR 0201), on both branches: `capabilities.project` rendered and
@@ -327,7 +327,10 @@ def migrate_rendered(
     if detect_version(document) == 16:
         document = migrate_v16_to_v17(document)
 
-    return migrate_v17_to_v18(document)
+    if detect_version(document) == 17:
+        document = migrate_v17_to_v18(document)
+
+    return migrate_v18_to_v19(document)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -1371,6 +1374,40 @@ def migrate_v17_to_v18(document: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+#: What a document below version 19 means about connectors: none. No manifest
+#: below schema 7 could enable the facility, and outputs 19 arrives with it.
+NO_CONNECTORS = {"enabled": False}
+
+
+def migrate_v18_to_v19(document: dict[str, Any]) -> dict[str, Any]:
+    """Return a version 19 ``rendered`` document derived from a version 18 one.
+
+    Version 19 adds `connectors` (ADR 0237): whether the project has the
+    connectors facility. No document below 19 could have it -- the manifest key
+    arrives at project schema 7 with this version -- so the step writes the one
+    value the version means for an archived document, `{"enabled": false}`,
+    and takes no argument. Everything else is left exactly as it was found
+    (ADR 0199's rule, restated for the fourth version running).
+    """
+    version = detect_version(document)
+    if version == 19:
+        raise MigrationError("document is already version 19; migration would be a no-op")
+    if version != 18:
+        raise MigrationError(f"only version 18 can be migrated to 19, got {version}")
+
+    require_kind(document, "rendered")
+
+    if "connectors" in document:
+        raise MigrationError(
+            "the document already carries `connectors`; this is not a version 18 document"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["connectors"] = dict(NO_CONNECTORS)
+    migrated["schema_version"] = 19
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -1385,6 +1422,7 @@ __all__ = [
     "BUDGET_MEMBERS",
     "CURRENT_VERSION",
     "HEALTH_ROUTE_PATH",
+    "NO_CONNECTORS",
     "NO_MIRROR",
     "NO_PROJECT_CAPABILITIES",
     "NO_PROJECT_SET",
@@ -1410,5 +1448,6 @@ __all__ = [
     "migrate_v15_to_v16",
     "migrate_v16_to_v17",
     "migrate_v17_to_v18",
+    "migrate_v18_to_v19",
     "require_kind",
 ]

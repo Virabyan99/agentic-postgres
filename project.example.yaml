@@ -9,7 +9,15 @@
 # project.second.example.yaml they also exercise the collision contract --
 # "fixture-alpha" and "fixture-alpine" share a 12-character prefix.
 
-# Schema version 6 (ADR 0201): `mcp.capabilities` names this project's OWN
+# Schema version 7 (ADR 0237): `connectors` enables the connectors facility and
+# names each outbound connector's endpoint for THIS deployment. Optional at 7
+# and forbidden below it, and deliberately omitted here: the facility is off, so
+# this project owes no `connector_signing_key` and step 6e installs nothing. A
+# deployment that enables it writes, for example,
+#   connectors: {enabled: true, endpoints: {note-embedded: "https://example.test/hook"}}
+# -- no userinfo, query or fragment, so an endpoint cannot carry a credential.
+#
+# Version 6 (ADR 0201): `mcp.capabilities` names this project's OWN
 # capability manifest, `projects/<slug>/capabilities.yaml`, beside its
 # migration set -- the tools an agent may call over the project's tables.
 # Optional at 6 and forbidden below it; `project.second.example.yaml` is
@@ -30,7 +38,7 @@
 # read (D929), with `mcp.profile`. Versions 1 to 4 still load -- both host
 # manifests are version 1 -- and render as permanent, unmirrored projects with
 # no set of their own, which is what they always were.
-schema_version: 6
+schema_version: 7
 
 # This project's own migrations, and the whole of what an adopter adds. The
 # directory is tracked in this checkout: a release is exactly the commit it is

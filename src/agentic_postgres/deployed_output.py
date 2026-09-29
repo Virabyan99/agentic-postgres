@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import REPO_ROOT, access_policy, backup_report, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
@@ -709,6 +709,9 @@ def build_deployed_document(
         # is D700's shape (`backup_state` is a deploy-time snapshot) arriving in
         # a block whose whole purpose is to say which SQL a cluster holds.
         "migrations": dict(rendered["migrations"]),
+        # Version 19 (ADR 0237). Carried from the render, not recomputed: the
+        # facility the deployment was rendered with is the one it has.
+        "connectors": dict(rendered["connectors"]),
         "observed_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }
     return validate_deployed_document(document)

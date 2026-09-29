@@ -703,7 +703,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 18"):
+    with pytest.raises(MigrationError, match="already version 19"):
         output_migrations.migrate_rendered(
             chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -2360,13 +2360,17 @@ def v14(v15: dict[str, Any]) -> dict[str, Any]:
     return document
 
 
-def test_the_chain_ends_at_version_18_with_nothing_of_a_projects_own(
+def test_the_chain_ends_at_version_19_with_nothing_of_a_projects_own(
     chained: dict[str, Any],
 ) -> None:
-    """The premise of the `v14` to `v17` fixtures, as a test rather than
+    """The premise of the `v14` to `v18` fixtures, as a test rather than
     inside a fixture (D386): a mutation that made the chain end elsewhere must
-    FAIL an assertion, not ERROR every test that shares the fixture."""
-    assert chained["schema_version"] == 18
+    FAIL an assertion, not ERROR every test that shares the fixture.
+
+    Renamed from `..._at_version_18_...` in Session 34, when the chain moved to
+    19: a name that said 18 over an assertion of 19 would be a proof that reads
+    as measuring one thing and measures another."""
+    assert chained["schema_version"] == 19
     assert chained["project"]["lifecycle"] == output_migrations.PERMANENT_LIFECYCLE
     assert chained["backup"]["mirror"] == output_migrations.NO_MIRROR
     # Version 17, ADR 0198. A migrated document has no project set -- no
@@ -2380,6 +2384,9 @@ def test_the_chain_ends_at_version_18_with_nothing_of_a_projects_own(
     # an empty object, which would say "a manifest with nothing in it".
     assert "project" in chained["capabilities"]
     assert chained["capabilities"]["project"] is None
+    # Version 19, ADR 0237. No document below 19 could have the connectors
+    # facility, so the migrated one records it off.
+    assert chained["connectors"] == {"enabled": False}
 
 
 def test_v15_adds_the_lifecycle_and_nothing_else(v14: dict[str, Any]) -> None:
@@ -2431,12 +2438,23 @@ def test_v15_refuses_a_document_already_at_15(v14: dict[str, Any]) -> None:
 
 
 @pytest.fixture
-def v17(chained: dict[str, Any]) -> dict[str, Any]:
-    """A version 17 document, derived from the chain's current one by removing
-    what version 18 added (ADR 0201). Its premise is asserted by
-    `test_the_chain_ends_at_version_18_with_nothing_of_a_projects_own`
+def v18(chained: dict[str, Any]) -> dict[str, Any]:
+    """A version 18 document, derived from the chain's current one by removing
+    what version 19 added (ADR 0237). Its premise is asserted by
+    `test_the_chain_ends_at_version_19_with_nothing_of_a_projects_own`
     (D386)."""
     document = json.loads(json.dumps(chained))
+    document.pop("connectors", None)
+    document["schema_version"] = 18
+    return document
+
+
+@pytest.fixture
+def v17(v18: dict[str, Any]) -> dict[str, Any]:
+    """A version 17 document, derived from the version 18 one by removing
+    what version 18 added (ADR 0201) -- chained through `v18` so the
+    subtractions cannot disagree about what each version carries."""
+    document = json.loads(json.dumps(v18))
     document["capabilities"].pop("project", None)
     document["schema_version"] = 17
     return document
@@ -2530,10 +2548,49 @@ def test_v17_refuses_its_own_output(v17: dict[str, Any]) -> None:
         output_migrations.migrate_v16_to_v17(v17)
 
 
-def test_v18_refuses_a_current_document(chained: dict[str, Any]) -> None:
-    """The same property for the step this session adds."""
+def test_v18_refuses_a_current_document(v18: dict[str, Any]) -> None:
+    """The same property for Session 21's step. Takes `v18` rather than
+    `chained`, which is version 19 since ADR 0237, for the reason the version
+    16 test above gives."""
     with pytest.raises(MigrationError, match="already version 18"):
-        output_migrations.migrate_v17_to_v18(chained)
+        output_migrations.migrate_v17_to_v18(v18)
+
+
+def test_v19_refuses_a_current_document(chained: dict[str, Any]) -> None:
+    """The same property for the step Session 34 adds."""
+    with pytest.raises(MigrationError, match="already version 19"):
+        output_migrations.migrate_v18_to_v19(chained)
+
+
+def test_v18_to_v19_adds_connectors_disabled(v18: dict[str, Any]) -> None:
+    """ADR 0237. `connectors` is `{"enabled": false}`: no document below 19
+    could have the facility, and the one value the version means is off. Every
+    other member is left exactly as it was found (ADR 0199's rule), and the
+    result validates against the current schema."""
+    migrated = output_migrations.migrate_v18_to_v19(v18)
+    assert migrated["schema_version"] == 19
+    assert migrated["connectors"] == {"enabled": False}
+    assert migrated["connectors"] == output_migrations.NO_CONNECTORS
+    assert migrated["connectors"] is not output_migrations.NO_CONNECTORS
+
+    stripped = json.loads(json.dumps(migrated))
+    del stripped["connectors"]
+    stripped["schema_version"] = 18
+    assert stripped == v18, "the step changed something other than what version 19 adds"
+    config.validate_against_schema(migrated, "outputs.schema.json")
+
+
+def test_v19_refuses_a_document_that_already_carries_the_block(v18: dict[str, Any]) -> None:
+    v18["connectors"] = {"enabled": True}
+    with pytest.raises(MigrationError, match="already carries `connectors`"):
+        output_migrations.migrate_v18_to_v19(v18)
+
+
+def test_v19_takes_no_argument_because_the_value_is_what_the_version_means() -> None:
+    import inspect
+
+    parameters = inspect.signature(output_migrations.migrate_v18_to_v19).parameters
+    assert list(parameters) == ["document"]
 
 
 def test_v17_to_v18_adds_the_project_capabilities_block_and_nothing_else(
@@ -2555,8 +2612,11 @@ def test_v17_to_v18_adds_the_project_capabilities_block_and_nothing_else(
     stripped["schema_version"] = 17
     assert stripped == v17, "the step changed something other than what version 18 adds"
 
-    # And the result is the current schema's: the chain's end validates.
-    config.validate_against_schema(migrated, "outputs.schema.json")
+    # And the result is the current schema's once the chain's last step has run:
+    # the chain's end validates (Session 34: the current schema is 19's).
+    config.validate_against_schema(
+        output_migrations.migrate_v18_to_v19(migrated), "outputs.schema.json"
+    )
 
 
 def test_v18_refuses_a_document_that_already_carries_the_block(v17: dict[str, Any]) -> None:

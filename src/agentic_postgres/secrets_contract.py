@@ -87,7 +87,13 @@ OPERATOR_SUPPLIED = "operator_supplied"
 #: (Compose refuses a missing mount source) and a required-everywhere one
 #: would fail every project without the facility.
 FACILITY_BACKUP_MIRROR = "backup_mirror"
-FACILITIES = (FACILITY_BACKUP_MIRROR,)
+
+#: Session 34 (ADR 0237, D1784). The connectors facility: its one secret,
+#: `connector_signing_key`, is the master every connector's key is DERIVED
+#: from, so a project that enables no connectors owes nothing new and the
+#: release stays minor.
+FACILITY_CONNECTORS = "connectors"
+FACILITIES = (FACILITY_BACKUP_MIRROR, FACILITY_CONNECTORS)
 
 #: The `pgpass` template. Wildcards in all four match fields, deliberately: the
 #: alternative names a host, a port, a database and a role that `naming.py`
@@ -203,6 +209,10 @@ def enabled_facilities(document: dict[str, Any]) -> frozenset[str]:
     enabled: set[str] = set()
     if config.backup_mirror_enabled(document):
         enabled.add(FACILITY_BACKUP_MIRROR)
+    # Session 34: the same rule for connectors -- a manifest and a document
+    # carry `connectors.enabled` at the same place (D1785).
+    if config.connectors_enabled(document):
+        enabled.add(FACILITY_CONNECTORS)
     return frozenset(enabled)
 
 
@@ -751,6 +761,7 @@ __all__ = [
     "CONTAINER_SECRET_DIR",
     "FACILITIES",
     "FACILITY_BACKUP_MIRROR",
+    "FACILITY_CONNECTORS",
     "FORMATS",
     "OPERATOR_SUPPLIED",
     "ORIGINS",

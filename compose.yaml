@@ -1306,6 +1306,11 @@ services:
       # exactly where the reviewed surface derives it. Names and bounds only;
       # no credential.
       APG_MCP_LOCK_FILE: /etc/auth/capability-lock.json
+      # Session 34 (ADR 0237). The connectors facility's master key. The
+      # path is set for every project; the file is mounted only for one that
+      # enables the facility (a facility-gated secret, ADR 0188), and its
+      # absence is what the service reads as "no connectors".
+      APG_CONNECTOR_KEY_FILE: /run/secrets/connector_signing_key
     # Container-local, and the only health surface this service has (D231).
     # `/health/ready` opens a connection from the pool and runs one statement,
     # so an unhealthy container is one that could not serve a request -- not one

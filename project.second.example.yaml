@@ -9,14 +9,18 @@
 # one rendered from project.example.yaml. See runbook §8 and
 # tests/contract/test_render_isolation.py.
 
-# Schema version 6 (ADR 0201), deliberately WITHOUT a `migrations` block and
+# Schema version 7 (ADR 0237) since Session 34, and still WITHOUT `connectors`:
+# the facility is off, so this project owes no `connector_signing_key`, which
+# is the measurement that keeps 1.12.0 minor (D1784).
+#
+# Version 6 (ADR 0201), deliberately WITHOUT a `migrations` block and
 # WITHOUT `mcp.capabilities`. This manifest is the control: same version as
 # `project.example.yaml`, no set of its own and no capabilities of its own, so a
 # proof that either renders is read against a project at the same version that
 # has neither. A version 6 manifest omitting both keys applies exactly the
 # release's migrations and serves exactly the release's agent surface -- which
 # is what every manifest below version 5 also does.
-schema_version: 6
+schema_version: 7
 
 project:
   slug: fixture-alpine

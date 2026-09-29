@@ -92,6 +92,7 @@ def downgrade_to_two(document: dict[str, Any]) -> dict[str, Any]:
     document["project"].pop("lifecycle", None)
     document.pop("migrations", None)
     document["mcp"].pop("capabilities", None)
+    document.pop("connectors", None)
     return document
 
 
@@ -730,6 +731,8 @@ def downgrade_to_five(document: dict[str, Any]) -> dict[str, Any]:
     document = copy.deepcopy(document)
     document["schema_version"] = 5
     document["mcp"].pop("capabilities", None)
+    # Session 34: the base is version 7, and `connectors` is forbidden below 7.
+    document.pop("connectors", None)
     return document
 
 

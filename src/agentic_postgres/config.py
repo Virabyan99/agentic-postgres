@@ -61,7 +61,7 @@ MAX_MANIFEST_BYTES = 65_536
 #: `project.lifecycle`. Versions 1 and 2 still load and render as permanent
 #: projects, because both host manifests are version 1 and no commit can edit
 #: them.
-SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6})
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7})
 SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
 
 #: The project manifest version at which `mcp.capabilities` exists (ADR 0201):
@@ -69,6 +69,12 @@ SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
 #: manifest of its own, and the deployed document records
 #: `mcp.project_capabilities: null` for it (outputs version 18).
 PROJECT_CAPABILITIES_FROM = 6
+
+#: The project manifest version at which `connectors` exists (ADR 0237):
+#: optional at 7, forbidden below. A manifest below 7 has no connectors
+#: facility, and the deployed document records `connectors.enabled: false`
+#: for it (outputs version 19).
+PROJECT_CONNECTORS_FROM = 7
 
 #: The project manifest version at which `backup.mirror` exists (ADR 0188):
 #: optional at 4, forbidden below. A manifest below 4 has no mirror, and the
@@ -428,6 +434,29 @@ def backup_mirror_enabled(document: dict[str, Any]) -> bool:
     """
     backup = {**BACKUP_DEFAULTS, **(document.get("backup") or {})}
     return bool(backup.get("enabled")) and bool(backup_mirror(document)["enabled"])
+
+
+def connectors_enabled(document: dict[str, Any]) -> bool:
+    """Does this project have the connectors facility? (ADR 0237, D1785.)
+
+    The one reader of the fact, `backup_mirror_enabled`'s shape: a manifest
+    (schema 7) and a rendered or deployed document (outputs 19) carry
+    `connectors.enabled` at the same place, and an absent block means off --
+    every manifest below 7, and a document migrated from 18. Every caller that
+    decides what a project materializes, mounts, requires or installs asks
+    this, never the key directly.
+    """
+    return bool((document.get("connectors") or {}).get("enabled", False))
+
+
+def connector_endpoints(manifest: dict[str, Any]) -> dict[str, str]:
+    """Where each outbound connector of this deployment sends, by name (D1786).
+
+    MANIFEST only: no document carries an endpoint, by design -- a URL is a
+    per-deployment value that leaves the installed manifest for exactly one
+    place, the connector's row, and is written in no record, status or log.
+    """
+    return dict((manifest.get("connectors") or {}).get("endpoints") or {})
 
 
 #: The three secrets a repository needs before anything may touch it.
