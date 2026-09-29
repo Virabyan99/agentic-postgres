@@ -1,4 +1,8 @@
-"""The workflow calls: eight of migration 0034's substrate and six of 0035's.
+"""The workflow calls: eight of migration 0034's substrate, six of 0035's, one of 0036's.
+
+Since Session 34 the event wait's park, `workflow_await_event`, is here beside
+`park`, whose attempt row it writes (ADR 0239); the eight connector calls are
+`connector_repository.py`'s.
 
 Since Session 33 the gates -- requesting, reading, expiring and deciding an
 approval -- the approvals listing and provenance are here too (ADR 0230-0234),
@@ -200,6 +204,30 @@ class WorkflowRepository:
         row = await self._one(
             "SELECT app_private.workflow_park(%s, %s, %s, %s, %s) AS outcome",
             (step_id, holder, reason, resume_after, request_id),
+        )
+        assert row is not None
+        return str(row["outcome"])
+
+    async def await_event(
+        self,
+        *,
+        step_id: UUID,
+        holder: str,
+        event: str,
+        match: str,
+        resume_after: Any,
+    ) -> str:
+        """Park a wait step on an event until a time (ADR 0239, migration 0036).
+
+        `match` is the RESOLVED match as JSON text, resolved once by the loop at
+        park; the emitter serves the step only for the run's own owner and a
+        payload that contains it. The park itself is `workflow_park`'s, called
+        by the function rather than copied, so its attempt row is every park's.
+        Returns `'parked'` or `'lease_lost'`.
+        """
+        row = await self._one(
+            "SELECT app_private.workflow_await_event(%s, %s, %s, %s::jsonb, %s) AS outcome",
+            (step_id, holder, event, match, resume_after),
         )
         assert row is not None
         return str(row["outcome"])

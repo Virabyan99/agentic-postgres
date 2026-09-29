@@ -406,6 +406,17 @@
       "template": "templates/0035-workflow-gates.sql",
       "template_sha256": "6505cad9d6b55d136660924e196ad1445c15808a45e37377466814cb68344f43",
       "version": "20260917120035"
+    },
+    {
+      "canonical_render_sha256": "d4b0268b465903c4aaf72f2e229b1563c8f960c9a33668455af16245ace2b0c7",
+      "name": "connectivity",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0036-connectivity.sql",
+      "template_sha256": "a267e83da5c48cd7df53718ad9ed0832f2bcd2bfda3160e71afcdc85f81f60cd",
+      "version": "20260929120036"
     }
   ],
   "schema_version": 1

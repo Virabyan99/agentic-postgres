@@ -820,7 +820,11 @@ def test_gate_state_reports_a_served_wait(applied: dict[str, Any], fresh: dict[s
     _enqueue(applied, fresh["agent"], "waiting")
     pause = _claim(applied, "H")
     assert pause is not None and pause["name"] == "pause"
-    assert _gate_state(applied, pause["step_id"], "H") == {"approval": None, "waited": False}
+    assert _gate_state(applied, pause["step_id"], "H") == {
+        "approval": None,
+        "waited": False,
+        "event": None,
+    }
 
     parked = _as_role(
         applied,
@@ -830,7 +834,11 @@ def test_gate_state_reports_a_served_wait(applied: dict[str, Any], fresh: dict[s
     assert parked.stdout.strip().splitlines()[-1] == "parked", parked.stderr[:300]
     again = _claim(applied, "H")
     assert again is not None and again["name"] == "pause" and again["attempt"] == 2
-    assert _gate_state(applied, again["step_id"], "H") == {"approval": None, "waited": True}
+    assert _gate_state(applied, again["step_id"], "H") == {
+        "approval": None,
+        "waited": True,
+        "event": None,
+    }
 
     not_held = _as_role(
         applied,

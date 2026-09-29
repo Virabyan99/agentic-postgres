@@ -58,7 +58,13 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 #: `api` is the only schema exposed over HTTP, so its functions are the ones
 #: whose arity a caller can be refused by -- which makes it the schema this
 #: mattered most in and the one it did not cover.
-SCHEMAS = ("app_private", "api")
+#:
+#: **And `app` since Session 34** (D1820): migration 0036 puts the event
+#: emitter there, granted to nobody, and every project RPC and proof reaches it
+#: as `app.emit_event(name, version, payload)`. A call with the wrong arity
+#: would fail only inside a cluster -- the D887 shape one schema over.
+#: `app_private` is listed first so the alternation never reads it as `app`.
+SCHEMAS = ("app_private", "api", "app")
 _QUALIFIED = f"(?:{'|'.join(SCHEMAS)})"
 
 #: `CREATE FUNCTION <schema>.name(` — the declaration.
@@ -603,7 +609,11 @@ def test_every_call_to_a_released_function_uses_a_released_arity() -> None:
     # dropping the two functions the agent plane calls on every request. That is
     # how the hole D887 found was invisible for a whole session, and a guard
     # whose coverage can shrink without a failure is a guard that will.
-    for schema, witness in (("app_private", "auth_create_agent"), ("api", "agent_audit_begin")):
+    for schema, witness in (
+        ("app_private", "auth_create_agent"),
+        ("api", "agent_audit_begin"),
+        ("app", "emit_event"),
+    ):
         assert witness in live, (
             f"{witness} is not in the released set, so schema {schema!r} is no longer "
             "being read. This test would still pass, and would be checking half the "

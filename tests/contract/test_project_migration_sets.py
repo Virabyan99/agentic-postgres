@@ -895,10 +895,10 @@ def test_a_project_may_not_publish_a_name_the_release_owns(copied: Path) -> None
 # EVT-LINT-001 -- a project set may call a release function and never define one
 # ---------------------------------------------------------------------------
 
-#: What the release defines in `api` and `app` at 1.11.0, read out of the
-#: templates by rig 34a's reader and written here as an EXACT set. Migration
-#: 0036 moves it by one (`app.emit_event`), and the move is this proof's to
-#: record, never a containment check's to absorb.
+#: What the release defines in `api` and `app`, read out of the templates by
+#: rig 34a's reader and written here as an EXACT set. Eight at 1.11.0; migration
+#: 0036 moved it by one (`app.emit_event`, Session 34 Run 3), and the move is
+#: this proof's to record, never a containment check's to absorb.
 RELEASE_FUNCTIONS = frozenset(
     {
         ("api", "agent_audit_begin"),
@@ -909,6 +909,7 @@ RELEASE_FUNCTIONS = frozenset(
         ("api", "owner_activity_report"),
         ("api", "update_task_status"),
         ("app", "current_user_id"),
+        ("app", "emit_event"),
     }
 )
 
@@ -1009,19 +1010,16 @@ def test_a_project_set_may_not_replace_the_emitter(
     """The emitter is only as trustworthy as the rule that nobody else defines it.
 
     ADR 0235: `app.emit_event` is granted to nobody, so the one way to forge an
-    event is to replace the function a project's RPC calls. Until migration 0036
-    exists this proof builds a release with one more migration defining it, and
-    asserts the derived set picked the name up before asserting the refusal --
-    otherwise the refusal could be the unqualified-name rule answering for a
-    name the reader never read. Run 3 adds an arm over the real template.
-    """
-    release = _release_with(
-        tmp_path,
-        "CREATE FUNCTION app.emit_event(p_name text, p_version integer, p_payload jsonb) "
-        f"RETURNS uuid {_BODY}",
-    )
-    assert ("app", "emit_event") in migrations.release_functions(release)
+    event is to replace the function a project's RPC calls.
 
+    Two arms. **The real template**: migration 0036 defines it, the derived set
+    holds it, and a project replacing it is refused against the release as
+    shipped. **A release one migration newer**: a function the next migration
+    adds joins the set with no edit to the lint -- asserted as a name the
+    derivation must pick up BEFORE the refusal is asserted, so the refusal
+    cannot be the unqualified-name rule answering for a name never read.
+    """
+    assert ("app", "emit_event") in migrations.release_functions(migrations.release_set())
     candidate = broken(
         copied,
         TEMPLATE,
@@ -1030,8 +1028,21 @@ def test_a_project_set_may_not_replace_the_emitter(
         f"integer, p_payload jsonb) RETURNS uuid {_BODY}",
     )
     with pytest.raises(migrations.ProjectSetError, match=re.escape("defines app.emit_event")):
-        migrations.lint_project_set(candidate, release)
+        migrations.lint_project_set(candidate)
+    migrations.lint_project_set(example)
 
+    release = _release_with(
+        tmp_path, f"CREATE FUNCTION app.next_emitter(p_name text) RETURNS uuid {_BODY}"
+    )
+    assert ("app", "next_emitter") in migrations.release_functions(release)
+    later = broken(
+        copied,
+        TEMPLATE,
+        "CREATE OR REPLACE FUNCTION app.emit_event(",
+        "CREATE OR REPLACE FUNCTION app.next_emitter(",
+    )
+    with pytest.raises(migrations.ProjectSetError, match=re.escape("defines app.next_emitter")):
+        migrations.lint_project_set(later, release)
     migrations.lint_project_set(example, release)
 
 

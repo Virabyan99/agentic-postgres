@@ -237,6 +237,67 @@ def test_0035_reissues_the_reader_grant_at_its_new_arity(manifest: dict[str, Any
     )
 
 
+#: What 0036 grants to the auth service, and the four it grants to nobody
+#: (ADR 0235-0238). An EXACT pair of sets: a function moved from one to the
+#: other is the change this arm exists to see.
+CONNECTIVITY_GRANTED = frozenset(
+    {
+        "connector_claim_delivery",
+        "connector_finish_delivery",
+        "connector_fire_due",
+        "connector_inbound",
+        "connector_accept",
+        "connector_enable",
+        "connector_disable",
+        "connector_status",
+        "workflow_await_event",
+    }
+)
+CONNECTIVITY_NOBODY = frozenset(
+    {"emit_event", "connector_install", "connector_rehearse_delivery", "connector_scopes_match"}
+)
+
+
+def test_0036_grants_what_it_names_and_revokes_every_new_function_first(
+    manifest: dict[str, Any],
+) -> None:
+    """Migration 0036's privileges, read as text (D464): the cluster's answer is
+    `test_connectivity_substrate.py`'s.
+
+    Every function 0036 CREATES (not the two it replaces, whose 0035 grants
+    stand) has a `REVOKE ALL ... FROM PUBLIC`; every REVOKE precedes the first
+    GRANT; the grants name exactly nine functions, all to `auth_service`; and the
+    four granted to nobody -- the emitter above all -- appear in no GRANT.
+    """
+    entry = next((item for item in manifest["migrations"] if item["name"] == "connectivity"), None)
+    assert entry is not None, "the released manifest has no connectivity migration"
+    text = (migrations.MIGRATIONS_ROOT / entry["template"]).read_text(encoding="utf-8")
+    statements = "\n".join(
+        line.split("--")[0] for line in text.split("-- migrate:down", 1)[0].splitlines()
+    )
+    up = " ".join(statements.split())
+
+    created = set(re.findall(r"CREATE FUNCTION (?:app_private|app)\.(\w+)\(", up))
+    assert created == CONNECTIVITY_GRANTED | CONNECTIVITY_NOBODY, sorted(created)
+    replaced = set(re.findall(r"CREATE OR REPLACE FUNCTION app_private\.(\w+)\(", up))
+    assert replaced == {"workflow_gate_state", "workflow_counts"}, sorted(replaced)
+
+    revoked = set(re.findall(r"REVOKE ALL ON FUNCTION (?:app_private|app)\.(\w+)\(", up))
+    assert revoked == created, sorted(created - revoked)
+
+    grants = re.findall(
+        r"GRANT EXECUTE ON FUNCTION (?:app_private|app)\.(\w+)\([^;]*\) TO ([^;]+);", up
+    )
+    names = {name for name, _ in grants}
+    assert names == CONNECTIVITY_GRANTED, sorted(names)
+    assert {grantee.strip() for _, grantee in grants} == {"{{auth_service}}"}
+    assert not names & CONNECTIVITY_NOBODY
+
+    last_revoke = max(m.start() for m in re.finditer(r"REVOKE ALL ON FUNCTION", up))
+    first_grant = min(m.start() for m in re.finditer(r"GRANT EXECUTE ON FUNCTION", up))
+    assert last_revoke < first_grant, "0036 grants a function before it has revoked every one"
+
+
 def test_every_up_block_assumes_and_returns_the_owner_role(manifest: dict[str, Any]) -> None:
     """ADR 0026: objects are owned by object_owner, versions stamped by migration_user.
 

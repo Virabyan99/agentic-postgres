@@ -607,6 +607,11 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1816** | 1 | §5 Run 1: the three `THR-*` rows cite `CONN-IN-001`, `CONN-IN-002`, `CONN-ADMIN-001`, `CONN-OUT-001`, `CONN-OUT-002`, `CONN-STORM-001` and proposed node ids. | `test_acceptance_registry.py::test_threat_model_requirement_ids_exist_in_the_registry` and `::test_threat_model_node_ids_are_collectible` read EVERY threat row; none of those requirements exists until Run 9 lands the registry (D690), and none of the node ids collects — D1742's shape exactly. | **The rows land in Run 1 with the prevention, detection and residual cells whole and cite what holds TODAY**: `THR-CONNECTOR-INPUT` → `API-AUTH-002` (the strict input the route reuses after the signature) + `test_auth_strict_json.py::test_an_oversized_body_is_refused_before_it_is_parsed` + `test_auth_service_shape.py::test_the_application_serves_exactly_the_declared_paths` (no connector path is served yet); `THR-WEBHOOK-REPLAY` → `AGT-IDEM-001` + `test_agent_audit_plane.py::test_a_replayed_write_performs_the_work_once_and_returns_the_same_row` + the path equality; `THR-DELIVERY` → `WF-WORK-001` + `test_auth_service_shape.py::test_every_transport_in_the_service_is_declared_with_a_reason` + `test_workflow_worker.py::test_the_loop_starts_in_auth_mode_only`. Each residual cell says so. **Run 9 rewrites the two ID cells of all three rows** with the §2 requirements and their collected node ids. | — |
 | **D1817** | 2 | §5 Run 2 battery: *"a `PATH` shim `sleep` that sleeps 0.2 s before `exec`"* makes the race observable. | **With a 0.2 s shim the mutation (the wait removed) SURVIVED**: the whole proof ran in 0.10 s, so the record AND `connect.sh status` both read the pre-exec args (`/bin/bash …/sleep 300`) and agreed. CI's failure is the other ordering — the `exec` lands BETWEEN the recorded read and `status`. A **0.03 s** shim (`exec -a sleep /usr/bin/sleep "$@"`, so the post-exec args read exactly `sleep 300`) reproduces it: the mutation FAILED on the stale-record assertion, the fixed fixture PASSED under the same shim. | **The battery's shim window is 0.03 s**, and the instrument's first result is recorded rather than tuned away: a race is observable only when the window falls between the two reads the proof compares, not merely when it is long. | — |
 | **D1818** | 2 | §5 Run 2 step 2: *"a function `release_functions(release_templates_dir)`"*; the rule's regex `(CREATE(\s+OR\s+REPLACE)?\|ALTER\|DROP)\s+FUNCTION\s+(api\|app)\.<name>\b`; *"Every reader of `lint_project_set` … passes the release directory it already has"*. | `lint_project_set(project, release: MigrationSet \| None = None)` ALREADY takes the release as a `MigrationSet` (`release_set()` by default), and its three callers (`rendering.py:2448`, `bin/migrate.py:416`, `:442`) pass none — the default is the one they want. PostgreSQL also accepts `PROCEDURE`/`ROUTINE`, `IF EXISTS`, a quoted or spaced schema and name, an argument-less name, and an UNQUALIFIED name after a `search_path` move — each a spelling the planned regex would not see. | **`release_functions(release: MigrationSet)`** derives from the set the lint already holds (manifest order: `CREATE` adds, `DROP` removes; the exact set is the plan's eight). No caller changed. **`FUNCTION_DDL` matches every one of those spellings, and an unqualified definition of a release function's NAME is refused too**; proofs are arms of `test_a_project_set_may_not_replace_a_release_function` (quoted-and-spaced, `ALTER ROUTINE` without arguments, unqualified). The DROP half of the old rule is folded in with its message kept (`drops api.<name>`), so the existing `drops_a_release_function` arm passes unchanged. | 0235 |
+| **D1819** | 3 | §5 Run 3 item 12: *"`connector_fire_due(p_holder text) RETURNS integer`"*. | Nothing in the function records a holder: no column, no attempt row, no heartbeat (the heartbeat is `workflow_heartbeat`'s, written by the loop anyway). A parameter nothing reads is a declared field with no reader — the D816 class. | **`app_private.connector_fire_due()` takes no argument**; `ConnectorRepository.fire_due()` calls it bare; Run 6's loop calls it once per iteration. | 0236 |
+| **D1820** | 3 | §5 Run 3 *Read first*: *"ADR 0175's arity guard over `api` and `app_private` — decide whether it must learn `app`, and if it must, that is a stricter guard, stated"*. | `test_database_function_signatures.py:61` `SCHEMAS = ("app_private", "api")`. 0036 puts `app.emit_event` in `app`, and the project RPC, the proofs and 0003 all reach it as `app.emit_event(name, version, payload)`; a wrong-arity call would fail only inside a cluster. | **The guard learns `app`** — `SCHEMAS = ("app_private", "api", "app")` (`app_private` first so the alternation never reads it as `app`) and a third witness `("app", "emit_event")` beside the two that keep the schema list from shrinking silently (D887). Stricter; every call in the tree passes it. | 0235 |
+| **D1821** | 3 | §5 Run 3 item 9: `connector_install` with thirteen parameters, laid out like 0034/0035's aligned declarations. | **Measured on first run**: `test_every_sql_signature_names_a_declaration_that_is_live_at_that_point` reported both `connector_install(...)` references (the `COMMENT` and the `REVOKE`) as naming *"no declaration"*. `_arguments` reads an argument list within **400 characters** of its paren (D1450's bound against runaway parses), and the column-aligned thirteen-parameter list was longer, so the walk skipped the DECLARATION and then called every reference stale. | **The declaration is written unaligned**, four lines, with a comment saying why; the bound is not widened (it exists for D1450's reason, and every other declaration fits). A function with a longer parameter list than this would meet the same wall — the comment in 0036 names the bound so the next one is not a surprise. | — |
+| **D1822** | 3 | §5 Run 3 items 2, 3, 8, 9, 10, 16. | Four places where the plan's sketch was silent or looser than the tree allows: (1) `workflow_run.owner_id` exists (0034:196-210) and is COPIED from the agent at enqueue (0034:443) — the owner a wait belongs to is on the run itself; (2) a higher-version install that changes the connector's EVENT or its definition's REQUIRED SCOPES changes what the bound agent was bound to, as a changed kind or definition does; (3) a delivery whose lease expires on its LAST attempt is excluded by `attempts < max_attempts` and would stay `pending` forever; (4) the rehearsal's event has no owner, and `connector_event.owner_id NOT NULL` would force a nil uuid that looks measured (D600). | (1) **The emitter matches `r.owner_id = caller`** — the same owner, without a join through `agents`. (2) **`connector_install` returns `replaced_disabled` (disabled, unbound) when the kind, event, definition name or version, or required scopes change.** (3) **The claim first retires such a delivery as `dead`** (`last_error` kept, else `unknown`) before it leases anything. (4) **`owner_id` is nullable with `CHECK (owner_id IS NOT NULL OR name = 'apg.rehearsal')`.** `connector_status` also carries `endpoint_declared` (a boolean, never the value), `enabled_by/at`, `disabled_by/at`, and binding values `not_applicable` (outbound) and `agent_not_active` beside the plan's three. | 0236, 0238 |
+| **D1823** | 3 | §5 Run 3 battery: *"make `connector_accept` insert the receipt AFTER the enqueue without the single transaction"*. | A plpgsql function body IS one transaction; there is no way to write "not one transaction" inside it. The failure the mutation stands for is a refused enqueue that leaves a receipt behind. | **The mutation is written as the expressible form of that failure**: the enqueue wrapped in `BEGIN … EXCEPTION WHEN OTHERS THEN RETURN NULL; END`, which keeps the receipt and swallows the refusal. `test_a_refused_enqueue_leaves_no_receipt` must FAIL on it. | — |
 
 ---
 
@@ -1092,7 +1097,9 @@ a 0.2 s shim let it SURVIVE, D1817), M2 the rule deleted, M3 narrowed to
 once: `test_project_migration_sets`, `test_connect_command`,
 `test_dev_environment`, `test_rendered_migrations`,
 `test_acceptance_registry`, `test_evidence_claims`, `test_api_migrations`,
-`test_migrations` — **314 passed**. Rows D1817–D1818. CI: *(below)*.
+`test_migrations` — **314 passed**. Rows D1817–D1818. Commit `428bec2`; CI
+by full SHA `428bec2ceb6a5946c2ea114de1797d5cf9fb11cb`: `contract` **success**
+(run 36618603298).
 
 ### Run 3 — migration 0036: the emitter, the outbox, connectors, receipts, the event wait, under a real cluster
 
@@ -1318,7 +1325,61 @@ Targeted (fast): `test_migrations`, `test_rendered_migrations`,
 Commit (`Session 34 Run 3: migration 0036 -- the emitter, the outbox,
 connectors, receipts and the event wait`), push, CI.
 
-**Done.** *(the executor writes it.)*
+**Done.** 2026-09-29. **Migration 0036** (`20260929120036_connectivity`,
+`migrations/templates/0036-connectivity.sql`), frozen by `bin/migrate.sh
+freeze-lock` (36 migrations): two enums, the four tables (no grant, no RLS),
+four nullable `workflow_step` columns and a partial index on unserved waits,
+`app.emit_event` (granted to nobody), eleven `app_private` definer functions —
+nine granted to `auth_service` (`connector_claim_delivery`,
+`connector_finish_delivery`, `connector_fire_due`, `connector_inbound`,
+`connector_accept`, `connector_enable`, `connector_disable`,
+`connector_status`, `workflow_await_event`), and `connector_install`,
+`connector_rehearse_delivery`, `connector_scopes_match` to nobody — and
+`workflow_gate_state` / `workflow_counts` replaced in place. Rows D1819–D1823
+(`fire_due` takes no holder; the arity guard learns `app`; the 400-character
+bound met by an aligned declaration; four tightenings of the sketch; the
+battery's M5 in its expressible form). **Rig 34e** (`/tmp/rig34e.py`, the
+locked image, 35 migrations then 0036 as `migration_user`): before
+`workflow_counts() -> jsonb`, `workflow_gate_state(p_step uuid, p_holder
+text) -> jsonb`; after — **identical** (`equal: true`). **Callers shipped
+with the grants (D1680)**: `services/auth-api/app/connector_repository.py`
+(eight methods, `ClaimedDelivery`) and `WorkflowRepository.await_event`;
+`test_every_granted_function_has_a_caller` green. **Proofs**:
+`tests/contract/test_connectivity_substrate.py` (NEW, `pytestmark` first) —
+**30 passed on the second execution**; the first execution's one failure was
+the PROOF's (an unsorted scope array the agents table's `is_scope_set` CHECK
+refuses), not the product's. EVT-EMIT-001's eleven (the emitter's
+`has_function_privilege` false for eight roles AND its ACL naming the owner
+alone AND `42501` for four — D1814), `test_gate_state_reports_the_event`,
+CONN-SCHED-001's three, accept's refusals + one transaction + the bound agent,
+enable's six refusals + the named scope difference, disable, the status key
+walk with three canaries, and the delivery lease (retry to max then dead,
+`lease_lost`, the fixed token, a rehearsal's claim never returning the
+endpoint). `tests/contract/test_connector_repository.py` (NEW): the nine
+grants each called by a named repository, the four nobody-functions reached by
+no statement, no formatted statement, placeholders equal to the declarations,
+the claim's mapping. `test_migrations.py::test_0036_grants_what_it_names_
+and_revokes_every_new_function_first`; `RELEASE_FUNCTIONS` moved to nine with
+`app.emit_event` and the emitter proof's real-template arm;
+`test_database_function_signatures.py` reads `app`. **Three older exact pins
+moved to the new exact shapes** (each a larger equality, found by the targeted
+run — question 5): `test_workflow_substrate.py` 35 → 36 applied versions and
+the counts key set +4, `test_workflow_gates.py`'s gate-state equality `+
+"event": None`. **Battery 10/10 kills, 0 errors**, control green before and
+after in the same invocation, restored by copy and `cmp`: the emitter granted
+to `auth_service`; the owner condition dropped; `enabled` dropped from the
+subscriber INSERT; an id returned when nothing listens; accept's enqueue
+swallowed (D1823); no coalescing; `endpoint` in the status; the scope equality
+dropped from `fire_due`; and from `accept`; a rehearsal's claim returning the
+endpoint. Both example projects re-rendered (D1678). Targeted, once:
+`test_migrations`, `test_rendered_migrations`, `test_project_migration_sets`,
+`test_database_function_signatures`, `test_acceptance_registry`,
+`test_evidence_claims`, `test_workflow_repository`,
+`test_connector_repository`, `test_auth_service_shape`,
+`test_connectivity_substrate`, `test_workflow_gates`,
+`test_workflow_substrate`, `test_migration_ledger`, `test_agent_audit_plane` —
+408 passed, 3 failed (the three pins above); the two failing modules re-run
+alone: **56 passed**. CI: *(below)*.
 
 ### Run 4 — the facility: manifest 7, outputs 19, the secret, the two key derivations
 

@@ -267,7 +267,9 @@ def test_the_migration_applies_as_the_migration_user_and_its_down_refuses(
     # 35 since Session 33: 0035 replaces five of 0034's functions in place, so
     # every proof below runs against the replaced bodies (D1744's timeout rule
     # among them), and this module is part of 0035's evidence as well as 0034's.
-    assert len(applied["versions"]) == 35, len(applied["versions"])
+    # 36 since Session 34: 0036 replaces 0035's `workflow_gate_state` and
+    # `workflow_counts` in place with unchanged signatures (rig 34e).
+    assert len(applied["versions"]) == 36, len(applied["versions"])
 
     template = (REPO_ROOT / "migrations" / "templates" / "0034-workflow-substrate.sql").read_text(
         encoding="utf-8"
@@ -1105,7 +1107,10 @@ def test_counts_reports_numbers_and_no_verdict(applied: dict[str, Any]) -> None:
     caller value: the assertion below is over the KEY SET, so a field added
     later has to be looked at. **Looked at in Session 33**: 0035 adds
     `approvals_pending` and `oldest_pending_approval_age_seconds` -- a count and
-    an age, no verdict, no caller value (ADR 0230).
+    an age, no verdict, no caller value (ADR 0230). **Looked at in Session 34**:
+    0036 adds `deliveries_pending`, `deliveries_dead`,
+    `oldest_pending_delivery_age_seconds` and `connectors_enabled` -- three counts
+    and an age, no verdict, no endpoint or payload (ADR 0238).
     """
     counts = json.loads(
         _scalar(
@@ -1122,6 +1127,10 @@ def test_counts_reports_numbers_and_no_verdict(applied: dict[str, Any]) -> None:
         "heartbeat_holder",
         "approvals_pending",
         "oldest_pending_approval_age_seconds",
+        "deliveries_pending",
+        "deliveries_dead",
+        "oldest_pending_delivery_age_seconds",
+        "connectors_enabled",
     }, sorted(counts)
     assert isinstance(counts["definitions"], int)
     assert isinstance(counts["runs"], dict)
