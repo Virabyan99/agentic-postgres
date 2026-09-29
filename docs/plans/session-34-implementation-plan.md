@@ -1533,7 +1533,11 @@ admitting a query. Targeted, once: `test_connector_facility`,
 `test_capability_compiler`, `test_backup_plane`, `test_deploy_project*`,
 `test_workflow_worker` and others — 616 passed, 2 failed (the matrix, the
 orphan module); the three modules re-run after the repairs: **274 passed**.
-Bounds doc unchanged. Rows D1824–D1830. **CI on `5005c37…` (`5005c37576f1dd040e7eecaba309123e729eee40`): `contract` FAILURE** (run 36623650516) — seven modules outside the targeted list (D1830), repaired in the next commit; that commit's verdict: *(below)*.
+Bounds doc unchanged. Rows D1824–D1830. **CI on `5005c37…` (`5005c37576f1dd040e7eecaba309123e729eee40`): `contract` FAILURE** (run 36623650516) — seven modules outside the targeted list (D1830), repaired in the next commit, `0e5335a`; CI by full SHA
+`0e5335a756bf5163bc643aa34b401d7e3f329bad`: `contract` **success** (run
+36626102633). **Run 4 is done. NEXT FREE: D1831, ADR 0240.** The executor
+stopped here at the operator's request (2026-09-30); Run 5 starts from its
+*Read first* list.
 
 ### Run 5 — the definitions: connector files, the event wait, the example set, step 6e and `apg dev`
 
