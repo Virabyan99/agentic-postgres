@@ -605,6 +605,8 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1814** | 1 | §2 EVT-EMIT-001: *"a request role and `auth_service` are refused `42501`"*. | **Rig 34a**: `authenticated`, `agent_writer`, `auth_service` and `anon` each get **`42501 permission denied for schema app`** — the SCHEMA's refusal (none holds `USAGE` on `app`) — and `has_function_privilege(role, 'app.emit_event(text,integer,jsonb)', 'EXECUTE')` is **false** for all four. PostgREST answers `POST /rpc/emit_event` **404 `PGRST202`** for a human and an agent token (control `POST /rpc/create_note` 200). Through a definer RPC the row carries the GUC's owner; through PostgREST with an agent token it carries the agent's owner AND the agent's id. A rolled-back caller left 3 rows at 3. | **The prediction holds, and the proof must measure the function's grant, not only the schema's**: a proof asserting only `42501` passes vacuously while `app` stays closed, and would still pass if 0036 granted the function to PUBLIC. `test_emit_event_is_executable_by_no_role` asserts `has_function_privilege` false for every login and request role AND the `42501`. | 0235 |
 | **D1815** | 1 | D1780: the hole is *"`CREATE OR REPLACE FUNCTION api.create_note(...)`"* and *"the same hole would let a project replace `app.emit_event`"*. | **Rig 34a, `lint_project_set` over a scratch set**: PASSED `CREATE OR REPLACE FUNCTION api.create_note(…)`, `CREATE OR REPLACE FUNCTION app.emit_event(…)`, `ALTER FUNCTION api.create_note(text, text) SECURITY INVOKER`, and **`CREATE OR REPLACE FUNCTION app.current_user_id()` — the function every row policy in `app` reads**. Applied as the owner, `api.create_note`'s `pg_get_functiondef` md5 moved `c0cdcc57…` → `0d4f9729…`. Controls: a body naming `app_private` refused; `DROP FUNCTION api.create_note` refused; a project RPC calling `app.emit_event` passed. | **The hole is wider than the row named and its worst member is `app.current_user_id()`** (a project could make every policy answer for any owner). Run 2's rule is as planned — `CREATE [OR REPLACE]`, `ALTER` or `DROP` of any FUNCTION the release creates in `api` or `app` — and its proofs include the `ALTER` case and `app.current_user_id()` by name, beside the two the plan lists. The names are derived from the release templates; **if `sql_surface` derives only `api` names today, Run 2 widens the derivation to `app`, and the proof `test_the_release_function_names_are_derived_from_the_templates` asserts `current_user_id` is among them.** | 0235 |
 | **D1816** | 1 | §5 Run 1: the three `THR-*` rows cite `CONN-IN-001`, `CONN-IN-002`, `CONN-ADMIN-001`, `CONN-OUT-001`, `CONN-OUT-002`, `CONN-STORM-001` and proposed node ids. | `test_acceptance_registry.py::test_threat_model_requirement_ids_exist_in_the_registry` and `::test_threat_model_node_ids_are_collectible` read EVERY threat row; none of those requirements exists until Run 9 lands the registry (D690), and none of the node ids collects — D1742's shape exactly. | **The rows land in Run 1 with the prevention, detection and residual cells whole and cite what holds TODAY**: `THR-CONNECTOR-INPUT` → `API-AUTH-002` (the strict input the route reuses after the signature) + `test_auth_strict_json.py::test_an_oversized_body_is_refused_before_it_is_parsed` + `test_auth_service_shape.py::test_the_application_serves_exactly_the_declared_paths` (no connector path is served yet); `THR-WEBHOOK-REPLAY` → `AGT-IDEM-001` + `test_agent_audit_plane.py::test_a_replayed_write_performs_the_work_once_and_returns_the_same_row` + the path equality; `THR-DELIVERY` → `WF-WORK-001` + `test_auth_service_shape.py::test_every_transport_in_the_service_is_declared_with_a_reason` + `test_workflow_worker.py::test_the_loop_starts_in_auth_mode_only`. Each residual cell says so. **Run 9 rewrites the two ID cells of all three rows** with the §2 requirements and their collected node ids. | — |
+| **D1817** | 2 | §5 Run 2 battery: *"a `PATH` shim `sleep` that sleeps 0.2 s before `exec`"* makes the race observable. | **With a 0.2 s shim the mutation (the wait removed) SURVIVED**: the whole proof ran in 0.10 s, so the record AND `connect.sh status` both read the pre-exec args (`/bin/bash …/sleep 300`) and agreed. CI's failure is the other ordering — the `exec` lands BETWEEN the recorded read and `status`. A **0.03 s** shim (`exec -a sleep /usr/bin/sleep "$@"`, so the post-exec args read exactly `sleep 300`) reproduces it: the mutation FAILED on the stale-record assertion, the fixed fixture PASSED under the same shim. | **The battery's shim window is 0.03 s**, and the instrument's first result is recorded rather than tuned away: a race is observable only when the window falls between the two reads the proof compares, not merely when it is long. | — |
+| **D1818** | 2 | §5 Run 2 step 2: *"a function `release_functions(release_templates_dir)`"*; the rule's regex `(CREATE(\s+OR\s+REPLACE)?\|ALTER\|DROP)\s+FUNCTION\s+(api\|app)\.<name>\b`; *"Every reader of `lint_project_set` … passes the release directory it already has"*. | `lint_project_set(project, release: MigrationSet \| None = None)` ALREADY takes the release as a `MigrationSet` (`release_set()` by default), and its three callers (`rendering.py:2448`, `bin/migrate.py:416`, `:442`) pass none — the default is the one they want. PostgreSQL also accepts `PROCEDURE`/`ROUTINE`, `IF EXISTS`, a quoted or spaced schema and name, an argument-less name, and an UNQUALIFIED name after a `search_path` move — each a spelling the planned regex would not see. | **`release_functions(release: MigrationSet)`** derives from the set the lint already holds (manifest order: `CREATE` adds, `DROP` removes; the exact set is the plan's eight). No caller changed. **`FUNCTION_DDL` matches every one of those spellings, and an unqualified definition of a release function's NAME is refused too**; proofs are arms of `test_a_project_set_may_not_replace_a_release_function` (quoted-and-spaced, `ALTER ROUTINE` without arguments, unqualified). The DROP half of the old rule is folded in with its message kept (`drops api.<name>`), so the existing `drops_a_release_function` arm passes unchanged. | 0235 |
 
 ---
 
@@ -1065,7 +1067,32 @@ migrations`, `test_acceptance_registry`, `test_evidence_claims`. Commit
 (`Session 34 Run 2: the tunnel fixture waits for exec; a project set may not
 define a release function`), push, CI by full SHA.
 
-**Done.** *(the executor writes it.)*
+**Done.** 2026-09-29. **D1805**: `sleeper.spawn()` polls `ps -o args= -p
+<pid>` every 0.05 s until it reads `sleep 300`, bounded 5 s, failing with the
+last reading. **D1780**: `migrations.FUNCTION_DDL` + `RELEASE_FUNCTION_SCHEMAS`
++ `release_functions(release)` (derived, manifest order, exactly the plan's
+eight: `api.{agent_audit_begin, agent_audit_complete, create_note,
+create_task, mcp_agent_context, owner_activity_report, update_task_status}` +
+`app.current_user_id`) and ONE rule in `lint_project_set` refusing `defines` /
+`alters` / `drops <schema>.<name>, which is the release's function`; the
+`DROP VIEW` half kept; the example set passes. Proofs (EVT-LINT-001, in
+`test_project_migration_sets.py`): `test_a_project_set_may_not_replace_a_
+release_function` (seven arms — the plan's four plus quoted-and-spaced,
+`ALTER ROUTINE` without arguments, unqualified; D1818),
+`test_a_project_set_may_not_replace_the_emitter` (a scratch release with one
+more migration; asserts the derived set picked `app.emit_event` up before the
+refusal), `test_the_release_function_names_are_derived_from_the_templates`
+(EXACT), `test_a_project_rpc_calling_the_emitter_passes`,
+`test_naming_app_private_is_still_refused`,
+`test_every_committed_project_set_still_passes`. **Battery 4/4 kills, 0
+errors**, control green before and after in the same invocation, restored by
+copy and `cmp`: M1 the exec wait removed (killed under a 0.03 s `sleep` shim —
+a 0.2 s shim let it SURVIVE, D1817), M2 the rule deleted, M3 narrowed to
+`CREATE FUNCTION`, M4 the set typed minus `app.current_user_id`. Targeted,
+once: `test_project_migration_sets`, `test_connect_command`,
+`test_dev_environment`, `test_rendered_migrations`,
+`test_acceptance_registry`, `test_evidence_claims`, `test_api_migrations`,
+`test_migrations` — **314 passed**. Rows D1817–D1818. CI: *(below)*.
 
 ### Run 3 — migration 0036: the emitter, the outbox, connectors, receipts, the event wait, under a real cluster
 

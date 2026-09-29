@@ -170,6 +170,31 @@ _ENABLE_RLS = re.compile(
     r"\bALTER\s+TABLE\s+app\.(\w+)\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY", re.IGNORECASE
 )
 
+#: Every statement that defines, changes or removes a function, in any spelling
+#: PostgreSQL accepts for one: `OR REPLACE` or not, `FUNCTION`, `PROCEDURE` or
+#: `ROUTINE`, `IF EXISTS`, a quoted or unquoted schema and name, whitespace
+#: around the dot, and no argument list at all (a unique name needs none).
+#: Group 1 is the verb, 2 the schema (absent for an unqualified name), 3 the name.
+#:
+#: Session 34 (ADR 0235, D1780, D1815). Until then the lint refused only
+#: `DROP FUNCTION api.<release name>`, and rig 34a measured what that left: a
+#: project set passed `CREATE OR REPLACE FUNCTION api.create_note(...)`,
+#: `ALTER FUNCTION api.create_note(...) SECURITY INVOKER` and -- the worst of
+#: them -- `CREATE OR REPLACE FUNCTION app.current_user_id()`, the function every
+#: row policy in `app` reads, and applied as the owner the first one replaced the
+#: release's audited write. A project set runs as the object owner, and the owner
+#: owns every release function, so nothing but this rule stood in the way.
+FUNCTION_DDL = re.compile(
+    r"\b(CREATE(?:\s+OR\s+REPLACE)?|ALTER|DROP)\s+(?:FUNCTION|PROCEDURE|ROUTINE)\s+"
+    r"(?:IF\s+EXISTS\s+)?(?:\"?(\w+)\"?\s*\.\s*)?\"?(\w+)\"?",
+    re.IGNORECASE,
+)
+
+#: The two schemas whose functions the release defines and a project may only
+#: call. `api` is the published surface; `app` holds `current_user_id()` and,
+#: from migration 0036, the event emitter granted to nobody.
+RELEASE_FUNCTION_SCHEMAS = frozenset({"api", "app"})
+
 
 class MigrationError(ValueError):
     """The manifest, a template, or the lock is not usable as declared."""
@@ -737,6 +762,36 @@ def _assert_follows_release_version(manifest: dict[str, Any], follows: str) -> N
 # ---------------------------------------------------------------------------
 
 
+def release_functions(release: MigrationSet) -> frozenset[tuple[str, str]]:
+    """`(schema, name)` for every function the release defines in `api` or `app`.
+
+    DERIVED from the release's own templates in manifest order -- a `CREATE`
+    adds the name, a `DROP` removes it -- so the set is what the cluster holds
+    after the release's last migration, and a function a later migration adds
+    joins it with no edit here (ADR 0235). Never a typed list: a list someone
+    maintains is a list someone forgets to extend, and the name it forgets is
+    the one a project can then replace.
+
+    Read from the comment-stripped `up` half, like every other rule in this
+    module, so a template explaining a function in prose does not define it.
+    """
+    defined: set[tuple[str, str]] = set()
+    for entry in release.load_manifest()["migrations"]:
+        body = sql_surface.statements(
+            (release.root / entry["template"]).read_text(encoding="utf-8")
+        )
+        for verb, schema, name in FUNCTION_DDL.findall(body):
+            key = (schema.lower(), name.lower())
+            if key[0] not in RELEASE_FUNCTION_SCHEMAS:
+                continue
+            action = verb.split()[0].upper()
+            if action == "CREATE":
+                defined.add(key)
+            elif action == "DROP":
+                defined.discard(key)
+    return frozenset(defined)
+
+
 def lint_project_set(project: MigrationSet, release: MigrationSet | None = None) -> None:
     """Refuse a project set before anything renders it. ADR 0198.
 
@@ -789,6 +844,8 @@ def lint_project_set(project: MigrationSet, release: MigrationSet | None = None)
 
     release_surface = sql_surface.final_surface(release.load_manifest(), release.root)
     release_owns = sql_surface.published_names(release_surface)
+    release_defines = release_functions(release)
+    release_function_names = {name for _, name in release_defines}
 
     for entry in manifest["migrations"]:
         template = (project.root / entry["template"]).read_text(encoding="utf-8")
@@ -813,15 +870,36 @@ def lint_project_set(project: MigrationSet, release: MigrationSet | None = None)
                     "transaction dbmate wraps this migration in."
                 )
 
-        for name in sql_surface.DROP_VIEW.findall(applied) + sql_surface.DROP_FUNCTION.findall(
-            applied
-        ):
+        for name in sql_surface.DROP_VIEW.findall(applied):
             if name in release_owns:
                 raise ProjectSetError(
                     f"{where} drops api.{name}, which the release's own surface publishes. "
                     "A project adds to the published surface and never removes from it: the "
                     "release's contract names that object, and a cluster where it is missing "
                     "serves a document the release cannot honour."
+                )
+
+        # A release function, defined, altered or dropped (ADR 0235). One rule
+        # for the three verbs, because each is the same act -- a project changing
+        # what the release's reviewed function does -- and the DROP-only rule
+        # this replaced is exactly how the other two were left open (D1780).
+        # An UNQUALIFIED name the release uses is refused too: a set that moved
+        # its search_path would define `api.create_note` without ever writing it.
+        for match in FUNCTION_DDL.finditer(applied):
+            verb, schema, name = match.groups()
+            key = ((schema or "").lower(), name.lower())
+            if key in release_defines or (not schema and key[1] in release_function_names):
+                action = {"CREATE": "defines", "ALTER": "alters", "DROP": "drops"}[
+                    verb.split()[0].upper()
+                ]
+                shown = f"{key[0]}.{key[1]}" if schema else key[1]
+                raise ProjectSetError(
+                    f"{where} {action} {shown}, which is the release's function: "
+                    f"{match.group(0).strip()!r}. A project set may call a release function "
+                    "and may never define, alter or drop one. It runs as the object owner, "
+                    "which owns every release function, so without this refusal a project "
+                    "could replace the release's audited write or the identity every row "
+                    "policy reads (ADR 0235)."
                 )
 
         # A table in `app` without FORCE. Not merely ENABLE: without FORCE the
@@ -864,12 +942,14 @@ __all__ = [
     "FOLLOWS_COMPUTED",
     "FOLLOWS_DECLARED",
     "FOLLOWS_SOURCES",
+    "FUNCTION_DDL",
     "LOCK_PATH",
     "MANIFEST_PATH",
     "MIGRATIONS_ROOT",
     "PROJECT_LOCK_SCHEMA_VERSION",
     "PROJECT_PLACEHOLDER_SOURCES",
     "PROJECT_SETS_DIRECTORY",
+    "RELEASE_FUNCTION_SCHEMAS",
     "MigrationError",
     "MigrationSet",
     "ProjectSetError",
@@ -885,6 +965,7 @@ __all__ = [
     "project_set_from",
     "quote_identifier",
     "quote_literal",
+    "release_functions",
     "release_set",
     "render",
     "render_migration",

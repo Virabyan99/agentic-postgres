@@ -21,6 +21,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -888,6 +889,206 @@ def test_a_project_may_not_publish_a_name_the_release_owns(copied: Path) -> None
         "the collision this test exists to describe did not happen, so a "
         "refusal built on it would be measuring nothing"
     )
+
+
+# ---------------------------------------------------------------------------
+# EVT-LINT-001 -- a project set may call a release function and never define one
+# ---------------------------------------------------------------------------
+
+#: What the release defines in `api` and `app` at 1.11.0, read out of the
+#: templates by rig 34a's reader and written here as an EXACT set. Migration
+#: 0036 moves it by one (`app.emit_event`), and the move is this proof's to
+#: record, never a containment check's to absorb.
+RELEASE_FUNCTIONS = frozenset(
+    {
+        ("api", "agent_audit_begin"),
+        ("api", "agent_audit_complete"),
+        ("api", "create_note"),
+        ("api", "create_task"),
+        ("api", "mcp_agent_context"),
+        ("api", "owner_activity_report"),
+        ("api", "update_task_status"),
+        ("app", "current_user_id"),
+    }
+)
+
+#: A one-line function body, so each arm below is a statement and not a story.
+_BODY = "LANGUAGE sql AS $fn$ SELECT NULL::uuid $fn$;"
+
+
+@pytest.mark.parametrize(
+    "statement,message",
+    [
+        pytest.param(
+            "CREATE OR REPLACE FUNCTION api.create_note(p_title text, p_content text DEFAULT '')\n"
+            "  RETURNS api.notes LANGUAGE sql AS $fn$ SELECT NULL::api.notes $fn$;",
+            "defines api.create_note",
+            id="create_or_replace_create_note",
+        ),
+        pytest.param(
+            "ALTER FUNCTION api.update_task_status(uuid, text, text) SECURITY INVOKER;",
+            "alters api.update_task_status",
+            id="alter_update_task_status",
+        ),
+        pytest.param(
+            "DROP FUNCTION api.create_task(text, text);",
+            "drops api.create_task",
+            id="drop_create_task",
+        ),
+        pytest.param(
+            f"CREATE FUNCTION app.current_user_id() RETURNS uuid {_BODY}",
+            "defines app.current_user_id",
+            id="define_current_user_id",
+        ),
+        pytest.param(
+            f'CREATE OR REPLACE FUNCTION "api" . "create_note"(p_title text) RETURNS uuid {_BODY}',
+            "defines api.create_note",
+            id="quoted_and_spaced",
+        ),
+        pytest.param(
+            "ALTER ROUTINE api.create_note OWNER TO CURRENT_USER;",
+            "alters api.create_note",
+            id="alter_routine_without_arguments",
+        ),
+        pytest.param(
+            f"CREATE FUNCTION create_note(p_title text) RETURNS uuid {_BODY}",
+            "defines create_note",
+            id="unqualified_release_name",
+        ),
+    ],
+)
+def test_a_project_set_may_not_replace_a_release_function(
+    copied: Path, example: migrations.MigrationSet, statement: str, message: str
+) -> None:
+    """Rig 34a measured every one of these PASSING the lint before Session 34.
+
+    A project set runs as the object owner, which owns every release function,
+    so `CREATE OR REPLACE FUNCTION api.create_note` applied replaces the
+    release's audited, idempotent write -- measured: its `pg_get_functiondef`
+    changed (D1780, D1815). `app.current_user_id()` is the function every row
+    policy reads. The quoted, spaced, argument-less and unqualified spellings
+    are arms because a text rule that one of them escapes is a rule a project
+    could escape on purpose. The example set is the control in every arm (D499).
+    """
+    candidate = broken(copied, TEMPLATE, PREAMBLE, PREAMBLE + "\n" + statement)
+    with pytest.raises(migrations.ProjectSetError, match=re.escape(message)) as raised:
+        migrations.lint_project_set(candidate)
+    assert "which is the release's function" in str(raised.value)
+    assert "may never define, alter or drop one" in str(raised.value)
+
+    migrations.lint_project_set(example)
+
+
+def _release_with(tmp_path: Path, statement: str) -> migrations.MigrationSet:
+    """A copy of the release's own set with ONE more migration defining `statement`."""
+    root = tmp_path / "release"
+    shutil.copytree(migrations.release_set().root, root)
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    newest = int(manifest["migrations"][-1]["version"])
+    (root / "templates" / "9999-scratch.sql").write_text(
+        "-- migrate:up\nSET LOCAL ROLE {{object_owner}};\n"
+        f"{statement}\nRESET ROLE;\n-- migrate:down\nSELECT 1;\n",
+        encoding="utf-8",
+    )
+    manifest["migrations"].append(
+        {
+            "version": str(newest + 1),
+            "name": "scratch",
+            "template": "templates/9999-scratch.sql",
+            "placeholders": ["object_owner"],
+            "description": "Added by the proof: one release function more.",
+        }
+    )
+    (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return migrations.MigrationSet(label="release", root=root)
+
+
+def test_a_project_set_may_not_replace_the_emitter(
+    tmp_path: Path, copied: Path, example: migrations.MigrationSet
+) -> None:
+    """The emitter is only as trustworthy as the rule that nobody else defines it.
+
+    ADR 0235: `app.emit_event` is granted to nobody, so the one way to forge an
+    event is to replace the function a project's RPC calls. Until migration 0036
+    exists this proof builds a release with one more migration defining it, and
+    asserts the derived set picked the name up before asserting the refusal --
+    otherwise the refusal could be the unqualified-name rule answering for a
+    name the reader never read. Run 3 adds an arm over the real template.
+    """
+    release = _release_with(
+        tmp_path,
+        "CREATE FUNCTION app.emit_event(p_name text, p_version integer, p_payload jsonb) "
+        f"RETURNS uuid {_BODY}",
+    )
+    assert ("app", "emit_event") in migrations.release_functions(release)
+
+    candidate = broken(
+        copied,
+        TEMPLATE,
+        PREAMBLE,
+        PREAMBLE + "\nCREATE OR REPLACE FUNCTION app.emit_event(p_name text, p_version "
+        f"integer, p_payload jsonb) RETURNS uuid {_BODY}",
+    )
+    with pytest.raises(migrations.ProjectSetError, match=re.escape("defines app.emit_event")):
+        migrations.lint_project_set(candidate, release)
+
+    migrations.lint_project_set(example, release)
+
+
+def test_the_release_function_names_are_derived_from_the_templates() -> None:
+    """An EXACT equality, read from the templates and never typed into the lint.
+
+    D1815: the name the lint must know that a typed list is likeliest to forget
+    is `app.current_user_id`, because it is not in `api` and no contract names
+    it. It is here by derivation. And a function a template CREATES and a later
+    one DROPS without re-creating would leave the set -- so the reader walks the
+    manifest in order, as the cluster does.
+    """
+    assert migrations.release_functions(migrations.release_set()) == RELEASE_FUNCTIONS
+
+
+def test_a_project_rpc_calling_the_emitter_passes(copied: Path) -> None:
+    """Calling a release function is what a project set is FOR (ADR 0235).
+
+    The example's `0003` does exactly this, so a rule that matched a call as a
+    definition would refuse the one project migration Session 34 adds.
+    """
+    candidate = broken(
+        copied,
+        TEMPLATE,
+        PREAMBLE,
+        PREAMBLE + "\nCREATE FUNCTION api.rig_emit() RETURNS uuid LANGUAGE plpgsql "
+        "SECURITY DEFINER SET search_path = pg_catalog, pg_temp\n"
+        "AS $fn$ BEGIN RETURN app.emit_event('x.y', 1, '{}'::jsonb); END $fn$;",
+    )
+    migrations.lint_project_set(candidate)
+
+
+def test_naming_app_private_is_still_refused(copied: Path) -> None:
+    """The control the stage plan named: the new rule changed no older one."""
+    candidate = broken(
+        copied,
+        TEMPLATE,
+        PREAMBLE,
+        # A template's text handed to the lint, never executed: S608 reads a
+        # query built from strings, and this one is the forbidden input itself.
+        PREAMBLE + "\nCREATE FUNCTION api.rig_x() RETURNS integer LANGUAGE sql AS $fn$ "  # noqa: S608
+        "SELECT count(*)::integer FROM app_private.agents $fn$;",
+    )
+    with pytest.raises(migrations.ProjectSetError, match="names the app_private schema"):
+        migrations.lint_project_set(candidate)
+
+
+def test_every_committed_project_set_still_passes() -> None:
+    """A stricter lint that refused a set already in the tree would be a break.
+
+    §4 of the Session 34 plan: every project set under `projects/*/migrations`
+    passes the new rule.
+    """
+    roots = sorted((REPO_ROOT / "projects").glob("*/migrations/manifest.json"))
+    assert roots, "no committed project set to measure"
+    for manifest in roots:
+        migrations.lint_project_set(migrations.MigrationSet(label="project", root=manifest.parent))
 
 
 # ---------------------------------------------------------------------------

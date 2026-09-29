@@ -118,13 +118,33 @@ def write_record(runtime: Path, *, pid: int, started: str, args: str, profile: s
 
 @pytest.fixture
 def sleeper():
-    """A live process to stand in for an ssh forward. Reaped whatever happens."""
+    """A live process to stand in for an ssh forward. Reaped whatever happens.
+
+    **It returns only once the child has EXEC'd** (D1777, D1805). `Popen`
+    returns after the fork; until the child's `exec` completes, `ps -o args=`
+    reads the Python parent's command line. A proof that recorded the identity
+    in that window wrote a record `connect.sh status` then rightly called stale,
+    and CI failed once on a commit that touched nothing the proof reads. The
+    fixture was the defect, not the product, so the wait is here.
+    """
     started: list[subprocess.Popen] = []
 
     def spawn() -> subprocess.Popen:
         process = subprocess.Popen(["sleep", "300"])
         started.append(process)
-        return process
+        deadline = time.monotonic() + 5.0
+        reading = ""
+        while time.monotonic() < deadline:
+            reading = subprocess.run(
+                ["ps", "-o", "args=", "-p", str(process.pid)],
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout.strip()
+            if reading == "sleep 300":
+                return process
+            time.sleep(0.05)
+        pytest.fail(f"the sleeper never exec'd within 5 s; ps last read {reading!r}")
 
     yield spawn
 
