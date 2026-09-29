@@ -66,6 +66,9 @@ PRINTABLE_BLOCKS = {
     # doctor. Refusing to print it would send them to read the deployed
     # document by hand, which is where the sensitive blocks are.
     "migrations",
+    # Version 19 (ADR 0237). One boolean: whether the project has the
+    # connectors facility. The endpoints are in no document (D1786).
+    "connectors",
 }
 
 #: Blocks that must never appear in output, at any verbosity.

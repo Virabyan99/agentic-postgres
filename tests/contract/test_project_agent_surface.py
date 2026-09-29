@@ -535,13 +535,16 @@ def test_the_command_refuses_a_project_contract_for_a_manifest_that_names_none()
     assert "joint contract" in example.stdout
 
 
-def test_the_shipped_fixtures_are_at_six_and_only_the_example_names_capabilities() -> None:
-    """Version 6 on both; the example names its manifest (Run 5, written by
-    the scaffold) and the second does not, so every proof above about a
-    manifest that names one has a shipped control at the same version."""
+def test_the_shipped_fixtures_are_at_the_newest_version_and_one_names_capabilities() -> None:
+    """The newest version on both (7 since Session 34, D1824 -- renamed from
+    `..._are_at_six_...`, which the move made untrue); the example names its
+    manifest (Run 5, written by the scaffold) and the second does not, so every
+    proof above about a manifest that names one has a shipped control at the
+    same version."""
     example = config.load_project_manifest(REPO_ROOT / "project.example.yaml")
     second = config.load_project_manifest(REPO_ROOT / "project.second.example.yaml")
-    assert example["schema_version"] == second["schema_version"] == 6
+    newest = max(config.SUPPORTED_PROJECT_SCHEMA_VERSIONS)
+    assert example["schema_version"] == second["schema_version"] == newest == 7
     assert config.project_capabilities(example) == "projects/example"
     assert config.project_capabilities(second) is None
     assert capability_manifest.PROJECT_SCHEMA_FROM == capability_compiler.VOCABULARY_FROM

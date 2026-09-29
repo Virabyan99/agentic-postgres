@@ -308,7 +308,11 @@ def test_the_mirror_pair_is_a_required_facility_secret_for_the_mirror_container(
         assert all(c["format"] == "raw" for c in secret["consumers"])
         assert [c["uid"] for c in secret["consumers"]] == [65532, 999]
     facility_bound = {s["name"] for s in contract["secrets"] if s.get("facility")}
-    assert facility_bound == MIRROR_PAIR, "another secret gained a facility; extend this proof"
+    # Session 34 (ADR 0237): the second facility's one secret, extended here
+    # deliberately -- the connectors facility, not the mirror's.
+    assert facility_bound == MIRROR_PAIR | {"connector_signing_key"}, (
+        "another secret gained a facility; extend this proof"
+    )
 
 
 def test_a_facility_secret_declared_optional_is_refused(tmp_path: Path) -> None:
@@ -334,7 +338,7 @@ def test_an_unknown_facility_is_refused_by_schema_and_by_loader(tmp_path: Path) 
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     with pytest.raises((config.ManifestError, ValueError)):
         secrets_contract.load_secret_contract(path)
-    assert secrets_contract.FACILITIES == ("backup_mirror",)
+    assert secrets_contract.FACILITIES == ("backup_mirror", "connectors")
 
 
 def test_the_override_grants_the_mirror_container_only_for_a_mirrored_project(

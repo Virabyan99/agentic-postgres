@@ -347,6 +347,9 @@ def environment(cluster: dict[str, Any], signing_key: Path) -> dict[str, str]:
     )
     return {
         "APG_MCP_LOCK_FILE": str(lock_path),
+        # Session 34 (D1827): a required PATH whose file is absent -- a project
+        # without the connectors facility, which every proof here is.
+        "APG_CONNECTOR_KEY_FILE": str(cluster["work"] / "no-connector-signing-key"),
         "APG_PROJECT_KEY": "fixture-alpha-dev",
         "APG_PROJECT_ENVIRONMENT": "dev",
         "APG_JWT_ISSUER": document["jwt"]["issuer"],

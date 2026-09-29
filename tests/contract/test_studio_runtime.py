@@ -379,6 +379,8 @@ def studio_rig(tmp_path_factory: pytest.TempPathFactory) -> Any:
         os.environ.update(
             {
                 "APG_MCP_LOCK_FILE": str(lock_path),
+                # Session 34 (D1827): the path, with no file behind it.
+                "APG_CONNECTOR_KEY_FILE": str(work / "no-connector-signing-key"),
                 "APG_PROJECT_KEY": KEY,
                 "APG_PROJECT_ENVIRONMENT": "dev",
                 "APG_JWT_ISSUER": document["jwt"]["issuer"],
