@@ -95,7 +95,10 @@ ID_PATTERN = re.compile(
     # provenance are a run's, so they are `WF`; the audit filters and the
     # approval claim are the agent plane's, so they are `AGT`; the ledger
     # print is an operator's, so it is `OPS`.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF)-[A-Z0-9]+(-\d+)?$"
+    # Session 34 (ADR 0235-0239) adds `EVT` for what an event is and who may
+    # write or wait on one, and `CONN` for what a connector is, how it is
+    # bound, delivered and started; the restore row is `REC`'s.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN)-[A-Z0-9]+(-\d+)?$"
 )
 
 

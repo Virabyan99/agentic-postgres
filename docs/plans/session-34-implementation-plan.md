@@ -2255,7 +2255,9 @@ accepted; the clause losing its deliveries line. **Targeted, once**:
 `test_operator_commands_run_on_the_host`, `test_deployment_module_shape`,
 `test_printed_commands`, `test_repository_contract`: **1255 passed**, ruff clean
 (an earlier doc-guard run failed on `bin/rehearse.sh`'s executable bit, stripped
-by the `\\wsl$` write -- `chmod`, re-run green). Row D1843. CI: CI_PENDING
+by the `\\wsl$` write -- `chmod`, re-run green). Row D1843. Commit `5fc5c7a`;
+CI by full SHA `5fc5c7a1d4cfe12769d09096c7f361a92e81024d`: `contract`
+**success** (run 36710438609).
 
 ### Run 9 — the bump, the registry, the gate, and the trip's proofs
 

@@ -687,7 +687,80 @@ from pathlib import Path
 #: definition -- so the class is confirmed against a DEPLOYMENT in the same
 #: session: Run 9's `upgrade plan` on both projects, with the same two
 #: declarations, before the deploy -- and a `major` there is a stop condition.
-CURRENT_SESSION = 33
+#:
+#: **Session 34 moves it to 34, all-or-nothing again** (D690): SIXTEEN
+#: requirements and sixteen claims -- `CLAIMS` 172 -> 188 and `OFFLINE_CLAIMS`
+#: 42 -> 53, counted from the tuples rather than by hand (D1628) -- eleven
+#: declared offline and five host, with every offline half written in the run
+#: that built its plane (Runs 2-8) and every live half here. Two families join
+#: the registry: `EVT` (what an event is and who may write or wait on one) and
+#: `CONN` (what a connector is, how it is bound, delivered and started).
+#:
+#: **The session's subject is governed connectivity**, and the five ADRs are its
+#: shape. ADR 0235: an event is written only by a reviewed definer function in
+#: a project's own set calling `app.emit_event`, which NO role may call, and is
+#: recorded only when something listens. ADR 0236: a connector is a project
+#: file the deploy installs DISABLED (step 6e) and an administrator enables,
+#: binding an agent whose stored scopes EQUAL its definition's. ADR 0237: the
+#: inbound route verifies an HMAC over the delivery before it reads anything
+#: else, and every connector's key is derived from ONE facility-gated secret.
+#: ADR 0238: delivery is the loop's second pass -- signed, at least once, never
+#: redirected, dead after `max + 1` attempts. ADR 0239: a wait resumes on its
+#: run owner's matching event.
+#:
+#: **One migration, 0036, and it is the floor once applied** (ADR 0162 §3):
+#: four `app_private` connector tables nobody may read, the emitter granted to
+#: nobody, the connector functions (seven to `auth_service`, the install and
+#: the rehearsal's to nobody), the event wait, and `workflow_counts` with four
+#: delivery members. **Outputs move to v19** (`connectors.enabled`, migrated
+#: from v18 as `false`) and **the project manifest to schema 7**
+#: (`connectors: {enabled, endpoints}`); the secret contract gains ONE
+#: facility-gated secret; the capability schema's administrative enum gains two
+#: members without its `schema_version` moving.
+#:
+#: **`VERSION` moves to `1.12.0`.** What moved: migration 0036; one operation
+#: on the auth service's application API that takes NO token (`POST
+#: /connectors/{name}`, a signature) and three for HUMAN tokens (`GET
+#: /admin/connectors`, `POST /admin/connectors/{name}/enable` and `/disable`);
+#: two administrative scopes; the loop's delivery and schedule passes and the
+#: event wait, so the `services/auth-api` image moves and a deploy recreates
+#: `auth`, `storage` and `mcp`; deploy step 6e; `bin/connector.sh` (six verbs);
+#: the doctor's `workflow` check reports deliveries; the drill member carries
+#: them; an eleventh rehearsal, `delivery-retry-storm`; the example set's
+#: `0003` emits `note_embedding.set@1` and three definitions and four
+#: connectors join it.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig: a git
+#: worktree at `02ffbbd`, the commit that IS deployed, and a `tar`-piped copy
+#: of this working tree, the candidate rendering the INSTALLED tree's
+#: `project.example.yaml` -- an operator's manifest does not move with a
+#: release, and rendering each tree's own read `blocked` on `project_sha256`,
+#: the rig's artefact. With `--also migration_added --also api_operation_added
+#: --also document_schema_migratable`: `bump minor`, **`requires minor`**,
+#: verdict `ok`, `changes [api_operation_added, document_schema_migratable,
+#: implementation, migration_added]`, `reasons []`, `operator_digests_moved
+#: []`, and **no `secret_required_added`** -- the facility-gated secret is
+#: owed by no project that leaves the facility off, which is the minor's whole
+#: argument (D1784). Without the declarations: `requires patch`, the
+#: documents' own floor. **Seven leaves differ**: D1811's five --
+#: `template_version` 1.11.0 -> 1.12.0, `schema_version` 18 -> 19,
+#: `connectors.enabled` absent -> false, `migrations.release_lock_sha256`,
+#: `inputs.secrets_contract_sha256` -- and two it did not name,
+#: `migrations.project_set.count` 2 -> 3 and `migrations.project_set.lock_sha256`,
+#: the example set's own `0003` (5,949 -> 5,993 bytes).
+#: **ADR 0162 prices it a MINOR, and `1.12.0` is that floor exactly.** Its two
+#: schema moves are MIGRATABLE -- outputs v18 migrates to v19 as `false`, and
+#: a schema-6 project manifest still validates -- and no capability, lock,
+#: secret or host schema moves, so an operator supplies nothing new unless it
+#: turns the facility on. What an operator must KNOW the reading cannot show: 0036 cannot be taken back by an image; **no existing
+#: administrator gains either connector scope**; and **the facility is off
+#: until a manifest turns it on**, as its own operation with
+#: `bootstrap-providers.sh --apply` (D1807). **This session takes a host trip,
+#: ON BETA** (D1809) -- alpha is the control without the facility -- so the
+#: class is confirmed against a DEPLOYMENT in the same session: Run 10's
+#: `upgrade plan` on both projects, with the same three declarations, before
+#: the deploy -- and a `major` there is a stop condition.
+CURRENT_SESSION = 34
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

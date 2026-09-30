@@ -192,6 +192,11 @@ SHELL_COMMANDS = (
     # (D1133) -- and 32 -> 33 is consecutive again. Its offline half reports
     # TEN claims; its host sweep creates the humans that decide beta's runs.
     "bin/session-33-check.sh",
+    # Session 34 (ADR 0235-0239). Derived from 33's by diff with NO flag added
+    # or removed -- the sorted flag sets were compared and the diff is empty
+    # (D1133) -- and 33 -> 34 is consecutive. Its offline half reports ELEVEN
+    # claims; its host sweep starts a sink on beta's internal network.
+    "bin/session-34-check.sh",
     "bin/smoke-test.sh",
     # Session 24 (ADR 0205). A loopback client of a deployment's own
     # surfaces, holding the human's token in one process and handing the

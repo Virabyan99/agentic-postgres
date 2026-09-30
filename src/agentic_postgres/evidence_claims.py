@@ -256,6 +256,34 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "workflow_admin",
         "workflow_command_human",
         "migrate_status_ledger",
+        # Session 34 (ADR 0235-0239). ELEVEN, each a property of a CHECKOUT:
+        # migration 0036 under a real cluster this workstation starts
+        # (`event_emitter`, `connector_schedule`'s substrate half), the project
+        # lint (`event_lint`), the compilers over a committed lock
+        # (`event_wait`, `connector_definition`), the facility's schemas and
+        # derivations (`connector_facility`), the loop and the delivery over a
+        # real `http.server` (`connector_delivery`), the routes over fakes
+        # behind a REAL `AuthService` (`connector_inbound`,
+        # `connector_admin`), a command's closed table and its key file
+        # (`connector_command`), and the rehearsal against a recorded cluster
+        # (`delivery_storm_rehearsal`).
+        #
+        # The session's other FIVE are deliberately not here: a signed request
+        # against the deployment, a delivery to a real receiver, a wait served
+        # by a real owner's write, a schedule firing on the host's clock and a
+        # restore of the host's own outbox are each a question only a
+        # deployment answers.
+        "event_emitter",
+        "event_lint",
+        "event_wait",
+        "connector_definition",
+        "connector_facility",
+        "connector_delivery",
+        "connector_inbound",
+        "connector_admin",
+        "connector_schedule",
+        "connector_command",
+        "delivery_storm_rehearsal",
     }
 )
 
@@ -552,6 +580,30 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "workflow_compensation_live": ("WF-COMP-002",),
     "workflow_provenance_live": ("WF-PROV-002",),
     "audit_filters_live": ("AGT-AUDIT-004",),
+    # Session 34 (ADR 0235-0239). SIXTEEN claims, landing with the constant
+    # (D690), eleven offline and five host -- counted from these tuples and
+    # from `OFFLINE_CLAIMS`, never by hand (D1628). Each requirement is its
+    # own claim (ADR 0089, D1150). The session's subject is governed
+    # connectivity: an event written only by reviewed SQL, delivered signed
+    # and at least once, a signed request starting ONE run as an agent
+    # holding exactly the definition's scopes, a schedule, and a wait that
+    # resumes on its owner's event.
+    "event_emitter": ("EVT-EMIT-001",),
+    "event_lint": ("EVT-LINT-001",),
+    "event_wait": ("EVT-WAIT-001",),
+    "connector_definition": ("CONN-DEF-001",),
+    "connector_facility": ("CONN-FAC-001",),
+    "connector_delivery": ("CONN-OUT-001",),
+    "connector_inbound": ("CONN-IN-001",),
+    "connector_admin": ("CONN-ADMIN-001",),
+    "connector_schedule": ("CONN-SCHED-001",),
+    "connector_command": ("CONN-CMD-001",),
+    "delivery_storm_rehearsal": ("CONN-STORM-001",),
+    "connector_inbound_live": ("CONN-IN-002",),
+    "connector_delivery_live": ("CONN-OUT-002",),
+    "event_wait_live": ("EVT-WAIT-002",),
+    "connector_schedule_live": ("CONN-SCHED-002",),
+    "delivery_restore": ("REC-EVT-001",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

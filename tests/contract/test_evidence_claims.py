@@ -1154,6 +1154,25 @@ CLAIM_INTRODUCED_IN = {
     "workflow_compensation_live": 33,
     "workflow_provenance_live": 33,
     "audit_filters_live": 33,
+    # Session 34 (ADR 0235-0239). SIXTEEN, eleven offline and five host,
+    # landing with the constant (D690): events, connectors, the event wait,
+    # schedules, the storm rehearsal and the outbox's restore.
+    "event_emitter": 34,
+    "event_lint": 34,
+    "event_wait": 34,
+    "connector_definition": 34,
+    "connector_facility": 34,
+    "connector_delivery": 34,
+    "connector_inbound": 34,
+    "connector_admin": 34,
+    "connector_schedule": 34,
+    "connector_command": 34,
+    "delivery_storm_rehearsal": 34,
+    "connector_inbound_live": 34,
+    "connector_delivery_live": 34,
+    "event_wait_live": 34,
+    "connector_schedule_live": 34,
+    "delivery_restore": 34,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer
