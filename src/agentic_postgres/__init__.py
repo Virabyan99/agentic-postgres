@@ -752,8 +752,9 @@ from pathlib import Path
 #: schema moves are MIGRATABLE -- outputs v18 migrates to v19 as `false`, and
 #: a schema-6 project manifest still validates -- and no capability, lock,
 #: secret or host schema moves, so an operator supplies nothing new unless it
-#: turns the facility on. What an operator must KNOW the reading cannot show: 0036 cannot be taken back by an image; **no existing
-#: administrator gains either connector scope**; and **the facility is off
+#: turns the facility on. What an operator must KNOW the reading cannot show:
+#: 0036 cannot be taken back by an image; **no existing administrator gains
+#: either connector scope**; and **the facility is off
 #: until a manifest turns it on**, as its own operation with
 #: `bootstrap-providers.sh --apply` (D1807). **This session takes a host trip,
 #: ON BETA** (D1809) -- alpha is the control without the facility -- so the
