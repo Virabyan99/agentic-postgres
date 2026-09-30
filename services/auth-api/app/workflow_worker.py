@@ -84,7 +84,7 @@ from secrets import token_hex
 from typing import Any
 from uuid import UUID
 
-from app import mcp_upstream
+from app import connector_delivery, mcp_upstream
 from app.errors import AuthenticationFailed
 
 log = logging.getLogger("app.workflow_worker")
@@ -638,7 +638,16 @@ async def _wait(step: Any, *, repository: Any, holder: str) -> None:
     `workflow_gate_state` reports whether this step's `waiting` park has been
     served -- an attempt row, not a flag this process holds -- so a reclaim
     after a crash finishes the wait rather than starting it again.
+
+    An EVENT wait (Session 34, ADR 0239) is the same shape on the step's own
+    columns: parked once with its match resolved, then finished `event_received`
+    with the payload when the emitter served it, or `event_timeout` when its
+    `seconds` ran out first -- the claim fires a parked step at `resume_after`
+    either way, and the gate read says which.
     """
+    if step.step.get("event") is not None:
+        await _await_event(step, repository=repository, holder=holder)
+        return
     state = await repository.gate_state(step_id=step.step_id, holder=holder)
     if isinstance(state, dict) and state.get("waited"):
         await repository.finish(
@@ -655,6 +664,71 @@ async def _wait(step: Any, *, repository: Any, holder: str) -> None:
         holder=holder,
         reason="waiting",
         resume_after=datetime.now(UTC) + timedelta(seconds=int(step.step["seconds"])),
+        request_id=None,
+    )
+
+
+async def _await_event(step: Any, *, repository: Any, holder: str) -> None:
+    """Park on an event once, then finish by what the gate read says (ADR 0239).
+
+    In a dry run an event wait is never parked: nothing a rehearsal does emits
+    the event a real run would wait for, so it finishes `dry_run` -- the
+    approval step's rule (D1722). The match is resolved ONCE, here, against the
+    run's input and the prior steps' results; a reference that cannot resolve
+    fails the step before anything waits on it.
+    """
+    compiled = step.step
+    if step.dry_run:
+        await repository.finish(
+            step_id=step.step_id,
+            holder=holder,
+            outcome="dry_run",
+            result=None,
+            reason="event waits are not rehearsed",
+            request_id=None,
+        )
+        return
+    state = await repository.gate_state(step_id=step.step_id, holder=holder)
+    event = state.get("event") if isinstance(state, dict) else None
+    if event is None:
+        try:
+            match = resolve(compiled.get("match") or {}, run_input=step.input, prior=step.prior)
+        except Unresolvable as exc:
+            await repository.finish(
+                step_id=step.step_id,
+                holder=holder,
+                outcome="failed",
+                result=None,
+                reason=str(exc),
+                request_id=None,
+            )
+            return
+        await repository.await_event(
+            step_id=step.step_id,
+            holder=holder,
+            event=str(compiled["event"]),
+            match=json.dumps(match, sort_keys=True),
+            resume_after=datetime.now(UTC) + timedelta(seconds=int(compiled["seconds"])),
+        )
+        return
+    if event.get("served"):
+        await repository.finish(
+            step_id=step.step_id,
+            holder=holder,
+            outcome="succeeded",
+            result=json.dumps(
+                {"event": compiled["event"], "payload": event.get("payload")}, default=str
+            ),
+            reason="event_received",
+            request_id=None,
+        )
+        return
+    await repository.finish(
+        step_id=step.step_id,
+        holder=holder,
+        outcome="failed",
+        result=None,
+        reason="event_timeout",
         request_id=None,
     )
 
@@ -698,8 +772,20 @@ async def run_forever(
     now: Any = time.monotonic,
     sleep: Any = asyncio.sleep,
     once: bool = False,
+    connectors: Any = None,
+    connector_key: str | None = None,
 ) -> None:
     """Heartbeat, claim, process. Forever, or once for a proof.
+
+    **Since Session 34, three passes per iteration and still one task** (D1790):
+    at most ONE step, then -- only when the project has the connectors facility,
+    so both `connectors` and `connector_key` are set -- at most ONE delivery and
+    one call to `connector_fire_due`. The loop sleeps only when the iteration
+    found neither a step nor a delivery, so a retry storm cannot starve a step
+    (a delivery is claimable only once its backoff has passed) and a busy
+    workflow cannot starve a delivery. Each connector pass's exception is logged
+    by the pass's name and does not stop the other passes; anything else still
+    reaches `supervise`.
 
     The heartbeat is written at every poll and not at every claim: a loop that
     finds nothing to do is still alive, and a heartbeat that only moved on work
@@ -720,26 +806,68 @@ async def run_forever(
             holder=identity,
             lease_margin_seconds=lease_margin_seconds(),
         )
-        if step is None:
-            if once:
-                return
-            await sleep(POLL_SECONDS)
-            continue
+        if step is not None:
+            await process(
+                step,
+                repository=repository,
+                service=service,
+                holder=identity,
+                url=address,
+                now=now,
+            )
 
-        await process(
-            step,
-            repository=repository,
-            service=service,
-            holder=identity,
-            url=address,
-            now=now,
-        )
+        delivered = False
+        if connectors is not None and connector_key is not None:
+            delivered = await _connector_passes(
+                connectors=connectors, connector_key=connector_key, holder=identity
+            )
+
         if once:
             return
+        if step is None and not delivered:
+            await sleep(POLL_SECONDS)
+
+
+async def _connector_passes(*, connectors: Any, connector_key: str, holder: str) -> bool:
+    """One delivery, then the schedule. True when a delivery was claimed.
+
+    Each pass is caught and logged by its NAME, never with the exception's
+    text (a transport's message names the host it failed to reach), so a
+    failing receiver or a failing schedule stops neither the other pass nor
+    the steps.
+    """
+    claimed = False
+    try:
+        delivery = await connectors.claim_delivery(
+            holder=holder,
+            lease_seconds=connector_delivery.DELIVERY_TIMEOUT_SECONDS + lease_margin_seconds(),
+        )
+        if delivery is not None:
+            claimed = True
+            await connector_delivery.deliver(
+                delivery, repository=connectors, key_master_hex=connector_key, holder=holder
+            )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        log.error("the delivery pass raised %s; continuing", type(exc).__name__)
+    try:
+        await connectors.fire_due()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        log.error("the schedule pass raised %s; continuing", type(exc).__name__)
+    return claimed
 
 
 async def supervise(
-    *, repository: Any, service: Any, sleep: Any = asyncio.sleep, url: str | None = None
+    *,
+    repository: Any,
+    service: Any,
+    sleep: Any = asyncio.sleep,
+    url: str | None = None,
+    connectors: Any = None,
+    connector_key: str | None = None,
 ) -> None:
     """Restart the loop when it raises, and never take the verifier with it.
 
@@ -754,7 +882,13 @@ async def supervise(
     """
     while True:
         try:
-            await run_forever(repository=repository, service=service, url=url)
+            await run_forever(
+                repository=repository,
+                service=service,
+                url=url,
+                connectors=connectors,
+                connector_key=connector_key,
+            )
         except asyncio.CancelledError:
             raise
         except Exception:

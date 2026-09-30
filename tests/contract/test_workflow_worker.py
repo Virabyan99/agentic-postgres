@@ -105,6 +105,10 @@ class FakeRepository:
         self.calls.append(("park", kwargs))
         return "parked"
 
+    async def await_event(self, **kwargs: Any) -> str:
+        self.calls.append(("await_event", kwargs))
+        return "parked"
+
     @property
     def names(self) -> list[str]:
         return [name for name, _ in self.calls]
@@ -1021,6 +1025,182 @@ def test_a_dry_run_never_requests_approval(monkeypatch: Any) -> None:
         "approval steps are not rehearsed",
     )
     assert service.minted == [] and sent == []
+
+
+# ---------------------------------------------------------------------------
+# Session 34: the event wait (ADR 0239, EVT-WAIT-001) and the schedule pass
+# ---------------------------------------------------------------------------
+
+
+def event_step(**overrides: Any) -> FakeStep:
+    step = {
+        "name": "embedded",
+        "kind": "wait",
+        "seconds": 300,
+        "timeout_seconds": 5,
+        "retry": {"max": 0, "backoff_seconds": 1},
+        "event": "note_embedding.set@1",
+        "match": {"note_id": "{{input.note_id}}", "kind": "vector", "n": 2},
+    }
+    step.update(overrides)
+    return FakeStep(name="embedded", step=step, input={"note_id": "n-0001"})
+
+
+def test_an_event_wait_parks_once_with_its_resolved_match(monkeypatch: Any) -> None:
+    """Nothing parked yet (`event` null in the gate): the match is resolved
+    ONCE against the run's input -- the whole reference to its value, the
+    literals as they are -- and the step parks on the event until `seconds`.
+    It is not finished and not parked as a time wait."""
+    from datetime import UTC, datetime, timedelta
+
+    before = datetime.now(UTC)
+    repository, _ = drive(
+        step=event_step(),
+        gate={"approval": None, "waited": False, "event": None},
+        monkeypatch=monkeypatch,
+    )
+    assert repository.names == ["heartbeat", "claim", "gate_state", "await_event"]
+    parked = repository.one("await_event")
+    assert parked["event"] == "note_embedding.set@1"
+    assert json.loads(parked["match"]) == {"note_id": "n-0001", "kind": "vector", "n": 2}
+    assert (
+        before + timedelta(seconds=300)
+        <= parked["resume_after"]
+        <= datetime.now(UTC) + (timedelta(seconds=300))
+    )
+
+    # A reference the input cannot satisfy fails the step before it waits.
+    unresolvable = event_step()
+    unresolvable.input = {}
+    repository, _ = drive(
+        step=unresolvable,
+        gate={"approval": None, "waited": False, "event": None},
+        monkeypatch=monkeypatch,
+    )
+    finished = repository.one("finish")
+    assert finished["outcome"] == "failed" and finished["reason"].startswith("input_unresolved")
+    assert "await_event" not in repository.names
+
+    # A rehearsal never waits on an event nothing it does would emit.
+    rehearsal = event_step()
+    rehearsal.dry_run = True
+    repository, _ = drive(step=rehearsal, monkeypatch=monkeypatch)
+    finished = repository.one("finish")
+    assert (finished["outcome"], finished["reason"]) == ("dry_run", "event waits are not rehearsed")
+    assert "gate_state" not in repository.names
+
+
+def test_a_served_event_finishes_the_step_with_its_payload(monkeypatch: Any) -> None:
+    payload = {"note_id": "n-0001", "extra": [1, 2]}
+    repository, _ = drive(
+        step=event_step(),
+        gate={"approval": None, "waited": False, "event": {"served": True, "payload": payload}},
+        monkeypatch=monkeypatch,
+    )
+    finished = repository.one("finish")
+    assert (finished["outcome"], finished["reason"]) == ("succeeded", "event_received")
+    assert json.loads(finished["result"]) == {"event": "note_embedding.set@1", "payload": payload}
+    assert finished["request_id"] is None
+    assert "await_event" not in repository.names and "park" not in repository.names
+
+
+def test_an_unserved_event_wait_fails_event_timeout(monkeypatch: Any) -> None:
+    """The claim fired the parked step at `resume_after` and nothing served
+    it: `failed`/`event_timeout`, and the wait is NOT parked again."""
+    repository, _ = drive(
+        step=event_step(),
+        gate={"approval": None, "waited": False, "event": {"served": False, "payload": None}},
+        monkeypatch=monkeypatch,
+    )
+    finished = repository.one("finish")
+    assert (finished["outcome"], finished["reason"], finished["result"]) == (
+        "failed",
+        "event_timeout",
+        None,
+    )
+    assert "await_event" not in repository.names
+
+
+def test_an_event_wait_mints_no_token(monkeypatch: Any) -> None:
+    """Across every path -- park, served, timed out, unresolvable, rehearsed
+    -- no token is minted and nothing is sent: an event wait calls nothing."""
+    sent: list[dict[str, Any]] = []
+    service = FakeService()
+    unresolvable = event_step()
+    unresolvable.input = {}
+    rehearsal = event_step()
+    rehearsal.dry_run = True
+    for step, gate in (
+        (event_step(), {"approval": None, "waited": False, "event": None}),
+        (
+            event_step(),
+            {"approval": None, "waited": False, "event": {"served": True, "payload": {}}},
+        ),
+        (
+            event_step(),
+            {"approval": None, "waited": False, "event": {"served": False, "payload": None}},
+        ),
+        (unresolvable, {"approval": None, "waited": False, "event": None}),
+        (rehearsal, None),
+    ):
+        drive(
+            step=step,
+            service=service,
+            gate=gate,
+            send=_recording_send(sent, OK_RESULT),
+            monkeypatch=monkeypatch,
+        )
+    assert service.minted == [], "a token was minted for an event wait"
+    assert sent == []
+
+
+def test_the_loop_fires_due_schedules_each_iteration() -> None:
+    """CONN-SCHED-001's loop half (D1790): with the facility's key, every
+    iteration calls `connector_fire_due` once -- a busy iteration and an idle
+    one alike; without it, never. The substrate decides what is due."""
+
+    class Connectors:
+        def __init__(self) -> None:
+            self.fired = 0
+            self.claims = 0
+
+        async def claim_delivery(self, **kwargs: Any) -> Any:
+            self.claims += 1
+            return None
+
+        async def fire_due(self) -> int:
+            self.fired += 1
+            return 1
+
+    connectors = Connectors()
+    for steps in ([], [FakeStep(step={**FakeStep().step, "kind": "wait", "seconds": 5})]):
+        repository = FakeRepository(steps)
+        asyncio.run(
+            worker.run_forever(
+                repository=repository,
+                service=FakeService(),
+                holder="host:1:aa",
+                sleep=_never_sleeps,
+                once=True,
+                connectors=connectors,
+                connector_key="0f" * 32,
+            )
+        )
+    assert (connectors.fired, connectors.claims) == (2, 2)
+
+    control = Connectors()
+    asyncio.run(
+        worker.run_forever(
+            repository=FakeRepository([]),
+            service=FakeService(),
+            holder="host:1:aa",
+            sleep=_never_sleeps,
+            once=True,
+            connectors=control,
+            connector_key=None,
+        )
+    )
+    assert (control.fired, control.claims) == (0, 0)
 
 
 def test_a_wait_step_parks_once_then_finishes_and_mints_nothing(monkeypatch: Any) -> None:

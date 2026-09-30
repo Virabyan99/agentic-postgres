@@ -36,6 +36,7 @@ from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 
 from app import (
+    connector_signature,
     db,
     keys,
     openapi_docs,
@@ -48,6 +49,7 @@ from app import (
 )
 from app import scopes as scope_map
 from app import settings as settings_module
+from app.connector_repository import ConnectorRepository
 from app.hashing import BoundedHasher
 from app.profile import HASH_CONCURRENCY
 from app.repository import Repository
@@ -190,10 +192,23 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         worker: asyncio.Task[None] | None = None
         if mode == "auth":
             application.state.workflows = WorkflowRepository(pool)
+            # Session 34 (ADR 0238, D1790): the delivery and schedule passes
+            # run INSIDE this one task, and only with the facility's key --
+            # read once, here, like the signing key. No file is the facility
+            # off: no delivery is claimed and nothing is fired.
+            application.state.connectors = ConnectorRepository(pool)
+            connector_key = connector_signature.read_master(settings.connector_key_file)
+            application.state.connector_key = connector_key
+            if connector_key is None:
+                logging.getLogger("app.workflow_worker").info(
+                    "connectors: no key file (the project has not enabled the facility)"
+                )
             worker = asyncio.create_task(
                 workflow_worker.supervise(
                     repository=application.state.workflows,
                     service=application.state.service,
+                    connectors=application.state.connectors,
+                    connector_key=connector_key,
                 )
             )
         try:

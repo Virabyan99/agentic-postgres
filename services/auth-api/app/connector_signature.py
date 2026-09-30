@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+from pathlib import Path
 
 #: The derivation's label. Versioned, so a later scheme is a new label and
 #: never a silent change of every key.
@@ -51,6 +52,24 @@ def derive(master_hex: str, name: str) -> str:
     return hmac.new(
         bytes.fromhex(master), CONNECTOR_KEY_LABEL + name.encode("ascii"), hashlib.sha256
     ).hexdigest()
+
+
+def read_master(path: Path | None) -> str | None:
+    """The project's `connector_signing_key`, read ONCE at start, or `None`.
+
+    `None` when there is no file at the path (D1827: the path is always set and
+    the file exists only when the project has the connectors facility), which
+    turns the inbound route and the delivery pass off. A file that exists and
+    is not 64+ lowercase hex raises `ValueError` naming no value: a present,
+    malformed secret is a deployment defect, and the start fails on it as it
+    fails on a malformed signing key.
+    """
+    if path is None or not path.is_file():
+        return None
+    master = path.read_text(encoding="ascii").strip()
+    if not MASTER.match(master):
+        raise ValueError("the connector key file is not 64 or more lowercase hex characters")
+    return master
 
 
 def signed_bytes(t: int, delivery_id: str, body: bytes) -> bytes:

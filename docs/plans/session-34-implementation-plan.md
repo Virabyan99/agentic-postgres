@@ -625,6 +625,8 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1834** | 5 | §5 Run 5 item 7: *"`test_project_migration_sets.py::test_the_example_sets_third_migration_keeps_the_signature` (… `CREATE OR REPLACE` keeps `has_function_privilege` for `authenticated` and `agent_writer` -- under the cluster fixture)"*. | `test_project_migration_sets.py` has no cluster fixture; the one cluster that applies the example set is the one `apg dev up` builds (`test_dev_environment_cluster.py`'s `environment`). | **Two proofs**: `test_the_example_sets_third_migration_keeps_the_signature` (offline: the lint passes, the function is 0001's byte for byte but `OR REPLACE` and the one emit directly after the upsert, the payload carries no vector, `object_owner` alone, no GRANT restated) and `test_dev_environment_cluster.py::test_the_example_sets_third_migration_kept_its_grants` (EXECUTE held by `authenticated`, `agent_writer`, `api_documentation`, not `anon` -- the control; 0001's comment kept; the running body emits; the project ledger ends at `20260930120003`), through the product's own command (D1114). Run 9 registers both under EVT-LINT-001. | — |
 | **D1835** | 5 | §2: *"The registry entries cannot be committed before Run 9"*; *"WF-DEF-002 … leaves its node ids"* (listed as Run 9's). | Deleting `test_a_wait_on_an_event_is_refused_naming_session_thirty_four` in Run 5 (ADR 0239) leaves a registry node id with no test, which `test_acceptance_registry` refuses; and three proofs pinned the example set's COUNTS -- two by name (`…two_migrations_in_order`, `…four_definitions_compile`) and one by a `notes-` prefix filter that the new `notes-*` definitions entered. | **Moved in Run 5, not Run 9**: WF-DEF-002 loses the deleted node id and its sentence becomes *"since Session 34 a wait may name an event (EVT-WAIT-001, ADR 0239)"*; the two count-named proofs are renamed (`test_the_example_lock_records_its_migrations_in_order`, 3 versions; `test_the_example_projects_seven_definitions_compile`, 7 files) with their node ids moved in AGT-TENANT-002, WF-DEF-001 and WF-DEF-002 and WF-DEF-001's *"four since Session 33"* now seven; the byte-for-byte proof names its two files instead of a prefix (same two digests). No NEW entry is committed -- `CURRENT_SESSION` still moves in Run 9 alone (D690). | 0239 |
 | **D1836** | 5 | §5 Run 5 item 5: step 6e's three reasons and the missing-endpoint line; §2 CONN-DEF-001's `test_the_init_skeletons_validate`. | The plan names no case for an endpoint in the manifest that belongs to NO outbound connector (a typo, or an endpoint given to an inbound one, which the table's CHECK would refuse at psql); and `init` is `bin/connector.sh`'s verb, which Run 7 writes. | **6e reports each such endpoint** (*"endpoint for <name>: names no outbound connector of this set; installed nowhere"*) and sends it nowhere -- a report, like the missing endpoint (ADR 0195); `connector_install.statements` refuses an endpoint for a non-outbound connector before psql could. **No line prints an endpoint** (proved). `test_the_init_skeletons_validate` moves to Run 7 with `init`. The dev path's enabled arm is a contract proof over a recording `docker` (`test_deploy_connectors.py::test_dev_up_installs_connectors_only_with_the_facility`, a tmp schema-7 manifest), D1808's disabled sentence read off the real `up`. | — |
+| **D1837** | 6 | §5 Run 6 item 2: *"absent → `None`, and a single INFO line \"connectors: no key file (the project has not enabled the facility)\""*. | **Rig 34f's control read the auth log for the line and found nothing.** The application configures no logging (no `basicConfig`, `dictConfig` or `setLevel` under `services/auth-api/app/`), so under uvicorn's defaults an `app.*` INFO record reaches no handler -- Python's last-resort handler prints WARNING and above. | The line is written as the plan says and recorded as INVISIBLE, never as a reader of the facility: an operator reads the facility from the deployed document's `connectors.enabled` and from Run 8's doctor line. A WARNING would sound on every start of every project without the facility (alpha) about a state that is correct. | — |
+| **D1838** | 6 | §5 Run 6 item 4 (ii): *"exactly 3 POSTs at ≥ 2 s spacing"*; D1801's rehearsal *"3 attempts at ≥ 2 s spacing"*; §2 CONN-OUT-002 *"attempted exactly `max + 1` times at the backoff"*. | **Rig 34f (ii): 3 POSTs 5.06 s and 5.09 s apart with `backoff_seconds: 2`.** A delivery is claimable once its backoff passes, but an iteration that found nothing sleeps `POLL_SECONDS` (5) -- the loop sleeps only then (D1790) -- so on an idle deployment the spacing is `max(backoff, POLL_SECONDS)`. | Correct, and now measured: bounded below by the backoff, never hot. **Run 8's rehearsal and Run 9's host proof assert spacing `≥ backoff` and exactly `max + 1` attempts, never a spacing near the backoff**, and their time bounds allow `(max + 1) × POLL_SECONDS` plus one poll. | 0238 |
 
 ---
 
@@ -1750,7 +1752,9 @@ skeletons_validate` is Run 7's (D1836). (Docker, once): `test_dev_environment_cl
 them), `test_migrations_apply_as_the_migration_user` (3, the example set now
 with `0003` applied as `migration_user`), `test_connectivity_substrate` (30),
 `test_deployment_module_shape` and `test_printed_commands` (the D1242 guard) —
-**49 passed, 0 skipped**. CI: CI_PENDING
+**49 passed, 0 skipped**. Commit `f5966cb`; CI by full SHA
+`f5966cbf46f25be30916c820837c809e2ee73175`: `contract` **success** (run
+36631298892).
 
 ### Run 6 — the loop: the delivery pass, the schedule pass, the event wait
 
@@ -1857,7 +1861,67 @@ Targeted (fast): `test_workflow_worker`, `test_connector_delivery`,
 `test_acceptance_registry`, `test_evidence_claims`. Commit (`Session 34 Run
 6: the loop delivers, fires and resumes on an event`), push, CI.
 
-**Done.** *(the executor writes it, with rig 34f's numbers arm by arm.)*
+**Done.** 2026-09-30. **`services/auth-api/app/connector_delivery.py`**
+(NEW; `DELIVERY_TIMEOUT_SECONDS = 10`, `REHEARSAL_ENDPOINT`, `USER_AGENT`,
+`body`, `headers`, `error_token`, `_post`, `deliver`): the canonical body, the
+three `X-Apg-*` headers signed by `connector_signature`, an opener whose
+`_Refuse` handler follows no redirect, only `http(s)` opened, D1813's table as
+written (a DNS failure recognised by its class NAME, `gaierror`, because
+`socket` is a transport this service does not grant), the endpoint deleted in
+a `finally`, no exception text leaving `_post`. Its own `TRANSPORT_ALLOWLIST`
+row and a place among the senders, now four (D1791). **The loop**:
+`run_forever(…, connectors, connector_key)` -- per iteration one step, then
+(only with both) one delivery and one `fire_due`, sleeping only when neither a
+step nor a delivery was found; each connector pass logged by its NAME and
+exception TYPE only; `supervise` passes both; `main.py` builds
+`ConnectorRepository` and reads the key ONCE through
+`connector_signature.read_master` (no file → `None`; a present malformed file
+fails the start naming no value) -- **still one `create_task`**. **The event
+wait** (`_await_event`): a rehearsal finishes `dry_run`; nothing parked → the
+match resolved once (`Unresolvable` → `failed`) and `await_event` until
+`seconds`; served → `succeeded`/`event_received` with `{event, payload}`;
+otherwise `failed`/`event_timeout`; no token on any path. **Rig 34f**
+(`/tmp/rig34f/rig34f.py`, derived from rig34.py's stack: `apg dev up` -- 36
+release migrations, the set's three, 7 definitions -- the four connectors
+installed through `connector_install.statements` with the outbound endpoints
+on a sink the rig serves, PostgREST from the pinned digest, the auth
+application from the checkout; exit 0): **control** (no key file) -- after 12 s
+the sink had received 0 requests, both deliveries `pending` at 0 attempts, 0
+`notes-digest` runs, and a `notes-await-embedding` run's wait step still
+parked `awaiting_event` (steps unaffected); the INFO line was not in the log
+(D1837). **With the key** (a restart): **(i)** ONE POST to `/ok`, `delivered`
+at attempt 1 status 200, its signature verified by `openssl dgst -sha256 -mac
+HMAC` over the received bytes under a key the rig derived itself, and no line
+of the auth log carried the sink's URL; **(ii)** `/fail` received exactly 3
+POSTs under one delivery id, **5.06 s and 5.09 s apart** (D1838), then `dead`,
+3 attempts, `last_status` 500, `http_500`; **(iii)** a write for ANOTHER note
+left the run parked (`awaiting_event` after 12 s); the owner's write for its
+own note finished the wait **2.0 s later** `succeeded`/`event_received` with
+`{event: note_embedding.set@1, payload: {note_id: <that note>}}` (the run then
+failed at its `record` step, `transport: URLError` -- the rig starts no plane,
+by design); **(iv)** `notes-digest`, bound to a `notes:read`-exact agent (rig
+34c's answer), fired ONE run as that agent 0.05 s after the new worker
+started and set `next_fire_at` 60 s on; **(v)**
+`connector_rehearse_delivery('note-embedded')` → 3 attempts, `connect_failed`,
+`dead`, the heartbeat's `seen_at` moving 21:19:30 → 21:19:45 throughout.
+**Proofs**: `tests/contract/test_connector_delivery.py` (NEW, 10, a real
+`http.server` per proof; the signature verified by the proof's own HMAC; every
+redirect code; a real refused port and a real read timeout),
+`test_workflow_worker.py` gains EVT-WAIT-001's four and
+`test_the_loop_fires_due_schedules_each_iteration`, the allowlist row.
+**Battery 6/6 kills, 0 errors**, control green before and after: redirects
+followed; two deliveries per iteration; the exception text stored; the
+exception logged; a token minted for a wait; `served` ignored. **The battery's
+first reading was wrong and the reader was:** `-rA` prints the no-record
+proof's captured `ERROR` log line, which the outcome regex counted as a
+seventh node; the regex now requires `::` and the re-run is the record.
+Targeted, once: `test_workflow_worker`, `test_connector_delivery`,
+`test_auth_service_shape` (89), then with `test_workflow_repository`,
+`test_connector_repository`, `test_acceptance_registry`,
+`test_evidence_claims`, `test_auth_endpoints`, `test_studio_runtime`,
+`test_connector_facility`, `test_workflow_routes`,
+`test_workflow_admin_routes` and the D1242 guards: **346 passed**. Rows
+D1837–D1838. CI: CI_PENDING
 
 ### Run 7 — the routes, the scopes and the command
 

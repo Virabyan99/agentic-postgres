@@ -714,6 +714,12 @@ TRANSPORT_ALLOWLIST: dict[str, frozenset[str]] = {
     # `os.uname().nodename`, which is `storage_cleanup.worker_identity`'s
     # choice and its reason.
     "app/workflow_worker.py": frozenset({"urllib"}),
+    # Session 34 (ADR 0238, D1791): delivers one signed body to the endpoint an
+    # operator declared for one connector; follows no redirect (`_Refuse`);
+    # `socket` is not granted -- a DNS failure is recognised by its class name.
+    # A module of its own, so `workflow_worker.py`'s row above -- one address,
+    # built from three constants -- stays literally true.
+    "app/connector_delivery.py": frozenset({"urllib"}),
 }
 
 #: How a key set may be built. Both are local reads; neither can reach a network.
@@ -811,7 +817,7 @@ def test_the_allowlist_describes_modules_that_exist_and_use_what_they_declare() 
         )
 
     # `urllib` covers both `urllib.parse` (encoding) and `urllib.request`
-    # (sending), and only three modules may send. Asserted separately because
+    # (sending), and only four modules may send. Asserted separately because
     # the package name alone cannot tell them apart -- and a query builder that
     # grew a `urlopen` would otherwise be covered by its own row.
     #
@@ -820,7 +826,16 @@ def test_the_allowlist_describes_modules_that_exist_and_use_what_they_declare() 
     # plane does not. The list is a WIDENING to a measured set and the count in
     # the sentence above moved with it -- a list that grew while its own prose
     # still said "two" is how an allowlist stops being read.
-    senders = {"app/mcp_upstream.py", "app/mcp_health.py", "app/workflow_worker.py"}
+    #
+    # `connector_delivery.py` joined it in Session 34 (ADR 0238, D1791): the
+    # one outbound POST to an operator's endpoint. Four senders now, each with
+    # its own reason -- a reviewed widening of a closed set, not a weakening.
+    senders = {
+        "app/mcp_upstream.py",
+        "app/mcp_health.py",
+        "app/workflow_worker.py",
+        "app/connector_delivery.py",
+    }
     for relative in sorted(TRANSPORT_ALLOWLIST):
         names = _referenced_names((SERVICE_ROOT / relative).read_text(encoding="utf-8"))
         if relative in senders:
