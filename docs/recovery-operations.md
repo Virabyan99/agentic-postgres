@@ -116,6 +116,7 @@ sudo bin/rehearse.sh reverse                         # after an interrupted one
 | `provider-loss` | nothing: recorded (D976) | the record | nothing |
 | `admission-refused` | nothing; `bin/admit.py` with `--reserve-memory-mb` injected so nothing can fit | the injected run's refusal; the host's own declaration as the control | nothing was changed |
 | `worker-restart` | SIGKILL to the `auth` process, which holds the workflow loop (ADR 0226) | the doctor's `workflow` check: the heartbeat's HOLDER before and after, and the oldest overdue lease; the restart count as the control | the restart policy; `docker start` only if it did not |
+| `delivery-retry-storm` | one rehearsal delivery through the first installed outbound connector, sent to the `auth` container's discard port and never to the endpoint (ADR 0238); refused without the connectors facility or an outbound connector | the delivery's row and the worker heartbeat, every second: exactly three attempts, each at least the 2 s backoff after the last (on an idle deployment about 5 s, D1838), then `dead` with `connect_failed`, the heartbeat moving throughout | nothing: the dead row is the record, counted by the doctor; the `workflow` check must read `ok` |
 
 Exit codes: 0 the reader read and the reversal verified; 5 refused (another
 rehearsal un-reversed, or the scenario has nothing to induce here); 6 the

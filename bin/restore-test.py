@@ -535,7 +535,34 @@ def observe_restored_instance(plan: restore_drill.DrillPlan) -> dict[str, Any]:
                 "value": None,
                 "reason": "the reading did not arrive in the shape it was asked for",
             }
-    observed["workflow_runs"] = {**observed["workflow_runs"], "approvals": approvals}
+
+    # Session 34 (ADR 0238, D1802): the connectors' deliveries by status, in
+    # the same member and with the same three outcomes. A restored drill
+    # carrying the pending and dead deliveries the live cluster held is
+    # REC-EVT-001's whole claim, so the absent case names the migration --
+    # never `{}`, which would read as *nothing was ever queued* (ADR 0195).
+    code, answer = query(plan, DELIVERIES_BY_STATUS)
+    if code != 0 or answer == "":
+        deliveries: dict[str, Any] = {
+            "value": None,
+            "reason": (
+                "app_private.connector_delivery is not present in the restored cluster; "
+                "the backup predates migration 0036"
+            ),
+        }
+    else:
+        try:
+            deliveries = {"value": json.loads(answer), "reason": ""}
+        except ValueError:
+            deliveries = {
+                "value": None,
+                "reason": "the reading did not arrive in the shape it was asked for",
+            }
+    observed["workflow_runs"] = {
+        **observed["workflow_runs"],
+        "approvals": approvals,
+        "deliveries": deliveries,
+    }
     return observed
 
 
@@ -547,6 +574,16 @@ APPROVALS_BY_STATUS = (
     "SELECT coalesce(jsonb_object_agg(status, total), '{}'::jsonb) FROM "
     "(SELECT status::text AS status, count(*) AS total "
     "FROM app_private.workflow_approval GROUP BY status) counted"
+)
+
+#: Every connector delivery in the restored cluster, counted by status --
+#: `pending`, `delivered`, `dead`. No endpoint, no payload, no event id: the
+#: drill records THAT the outbox survived, and what is in it is the
+#: substrate's (ADR 0238).
+DELIVERIES_BY_STATUS = (
+    "SELECT coalesce(jsonb_object_agg(status, total), '{}'::jsonb) FROM "
+    "(SELECT status::text AS status, count(*) AS total "
+    "FROM app_private.connector_delivery GROUP BY status) counted"
 )
 
 

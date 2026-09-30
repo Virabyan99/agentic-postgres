@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from agentic_postgres import (
     REPO_ROOT,
     config,
+    container_exec,
     deployed_output,
     naming,
     port_allocations,
@@ -65,6 +66,9 @@ QUICK_TIMEOUT_SECONDS = 60
 DOCTOR_TIMEOUT_SECONDS = 180
 CHECK_TIMEOUT_SECONDS = 600
 POLL_SECONDS = 2.0
+#: `delivery-retry-storm` polls every second: the attempt times it records
+#: are the poll's, so the poll is what bounds their error.
+STORM_POLL_SECONDS = 1.0
 
 
 class OperatorError(Exception):
@@ -179,6 +183,44 @@ def container_facts(name: str) -> tuple[int | None, int | None]:
     return (pid if pid > 0 else None), count
 
 
+def psql_json(container: str, database: str, sql: str) -> Any:
+    """One read as the cluster's superuser, parsed as JSON; `None` when it did
+    not answer or answered something else. The argv is `container_exec`'s own
+    (no `-i`: nothing is fed) and it runs through this program's `run`, so
+    stdin is closed and the call is bounded (ADR 0218)."""
+    result = run(
+        *container_exec.exec_argv(
+            container, "psql", "-U", "postgres", "-d", database, "-X", "-qtA", "-c", sql
+        )
+    )
+    if result is None or result.returncode != 0:
+        return None
+    try:
+        return json.loads(result.stdout.strip() or "null")
+    except ValueError:
+        return None
+
+
+def storm_facts(
+    containers: dict[str, str], database: str | None
+) -> tuple[tuple[str, ...] | None, int | None]:
+    """The installed outbound connectors and the rehearsal deliveries that
+    already exist -- read BEFORE anything is induced, so a delivery the storm
+    induces is the one more, and never an older dead row read as its own."""
+    container = containers.get(rehearsal.DATABASE_SERVICE)
+    if not container or not database:
+        return None, None
+    listed = psql_json(container, database, rehearsal.OUTBOUND_CONNECTORS)
+    outbound = (
+        tuple(listed)
+        if isinstance(listed, list) and all(isinstance(name, str) for name in listed)
+        else None
+    )
+    reading = psql_json(container, database, rehearsal.STORM_READING)
+    count = reading.get("rehearsal_deliveries") if isinstance(reading, dict) else None
+    return outbound, (count if isinstance(count, int) else None)
+
+
 def network_subnet(network: str) -> str | None:
     inspected = run(
         "docker", "network", "inspect", "-f", "{{(index .IPAM.Config 0).Subnet}}", network
@@ -244,6 +286,20 @@ def gather_facts(
         else None
     )
 
+    # Session 34 (D1801). The facility is a fact of the document and costs
+    # nothing, so `--plan` checks it; the connectors and the rehearsal
+    # deliveries are READINGS, taken only when the storm will induce --
+    # D1694's rule, the heartbeat's above.
+    connectors_enabled = config.connectors_enabled(document)
+    database_name = str((document.get("database") or {}).get("name") or "") or None
+    outbound_connectors, deliveries_before = (
+        storm_facts(containers, database_name)
+        if arguments.scenario == "delivery-retry-storm"
+        and not arguments.plan
+        and connectors_enabled
+        else (None, None)
+    )
+
     registry = Path(arguments.registry)
     lock_path = deployed_output.rendered_path(key, root=arguments.rendered_root) / (
         runtime_override.MCP_LOCK_FILENAME
@@ -291,6 +347,10 @@ def gather_facts(
         project_manifest=str(arguments.manifest) if arguments.manifest else None,
         admit_py=str(REPO_ROOT / "bin" / "admit.py"),
         workflow_heartbeat=workflow_heartbeat,
+        connectors_enabled=connectors_enabled,
+        database_name=database_name,
+        outbound_connectors=outbound_connectors,
+        rehearsal_deliveries_before=deliveries_before,
     )
 
 
@@ -584,11 +644,79 @@ def observe(plan: rehearsal.Plan, facts: rehearsal.Facts) -> dict[str, Any]:
         )
         return readings
 
+    if plan.scenario == "delivery-retry-storm":
+        return observe_storm(plan, facts, by_name["storm"].argv)
+
     if plan.scenario == "provider-loss":
         readings["record"] = rehearsal.PROVIDER_LOSS_RECORD
         return readings
 
     raise OperatorError(EXIT_INPUT, f"no observer for {plan.scenario!r}")
+
+
+def observe_storm(
+    plan: rehearsal.Plan, facts: rehearsal.Facts, argv: tuple[str, ...]
+) -> dict[str, Any]:
+    """The rehearsal delivery and the heartbeat, in ONE reading, every second.
+
+    One reading because they are two facts about one moment: a storm that
+    starved the loop would show attempts piling up while `seen_at` stood still.
+    An attempt's time is the poll that first saw its count, so the recorded
+    spacing is the real one to within a poll. The newest rehearsal row counts
+    as the storm's only once there is one MORE than before it was induced --
+    an older dead row is never read as this one. The poll ends when the
+    delivery has left `pending` AND the heartbeat has moved, or at the bound.
+    """
+    before = facts.rehearsal_deliveries_before
+    readings: dict[str, Any] = {
+        "rehearsal_deliveries_before": before,
+        "rehearsal_deliveries_after": None,
+        "attempts": None,
+        "status": None,
+        "last_error": None,
+        "attempt_seconds": [],
+        "heartbeat_first": None,
+        "heartbeat_last": None,
+    }
+    started = time.monotonic()
+    deadline = started + plan.bound_seconds
+    seen = 0
+    while time.monotonic() < deadline:
+        result = run(*argv)
+        elapsed = round(time.monotonic() - started, 1)
+        try:
+            reading = json.loads(result.stdout.strip() or "null") if result else None
+        except ValueError:
+            reading = None
+        if isinstance(reading, dict):
+            beat = reading.get("heartbeat_seen_at")
+            if isinstance(beat, str):
+                readings["heartbeat_first"] = readings["heartbeat_first"] or beat
+                readings["heartbeat_last"] = beat
+            count = reading.get("rehearsal_deliveries")
+            if isinstance(count, int):
+                readings["rehearsal_deliveries_after"] = count
+            newest = reading.get("newest")
+            ours = isinstance(count, int) and before is not None and count > before
+            if ours and isinstance(newest, dict):
+                attempts = newest.get("attempts")
+                if isinstance(attempts, int):
+                    while seen < attempts:
+                        readings["attempt_seconds"].append(elapsed)
+                        seen += 1
+                    readings["attempts"] = attempts
+                readings["status"] = newest.get("status")
+                readings["last_error"] = newest.get("last_error")
+        moved = readings["heartbeat_first"] != readings["heartbeat_last"]
+        if readings["status"] not in (None, "pending") and moved:
+            break
+        time.sleep(STORM_POLL_SECONDS)
+    readings["heartbeat_moved"] = (
+        readings["heartbeat_first"] is not None
+        and readings["heartbeat_first"] != readings["heartbeat_last"]
+    )
+    readings["seconds_observed"] = round(time.monotonic() - started, 1)
+    return readings
 
 
 def delete_tagged_rules(comment: str) -> int | None:
@@ -651,6 +779,15 @@ def reverse(
             registry.is_file() and sha256_of(registry) == facts.registry_sha256
         )
         verification["database-ports.sh show exits 0"] = bool(shown) and shown.returncode == 0
+    elif plan.scenario == "delivery-retry-storm":
+        # Nothing was reversed, so what is verified is that the deployment reads
+        # as it did: the dead rehearsal row is counted, never a verdict (D1803).
+        workflow = doctor_checks(
+            (*facts.doctor_argv, "--project", facts.project_key, "--json"), checks["workflow"]
+        )
+        verification["the doctor's workflow check reads ok"] = (
+            workflow.get(checks["workflow"]) == "ok"
+        )
     elif plan.scenario == "capability-drift":
         verification["foreign lock absent"] = not Path(facts.foreign_lock_path or "").exists()
         verification["deployed lock unchanged"] = Path(facts.lock_path or "").is_file()

@@ -43,11 +43,13 @@ Nothing here reads a file, runs a process, resolves a name or reads a clock.
 
 from __future__ import annotations
 
+import itertools
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from agentic_postgres import naming
+from agentic_postgres import container_exec, naming
 
 __all__ = [
     "BOUNDS",
@@ -97,6 +99,11 @@ SCENARIOS = (
     # something no separate worker could have proved, which is that the signer
     # and the loop come back together.
     "worker-restart",
+    # Session 34 (ADR 0238, D1801). The eleventh: one rehearsal delivery sent
+    # to the auth container's discard port, which refuses every connection on
+    # every deployment -- so the retry discipline is rehearsed without an
+    # operator's receiver ever being down.
+    "delivery-retry-storm",
 )
 
 #: The stateless service whose route the doctor reads (ADR 0015: `edge-probe`
@@ -137,6 +144,11 @@ BOUNDS = {
     # polls every `POLL_SECONDS`, so the holder moves well inside this. The
     # bound is what the rehearsal gives up after, not what it expects.
     "worker-restart": 120,
+    # Session 34. A rehearsal delivery is three attempts spaced by
+    # max(backoff 2 s, the loop's idle poll of 5 s) -- D1838 measured 5.06 s
+    # and 5.09 s -- so about ten seconds, plus a poll. The bound is what the
+    # rehearsal gives up after, not what it expects.
+    "delivery-retry-storm": 60,
 }
 
 #: The one file that says a rehearsal is un-reversed. Beside the projects'
@@ -168,6 +180,39 @@ INJECTED_WARN_ABOVE_PROBLEM = 2.0e9
 #: happened to be that day, and then a green rehearsal would mean *the host was
 #: quiet* rather than *the reader works*.
 INJECTED_RESERVE_MB = 1_000_000_000
+
+#: What a rehearsal delivery is, as 0036's `connector_rehearse_delivery`
+#: inserts it: three attempts, two seconds of backoff, dead with the token a
+#: refused connection is (D1813). The verdict holds the readings to these.
+STORM_ATTEMPTS = 3
+STORM_BACKOFF_SECONDS = 2
+STORM_ERROR = "connect_failed"
+
+#: The storm's ONE reading, polled: how many rehearsal deliveries exist, the
+#: newest one's status, attempts and error token, and the worker heartbeat's
+#: time. No endpoint, payload or event id -- a rehearsal delivery carries none
+#: worth reading, and the reading is printed.
+STORM_READING = (
+    "SELECT jsonb_build_object('rehearsal_deliveries', "
+    "(SELECT count(*) FROM app_private.connector_delivery WHERE rehearsal), "
+    "'newest', (SELECT jsonb_build_object('status', d.status::text, "
+    "'attempts', d.attempts, 'last_error', d.last_error) "
+    "FROM app_private.connector_delivery d WHERE d.rehearsal "
+    "ORDER BY d.created_at DESC, d.id DESC LIMIT 1), "
+    "'heartbeat_seen_at', (SELECT seen_at::text FROM app_private.workflow_worker "
+    "WHERE singleton))"
+)
+
+#: The installed outbound connectors, by name -- which one the storm induces
+#: through is the first.
+OUTBOUND_CONNECTORS = (
+    "SELECT coalesce(jsonb_agg(name ORDER BY name), '[]'::jsonb) "
+    "FROM app_private.connector WHERE kind = 'outbound'"
+)
+
+#: `app_private.connector.name`'s own constraint. The one value the storm
+#: puts inside SQL, read from the cluster and held to this before it is.
+CONNECTOR_NAME = re.compile(r"[a-z][a-z0-9-]{0,62}")
 
 
 class RehearsalError(Exception):
@@ -222,6 +267,15 @@ class Facts:
     #: reader must read before the kill or a holder read afterwards is not a
     #: comparison with anything.
     workflow_heartbeat: str | None = None
+    #: Session 34: the facility, read from the deployed document (free, so
+    #: `--plan` checks it), the database the storm reads and induces through,
+    #: and -- only for `delivery-retry-storm`, only when it will induce --
+    #: the installed outbound connectors and how many rehearsal deliveries
+    #: already exist, both READ from the cluster before anything is induced.
+    connectors_enabled: bool = False
+    database_name: str | None = None
+    outbound_connectors: tuple[str, ...] | None = None
+    rehearsal_deliveries_before: int | None = None
 
     @property
     def compose_project(self) -> str:
@@ -332,6 +386,15 @@ def refuse_without_a_reading(plan: Plan, facts: Facts) -> None:
     whose "after" has no "before" would report `read` for a worker that never
     died.
     """
+    if plan.scenario == "delivery-retry-storm" and (
+        not facts.outbound_connectors or facts.rehearsal_deliveries_before is None
+    ):
+        raise RehearsalError(
+            "the project has not enabled the connectors facility, or declares no outbound "
+            "connector: the cluster's installed outbound connectors and its rehearsal "
+            "deliveries were read before inducing anything, and there is no connector "
+            "to induce a rehearsal delivery through"
+        )
     if plan.scenario == "worker-restart" and not facts.workflow_heartbeat:
         raise RehearsalError(
             "the doctor's workflow check read no heartbeat holder, so there is nothing "
@@ -976,6 +1039,95 @@ def _worker_restart(facts: Facts) -> Plan:
     )
 
 
+def _delivery_retry_storm(facts: Facts) -> Plan:
+    """An endpoint that refuses every connection: bounded retries and a visible
+    dead letter, never a hot loop? (ADR 0238, D1801, D1838.)
+
+    **Nothing an operator depends on is broken.** `connector_rehearse_delivery`
+    -- granted to nobody, run as the bootstrap superuser -- inserts ONE
+    delivery flagged `rehearsal` for an installed outbound connector, and the
+    worker sends a rehearsal delivery to the auth container's discard port
+    (`http://127.0.0.1:9/`), never to the connector's endpoint. So the
+    receiver is the one unreachable address every deployment has, and what is
+    rehearsed is the product's retry discipline, not anybody's receiver.
+
+    **The reader is the delivery row and the heartbeat, polled together**: the
+    attempts as they are made, and the worker's `seen_at` -- a storm that
+    starved the loop would be a hot loop by another name. The reversal is none:
+    the dead row is the record, and the doctor counts it.
+    """
+    if not facts.connectors_enabled:
+        raise RehearsalError(
+            "the project has not enabled the connectors facility, or declares no outbound "
+            "connector: the deployed document's connectors.enabled is off, so no worker "
+            "would deliver the rehearsal"
+        )
+    container = facts.containers.get(DATABASE_SERVICE)
+    if not container or not facts.database_name:
+        raise RehearsalError(
+            f"{facts.project_key} has no running {DATABASE_SERVICE} container or names no "
+            "database; the rehearsal delivery is induced and read through it"
+        )
+    connector = facts.outbound_connectors[0] if facts.outbound_connectors else None
+    if connector is not None and CONNECTOR_NAME.fullmatch(connector) is None:
+        raise RehearsalError(f"the cluster named an outbound connector {connector!r}")
+    shown = connector or "<the first outbound connector by name, read before inducing>"
+    psql = ("psql", "-U", "postgres", "-d", facts.database_name, "-X", "-qtA")
+    return Plan(
+        scenario="delivery-retry-storm",
+        reader=(
+            "the rehearsal delivery's row (attempts, status, error token) and the worker "
+            "heartbeat, polled together"
+        ),
+        induce=(
+            Action(
+                what=(
+                    f"one rehearsal delivery through {shown}, sent to the auth container's "
+                    f"discard port and never to the endpoint: {STORM_ATTEMPTS} attempts, "
+                    f"{STORM_BACKOFF_SECONDS} s backoff (ADR 0238)"
+                ),
+                kind="run",
+                argv=tuple(
+                    container_exec.exec_argv(
+                        container,
+                        *psql,
+                        "-v",
+                        "ON_ERROR_STOP=1",
+                        "-c",
+                        f"SELECT app_private.connector_rehearse_delivery('{shown}')",
+                    )
+                ),
+            ),
+        ),
+        observe=(
+            Observation(
+                name="storm",
+                what=(
+                    "the rehearsal delivery and the heartbeat, every second until the "
+                    "delivery is dead or the bound"
+                ),
+                argv=tuple(container_exec.exec_argv(container, *psql, "-c", STORM_READING)),
+                expect=(
+                    f"exactly {STORM_ATTEMPTS} attempts, each at least {STORM_BACKOFF_SECONDS}s "
+                    f"after the last, then dead with {STORM_ERROR}; the heartbeat moving "
+                    "throughout"
+                ),
+                until="dead",
+            ),
+        ),
+        reverse=(
+            Action(
+                what=(
+                    "nothing to reverse: the dead rehearsal delivery is the record, counted by "
+                    "the doctor's workflow check"
+                )
+            ),
+        ),
+        verify=("the doctor's workflow check reads ok",),
+        bound_seconds=BOUNDS["delivery-retry-storm"],
+    )
+
+
 _PLANNERS = {
     "service-termination": _service_termination,
     "database-restart": _database_restart,
@@ -987,6 +1139,7 @@ _PLANNERS = {
     "provider-loss": _provider_loss,
     "admission-refused": _admission_refused,
     "worker-restart": _worker_restart,
+    "delivery-retry-storm": _delivery_retry_storm,
 }
 
 
@@ -1250,7 +1403,43 @@ def verdict(scenario: str, readings: dict[str, Any]) -> tuple[str, str]:
             f"a new holder {readings.get('seconds_to_holder')}s after the kill, and no "
             "step claimed past its lease"
         )
+    if scenario == "delivery-retry-storm":
+        return _storm_verdict(readings)
     raise RehearsalError(f"no verdict for {scenario!r}")
+
+
+def _storm_verdict(readings: dict[str, Any]) -> tuple[str, str]:
+    """Read only if exactly one rehearsal delivery was induced, it was attempted
+    exactly `STORM_ATTEMPTS` times, each attempt at least the backoff after the
+    last (D1838: the spacing is max(backoff, the idle poll), bounded BELOW by
+    the backoff), it ended dead with the refused connection's token, and the
+    worker's heartbeat moved while it did."""
+    before = readings.get("rehearsal_deliveries_before")
+    after = readings.get("rehearsal_deliveries_after")
+    if before is None or after != before + 1:
+        return "unread", f"{before} rehearsal deliveries before and {after} after, not one more"
+    attempts = readings.get("attempts")
+    if attempts != STORM_ATTEMPTS:
+        return "unread", f"the delivery was attempted {attempts} times, not {STORM_ATTEMPTS}"
+    if readings.get("status") != "dead":
+        return "unread", f"the delivery ended {readings.get('status')}, not dead"
+    if readings.get("last_error") != STORM_ERROR:
+        return "unread", f"the delivery's error token is {readings.get('last_error')}"
+    times = readings.get("attempt_seconds")
+    if not isinstance(times, list) or len(times) != STORM_ATTEMPTS:
+        return "unread", f"{times} attempt times were observed, not {STORM_ATTEMPTS}"
+    spacing = [round(later - earlier, 1) for earlier, later in itertools.pairwise(times)]
+    if any(gap < STORM_BACKOFF_SECONDS for gap in spacing):
+        return "unread", (
+            f"attempts {spacing}s apart; a retry sooner than the {STORM_BACKOFF_SECONDS}s "
+            "backoff is a hot loop"
+        )
+    if not readings.get("heartbeat_moved"):
+        return "unread", "the worker heartbeat did not move during the storm"
+    return "read", (
+        f"{STORM_ATTEMPTS} attempts {spacing}s apart, dead with {STORM_ERROR}; the "
+        "heartbeat moved throughout"
+    )
 
 
 def state_document(plan: Plan, facts: Facts, *, started_at: str) -> dict[str, Any]:

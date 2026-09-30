@@ -1494,3 +1494,167 @@ rather than installing half a project's definitions. `(name, version)` is
 immutable, so the usual cause is an edited definition whose version did not
 move: publish a new version. `bin/workflow.sh validate --project <manifest>`
 gives the same answer in the checkout, before the trip.
+
+## 18. Connectors, on a deployment
+
+Since `1.12.0`. A connector is a file in the project's set, installed by the
+deploy's step 6e **disabled**, and enabled by an administrator (ADR 0236). The
+outbound delivery pass and the schedule pass run inside the same loop as the
+workflows -- inside `auth` -- and only when the project has the **connectors
+facility**. `docs/connectors.md` is the developer's and the sender's half: the
+file, the signature scheme exactly, and every answer the inbound route gives.
+
+### Enabling the facility
+
+The facility is ONE secret, `connector_signing_key` (`APG_CONNECTOR_SIGNING_KEY`
+at the provider), which every connector's key is derived from. A project that
+leaves it off owes nothing new. Turning it on is **its own operation**, never
+part of a release deploy:
+
+1. Edit the installed manifest -- `schema_version: 7`, and
+
+   ```yaml
+   connectors:
+     enabled: true
+     endpoints:
+       note-embedded: https://receiver.example.com/hooks/apg
+   ```
+
+   An endpoint is `http(s)`, a host, an optional port and path, and nothing
+   else: no user, password, query or fragment. It is written into the
+   connector's row by step 6e and appears in no document, status or log.
+
+2. Plan the provider change, then apply it (the key is generated, never typed):
+
+   ```bash
+   bin/bootstrap-providers.sh --host host.yaml --project <manifest> --plan
+   sudo bin/bootstrap-providers.sh --host host.yaml --project <manifest> --apply \
+     --operator-credential-file <file>
+   ```
+
+3. Redeploy. Step 6e installs the set's connectors and reports what it did in
+   words -- an outbound connector the manifest gives no endpoint (`enable` will
+   refuse it), an endpoint that names no outbound connector -- and never prints
+   an endpoint. Without the facility it says so and installs nothing.
+
+### Granting the scopes, and binding an agent
+
+`admin_connectors:read` (the status) and `admin_connectors:write` (enable and
+disable) are administrative, `project_admin`'s alone, and **no existing
+administrator gains either on upgrade**. Grant them with §17's `PATCH
+/admin/users/{id}`, remembering that `scopes` REPLACES the set.
+
+An inbound or scheduled connector starts runs **as the agent bound to it**, and
+that agent must hold EXACTLY its definition's scopes -- no fewer and no more --
+and be bound to no other connector. Create one agent per connector with those
+scopes (`bin/connector.sh validate --project <manifest>` prints each
+connector's scopes), then:
+
+```bash
+export APG_API_TOKEN=...     # a human holding admin_connectors:write
+bin/connector.sh enable --name notes-inbox --confirm notes-inbox --agent "$AGENT" \
+  --project-outputs outputs.json
+bin/connector.sh enable --name note-embedded --confirm note-embedded \
+  --project-outputs outputs.json      # outbound: no agent
+bin/connector.sh status --project-outputs outputs.json
+bin/connector.sh disable --name notes-inbox --confirm notes-inbox \
+  --project-outputs outputs.json
+```
+
+`--confirm` repeats `--name` or nothing is sent (exit 2). Refusals are fixed
+words (exit 5): `agent_not_active` (no such agent, a revoked one, or none named
+for a connector that needs one), `agent_already_bound`, `agent_scopes_differ`,
+`no_endpoint`, `agent_not_needed`. `status` prints the document whole -- the
+binding as it stands NOW, the counts, the last error token and up to 20 dead
+letters -- and never an endpoint, a payload or a key. A disabled connector's
+pending deliveries are held, not sent.
+
+### Handing a sender its key
+
+Each connector's key is derived from the master and the connector's NAME, so
+one sender holds one connector's key. It is written as root, on the host, to a
+NEW file, mode 0600 -- **never to standard output, and never onto a
+workstation**:
+
+```bash
+sudo bin/connector.sh key --project <manifest> --name notes-inbox \
+  --output /root/notes-inbox.key
+```
+
+The path it reads is derived from `active-secret-generation.json` and the
+secret contract, never typed; an existing `--output` is refused, never
+replaced. Hand the file over out of band, then remove it.
+
+**Rotating it** is replacing `APG_CONNECTOR_SIGNING_KEY` at the provider and
+redeploying -- which changes **every connector's key of the project at once**:
+re-issue every key, to every sender and receiver, in the same window. There is
+no per-connector rotation (one master per project, D1784). The other three
+rotations Session 30 did not perform are unchanged by this one.
+
+### The doctor's clause
+
+The `workflow` check -- still the twelfth, still no threshold -- gains a clause:
+
+```
+workflow    ok    ...; approvals pending 0; deliveries pending 2 (oldest 41s),
+                  dead 1; connectors enabled 3; counts and ages only, no
+                  threshold (ADR 0226)
+```
+
+Four figures under `--verbose` or `--json`: `deliveries_pending`,
+`deliveries_dead`, `oldest_pending_delivery_age_seconds` and
+`connectors_enabled`. **A dead letter is not a verdict** -- it is a receiver's
+refusal recorded as designed -- and a pending delivery an hour old is what a
+connector disabled with work queued looks like. On a `1.11.0` cluster the
+clause reads *deliveries: not read (the substrate predates 1.12.0)*, never
+zero.
+
+### The rehearsal
+
+```bash
+sudo bin/rehearse.sh delivery-retry-storm \
+  --outputs /etc/agentic-postgres/projects/<key>/outputs.json --plan
+sudo bin/rehearse.sh delivery-retry-storm \
+  --outputs /etc/agentic-postgres/projects/<key>/outputs.json
+```
+
+One rehearsal delivery through the first installed outbound connector, which
+the worker sends to the `auth` container's discard port and never to the
+endpoint -- so no receiver of yours is involved (ADR 0238). The reading is the
+delivery's row and the heartbeat, every second: exactly three attempts, each
+at least the 2 s backoff after the last (about 5 s on an idle deployment,
+D1838), then `dead` with `connect_failed`, and the heartbeat moving the whole
+time -- a storm that starved the loop would be a hot loop by another name.
+Nothing is reversed: the dead rehearsal row is the record, the doctor counts
+it, and the `workflow` check must still read `ok`. It refuses a project
+without the facility or without an outbound connector.
+
+### The restore drill's member
+
+`workflow_runs` also carries `deliveries`: the restored cluster's deliveries
+by status (`pending`, `delivered`, `dead`), or `{"value": null, "reason":
+...}` when the backup predates migration 0036. What the outbox held survives a
+restore; no endpoint, payload or event id is in the record.
+
+### If something goes wrong
+
+**A sender sees `401 signature_invalid`.** One answer for every cause, by
+design. It is the key -- the right connector's, from the CURRENT master (a
+redeploy after a rotation changed it) -- or the clock: a request more than 300
+s from the sender's own `t` is refused exactly like a forgery. The refusal is
+in the `auth` service's log as a request line with the route template and the
+status, and nowhere else (`apg-diag` cannot read that log, D380).
+
+**A sender sees `409 agent_scopes_differ`.** The bound agent's scopes were
+widened or narrowed since it was bound; `status` shows the binding
+`agent_scopes_differ`. Put the agent's scopes back, or bind a new agent with
+exactly the definition's.
+
+**Deliveries are pending and not moving.** Either the connector is disabled
+(held, by design), or the `auth` container has no key file -- the facility is
+off in the deployed document, or the deploy that enabled it never ran. The
+doctor's clause and `status` say which; the `auth` log does not.
+
+**A delivery is dead.** `status` names its event and its token (`http_500`,
+`connect_failed`, `timeout`, ...). A dead letter is visible, not replayable
+(D1798): fix the receiver, and the next event is delivered normally.

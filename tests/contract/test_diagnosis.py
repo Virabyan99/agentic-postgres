@@ -712,6 +712,71 @@ def test_an_unread_approval_count_is_said_as_not_read_and_never_as_zero() -> Non
     assert dict(check.evidence)["approvals_pending"] == "null"
 
 
+def test_the_workflow_check_reports_deliveries_with_no_threshold() -> None:
+    """Session 34 (D1803, ADR 0238): four more numbers in the SAME check, and
+    still no verdict on them.
+
+    A dead letter is a receiver's refusal recorded as designed, and a
+    pending delivery an hour old is what a connector disabled with work
+    queued looks like -- so `OK` at every count and every age, with every
+    number in the sentence. With nothing pending there is no oldest, and
+    the sentence says the count alone rather than inventing an age of zero.
+    """
+    for pending in (0, 1, 10**4):
+        for dead in (0, 1, 10**4):
+            for age in (0, 59, 10**6):
+                check = diagnosis.workflow_record(
+                    definitions=1,
+                    runs="succeeded=1",
+                    steps="succeeded=1",
+                    oldest_claimed_lease_age_seconds=None,
+                    heartbeat_age_seconds=4,
+                    heartbeat_holder="apg-host:41:deadbeef",
+                    approvals_pending=0,
+                    deliveries_pending=pending,
+                    deliveries_dead=dead,
+                    oldest_pending_delivery_age_seconds=age if pending else None,
+                    connectors_enabled=2,
+                )
+                assert check.verdict == diagnosis.OK, (pending, dead, age, check.verdict)
+                oldest = f" (oldest {age}s)" if pending else ""
+                assert (
+                    f"deliveries pending {pending}{oldest}, dead {dead}; connectors enabled 2;"
+                    in check.detail
+                ), check.detail
+                evidence = dict(check.evidence)
+                assert evidence["deliveries_pending"] == str(pending)
+                assert evidence["deliveries_dead"] == str(dead)
+                assert evidence["connectors_enabled"] == "2"
+
+
+def test_an_unread_delivery_count_is_said_as_not_read_and_never_as_zero() -> None:
+    """`None` renders *not read* with its reason and `null` in the evidence;
+    the check stays `OK` because the substrate WAS read (ADR 0195's third
+    outcome at the member it belongs to). A reading missing ANY of the
+    three counts is not read -- never a sentence with a hole in it."""
+    base = {
+        "definitions": 2,
+        "runs": "succeeded=3",
+        "steps": "succeeded=9",
+        "oldest_claimed_lease_age_seconds": None,
+        "heartbeat_age_seconds": 4,
+        "heartbeat_holder": None,
+    }
+    check = diagnosis.workflow_record(**base)
+    assert check.verdict == diagnosis.OK
+    assert "deliveries: not read (the substrate predates 1.12.0)" in check.detail
+    assert "deliveries pending" not in check.detail
+    assert dict(check.evidence)["deliveries_pending"] == "null"
+    for missing in (
+        {"deliveries_dead": 0, "connectors_enabled": 0},
+        {"deliveries_pending": 0, "connectors_enabled": 0},
+        {"deliveries_pending": 0, "deliveries_dead": 0},
+    ):
+        partial = diagnosis.workflow_record(**base, **missing)
+        assert "deliveries: not read" in partial.detail, missing
+
+
 def test_an_overdue_lease_is_reported_in_the_detail_rather_than_only_in_the_evidence() -> None:
     """An operator reading the table sees `ok` either way, so the one fact that
     tells them to look is in the sentence beside it."""

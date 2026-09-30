@@ -592,6 +592,11 @@ def workflow_record(
     approvals_pending: int | None = None,
     oldest_pending_approval_age_seconds: int | None = None,
     approvals_detail: str = "the substrate predates 1.11.0",
+    deliveries_pending: int | None = None,
+    deliveries_dead: int | None = None,
+    oldest_pending_delivery_age_seconds: int | None = None,
+    connectors_enabled: int | None = None,
+    deliveries_detail: str = "the substrate predates 1.12.0",
 ) -> Check:
     """What the workflow substrate holds, and how long ago the loop asked for work.
 
@@ -632,6 +637,16 @@ def workflow_record(
     such keys, and reporting that as zero pending would be D600's reassuring
     null (ADR 0195). A status `compensating` reaches `runs` like any other,
     because the probe admits a status by its SHAPE (D1693).
+
+    **Since 1.12.0 (Session 34, D1803): the connectors' deliveries** --
+    pending and dead, how long the oldest pending one has waited, and how
+    many connectors are enabled. Still this check and not a thirteenth: a
+    delivery is the loop's second pass, and it moves no count in any sheet.
+    Still no threshold: a dead letter is a receiver's refusal recorded as
+    designed (ADR 0238), and a pending delivery an hour old is what a
+    connector disabled with work queued looks like. `None` is *not read*,
+    with `deliveries_detail` -- a 1.11.0 cluster's counts carry no such keys
+    (ADR 0195), exactly as the approvals above.
     """
     facts = _pairs(
         definitions=definitions,
@@ -642,6 +657,10 @@ def workflow_record(
         heartbeat_holder=heartbeat_holder,
         approvals_pending=approvals_pending,
         oldest_pending_approval_age_seconds=oldest_pending_approval_age_seconds,
+        deliveries_pending=deliveries_pending,
+        deliveries_dead=deliveries_dead,
+        oldest_pending_delivery_age_seconds=oldest_pending_delivery_age_seconds,
+        connectors_enabled=connectors_enabled,
     )
     if definitions is None:
         return _check(
@@ -669,11 +688,23 @@ def workflow_record(
             else ""
         )
         approvals = f"approvals pending {approvals_pending}{oldest}"
+    if deliveries_pending is None or deliveries_dead is None or connectors_enabled is None:
+        deliveries = f"deliveries: not read ({deliveries_detail})"
+    else:
+        waited = (
+            f" (oldest {oldest_pending_delivery_age_seconds}s)"
+            if oldest_pending_delivery_age_seconds is not None
+            else ""
+        )
+        deliveries = (
+            f"deliveries pending {deliveries_pending}{waited}, dead {deliveries_dead}; "
+            f"connectors enabled {connectors_enabled}"
+        )
     return _check(
         "workflow",
         OK,
         f"{definitions} definitions; runs {runs}; steps {steps}; {heartbeat}{overdue}; "
-        f"{approvals}; counts and ages only, no threshold (ADR 0226)",
+        f"{approvals}; {deliveries}; counts and ages only, no threshold (ADR 0226)",
         facts,
     )
 

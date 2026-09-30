@@ -221,6 +221,12 @@ def poisoned_run(monkeypatch: pytest.MonkeyPatch, doctor: Any) -> None:
                         # cluster computes, so the leak scans cover the line.
                         "approvals_pending": 2,
                         "oldest_pending_approval_age_seconds": SUBPROCESS,
+                        # Session 34's four keys, the canary again in the
+                        # one age the cluster computes.
+                        "deliveries_pending": 3,
+                        "deliveries_dead": 1,
+                        "oldest_pending_delivery_age_seconds": SUBPROCESS,
+                        "connectors_enabled": 2,
                     }
                 )
                 + "\n"
@@ -794,6 +800,68 @@ def test_the_workflow_probe_reports_counts_when_the_cluster_answers(doctor: Any)
     assert evidence["approvals_pending"] == "2"
     assert evidence["oldest_pending_approval_age_seconds"] == "null"
     assert "approvals pending 2;" in check.detail
+    # Session 34: the three counts kept, the canary in the age dropped.
+    assert evidence["deliveries_pending"] == "3"
+    assert evidence["deliveries_dead"] == "1"
+    assert evidence["oldest_pending_delivery_age_seconds"] == "null"
+    assert evidence["connectors_enabled"] == "2"
+    assert "deliveries pending 3, dead 1; connectors enabled 2;" in check.detail
+
+
+def test_a_pre_connectivity_substrate_is_reported_not_zeroed(
+    doctor: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 1.11.0 cluster's counts carry no delivery keys, and that is not zero
+    (D1803, ADR 0195).
+
+    Driven through the probe with the document 0035's `workflow_counts`
+    returns. *deliveries pending 0, dead 0* would tell the operator of a
+    deployment that predates connectors that nothing is queued -- true by
+    accident, and false the day a 1.12.0 function fails to carry them. The
+    control is the same probe over 0036's document, which IS read.
+    """
+
+    def answer(counts: dict[str, Any]) -> Any:
+        return lambda *a, **k: subprocess.CompletedProcess(
+            args=list(a), returncode=0, stdout=json.dumps(counts) + "\n", stderr=""
+        )
+
+    before = {
+        "definitions": 1,
+        "runs": {"succeeded": 1},
+        "steps": {"succeeded": 2},
+        "oldest_claimed_lease_age_seconds": None,
+        "heartbeat_age_seconds": 3,
+        "heartbeat_holder": "apg-host-01:41:deadbeef",
+        "approvals_pending": 0,
+        "oldest_pending_approval_age_seconds": None,
+    }
+    monkeypatch.setattr(doctor, "run", answer(before))
+    check = doctor.probe_workflow(document())
+    assert check.verdict == diagnosis.OK, check.detail
+    assert "deliveries: not read (the substrate predates 1.12.0)" in check.detail
+    assert "deliveries pending" not in check.detail
+    assert dict(check.evidence)["deliveries_pending"] == "null"
+
+    malformed = {**before, "deliveries_pending": "3", "deliveries_dead": 0,
+                 "connectors_enabled": 0}  # fmt: skip
+    monkeypatch.setattr(doctor, "run", answer(malformed))
+    check = doctor.probe_workflow(document())
+    assert "deliveries: not read (the reading did not arrive in the shape" in check.detail
+
+    after = {
+        **before,
+        "deliveries_pending": 0,
+        "deliveries_dead": 0,
+        "oldest_pending_delivery_age_seconds": None,
+        "connectors_enabled": 0,
+    }
+    monkeypatch.setattr(doctor, "run", answer(after))
+    check = doctor.probe_workflow(document())
+    assert "deliveries pending 0, dead 0; connectors enabled 0;" in check.detail, (
+        "the control failed: a 1.12.0 count was not read"
+    )
+    assert dict(check.evidence)["deliveries_pending"] == "0"
 
 
 def test_a_pre_gate_substrate_is_reported_not_zeroed(

@@ -869,7 +869,21 @@ def probe_workflow(document: dict[str, Any]) -> diagnosis.Check:
     else:
         pending = _whole_number(counts.get("approvals_pending"))
         approvals_detail = "the reading did not arrive in the shape it was asked for"
+    # Session 34: 0036's four keys, the same rule. ABSENT is a 1.11.0
+    # substrate; present and not a whole number is the wrong shape; neither is
+    # zero deliveries (ADR 0195, D1803).
+    if "deliveries_pending" not in counts:
+        deliveries_detail = "the substrate predates 1.12.0"
+    else:
+        deliveries_detail = "the reading did not arrive in the shape it was asked for"
     return diagnosis.workflow_record(
+        deliveries_pending=_whole_number(counts.get("deliveries_pending")),
+        deliveries_dead=_whole_number(counts.get("deliveries_dead")),
+        oldest_pending_delivery_age_seconds=_whole_number(
+            counts.get("oldest_pending_delivery_age_seconds")
+        ),
+        connectors_enabled=_whole_number(counts.get("connectors_enabled")),
+        deliveries_detail=deliveries_detail,
         approvals_pending=pending,
         oldest_pending_approval_age_seconds=_whole_number(
             counts.get("oldest_pending_approval_age_seconds")

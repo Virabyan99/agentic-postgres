@@ -822,6 +822,8 @@ sql_answer() {
     *workflow_counts*)                printf '%s\n' "${APG_WORKFLOW_RUNS}" ;;
     # Session 33, above `count(*)` for the same reason: the statement counts.
     *workflow_approval*)              printf '%s\n' "${APG_WORKFLOW_APPROVALS}" ;;
+    # Session 34, above `count(*)` for the same reason.
+    *connector_delivery*)             printf '%s\n' "${APG_CONNECTOR_DELIVERIES}" ;;
     *"max(version)"*)                 printf '20260101000000\n' ;;
     *"count(*)"*)                     printf '21\n' ;;
     *"SELECT 1"*)                     printf '1\n' ;;
@@ -997,6 +999,8 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         # Session 33: the approvals by status, two statuses so neither can be
         # a constant the command wrote itself.
         ("APG_WORKFLOW_APPROVALS", '{"approved": 3, "expired": 1}'),
+        # Session 34: the deliveries by status, two statuses for the same reason.
+        ("APG_CONNECTOR_DELIVERIES", '{"dead": 1, "pending": 2}'),
     ):
         monkeypatch.setenv(name, value)
 
@@ -1092,6 +1096,7 @@ def test_the_drill_reads_the_restored_clusters_workflow_runs_or_says_why_not(
         "value": {"succeeded": 2},
         "reason": "",
         "approvals": {"value": {"approved": 3, "expired": 1}, "reason": ""},
+        "deliveries": {"value": {"dead": 1, "pending": 2}, "reason": ""},
     }
 
     monkeypatch.setenv("APG_WORKFLOW_RUNS", "")
@@ -1130,6 +1135,35 @@ def test_the_drill_evidence_carries_approvals_or_null_with_a_reason(
         "the backup predates migration 0035"
     )
     assert document["workflow_runs"]["value"] == {"succeeded": 2}
+    assert document["verdict"]["passed"] is True
+
+
+def test_the_drill_evidence_carries_deliveries_or_null_with_a_reason(
+    rig: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Session 34 (ADR 0238, D1802): the outbox by status, or null and why.
+
+    REC-EVT-001's claim is that a restored drill carries the undelivered
+    deliveries the live cluster held; its offline half is this member. Both
+    branches through the real command: counted, then a cluster restored from a
+    backup taken before 0036 -- runs and approvals, no delivery table -- which
+    carries `null` WITH the reason and leaves the approvals beside it
+    untouched. `{}` would say *nothing was ever queued* (D600).
+    """
+    assert _drive(rig) == 0
+    counted = _newest_evidence(rig)["workflow_runs"]["deliveries"]
+    assert counted == {"value": {"dead": 1, "pending": 2}, "reason": ""}
+
+    monkeypatch.setenv("APG_CONNECTOR_DELIVERIES", "")
+    assert _drive(rig) == 0
+    document = _newest_evidence(rig)
+    absent = document["workflow_runs"]["deliveries"]
+    assert absent["value"] is None
+    assert absent["reason"] == (
+        "app_private.connector_delivery is not present in the restored cluster; "
+        "the backup predates migration 0036"
+    )
+    assert document["workflow_runs"]["approvals"]["value"] == {"approved": 3, "expired": 1}
     assert document["verdict"]["passed"] is True
 
 

@@ -112,6 +112,13 @@ def facts(**overrides: Any) -> rehearsal.Facts:
         # below. Present in the base for the two parametrised sweeps' sake, the
         # same reason the two manifests above are.
         "workflow_heartbeat": HOLDER_BEFORE,
+        # Session 34: `delivery-retry-storm` refuses without the facility, the
+        # connectors and the count before, asserted below; present here for the
+        # parametrised sweeps, the same reason as the heartbeat.
+        "connectors_enabled": True,
+        "database_name": "apg_fixture_alpha_dev",
+        "outbound_connectors": ("note-embedded", "notes-deadletter"),
+        "rehearsal_deliveries_before": 4,
     }
     base.update(overrides)
     return rehearsal.Facts(**base)
@@ -372,6 +379,28 @@ def test_provider_loss_is_recorded_not_induced() -> None:
             {"drift_foreign": "ok", "drift_deployed": "ok"},
             "not problem",
         ),
+        (
+            "delivery-retry-storm",
+            {
+                "rehearsal_deliveries_before": 4,
+                "rehearsal_deliveries_after": 5,
+                "attempts": 3,
+                "status": "dead",
+                "last_error": "connect_failed",
+                "attempt_seconds": [1.0, 6.1, 11.2],
+                "heartbeat_moved": True,
+            },
+            {
+                "rehearsal_deliveries_before": 4,
+                "rehearsal_deliveries_after": 5,
+                "attempts": 2,
+                "status": "dead",
+                "last_error": "connect_failed",
+                "attempt_seconds": [1.0, 6.1],
+                "heartbeat_moved": True,
+            },
+            "attempted 2 times",
+        ),
     ],
 )
 def test_a_reader_that_read_nothing_is_unread_never_read(
@@ -447,6 +476,9 @@ def deployed_document(*, mirror: bool = True, lock_sha: str | None = LOCK_SHA) -
             "retain_full": 2,
         },
         "mcp": {"status": "ready", "capability_lock_sha256": lock_sha},
+        # Session 34 (outputs 19): the facility is on, so the eleventh
+        # scenario plans; a proof below turns it off.
+        "connectors": {"enabled": True},
     }
     if mirror:
         document["backup"]["mirror"] = {
@@ -467,8 +499,16 @@ class Recorded:
     health service was killed and whether the policy brings it back, which
     tagged rules stand in DOCKER-USER, and the files the verbs would read."""
 
-    def __init__(self, *, restart_on_kill: bool = True) -> None:
+    def __init__(self, *, restart_on_kill: bool = True, storm: str = "healthy") -> None:
         self.calls: list[list[str]] = []
+        # Session 34: the storm's cluster. Four OLD rehearsal rows exist, the
+        # newest of them dead with three attempts -- exactly what a healthy
+        # storm ends as, so an observer that read it as its own would pass
+        # without inducing anything. `storm` picks the one way it goes wrong.
+        self.storm = storm
+        self.storm_induced = False
+        self.storm_polls = 0
+        self.heartbeat_ticks = 0
         self.restart_on_kill = restart_on_kill
         self.killed = False
         self.started = False
@@ -519,6 +559,8 @@ class Recorded:
             return answer()
         if argv[:2] == ["docker", "restart"]:
             return answer()
+        if argv[:2] == ["docker", "exec"] and "psql" in argv:
+            return answer(self.storm_psql(argv[-1]))
         if argv[:2] == ["docker", "exec"]:
             return answer(code=41 if "-e" in argv else 0)
         if argv[0] == "iptables":
@@ -537,6 +579,33 @@ class Recorded:
         if len(argv) > 1 and argv[1].endswith("doctor.py"):
             return answer(self.doctor(argv))
         raise AssertionError(f"unexpected command {argv}")
+
+    def storm_psql(self, sql: str) -> str:
+        """The three statements the storm sends, answered from its state."""
+        if sql == rehearsal.OUTBOUND_CONNECTORS:
+            return '["note-embedded", "notes-deadletter"]\n'
+        if "connector_rehearse_delivery" in sql:
+            self.storm_induced = True
+            return "0b1c2d3e-4f50-4617-8293-a4b5c6d7e8f9\n"
+        assert sql == rehearsal.STORM_READING, sql
+        if self.storm != "frozen_heartbeat":
+            self.heartbeat_ticks += 1
+        beat = f"2026-09-30 12:00:{self.heartbeat_ticks:02d}+00"
+        if not self.storm_induced:
+            newest = {"status": "dead", "attempts": 3, "last_error": "connect_failed"}
+            return json.dumps(
+                {"rehearsal_deliveries": 4, "newest": newest, "heartbeat_seen_at": beat}
+            )
+        self.storm_polls += 1
+        total = 2 if self.storm == "two_attempts" else 3
+        attempts = total if self.storm == "hot" else min(self.storm_polls, total)
+        done = attempts == total
+        newest = {
+            "status": "dead" if done else "pending",
+            "attempts": attempts,
+            "last_error": "connect_failed",
+        }
+        return json.dumps({"rehearsal_deliveries": 5, "newest": newest, "heartbeat_seen_at": beat})
 
     def iptables(self, argv: list[str], answer: Any) -> subprocess.CompletedProcess:
         if argv[1] == "-I":
@@ -1615,3 +1684,128 @@ def test_a_null_evidence_value_reads_as_absent_rather_than_as_the_word() -> None
     assert rehearsal.doctor_evidence(document, "workflow", "not_a_key") is None
     assert rehearsal.doctor_evidence(document, "agent record", "heartbeat_holder") is None
     assert rehearsal.doctor_evidence("not json", "workflow", "heartbeat_holder") is None
+
+
+# ---------------------------------------------------------------------------
+# Session 34: delivery-retry-storm (ADR 0238, D1801, D1838, CONN-STORM-001)
+# ---------------------------------------------------------------------------
+
+
+def test_the_storm_is_refused_without_the_facility_or_a_connector(
+    rehearse: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two refusals, each before anything is induced. The facility is the
+    deployed document's own fact, so even `--plan` refuses a project without
+    it; the connectors are a READING, so the refusal of a project that
+    installed none happens after `--plan` and before the in-progress file.
+    Control: the same facts with both present plan and pass the reading
+    refusal."""
+    with pytest.raises(rehearsal.RehearsalError, match="has not enabled the connectors"):
+        rehearsal.plan("delivery-retry-storm", facts(connectors_enabled=False))
+
+    planned = rehearsal.plan("delivery-retry-storm", facts())
+    for missing in (
+        {"outbound_connectors": None},
+        {"outbound_connectors": ()},
+        {"rehearsal_deliveries_before": None},
+    ):
+        with pytest.raises(rehearsal.RehearsalError, match="declares no outbound connector"):
+            rehearsal.refuse_without_a_reading(planned, facts(**missing))
+    rehearsal.refuse_without_a_reading(planned, facts())
+
+    document = deployed_document()
+    document["connectors"] = {"enabled": False}
+    rehearse.PATHS["outputs"].write_text(json.dumps(document), encoding="utf-8")
+    code, runner = drive(rehearse, monkeypatch, "delivery-retry-storm", "--plan")
+    assert code == rehearse.EXIT_REFUSED
+    assert mutating_calls(runner) == []
+    assert not rehearse.PATHS["state_file"].exists()
+
+
+def test_the_storm_induces_one_rehearsal_delivery_through_the_first_outbound_connector() -> None:
+    """The induce is ONE statement, as the superuser, through `container_exec`'s
+    argv with no `-i` -- never an endpoint, never a second connector."""
+    plan = rehearsal.plan("delivery-retry-storm", facts())
+    (induce,) = plan.induce
+    assert induce.kind == "run"
+    assert induce.argv[:3] == ("docker", "exec", f"{COMPOSE}-postgres-1")
+    assert "-i" not in induce.argv
+    assert induce.argv[-1] == "SELECT app_private.connector_rehearse_delivery('note-embedded')"
+    assert plan.bound_seconds == rehearsal.BOUNDS["delivery-retry-storm"] == 60
+    (reading,) = plan.observe
+    assert reading.argv[-1] == rehearsal.STORM_READING
+    for text in (rehearsal.STORM_READING, *induce.argv):
+        assert "endpoint" not in text and "payload" not in text
+    with pytest.raises(rehearsal.RehearsalError, match="named an outbound connector"):
+        rehearsal.plan("delivery-retry-storm", facts(outbound_connectors=("x'); DROP",)))
+
+
+def test_the_storm_observes_three_attempts_and_a_dead_letter(
+    rehearse: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Driven end to end against the recorded cluster: the connectors and the
+    count read BEFORE the induce, one induce, the delivery polled until dead,
+    the doctor's workflow check verified -- and the verdict `read`. The old
+    dead rehearsal rows the cluster already held (the recorded runner's four)
+    are never read as the storm's own: before the induce the count is 4, the
+    storm's row is the fifth."""
+    code, runner = drive(rehearse, monkeypatch, "delivery-retry-storm")
+    record = evidence(rehearse, "delivery-retry-storm")
+    assert code == 0, record
+    assert record["verdict"] == "read", record["why"]
+    readings = record["readings"]
+    assert readings["rehearsal_deliveries_before"] == 4
+    assert readings["rehearsal_deliveries_after"] == 5
+    assert readings["attempts"] == 3 and readings["status"] == "dead"
+    assert readings["last_error"] == "connect_failed"
+    assert len(readings["attempt_seconds"]) == 3
+    assert readings["heartbeat_moved"] is True
+    assert record["verification"] == {"the doctor's workflow check reads ok": True}
+    induces = [argv for argv in runner.calls if "connector_rehearse_delivery" in argv[-1]]
+    assert len(induces) == 1
+    first_induce = runner.calls.index(induces[0])
+    listed = [i for i, argv in enumerate(runner.calls) if argv[-1] == rehearsal.OUTBOUND_CONNECTORS]
+    assert listed and listed[0] < first_induce, "the connectors were not read before the induce"
+    assert not rehearse.PATHS["state_file"].exists()
+
+    for storm, why in (("two_attempts", "attempted 2 times"), ("hot", "hot loop")):
+        path = rehearse.PATHS["evidence"] / f"rehearsal-{KEY}-delivery-retry-storm-{RID}.json"
+        path.unlink()
+        code, _ = drive(rehearse, monkeypatch, "delivery-retry-storm", runner=Recorded(storm=storm))
+        assert code == rehearse.EXIT_UNREAD, storm
+        assert why in evidence(rehearse, "delivery-retry-storm")["why"], storm
+
+
+def test_the_storm_verdict_needs_the_heartbeat_to_move(
+    rehearse: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A storm that starved the loop would be a hot loop by another name, so a
+    delivery dead on schedule with the heartbeat standing still is `unread`.
+    The pure half at every other condition met, then end to end against a
+    cluster whose `seen_at` never moves. Control: the healthy storm, read."""
+    healthy = {
+        "rehearsal_deliveries_before": 4,
+        "rehearsal_deliveries_after": 5,
+        "attempts": 3,
+        "status": "dead",
+        "last_error": "connect_failed",
+        "attempt_seconds": [1.0, 6.1, 11.2],
+        "heartbeat_moved": True,
+    }
+    assert rehearsal.verdict("delivery-retry-storm", healthy)[0] == "read"
+    outcome, why = rehearsal.verdict("delivery-retry-storm", {**healthy, "heartbeat_moved": False})
+    assert outcome == "unread" and "heartbeat did not move" in why
+    for broken, words in (
+        ({"rehearsal_deliveries_after": 4}, "not one more"),
+        ({"status": "pending"}, "not dead"),
+        ({"last_error": "http_500"}, "http_500"),
+        ({"attempt_seconds": [1.0, 2.5, 7.0]}, "hot loop"),
+    ):
+        outcome, why = rehearsal.verdict("delivery-retry-storm", {**healthy, **broken})
+        assert outcome == "unread" and words in why, (broken, why)
+
+    code, _ = drive(
+        rehearse, monkeypatch, "delivery-retry-storm", runner=Recorded(storm="frozen_heartbeat")
+    )
+    assert code == rehearse.EXIT_UNREAD
+    assert "heartbeat did not move" in evidence(rehearse, "delivery-retry-storm")["why"]

@@ -156,10 +156,30 @@ embedding is upserted without returning the value it replaced.
 
 A wait step names no capability, makes no call and mints no token: the run
 parks for `seconds` (1–3600, strictly less than the run's `timeout_seconds`)
-and then continues. A crash during the wait does not restart it. A wait
-records no result, so `{{steps.pause.…}}` is a compile error. **`wait:
-{event: …}` is refused**: a wait on an event arrives in Session 34 with the
-events that resume it.
+and then continues. A crash during the wait does not restart it. A time wait
+records no result, so `{{steps.pause.…}}` is a compile error.
+
+**Since 1.12.0 a wait may name an event** (ADR 0239):
+
+```yaml
+  - name: embedded
+    wait:
+      event: note_embedding.set@1
+      match:
+        note_id: "{{input.note_id}}"
+      seconds: 600
+```
+
+The run parks until an event of that name and version is emitted by **the
+run's own owner** with a payload that CONTAINS every `match` member, or until
+`seconds` pass. Served, the step succeeds with outcome `event_received` and
+the payload as its result; not served, it fails `event_timeout`. `match` has
+at most eight members, and each is a literal or ONE whole reference to the
+input or an earlier step, resolved once when the step parks. An event is
+written only by a reviewed definer function in your project's own migration
+set calling `app.emit_event(name, version, payload)`, which no role may
+call directly (ADR 0235) -- `docs/connectors.md` is where events leave the
+deployment.
 
 ## The ten verbs
 
@@ -309,10 +329,14 @@ stopped.
 
 ## What is not here yet
 
-| Not yet | Where |
+| Not yet | Why |
 |---|---|
-| Events — a run started by something other than a call, and `wait: {event}` | Session 34 |
-| Outbound delivery and inbound connectors | Session 34 |
+| Redelivering a dead letter | A human write to the outbox: a route, a scope and an audit story of its own. Dead letters are VISIBLE in `bin/connector.sh status`, not replayable (D1798) |
+| Pruning events, deliveries and receipts | They join runs and approvals in the retention story an operator horizon would answer (ADR 0213's shape) |
+| An event from anywhere but your own SQL | Events are emitted by your project's definer functions and reach only your project |
+
+Events, schedules, outbound delivery and inbound connectors arrived in 1.12.0:
+`docs/connectors.md`.
 
 A run cannot branch, loop, fan out or call another run, and none of those is on
 a list above. Workflows here are a short, reviewed sequence over your own

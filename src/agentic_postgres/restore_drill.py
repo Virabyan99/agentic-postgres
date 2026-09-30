@@ -686,6 +686,8 @@ def evidence_document(
         # Since Session 33 the member carries `approvals` -- counts by status,
         # or null with the reason (a backup before migration 0035) -- nested
         # rather than a sibling, so the one member says what the substrate held.
+        # Since Session 34 it carries `deliveries` the same way (a backup before
+        # migration 0036): what the outbox held, pending and dead (REC-EVT-001).
         "workflow_runs": observed.get("workflow_runs"),
         "smoke": smoke,
         "verdict": drill_verdict(observed=observed, repository=repository, smoke=smoke),

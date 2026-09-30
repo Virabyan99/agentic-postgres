@@ -76,8 +76,18 @@ Scenarios, each with its reader:
                              without them: it asks whether THIS host would admit
                              THAT project, and neither is derivable from a
                              deployed document.
+  delivery-retry-storm       one rehearsal delivery through the first installed
+                             outbound connector, sent to the auth container's
+                             discard port and never to the endpoint (ADR 0238);
+                             the delivery's row and the worker heartbeat, every
+                             second: exactly 3 attempts at least 2 s apart, then
+                             dead with connect_failed, the heartbeat moving.
+                             Nothing is reversed -- the dead row is the record --
+                             and the doctor's workflow check must read ok.
+                             Refused without the connectors facility or an
+                             outbound connector.
 
-  --plan       Print induce, observe and reverse with every command; run nothing.
+  --plan      Print induce, observe and reverse with every command; run nothing.
   reverse      Replay the reversal an interrupted rehearsal recorded in
                /etc/agentic-postgres/rehearsal-in-progress.json.
 

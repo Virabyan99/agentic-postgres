@@ -631,6 +631,7 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1840** | 7 | §5 Run 7 item 3: *"`agent_not_active`, `agent_already_bound`, `agent_scopes_differ`, `no_endpoint`, `agent_not_needed`, `agent_required` 409"*; item 2: *"`PT403 scope_not_held` → 409 `agent_scopes_differ`"*. | `connector_enable` (0036) raises no `agent_required`: an inbound or scheduled connector enabled with a NULL agent finds no agent row and raises `agent_not_active`. `agent_not_needed` is `PT422`, not `PT409`. `connector_accept` reaches `workflow_enqueue`, whose `PT403` carries TWO words (0034: `scope_not_held`, and *"this operation requires an active agent identity"*), and `connector_scopes_match` reads scopes, not status -- so a revoked agent whose scopes still equal reaches the second. | The routes answer the functions' words: no `agent_required` (a missing agent is `agent_not_active`, and the 409's description says so); **`agent_not_needed` is a 422**, the function's own class -- input an outbound connector cannot take; the inbound route maps `PT403 scope_not_held` → 409 `agent_scopes_differ` and any other `PT403` → 409 `agent_not_active`, the status document's word for that binding. An unrecognised error is re-raised, never reported as a refusal (proved). | 0236 |
 | **D1841** | 7 | §5 Run 7 item 6: *"`test_auth_service_shape.py::test_the_application_serves_exactly_the_declared_paths` (unchanged text, new set)"*. | A second pin in the same module, `test_the_admin_surface_is_reachable_only_under_admin`, requires every published path under THREE prefixes (`/auth/`, `/admin/`, `/workflows/`) and failed on `/connectors/{name}` in the targeted run. | Widened to the measured set -- FOUR prefixes -- and made stricter in the same edit: `/connectors/` admits exactly `["/connectors/{name}"]`, so a second path under it fails (CLAUDE.md §6: widening to a measured set is not weakening). | 0237 |
 | **D1842** | 7 | §5 Run 7 item 1: *"regenerate every committed lock the tests compare (`bin/mcp-contract.sh lock` / `check`)"*; items 2-5 name no further refusal. | No committed file carries the administrative vocabulary (`admin_audit:read` is in no committed lock; Session 33's `admin_workflows:approve` commit regenerated none). **`bin/mcp-contract.sh check` and `check --project project.example.yaml` exit 0 after the enums moved.** The route and the command needed four decisions the plan does not name. | No lock regenerated -- `check` is the evidence. Decided: `X-Apg-Delivery` must be a CANONICAL lowercase uuid (it is inside the signed bytes as sent and the receipt's key as parsed; two spellings would be two signatures over one receipt), any other form being the 401; the 401 carries `WWW-Authenticate: APG-Signature` (RFC 9110) and nothing about why; `disable` refuses a non-empty body (400) rather than ignoring it; `key` refuses before asking for root when the manifest does not enable the facility or the set does not declare the name (exit 5), and `connector_keys.master_path` re-roots the contract's path at a module attribute a proof can move and nothing on the command line can. | 0237 |
+| **D1843** | 8 | §5 Run 8 item 3: *"a `Facts` member `outbound_connectors` … gathered … from `connector_status` through the doctor's evidence or a root `psql` … the induce through `container_exec.run` as `postgres`; observe: poll the delivery row every 1 s … and the heartbeat"*; *"`verdict`'s branch: PASS only if …"*. | `connector_rehearse_delivery` returns the delivery id to an induce whose output `rehearse()` discards, so the observer must FIND the row; the newest `rehearsal` row is an older storm's dead row whenever the induce did not land -- dead, 3 attempts, `connect_failed`, a storm that would read as passed. The doctor carries no connector names and runs twelve checks per call, too slow to poll each second. `bin/rehearse.py`'s tests intercept the module's own `run`, not `container_exec.run`. The verdict vocabulary is `read`/`unread`, never PASS. | `Facts` gains `connectors_enabled` and `database_name` (document facts, free under `--plan`) and `outbound_connectors` and **`rehearsal_deliveries_before`** (READINGS, taken only when the storm will induce, D1694); the observer counts a row as the storm's only when the count is one MORE than before, and the verdict requires `after == before + 1`. One statement per poll (`rehearsal.STORM_READING`: the count, the newest row, `workflow_worker.seen_at`); every argv built by `container_exec.exec_argv` (no `-i`) and run through `rehearse.run` (stdin closed, bounded) -- ADR 0218's rule kept, and the recorded runner sees each call. The facility is refused by the PLANNER (free) and a missing connector or count by `refuse_without_a_reading`. The doctor's clause reads *"deliveries: not read (…)"*, the approvals clause's own colon, where the plan wrote it without one. | 0238 |
 
 ---
 
@@ -2103,8 +2104,9 @@ failed** -- the prefix pin (D1841) and `test_commands_are_executable_in_the_git_
 re-run green (`test_cli_contract` beside the shape module, then the shape
 module's 43). Its `ruff check` had also failed (E501 in the scheduled template,
 S105 on a secret's NAME) and was read only afterwards; fixed, clean, and the
-six modules the fixes touch re-run: 328 passed. Rows D1839–D1842. CI:
-CI_PENDING
+six modules the fixes touch re-run: 328 passed. Rows D1839–D1842. Commit
+`cd158ff`; CI by full SHA `cd158ff8546e9af372841954d9a434503b0cd13d`:
+`contract` **success** (run 36708948571).
 
 ### Run 8 — the readers and the pages: the doctor, the drill, the rehearsal, `docs/connectors.md`, operator guide §18
 
@@ -2188,7 +2190,72 @@ redaction`, `test_restore_test_command`, `test_rehearsal`,
 in the doctor and the drill, the delivery-retry-storm rehearsal, the
 connector pages`), push, CI.
 
-**Done.** *(the executor writes it.)*
+**Done.** 2026-09-30. **The doctor** (D1803): `diagnosis.workflow_record`
+takes `deliveries_pending`, `deliveries_dead`, `oldest_pending_delivery_age_seconds`,
+`connectors_enabled` and `deliveries_detail` (default *"the substrate predates
+1.12.0"*); the OK sentence gains *"deliveries pending N (oldest Ns), dead N;
+connectors enabled N"* -- or *"deliveries: not read (…)"* when ANY of the three
+counts is `None` -- and the four join the evidence; still no threshold;
+`bin/doctor.py`'s `probe_workflow` reads 0036's four keys, ABSENT → *predates*,
+present and malformed → *the reading did not arrive in the shape*. **The drill**
+(D1802): `bin/restore-test.py`'s `DELIVERIES_BY_STATUS` beside
+`APPROVALS_BY_STATUS`, nested as `workflow_runs.deliveries`, absent → *"…
+connector_delivery is not present in the restored cluster; the backup predates
+migration 0036"*; `restore_drill` passes the member whole (comment only).
+**The rehearsal** (D1801, D1843): `delivery-retry-storm` is the eleventh
+`SCENARIOS` member, `BOUNDS` 60; `_delivery_retry_storm` induces ONE
+`connector_rehearse_delivery('<first outbound by name>')` as `postgres` and
+observes `STORM_READING` every second (`STORM_POLL_SECONDS` 1.0) until the row
+leaves `pending` AND the heartbeat moved, or the bound; reverses nothing; verifies
+the doctor's `workflow` check `ok`; `_storm_verdict` is `read` only with one
+more rehearsal delivery than before, exactly 3 attempts, `dead`,
+`connect_failed`, three observed attempt times each ≥ 2 s apart (D1838's lower
+bound) and the heartbeat moved. `bin/rehearse.sh`'s usage and
+`docs/recovery-operations.md` §4 gain the row. **The pages**: NEW
+`docs/connectors.md` (indexed in `docs/README.md` beside Workflows) -- the three
+kinds, the file and the closed body, the manifest block, the scheme exactly with
+a worked `openssl` example **executed here: `3c87822a…8a257aba`, OpenSSL
+3.5.5, the digest `test_connector_facility.py` pins**, the inbound answers in
+their order, at-least-once and de-duplicating on `X-Apg-Delivery`, the edge's
+16 KiB and 20/s (burst 40, read from `infra/edge/dynamic/baseline.yaml`), the
+status document, what is not here; two claims were checked against the tree
+and corrected before commit (the body carries `event_id` too; an endpoint
+naming no outbound connector is REPORTED, not refused). `docs/workflows.md`:
+`### Wait` gains the event form and *What is not here yet* names D1798, pruning
+and foreign events. **`docs/operator-guide.md` §18**: enabling the facility as
+its own operation (`bootstrap-providers.sh --plan`/`--apply`, flags read from
+its own `--help`), the scopes and binding, the key (never stdout), rotating it
+(every connector at once), the doctor's clause, the rehearsal, the drill's
+member, *If something goes wrong*. No `--session` literal. **Proofs**:
+`test_diagnosis.py` (`test_the_workflow_check_reports_deliveries_with_no_threshold`
+over 27 magnitudes, `test_an_unread_delivery_count_is_said_as_not_read_and_never_as_zero`),
+`test_doctor_redaction.py` (the poisoned document gains 0036's keys with the
+canary in the age; `test_a_pre_connectivity_substrate_is_reported_not_zeroed`),
+`test_restore_test_command.py` (the stub's `APG_CONNECTOR_DELIVERIES`;
+`test_the_drill_evidence_carries_deliveries_or_null_with_a_reason`),
+`test_rehearsal.py` (the recorded runner answers the storm from a small state
+-- four OLD rehearsal rows, the newest dead at 3 attempts; the parametrised
+sweeps now over eleven: `test_every_scenario_plans_three_phases_and_prints_every_command`
+and `test_plan_reads_the_facts_and_runs_writes_and_moves_nothing`, the names
+§2 proposed as `…has_induce_observe_reverse_and_a_reader` and
+`test_plan_mutates_nothing`; the verdict table's storm row; four new:
+`test_the_storm_is_refused_without_the_facility_or_a_connector`,
+`test_the_storm_induces_one_rehearsal_delivery_through_the_first_outbound_connector`,
+`test_the_storm_observes_three_attempts_and_a_dead_letter`,
+`test_the_storm_verdict_needs_the_heartbeat_to_move`). **Battery 7/7 killed,
+each beside `test_connector_definition.py::test_the_three_kinds_compile`
+PASSED, the targets green before and after**: an absent member reported as zero;
+the storm read with two attempts; the heartbeat condition dropped; the drill
+writing `{}`; the facility check dropped; a retry sooner than the backoff
+accepted; the clause losing its deliveries line. **Targeted, once**:
+`test_diagnosis`, `test_doctor_readings`, `test_doctor_redaction`,
+`test_restore_test_command`, `test_rehearsal`, `test_documentation_index`,
+`test_session12_documented_path`, `test_acceptance_registry`,
+`test_evidence_claims`, `test_cli_contract`,
+`test_operator_commands_run_on_the_host`, `test_deployment_module_shape`,
+`test_printed_commands`, `test_repository_contract`: **1255 passed**, ruff clean
+(an earlier doc-guard run failed on `bin/rehearse.sh`'s executable bit, stripped
+by the `\\wsl$` write -- `chmod`, re-run green). Row D1843. CI: CI_PENDING
 
 ### Run 9 — the bump, the registry, the gate, and the trip's proofs
 
