@@ -632,6 +632,10 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1841** | 7 | §5 Run 7 item 6: *"`test_auth_service_shape.py::test_the_application_serves_exactly_the_declared_paths` (unchanged text, new set)"*. | A second pin in the same module, `test_the_admin_surface_is_reachable_only_under_admin`, requires every published path under THREE prefixes (`/auth/`, `/admin/`, `/workflows/`) and failed on `/connectors/{name}` in the targeted run. | Widened to the measured set -- FOUR prefixes -- and made stricter in the same edit: `/connectors/` admits exactly `["/connectors/{name}"]`, so a second path under it fails (CLAUDE.md §6: widening to a measured set is not weakening). | 0237 |
 | **D1842** | 7 | §5 Run 7 item 1: *"regenerate every committed lock the tests compare (`bin/mcp-contract.sh lock` / `check`)"*; items 2-5 name no further refusal. | No committed file carries the administrative vocabulary (`admin_audit:read` is in no committed lock; Session 33's `admin_workflows:approve` commit regenerated none). **`bin/mcp-contract.sh check` and `check --project project.example.yaml` exit 0 after the enums moved.** The route and the command needed four decisions the plan does not name. | No lock regenerated -- `check` is the evidence. Decided: `X-Apg-Delivery` must be a CANONICAL lowercase uuid (it is inside the signed bytes as sent and the receipt's key as parsed; two spellings would be two signatures over one receipt), any other form being the 401; the 401 carries `WWW-Authenticate: APG-Signature` (RFC 9110) and nothing about why; `disable` refuses a non-empty body (400) rather than ignoring it; `key` refuses before asking for root when the manifest does not enable the facility or the set does not declare the name (exit 5), and `connector_keys.master_path` re-roots the contract's path at a module attribute a proof can move and nothing on the command line can. | 0237 |
 | **D1843** | 8 | §5 Run 8 item 3: *"a `Facts` member `outbound_connectors` … gathered … from `connector_status` through the doctor's evidence or a root `psql` … the induce through `container_exec.run` as `postgres`; observe: poll the delivery row every 1 s … and the heartbeat"*; *"`verdict`'s branch: PASS only if …"*. | `connector_rehearse_delivery` returns the delivery id to an induce whose output `rehearse()` discards, so the observer must FIND the row; the newest `rehearsal` row is an older storm's dead row whenever the induce did not land -- dead, 3 attempts, `connect_failed`, a storm that would read as passed. The doctor carries no connector names and runs twelve checks per call, too slow to poll each second. `bin/rehearse.py`'s tests intercept the module's own `run`, not `container_exec.run`. The verdict vocabulary is `read`/`unread`, never PASS. | `Facts` gains `connectors_enabled` and `database_name` (document facts, free under `--plan`) and `outbound_connectors` and **`rehearsal_deliveries_before`** (READINGS, taken only when the storm will induce, D1694); the observer counts a row as the storm's only when the count is one MORE than before, and the verdict requires `after == before + 1`. One statement per poll (`rehearsal.STORM_READING`: the count, the newest row, `workflow_worker.seen_at`); every argv built by `container_exec.exec_argv` (no `-i`) and run through `rehearse.run` (stdin closed, bounded) -- ADR 0218's rule kept, and the recorded runner sees each call. The facility is refused by the PLANNER (free) and a missing connector or count by `refuse_without_a_reading`. The doctor's clause reads *"deliveries: not read (…)"*, the approvals clause's own colon, where the plan wrote it without one. | 0238 |
+| **D1844** | 9 | §5 Run 9 item 6: *"the installed side a worktree at `02ffbbd`, the candidate a `tar`-piped copy … both rendered as `project.example.yaml`"* → expect verdict `ok`. | **Measured: each tree rendering its OWN `project.example.yaml` reads verdict `blocked`**, reason *"the operator's own inputs moved: project_sha256"* -- the example manifest moved to schema 7 in Run 4 (D1824), and the recipe compared two different operator inputs. An operator's manifest does not move with a release. | The candidate renders the INSTALLED tree's manifest (copied in as `project.installed.yaml`): `bump minor`, `requires minor`, verdict `ok`, `operator_digests_moved []`, no `secret_required_added`; undeclared `requires patch`. Seven leaves, not D1811's five: the example set's own `migrations.project_set.count` 2 → 3 and `.lock_sha256` (its `0003`) are the two it did not name. Run 10's host reading uses each project's INSTALLED manifest, which is this rig's shape. | 0162 |
+| **D1845** | 9 | §5 Run 9 item 3: *"`inbox` … scopes EXACTLY `notes-inbox`'s required scopes as the status document reports them — read them from `GET /admin/connectors`"*; EVT-WAIT-002: *"read the note id from the `create` step's result"*. | `connector_status` carries NO `required_scopes` (0036: name, kind, binding, counts, dead letters); `notes-await-embedding` has no `create` step -- its wait comes first, on `{{input.note_id}}` (D1832). `ApiResponse` is frozen. | The agents' scopes are read from `app_private.connector.required_scopes` and `workflow_definition.required_scopes` as the superuser -- read, never typed, which was the plan's point; the waiting run's note is created by the proof and passed as its input; `inbound()` returns `(answer, delivery id)`. | — |
+| **D1846** | 9 | §5 Run 9 item 3: REC-EVT-001 compares *"`pending + dead` from `connector_delivery WHERE created_at <= target` with the drill's `workflow_runs.value.deliveries`"*. | The drill nests `deliveries` BESIDE `value`, not inside it (`restore-test.py`, Run 8); and a delivery pending at the target may be delivered or dead when the live cluster is read -- comparing today's statuses would race the loop. | The live side is rebuilt AS OF the target from each row's own times (pending: neither `delivered_at` nor `dead_at` by then; dead: `dead_at` by then) and compared per status with `workflow_runs.deliveries.value`; the floor (at least one undelivered row) is kept. | 0238 |
+| **D1847** | 9 | §2: CONN-FAC-001's *"`tests/contract/test_secret_contract.py` (whole — both directions)"*, CONN-CMD-001's *"`tests/contract/test_cli_contract.py` (whole, D1014)"*, CONN-STORM-001's proposed `test_every_scenario_has_induce_observe_reverse_and_a_reader` and `test_plan_mutates_nothing`. | No registry entry names a whole module; the two storm sweeps exist under their Session 18 names. **The gate's first run on `7161a19` stopped at step 2** (E501 in the Session 34 paragraph, left by an edit made after the pre-commit ruff pass). | The cells name specific tests (four secret-contract proofs, four CLI-contract guards) and the storm sweeps' real names; repaired forward in `0299500`, and the gate's second run is the record. | — |
 
 ---
 
@@ -2418,7 +2422,62 @@ Commit (`Session 34 Run 9: the bump to 1.12.0, the registry, the gate, the
 trip's proofs`), push, read CI. **Nothing goes to the host until this commit's
 CI is green by full SHA.**
 
-**Done.** *(the executor writes it.)*
+**Done.** 2026-09-30. **The registry**: `EVT|CONN` in the ID regex with the
+Session 34 sentence; sixteen entries, every node id checked against `pytest
+--collect-only` over the modules §2 names (all offline ids present but the
+two storm sweeps, which exist under their own names; the whole-module cells
+named as tests, D1847); `evidence_claims.py` sixteen claims, eleven in
+`OFFLINE_CLAIMS` -- **188 and 53, read from the tuples** -- and sixteen
+`CLAIM_INTRODUCED_IN` rows at 34; the three `THR-*` rows cite `CONN-IN-001/002`,
+`CONN-OUT-001/002`, `CONN-STORM-001` and collected node ids, the *until Run 9*
+sentences gone; the matrix regenerated (281 requirements). **The bump**:
+`CURRENT_SESSION = 34`, `VERSION` 1.12.0, the Session 34 paragraph ending on
+its price (`test_release_contract` asked for `1.12.0` in backticks, one
+*prices it a MINOR* sentence and a *schema moves* sentence -- this release's
+two are migratable, and it says so); README's status line; both release pages'
+release line and the operator guide's first table (36 migrations, outputs v19,
+manifest 1–7); the upgrade guide's `1.12.0` row; **every `--session 33` /
+`--through-session 33` moved, counted per file: README 1+1, pool-operations 1,
+upgrade-guide 1+1, api-operations 1+3, operator-guide 3+4** (the first pass
+stopped at the operator guide's four, and its earlier files were counted done
+before the second); `apg generate` moved the client's version fields,
+`--check` exit 0. **The trip's proofs**: `tests/deployment/test_session34_connectivity.py`
+(NEW, thirteen, `pytestmark` before the first test; fixtures `facility_on`,
+`connectors_admin`, `event_owner` -- beta's deployed lock read first --
+`agents` with scopes READ from the rows (D1845), `key_file` through `sudo`-run
+`bin/connector.sh key` against the host checkout's `project.beta.yaml`, its
+project key checked against beta's document, `sink` from beta's own auth
+image on `compose.networks.internal` under the alias `apg-s34-sink`, rig 34d's
+server with an arrival time added; `enabled()` through `bin/connector.sh`,
+disabling in `finally`) and `tests/recovery/test_session34_delivery_restore.py`
+(NEW, D1846). **The sweep collects `tests/deployment` before `tests/recovery`**
+(`testpaths = tests`, no randomising plugin installed), so the dead letter
+the deployment module leaves is there for REC-EVT-001. **`--setup-plan` with
+`APG_LIVE_HOST=1` and two rendered documents: 14 proofs planned, 0 errors;
+with none set, run: 14 skipped** (outputs in the scratchpad). **None of the
+fourteen has executed.** **`bin/session-34-check.sh`**: derived from 33's by
+a count-asserted script, the header and the three mode paragraphs rewritten
+whole; **the flag sets are EQUAL -- 59 and 59, `diff` empty** (the first
+derivation's header named `bootstrap-providers.sh --apply` in prose and the
+token diff caught `--apply`; reworded); the body differs from 33's by `readonly
+SESSION=34` alone; `SHELL_COMMANDS` gains it; `test_session_thirty_four_gate_modes.py`
+derived (the no-gap test at 33 → 34, the eleven offline names). **`upgrade
+plan` offline** (D1844): declared `bump minor`, **`requires minor`**, verdict
+`ok`, `changes [api_operation_added, document_schema_migratable,
+implementation, migration_added]`, `reasons []`, **no `secret_required_added`**;
+undeclared `requires patch`; seven leaves -- `template_version`,
+`schema_version` 18 → 19, `connectors.enabled` absent → false,
+`migrations.release_lock_sha256`, `inputs.secrets_contract_sha256`,
+`migrations.project_set.count` 2 → 3, `migrations.project_set.lock_sha256`;
+5,949 → 5,993 bytes. **The gates, on the clean tree**: `bin/session-01-check.sh`
+on `7161a19` **FAILED at step 2** (E501, D1847) → repair `0299500` → **PASSED**:
+6,768 contract tests passed, 0 failed, 3 skipped, 7,197 P0 collected, 281
+requirements current, 0 collisions; `bin/session-34-check.sh --mode offline`
+on `0299500` **PASSED on its first run**: 6,777 passed, 0 failed, 3 skipped,
+and `evidence/session-34-offline.json` carries **53 claims, 53 `passed`**
+(counted from the file), the eleven new ones among them. Rows D1844–D1847.
+**CI:** `02995006dd19075fb9fe599e63cd951b20aa67fb` → `contract` **success** (run
+36716092054) -- the condition for anything going to the host is met.
 
 ### Run 10 — the trip: the release on both projects, then beta's facility as its own operation, one sweep, the tag
 
