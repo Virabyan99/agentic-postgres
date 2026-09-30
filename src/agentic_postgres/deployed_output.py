@@ -199,6 +199,7 @@ __all__ = [
     "MCP_NOT_PUBLISHED",
     "NOT_OBSERVED",
     "PROJECT_STATE_ROOT",
+    "READABLE_PREVIOUS_VERSION",
     "RENDERED_ROOT",
     "ROUTE_NOT_PUBLISHED",
     "ROUTE_STATUSES",
@@ -206,11 +207,13 @@ __all__ = [
     "SCHEMA_VERSION",
     "RenderedDocumentAbsent",
     "RenderedDocumentUnreadable",
+    "UnreadableVersion",
     "activated_login_roles",
     "build_deployed_document",
     "deployed_path",
     "mirror_record_path",
     "published_route",
+    "read_deployed_document",
     "read_rendered_document",
     "rendered_document_path",
     "rendered_path",
@@ -802,6 +805,69 @@ def validate_deployed_document(document: Any) -> dict[str, Any]:
 
     _refuse_placeholders(document)
     _refuse_incoherent_publication(document)
+    return document
+
+
+#: The one earlier outputs version a deployed document may carry and still be
+#: READ by this release: the version the release before it wrote (D1848).
+READABLE_PREVIOUS_VERSION = SCHEMA_VERSION - 1
+
+
+class UnreadableVersion(ManifestError):
+    """A deployed document at an outputs version this release does not read.
+
+    A statement about the READER, not the document (ADR 0195): it sends an
+    operator to the right checkout, where *does not validate* would send them to
+    audit a document that is whole.
+    """
+
+
+def read_deployed_document(document: Any) -> dict[str, Any]:
+    """A deployed document that ALREADY EXISTS on a host, read at this release
+    and returned exactly as found (D1848).
+
+    **Every reader of another project's document, or of one this release did
+    not write, comes here** -- never to `validate_deployed_document`, which is
+    for the document a deploy is about to write. `outputs.schema.json` admits
+    exactly one version, the current one, so validating an existing document
+    against it fails in exactly the case an upgrade creates: the first project
+    deployed at a new outputs version reads its neighbour's document one version
+    behind. Measured on the reference host on 2026-09-30 at 1.12.0: deploy step
+    0 read beta's version 18 document as *does not validate*, counted it
+    UNREADABLE, and `decide` refused alpha's redeploy -- and would have refused
+    beta's on alpha's. `fleet` and `dr-kit export` refused the same documents.
+
+    The document is NOT carried forward. A deployed document is an observation,
+    and migrating one republishes it under a version that never measured it
+    (ADR 0012; the migrator refuses the kind). So it is read by version, D1122's
+    rule for a kit, applied to every reader:
+
+    * the **current** version validates against the full schema -- nothing is
+      weakened for a document this release wrote;
+    * the **previous** version must be a deployed document with no sensitive
+      key and no unfilled placeholder, and each reader then asks it only for
+      the members it needs, failing closed on a missing one as it already does
+      (`capacity_reading.committed_from_documents` reports one as unreadable);
+    * any other version raises `UnreadableVersion`, naming both.
+    """
+    if not isinstance(document, dict):
+        raise ManifestError("a deployed document must be a JSON object")
+    version = document.get("schema_version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise ManifestError("the deployed document declares no integer schema_version")
+    if version == SCHEMA_VERSION:
+        return validate_deployed_document(document)
+    if version != READABLE_PREVIOUS_VERSION:
+        raise UnreadableVersion(
+            f"the deployed document is outputs version {version}; this release reads "
+            f"versions {READABLE_PREVIOUS_VERSION} and {SCHEMA_VERSION}"
+        )
+    if document.get("document_kind") != "deployed":
+        raise ManifestError(
+            f"expected document_kind 'deployed', got {document.get('document_kind')!r}"
+        )
+    config.assert_no_sensitive_keys(document)
+    _refuse_placeholders(document)
     return document
 
 

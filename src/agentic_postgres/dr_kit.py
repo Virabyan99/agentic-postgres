@@ -165,7 +165,9 @@ def plan_export(
         deployed_path = deployed_output.deployed_path(key, root=state_root)
         try:
             deployed = json.loads(deployed_path.read_text(encoding="utf-8"))
-            deployed_output.validate_deployed_document(deployed)
+            # D1848: the pre-upgrade kit is taken by the NEW checkout from a
+            # document one outputs version behind; read it by version.
+            deployed_output.read_deployed_document(deployed)
         except (OSError, ValueError, ManifestError) as problem:
             raise KitError(
                 f"{key}: no valid deployed document at {deployed_path}: {problem}. The kit "
@@ -270,7 +272,7 @@ def verify_deployed_document(document: Any, key: str) -> list[str]:
     problems: list[str] = []
     if version == current:
         try:
-            deployed_output.validate_deployed_document(document)
+            deployed_output.read_deployed_document(document)
         except ManifestError as problem:
             problems.append(f"{key}: the deployed document does not validate: {problem}")
     else:

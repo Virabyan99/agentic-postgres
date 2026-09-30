@@ -92,8 +92,11 @@ def read_document(root: Path, key: str) -> tuple[dict[str, Any] | None, str | No
         return None, "the deployed document could not be read"
     except ValueError:
         return None, "the deployed document is not valid JSON"
+    # D1848: read by version, not validated as if this release had written it.
     try:
-        deployed_output.validate_deployed_document(document)
+        deployed_output.read_deployed_document(document)
+    except deployed_output.UnreadableVersion as problem:
+        return None, str(problem)
     except ManifestError:
         return None, "the deployed document does not validate against the outputs schema"
     return document, None

@@ -24,6 +24,7 @@ from typing import Any, ClassVar
 import pytest
 
 from agentic_postgres import CURRENT_SESSION, REPO_ROOT, bootstrap_state, deployed_output, dr_kit
+from agentic_postgres.config import ManifestError
 from agentic_postgres.secrets_contract import load_secret_contract
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
@@ -803,3 +804,152 @@ def test_a_document_this_release_cannot_read_is_reported_as_such_and_not_as_inva
     broken["routes"]["rest"]["status"] = "nonsense"
     problems = dr_kit.verify_kit(_kit_with_document(host, contract, broken, tmp_path / "broken"))
     assert any("does not validate" in p for p in problems), problems
+
+
+# ---------------------------------------------------------------------------
+# D1848 -- an EXISTING deployed document is read by version, never migrated
+# ---------------------------------------------------------------------------
+#
+# Measured on the reference host on 2026-09-30: the first 1.12.0 deploy's step
+# 0 read the neighbour's outputs-18 document against a schema that admits only
+# 19, counted it unreadable, and refused. D1122's rule for a kit is now the
+# rule for every reader of a document that already exists.
+
+
+def previous_version(document: dict[str, Any]) -> dict[str, Any]:
+    """The document the release before this one wrote: 19 added `connectors`
+    and nothing else (ADR 0237), so 18 is the current document without it."""
+    older = json.loads(json.dumps(document))
+    del older["connectors"]
+    older["schema_version"] = deployed_output.READABLE_PREVIOUS_VERSION
+    return older
+
+
+def test_a_document_one_outputs_version_behind_is_read_exactly_as_found(
+    rendered: dict[str, Any],
+) -> None:
+    current = deployed_document(rendered)
+    older = previous_version(current)
+    before = json.dumps(older, sort_keys=True)
+    assert deployed_output.read_deployed_document(older) is older
+    assert json.dumps(older, sort_keys=True) == before, "the reader carried an observation forward"
+    assert "connectors" not in older
+    # The WRITER's validator is unchanged: this release still writes only 19.
+    with pytest.raises(ManifestError, match="not valid under any of the given schemas"):
+        deployed_output.validate_deployed_document(older)
+    assert deployed_output.read_deployed_document(current) is current
+
+
+@pytest.mark.parametrize("offset", [-2, 1])
+def test_any_other_outputs_version_is_named_as_unreadable_at_this_release(
+    rendered: dict[str, Any], offset: int
+) -> None:
+    document = deployed_document(rendered)
+    document["schema_version"] = deployed_output.SCHEMA_VERSION + offset
+    expected = (
+        f"outputs version {deployed_output.SCHEMA_VERSION + offset}; this release reads "
+        f"versions {deployed_output.READABLE_PREVIOUS_VERSION} and {deployed_output.SCHEMA_VERSION}"
+    )
+    with pytest.raises(deployed_output.UnreadableVersion) as raised:
+        deployed_output.read_deployed_document(document)
+    assert expected in str(raised.value)
+
+
+def test_the_previous_version_is_still_checked_for_what_a_reader_trusts(
+    rendered: dict[str, Any],
+) -> None:
+    older = previous_version(deployed_document(rendered))
+    read = deployed_output.read_deployed_document
+
+    with pytest.raises(ManifestError, match="expected document_kind 'deployed'"):
+        read({**older, "document_kind": "rendered"})
+    sensitive = json.loads(json.dumps(older))
+    sensitive["database"]["password"] = "x"  # noqa: S105 -- the planted key under test
+    with pytest.raises(ManifestError, match="looks like secret material"):
+        read(sensitive)
+    placeholder = json.loads(json.dumps(older))
+    placeholder["project"]["domain"] = "<domain>"
+    with pytest.raises(ManifestError, match="unfilled placeholder"):
+        read(placeholder)
+    # And the current version is refused exactly as before -- nothing weakened.
+    broken = deployed_document(rendered)
+    broken["routes"]["rest"]["status"] = "nonsense"
+    with pytest.raises(ManifestError) as raised:
+        read(broken)
+    assert not isinstance(raised.value, deployed_output.UnreadableVersion)
+
+
+def _admission_root(tmp_path: Path, document: dict[str, Any]) -> Path:
+    root = tmp_path / "admission-state"
+    (root / KEY).mkdir(parents=True)
+    (root / KEY / "outputs.json").write_text(json.dumps(document), encoding="utf-8")
+    return root
+
+
+def test_admission_charges_a_neighbour_one_outputs_version_behind(
+    tmp_path: Path, rendered: dict[str, Any]
+) -> None:
+    """The measured refusal, closed: the candidate is another project, the
+    neighbour is at the previous version, and its claim is COUNTED, not
+    refused as unreadable. The control is two versions behind: unreadable,
+    named by version, and `decide` still fails closed on it."""
+    from agentic_postgres import capacity_probe, capacity_reading
+
+    def runner(*argv: str, **_: Any) -> None:
+        return None
+
+    host_manifest = REPO_ROOT / "host.example.yaml"
+    neighbour = previous_version(deployed_document(rendered))
+    claimed = neighbour["database"]["budget"]["unreclaimable_mb"]
+    reading, _ = capacity_probe.read(
+        host_manifest, _admission_root(tmp_path / "a", neighbour), runner=runner,
+        exclude="candidate-dev",
+    )  # fmt: skip
+    assert reading.unreadable == {}, reading.unreadable
+    assert reading.committed == {KEY: claimed}
+
+    stale = {**neighbour, "schema_version": deployed_output.SCHEMA_VERSION - 2}
+    reading, _ = capacity_probe.read(
+        host_manifest, _admission_root(tmp_path / "b", stale), runner=runner,
+        exclude="candidate-dev",
+    )  # fmt: skip
+    assert KEY in reading.unreadable
+    assert f"outputs version {deployed_output.SCHEMA_VERSION - 2}" in reading.unreadable[KEY]
+    decision = capacity_reading.decide(
+        reading, candidate_key="candidate-dev", candidate_unreclaimable_mb=1,
+        candidate_is_deployed=True,
+    )  # fmt: skip
+    assert decision.outcome == "refused"
+    assert KEY in decision.reason
+
+
+def test_fleet_retire_and_the_kit_read_a_document_one_version_behind(
+    tmp_path: Path, rendered: dict[str, Any], host: dict[str, Path], contract: dict[str, Any]
+) -> None:
+    older = previous_version(deployed_document(rendered))
+    root = _admission_root(tmp_path, older)
+
+    document, why = load_command("fleet").read_document(root, KEY)
+    assert why is None and document == older, why
+    assert load_command("project-retire").load_document(root, KEY) == older
+
+    (host["state_root"] / KEY / "outputs.json").write_text(json.dumps(older), encoding="utf-8")
+    entries = {entry.relative: entry for entry in export(host, contract)}
+    stored = entries[f"projects/{KEY}/{dr_kit.DEPLOYED_DOCUMENT}"]
+    assert json.loads(stored.content) == older, "the kit must store the document as found"
+    assert dr_kit.verify_deployed_document(older, KEY) == []
+
+
+def test_no_reader_outside_deployed_output_calls_the_writers_validator() -> None:
+    """The class guard (D1848, question 5 of CLAUDE.md section 7): the four
+    readers that failed on the host were the four that called the WRITER's
+    validator on a document that already existed. Every call of it outside
+    `deployed_output` is refused, whatever the reader is for."""
+    callers = []
+    for path in sorted([*(REPO_ROOT / "bin").glob("*.py"), *(REPO_ROOT / "src").rglob("*.py")]):
+        if path.name == "deployed_output.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "validate_deployed_document(" in text:
+            callers.append(str(path.relative_to(REPO_ROOT)))
+    assert callers == [], callers

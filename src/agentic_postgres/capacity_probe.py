@@ -80,8 +80,12 @@ def read_deployed(root: Path, key: str) -> tuple[dict[str, Any] | None, str | No
         return None, "the deployed document could not be read"
     except ValueError:
         return None, "the deployed document is not valid JSON"
+    # D1848: an EXISTING document, read by version -- a neighbour one outputs
+    # version behind is the ordinary case the first deploy of a release meets.
     try:
-        deployed_output.validate_deployed_document(deployed)
+        deployed_output.read_deployed_document(deployed)
+    except deployed_output.UnreadableVersion as problem:
+        return None, str(problem)
     except config.ManifestError:
         return None, "the deployed document does not validate against the outputs schema"
     return deployed, None

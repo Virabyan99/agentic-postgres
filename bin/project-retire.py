@@ -90,7 +90,9 @@ def load_document(root: Path, key: str) -> dict[str, Any]:
         )
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
-        deployed_output.validate_deployed_document(document)
+        # D1848: a project deployed by the release before this one is still
+        # retirable; its document is read by version.
+        deployed_output.read_deployed_document(document)
     except (OSError, ValueError, ManifestError) as problem:
         raise SystemExit(
             fail(EXIT_STATE, f"{path} is not a valid deployed document: {problem}")

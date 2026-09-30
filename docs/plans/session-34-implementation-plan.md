@@ -636,6 +636,10 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1845** | 9 | §5 Run 9 item 3: *"`inbox` … scopes EXACTLY `notes-inbox`'s required scopes as the status document reports them — read them from `GET /admin/connectors`"*; EVT-WAIT-002: *"read the note id from the `create` step's result"*. | `connector_status` carries NO `required_scopes` (0036: name, kind, binding, counts, dead letters); `notes-await-embedding` has no `create` step -- its wait comes first, on `{{input.note_id}}` (D1832). `ApiResponse` is frozen. | The agents' scopes are read from `app_private.connector.required_scopes` and `workflow_definition.required_scopes` as the superuser -- read, never typed, which was the plan's point; the waiting run's note is created by the proof and passed as its input; `inbound()` returns `(answer, delivery id)`. | — |
 | **D1846** | 9 | §5 Run 9 item 3: REC-EVT-001 compares *"`pending + dead` from `connector_delivery WHERE created_at <= target` with the drill's `workflow_runs.value.deliveries`"*. | The drill nests `deliveries` BESIDE `value`, not inside it (`restore-test.py`, Run 8); and a delivery pending at the target may be delivered or dead when the live cluster is read -- comparing today's statuses would race the loop. | The live side is rebuilt AS OF the target from each row's own times (pending: neither `delivered_at` nor `dead_at` by then; dead: `dead_at` by then) and compared per status with `workflow_runs.deliveries.value`; the floor (at least one undelivered row) is kept. | 0238 |
 | **D1847** | 9 | §2: CONN-FAC-001's *"`tests/contract/test_secret_contract.py` (whole — both directions)"*, CONN-CMD-001's *"`tests/contract/test_cli_contract.py` (whole, D1014)"*, CONN-STORM-001's proposed `test_every_scenario_has_induce_observe_reverse_and_a_reader` and `test_plan_mutates_nothing`. | No registry entry names a whole module; the two storm sweeps exist under their Session 18 names. **The gate's first run on `7161a19` stopped at step 2** (E501 in the Session 34 paragraph, left by an edit made after the pre-commit ruff pass). | The cells name specific tests (four secret-contract proofs, four CLI-contract guards) and the storm sweeps' real names; repaired forward in `0299500`, and the gate's second run is the record. | — |
+| **D1848** | 10 | §9: *"Admission would refuse alpha's or beta's OWN redeploy: stop before the deploy"* -- written as a stop, never predicted. Sheet D1 expected `fleet` to list both projects and `dr-kit export` to write the PRE kit. | **Measured on Sheet D1 (reads only, nothing deployed): `fleet` read both documents as *"does not validate against the outputs schema"*; `dr-kit export` exit 2, no PRE kit.** `outputs.schema.json` admits 19 only, and four readers -- `capacity_probe.read` (deploy step 0, `admit`, `doctor capacity`), `fleet`, `dr-kit export`, `project-retire` -- ran the WRITER's `validate_deployed_document` on a document that already existed. A workstation rig on beta's REAL version 18 document: unreadable, `decide` refused; the same document plus only `connectors: {enabled: false}` at 19: read. So alpha's deploy would have refused at step 0 on beta's document and beta's on alpha's, every order, no override. 1.12.0 is the first outputs bump since admission shipped (v18 Session 21, `cfb1e93`; admission Session 31, `56096d3`). | **Run 10a**, ADR 0241: `deployed_output.read_deployed_document` reads an EXISTING document by version (D1122's kit rule for every reader): current validates fully; the previous version must be `deployed`, with no sensitive key and no placeholder, and is returned as found; anything else is `UnreadableVersion`, reported in its own words. No migration (ADR 0012). The four readers and `dr-kit verify`'s current branch use it; a class guard refuses any call of the writer's validator outside `deployed_output`. The deploy, the sweep and the tag move to Run 10a's commit (nothing had been deployed). | 0241 |
+| **D1849** | 10 | §5 Run 10, the facility script: *"assert the rendered document says `connectors.enabled: true` and `secrets.required_names` gained exactly `connector_signing_key`"*. | `secrets.required_names` is the render's PLANNED surface at `RENDER_SESSION = 2` (`rendering.py:51`) and never names a Session 34 secret: the workstation rig measured it unchanged with the facility on. | `s34-r10-facility.py` asserts with the contract's own reader: `active_secrets(contract, CURRENT_SESSION, facilities=enabled_facilities(manifest))` before and after -- 18 → 19, gained exactly `connector_signing_key`. `s34-r10-after-facility.sh` reads where, if anywhere, the deployed document names it rather than predicting it. | — |
+| **D1850** | 10 | Sheet D9: *"expect four rows, all `disabled` or `already_disabled`"*. | `app_private.connector_disable` returns `'disabled'` for every row it updates and raises `PT404` for none (0036:727-743); it has no `already_disabled` word. | The cleanup expects four `disabled`. | — |
+| **D1851** | 10 | §5 Run 10: *"a Python deriver modelled on `s33r9-derive.py`"*; the facility edit: *"load it with `yaml.safe_load` … write it back preserving key order … assert it touches exactly those lines"*. | `s33r9-derive.py` is on neither the workstation nor the host (it lived in a lost scratchpad). A `safe_dump` of beta's manifest would reflow the file, so the plan's own diff assertion could not hold. | `~/s34r10/s34r10-derive.py` written in its described shape (named substitutions, every count asserted, headers replaced whole to an anchor, parent tokens refused in code): ten scripts, first time; the gate's declaration block 15 tokens in, 15 out. The facility edit is TEXT -- the one `schema_version: 6` line and an appended block -- checked by parse equality and key order; a rig proved control-refused / 1+6 lines / second-run-refused. | — |
 
 ---
 
@@ -2577,6 +2581,35 @@ read as root by the after-facility script — never the value), the doctor's
 status, the merged document's totals, the rehearsal's verdict and its three
 attempt times, the connectors' final state (all disabled), the probe agents
 and humans left on beta, the tag and its message.
+
+### Run 10a — the repair Sheet D1 forced: an existing deployed document is read by version (D1848)
+
+**Why.** Sheet D1 (reads only) found that the new checkout could not read
+either project's outputs-18 document: `fleet` and `dr-kit export` refused them,
+and a workstation rig on beta's real document showed deploy step 0 would refuse
+every deploy of the release (D1848, §9's stop). Nothing had been deployed.
+
+**What.** ADR 0241: `deployed_output.read_deployed_document` (+
+`UnreadableVersion`, `READABLE_PREVIOUS_VERSION`); `capacity_probe.read_deployed`,
+`bin/fleet.py`, `dr_kit.plan_export` and `verify_deployed_document`'s current
+branch, `bin/project-retire.py` moved onto it. Six tests in
+`tests/contract/test_disaster_kit.py`: the previous version read exactly as
+found (and still refused by the writer's validator); two other versions named
+as unreadable; the previous version still checked for kind, sensitive keys and
+placeholders, the current one refused as before; admission CHARGES a
+previous-version neighbour and refuses one two versions behind by name; fleet,
+retire and the kit read it and the kit stores it as found; and the class guard.
+
+**Done.** 2026-09-30. Targeted modules (`test_disaster_kit`, `test_fleet`,
+`test_capacity_reading`, `test_output_migrations`, `test_project_retire`): **286
+passed**. **Battery: 9 of 9 killed, each beside a green control it cannot
+reach** (`test_the_command_writes_owner_only_refuses_an_existing_directory_and_verifies`),
+every file restored and `cmp`-equal: any older version accepted; the kind check
+dropped; the sensitive-key check dropped; the reader carrying `connectors`
+forward; admission, fleet, the kit and retire each put back on the writer's
+validator; an unreadable version folded into *does not validate*. The rig on
+beta's REAL version 18 document, re-run on the repaired tree: **unreadable {}**.
+**CI:** CI_PENDING
 
 ### Run 11 — the close
 

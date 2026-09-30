@@ -304,3 +304,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0238](0238-outbound-delivery-is-the-workers-second-pass-signed-at-least-once-and-never-redirected.md) | Outbound delivery is the worker's second pass: signed, at-least-once, fixed backoff, dead-lettered, never redirected, and it records no URL, payload or key | 34 | Accepted |
 | [0239](0239-a-wait-on-an-event-resumes-on-its-run-owners-matching-event.md) | A wait on an event resumes on its run owner's matching event, and the Session 34 refusal is replaced | 34 | Accepted |
 | [0240](0240-the-example-sets-lock-declares-the-release-it-was-frozen-against.md) | The example set's lock declares the release it was frozen against | 34 | Accepted |
+| [0241](0241-an-existing-deployed-document-is-read-by-version.md) | An existing deployed document is read by version, never validated as if this release wrote it | 34 | Accepted |
