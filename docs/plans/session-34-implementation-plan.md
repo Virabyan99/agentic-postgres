@@ -1921,7 +1921,11 @@ Targeted, once: `test_workflow_worker`, `test_connector_delivery`,
 `test_evidence_claims`, `test_auth_endpoints`, `test_studio_runtime`,
 `test_connector_facility`, `test_workflow_routes`,
 `test_workflow_admin_routes` and the D1242 guards: **346 passed**. Rows
-D1837–D1838. CI: CI_PENDING
+D1837–D1838. Commit `ca75ad0`; CI by full SHA
+`ca75ad05585fb7293a0fb90a51048c4ff0fc7e69`: `contract` **success** (run
+36704677704). **Run 6 is done. NEXT FREE: D1839, ADR 0241.** The executor
+stopped here at the operator's request (2026-09-30); Run 7 starts from its
+*Read first* list.
 
 ### Run 7 — the routes, the scopes and the command
 
