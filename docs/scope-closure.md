@@ -1124,3 +1124,87 @@ first question, asked of a proof and of a record.
    administrative scope. It is held by `project_admin` alone, NO existing
    administrator gains it on upgrade, and the run's owner may not use it on
    their own agent's run.
+
+---
+
+## 27. What Session 34 closed, what it left, and what Session 35 inherits
+
+**Session 34 is the session whose second principal is OUTSIDE the deployment,
+and it reaches the deployment only through a run an agent could have started.**
+Eleven runs plus three the trip forced (10a–10c), `D1778`–`D1856`: thirty-four
+rows written at planning and **forty-five written by executing it**. `1.12.0` is
+deployed on both projects, swept, merged and tagged at `14b1b9d` (D1425, with
+D1641's method stated in the tag), and the merged evidence reads **188 claims:
+182 passed, 5 not_run, 1 failed** — §7's prediction exactly. All sixteen claims
+the session added passed; the five host ones on their first executions
+anywhere: `connector_inbound_live` (a signed request that crossed the public
+edge under a key the product's own `key` command wrote), `connector_delivery_live`
+(bytes a sink received and the proof verified with its own HMAC),
+`event_wait_live`, `connector_schedule_live`, `delivery_restore`. The
+`delivery-retry-storm` rehearsal read on beta: three attempts, `dead` with
+`connect_failed`, the loop's heartbeat moving throughout.
+
+**The sentence this session would most want carried forward: the first reader
+of a new document version is the neighbour's deploy.** 1.12.0 moved the outputs
+document 18 → 19, the first bump since admission shipped (Session 31), and four
+readers — deploy step 0's admission among them — validated the OTHER project's
+existing document against a schema that admits only the current version
+(D1848). Every 1.12.0 deploy would have refused, in either order, with no
+override. Nothing offline could see it: every fixture was rendered by the
+checkout under test. Sheet D1 — reads only, before anything moved — saw it,
+because `fleet` and `dr-kit export` share the reader. ADR 0241 reads an existing
+document by version and never migrates it (ADR 0012 stands). And the trip's
+three sweeps say the second thing again: six never-executed proofs failed on
+first execution (D1853: a rendered-only member read from a deployed document; a
+field misread; a new leaf unclassified; two proofs that assumed every project
+has every facility, true until beta was the first with one alpha lacks), and
+one long-standing fixture failed only when the suite grew (D1854: a
+session-scoped login held a 900-second token for 933 seconds).
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **D1522** — the outbox, delivery, inbound, event-triggered runs, scheduled connectors, the command | **Closed, as far as the proofs reach.** Migration 0036: `app.emit_event` granted to NOBODY and called by a reviewed definer function in the caller's transaction (ADR 0235); the outbox, connectors, receipts and the event wait. Outbound delivery is the loop's second pass — signed, at-least-once, fixed backoff, dead-lettered, never redirected (ADR 0238); inbound is `POST /connectors/{name}`, signature before any database and one 401 for every signature failure (ADR 0237); a scheduled connector fires a run as its bound agent; an event resumes a waiting run of its owner (ADR 0239). `bin/connector.sh init|validate|status|enable|disable|key`. A connector starts a RUN as an agent whose stored scopes EQUAL the definition's — it holds nothing an agent does not (D1783). |
+| **D1525** — the rehearsal `delivery-retry-storm` | **Closed on production** (Sheet D8): a rehearsal delivery to the auth container's discard port, never to a receiver. |
+| **D1527** — `THR-CONNECTOR-INPUT`, `THR-WEBHOOK-REPLAY`, `THR-DELIVERY` | **Written before code** (Run 1) and each cites the claims that now pass live. |
+| **D1529** — a restore-test row for an undelivered event | **Closed on production**: `delivery_restore` rebuilds the live side AS OF the target from each row's own times and compares per status with the drill's `workflow_runs.deliveries` (D1846). |
+| **D1780** — a project set could replace a release function | **Closed**: the lint refuses a set that creates, replaces, alters or drops a function the release creates in `api` or `app`. |
+| **D1777** — `test_a_live_tunnel_is_reported_live` raced fork against exec | **Closed** (Run 2): the fixture waits for `ps` to read `sleep 300`. |
+| **D1848** (found here) — readers of an existing deployed document | **Closed on production**: step 0 admitted alpha reading beta's version 18 document (ADR 0241), and a class guard refuses the writer's validator outside `deployed_output`. |
+| **D1854** (found here) — the live suite's administrator session | **Closed**: `AdminSession.token` renews inside 120 s of its deadline, through the same published route. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **D1721** — approval is a PLANE control only | **Assigned to Session 35 by the operator (2026-09-29).** Now visible from a new side: `set_note_embedding` EMITS on every committed write, including a direct PostgREST call that met no approval. |
+| **D1722 / D1806** — a project function cannot honour `Dry-Run` | Priced (`app.request_is_dry_run()`), not built. |
+| **D1798** — a dead letter cannot be redelivered | A redelivery is a human write to the outbox: a route, a scope, an audit story. |
+| **D1700 / D1775** — retention | Four more tables never pruned (events, deliveries, receipts, connectors' history) beside runs, approvals and probe identities. Beta now carries 68 revoked probe agents (s32 28, s33 24, s34 16), 27 probe humans, 6 `pending` approvals on ended runs, and 4 dead deliveries (3 dead letters, 1 rehearsal). |
+| **D1784** — one master key per project | Rotating it rotates every connector's key; said in operator guide §18. |
+| **D1792** — the endpoint is trusted because the manifest is root's | No resolver allowlist. |
+| **ADR 0241's bound** | This release reads its own outputs version and the one before it. A host with a project two versions behind still refuses a neighbour's deploy, by name — upgrade that project first. |
+| **D1711** — no memory figure under a run | Unchanged; this session took no memory reading. The delivery pass is a second workload inside `auth`. |
+| **D1642** — a DR kit names the checkout's commit | Seen twice more: `kit-2026-09-30-pre` names `14b1b9d`, `-post` names `8d655b5`. **D1856**: every kit's `projects/` is `755` on the host (the root is `700`). Both belong to the session that next moves `dr_kit.py`. |
+| **D1581 / D1713** — why a deploy recreates what it does | Beta's facility deploy recreated `mcp` as well as `auth`; still undetermined. |
+| **D1855** — the storm's `--plan` names no connector | By design (it reads no cluster); recorded. |
+| **D1547, D380, the edge's unbounded containers** | Unchanged. `apg-diag` still cannot read the auth log, which is the only record of a refused inbound request. |
+| `documented_path`, `port_allocation`, the rotation trio, `replacement_host_restore` | Unchanged, and for the same reasons. |
+
+### What Session 35 inherits, in order
+
+1. **D1721's database half**, assigned by the operator: approval enforced in
+   the database, so a direct PostgREST call on a gated function meets it too —
+   and, since 0003, emits nothing it should not.
+2. **The noisy-neighbour measurement has a second workload**: the delivery pass
+   shares the `auth` process with the step loop. D1711's sub-second sampler is
+   still owed.
+3. **The third reader walks a path that now includes connectors**:
+   `docs/connectors.md`, operator guide §18, `bin/connector.sh`.
+4. **Hardening**: the edge's unbounded `traefik` and `docker-socket-proxy`;
+   `apg-diag`'s allowlist (D380) now matters for the inbound route.
+5. **The retention story**, now four tables longer (D1700, D1775).
+6. **ADR 0241's rule for any reader Session 35 adds**: a reader of a document
+   that already exists goes through `deployed_output.read_deployed_document`;
+   the class guard will say so.

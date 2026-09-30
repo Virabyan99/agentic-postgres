@@ -30,33 +30,39 @@ STAGE 3 IS CLOSED.  Tagged 1.6.0 on a16cb84 (2026-09-15). Sessions 26-29 were
                 1.6.1 / 1.6.2 (ADR 0209), 28 offline (ADR 0210-0215, migration
                 0033), 29 THE TRIP. None of 26, 27, 29 registered a requirement,
                 so the ordinal skips them the way it skips 19 (D1063).
-RELEASE         1.11.0, tagged 2026-09-28 on 02ffbbd9099c -- THE COMMIT THAT WAS
+RELEASE         1.12.0, tagged 2026-09-30 on 14b1b9de1267 -- THE COMMIT THAT WAS
                 DEPLOYED (D1425, with D1641's method stated in the tag: the
-                second sweep's INSTRUMENTS came from e087bca, one test module
-                past it, whose deployable diff was asserted NONE -- D1773).
+                third sweep's INSTRUMENTS came from 8d655b5, tests only, whose
+                deployable diff was asserted NONE -- D1853, D1854).
 SESSIONS DONE   30 (2026-09-19, 1.8.0), 31 (2026-09-21, 1.9.0), 32
                 (2026-09-26, 1.10.0: the durable step substrate and the worker
                 loop) and 33 (2026-09-28, 1.11.0: approval gates, compensation,
-                provenance, the audit filters; migration 0035). TWO LEFT:
-                34 governed connectivity - 35 change-governance, hardening,
-                the third reader, the Stage 5 decision report.
-EVIDENCE        evidence/session-33.json: 172 claims, 166 passed, 5 not_run,
-                1 failed (documented_path, deliberately -- §2.4). All fourteen
-                claims Session 33 added passed, the four host ones on their
-                FIRST execution anywhere (the second sweep, D1774).
-CURRENT_SESSION 33. Stage 4 numbers its sessions 30-35.
-template_version 1.11.0. host.yaml schema 3. Outputs schema v18, capability
-                manifest 4, lock 4, project lock 3, project manifest 6,
-                api-surface 2 -- no schema VERSION moved in 30-33. Session 32
-                ADDED schemas/workflow.schema.json; Session 33 widened it and
-                the capability schema's scope enum gained one name (D1769).
-ADRs            234, next free 0235.   migrations 35, released and applied on
-                both projects, fix-forward only -- 0035 applied 2026-09-28.
-                requirements 265.   claims 172, 42 declared offline.
+                provenance, the audit filters; migration 0035) and 34
+                (2026-09-30, 1.12.0: governed connectivity -- the outbox,
+                outbound delivery, the signed inbound route, scheduled
+                connectors, event-triggered runs; migration 0036; ADR 0241).
+                ONE LEFT: 35 change-governance (with D1721's database half,
+                the operator's decision of 2026-09-29), hardening, the third
+                reader, the Stage 5 decision report.
+EVIDENCE        evidence/session-34.json: 188 claims, 182 passed, 5 not_run,
+                1 failed (documented_path, deliberately -- §2.4). All sixteen
+                claims Session 34 added passed, the five host ones on their
+                FIRST executions anywhere (the third sweep; D1853, D1854).
+CURRENT_SESSION 34. Stage 4 numbers its sessions 30-35.
+template_version 1.12.0. host.yaml schema 3. Outputs schema v19, project
+                manifest 7 (both moved in 34, migratable: `connectors`, D1785),
+                capability manifest 4, lock 4, project lock 3, api-surface 2.
+                Session 32 ADDED schemas/workflow.schema.json; Session 33
+                widened it; Session 34 ADDED schemas/connector.schema.json and
+                the capability schema's scope enum gained two names.
+ADRs            241, next free 0242.   migrations 36, released and applied on
+                both projects, fix-forward only -- 0036 applied 2026-09-30.
+                requirements 281.   claims 188, 53 declared offline.
 divergences     D1-D1513 recorded in the session plans. D1514-D1536 recorded
                 here. D1537-D1581 in Session 30's plan, D1582-D1644 in Session
                 31's (D1633 never issued), D1645-D1713 in Session 32's,
-                D1714-D1777 in Session 33's. **Next free: D1778.**
+                D1714-D1777 in Session 33's, D1778-D1856 in Session 34's.
+                **Next free: D1857.**
 PostgreSQL      18.4 (pgvector/pgvector:pg18 by digest). STAYS. Decided by the
                 operator on 2026-09-18 (D1515).
 DIRECTION       APPLIANCE FIRST, HOSTING DEFERRED. Decided by the operator on
@@ -69,7 +75,7 @@ OBSERVABILITY   The OTel collector and Prometheus that already run, bounded.
 
 **Every number in §1 onward was measured on 2026-09-18 at `de9ecbb`**, or says
 whose it is; **the Status block above is re-read at each session's close** and
-currently stands at Session 33's, 2026-09-28.
+currently stands at Session 34's, 2026-09-30.
 
 ---
 

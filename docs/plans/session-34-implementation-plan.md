@@ -1,10 +1,24 @@
 # Session 34 — Governed connectivity
 
-**Status: PLANNED 2026-09-29 at `be439ed`. Not started.** Eleven runs, all on
-`main` directly. This plan spends **D1778–D1811** in §1 and **ADR 0235–0239**.
-**NEXT FREE AFTER THIS PLAN: D1812, ADR 0240.** Rows the runs add go in §1's
-second table, below D1811, in execution order; the header's *Status*
-paragraph is rewritten at the close to say which run added which.
+**Status: COMPLETE 2026-09-30.** Planned 2026-09-29 at `be439ed`; executed
+2026-09-29/30 in eleven runs plus three repair runs the trip forced (10a, 10b,
+10c), all on `main`. **`1.12.0` is deployed on both projects, swept, merged and
+tagged at `14b1b9d`** (D1425, D1641's method stated in the tag: the host half's
+instruments came from `8d655b5`, tests only). Merged evidence
+`evidence/session-34.json`: **188 claims — 182 passed, 5 not_run, 1 failed
+(`documented_path`, by decision)**, the prediction in §7 exactly; all sixteen
+claims this session added passed, the five host ones on their first executions
+anywhere. The plan spent **D1778–D1811** and **ADR 0235–0239**; executing it
+added **D1812–D1856** (45 rows) and **ADR 0240–0241**: Run 1 D1812–D1816, Run 2
+D1817–D1818, Run 3 D1819–D1823, Run 4 D1824–D1830, Run 5 D1831–D1836 (ADR 0240),
+Run 6 D1837–D1838, Run 7 D1839–D1842, Run 8 D1843, Run 9 D1844–D1847, Run 10
+D1848–D1856 (ADR 0241 in Run 10a). **The product defect executing it found:
+D1848 -- four readers validated an EXISTING deployed document as if this
+release had written it, so every 1.12.0 deploy would have refused at step 0;
+found by Sheet D1's reads, before anything moved.** CI caught one (D1830: Run
+4's auth-service fixtures and five guards lacked the new variable). Instrument
+and procedure defects found on the host: D1852, D1853, D1854. **NEXT FREE: D1857, ADR 0242.** `docs/scope-closure.md` §27
+is the account of what 34 closed, left and hands to 35.
 
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 34* whole (Builds / Already
 true / Must not / Measures / Closes, `:568-611`), its rows **D1522** (the
@@ -2705,6 +2719,22 @@ story, now four tables longer; **the D1721 database half, assigned to 35 by the 
 the evidence totals, NEXT FREE); CLAUDE.md §2/§8/§9 in the launch folder
 rewritten compactly (**copy it to the scratchpad first** — it is not in git)
 and the project memory updated. Documentation commit(s): push, no CI read.
+
+**Done.** 2026-09-30. **Documentation only** -- Run 10 found nothing for
+`capacity.ENVELOPE` (no memory reading was taken; D1711 stays `UNMEASURED`), and
+its one product change (ADR 0241) was committed, gated and CI-green in Run 10a,
+so no gate ran here and no CI is read. This plan's header rewritten (COMPLETE;
+the rows each run added; NEXT FREE **D1857, ADR 0242**);
+**`docs/scope-closure.md` §27** written (closed: D1522, D1525, D1527, D1529,
+D1780, D1777 via D1805, and the trip's own D1848 and D1854; left: D1721 --
+assigned to 35 --, D1722/D1806, D1798, the retention story now four tables
+longer, D1784, D1792, ADR 0241's two-versions bound, D1711, D1642 and D1856,
+D1581/D1713, D1855, D1547/D380/the edge; inherited by 35 in order);
+`docs/plans/stage-4-plan.md`'s Status block moved to Session 34 (1.12.0 on
+`14b1b9d`; 188 = 182/5/1; `CURRENT_SESSION 34`; outputs 19, project manifest 7;
+ADRs 241; migrations 36; requirements 281; claims 188, 53 offline; D1778–D1856).
+CLAUDE.md (launch folder, not in git; the pre-close copy in the scratchpad) §2,
+§8 and §9 rewritten, and the project memory updated.
 
 ---
 ## 7. Evidence and claims
