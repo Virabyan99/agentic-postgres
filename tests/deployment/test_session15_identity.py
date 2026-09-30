@@ -434,7 +434,12 @@ def test_the_rotation_surface_describes_this_deployments_generation(
     del as_root
     from agentic_postgres import REPO_ROOT, rotation
     from agentic_postgres.secret_generation import SECRET_ROOT
-    from agentic_postgres.secrets_contract import consumer_directory, load_secret_contract
+    from agentic_postgres.secrets_contract import (
+        active_secrets,
+        consumer_directory,
+        enabled_facilities,
+        load_secret_contract,
+    )
 
     contract = load_secret_contract(REPO_ROOT / "secrets.required.yaml")
     session = int(project_a["deployed_through_session"])
@@ -448,6 +453,14 @@ def test_the_rotation_surface_describes_this_deployments_generation(
 
     planned = {v.name for v in rotation.plan_all(contract, session)}
     assert planned, "the surface plans nothing for this deployment's session"
+    # `plan_all` is the contract's DECLARED view (`bin/rotate-secret.py` names
+    # no project); what THIS deployment materializes is filtered by its
+    # facilities -- alpha has no connectors facility (D1853).
+    owed = {
+        secret["name"]
+        for secret in active_secrets(contract, session, facilities=enabled_facilities(project_a))
+    }
+    planned &= owed
 
     missing: list[str] = []
     not_a_file: list[str] = []

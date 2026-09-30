@@ -23,6 +23,7 @@ from agentic_postgres import REPO_ROOT
 from agentic_postgres.secrets_contract import (
     SECRET_ROOT,
     active_secrets,
+    enabled_facilities,
     granted_services,
     load_secret_contract,
     secret_source_path,
@@ -251,7 +252,12 @@ def test_materialized_files_are_read_only_and_owned_by_the_declared_consumer(
     generation = project_a["secrets"]["generation_id"]
 
     checked = 0
-    for secret in active_secrets(contract, session=deployed_session):
+    # Filtered by the project's facilities (ADR 0188, 0237): alpha has no
+    # connectors facility and materializes no `connector_signing_key`, and
+    # that is correct -- both projects had the mirror, so until the first
+    # 1.12.0 sweep no live project lacked a facility this could miss (D1853).
+    facilities = enabled_facilities(project_a)
+    for secret in active_secrets(contract, session=deployed_session, facilities=facilities):
         for consumer in secret["consumers"]:
             path = Path(secret_source_path(key, generation, consumer))
             # `required: false` means the provider may hold no value, and the

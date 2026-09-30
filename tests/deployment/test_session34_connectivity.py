@@ -448,7 +448,10 @@ def sink(
     ).split()  # fmt: skip
     assert len(auth) == 1, f"beta runs {auth} as its auth container"
     image = sh("docker", "inspect", "-f", "{{.Config.Image}}", auth[0]).strip()
-    network = project_b["compose"]["networks"]["internal"]
+    # The DEPLOYED document carries no `compose` (a rendered-only member); it
+    # names the project's internal network here. The first sweep's KeyError
+    # (D1853) -- measured equal to the render's compose.networks.internal.
+    network = project_b["edge"]["project_internal_network"]
     name = f"apg-s34-sink-{SWEEP}"
     sh(
         "docker", "run", "-d", "--rm", "--name", name, "--network", network,
@@ -896,7 +899,8 @@ def test_a_waiting_run_resumes_on_its_owners_matching_write(
     )
     assert final["status"] == "succeeded", json.dumps(final)[:1500]
     step = _step(final, "embedded")
-    assert step["outcome"] == "event_received", step
+    assert step["outcome"] == "succeeded", step
+    assert step["reason"] == "event_received", step
     assert (step.get("result") or {}).get("payload", {}).get("note_id") == note, step
 
 

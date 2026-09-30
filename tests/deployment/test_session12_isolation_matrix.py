@@ -238,6 +238,12 @@ NOT_AUTHORITY_PREFIXES = (
     # and it was the control's.
     "migrations.project_set",
     "migrations.project_set.",
+    # Version 19 (ADR 0237): whether the project has the connectors facility.
+    # Beta has it and alpha does not, which is the ordinary case, and two
+    # projects that both have it share nothing by that fact: a facility, not
+    # an identity -- `backup.mirror.enabled`'s reasoning. The first 1.12.0
+    # sweep found it unclassified (D1853).
+    "connectors.enabled",
     "backup_state.",
     "bootstrap.status",
     "routes.",
