@@ -414,5 +414,56 @@ def test_the_example_sets_four_connectors_compile(
         assert "endpoint" not in yaml.safe_load(text)
 
 
+def test_the_init_skeletons_validate(
+    tmp_path: Path, lock: wd.LockView, definitions: dict[tuple[str, int], wd.Compiled]
+) -> None:
+    """**The round trip, D1836**: `bin/connector.sh init` prints a skeleton of
+    each kind, and the product's own `validate` compiles each as printed -- a
+    scaffold whose first edit had to be structural would teach the wrong file.
+
+    The inbound skeleton declares exactly the members its definition reads and
+    the scheduled one gives exactly its keys, so the compiler's both-direction
+    checks are what this proves the scaffold satisfies. The compiled kinds are
+    read back so an `init` that printed the wrong kind cannot pass.
+    """
+    import subprocess
+
+    command = REPO_ROOT / "bin" / "connector.sh"
+    for kind in cd.KINDS:
+        printed = subprocess.run(
+            [str(command), "init", "--kind", kind, "--project", str(EXAMPLE)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+            cwd=tmp_path,
+        )
+        assert printed.returncode == 0, (kind, printed.stderr)
+        assert not list(tmp_path.iterdir()), "init wrote a file; it streams to stdout"
+        skeleton = tmp_path.parent / f"{tmp_path.name}-{kind}.yaml"
+        skeleton.write_text(printed.stdout, encoding="utf-8")
+
+        validated = subprocess.run(
+            [str(command), "validate", "--project", str(EXAMPLE), "--file", str(skeleton)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+        assert validated.returncode == 0, (kind, validated.stderr, printed.stdout)
+        assert "1 connector(s) compile" in validated.stdout
+        assert cd.compile_file(skeleton, lock, definitions).kind == kind
+
+    refused = subprocess.run(
+        [str(command), "init", "--kind", "sideways", "--project", str(EXAMPLE)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    assert refused.returncode == 2
+    assert refused.stdout == ""
+
+
 def test_connectors_of_a_project_with_no_directory_is_empty(tmp_path: Path) -> None:
     assert cd.connectors_of(tmp_path) == []

@@ -4,9 +4,10 @@
 `connectors.enabled` off owes nothing new; one that turns it on owes exactly
 `connector_signing_key`, from which every connector's key is DERIVED. The
 derivation lives in the auth image (`connector_signature.derive`) and is proved
-here against an HMAC this module writes itself; the host's copy arrives with its
-caller, `bin/connector.py key`, in Run 7, and the two-copy agreement with it
-(D204: a module nothing imports is a feature that does not exist, D1828).
+here against an HMAC this module writes itself; the host's copy
+(`connector_keys.derive`) arrived with its caller, `bin/connector.py key`, in
+Run 7, and `test_the_two_key_derivations_agree` holds the two together (D204:
+a module nothing imports is a feature that does not exist, D1828).
 
 No cluster and no host: the manifest loader, the facility reader, the secret
 contract's project view, the secret override's mounts and the two derivations
@@ -201,8 +202,8 @@ def _vectors() -> list[tuple[str, str]]:
 
 def test_the_key_derivation_matches_an_independent_hmac() -> None:
     """The image's derivation against an HMAC this test writes itself, on ten
-    fixed vectors, so a changed label or input order fails here. Run 7 adds the
-    host's copy and the two-copy agreement (D1682's pattern, D1828)."""
+    fixed vectors, so a changed label or input order fails here. The host's
+    copy is held to it by `test_the_two_key_derivations_agree` (D1828)."""
     service = service_source.load("connector_signature")
     vectors = _vectors()
     assert len(vectors) == 10
@@ -217,6 +218,28 @@ def test_the_key_derivation_matches_an_independent_hmac() -> None:
     body = b'{"note_id":"00000000-0000-4000-8000-000000000001"}'
     digest = service.sign(key, 1727600000, "7f1c1d6e-0000-4000-8000-000000000034", body)
     assert digest == "3c87822a243911edc8870359fd62616a6867de84986eef164eb028888a257aba"
+
+
+def test_the_two_key_derivations_agree() -> None:
+    """**D1828, D1682's pattern.** The host's copy (`connector_keys.derive`,
+    which `bin/connector.sh key` writes to a sender's file) and the image's
+    (`connector_signature.derive`, which the route verifies and the worker
+    signs with) agree on every fixed vector -- and on the label, byte for byte.
+    Two copies of one derivation are held together by this and nothing else:
+    if they drift, every key an operator hands out verifies nothing."""
+    from agentic_postgres import connector_keys
+
+    service = service_source.load("connector_signature")
+    assert connector_keys.CONNECTOR_KEY_LABEL == service.CONNECTOR_KEY_LABEL
+    for master, name in _vectors():
+        assert connector_keys.derive(master, name) == service.derive(master, name), (
+            master[:8],
+            name,
+        )
+    for master, name in (("ab" * 32, "Bad"), ("AB" * 32, "ok"), ("ab" * 31, "ok")):
+        with pytest.raises(ValueError) as host:
+            connector_keys.derive(master, name)
+        assert master not in str(host.value)
 
 
 @pytest.mark.parametrize(

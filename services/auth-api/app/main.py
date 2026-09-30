@@ -36,6 +36,8 @@ from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 
 from app import (
+    connector_admin_routes,
+    connector_routes,
     connector_signature,
     db,
     keys,
@@ -323,6 +325,14 @@ def create_app(mode: str | None = None) -> Any:
         # one calls `authenticate`, so an agent token -- the requester of an
         # approval among them -- is refused before any scope is read.
         application.include_router(workflow_admin_routes.router)
+        # **Session 34 (ADR 0236, ADR 0237): the connector surface**, in two
+        # modules for the reason above. The inbound route calls NO
+        # authenticator -- its caller is an outside system holding one
+        # connector's derived key, and the signature is the whole check -- and
+        # the three admin routes call `authenticate`, so an agent token, the
+        # bound agent's among them, is refused before any scope is read.
+        application.include_router(connector_routes.router)
+        application.include_router(connector_admin_routes.router)
 
     # The document this application publishes, with FastAPI's unreachable `422`
     # removed (Run 9). Overridden here rather than in `bin/app-contract.py` so
@@ -446,6 +456,12 @@ def public_paths() -> tuple[str, ...]:
         # can carry it however it is minted, and an agent cannot read the record
         # that exists to attribute it.
         "/admin/audit",
+        # Session 34 (ADR 0236). The connector status under
+        # `admin_connectors:read` and enable/disable under `:write`, published
+        # like every administrative path.
+        "/admin/connectors",
+        "/admin/connectors/{name}/disable",
+        "/admin/connectors/{name}/enable",
         "/admin/users",
         "/admin/users/{user_id}",
         "/admin/users/{user_id}/reset-password",
@@ -480,6 +496,11 @@ def public_paths() -> tuple[str, ...]:
         # session rather than asserting an identity.
         "/auth/sessions",
         "/auth/sessions/{session_id}",
+        # Session 34 (ADR 0237). The inbound connector route, published because
+        # its caller is OFF the host by definition: a webhook sender. It takes no
+        # token; a signature under the connector's derived key is checked before
+        # the body is parsed or the database reached.
+        "/connectors/{name}",
         # Session 32 Run 5 (ADR 0229). The three workflow routes, published like
         # every other path here -- and the only ones on this surface that take
         # an AGENT token. `authenticate` still refuses one on every path above,

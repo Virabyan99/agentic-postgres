@@ -65,6 +65,10 @@ SHELL_COMMANDS = (
     "bin/completion.sh",
     "bin/compose.sh",
     "bin/connect.sh",
+    # Session 34 (ADR 0236, ADR 0237): a project's connectors -- scaffold,
+    # compile, read and change a deployment's, and hand a sender its key as
+    # root. Listed the run it landed (D1014), `git add`ed first (D1188).
+    "bin/connector.sh",
     "bin/docker-firewall.sh",
     "bin/doctor.sh",
     "bin/edge.sh",
@@ -215,6 +219,9 @@ PYTHON_COMMANDS = (
     "bin/auth-admin.py",
     "bin/backup.py",
     "bin/bootstrap-providers.py",
+    # Session 34. `init` and `validate` are pure reads, three verbs call the
+    # admin connector routes, and `key` is root's.
+    "bin/connector.py",
     "bin/database-access.py",
     "bin/database-ports.py",
     "bin/db-verify.py",
@@ -452,6 +459,8 @@ COMMANDS_WITH_VERBS = {
     "bin/agent.sh",
     "bin/apg.sh",
     "bin/connect.sh",
+    # Session 34: six verbs, all documented from the day the command lands.
+    "bin/connector.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/dev.sh",

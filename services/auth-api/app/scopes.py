@@ -136,6 +136,16 @@ ADMIN_AUDIT_READ = "admin_audit:read"
 #: database refuses the run's OWNER (`approver_is_owner`).
 ADMIN_WORKFLOWS_APPROVE = "admin_workflows:approve"
 
+#: Session 34's two administrative scopes (ADR 0236), gating the connector
+#: routes: `:read` for `GET /admin/connectors` (every connector's counts,
+#: binding and dead letters -- never an endpoint, a payload or a key) and
+#: `:write` for enable and disable. A read twin, unlike `approve`, because a
+#: status is what an auditor needs without the power to bind an agent. In the
+#: administrative class, so `project_admin`'s ceiling alone may carry them;
+#: no existing administrator gains either on upgrade.
+ADMIN_CONNECTORS_READ = "admin_connectors:read"
+ADMIN_CONNECTORS_WRITE = "admin_connectors:write"
+
 #: Session 7's storage class (ADR 0100), named here for the same reason as the
 #: four above: the endpoint, the registry and the test read one string.
 OBJECTS_READ = "objects:read"

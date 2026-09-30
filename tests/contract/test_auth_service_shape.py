@@ -935,15 +935,22 @@ def test_no_health_path_is_in_the_public_list() -> None:
 
 
 def test_the_admin_surface_is_reachable_only_under_admin() -> None:
-    """Every published path is one of the THREE prefixes now (§6, ADR 0229).
+    """Every published path is one of the FOUR prefixes now (§6, ADR 0229, ADR 0237).
 
     `/workflows/` is the third and it arrived in Session 32 with an ADR that
     names it: three routes behind a second authenticator, for agent tokens.
+    `/connectors/` is the fourth, Session 34's, and it admits exactly ONE path
+    -- the inbound route, which takes no token and is authenticated by a
+    signature under a connector's derived key (ADR 0237); the connectors'
+    ADMIN routes live under `/admin/` with every other administrative path.
     Widened to a measured set rather than loosened to a substring check --
-    CLAUDE.md §6's distinction -- so a path under a fourth prefix still fails.
+    CLAUDE.md §6's distinction -- so a path under a fifth prefix still fails.
     """
     for path in main_module.public_paths():
-        assert path.startswith(("/auth/", "/admin/", "/workflows/")), path
+        assert path.startswith(("/auth/", "/admin/", "/workflows/", "/connectors/")), path
+    assert [p for p in main_module.public_paths() if p.startswith("/connectors/")] == [
+        "/connectors/{name}"
+    ]
 
 
 def test_the_application_generates_no_openapi_document() -> None:

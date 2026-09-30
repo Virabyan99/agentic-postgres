@@ -16,6 +16,7 @@ them is `scope_registry`'s ceiling, checked in `service.py`, not the model.
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -395,3 +396,108 @@ class ApprovalConflictResponse(BaseModel):
     """
 
     error: Literal["approval_already_decided", "approval_expired"]
+
+
+# ---------------------------------------------------------------------------
+# Session 34 (ADR 0236, ADR 0237): the connector surface
+# ---------------------------------------------------------------------------
+
+
+class ConnectorAcceptedResponse(BaseModel):
+    """What a signed, accepted inbound delivery answers: the run it started."""
+
+    run_id: str
+    status: Literal["queued"]
+
+
+class NoSuchConnectorResponse(BaseModel):
+    """No inbound connector of that name, or the facility is off on this deployment.
+
+    One answer for both, and for a name the route's own pattern refuses: a
+    deployment without the connectors facility has no connectors to name.
+    """
+
+    error: Literal["no_such_connector"]
+
+
+class BodyTooLargeResponse(BaseModel):
+    """The raw body is above 16 KiB, refused before its signature is computed."""
+
+    error: Literal["body_too_large"]
+
+
+class SignatureInvalidResponse(BaseModel):
+    """Every signature failure, whatever its cause (ADR 0237).
+
+    A missing or malformed header, a delivery id that is not a canonical uuid,
+    a timestamp outside the window, a wrong key, a wrong delivery id and a
+    changed body are all this one document: a prober learns nothing about
+    which it got wrong.
+    """
+
+    error: Literal["signature_invalid"]
+
+
+class BodyNotPermittedResponse(BaseModel):
+    """A signed body outside the connector's closed declaration.
+
+    `reason` is one of the validator's fixed tokens and `member` names a
+    DECLARED member only -- never an undeclared one, which is the sender's own
+    text, and never a value.
+    """
+
+    error: Literal["body_not_permitted"]
+    reason: Literal[
+        "not_an_object", "missing", "type", "too_long", "out_of_range", "unexpected_member"
+    ]
+    member: str | None
+
+
+class DeliveryRefusedResponse(BaseModel):
+    """A signed delivery the database refused after the signature held.
+
+    `delivery_replayed` -- this delivery id was accepted before, and a retry
+    of it starts nothing; `connector_disabled` -- an administrator has not
+    enabled it, or disabled it; `agent_scopes_differ` -- the bound agent's
+    stored scopes no longer equal the definition's; `agent_not_active` -- the
+    bound agent was revoked.
+    """
+
+    error: Literal[
+        "delivery_replayed", "connector_disabled", "agent_scopes_differ", "agent_not_active"
+    ]
+
+
+class ConnectorEnableRequest(_Strict):
+    """Which agent an inbound or scheduled connector acts as, or null.
+
+    Required and nullable: an outbound connector acts as nobody and takes
+    `null`, and the other two take the agent whose stored scopes EQUAL the
+    definition's (ADR 0236). The member is required so that "no agent" is
+    something a caller said, never something it forgot.
+    """
+
+    agent_id: UUID | None
+
+
+class ConnectorChangedResponse(BaseModel):
+    """What an enable or a disable answers: the connector and what it now is."""
+
+    name: str
+    outcome: Literal["enabled", "disabled"]
+
+
+class BindingRefusedResponse(BaseModel):
+    """An enable the database refused, and which of four reasons.
+
+    One model for the one status, `ApprovalConflictResponse`'s reason: two
+    models under one 409 would publish only whichever was named last.
+    """
+
+    error: Literal["agent_not_active", "agent_already_bound", "agent_scopes_differ", "no_endpoint"]
+
+
+class AgentNotNeededResponse(BaseModel):
+    """An agent named for an OUTBOUND connector, which acts as nobody."""
+
+    error: Literal["agent_not_needed"]

@@ -1,6 +1,21 @@
 {
   "components": {
     "schemas": {
+      "AgentNotNeededResponse": {
+        "description": "An agent named for an OUTBOUND connector, which acts as nobody.",
+        "properties": {
+          "error": {
+            "const": "agent_not_needed",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "AgentNotNeededResponse",
+        "type": "object"
+      },
       "ApprovalConflictResponse": {
         "description": "A decision that can no longer be made, and which of the two reasons.\n\nOne model for the one status: `approval_already_decided` (a decision is\nfinal) or `approval_expired` (the window closed before anyone decided).\nTwo models under one 409 would publish only whichever was named last.",
         "properties": {
@@ -64,6 +79,81 @@
         "title": "AuthorizationFailedResponse",
         "type": "object"
       },
+      "BindingRefusedResponse": {
+        "description": "An enable the database refused, and which of four reasons.\n\nOne model for the one status, `ApprovalConflictResponse`'s reason: two\nmodels under one 409 would publish only whichever was named last.",
+        "properties": {
+          "error": {
+            "enum": [
+              "agent_not_active",
+              "agent_already_bound",
+              "agent_scopes_differ",
+              "no_endpoint"
+            ],
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "BindingRefusedResponse",
+        "type": "object"
+      },
+      "BodyNotPermittedResponse": {
+        "description": "A signed body outside the connector's closed declaration.\n\n`reason` is one of the validator's fixed tokens and `member` names a\nDECLARED member only -- never an undeclared one, which is the sender's own\ntext, and never a value.",
+        "properties": {
+          "error": {
+            "const": "body_not_permitted",
+            "title": "Error",
+            "type": "string"
+          },
+          "member": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member"
+          },
+          "reason": {
+            "enum": [
+              "not_an_object",
+              "missing",
+              "type",
+              "too_long",
+              "out_of_range",
+              "unexpected_member"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "reason",
+          "member"
+        ],
+        "title": "BodyNotPermittedResponse",
+        "type": "object"
+      },
+      "BodyTooLargeResponse": {
+        "description": "The raw body is above 16 KiB, refused before its signature is computed.",
+        "properties": {
+          "error": {
+            "const": "body_too_large",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "BodyTooLargeResponse",
+        "type": "object"
+      },
       "CompletedObjectResponse": {
         "description": "The object is available, and `size_bytes` is the provider's count.\n\nNot the client's `declared_bytes`. The two are separate fields in the row\nprecisely because completion exists to detect that they disagree, and this\nreports the one that was verified.",
         "properties": {
@@ -87,6 +177,69 @@
           "size_bytes"
         ],
         "title": "CompletedObjectResponse",
+        "type": "object"
+      },
+      "ConnectorAcceptedResponse": {
+        "description": "What a signed, accepted inbound delivery answers: the run it started.",
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "queued",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "ConnectorAcceptedResponse",
+        "type": "object"
+      },
+      "ConnectorChangedResponse": {
+        "description": "What an enable or a disable answers: the connector and what it now is.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "enabled",
+              "disabled"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "outcome"
+        ],
+        "title": "ConnectorChangedResponse",
+        "type": "object"
+      },
+      "DeliveryRefusedResponse": {
+        "description": "A signed delivery the database refused after the signature held.\n\n`delivery_replayed` -- this delivery id was accepted before, and a retry\nof it starts nothing; `connector_disabled` -- an administrator has not\nenabled it, or disabled it; `agent_scopes_differ` -- the bound agent's\nstored scopes no longer equal the definition's; `agent_not_active` -- the\nbound agent was revoked.",
+        "properties": {
+          "error": {
+            "enum": [
+              "delivery_replayed",
+              "connector_disabled",
+              "agent_scopes_differ",
+              "agent_not_active"
+            ],
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "DeliveryRefusedResponse",
         "type": "object"
       },
       "DownloadGrantResponse": {
@@ -165,6 +318,21 @@
           "error"
         ],
         "title": "MalformedRequestResponse",
+        "type": "object"
+      },
+      "NoSuchConnectorResponse": {
+        "description": "No inbound connector of that name, or the facility is off on this deployment.\n\nOne answer for both, and for a name the route's own pattern refuses: a\ndeployment without the connectors facility has no connectors to name.",
+        "properties": {
+          "error": {
+            "const": "no_such_connector",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "NoSuchConnectorResponse",
         "type": "object"
       },
       "NoSuchWorkflowResponse": {
@@ -337,6 +505,21 @@
           "refresh_token"
         ],
         "title": "SessionTokenResponse",
+        "type": "object"
+      },
+      "SignatureInvalidResponse": {
+        "description": "Every signature failure, whatever its cause (ADR 0237).\n\nA missing or malformed header, a delivery id that is not a canonical uuid,\na timestamp outside the window, a wrong key, a wrong delivery id and a\nchanged body are all this one document: a prober learns nothing about\nwhich it got wrong.",
+        "properties": {
+          "error": {
+            "const": "signature_invalid",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "SignatureInvalidResponse",
         "type": "object"
       },
       "SubjectResponse": {
@@ -1007,6 +1190,257 @@
           }
         },
         "summary": "Read the agent audit record"
+      }
+    },
+    "/admin/connectors": {
+      "get": {
+        "description": "Requires `admin_connectors:read` and an ACCESS token; an agent token is refused before the scope is read. Each connector: its name, version and kind; whether it is enabled and by whom; the bound agent and the binding as it stands NOW (`ok`, `unbound`, `agent_not_active`, `agent_scopes_differ`, or `not_applicable` for an outbound one); `endpoint_declared`; the pending, delivered and dead counts, the oldest pending delivery's age, the last error token, the receipts, and up to `dead_limit` dead letters by event and token. **Never an endpoint, a payload or a key.**",
+        "operationId": "list_connectors_admin_connectors_get",
+        "parameters": [
+          {
+            "description": "Dead letters per connector, 1-20. Outside the range is refused with 422; it is never clamped.",
+            "in": "query",
+            "name": "dead_limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 20,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Every connector, by name."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "List every connector, its binding, its counts and its dead letters"
+      }
+    },
+    "/admin/connectors/{name}/disable": {
+      "post": {
+        "description": "Requires `admin_connectors:write`. Takes no body. Unbinds the agent and clears the schedule; deliveries already pending are held, not sent, until it is enabled again.",
+        "operationId": "disable_admin_connectors__name__disable_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorChangedResponse"
+                }
+              }
+            },
+            "description": "The connector is disabled."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoSuchConnectorResponse"
+                }
+              }
+            },
+            "description": "No connector of that name."
+          }
+        },
+        "summary": "Disable one connector"
+      }
+    },
+    "/admin/connectors/{name}/enable": {
+      "post": {
+        "description": "Requires `admin_connectors:write`. An inbound or scheduled connector starts runs AS the agent named here, which must be active, bound to no other connector, and hold EXACTLY its definition's scopes -- no fewer, and no more. An outbound connector acts as nobody: name no agent, and it must have an endpoint in the project manifest. The administrator is recorded as the one who enabled it.",
+        "operationId": "enable_admin_connectors__name__enable_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Which agent an inbound or scheduled connector acts as, or null.\n\nRequired and nullable: an outbound connector acts as nobody and takes\n`null`, and the other two take the agent whose stored scopes EQUAL the\ndefinition's (ADR 0236). The member is required so that \"no agent\" is\nsomething a caller said, never something it forgot.",
+                "properties": {
+                  "agent_id": {
+                    "anyOf": [
+                      {
+                        "format": "uuid",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Agent Id"
+                  }
+                },
+                "required": [
+                  "agent_id"
+                ],
+                "title": "ConnectorEnableRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorChangedResponse"
+                }
+              }
+            },
+            "description": "The connector is enabled."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoSuchConnectorResponse"
+                }
+              }
+            },
+            "description": "No connector of that name."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingRefusedResponse"
+                }
+              }
+            },
+            "description": "`agent_not_active` (no such agent, a revoked one, or none named for a connector that needs one), `agent_already_bound` (another connector acts as it), `agent_scopes_differ` (its stored scopes are not exactly the definition's) or `no_endpoint` (an outbound connector the manifest gives no endpoint)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentNotNeededResponse"
+                }
+              }
+            },
+            "description": "An agent was named for an outbound connector, which acts as nobody."
+          }
+        },
+        "summary": "Enable one connector, binding the agent it acts as"
       }
     },
     "/admin/users": {
@@ -2095,6 +2529,127 @@
           }
         },
         "summary": "End one of this subject's sessions"
+      }
+    },
+    "/connectors/{name}": {
+      "post": {
+        "description": "No bearer token: the request is authenticated by `X-Apg-Signature`, an HMAC-SHA256 under the connector's own key over `<t>.<delivery id>.<raw body>`, inside 300 seconds of `t` (ADR 0237). Every signature failure is the same 401. Only after the signature holds is the body parsed and checked against the connector's closed declaration, and a run of its definition started as the agent an administrator bound to it, with the body as the run's input. A delivery id is accepted once: a retry of the same id is `delivery_replayed` and starts nothing.",
+        "operationId": "accept_connectors__name__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The sender's id for this delivery, canonical lowercase. Signed.",
+            "in": "header",
+            "name": "X-Apg-Delivery",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`t=<unix seconds>,v1=<64 lowercase hex>`.",
+            "in": "header",
+            "name": "X-Apg-Signature",
+            "required": true,
+            "schema": {
+              "pattern": "^t=[0-9]{1,12},v1=[0-9a-f]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "The connector's declared members and nothing else, at most 16 KiB. Becomes the run's input.",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorAcceptedResponse"
+                }
+              }
+            },
+            "description": "The run was enqueued."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Signed, and not a JSON object: refused before the database."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignatureInvalidResponse"
+                }
+              }
+            },
+            "description": "Any signature failure. One answer for every cause."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoSuchConnectorResponse"
+                }
+              }
+            },
+            "description": "No inbound connector of that name, or no connectors on this deployment."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryRefusedResponse"
+                }
+              }
+            },
+            "description": "Signed and refused: replayed, disabled, or the bound agent changed."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BodyTooLargeResponse"
+                }
+              }
+            },
+            "description": "The body is above 16 KiB."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BodyNotPermittedResponse"
+                }
+              }
+            },
+            "description": "Outside the connector's declaration, naming the declared member."
+          }
+        },
+        "summary": "Deliver one signed request to an inbound connector"
       }
     },
     "/storage/objects/{object_id}": {

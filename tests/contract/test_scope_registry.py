@@ -72,7 +72,9 @@ def test_the_administrative_class_is_one_per_identity_resource_and_verb() -> Non
     closed list is what makes an unreviewed addition to the vocabulary fail
     here; a `<=` would have admitted `admin_audit:read` silently and admitted
     the next name silently too. Five members since Session 9 Run 7 (ADR 0142);
-    SIX since Session 33 (ADR 0232, D1717): `admin_workflows:approve`.
+    SIX since Session 33 (ADR 0232, D1717): `admin_workflows:approve`;
+    EIGHT since Session 34 (ADR 0236, D1796): `admin_connectors:read` and
+    `admin_connectors:write`.
     """
     assert scope_registry.administrative_scopes() == {
         "admin_users:read",
@@ -81,6 +83,8 @@ def test_the_administrative_class_is_one_per_identity_resource_and_verb() -> Non
         "admin_agents:write",
         "admin_audit:read",
         "admin_workflows:approve",
+        "admin_connectors:read",
+        "admin_connectors:write",
     }
     assert scope_registry.administrative_scopes() <= scope_registry.approved_scopes()
 
@@ -91,6 +95,9 @@ def test_the_administrative_class_is_one_per_identity_resource_and_verb() -> Non
     # decision, so there is no read twin, and no write verb either.
     for twin in ("admin_workflows:read", "admin_workflows:write"):
         assert twin not in scope_registry.approved_scopes(), twin
+    # And ADR 0236's: the connector pair is read and write, and nothing
+    # else -- enabling is the write, and there is no third verb.
+    assert "admin_connectors:approve" not in scope_registry.approved_scopes()
 
 
 def test_the_storage_class_is_one_per_object_verb() -> None:
@@ -350,6 +357,8 @@ def test_the_ceilings_over_the_release_surface_are_what_they_were() -> None:
         "admin_agents:write",
         "admin_audit:read",
         "admin_workflows:approve",
+        "admin_connectors:read",
+        "admin_connectors:write",
     }
 
 
@@ -398,6 +407,7 @@ def test_an_administrative_scope_is_reachable_only_by_the_admin_role() -> None:
     }
     assert holders == {"project_admin"}
     assert "admin_workflows:approve" in administrative
+    assert {"admin_connectors:read", "admin_connectors:write"} <= administrative
     for surface in (None, merged_example_surface()):
         for scope in sorted(administrative):
             reaching = {

@@ -627,6 +627,10 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1836** | 5 | §5 Run 5 item 5: step 6e's three reasons and the missing-endpoint line; §2 CONN-DEF-001's `test_the_init_skeletons_validate`. | The plan names no case for an endpoint in the manifest that belongs to NO outbound connector (a typo, or an endpoint given to an inbound one, which the table's CHECK would refuse at psql); and `init` is `bin/connector.sh`'s verb, which Run 7 writes. | **6e reports each such endpoint** (*"endpoint for <name>: names no outbound connector of this set; installed nowhere"*) and sends it nowhere -- a report, like the missing endpoint (ADR 0195); `connector_install.statements` refuses an endpoint for a non-outbound connector before psql could. **No line prints an endpoint** (proved). `test_the_init_skeletons_validate` moves to Run 7 with `init`. The dev path's enabled arm is a contract proof over a recording `docker` (`test_deploy_connectors.py::test_dev_up_installs_connectors_only_with_the_facility`, a tmp schema-7 manifest), D1808's disabled sentence read off the real `up`. | — |
 | **D1837** | 6 | §5 Run 6 item 2: *"absent → `None`, and a single INFO line \"connectors: no key file (the project has not enabled the facility)\""*. | **Rig 34f's control read the auth log for the line and found nothing.** The application configures no logging (no `basicConfig`, `dictConfig` or `setLevel` under `services/auth-api/app/`), so under uvicorn's defaults an `app.*` INFO record reaches no handler -- Python's last-resort handler prints WARNING and above. | The line is written as the plan says and recorded as INVISIBLE, never as a reader of the facility: an operator reads the facility from the deployed document's `connectors.enabled` and from Run 8's doctor line. A WARNING would sound on every start of every project without the facility (alpha) about a state that is correct. | — |
 | **D1838** | 6 | §5 Run 6 item 4 (ii): *"exactly 3 POSTs at ≥ 2 s spacing"*; D1801's rehearsal *"3 attempts at ≥ 2 s spacing"*; §2 CONN-OUT-002 *"attempted exactly `max + 1` times at the backoff"*. | **Rig 34f (ii): 3 POSTs 5.06 s and 5.09 s apart with `backoff_seconds: 2`.** A delivery is claimable once its backoff passes, but an iteration that found nothing sleeps `POLL_SECONDS` (5) -- the loop sleeps only then (D1790) -- so on an idle deployment the spacing is `max(backoff, POLL_SECONDS)`. | Correct, and now measured: bounded below by the backoff, never hot. **Run 8's rehearsal and Run 9's host proof assert spacing `≥ backoff` and exactly `max + 1` attempts, never a spacing near the backoff**, and their time bounds allow `(max + 1) × POLL_SECONDS` plus one poll. | 0238 |
+| **D1839** | 7 | §5 Run 7 item 7: *"parse the body before the signature (the no-call proof FAILS — the fake raises)"*. | Parsing makes no repository call, and every bad-signature case the proofs were written with carried a VALID body -- so a route that parsed first changed neither a status nor a call. **Measured: with the new arm removed, M1 PASSED both `test_every_signature_failure_is_one_fixed_document` and `test_no_database_call_precedes_the_signature`.** | The case table both proofs iterate gains `unsigned_non_json` -- a non-JSON body under a wrong key -- which a route that parsed first answers 400, telling a prober its body was read. With it, M1 is killed by both. | 0237 |
+| **D1840** | 7 | §5 Run 7 item 3: *"`agent_not_active`, `agent_already_bound`, `agent_scopes_differ`, `no_endpoint`, `agent_not_needed`, `agent_required` 409"*; item 2: *"`PT403 scope_not_held` → 409 `agent_scopes_differ`"*. | `connector_enable` (0036) raises no `agent_required`: an inbound or scheduled connector enabled with a NULL agent finds no agent row and raises `agent_not_active`. `agent_not_needed` is `PT422`, not `PT409`. `connector_accept` reaches `workflow_enqueue`, whose `PT403` carries TWO words (0034: `scope_not_held`, and *"this operation requires an active agent identity"*), and `connector_scopes_match` reads scopes, not status -- so a revoked agent whose scopes still equal reaches the second. | The routes answer the functions' words: no `agent_required` (a missing agent is `agent_not_active`, and the 409's description says so); **`agent_not_needed` is a 422**, the function's own class -- input an outbound connector cannot take; the inbound route maps `PT403 scope_not_held` → 409 `agent_scopes_differ` and any other `PT403` → 409 `agent_not_active`, the status document's word for that binding. An unrecognised error is re-raised, never reported as a refusal (proved). | 0236 |
+| **D1841** | 7 | §5 Run 7 item 6: *"`test_auth_service_shape.py::test_the_application_serves_exactly_the_declared_paths` (unchanged text, new set)"*. | A second pin in the same module, `test_the_admin_surface_is_reachable_only_under_admin`, requires every published path under THREE prefixes (`/auth/`, `/admin/`, `/workflows/`) and failed on `/connectors/{name}` in the targeted run. | Widened to the measured set -- FOUR prefixes -- and made stricter in the same edit: `/connectors/` admits exactly `["/connectors/{name}"]`, so a second path under it fails (CLAUDE.md §6: widening to a measured set is not weakening). | 0237 |
+| **D1842** | 7 | §5 Run 7 item 1: *"regenerate every committed lock the tests compare (`bin/mcp-contract.sh lock` / `check`)"*; items 2-5 name no further refusal. | No committed file carries the administrative vocabulary (`admin_audit:read` is in no committed lock; Session 33's `admin_workflows:approve` commit regenerated none). **`bin/mcp-contract.sh check` and `check --project project.example.yaml` exit 0 after the enums moved.** The route and the command needed four decisions the plan does not name. | No lock regenerated -- `check` is the evidence. Decided: `X-Apg-Delivery` must be a CANONICAL lowercase uuid (it is inside the signed bytes as sent and the receipt's key as parsed; two spellings would be two signatures over one receipt), any other form being the 401; the 401 carries `WWW-Authenticate: APG-Signature` (RFC 9110) and nothing about why; `disable` refuses a non-empty body (400) rather than ignoring it; `key` refuses before asking for root when the manifest does not enable the facility or the set does not declare the name (exit 5), and `connector_keys.master_path` re-roots the contract's path at a module attribute a proof can move and nothing on the command line can. | 0237 |
 
 ---
 
@@ -2030,7 +2034,77 @@ Targeted (fast): `test_connector_routes`, `test_connector_admin_routes`,
 Commit (`Session 34 Run 7: the inbound route, three admin routes, two scopes,
 bin/connector.sh`), push, CI.
 
-**Done.** *(the executor writes it.)*
+**Done.** 2026-09-30. **Scopes** (D1796): `admin_connectors:read` and
+`admin_connectors:write` appended to BOTH enums of
+`schemas/capabilities.schema.json` with the description's sentence;
+`ADMIN_CONNECTORS_READ`/`ADMIN_CONNECTORS_WRITE` in `scopes.py`;
+`api_surface.reserved_resource_names`' docstring; the six pins moved to the
+EIGHT-member exact sets (`test_scope_registry.py` three places plus an
+`admin_connectors:approve` absence, `test_scope_vocabulary.py`'s reserved
+names, `ADMIN_SCOPES` in `test_auth_endpoints.py` and `test_studio_runtime.py`);
+no lock regenerated -- `bin/mcp-contract.sh check`, both forms, exit 0 (D1842).
+**`services/auth-api/app/connector_routes.py`** (NEW): `POST /connectors/{name}`,
+no authenticator, ADR 0237's order exactly -- the name pattern → 404
+`no_such_connector`; `app.state.connector_key` `None` → 404; the raw body above
+`strict_json.MAX_BODY_BYTES` → 413 `body_too_large`; a canonical
+`X-Apg-Delivery` and `connector_signature.verify` under `derive(master, name)`
+→ ONE 401 `signature_invalid` (`WWW-Authenticate: APG-Signature`, `no-store`);
+`parse_object` → 400; only then `inbound`, `connector_body.check` → 422
+`body_not_permitted` `{reason, member}` (a DECLARED member only), `accept` →
+202 `{run_id, status: queued}`; the database's refusals as fixed words (D1840).
+**`connector_admin_routes.py`** (NEW): `GET /admin/connectors` (`:read`,
+`dead_limit` 1..20, default 20, through `strict_query`; the database's document
+plus `dead_limit`), `POST .../enable` (`:write`, `ConnectorEnableRequest
+{agent_id: uuid | null}`, required and closed) and `POST .../disable`
+(`:write`, a body refused) -- each Session 33's `_admin` before any parse,
+`user_id=principal.user_id`; refusals through `errors.ConnectorRefused` /
+`connector_refused`, a DETAIL never relayed. Nine models in `models.py`.
+**Mounted** in the `auth` branch; `public_paths()` gains the four;
+`contracts/app-openapi.canonical.json` recaptured (`--check` exit 0); `apg
+generate` moved `appOpenapiSha256` alone (client 1.0.0, `--check` exit 0);
+Studio forwards none (its proofs green, unchanged). **`src/agentic_postgres/
+connector_keys.py`** (NEW, D1828) ships with its caller, **`bin/connector.py` +
+`bin/connector.sh`** (six verbs, exits 0/2/3/4/5): `init --kind` derives an
+inbound or scheduled skeleton from the set's first definition (an inbound one:
+the first that reads an input) and each compiles as printed; `validate` holds
+its report (D1403); `status`/`enable`/`disable` over `ROUTES` with
+`APG_API_TOKEN`, `--confirm` = `--name` or exit 2 before the token is looked
+for; `key` refuses input (2), then a project without the facility or a name its
+set does not declare (5), then asks for root (4), reads the master from the
+ACTIVE generation's `auth/connector_signing_key` (the pointer plus the
+contract's consumer, never typed) and writes a NEW 0600 file with
+`O_CREAT|O_EXCL|O_NOFOLLOW`, never stdout. Listed in `test_cli_contract.py`'s
+three lists. **Proofs**: `test_connector_routes.py` (NEW, 10; twelve bad
+signatures against an `Untouchable` repository, the control a `Recording` one
+making exactly `inbound, accept`; every signature this module's OWN HMAC),
+`test_connector_admin_routes.py` (NEW, 6; a REAL `AuthService` over the example
+lock's vocabulary, three humans holding one scope each, an agent token 401 on
+all three), `test_connector_command.py` (NEW, 8 functions, 13 cases; the
+loopback recorder; `key` in-process with `geteuid` → 0 and `SECRET_ROOT` in a
+tmp tree of two generations, the non-root exit 4 through the real command),
+`test_connector_definition.py::test_the_init_skeletons_validate` (D1836),
+`test_connector_facility.py::test_the_two_key_derivations_agree` (D1828), and
+`test_auth_service_shape.py::test_the_admin_surface_is_reachable_only_under_admin`
+widened and made stricter (D1841). **Battery 10/10 killed, each run beside
+`test_connector_definition.py::test_the_three_kinds_compile` PASSED, the targets
+green before and after**: the body parsed before the signature; the declaration
+read before it; stale told from a wrong key; a replay accepted; an agent token
+through status; the key printed; `key` overwriting (both guards removed); the
+host copy's label drifting; the first generation read instead of the active
+one; enable relaying the database's message. **M1 survived the proofs as the
+plan named them** -- with the `unsigned_non_json` arm removed it PASSED both
+(D1839). **Targeted, once:** the plan's nineteen modules (`test_app_contract`
+is `test_app_contract_aggregate.py`) plus `test_connector_definition`,
+`test_connector_facility`, `test_repository_contract`, `test_workflow_routes`,
+`test_workflow_admin_routes`, `test_workflow_command`,
+`test_deployment_module_shape`, `test_printed_commands`: **1377 passed, 2
+failed** -- the prefix pin (D1841) and `test_commands_are_executable_in_the_git_index`
+(`bin/connector.*` not yet `git add`ed: D1188's order, missed); both modules
+re-run green (`test_cli_contract` beside the shape module, then the shape
+module's 43). Its `ruff check` had also failed (E501 in the scheduled template,
+S105 on a secret's NAME) and was read only afterwards; fixed, clean, and the
+six modules the fixes touch re-run: 328 passed. Rows D1839–D1842. CI:
+CI_PENDING
 
 ### Run 8 — the readers and the pages: the doctor, the drill, the rehearsal, `docs/connectors.md`, operator guide §18
 

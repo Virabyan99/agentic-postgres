@@ -167,6 +167,41 @@ def approval_expired() -> JSONResponse:
     return JSONResponse(APPROVAL_EXPIRED, status_code=409, headers={"Cache-Control": "no-store"})
 
 
+#: Session 34 (ADR 0236, ADR 0237). The connector surface's refusals are fixed
+#: words, each chosen HERE or read out of the definer function's own message
+#: for that one word -- never relayed. The inbound route's are answered to a
+#: sender that has proved it holds the connector's key (or, for the 404, 413
+#: and 401, to anybody): `no_such_connector`, `body_too_large`,
+#: `signature_invalid`, `body_not_permitted`, `delivery_replayed`,
+#: `connector_disabled`, `agent_scopes_differ`, `agent_not_active`. The admin
+#: routes' are answered to an administrator: `no_such_connector`,
+#: `agent_not_active`, `agent_already_bound`, `agent_scopes_differ`,
+#: `no_endpoint`, `agent_not_needed`.
+NO_SUCH_CONNECTOR: Final = "no_such_connector"
+SIGNATURE_INVALID: Final = "signature_invalid"
+
+
+class ConnectorRefused(Exception):
+    """One fixed refusal of the connector surface: a status, a word, and at most
+    the two members `body_not_permitted` carries. Never a value a caller sent."""
+
+    def __init__(self, status: int, word: str, **extra: str | None) -> None:
+        super().__init__(word)
+        self.status = status
+        self.word = word
+        self.extra = extra
+
+
+def connector_refused(refusal: ConnectorRefused) -> JSONResponse:
+    """The refusal's document, `no-store`. A 401 carries `WWW-Authenticate`
+    (RFC 9110), naming the scheme and nothing about why."""
+    headers = {"Cache-Control": "no-store"}
+    if refusal.status == 401:
+        headers["WWW-Authenticate"] = "APG-Signature"
+    body: dict[str, Any] = {"error": refusal.word, **refusal.extra}
+    return JSONResponse(body, status_code=refusal.status, headers=headers)
+
+
 class AuthenticationFailed(Exception):
     """Any of the four. Carries a reason for the log and never for the caller."""
 

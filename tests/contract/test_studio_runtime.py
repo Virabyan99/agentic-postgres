@@ -85,6 +85,8 @@ ADMIN_SCOPES = [
     "admin_agents:read",
     "admin_agents:write",
     "admin_audit:read",
+    "admin_connectors:read",
+    "admin_connectors:write",
     "admin_users:read",
     "admin_users:write",
     "admin_workflows:approve",
