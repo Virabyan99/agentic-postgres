@@ -1277,7 +1277,14 @@ def admin_password() -> str:
     return text.removesuffix("\n")
 
 
-@dataclasses.dataclass(frozen=True)
+#: How close to its ``expires_at`` the administrator's token may come before
+#: the session logs in again (D1854). Two minutes: longer than any one proof
+#: holds a token between reading it and presenting it, far shorter than the
+#: 900-second lifetime the deployment issues.
+ADMIN_TOKEN_RENEW_MARGIN_SECONDS = 120
+
+
+@dataclasses.dataclass
 class AdminSession:
     """An open administrator session, and the state the server says it has.
 
@@ -1289,14 +1296,36 @@ class AdminSession:
 
     ``expires_at`` is an absolute epoch second, not a duration: that is the
     shape ``TokenResponse`` chose, so that one deadline has one representation.
+
+    **The token is RENEWED, not held** (D1854). The session is opened once per
+    run and the deployment issues 900-second tokens; Session 34's second 1.12.0
+    sweep reached `test_project_bs_route_refuses_project_as_administrator` 933
+    seconds after the session opened, and project A rightly refused its own
+    administrator's expired token. Reading ``token`` within
+    ``ADMIN_TOKEN_RENEW_MARGIN_SECONDS`` of the deadline logs in again through
+    the same published route (``renew``), so every proof still presents a token
+    the deployment issued -- never one this suite signed.
     """
 
     username: str
-    token: str
+    issued_token: str = dataclasses.field(repr=False)
     expires_at: int
     user_id: str
     role: str
     scopes: tuple[str, ...]
+    renew: Callable[[], tuple[str, int]] | None = dataclasses.field(
+        default=None, repr=False, compare=False
+    )
+    renewals: int = 0
+
+    @property
+    def token(self) -> str:
+        if self.renew is not None and (
+            time.time() >= self.expires_at - ADMIN_TOKEN_RENEW_MARGIN_SECONDS
+        ):
+            self.issued_token, self.expires_at = self.renew()
+            self.renewals += 1
+        return self.issued_token
 
 
 @pytest.fixture(scope="session")
@@ -1370,29 +1399,39 @@ def admin_session(
     being measured is that the deployed service issues one and that the deployed
     verifier accepts it.
     """
-    answer = app_login(project_a, administrator_username, admin_password)
-    assert answer.status == 200, (
-        f"login as {administrator_username!r} answered {answer.status} "
-        f"({answer.reason or ''}). Either the password in {ADMIN_PASSWORD_FILE} is not "
-        "this deployment's, or the administrator's credential has been rotated since "
-        "it was written."
-    )
-    issued = json.loads(answer.body)
 
-    current = api_call(f"{app_base(project_a)}/auth/me", token=issued["access_token"])
-    assert current.status == 200, (
-        f"a token this deployment issued moments ago was refused by its own /auth/me "
-        f"({current.status}). That is the two-verifier failure D276 describes: the "
-        "issuer's key is not in the set the verifier reads."
-    )
-    subject = json.loads(current.body)
+    def login() -> tuple[str, int, dict[str, Any]]:
+        answer = app_login(project_a, administrator_username, admin_password)
+        assert answer.status == 200, (
+            f"login as {administrator_username!r} answered {answer.status} "
+            f"({answer.reason or ''}). Either the password in {ADMIN_PASSWORD_FILE} is not "
+            "this deployment's, or the administrator's credential has been rotated since "
+            "it was written."
+        )
+        issued = json.loads(answer.body)
+        current = api_call(f"{app_base(project_a)}/auth/me", token=issued["access_token"])
+        assert current.status == 200, (
+            f"a token this deployment issued moments ago was refused by its own /auth/me "
+            f"({current.status}). That is the two-verifier failure D276 describes: the "
+            "issuer's key is not in the set the verifier reads."
+        )
+        return issued["access_token"], int(issued["expires_at"]), json.loads(current.body)
+
+    token, expires_at, subject = login()
+
+    def renew() -> tuple[str, int]:
+        fresh, deadline, again = login()
+        assert again["user_id"] == subject["user_id"], "a renewal logged in as someone else"
+        return fresh, deadline
+
     return AdminSession(
         username=subject["username"],
-        token=issued["access_token"],
-        expires_at=int(issued["expires_at"]),
+        issued_token=token,
+        expires_at=expires_at,
         user_id=subject["user_id"],
         role=subject["role"],
         scopes=tuple(subject["scopes"]),
+        renew=renew,
     )
 
 
