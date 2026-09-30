@@ -643,6 +643,8 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1852** | 10 | §5 Run 10, the facility script: *"copy `/home/op/agentic-postgres/project.beta.yaml` to `project.beta.yaml.pre-s34`"* -- beside it, in the checkout. | **Measured: Sheet D5's first run refused at step 3**, *"the checkout has uncommitted changes"*: the backup is an UNTRACKED file (only `project.beta.yaml` is gitignored) -- D971's class. Steps 0–2 read and rendered only; nothing was installed. The workstation rig could not see it: it ran in a `git archive` copy with no `.git`. | The backup moved to `/home/op/project.beta.yaml.pre-s34` (the checkout clean again, the edited manifest in place) and `s34-r10-facility.py`'s `BACKUP` is `CHECKOUT.parent`; D5 re-run: exit 0. | — |
 | **D1853** | 10 | §5 Run 9 item 3's live module and the older live proofs, expected to pass on the first 1.12.0 sweep. | **The first sweep on `14b1b9d` (2026-09-30, 35 min 36 s): 1,068 passed, 6 failed, 7 skipped, 2 errors; exit 5.** `connector_inbound_live` and `connector_schedule_live` PASSED on first execution; every Session 30–33 claim held. Five INSTRUMENT defects, no product one: (1) the `sink` fixture read `project_b["compose"]` -- a RENDERED-only member; the deployed document names the network at `edge.project_internal_network` (measured equal, `apg-beta-dev-internal`) -- so both delivery proofs ERRORED at setup, no dead letter was left, and REC-EVT-001's floor failed (`delivery_restore`); (2) the event wait RESUMED (`reason: event_received`, the event's payload) and the proof read `outcome` for the reason; (3) outputs 19's leaf `connectors.enabled` was unclassified in the isolation matrix (`isolation_matrix`, and `agent_tenant_surface`, which carries that node); (4) `test_materialized_files_are_read_only_and_owned_by_the_declared_consumer` and (5) `test_the_rotation_surface_describes_this_deployments_generation` asked for `connector_signing_key` in ALPHA's generation -- alpha has no facility; both projects had the mirror, so no live project had lacked a facility until now. `rotation.plan_all` is the contract's DECLARED view by design (`bin/rotate-secret.py` names no project). | Run 10b repairs the five instruments (tests only; the deployable diff from `14b1b9d` is empty, D1641's method): the network from the deployed document; `outcome == succeeded` AND `reason == event_received`; `connectors.enabled` classified beside `backup.mirror.enabled`; both secret proofs filtered by `enabled_facilities(project_a)`. A `-k` iteration, then a second sweep; the deployment stays on `14b1b9d` and the tag says so. | — |
 | **D1854** | 10 | The second sweep (Run 10b), expected to leave `documented_path` the only failure. | **Measured: the second sweep on the unchanged `14b1b9d` deployment (instruments `5b8f641`, 44 min 40 s): 1,074 passed, 2 failed, 7 skipped, 0 errors; ALL FIVE Session 34 host claims PASSED, and every claim the first sweep lost to D1853 passed.** The second failure was `test_project_bs_route_refuses_project_as_administrator` (`project_isolation`, which passed in the first sweep): project A answered its OWN administrator's token 401 `authentication_failed`. `admin_session` is SESSION-scoped and logged in once; the deployment issues 900-second tokens (`claims.MAX_TTL_SECONDS`, 30 s skew), and the JUnit times put that proof **933 s** after the first proof that requested the session. Session 34's connectivity module (121 s, which ERRORED at setup in the first sweep) now sits between them. The product was right to refuse an expired token; the fixture held one past its deadline. | **Run 10c** (tests only; the deployable diff from `14b1b9d` stays empty): `AdminSession.token` is a property that logs in again through the same published route, confirmed by `/auth/me` for the same user, once the token is within `ADMIN_TOKEN_RENEW_MARGIN_SECONDS` (120) of `expires_at`; the token is kept out of the dataclass's `repr` (the failing sweep's log printed part of one). `tests/contract/test_admin_session_renewal.py` (new): the offline half; battery 5/5 beside a green control. A third sweep, by the operator's decision. | — |
+| **D1855** | 10 | Sheet D8: *"the plan names `note-embedded` (the first outbound by name) and `127.0.0.1:9`"*. | `bin/rehearse.sh delivery-retry-storm --plan` printed the placeholder *"<the first outbound connector by name, read before inducing>"*: `--plan` reads no cluster, and the connector is read before INDUCING (`storm_facts`). The run itself named `note-embedded`. | Recorded; the plan output is what `_delivery_retry_storm` promises when no connector was read (Run 8's design). No change. | — |
+| **D1856** | 10 | `dr-kit export`'s own line: *"the kit is owned by op; modes are unchanged (0700/0600)"*. | Every kit's `projects/` subdirectory is `755` on the host -- `kit-2026-09-30-pre`, `-post` and Session 33's `kit-2026-09-28-post` alike (the kit root is `700`, so nothing is reachable through it). A long-standing inaccuracy in the message, not a new exposure. | Recorded for the session that next moves `dr_kit.py`; the WSL copies were set 0700/0600. | — |
 
 ---
 
@@ -2585,6 +2587,73 @@ status, the merged document's totals, the rehearsal's verdict and its three
 attempt times, the connectors' final state (all disabled), the probe agents
 and humans left on beta, the tag and its message.
 
+**Done.** 2026-09-30. **Deployed, swept and tagged on `14b1b9d`** (Run 10a's
+commit; D1848 moved it from Run 9's `d32dc09` before anything was deployed).
+**Prep**: WSL TCP to the host 0.33 s; `s33r9-derive.py` was on neither machine,
+so `~/s34r10/s34r10-derive.py` was written in its shape (D1851) -- ten scripts,
+every count asserted, the gate's declaration block **15 tokens in, 15 out**;
+the facility script, `after-facility` and `rehearse` new; a facility rig
+(control refused, 1+6 lines, second run refused) found D1849. **Sheet D1
+(first)** found D1848 -- `fleet` and `dr-kit export` could not read the v18
+documents, and a rig showed step 0 would refuse every deploy; **Run 10a**
+repaired it; **D1 (second)**: `upgrade check` rc 0 twice; doctor 11 ok +
+`migrations` PROBLEM (35 of 36, 37 of 39) and *"deliveries: not read (the
+substrate predates 1.12.0)"*; `fleet` both at `02ffbbd`; `upgrade plan` WITH
+the three classes `bump minor`, `requires minor`, `ok` (alpha 5 leaves, beta 7),
+WITHOUT them `requires patch`; the PRE kit `kit-2026-09-30-pre` export 0,
+verify 0 (copied to `~/dr-kits`). **D2a**: the sentinel
+`s34-redeploy-sentinel-2026-09-30`, generation `7b54c4f4386098c4`, count 1.
+**D2b alpha**: step 0 `admitted` **reading beta's v18 document** (committed
+`beta-dev 304`) -- ADR 0241 live; step 6 `Applying: 20260929120036_connectivity`
+(86.9 ms), ledger **36**, `Pending: 0`; 6d/6e *"no … (the project declares no
+migration set)"*; exit 0; auth, storage, mcp, docs recreated; doctor **12 ok**,
+*"deliveries pending 0, dead 0; connectors enabled 0"*. **D3 beta**: admitted;
+0036 (89.6 ms) then the set's `0003_note_embedding_events` (13.3 ms), ledger
+**36 + 3**, `Pending: 0` twice; 6d **seven** definitions (new:
+`notes-await-embedding`, `notes-digest`, `notes-inbox`); 6e *"no connectors (the
+manifest's connectors.enabled is false)"*; exit 0; doctor 12 ok. **The
+facility** (op): diff 1 removed + 6 added; the render `connectors {"enabled":
+true}`; the contract's reader owes 20 → 21, gained exactly
+`connector_signing_key` (D1849). **D4a** `--plan`: exactly *"create secret
+value connector_signing_key"*; **D4b** `--apply`: *"created
+connector_signing_key for beta-dev"*, recorded, no value printed. **D5**: the
+first run refused at step 3 on the facility backup left in the checkout
+(D1852) -- nothing installed; moved out; second run exit 0, no migration, 6e
+**four installed** (two outbound, one scheduled, one inbound), `auth` and `mcp`
+recreated; the deployed document names `connector_signing_key` in
+`secrets.required_names`; the key file `generations/a7dae74036d88ebf/auth/
+connector_signing_key`, owner uid 65532 (no host name), mode `400`, under
+`auth` alone -- never read; four rows all disabled, the two outbound
+`has_endpoint t`; doctor 12 ok, connectors enabled 0. **D6**: ceilings 4,480
+MiB unchanged, 608 committed; doctor 12 ok (BEFORE: deliveries 0/0, enabled
+0); `usage` rc 6; both op copies v19 at `14b1b9d`. **The sweeps**: FIRST
+(`14b1b9d`, 35m36s) 1,068/6/7/2 -- `connector_inbound_live` and
+`connector_schedule_live` passed on first execution, five instrument defects
+(D1853); `-k` on `5b8f641` 17/0; SECOND (`5b8f641`, 44m40s) 1,074/2/7/0 -- all
+five new host claims passed, `project_isolation` lost to an expired fixture
+token (D1854); `-k` on `8d655b5` 22/0; **THIRD (`8d655b5`, 45m57s) 1,075
+passed, 1 failed (`documented_path`), 7 skipped, 0 errors** -- the host half.
+**Every new claim**: `connector_inbound_live`, `connector_delivery_live`,
+`event_wait_live`, `connector_schedule_live`, `delivery_restore` **passed**; the
+eleven offline passed at the gate. **D8** `delivery-retry-storm`: verdict
+`read`, rc 0; one rehearsal delivery through `note-embedded`, attempts at
+**3.8, 8.5, 14.3 s** ([4.7, 5.8] s apart), `dead`, `connect_failed`; heartbeat
+18:33:08.849 → 18:33:23.989; the doctor's workflow check ok (the `--plan`
+placeholder, D1855). **D9**: the sentinel `DELETE 1`; all four connectors
+`disabled` (D1850's word), unbound, by the operator; doctor AFTER 12 ok, runs
+succeeded 50 / cancelled 16 / failed 13 / stopped 13, **deliveries pending 0,
+dead 4** (three dead letters and one rehearsal), **connectors enabled 0**;
+left on beta: 16 revoked `apg-s34-*` agents and 8 probe humans, 6 `pending`
+approvals on ended runs (D1775's class); the POST kit `kit-2026-09-30-post`
+export 0, verify 0, copied to `~/dr-kits` (D1856). **External** (WSL,
+ephemeral agent, no-`-i` control rc 0): PASSED 25/0/8. **The merge**:
+`evidence/session-34.json` **188 claims -- 182 passed, 5 not_run, 1 failed**,
+the plan's prediction exactly; every half names `14b1b9d`. `release-reading
+--ref 14b1b9d`: `tag_is_owed`, 21 commits, 138 files, migrations 35 → 36, ADRs
+234 → 241. **Tagged `1.12.0` on `14b1b9d` and pushed**, the message stating
+D1641's method (the host half's instruments from `8d655b5`; the diff
+`14b1b9d..8d655b5` tests and the plan only, asserted on the host).
+
 ### Run 10a — the repair Sheet D1 forced: an existing deployed document is read by version (D1848)
 
 **Why.** Sheet D1 (reads only) found that the new checkout could not read
@@ -2612,7 +2681,9 @@ dropped; the sensitive-key check dropped; the reader carrying `connectors`
 forward; admission, fleet, the kit and retire each put back on the writer's
 validator; an unreadable version folded into *does not validate*. The rig on
 beta's REAL version 18 document, re-run on the repaired tree: **unreadable {}**.
-**CI:** CI_PENDING
+**CI:** `14b1b9de1267298352285b62067baea7e9708eba` → `contract` **success** (run
+36722250463). Run 10b (`5b8f641`, D1853) → success, run 36740526676; Run 10c
+(`8d655b5`, D1854) → success, run 36750791298. Both tests only.
 
 ### Run 11 — the close
 
