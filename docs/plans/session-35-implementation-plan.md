@@ -1,9 +1,9 @@
 # Session 35 — Change governance, the database half of approval, hardening, and the Stage 4 release
 
-**Status: EXECUTING — Runs 1–4 DONE 2026-10-01** (planned 2026-09-30 at
+**Status: EXECUTING — Runs 1–5 DONE 2026-10-01** (planned 2026-09-30 at
 `a018939`). The last session of Stage 4 (`docs/plans/stage-4-plan.md` §3).
 Eleven runs. The plan spends **D1857–D1891** and **ADR 0242–0245**; rows the
-runs add start at **D1892**. **NEXT FREE: D1918, ADR 0246.**
+runs add start at **D1892**. **NEXT FREE: D1923, ADR 0246.**
 
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 35* whole (Builds / Already
 true / Must not / Measures / Closes, `:619-657`), its rows **D1523** (the
@@ -539,6 +539,11 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1915** | 4 | Step 4: `--by "<the executor's model id>, Session 35 executor"`. | Run 3's `NAME` admits letters, digits, space, `.`, `_`, `'`, `-` -- no comma; the verb refuses that string at exit 2. | **`--by "claude-opus-5-5 Session 35 executor"`.** And a fact for Runs 8 and 10: the record's `project_slug` is `fixture-alpha` (the manifest that proposed it), while the gate keys on the SET's digest -- so beta, which applies the same example set, is admitted by this proposal, under BETA's own installed `approvals_required` (schema 7: 0). | The rule Run 3 wrote, kept; a set is what is reviewed, not a project. | 0243 |
 | **D1916** | 4 | D1865: `gate(...) -> None`; `status` prints *"`present, approved by <name>` / `absent` / `not needed (nothing pending)`"*; D1866: `proposals_naming(...) -> tuple[str, ...]`. | Three outcomes are not all the states: a proposal present under `approvals_required: 0`, a present proposal the gate refuses, an applied set the read could not reach (ADR 0195), and a project with no set; an unreadable proposal file must not read as *named by none*. | `gate` returns the approval it read (or None), so `status_line` names the approver from the same reading; the line adds `present (approvals_required is 0)`, `present; up refuses: <sentence>`, `whether anything is pending could not be read (<why>)` (and `status` still exits dbmate's code), and `proposal: not applicable (this project applies no set of its own)`. `proposals_naming` RAISES on a file that is not a proposal; `capability_report` says *the project's proposals could not be read (…)*. | A report may not substitute an answer for a failure to determine one. | 0243 |
 | **D1917** | 4 | Step 5: deploy's relay *"over `deploy-project.py`'s own `fail` (read how `test_deploy_*` modules drive a single step)"*; Battery: *"Control: the release set applied with the project set fully applied"*. | Step 6 is inline in the deploy's `main`; the `test_deploy_*` modules prove a step's HELPER and read where it sits from the AST. And the named control is `test_a_set_with_nothing_pending_needs_no_proposal` -- M1's own target, so M1 reaches it. | **The relay proof reads step 6's `fail(...)` under `if migrated.returncode != 0` out of the deploy's AST, evaluates its message expression over the stderr `migrate.py main` printed, and calls the deploy's own `fail`**: exit 5, the sentence intact. **Controls**: `test_the_release_set_is_never_gated` and `test_change_proposal.py::test_the_example_sets_committed_proposal_names_its_lock`, which no mutation reaches; M5-M7 added (status folding an unread set, the approval's `proposal_sha256` uncompared, the relay dropping stderr). | A control the mutation reaches is no control (D499). | 0243 |
+| **D1918** | 5 | D1879 / ADR 0245: *"the refused inbound request lives only in the auth log"*; `connector_routes.py:35`: *"The one log line per request is `StructuredRequestLog`'s"*. | **Measured, rig 35r5a** (`~/s35r5/rig-logs.sh`: the Session 34 auth image `apg-rig34-auth:local`, uvicorn 0.50.2, Python 3.12.13, the image's own `--no-access-log` flags, a two-line app logging as `StructuredRequestLog` and `mcp_telemetry` do): **no handler is configured on `apg.*`, so Python's last-resort handler prints WARNING and above only, as the bare message** -- an INFO `apg.http.request {…}` and an INFO `apg.mcp.read {…}`: ABSENT from `docker logs`; a WARNING `apg.mcp.read {…}`: present, bare; control, `uvicorn.error` INFO: present, `INFO:     …`. The per-request line has never reached a deployed log. | **Run 5 widens `apg-diag` as planned** -- what the log holds (uvicorn's lines, every warning, every traceback) goes through `redact` -- and the redaction proof feeds the PRINTED shapes. Making the INFO lines reach the log is a product change (a handler in `create_app`, and log volume under a `json-file` driver whose rotation nobody has measured): **not this run's; an open item for the operator** (§10). Sheet F4b's `apg-diag logs auth` will show uvicorn's lines and warnings, not one line per request. | Never write a measurement you did not run (D267); a reader with a hole in it is still better than none, and the hole is named. | 0245 |
+| **D1919** | 5 | Step 2: `test_every_long_running_service_carries_a_memory_limit` over *"the nine long-running services by the file's own `restart` policy or the set `SERVICE_RESOURCE_DEFAULTS` names"*; §2: `::test_the_three_new_memory_limits_are_rendered_from_config`. | The file's own restart policy names TEN (`edge-probe`, `restart: on-failure:5`, D1900); `SERVICE_RESOURCE_DEFAULTS` names nine, and the pids proof uses it. D1900 made it FOUR new limits. | **The memory proof walks the restart policy** and asserts the set equals the nine defaults plus `edge-probe`, so the classification is visible; the render proof is **`test_the_four_new_memory_limits_are_rendered_from_config`** -- Run 9 registers the tree's name in `NODE-LIMIT-002`. `edge-probe`'s key is `EDGE_PROBE_MEMORY_LIMIT` (`-` -> `_`). | A walk catches the eleventh long-running service; a list would not. | 0244 |
+| **D1920** | 5 | D1879: the JSON rule `"(password|secret|token|pgpass|authorization|api_key)"\s*:\s*"[^"]*"`. | That pattern requires the key to BE one of the words, so `"client_secret"`, `"access_token"` and `"refresh_token"` pass unmasked; and `\s` is a GNU extension in a script installed as a standalone copy. | **Any quoted key CONTAINING one of the words** (`"[A-Za-z0-9_-]*(…)[A-Za-z0-9_-]*"`), `[[:space:]]` for `\s`, the key kept and the value `<redacted>`; the first `sed` expression, so the older three see the masked line. | Stricter, never looser: widening a redaction masks more. | 0245 |
+| **D1921** | 5 | D1856 / step 4: *"`dr_kit`'s export creates the kit's `projects/` directory `0o700`"*. | The export writes in `bin/dr-kit.py:90-96`, not `dr_kit.py`; the cause is `Path.mkdir(parents=True, exist_ok=True, mode=0o700)`, which gives the mode to the LAST directory only -- Python creates missing parents *"with default permissions without taking mode into account"* -- so `projects/` took the umask's 0755 and `projects/<key>/` 0700. The existing proof walked files only. | **`_owner_only_directories`** makes each level with `os.mkdir(…, 0o700)` and `chmod`s it, so no umask widens it; `test_every_directory_in_the_kit_is_owner_only` exports under umask 022 and walks every directory (0700) and file (0600). The sixteen kits already written keep their 0755 `projects/` -- an export never rewrites a kit. | The class, not the field: every directory, not `projects/`. | — |
+| **D1922** | 5 | Step 2: *"write each reader's answer in the Done"*. | Five readers of `mem_limit` / `HostConfig.Memory` (grep, D979). | **`capacity_reading.ceilings_from_inspect`** sums per compose project: each project 2240 -> **2880 MiB** (+640), and the edge's two (672 MiB) leave `unbounded` and appear under the edge's own compose project, so `doctor capacity` will read *"… across 3 project(s)"* -- **predicted 4480 -> 6432 MiB, `unbounded` 10 -> 0, READ on the trip**; **`decide`** charges `unreclaimable_mb` only (no stop, §9); **the dev cluster** (`run_arguments`) carries no `--memory`, so `test_the_dev_cluster_carries_the_same_limit_as_the_release`'s condition is unchanged; **`bin/admit.py`**'s ceilings line and **the doctor's** text move with the sum, the `, K unbounded` clause vanishing at 0. Three docstrings saying *"2240 MiB per project"* now say 2880; the synthetic 2240s in `test_capacity_reading.py`/`test_doctor_readings.py` are fixture readings, not the tree, and stay. | A reader not asked is a reader that surprises the trip (D979). | 0244 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1421,6 +1426,34 @@ compose env keys), `test_capacity_reading`, `test_admission`,
 Run 5: the edge and every long-running service bounded; apg-diag reads auth,
 storage and mcp; D1856`), push, read CI.
 
+**Done.** 2026-10-01. **The edge** (`infra/edge/compose.yaml`): traefik
+`608m` / `76` / `"1.0"`, the socket proxy `64m` / `64` / `"1.0"`, literals
+with ADR 0244's comment; **`test_the_edge_plane_is_bounded` replaces
+`test_the_edge_plane_is_untouched`** and `NODE-LIMIT-001`'s node id and
+closing sentence moved in the same commit (the matrix and the product contract
+regenerated). **Four services** (D1900): `config.SERVICE_MEMORY_LIMITS_MB`
+(pgbouncer 64, postgrest 128, docs 224, edge-probe 224) rendered as
+`PGBOUNCER_/POSTGREST_/DOCS_/EDGE_PROBE_MEMORY_LIMIT` beside the pids/cpus
+block and interpolated `${X_MEMORY_LIMIT:?required}`; both examples
+re-rendered (`64m 128m 224m 224m` in `compose.env`). Readers' answers: D1922.
+`THR-NOISY-NEIGHBOUR`'s sentence corrected. **`apg-diag`** (ADR 0245):
+`SERVICES` + `auth storage mcp`, the JSON-key rule first (D1920); **rig
+35r5a found the `apg.*` INFO lines never reach `docker logs`** (D1918) -- an
+open item, not this run's. **D1856** (D1921): `bin/dr-kit.py`'s
+`_owner_only_directories`. **Proofs**: `test_process_limits.py` (the edge,
+the ten-by-restart-policy walk, the four rendered -- D1919),
+`test_diagnostic_surface.py` (the exact nine, the JSON rule, the three
+printed shapes, the 200 cap), `test_disaster_kit.py`'s directory walk.
+**Battery**: M1-M5 as planned plus M6 (`edge-probe`'s `mem_limit` removed),
+all KILLED as `FAILED` beside `test_a_container_cannot_fork_past_its_pids_limit`
+and `test_the_redaction_actually_redacts`, both green; M2's second half (the
+`:?` interpolation refusing) was not re-measured -- D178's. **Targeted**
+(once): 59 modules -- the plan's list and every `tests/contract` and
+`tests/security` module that reads `compose.yaml`, the edge file, the env
+keys, `apg-diag`, the kit, the capacity readers or the threat model, Docker
+included -- 2,641 passed, 0 skipped, 0 failed. Rows **D1918-D1922**; **NEXT
+FREE D1923, ADR 0246.** Commit `ffe65b2`; CI GREEN (run 36871440786), first push.
+
 ### Run 6 — the documentation converged, and the documented path extended
 
 **Documentation plus the two lists the documentation tests read
@@ -2027,6 +2060,7 @@ guide's table; `upgrade plan`'s blindness to a post-Session-2 secret (D1825).
 
 | Item | Note |
 |---|---|
+| **The auth, storage and mcp INFO lines never reach `docker logs`** (D1918, Run 5) | No handler on `apg.*`: `StructuredRequestLog`'s per-request line and `apg.mcp.read`'s served line are dropped; only WARNING and above print (bare). `apg-diag logs auth` reads uvicorn's lines and warnings. A handler in `create_app` is a product change with a log-volume question (the `json-file` driver's rotation is unmeasured) -- the operator's decision, not priced here. |
 | **A profile-added approval on a release tool is a plane control only** (D1869) | The database cannot read a deployment's profile; a rendered table of gated tools would be new construction. |
 | **The guard does not make a project function idempotent** (D1871) | A replay inside the step token's life writes again; the example's upsert keeps one row. A project that needs exactly-once must use ADR 0181's claim, which a project set cannot reach (`app_private`) — a release helper for projects is priced here, not built. |
 | **The proposal's names are declared** (D1864) | No operator identity exists; ADR 0243 says what the record is. A Stage 5 hosted reading with real users would make an authenticated reviewer possible and necessary. |
