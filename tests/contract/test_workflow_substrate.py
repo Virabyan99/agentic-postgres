@@ -269,7 +269,9 @@ def test_the_migration_applies_as_the_migration_user_and_its_down_refuses(
     # among them), and this module is part of 0035's evidence as well as 0034's.
     # 36 since Session 34: 0036 replaces 0035's `workflow_gate_state` and
     # `workflow_counts` in place with unchanged signatures (rig 34e).
-    assert len(applied["versions"]) == 36, len(applied["versions"])
+    # 37 since Session 35: 0037 adds `app.require_approval` and replaces none
+    # of these functions (ADR 0242, D1903).
+    assert len(applied["versions"]) == 37, len(applied["versions"])
 
     template = (REPO_ROOT / "migrations" / "templates" / "0034-workflow-substrate.sql").read_text(
         encoding="utf-8"
