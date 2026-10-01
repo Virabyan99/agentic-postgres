@@ -112,11 +112,21 @@ bookkeeping and it is not the audit trail.
 Never edit a template that has shipped. The preflight will refuse, which is the
 system working; the fix is a new migration.
 
+**A migration in a project's own set has one more step: propose it.** After
+`freeze-lock --project`, `bin/migrate.sh propose --project project.yaml --by
+"<your name>"` applies the set to an empty cluster and writes
+`projects/<slug>/proposals/<digest>.json`, which you commit with the set; a host
+refuses a set with a pending version and no proposal for it. The release's own
+migrations are not proposed — their lock is their review. Everything about the
+record is [Change governance](change-governance.md).
+
 ## A project's set
 
 ADR 0198. A project may bring migrations of its own. They live **tracked in the
 release checkout**, under a directory the project manifest names at schema
-version 5:
+version 5 — and since 1.13.0 a host applies them only when the set has been
+proposed, and approved where the project asks for it (ADR 0243,
+[Change governance](change-governance.md)):
 
 ```yaml
 schema_version: 5
@@ -179,6 +189,7 @@ it, checked against the release's own append-only manifest. That is the on-ramp
 | `CREATE`/`ALTER`/`DROP ROLE`, `SCHEMA`, `EXTENSION`; `ALTER DEFAULT PRIVILEGES` | the bootstrap plane owns roles; the migration plane owns objects |
 | any `SET ROLE` but `SET LOCAL ROLE {{object_owner}}` | LOCAL, so the authority cannot outlive the transaction dbmate wraps the migration in |
 | dropping an object the release publishes | a project adds to the published surface and never removes from it |
+| defining, altering or dropping a release FUNCTION — any schema, and an unqualified name the release uses | the set runs as the object owner, which owns every release function, so without this a project could replace the release's audited write or the identity every row policy reads. A set may CALL one — `app.emit_event`, `app.require_approval` (ADR 0235) |
 | a placeholder outside the six request roles and `database.name` | a project's SQL names its own database and the request roles, not the platform's identities. **`app_runtime` is the one adopters reach for**, because the release's own `0003` grants to it — and `0006` then revokes schema `app` from it, so that grant reaches nothing. The allowlist stands and the refusal says so (ADR 0211) |
 | a table in `app` without `FORCE ROW LEVEL SECURITY` | FORCE is what makes the policies apply to the table's **owner**, and every write function here is `SECURITY DEFINER` running as that owner |
 | a `down` block that does not raise `AP900` | this plane is fix-forward; a working rollback is one `dbmate down` from dropping a tenant's table |

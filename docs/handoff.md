@@ -69,7 +69,7 @@ bin/doctor.sh                          # exits 0 when everything is present
 Identity and credentials are already configured **in the checkout this
 document describes**. A clone you make yourself inherits neither, and `git
 commit` in one stops with *Author identity unknown* until you set
-`user.name` and `user.email` (see the new team member guide, step 14):
+`user.name` and `user.email` (see the new team member guide, step 16):
 
 - Remote: `https://github.com/Virabyan99/agentic-postgres` (private)
 - Author: `Virabyan99 <gmparstone99@gmail.com>`

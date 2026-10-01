@@ -340,6 +340,7 @@ teardown removes only what it recorded and refuses to remove anything matching t
 live volume, so a leftover is safe to remove by hand once you know what left it:
 `docker volume ls | grep -- -restore-`.
 
-**`apg-diag` cannot read `postgres` logs**, any more than it can read `auth`,
-`storage` or `mcp`. This will send you to a terminal on the host, and it is a
-standing open item rather than a surprise.
+**`apg-diag logs <key> <service>` reads a deployed service's last lines,
+redacted** — `postgres` among them, and `auth`, `storage` and `mcp` since
+1.13.0 (ADR 0245). It names deployed services, never a drill's own containers,
+so a drill that failed sends you to a terminal on the host.

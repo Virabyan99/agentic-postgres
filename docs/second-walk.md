@@ -47,7 +47,8 @@ by somebody, which is the alternative to leaving it unanswerable by anybody.
 **At most two walks per release** (the session plan's §9). The second is for a
 repair the first found, and it is walked by a *new* session after a
 documentation-only change. There is never a third: a third walk is a session
-being coached through a path until it passes.
+being coached through a path until it passes. A new release opens the count
+again — the path it documents is a different path (D1884).
 
 ## 2. The task statement
 
@@ -57,8 +58,8 @@ follow-up.
 
 <!-- task-statement:begin -->
 You have a clone of a product called Agentic Postgres at `~/walk/agentic-postgres`.
-It is a release: the commit is the one its version names, and the working tree
-is clean. Read it and follow it.
+It is release `1.13.0`: the commit is the one that version names, and the
+working tree is clean. Read it and follow it.
 
 The machine is yours, not the product's. You are inside WSL2 on Linux, with
 Docker, `git`, `curl` and a shell; if you are driving it from Windows, every
@@ -81,6 +82,7 @@ you:**
    and write that sentence down.
 7. Get the repository's own gate to exit 0 on a clean tree with your project
    directory tracked.
+8. Propose your migration set, and read what the proposal says about it.
 
 **The rules of the walk, and they matter more than finishing:**
 
@@ -146,7 +148,7 @@ bin/apg.sh dx-record check  --record ~/walk/dx-record.json
 verdict; read it, and do not edit the record to make it happier. If it reports
 findings, they are the documentation's, not yours.
 
-**Set `reached_success_criterion` honestly.** It is true only if all seven
+**Set `reached_success_criterion` honestly.** It is true only if all eight
 goals above are done — a goal whose documented answer is *this waits for a
 deploy* counts as done when you have found that sentence and recorded it —
 `check` reports no findings, and the gate exits 0 on a clean tree with your

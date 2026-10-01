@@ -1,25 +1,25 @@
 # New team member guide
 
-Fourteen steps, **every one of them available now**, and **twelve of them
+Sixteen steps, **every one of them available now**, and **fourteen of them
 offline**. None requires editing a file this repository ships, and none needs
 a credential or a provider. **One needs root and it is step 2**: two packages
 come from `apt-get`. Nothing after it does, and if `sudo` is not yours to use,
 step 2's note says how to get the same two tools without it.
 
-**Two of the fourteen wait for your project's first deploy, and both wait on
+**Two of the sixteen wait for your project's first deploy, and both wait on
 the same file.** `projects/<slug>/contracts/postgrest-openapi.canonical.json`
 is your surface as a running PostgREST serves it, and a checkout cannot serve
 one — `apg dev` is the database alone (ADR 0203). So if you add a table of your
-own at step 9, then step 11's *compile* and step 12's *generate* refuse with
+own at step 9, then step 13's *compile* and step 14's *generate* refuse with
 exit 5 until you have deployed once and captured that snapshot. Each step says
-so where you meet it, and step 11 carries the four-line order to follow. A
+so where you meet it, and step 13 carries the four-line order to follow. A
 reader who adds no table of their own meets neither wall.
 
 Every step on this page runs against the release you have. For fifteen
 sessions some of them were labelled as belonging to a session still to come,
 on steps that had already been built, deployed and measured; a reader who
 followed it was told the product could not do things it had been doing for a
-year (D1313). One label, and it is true of all fourteen.
+year (D1313). One label, and it is true of all sixteen.
 
 This is source specification §1.4 transcribed into the CLI this repository
 actually has, extended with what Stage 3 added: a table of your own, an agent
@@ -107,24 +107,31 @@ cp project.example.yaml project.yaml
 cp capabilities.example.yaml capabilities.yaml
 ```
 
-Set the slug, environment, and domain in `project.yaml`.
+Set the slug, environment, and domain in `project.yaml` — **and every
+`allowed_cors_origins` entry**: the copied file's origins name the example's
+domain, and a render refuses a domain its own origin list does not carry
+(*api.rest.allowed_cors_origins does not contain 'https://…'*, exit 2).
 
 **`capabilities.yaml` is the reviewed release set and you keep it as copied.**
 It is not empty — it carries the release's capabilities, enabled, and step 8
 will print `Capabilities 7 enabled` from it. (Empty was the correct state
 through Session 7 only; `capabilities.example.yaml`'s own header says so.) This
 file is the RELEASE's surface; the capability over a table of your own is a
-different file in a different place, and step 11 is where you write it.
+different file in a different place, and step 13 is where you write it.
 
 **Two keys in the copied `project.yaml` point at the example project, and both
 must move.** `mcp.capabilities` and `migrations.set` are each
 `projects/example` in the file you just copied:
 
-- **`migrations.set`** — delete it now. Left as copied it renders *another
+- **the whole `migrations` block** — delete it now: `set`, and the
+  `approvals_required: 1` beside it. Left as copied it renders *another
   project's* migration set into yours, and step 9's `freeze-lock` freezes
-  `projects/example` while appearing to work. You put it back at step 9,
-  pointing at your own directory.
-- **`mcp.capabilities`** — delete it now and put it back at step 11. The
+  `projects/example` while appearing to work. Delete `set` alone and the
+  block left behind is refused (*migrations: 'set' is a required property*):
+  `approvals_required` belongs to a set. You put `set` back at step 9,
+  pointing at your own directory, and step 11 says what `approvals_required`
+  is for.
+- **`mcp.capabilities`** — delete it now and put it back at step 13. The
 example manifest you just copied carries it, and it names a file that does not
 exist yet in your project — the manifest loader refuses that, so the first
 `freeze-lock` at step 9 would be refused before it read a single migration. The
@@ -187,10 +194,11 @@ mkdir -p projects/<slug>/migrations/templates
 ```
 
 **Point your manifest at the directory before you freeze**, at schema version
-6 — this is the `migrations.set` key you removed at step 7:
+8 — the version you copied — this is the `migrations.set` key you removed at
+step 7:
 
 ```yaml
-schema_version: 6
+schema_version: 8
 migrations:
   set: projects/<slug>
 ```
@@ -208,7 +216,7 @@ still pointed at — silently, and with a lock that looks correct.
 **Write the reviewed surface now too, in the same step.** It is listed in the
 block above because it belongs to the table rather than to the agent:
 `projects/<slug>/contracts/postgrest-api-surface.yaml` is what publishes your
-view and your function to every later comparison, and step 11's
+view and your function to every later comparison, and step 13's
 `bin/agent.sh init` reads it. Without it that command refuses with exit `2` and
 *the merged reviewed surface names no operation* — which is a step you have not
 done yet rather than a mistake you made.
@@ -258,7 +266,81 @@ and nothing reaches a provider — see [the developer loop](dev-environment.md).
 
 It needs Docker, which step 2 installed and step 4 confirmed.
 
-### 11. Give an agent your table — *the manifest now, the compile after your first deploy*
+### 11. Propose your migration set — *available now*
+
+```bash
+bin/apg.sh dev down --project project.yaml
+bin/apg.sh migrate propose --project project.yaml --by "<your name>"
+```
+
+About ten seconds. `propose` builds an empty local database of its own,
+applies your set to it as the migration user, removes it, and writes the
+record a host asks for before it applies your set:
+
+```
+proposal a097d35e2fb8655c written: projects/<slug>/proposals/a097d35e2fb8655c….json (0 destructive finding(s))
+```
+
+**Your database from step 10 has to be down first**: `propose` refuses (exit
+`3`) rather than remove an environment that is yours. The file is named by the
+sha256 of your set's lock, so it names exactly the set you froze. Read it:
+
+```bash
+jq . projects/<slug>/proposals/*.json
+```
+
+`destructive` lists every `DROP`, `TRUNCATE`, column type change and the like
+your set contains — named, never refused; `dev_apply` says how many migrations
+applied (the release's and yours) and states what that cannot tell you: the
+cluster was empty. `surface` says whether each function and view you published
+is in your reviewed surface. `harness` reads *not applicable* because you have
+no capability of your own yet — said, not zero.
+
+**An approval needs a second person.** `bin/apg.sh migrate approve --project
+project.yaml --proposal <digest> --by "<your name>"` is refused with *an
+approval needs a second name (ADR 0243)*, exit `5`: the names in both records
+are declared, not authenticated, and the record cannot know that a second name
+is a second person. Whether a host asks for an approval at all is your
+project's `migrations.approvals_required` — `0` unless you set it, so while you
+work alone leave it unset; the copied `1` went with step 7's block. **A host
+refuses a set with a pending version and no proposal for it.** Commit the
+proposal with your set at step 16; a different set is a different digest, and
+needs proposing again. [Change governance](change-governance.md) is the whole
+of it.
+
+### 12. Compose a workflow — *available now*
+
+```bash
+mkdir -p projects/<slug>/workflows
+bin/apg.sh workflow init --project project.yaml --name first-run \
+  > projects/<slug>/workflows/first-run.yaml
+bin/apg.sh workflow validate --project project.yaml
+bin/apg.sh dev up --project project.yaml
+```
+
+`init` prints a definition compiled from your project's lock — a read and a
+write it serves — and writes no file, so the redirect makes it yours. **Before
+step 13 your lock is the release's**, so the steps name `query_notes@1.0.0`
+and `create_note@1.0.0`; the capability over your own table joins the lock
+after your first deploy, and a workflow over it is that capability's name in a
+step. Give it a description and real arguments, then `validate`:
+
+```
+workflow: 1 definition(s) compile against this project's lock
+  first-run.yaml               first-run v1  2 steps  scopes: notes:read, notes:write
+```
+
+and `dev up` installs it — *workflows   1 definition(s) installed*. A RUN
+needs a deployment and an agent's token, and [Workflows](workflows.md) is the
+page for it. If `init` refused, the redirect has still left an empty file:
+delete it before `validate`.
+
+**Connectors are a read, not a step.** A connector needs the `connectors`
+facility enabled in a deployed project, a key only root writes, and a sender
+or a receiver on the other end — none of which a workstation has.
+[Connectors](connectors.md) is what to read before your first deployment.
+
+### 13. Give an agent your table — *the manifest now, the compile after your first deploy*
 
 An agent reaches your relations through a capability manifest you own, beside
 your migration set, and through nothing else (ADR 0201). **The first two
@@ -295,20 +377,20 @@ that). So a capability over your own view is *declared* on your machine and
    which is [Operating a deployment](operator-guide.md) §3, not this page;
 3. `bin/api-contract.sh --update --project project.yaml --project-outputs
    <the deployed outputs.json>`, review the captured snapshot and commit it;
-4. then the three commands above, and step 12's `generate`, all run offline
+4. then the three commands above, and step 14's `generate`, all run offline
    from then on.
 
 Nothing is lost by the wait — the deploy does not need the capability, and the
 agent plane serves the release's six tools until your own is compiled into the
 lock. **If you are following this guide to the end without a deployment, stop
-at `bin/agent.sh init` and read step 13.**
+at `bin/agent.sh init` and read step 15.**
 
 **If you ran the compile line anyway, delete the file it left behind.** The
 redirect is the shell's, not the command's: `>` creates and truncates the
 target before `compile` runs, so a compile that refuses still leaves a 0-byte
 `mcp-capabilities.canonical.json` in your contracts directory. Every command
 that reads it will tell you it is empty and say to delete it (exit `5`), and
-the gate at step 14 would otherwise ask you to commit an empty contract:
+the gate at step 16 would otherwise ask you to commit an empty contract:
 
 ```bash
 rm -f projects/<slug>/contracts/mcp-capabilities.canonical.json
@@ -329,15 +411,21 @@ other three.
 you read what it wrote before it becomes a file. An operation your surface does
 not publish is refused with the ones it does; so is one the release already
 serves, and the refusal says which of the two it is. Point your manifest at the
-directory, at schema version 6:
+directory, at schema version 8:
 
 ```yaml
-schema_version: 6
+schema_version: 8
 migrations:
   set: projects/<slug>
 mcp:
   capabilities: projects/<slug>
 ```
+
+**From here until that deploy, steps 11 and 12 wait as well.** With
+`mcp.capabilities` named, `propose` refuses (exit `2`) and `workflow
+validate` refuses (exit `5`), each naming the snapshot your deployment has
+not produced yet — which is why they come before this step. The proposal you
+wrote at step 11 still names your set: the capability is not in its digest.
 
 `check --project` is the approval: it compares your manifest against your
 reviewed surface and your snapshot, and refuses a drift with exit `5`. The last
@@ -354,7 +442,7 @@ That is a second migration, because the first is frozen; fix forward, never an
 amendment. `projects/example/migrations/templates/0002-agent-grants.sql` is the
 worked example.
 
-### 12. Generate a client — *after your first deploy, if you added a table*
+### 14. Generate a client — *after your first deploy, if you added a table*
 
 ```bash
 bin/apg.sh generate --project project.yaml
@@ -362,7 +450,7 @@ bin/apg.sh generate --project project.yaml
 
 A third of a second, and it writes a typed TypeScript package over the
 surface your project publishes — including the view and the write function you
-added in step 9, and the tool you declared in step 11: one method per published
+added in step 9, and the tool you declared in step 13: one method per published
 object, one per agent tool, and the digests that say which surface and which
 lock they came from.
 
@@ -372,7 +460,7 @@ deployment can produce it.** So this command works today for a project with no
 migration set of its own, over the release's surface alone, and refuses with
 exit 5 for a project that HAS one until that project has been deployed once and
 its snapshot captured. If you followed step 9 you have one, and this step waits.
-The note under step 11 is the same wall and says what to do about it.
+The note under step 13 is the same wall and says what to do about it.
 
 You cannot *call* anything with it yet — there is no REST service until a
 deploy — and that is worth seeing rather than reading about: `init()` is the
@@ -380,7 +468,7 @@ first thing a caller runs, and against nothing it answers `unreachable`
 rather than pretending the contract is stale. Read the generated `README.md`
 and [generated clients](generated-clients.md).
 
-### 13. Read Studio — *available now*
+### 15. Read Studio — *available now*
 
 ```bash
 bin/apg.sh studio --help
@@ -413,7 +501,7 @@ the same shape as `init()`'s `unreachable` in the step before, and it is worth
 meeting once: a clear sentence naming what is missing is this product working,
 not failing. [Studio](studio.md) is the longer form.
 
-### 14. Run the gate — *available now*
+### 16. Run the gate — *available now*
 
 The gate refuses a tree with untracked or uncommitted changes, so everything
 you wrote under `projects/<slug>/` is committed first — that is what "your
@@ -441,7 +529,7 @@ CI runs this exact script; there is no second, divergent definition of
 
 ## What "done" looks like
 
-**Steps 1–14 complete, `bin/apg.sh dx-record check` reports none, none and
+**Steps 1–16 complete, `bin/apg.sh dx-record check` reports none, none and
 none, and the gate exits 0 on your clean tree with your project directory
 tracked.** That sentence is the success criterion, and it is what a walk's
 record means when it says `reached_success_criterion: true` (ADR 0207 §4).
@@ -460,6 +548,10 @@ Concretely, you have:
 - **an agent capability over it**, compiled, checked and catalogued;
 - **a local database** with that set applied by the role that will apply it on
   a deployment;
+- **a proposal for your set**, `projects/<slug>/proposals/<digest>.json`,
+  committed beside it — what a host asks for before it applies the set;
+- **a workflow definition** that compiles against your lock and installs on
+  the local database;
 - **a generated client** over the surface you extended, whose `init()` answers
   `unreachable` against nothing rather than pretending the contract is stale;
 - **Studio read**, and its refusal against a render recorded;
@@ -470,9 +562,9 @@ is a host, a domain, certificates and providers, and it is
 [Operating a deployment](operator-guide.md) rather than this page: its §3 is a
 host from empty and a first project, in the order the commands impose, with
 where each step was measured. When that deploy exists, three things on this
-page that stopped come back: step 11's three commands and step 12's `generate`
+page that stopped come back: step 13's three commands and step 14's `generate`
 run once the snapshot is captured (the operator guide's §6 step 4 is the
-capture), and step 13's Studio opens against the deployed document (its §8).
+capture), and step 15's Studio opens against the deployed document (its §8).
 Moving that deployment to a later release is
 [Upgrading a deployment](upgrade-guide.md), whose §1 is the half you do here,
 in the checkout, before any host is touched.

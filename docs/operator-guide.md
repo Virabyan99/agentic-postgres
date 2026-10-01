@@ -111,8 +111,13 @@ and **dropped by `sudo`** unless `--preserve-env=APG_PROJECT` is passed.
   ```
   Verbs: `containers labels logs routes listeners edge-log catalog generation`;
   `catalog` queries: `connection-limits, role-settings, migration-ledger,
-  extensions`. Its log allowlist covers neither `auth`, `storage` nor `mcp`
-  (D380, open since Session 7).
+  extensions`. Its log allowlist is `postgres pgbouncer postgrest docs
+  edge-probe dbmate auth storage mcp` — the last three since 1.13.0 (ADR 0245,
+  closing D380), every line through its redaction. The copy at
+  `/usr/local/bin/apg-diag` is installed by hand, so a release that changes the
+  script changes the host only when it is re-installed. What the `auth` log
+  holds is uvicorn's lines and every warning: the per-request line is not
+  printed (D1918).
 
 **Transport is `git bundle` + `scp` under a name derived from the commit**
 (D504), never a GitHub credential on the host. The sequence is
@@ -313,13 +318,24 @@ What each page owns:
 - **`docs/api-operations.md`** — the connection budget, statement timeouts,
   restarting, and rotating each credential (§9 below).
 
-**Two tables grow without bound and nothing prunes them** (D1255):
-`app_private.agent_audit` and `app_private.agent_idempotency`. Read on
-2026-09-15: alpha 1,508 audit rows over 21.6 days (696 kB, 44 with no
-`completed_at`) and 234 idempotency rows; beta 20 and none. The retention
-decision is a released migration carrying a policy, and it is on Stage 4's
-bill; until then the numbers are yours to watch. `fleet.sh` counts denials by
-boundary out of the same table.
+**The agent record is pruned by an operator who states a horizon, and by
+nothing else** (ADR 0213). Migration 0033's
+`app_private.agent_audit_prune(p_before, p_limit)` and
+`app_private.agent_idempotency_prune(p_before, p_limit)` delete rows older than
+the horizon you give, refuse a `NULL` or future one (`PT422`), and are granted
+to nobody: they are reached as the database superuser over the container
+socket, and nothing in the release calls either. `doctor.sh usage` reads the
+two row counts; `fleet.sh` counts denials by boundary out of the audit table,
+so a prune shortens the window it can count.
+
+**Ten tables are pruned by nothing** (D1886): the workflow tables
+(`workflow_definition`, `workflow_run`, `workflow_step`, `workflow_worker`,
+`workflow_approval`, `workflow_attempt`) and the connector tables
+(`connector`, `connector_event`, `connector_delivery`, `connector_receipt`). A
+run references its agent and an approval its approver, so a pruning plane is a
+design of its own — one function per table in foreign-key order and a horizon
+rule per table — and it is not in this release. Their row counts are yours to
+watch.
 
 ---
 
@@ -384,7 +400,7 @@ lock carries and refuses a lock the compiler did not sign. A project opens
 the plane to its own tables by owning a capability manifest beside its set
 (ADR 0201): `projects/<slug>/capabilities.yaml`, scaffolded by `bin/agent.sh
 init`, compiled and checked by `bin/mcp-contract.sh`, both in the checkout
-(`docs/new-team-member.md` step 11 says where the offline path ends and why).
+(`docs/new-team-member.md` step 13 says where the offline path ends and why).
 
 On the host, measured on beta 2026-09-11 (Session 21 Run 7) and re-read at
 every deploy since:
@@ -529,8 +545,9 @@ included** (D957).
 A release is closed by an evidence document, and an evidence document is three
 halves merged: **host** (root, on the deployment), **external** (from a
 network that is not the host), **offline** (a checkout with Docker, declared
-never inferred, ADR 0202). `bin/session-25-check.sh --help` is the authority
-for the flags; this is the sequence the trips ran.
+never inferred, ADR 0202). The newest shipped gate's `--help` is the
+authority for the flags -- `bin/session-34-check.sh` in this checkout -- and
+this is the sequence Session 34's third sweep ran (`s34-r10c-gate.sh`).
 
 **Before the sweep**, as `op`: the renders of §4 (both host manifests and
 both example fixtures — the gate's fixture check compares the rendered
@@ -544,10 +561,12 @@ flag omitted is a claim that silently goes `not_run` fifteen minutes later:
 
 ```bash
 sudo -v      # first, in the foreground (D1376)
-sudo bin/session-25-check.sh --mode host --host host.yaml \
+sudo bin/session-34-check.sh --mode host --host host.yaml \
   --project-a-outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json \
   --project-b-outputs /etc/agentic-postgres/projects/beta-dev/outputs.json \
   --admin-password-file /root/alpha-dev-administrator \
+  --redeploy-before-file /root/s34-redeploy-before.json \
+  --candidate-manifest /home/op/s31-third.yaml \
   --sentinel-file "$(sudo python3 -c "
 import json
 from pathlib import Path
@@ -557,7 +576,7 @@ print(root / 'generations' / gen / 'secret-check' / 'session2_sentinel')
 ")" \
   --kit-dir /home/op/kit-2026-09-11 \
   --replacement-bootstrap-state /home/op/replacement-bootstrap-state.json \
-  --restore-evidence-file /home/op/restore-alpha-dev-<id>.json \
+  --restore-evidence-file /home/op/restore-alpha-dev-202609060727818b.json \
   --rehearsal-evidence-dir /home/op/agentic-postgres/evidence \
   --removed-project-file /home/op/gamma-dev-retirement.json \
   --dx-record-file /home/op/session-25-dx-record.json \
@@ -571,9 +590,13 @@ print(root / 'generations' / gen / 'secret-check' / 'session2_sentinel')
   current kit destroys the proof without failing anything. As of 1.6.0 that is
   `kit-2026-09-11` (outputs v17 against a tree at v18).
 - **`--removed-project-file` stays**: drop it and `project_removal` goes
-  `not_run` for no reason (`g25-host.sh`'s header).
+  `not_run` for no reason. `--redeploy-before-file` is the file a sweep's
+  redeploy proof reads; `--candidate-manifest` stays the third project's
+  admission candidate. Not passed in Session 34, each for a reason: the
+  three `--rotated-*` (no rotation), `--after-reboot` (no reboot),
+  `--replacement-host-outputs` (D1028).
 - **Run it detached, ~15 minutes**, with the script writing its own exit code
-  to a file (`/home/op/g25-host.sh` is the working form: `setsid nohup … &`
+  to a file (`/home/op/s34-r10c-gate.sh` is the working form: `setsid nohup … &`
   after `sudo -v`), because `echo $?` from the launching shell reads the
   launcher's status. **Read the last thirty lines** (D1199).
 - **Exit 5 with the document written is the contract, not a failure** (D686):
@@ -587,7 +610,7 @@ account and `apg-agent@` is refused), and **both** outputs files, or the merge
 refuses on `project_keys` (D757):
 
 ```bash
-bin/session-25-check.sh --mode external --public-ipv4 <address> \
+bin/session-34-check.sh --mode external --public-ipv4 <address> \
   --project-a-outputs ./alpha-dev-outputs.json --project-b-outputs ./beta-dev-outputs.json \
   --ssh-destination op@<host>
 ```
@@ -602,10 +625,10 @@ mode stops being something a host is asked to run.
 
 ```bash
 python bin/write-session-evidence.py --session 34 \
-  --host-input evidence/session-28-host.json \
-  --external-input evidence/session-28-external.json \
-  --offline-input evidence/session-28-offline.json \
-  --output evidence/session-28.json
+  --host-input evidence/session-34-host.json \
+  --external-input evidence/session-34-external.json \
+  --offline-input evidence/session-34-offline.json \
+  --output evidence/session-34.json
 ```
 
 `--offline-input` is required for a session with an offline claim and refused
@@ -613,10 +636,11 @@ for one without (ADR 0202); the writer prints the commit each half measured
 rather than folding a difference.
 
 **One sweep per trip; a second only when the first found a defect; `-k` to
-iterate**, which writes no evidence. What the document says for 1.6.0:
-126 claims, 119 passed, 1 failed (`documented_path`, the first `failed` claim
-this project has written), 6 `not_run`, each named with its reason in
-`docs/stage-4-decision-report.md` §3.
+iterate**, which writes no evidence. What the document says for 1.12.0
+(`evidence/session-34.json`): 188 claims, 182 passed, 5 `not_run`, 1 failed
+(`documented_path`, by decision until a person walks it). The `not_run` are
+`port_allocation` (no reboot), the three rotation claims (they need four
+rotations) and `replacement_host_restore` (D1028).
 
 ---
 
@@ -1270,6 +1294,29 @@ inherits the machine's ambient ceiling — systemd's `DefaultTasksMax`, 3647 on
 this host — so the release takes them from 3647 to 128 or 64, not from
 infinity (D1602).
 
+**Since 1.13.0 every long-running service carries a `mem_limit`, and so does
+the edge** (ADR 0244, from Sheet E0's readings of both projects): `pgbouncer`
+64m, `postgrest` 128m, `docs` 224m and `edge-probe` 224m beside the six that
+already had one; Traefik `608m` / 76 processes / one core and the socket proxy
+`64m` / 64 / one core, as literals in `infra/edge/compose.yaml`. Each is four
+times the peak read, rounded up to 32 MiB, with a floor of 64 MiB.
+
+What that moves in the readings: **`ceilings` rises** — each project's sum goes
+from 2240 to 2880 MiB, and the edge's two containers, no longer unbounded,
+appear under the edge's own Compose project, so the line reads *"… across 3
+project(s)"* — and **`unbounded` counts only a container with no memory limit
+at all**, which on a host at 1.13.0 should be none: before it, the 10 were
+four per project (`pgbouncer`, `postgrest`, `docs`, `edge-probe`) and the
+edge's two (D1900). A non-zero count is now a container somebody started
+outside this release. **Admission is unchanged**: it charges
+`unreclaimable_mb`, never a cap (D767).
+
+**The edge's limits reach the host only when the edge is recreated**, which
+takes every project's ingress down at once: `sudo bin/edge.sh --host host.yaml
+restart` is down, then up, then the re-attachment of every deployed project's
+edge network. It is its own act on a sheet of its own, timed, never folded into
+a project's deploy.
+
 **What a neighbour's load actually does to the other project has not been
 measured**, and disk I/O is bounded by nothing at all: there is no `blkio`
 limit and the two projects share one device. `THR-NOISY-NEIGHBOUR` in
@@ -1646,9 +1693,12 @@ restore; no endpoint, payload or event id is in the record.
 **A sender sees `401 signature_invalid`.** One answer for every cause, by
 design. It is the key -- the right connector's, from the CURRENT master (a
 redeploy after a rotation changed it) -- or the clock: a request more than 300
-s from the sender's own `t` is refused exactly like a forgery. The refusal is
-in the `auth` service's log as a request line with the route template and the
-status, and nowhere else (`apg-diag` cannot read that log, D380).
+s from the sender's own `t` is refused exactly like a forgery. **The refusal
+leaves no record you can read**: no receipt, no run, and no line in the `auth`
+log either -- the service's per-request line is written at INFO with no
+handler to print it (D1918), so `apg-diag logs <key> auth` (since 1.13.0)
+shows uvicorn's lines and warnings, not this. Ask the sender for the time and
+the key they used.
 
 **A sender sees `409 agent_scopes_differ`.** The bound agent's scopes were
 widened or narrowed since it was bound; `status` shows the binding
@@ -1663,3 +1713,111 @@ doctor's clause and `status` say which; the `auth` log does not.
 **A delivery is dead.** `status` names its event and its token (`http_500`,
 `connect_failed`, `timeout`, ...). A dead letter is visible, not replayable
 (D1798): fix the receiver, and the next event is delivered normally.
+
+---
+
+## 19. Change governance, on a deployment
+
+Since `1.13.0`. A host applies a project's own migration set only when the set
+it is about to apply has been proposed — and, where the project asks for it,
+approved — in files committed beside the set (ADR 0243). **The records stop an
+unreviewed or altered set reaching a host; they do not authenticate a
+reviewer.** What a proposal holds, and how it is written, is
+[Change governance](change-governance.md); this section is what an operator
+meets on the host.
+
+**Nothing here is done on the host.** The proposal and the approval are written
+on a workstation by `bin/migrate.sh propose` and `approve`, committed, and
+reach the host in the release like any other file. A record written into the
+host's checkout dirties the release, and every deploy then refuses (D971,
+D1852) — and a record written anywhere else on the host is never read.
+
+### The status line
+
+```bash
+sudo bin/migrate.sh --project project.beta.yaml --runtime status
+```
+
+After the ledger, one line:
+
+```
+migrate: proposal 35245421404e77d3: not needed (nothing pending)
+```
+
+`not needed` is a project whose set this cluster has fully applied: nothing to
+govern, and nothing a deploy will be refused for. `absent (N pending; up
+refuses)` is a deploy that will stop at step 6. `present, approved by <name>`
+and `present (approvals_required is 0)` are a deploy that will apply. `present;
+up refuses: <sentence>` names which of the four refusals below it will meet.
+`whether anything is pending could not be read (<why>)` is a reading the
+command could not take, said rather than guessed.
+
+**Which projects it governs.** Only a project whose manifest names a set of
+its own (`migrations.set`), and only when that set has a version the cluster
+lacks. The release's own migrations are never asked. Whether an approval is
+needed is the INSTALLED manifest's `migrations.approvals_required` — a manifest
+below schema 8 reads as `0`. Two projects that apply the same set are admitted
+by the same proposal; each reads its own `approvals_required`.
+
+### Step 6 refuses
+
+```
+==> 6. Bootstrap and migrate the cluster
+...
+migrate: the rendered set for this project (41):
+...
+migrate: 1 project version(s) pending: 20261001120004
+deploy: migrations did not apply:
+migrate: no proposal for this set 35245421404e77d3
+```
+
+Exit 5, and **no migration was applied and no ledger row written**: the check
+runs before the ledger repair and before either set's migrator, so the
+release's migrations were not applied ahead of the refusal either. The deploy
+stops at step 6; what steps 0–5 converged stands, and the next deploy
+converges it again.
+
+The four sentences, exactly:
+
+- `no proposal for this set <digest16>` — the release carries no
+  `projects/<slug>/proposals/<digest>.json` for the set it is applying;
+- `the proposal names another set` — the file at that path names a different
+  digest (compared whole);
+- `approvals_required is 1 and the proposal has no approval`;
+- `the approval does not name this proposal, or names its proposer`.
+
+**What to do, every time**: on the workstation, at the commit you are
+deploying, `bin/migrate.sh propose --project <the manifest> --by "<name>"` (and
+`approve` under a second name, if the project asks), commit the record, move
+the host's checkout to that commit, and deploy again. A refusal is never
+repaired on the host.
+
+### The capability report
+
+Step 6 prints one line after the capability lock is written:
+
+```
+  capability contract 3d7d6e6d513a1e6c: named by proposal 35245421404e77d3
+```
+
+or `named by no proposal of this project`, `the project's proposals could not
+be read (…)`, or `no capability contract (the manifest declares none)`. **A
+report, never a refusal** (D1866): a capability contract named by no proposal
+deploys exactly as it did, and the line tells you nobody proposed it.
+
+### If something goes wrong
+
+**Step 6 refuses for a set you believe is applied.** Read `status`: if it
+prints `absent (N pending…)`, the cluster really lacks a version — the ledger
+is the cluster's answer, not the file's (D941). A set whose last migration
+failed half-way is not applied.
+
+**The proposal exists and the deploy still says `no proposal`.** The proposal
+names a different set: the lock was re-frozen, or a migration was added, after
+it was written. The digest in the refusal is the set the release carries; the
+file name under `proposals/` is the set that was proposed. Propose again.
+
+**`approvals_required is 1` on a project you work alone.** The setting is the
+project's own: set it to `0` (or remove it) in the installed manifest and
+deploy, or have a second name approve. The example project sets `1` to
+demonstrate the rule.

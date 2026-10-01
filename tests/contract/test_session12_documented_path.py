@@ -58,6 +58,12 @@ CURRENT_PATH_DOCUMENTS = (
     "docs/migrations.md",
     "docs/backup-operations.md",
     "docs/secret-handling.md",
+    # **D1881** (Session 35): the guide's steps 11 and 12 send a reader to
+    # these three, and `dx_record.DOCUMENT_ROOTS` reads them -- one claim's two
+    # halves read the same pages (D1323, D1383).
+    "docs/workflows.md",
+    "docs/connectors.md",
+    "docs/change-governance.md",
 )
 
 #: `--session N` and `--through-session N`, wherever they appear in prose or a

@@ -128,6 +128,13 @@ DOCUMENT_ROOTS = (
     # elsewhere, so this changed the documented set by nothing. It is here so
     # that the FIRST command named only there is seen.
     "docs/on-ramp.md",
+    # **D1881** (Session 35). The guide's steps 11 and 12 send a walker to
+    # these three -- proposing a set, composing a workflow, and the one page a
+    # connector needs a deployment for -- so a command named only there is
+    # documented. In both scans, D1383's rule.
+    "docs/workflows.md",
+    "docs/connectors.md",
+    "docs/change-governance.md",
 )
 
 #: The operator guides, which name commands the four pages above do not.
