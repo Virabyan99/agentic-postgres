@@ -1,0 +1,9 @@
+{
+  "declared_at": "2026-10-01T16:47:38Z",
+  "declared_by": "Andranik",
+  "kind": "migration_set_approval",
+  "note": "The names in this record are declared, not authenticated (ADR 0243).",
+  "proposal_sha256": "073583a4f212d6a9e6cec22d7b43620012f7554e7377725dff3899e4c1a31cf1",
+  "schema_version": 1,
+  "set_digest": "35245421404e77d3186c312eb92ce58fc740f9c768b33dca5f69486b2c55a76b"
+}
