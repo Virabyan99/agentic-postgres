@@ -22,9 +22,10 @@
         4,
         5,
         6,
-        7
+        7,
+        8
       ],
-      "description": "Manifest format version. 1 to 5. Version 5 (ADR 0198) adds `migrations`, optional at 5 and forbidden below it: the repository-relative directory of the project's OWN migration set, tracked in the release checkout under `projects/<slug>/`. Optional rather than required for `backup.mirror`'s reason -- a set is a facility a project may not have. It lives in the checkout and never beside this manifest on the host, because a release is exactly the commit it is named for and SQL applied from outside it would be a schema no commit determines (D1087). Version 4 (ADR 0188) adds `backup.mirror`, optional at 4 and forbidden below it. Version 4 (ADR 0188) adds `backup.mirror`, optional at 4 and forbidden below it: a copy of the backup repository at a second provider, made by a host unit and never known to the archiver. Version 2 (ADR 0183) replaces `mcp.max_result_rows` and `mcp.max_response_bytes` -- two fields nothing ever read (D929) -- with `mcp.profile`, which the lock compiler reads. A field is FORBIDDEN below the version that introduces it and REQUIRED at or above it (ADR 0177's rule, applied to this document), and the two replaced fields are the mirror image: required at 1, forbidden at 2. Version 3 (ADR 0186) adds `project.lifecycle`, required at 3 and forbidden below it; `permanent` is what every earlier version meant by omitting it. Versions 1 and 2 still load, because `project.alpha.yaml` and `project.beta.yaml` live only on the host and no commit can edit them. Version 6 (ADR 0201) adds the optional `mcp.capabilities`: the repository-relative directory holding this project's own capability manifest, forbidden below 6. Version 7 (ADR 0237) adds the optional `connectors`: whether this deployment enables the connectors facility, and where each outbound connector of the project's set sends. Forbidden below 7 and optional at 7, `backup.mirror`'s shape -- connectors are a facility a project may not have. Enabling it is what makes the project owe `connector_signing_key`; a project that leaves it off owes nothing new."
+      "description": "Manifest format version. 1 to 8. Version 5 (ADR 0198) adds `migrations`, optional at 5 and forbidden below it: the repository-relative directory of the project's OWN migration set, tracked in the release checkout under `projects/<slug>/`. Optional rather than required for `backup.mirror`'s reason -- a set is a facility a project may not have. It lives in the checkout and never beside this manifest on the host, because a release is exactly the commit it is named for and SQL applied from outside it would be a schema no commit determines (D1087). Version 4 (ADR 0188) adds `backup.mirror`, optional at 4 and forbidden below it. Version 4 (ADR 0188) adds `backup.mirror`, optional at 4 and forbidden below it: a copy of the backup repository at a second provider, made by a host unit and never known to the archiver. Version 2 (ADR 0183) replaces `mcp.max_result_rows` and `mcp.max_response_bytes` -- two fields nothing ever read (D929) -- with `mcp.profile`, which the lock compiler reads. A field is FORBIDDEN below the version that introduces it and REQUIRED at or above it (ADR 0177's rule, applied to this document), and the two replaced fields are the mirror image: required at 1, forbidden at 2. Version 3 (ADR 0186) adds `project.lifecycle`, required at 3 and forbidden below it; `permanent` is what every earlier version meant by omitting it. Versions 1 and 2 still load, because `project.alpha.yaml` and `project.beta.yaml` live only on the host and no commit can edit them. Version 6 (ADR 0201) adds the optional `mcp.capabilities`: the repository-relative directory holding this project's own capability manifest, forbidden below 6. Version 7 (ADR 0237) adds the optional `connectors`: whether this deployment enables the connectors facility, and where each outbound connector of the project's set sends. Forbidden below 7 and optional at 7, `backup.mirror`'s shape -- connectors are a facility a project may not have. Enabling it is what makes the project owe `connector_signing_key`; a project that leaves it off owes nothing new. Version 8 (ADR 0243) adds the optional `migrations.approvals_required` (0 or 1, absent meaning 0): whether a host applies this project's pending set only with a committed approval, by a second declared name, of the set's committed proposal. Forbidden below 8, and meaningful only beside `migrations.set`, which the `migrations` block already requires."
     },
     "project": {
       "type": "object",
@@ -112,6 +113,14 @@
           "type": "string",
           "pattern": "^projects/[a-z][a-z0-9-]{2,30}$",
           "description": "Repository-relative directory holding `migrations/manifest.json`, `migrations/templates/NNNN-*.sql`, `migrations/released.lock.json` and `contracts/`. The pattern admits no '/' beyond the fixed prefix and no '..', so a manifest cannot name a directory outside `projects/` -- the same refusal the migration manifest's `template` pattern makes about a template path. The render additionally refuses a directory that is absent, because a manifest naming a set that is not in the checkout is a deploy that would apply the release's migrations and silently skip the project's."
+        },
+        "approvals_required": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ],
+          "description": "Version 8 (ADR 0243). 1: a host applies a pending version of this set only when the set's committed proposal (`projects/<slug>/proposals/<digest>.json`, written by `bin/migrate.sh propose`) has a committed approval naming that proposal's bytes, declared by a name other than the proposer's. 0, or absent: the proposal alone. The names are DECLARED, not authenticated -- the record stops an unreviewed or altered set reaching a host; it does not authenticate a reviewer."
         }
       }
     },
@@ -959,6 +968,30 @@
         }
       },
       "description": "The version 7 gate (ADR 0237): `connectors` is forbidden below 7 and OPTIONAL at 7 -- `backup.mirror`'s shape, because connectors are a facility a project may or may not have. Below 7 a manifest says nothing and the deployed document records `connectors.enabled: false` for it (outputs version 19)."
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "maximum": 7
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "migrations": {
+            "not": {
+              "required": [
+                "approvals_required"
+              ]
+            }
+          }
+        }
+      },
+      "description": "The version 8 gate (ADR 0243): `migrations.approvals_required` is forbidden below 8 and OPTIONAL at 8 -- `mcp.capabilities`' shape, a key inside an existing block. Below 8 a manifest says nothing, and `config.approvals_required` reads it as 0: the proposal alone."
     }
   ]
 }

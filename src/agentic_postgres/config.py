@@ -61,7 +61,7 @@ MAX_MANIFEST_BYTES = 65_536
 #: `project.lifecycle`. Versions 1 and 2 still load and render as permanent
 #: projects, because both host manifests are version 1 and no commit can edit
 #: them.
-SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7})
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8})
 SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
 
 #: The project manifest version at which `mcp.capabilities` exists (ADR 0201):
@@ -75,6 +75,11 @@ PROJECT_CAPABILITIES_FROM = 6
 #: facility, and the deployed document records `connectors.enabled: false`
 #: for it (outputs version 19).
 PROJECT_CONNECTORS_FROM = 7
+
+#: The project manifest version at which `migrations.approvals_required`
+#: exists (ADR 0243): optional at 8, forbidden below. Below 8, or absent, it
+#: reads as 0 -- a host needs the set's proposal and no approval.
+PROJECT_APPROVALS_FROM = 8
 
 #: The project manifest version at which `backup.mirror` exists (ADR 0188):
 #: optional at 4, forbidden below. A manifest below 4 has no mirror, and the
@@ -1095,6 +1100,20 @@ def project_migration_set(document: dict[str, Any]) -> str | None:
     """
     block = document.get("migrations")
     return None if not block else block["set"]
+
+
+def approvals_required(document: dict[str, Any]) -> int:
+    """0 or 1: does a host need a second declared name's approval of this
+    project's set before applying a pending version of it? (ADR 0243, D1863.)
+
+    The ONE reader of the key, `project_migration_set`'s reason. 0 below
+    schema 8 and when the key is absent -- the schema forbids it below 8 and
+    the `migrations` block requires `set`, so a manifest naming no set always
+    reads 0.
+    """
+    if document.get("schema_version", 0) < PROJECT_APPROVALS_FROM:
+        return 0
+    return int((document.get("migrations") or {}).get("approvals_required", 0))
 
 
 def project_capabilities(document: dict[str, Any]) -> str | None:

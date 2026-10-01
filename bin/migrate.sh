@@ -41,6 +41,8 @@ readonly RENDERED_ROOT="/var/lib/agentic-postgres/rendered"
 SUBCOMMAND=""
 PROJECT_MANIFEST=""
 DECLARED_FOLLOWS=""
+DECLARED_BY=""
+PROPOSAL_DIGEST=""
 RUNTIME=0
 
 die() { local code="$1"; shift; printf 'migrate: %s\n' "$*" >&2; exit "${code}"; }
@@ -64,8 +66,25 @@ Subcommands:
                 and lint the set -- the release's is always checked, because a
                 project verb that could leave it unverified would be the one
                 way to render an unlocked platform migration.
+  propose       Write projects/<slug>/proposals/<set_digest>.json for the
+                project's own set: its versions, lint, destructive statements
+                (named, never refused), its apply on an EMPTY cluster through
+                `bin/dev.sh up` (then `down`), its api surface against the
+                reviewed contract, the approval-gate check, the harness's
+                cases and the capability contract's digest. Requires --by.
+                Refuses while an apg dev environment exists for the project.
+  approve       Write projects/<slug>/proposals/<set_digest>.approval.json,
+                naming the proposal FILE's sha256. Requires --proposal and a
+                --by that is not the proposer's name (case and spacing folded).
 
   --project FILE   Path to a project manifest (non-secret).
+  --by NAME        With propose and approve only: the name the record is
+                   DECLARED by. A letter, then letters, digits, spaces or
+                   . _ ' -, 2 to 64 characters. Declared, not authenticated:
+                   the records stop an unreviewed or altered set reaching a
+                   host; they do not authenticate a reviewer (ADR 0243).
+  --proposal DIGEST  With approve only: the set digest the proposal is named by
+                   (64 hex characters, the sha256 of the set's lock).
   --follows VERSION  With `freeze-lock --project` only: the 14-digit release
                    migration version this set was frozen against. Checked
                    against this release's own manifest, which lists every
@@ -74,7 +93,13 @@ Subcommands:
   --help           Show this message.
 
 `render` and `verify-lock` need no root and no cluster: they report what this
-release would apply. `status` and `up` both run dbmate in a container against
+release would apply. `propose` and `approve` need no root, no host and no
+network; `propose` needs docker through `bin/dev.sh` and a render of the
+project. Neither commits: the records are committed by whoever wrote them.
+They exit 0 written; 2 bad input, or a name that is not a declared name; 3 a
+prerequisite missing (no render, an apg dev environment exists); 5 the lint,
+the approval-gate check or the name rule refused, the set did not apply, or
+the record already exists. `status` and `up` both run dbmate in a container against
 the cluster, so both need root and a running project.
 
 There is no `down`. Released platform migrations are fix-forward only: every
@@ -125,7 +150,13 @@ parse_args() {
       --follows)
         [ "$#" -ge 2 ] || die 2 "--follows requires a value."
         DECLARED_FOLLOWS="$2"; shift 2 ;;
-      status|up|render|freeze-lock|verify-lock)
+      --by)
+        [ "$#" -ge 2 ] || die 2 "--by requires a name."
+        DECLARED_BY="$2"; shift 2 ;;
+      --proposal)
+        [ "$#" -ge 2 ] || die 2 "--proposal requires a set digest."
+        PROPOSAL_DIGEST="$2"; shift 2 ;;
+      status|up|render|freeze-lock|verify-lock|propose|approve)
         [ -z "${SUBCOMMAND}" ] || die 2 "one subcommand at a time."
         SUBCOMMAND="$1"; shift ;;
       down|rollback)
@@ -155,6 +186,25 @@ parse_args() {
       die 2 "--follows is only meaningful with freeze-lock; '${SUBCOMMAND}' writes no lock."
     [ -n "${PROJECT_MANIFEST}" ] || \
       die 2 "--follows declares the release a PROJECT set was frozen against, so it needs --project. The release's own lock has no such record."
+  fi
+
+  # ADR 0243. Each belongs to the record verbs and to nothing else; refused
+  # rather than ignored, for --follows' reason.
+  if [ -n "${DECLARED_BY}" ]; then
+    case "${SUBCOMMAND}" in
+      propose|approve) ;;
+      *) die 2 "--by belongs to propose and approve; '${SUBCOMMAND}' writes no record." ;;
+    esac
+  fi
+  if [ -n "${PROPOSAL_DIGEST}" ] && [ "${SUBCOMMAND}" != "approve" ]; then
+    die 2 "--proposal belongs to approve."
+  fi
+  case "${SUBCOMMAND}" in
+    propose|approve)
+      [ -n "${DECLARED_BY}" ] || die 2 "${SUBCOMMAND} requires --by NAME." ;;
+  esac
+  if [ "${SUBCOMMAND}" = "approve" ] && [ -z "${PROPOSAL_DIGEST}" ]; then
+    die 2 "approve requires --proposal DIGEST."
   fi
 
   case "${SUBCOMMAND}" in
@@ -214,6 +264,13 @@ main() {
       else
         "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode verify-lock
       fi ;;
+    propose)
+      "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode propose \
+        --project "${PROJECT_MANIFEST}" --by "${DECLARED_BY}" ;;
+    approve)
+      "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode approve \
+        --project "${PROJECT_MANIFEST}" --by "${DECLARED_BY}" \
+        --proposal "${PROPOSAL_DIGEST}" ;;
     render|status|up)
       local key rendered_dir document
       key="$(project_key)"

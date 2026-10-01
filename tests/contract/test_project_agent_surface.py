@@ -544,7 +544,7 @@ def test_the_shipped_fixtures_are_at_the_newest_version_and_one_names_capabiliti
     example = config.load_project_manifest(REPO_ROOT / "project.example.yaml")
     second = config.load_project_manifest(REPO_ROOT / "project.second.example.yaml")
     newest = max(config.SUPPORTED_PROJECT_SCHEMA_VERSIONS)
-    assert example["schema_version"] == second["schema_version"] == newest == 7
+    assert example["schema_version"] == second["schema_version"] == newest == 8
     assert config.project_capabilities(example) == "projects/example"
     assert config.project_capabilities(second) is None
     assert capability_manifest.PROJECT_SCHEMA_FROM == capability_compiler.VOCABULARY_FROM

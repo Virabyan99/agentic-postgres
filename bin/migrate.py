@@ -14,13 +14,32 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import subprocess
 import sys
+import time
+from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from agentic_postgres import config, container_exec, migrations, rendering, runtime_override
+from agentic_postgres import (
+    api_surface,
+    approval_gate,
+    capability_compiler,
+    capability_manifest,
+    config,
+    container_exec,
+    evaluation_harness,
+    migrations,
+    proposal,
+    rendering,
+    runtime_override,
+    sql_surface,
+    template_version,
+)
 
 EXIT_CONTRACT = 5
 
@@ -456,14 +475,319 @@ def verify_project_lock(project_path: str) -> str:
     )
 
 
-def main() -> int:
+# ---------------------------------------------------------------------------
+# propose and approve (ADR 0243)
+# ---------------------------------------------------------------------------
+
+#: `apg dev`'s own command: `propose` applies the set with the product's own
+#: environment (D1114, D1861), never a cluster of its own.
+DEV_SH = REPO_ROOT / "bin" / "dev.sh"
+
+#: Where `projects/<slug>/` is found for the records. The checkout, always; a
+#: name rather than a literal so a proof can write its records under a
+#: temporary root instead of the tree's own `projects/example/proposals/`.
+PROJECTS_ROOT = REPO_ROOT
+
+#: `bin/dev.sh up` is ~10-30 s (rig 35b: 22.5-29.4 s); six times that is a
+#: hang, not a slow cluster.
+DEV_UP_TIMEOUT = 180
+
+#: The line `bin/dev.sh up` prints after its migrations, measured by rig 35b:
+#: `dev: 39 migrations applied as <the project's migration_user role>`. The
+#: count is the WHOLE cluster's -- the release's and the set's (D1895).
+DEV_APPLIED = re.compile(r"^dev: (\d+) migrations applied as (\S+)$", re.MULTILINE)
+
+#: The release's own capability manifest, the joint contract's other half --
+#: what `bin/render-evaluation-report.py` and `bin/mcp-contract.sh` compile
+#: against when no host manifest is named.
+RELEASE_CAPABILITIES = REPO_ROOT / "capabilities.example.yaml"
+RELEASE_CONTRACT = REPO_ROOT / "contracts" / "snapshots" / "mcp" / "mcp-capabilities.canonical.json"
+
+
+class Refusal(Exception):
+    """`propose` or `approve` refuses, with the exit code the usage documents."""
+
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _now() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _dev(verb: str, project_path: str, timeout: int = 120) -> subprocess.CompletedProcess:
+    """One `bin/dev.sh` verb, stdin closed, output captured (ADR 0218)."""
+    return subprocess.run(
+        [str(DEV_SH), verb, "--project", project_path],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+    )
+
+
+def _write_exclusive(target: Path, data: bytes) -> None:
+    """Create ``target`` with these bytes, or Refusal(5) if it exists."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        raise Refusal(
+            EXIT_CONTRACT,
+            f"{target} already exists. A record is written once; a changed set has a new "
+            "digest and so a new proposal",
+        ) from None
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(data)
+
+
+def _project(project_path: str) -> tuple[dict, str, migrations.MigrationSet]:
+    manifest = config.load_project_manifest(Path(project_path))
+    named = config.project_migration_set(manifest)
+    if named is None:
+        raise Refusal(
+            2,
+            f"{project_path} declares no migrations.set, so it has no set to propose or "
+            "approve. A proposal is a record of a project's OWN set (ADR 0243)",
+        )
+    return (
+        manifest,
+        named,
+        migrations.MigrationSet(label="project", root=REPO_ROOT / named / "migrations"),
+    )
+
+
+def _deployed_contract(manifest: dict) -> tuple[dict, object | None]:
+    """The contract this project deploys, narrowed by its profile, and its inputs.
+
+    `bin/mcp-contract.sh check --project`'s reading: the joint contract for a
+    project with capabilities of its own, the release's otherwise, then the
+    profile applied -- so an approval a profile adds is visible (D1869).
+    """
+    inputs = capability_manifest.project_inputs(manifest)
+    if inputs is None:
+        contract = json.loads(RELEASE_CONTRACT.read_text(encoding="utf-8"))
+    else:
+        release = config.load_capabilities_manifest(RELEASE_CAPABILITIES)
+        contract = capability_manifest.compile_joint_contract(release, inputs)
+    if manifest["schema_version"] >= config.PROJECT_PROFILE_FROM:
+        contract = capability_compiler.apply_profile(contract, manifest["mcp"]["profile"])
+    return contract, inputs
+
+
+def _harness(contract: dict, inputs) -> dict:
+    """Cases ASKED, never results (D1860), or why there are none."""
+    if inputs is None:
+        return {"not_applicable": "the manifest declares no capabilities"}
+    derived = evaluation_harness.derive_cases(contract)
+    written: tuple = ()
+    own = inputs.root / "evaluation-cases.yaml"
+    for cases in (evaluation_harness.WRITTEN_CASES_PATH,) + ((own,) if own.is_file() else ()):
+        written += evaluation_harness.load_written_cases(
+            contract,
+            cases,
+            disabled=frozenset(
+                capability_manifest.disabled_release_capabilities(inputs.capabilities)
+            ),
+        )
+    return {
+        "contract_sha256": evaluation_harness.contract_digest(contract),
+        "derived": len(derived),
+        "written": len(written),
+        "capabilities": len(evaluation_harness.coverage(contract, derived, written)),
+        "note": "cases asked of the contract, not results",
+    }
+
+
+def _dev_apply(project_path: str) -> dict:
+    """`bin/dev.sh up` on an empty cluster, read and timed, then `down` (D1861).
+
+    **Refuses before starting when an environment exists** -- up, stopped, or
+    a state `status` could not read: `propose` never downs somebody's
+    environment, and a status it cannot read is not one it may assume absent
+    (ADR 0195). Only `status`'s *no environment* answer (exit 4) proceeds.
+    """
+    status = _dev("status", project_path)
+    if status.returncode != 4:
+        raise Refusal(
+            3,
+            f"an apg dev environment exists for this project (`bin/dev.sh status` exited "
+            f"{status.returncode}: {status.stdout.strip() or status.stderr.strip()}). "
+            f"propose applies the set to an EMPTY cluster and never removes yours: run "
+            f"`bin/apg.sh dev down --project {project_path}` first",
+        )
+    started = time.monotonic()
+    try:
+        try:
+            up = _dev("up", project_path, timeout=DEV_UP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            raise Refusal(
+                EXIT_CONTRACT,
+                f"`bin/dev.sh up` did not finish in {DEV_UP_TIMEOUT} s; no proposal written",
+            ) from None
+        seconds = round(time.monotonic() - started, 1)
+    finally:
+        _dev("down", project_path)
+    if up.returncode == 4:
+        raise Refusal(3, f"the project is not rendered here: {up.stderr.strip()}")
+    if up.returncode != 0:
+        raise Refusal(
+            EXIT_CONTRACT,
+            f"the set did not apply on an empty cluster (`bin/dev.sh up` exited "
+            f"{up.returncode}): {up.stderr.strip()[-600:]}. No proposal written",
+        )
+    applied = DEV_APPLIED.search(up.stdout)
+    if applied is None:
+        raise Refusal(
+            EXIT_CONTRACT,
+            "`bin/dev.sh up` exited 0 and printed no `dev: N migrations applied as ROLE` "
+            "line, so how many migrations applied could not be read. No proposal written",
+        )
+    return {"exit": 0, "migrations_applied": int(applied.group(1)), "seconds": seconds}
+
+
+def propose(project_path: str, by: str) -> int:
+    """Write `projects/<slug>/proposals/<set_digest>.json` (ADR 0243, GOV-PROPOSE-001)."""
+    try:
+        proposal.require_name(by)
+    except proposal.ProposalError as error:
+        raise Refusal(2, str(error)) from None
+    manifest, named, project_set = _project(project_path)
+    set_manifest = project_set.load_manifest()
+    lock = project_set.load_lock()
+    migrations.verify_lock(set_manifest, lock, project_set.root)
+    migrations.lint_project_set(project_set)
+
+    digest = migrations.set_digest(project_set)
+    project_root = PROJECTS_ROOT / named
+    target = proposal.proposal_path(project_root, digest)
+    if target.exists():
+        raise Refusal(EXIT_CONTRACT, f"{target} already exists; this set is already proposed")
+
+    contract, inputs = _deployed_contract(manifest)
+    bodies = sql_surface.final_function_bodies(set_manifest, project_set.root)
+    findings = approval_gate.unguarded(
+        contract, bodies, migrations.release_functions(migrations.release_set())
+    )
+    refused = approval_gate.refused(findings)
+    if refused:
+        for finding in findings:
+            print(f"migrate: {approval_gate.describe(finding)}", file=sys.stderr)
+        raise Refusal(
+            EXIT_CONTRACT,
+            f"{len(refused)} gated tool(s) do not call {approval_gate.GUARD} first; no "
+            "proposal written (ADR 0242)",
+        )
+
+    surface_path = api_surface.project_contract_path(REPO_ROOT / named)
+    if not surface_path.is_file():
+        raise Refusal(
+            EXIT_CONTRACT,
+            f"{surface_path.relative_to(REPO_ROOT)} does not exist, so the set's surface "
+            "cannot be read against a reviewed one",
+        )
+    reviewed = api_surface.load_project_surface(surface_path)
+    final = sql_surface.final_surface(set_manifest, project_set.root)
+    surface = {
+        "functions": [
+            {"name": name, "reviewed": name in reviewed["rpcs"]}
+            for name in sorted(final["functions"])
+        ],
+        "views": [
+            {"name": name, "reviewed": name in reviewed["relations"]}
+            for name in sorted(final["views"])
+        ],
+    }
+
+    if inputs is None:
+        capability_digest: str | dict = {"not_applicable": "the manifest declares no capabilities"}
+    else:
+        capability_digest = sha256(
+            capability_manifest.project_contract_path(inputs.root).read_bytes()
+        ).hexdigest()
+    harness = _harness(contract, inputs)
+    destructive = migrations.destructive_findings(project_set)
+    record_follows = migrations.follows_record(lock)
+
+    dev_apply = _dev_apply(project_path)
+
+    record = proposal.build_proposal(
+        project_slug=manifest["project"]["slug"],
+        set_digest=digest,
+        set_root=named,
+        versions=[
+            {"version": entry["version"], "name": entry["name"]}
+            for entry in set_manifest["migrations"]
+        ],
+        follows_release_version=None if record_follows is None else record_follows[0],
+        follows_release_version_source=None if record_follows is None else record_follows[1],
+        template_version=template_version(),
+        release_lock_sha256=migrations.set_digest(migrations.release_set()),
+        destructive=[finding._asdict() for finding in destructive],
+        dev_apply=dev_apply,
+        surface=surface,
+        approval_gate=[finding._asdict() for finding in findings],
+        harness=harness,
+        capability_contract_sha256=capability_digest,
+        declared_by=by,
+        declared_at=_now(),
+    )
+    _write_exclusive(target, proposal.record_bytes(record))
+    print(
+        f"proposal {digest[:16]} written: {named}/{proposal.PROPOSALS_SUBDIR}/{digest}.json "
+        f"({len(destructive)} destructive finding(s))"
+    )
+    return 0
+
+
+def approve(project_path: str, digest: str, by: str) -> int:
+    """Write `<set_digest>.approval.json` naming the proposal file's bytes (ADR 0243)."""
+    try:
+        proposal.require_name(by)
+        proposal.require_digest(digest)
+    except proposal.ProposalError as error:
+        raise Refusal(2, str(error)) from None
+    _manifest, named, _project_set = _project(project_path)
+    project_root = PROJECTS_ROOT / named
+    source = proposal.proposal_path(project_root, digest)
+    if not source.is_file():
+        raise Refusal(
+            EXIT_CONTRACT,
+            f"no proposal at {named}/{proposal.PROPOSALS_SUBDIR}/{digest}.json; "
+            "`bin/migrate.sh propose` writes it first",
+        )
+    data = source.read_bytes()
+    try:
+        record = proposal.build_approval(data, by, _now())
+    except proposal.ProposalError as error:
+        raise Refusal(EXIT_CONTRACT, str(error)) from None
+    if record["set_digest"] != digest:
+        raise Refusal(
+            EXIT_CONTRACT,
+            f"the proposal at {source.name} names set {record['set_digest'][:16]}, not "
+            f"{digest[:16]}; its file name and its content disagree",
+        )
+    target = proposal.approval_path(project_root, digest)
+    _write_exclusive(target, proposal.record_bytes(record))
+    print(
+        f"approval of proposal {digest[:16]} written: {named}/{proposal.PROPOSALS_SUBDIR}/"
+        f"{digest}.approval.json (declared by {by})"
+    )
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--mode", required=True)
     parser.add_argument("--outputs")
     parser.add_argument("--rendered-dir")
     parser.add_argument("--project")
     parser.add_argument("--follows")
-    arguments = parser.parse_args()
+    parser.add_argument("--by")
+    parser.add_argument("--proposal")
+    arguments = parser.parse_args(argv)
 
     # A declaration about a project set's ordering record, so it means nothing
     # without a set. Refused rather than ignored: a flag silently dropped is how
@@ -489,7 +813,28 @@ def main() -> int:
             print(f"migrate: {error}", file=sys.stderr)
             return 2
 
+    # `--by` names the person a record is declared by and `--proposal` the
+    # set an approval names; both belong to the two record verbs and nothing
+    # else (ADR 0243). Refused rather than ignored, `--follows`' reason.
+    if arguments.by is not None and arguments.mode not in ("propose", "approve"):
+        print("migrate: --by belongs to propose and approve", file=sys.stderr)
+        return 2
+    if arguments.proposal is not None and arguments.mode != "approve":
+        print("migrate: --proposal belongs to approve", file=sys.stderr)
+        return 2
+
     try:
+        if arguments.mode in ("propose", "approve"):
+            if not arguments.project or arguments.by is None:
+                print(f"migrate: {arguments.mode} requires --project and --by", file=sys.stderr)
+                return 2
+            if arguments.mode == "propose":
+                return propose(arguments.project, arguments.by)
+            if arguments.proposal is None:
+                print("migrate: approve requires --proposal DIGEST", file=sys.stderr)
+                return 2
+            return approve(arguments.project, arguments.proposal, arguments.by)
+
         if arguments.mode == "freeze-lock":
             if arguments.project:
                 return freeze_project_lock(arguments.project, arguments.follows)
@@ -578,7 +923,15 @@ def main() -> int:
         print(f"migrate: {error}", file=sys.stderr)
         return 2
 
+    except Refusal as refusal:
+        print(f"migrate: {refusal}", file=sys.stderr)
+        return refusal.code
+
     except migrations.MigrationError as error:
+        print(f"migrate: {error}", file=sys.stderr)
+        return EXIT_CONTRACT
+
+    except (evaluation_harness.HarnessError, proposal.ProposalError) as error:
         print(f"migrate: {error}", file=sys.stderr)
         return EXIT_CONTRACT
 

@@ -73,7 +73,8 @@ def test_schema_seven_admits_connectors_and_six_forbids_them(
     tmp_path: Path, base: dict[str, Any]
 ) -> None:
     """ADR 0177's rule a sixth time, `backup.mirror`'s shape: optional at 7."""
-    assert base["schema_version"] == 7 == config.PROJECT_CONNECTORS_FROM
+    # The base is version 8 since Session 35 (ADR 0243); connectors arrived at 7.
+    assert base["schema_version"] == 8 and config.PROJECT_CONNECTORS_FROM == 7
     assert "connectors" not in base
     assert config.connectors_enabled(_load(tmp_path, base)) is False
 
@@ -83,11 +84,15 @@ def test_schema_seven_admits_connectors_and_six_forbids_them(
 
     six = _enabled(base, **{"note-embedded": ENDPOINT})
     six["schema_version"] = 6
+    # Session 35: the base is version 8; `approvals_required` is forbidden below
+    # 8, so it goes too, or this arm would be refused for the wrong key.
+    six["migrations"].pop("approvals_required", None)
     with pytest.raises(config.ManifestError):
         _load(tmp_path, six)
     # The control: the same downgrade without the key loads.
     plain = copy.deepcopy(base)
     plain["schema_version"] = 6
+    plain["migrations"].pop("approvals_required", None)
     assert _load(tmp_path, plain)["schema_version"] == 6
 
 

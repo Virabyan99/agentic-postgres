@@ -43,7 +43,7 @@ import re
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from agentic_postgres import REPO_ROOT, config, sql_surface
 
@@ -938,7 +938,167 @@ def lint_project_set(project: MigrationSet, release: MigrationSet | None = None)
             )
 
 
+# ---------------------------------------------------------------------------
+# A set's identity and its destructive statements (ADR 0243)
+# ---------------------------------------------------------------------------
+
+
+def set_digest(migration_set: MigrationSet) -> str:
+    """The set's digest: the sha256 of its lock file's BYTES (D1857).
+
+    A set has no digest of its own beyond its lock, and needs none: the lock
+    binds every template and its canonical render, and is what a reviewer
+    signed off on. One function, because the render records this value as
+    `migrations.project_set.lock_sha256` and a proposal is named by it -- two
+    computations of one identity is the shape ADR 0002 forbids. The bytes and
+    never a re-serialisation: a lock re-indented is a different file, and the
+    deployed document says which file was rendered.
+    """
+    return sha256(migration_set.lock_path.read_bytes()).hexdigest()
+
+
+class DestructiveFinding(NamedTuple):
+    """One destructive statement in a set's UP section: where, what, on what."""
+
+    version: str
+    kind: str
+    object: str
+
+
+#: A name as PostgreSQL accepts it: bare or quoted, optionally schema-qualified,
+#: with whitespace around the dot. Captured whole and normalised afterwards.
+_NAME = r'((?:"[^"]+"|[A-Za-z_][\w$]*)(?:\s*\.\s*(?:"[^"]+"|[A-Za-z_][\w$]*))?)'
+
+#: The DROP shapes D1862 names, longest first so `MATERIALIZED VIEW` is not
+#: read as `VIEW`.
+_DROP = re.compile(
+    r"\bDROP\s+(MATERIALIZED\s+VIEW|TABLE|VIEW|FUNCTION|PROCEDURE|INDEX|TYPE|SEQUENCE|"
+    r"TRIGGER|POLICY)\s+(?:CONCURRENTLY\s+)?(?:IF\s+EXISTS\s+)?" + _NAME,
+    re.IGNORECASE,
+)
+_ALTER_TABLE = re.compile(
+    r"\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?" + _NAME + r"\s*\*?\s+(.*)\Z",
+    re.IGNORECASE | re.DOTALL,
+)
+_DROP_CONSTRAINT = re.compile(r"\ADROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?" + _NAME, re.IGNORECASE)
+_DROP_COLUMN = re.compile(r"\ADROP\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?" + _NAME, re.IGNORECASE)
+_ALTER_COLUMN_TYPE = re.compile(
+    r"\AALTER\s+(?:COLUMN\s+)?" + _NAME + r"\s+(?:SET\s+DATA\s+)?TYPE\b", re.IGNORECASE
+)
+_RENAME = re.compile(r"\ARENAME\b", re.IGNORECASE)
+_TRUNCATE = re.compile(r"\bTRUNCATE\s+(?:TABLE\s+)?(?:ONLY\s+)?" + _NAME, re.IGNORECASE)
+_DELETE = re.compile(
+    r"\bDELETE\s+FROM\s+(?:ONLY\s+)?" + _NAME + r"(.*)\Z", re.IGNORECASE | re.DOTALL
+)
+_WHERE = re.compile(r"\bWHERE\b", re.IGNORECASE)
+_STRING_LITERAL = re.compile(r"'(?:[^']|'')*'")
+_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+#: Every kind a finding can name, in D1862's order.
+DESTRUCTIVE_KINDS = (
+    "drop_table",
+    "drop_view",
+    "drop_materialized_view",
+    "drop_function",
+    "drop_procedure",
+    "drop_index",
+    "drop_type",
+    "drop_sequence",
+    "drop_trigger",
+    "drop_policy",
+    "drop_column",
+    "drop_constraint",
+    "alter_column_type",
+    "rename",
+    "truncate",
+    "delete_without_where",
+)
+
+
+def _object_name(written: str) -> str:
+    """A name as written, unquoted, with no whitespace around its dot, lowercased."""
+    return re.sub(r"\s*\.\s*", ".", written).replace('"', "").lower()
+
+
+def _top_level_actions(text: str) -> list[str]:
+    """An ALTER TABLE's comma-separated actions, ignoring commas in parentheses."""
+    actions, depth, current = [], 0, []
+    for character in text:
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth = max(depth - 1, 0)
+        if character == "," and depth == 0:
+            actions.append("".join(current).strip())
+            current = []
+            continue
+        current.append(character)
+    actions.append("".join(current).strip())
+    return [action for action in actions if action]
+
+
+def _statement_findings(statement: str) -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    for match in _DROP.finditer(statement):
+        kind = "drop_" + "_".join(match.group(1).lower().split())
+        found.append((kind, _object_name(match.group(2))))
+    altered = _ALTER_TABLE.search(statement)
+    if altered is not None:
+        table = _object_name(altered.group(1))
+        for action in _top_level_actions(altered.group(2)):
+            constraint = _DROP_CONSTRAINT.match(action)
+            if constraint is not None:
+                found.append(("drop_constraint", f"{table}.{_object_name(constraint.group(1))}"))
+                continue
+            column = _DROP_COLUMN.match(action)
+            if column is not None:
+                found.append(("drop_column", f"{table}.{_object_name(column.group(1))}"))
+                continue
+            retyped = _ALTER_COLUMN_TYPE.match(action)
+            if retyped is not None:
+                found.append(("alter_column_type", f"{table}.{_object_name(retyped.group(1))}"))
+                continue
+            if _RENAME.match(action):
+                found.append(("rename", table))
+    for match in _TRUNCATE.finditer(statement):
+        found.append(("truncate", _object_name(match.group(1))))
+    deleted = _DELETE.search(statement)
+    if deleted is not None and not _WHERE.search(deleted.group(2)):
+        found.append(("delete_without_where", _object_name(deleted.group(1))))
+    return found
+
+
+def destructive_findings(migration_set: MigrationSet) -> tuple[DestructiveFinding, ...]:
+    """Every destructive statement in a set's UP sections, named (D1862, ADR 0243).
+
+    Read from each template's comment-stripped `up` half -- the lint's own
+    reader, `sql_surface.statements`, never a second one -- with string
+    literals blanked, one statement at a time, so a `DROP` in a comment, in a
+    literal or in the unreachable `down` block is not a finding. Every
+    spelling PostgreSQL accepts for a name is read: quoted, schema-qualified,
+    `IF EXISTS`, `ONLY`, arbitrary whitespace (D1818's lesson).
+
+    **A finding is NAMED, never refused**: the lint does not call this, and a
+    destructive change is sometimes the change. A reviewer reads the list in
+    the proposal; `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` and a column
+    called `drop_date` are not on it.
+    """
+    findings: list[DestructiveFinding] = []
+    for entry in migration_set.load_manifest()["migrations"]:
+        applied = sql_surface.statements(
+            (migration_set.root / entry["template"]).read_text(encoding="utf-8")
+        )
+        # `/* */` too, which the line-comment reader leaves: a block comment
+        # cannot drop anything either.
+        applied = _STRING_LITERAL.sub("''", _BLOCK_COMMENT.sub(" ", applied))
+        for statement in applied.split(";"):
+            for kind, name in _statement_findings(statement):
+                findings.append(DestructiveFinding(entry["version"], kind, name))
+    return tuple(findings)
+
+
 __all__ = [
+    "DESTRUCTIVE_KINDS",
     "FOLLOWS_COMPUTED",
     "FOLLOWS_DECLARED",
     "FOLLOWS_SOURCES",
@@ -950,12 +1110,14 @@ __all__ = [
     "PROJECT_PLACEHOLDER_SOURCES",
     "PROJECT_SETS_DIRECTORY",
     "RELEASE_FUNCTION_SCHEMAS",
+    "DestructiveFinding",
     "MigrationError",
     "MigrationSet",
     "ProjectSetError",
     "assert_declarable_release_version",
     "build_lock",
     "canonical_outputs",
+    "destructive_findings",
     "digest",
     "follows_record",
     "lint_project_set",
@@ -970,6 +1132,7 @@ __all__ = [
     "render",
     "render_migration",
     "resolve_placeholders",
+    "set_digest",
     "sets_for",
     "verify_lock",
 ]

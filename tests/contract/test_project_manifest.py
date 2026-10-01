@@ -733,6 +733,9 @@ def downgrade_to_five(document: dict[str, Any]) -> dict[str, Any]:
     document["mcp"].pop("capabilities", None)
     # Session 34: the base is version 7, and `connectors` is forbidden below 7.
     document.pop("connectors", None)
+    # Session 35: the base is version 8, and `approvals_required` is forbidden
+    # below 8.
+    (document.get("migrations") or {}).pop("approvals_required", None)
     return document
 
 
@@ -795,6 +798,69 @@ def test_version_six_admits_a_capability_manifest_and_lower_versions_forbid_it(
     # And every reading below the version resolves to none.
     assert config.project_capabilities(downgrade_to_five(named)) is None
     assert config.project_capabilities(downgrade(named)) is None
+
+
+def downgrade_to_seven(document: dict[str, Any]) -> dict[str, Any]:
+    """The same manifest at schema version 7 (ADR 0237): `approvals_required`
+    out, which is what a version 7 manifest says and means -- a host needs the
+    set's proposal and no approval. Popped rather than assumed absent: the base
+    is version 8 and carries it (D1104's lesson)."""
+    document = copy.deepcopy(document)
+    document["schema_version"] = 7
+    (document.get("migrations") or {}).pop("approvals_required", None)
+    return document
+
+
+def test_schema_eight_admits_approvals_required_beside_a_set(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """ADR 0243, D1863: `migrations.approvals_required` is 0 or 1, optional at
+    8, read by ONE function -- 1 for the example fixture, 0 when absent, and
+    never anything else. It lives inside `migrations`, whose schema requires
+    `set`, so a manifest carrying it without a set is refused by the schema."""
+    assert config.PROJECT_APPROVALS_FROM == 8
+    assert base["schema_version"] == 8
+    assert config.approvals_required(check(tmp_path, base)) == 1
+
+    for value in (0, 1):
+        document = copy.deepcopy(base)
+        document["migrations"]["approvals_required"] = value
+        assert config.approvals_required(check(tmp_path, document)) == value
+
+    absent = copy.deepcopy(base)
+    del absent["migrations"]["approvals_required"]
+    assert config.approvals_required(check(tmp_path, absent)) == 0
+
+    for value in (2, -1, True, "1"):
+        document = copy.deepcopy(base)
+        document["migrations"]["approvals_required"] = value
+        with pytest.raises(config.ManifestError):
+            check(tmp_path, document)
+
+    without_set = copy.deepcopy(base)
+    del without_set["migrations"]["set"]
+    with pytest.raises(config.ManifestError, match="set"):
+        check(tmp_path, without_set)
+
+    second = config.load_project_manifest(REPO_ROOT / "project.second.example.yaml")
+    assert second["schema_version"] == 8
+    assert config.approvals_required(second) == 0
+
+
+def test_seven_forbids_approvals_required(tmp_path: Path, base: dict[str, Any]) -> None:
+    """The version 8 gate: the same document at 7 is refused for the key, and
+    the downgrade without it loads (the control) and reads 0."""
+    seven = downgrade_to_seven(base)
+    loaded = check(tmp_path, copy.deepcopy(seven))
+    assert loaded["schema_version"] == 7
+    assert config.approvals_required(loaded) == 0
+
+    seven["migrations"]["approvals_required"] = 1
+    with pytest.raises(config.ManifestError, match="approvals_required"):
+        check(tmp_path, seven)
+    # The reader is not the gate: a version 7 document read without the schema
+    # still answers 0, because the key does not exist below 8.
+    assert config.approvals_required(seven) == 0
 
 
 def downgrade_to_three(document: dict[str, Any]) -> dict[str, Any]:

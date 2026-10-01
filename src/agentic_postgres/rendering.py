@@ -604,11 +604,14 @@ def _migrations_block(project: dict[str, Any]) -> dict[str, Any]:
     named = config.project_migration_set(project)
     if named is not None:
         root = REPO_ROOT / named / "migrations"
-        lock_path = root / "released.lock.json"
         manifest = migration_module.load_manifest(root / "manifest.json")
         project_set = {
             "root": named,
-            "lock_sha256": sha256(lock_path.read_bytes()).hexdigest(),
+            # ONE reader of a set's identity (D1857, ADR 0002): a proposal is
+            # named by this same function's answer.
+            "lock_sha256": migration_module.set_digest(
+                migration_module.MigrationSet(label="project", root=root)
+            ),
             "count": len(manifest["migrations"]),
         }
 
@@ -2549,7 +2552,7 @@ def write_rendered_migrations(
                 # `verify_lock` compares and what a reviewer signed off on, so
                 # it is the digest that says "this deployment applied the set
                 # somebody reviewed" rather than "the set somebody described".
-                "lock_sha256": sha256(migration_set.lock_path.read_bytes()).hexdigest(),
+                "lock_sha256": migrations.set_digest(migration_set),
                 "count": len(manifest["migrations"]),
             }
 

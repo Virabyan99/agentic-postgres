@@ -9,7 +9,16 @@
 # project.second.example.yaml they also exercise the collision contract --
 # "fixture-alpha" and "fixture-alpine" share a 12-character prefix.
 
-# Schema version 7 (ADR 0237): `connectors` enables the connectors facility and
+# Schema version 8 (ADR 0243): `migrations.approvals_required` -- 1 here, so a
+# host applies a pending version of this set only when its committed proposal
+# (`bin/migrate.sh propose`) carries a committed approval by a SECOND declared
+# name (`bin/migrate.sh approve`). This fixture sets it to demonstrate the
+# two-name rule; `project.second.example.yaml` is version 8 without it.
+# Optional at 8, forbidden below it, and read as 0 when absent. The names are
+# declared, not authenticated: the records stop an unreviewed or altered set
+# reaching a host, and do not authenticate a reviewer.
+#
+# Version 7 (ADR 0237): `connectors` enables the connectors facility and
 # names each outbound connector's endpoint for THIS deployment. Optional at 7
 # and forbidden below it, and deliberately omitted here: the facility is off, so
 # this project owes no `connector_signing_key` and step 6e installs nothing. A
@@ -38,7 +47,7 @@
 # read (D929), with `mcp.profile`. Versions 1 to 4 still load -- both host
 # manifests are version 1 -- and render as permanent, unmirrored projects with
 # no set of their own, which is what they always were.
-schema_version: 7
+schema_version: 8
 
 # This project's own migrations, and the whole of what an adopter adds. The
 # directory is tracked in this checkout: a release is exactly the commit it is
@@ -51,6 +60,7 @@ schema_version: 7
 # project version that does not sort after the release lock's newest.
 migrations:
   set: projects/example
+  approvals_required: 1
 
 project:
   slug: fixture-alpha

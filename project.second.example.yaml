@@ -9,7 +9,11 @@
 # one rendered from project.example.yaml. See runbook §8 and
 # tests/contract/test_render_isolation.py.
 
-# Schema version 7 (ADR 0237) since Session 34, and still WITHOUT `connectors`:
+# Schema version 8 (ADR 0243) since Session 35, WITHOUT
+# `migrations.approvals_required` -- it has no set, and the key lives inside
+# the `migrations` block. The control for `project.example.yaml`'s 1.
+#
+# Version 7 (ADR 0237) since Session 34, and still WITHOUT `connectors`:
 # the facility is off, so this project owes no `connector_signing_key`, which
 # is the measurement that keeps 1.12.0 minor (D1784).
 #
@@ -20,7 +24,7 @@
 # has neither. A version 6 manifest omitting both keys applies exactly the
 # release's migrations and serves exactly the release's agent surface -- which
 # is what every manifest below version 5 also does.
-schema_version: 7
+schema_version: 8
 
 project:
   slug: fixture-alpine
