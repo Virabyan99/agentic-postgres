@@ -1,9 +1,9 @@
 # Session 35 — Change governance, the database half of approval, hardening, and the Stage 4 release
 
-**Status: EXECUTING — Runs 1–3 DONE 2026-10-01** (planned 2026-09-30 at
+**Status: EXECUTING — Runs 1–4 DONE 2026-10-01** (planned 2026-09-30 at
 `a018939`). The last session of Stage 4 (`docs/plans/stage-4-plan.md` §3).
 Eleven runs. The plan spends **D1857–D1891** and **ADR 0242–0245**; rows the
-runs add start at **D1892**. **NEXT FREE: D1912, ADR 0246.**
+runs add start at **D1892**. **NEXT FREE: D1918, ADR 0246.**
 
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 35* whole (Builds / Already
 true / Must not / Measures / Closes, `:619-657`), its rows **D1523** (the
@@ -533,6 +533,12 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1909** | 3 | Step 3: *"The downgrade helpers (`test_project_manifest.py:83-96`, `:725-736`) pop it"*; the targeted list. | Five more sites read the example manifest's VERSION: `test_connector_facility.py:76` (`== 7`) and its two downgrades to 6 (`:85`, `:90`), `test_deploy_connectors.py:390` (`== 7`), `test_project_agent_surface.py:547` (`newest == 7`). Found by grepping `tests/` for the old number before the first run, D1903's lesson applied. | Each moved to 8 (or popped the key) with a dated comment. | A pin moved to what the tree is, never loosened. | 0243 |
 | **D1910** | 3 | Step 5: *"`approval_gate.unguarded` over the committed capability contract"*; D1860: `harness: {contract_sha256, derived, written, capabilities}` *"labelled cases, not results"*. | The committed PROJECT contract cannot show an approval a profile adds to a release tool (D1869), and `check --project` reads the joint contract narrowed by the profile. | **propose reads the gate over the joint contract narrowed by the profile** (`check --project`'s reading; the release's own contract when the project names no capabilities), so a `release_function` finding appears in the record; `harness` carries a fifth member, `note: "cases asked of the contract, not results"` -- the label as a field; `release_lock_sha256` is `set_digest(release_set())`, one function for both locks. | One reading of what a project deploys, in both of the workstation's checks. | 0243 |
 | **D1911** | 3 | D1862: the destructive reading over *"the lint's own stripping"*. | `sql_surface.statements` strips `--` lines only; a `/* DROP TABLE … */` and a `'DROP …'` literal both survive it. | **`destructive_findings` blanks block comments and single-quoted literals after the lint's own reader**, then splits statements on `;`. A dollar-quoted body is READ: a `DO $$ … DROP … $$` runs at apply time, and a function body's `DELETE FROM t;` is named too (an over-report, never a refusal). The release's own set reads 13 findings today; the example's none. | Named, not refused: over-reporting costs a reviewer a line, under-reporting costs a table. | 0243 |
+| **D1912** | 4 | §5 Run 4 step 1: the gate *"after `reconcile_project_ledger` and BEFORE THE FIRST dbmate RUN"* -- *"if it WRITES … the gate moves before it and a row says why"*. | `reconcile_project_ledger` WRITES: one transaction, `INSERT INTO app_private.project_schema_migrations … SELECT version FROM app_private.schema_migrations WHERE version IN (<the rendered project versions>) ON CONFLICT DO NOTHING; DELETE FROM app_private.schema_migrations WHERE version IN (…)`, as the superuser. On a cluster already moved it moves nothing; on one that predates ADR 0206 it moves rows, and a gate after it would leave that move behind a refusal. | **The gate runs FIRST in `up`**, before the repair and both dbmate runs; its read covers both tables as the repair would leave them (D1913). A refused deploy has applied and written nothing (`test_a_pending_set_without_a_proposal_is_refused` asserts the repair, both dbmate runs and the ledger were never reached). | The plan's own conditional, taken. | 0243 |
+| **D1913** | 4 | Step 1: *"read how `reconcile_project_ledger` already computes the ledger — reuse it, never a second query"*. | It computes no ledger: it issues a blind INSERT…SELECT/DELETE and reads nothing back, and `bin/migrate.py` has never read the applied set (dbmate's `status` is relayed, never parsed -- D941). There is no query to reuse. | **One new READ-ONLY psql script**, `migrations.applied_project_versions_statement`: `to_regclass` of both tables `\gset`, then each `SELECT version … WHERE version IN (…)` behind `\if` -- a fresh cluster has neither table and dbmate creates the project's on the set's first run. **Measured, rig 35r4a** (`~/s35r4/rig-read.sh`, the local pgvector image `2ba9ca5f2e7d`, PostgreSQL 18.6): neither table -> empty, exit 0; the release table only (pre-split) -> its project version; both -> both; control, a broken statement -> exit 3. Through `container_exec.run` (the rule for new code); a non-zero exit, or a line it did not ask about, raises. What is reused is the version LIST: `migrations.rendered_project_versions` is now the one reader for the move and the read. | A read that cannot see a table that does not exist yet would refuse every first deploy of a set. | 0243 |
+| **D1914** | 4 | Step 1: `config.approvals_required(manifest)`; Battery M3: *"read from the INSTALLED manifest"*. | `bin/migrate.py`'s `status` and `up` had no manifest: `bin/migrate.sh` handed them `--outputs` and `--rendered-dir` only, and `approvals_required` is a manifest field the deployed document does not carry. | **`bin/migrate.sh` passes `--project` (the manifest it was handed -- step 6's installed copy) for `render`, `status` and `up`**; `migrate.py` requires it for `status`/`up` (exit 2), and `run_every_set` takes `approvals_required` KEYWORD-ONLY, no default. Carrying the field in the document instead would move outputs v19 -> v20 for one integer. | A default would be the one way to call the gate without the project's own answer. | 0243 |
+| **D1915** | 4 | Step 4: `--by "<the executor's model id>, Session 35 executor"`. | Run 3's `NAME` admits letters, digits, space, `.`, `_`, `'`, `-` -- no comma; the verb refuses that string at exit 2. | **`--by "claude-opus-5-5 Session 35 executor"`.** And a fact for Runs 8 and 10: the record's `project_slug` is `fixture-alpha` (the manifest that proposed it), while the gate keys on the SET's digest -- so beta, which applies the same example set, is admitted by this proposal, under BETA's own installed `approvals_required` (schema 7: 0). | The rule Run 3 wrote, kept; a set is what is reviewed, not a project. | 0243 |
+| **D1916** | 4 | D1865: `gate(...) -> None`; `status` prints *"`present, approved by <name>` / `absent` / `not needed (nothing pending)`"*; D1866: `proposals_naming(...) -> tuple[str, ...]`. | Three outcomes are not all the states: a proposal present under `approvals_required: 0`, a present proposal the gate refuses, an applied set the read could not reach (ADR 0195), and a project with no set; an unreadable proposal file must not read as *named by none*. | `gate` returns the approval it read (or None), so `status_line` names the approver from the same reading; the line adds `present (approvals_required is 0)`, `present; up refuses: <sentence>`, `whether anything is pending could not be read (<why>)` (and `status` still exits dbmate's code), and `proposal: not applicable (this project applies no set of its own)`. `proposals_naming` RAISES on a file that is not a proposal; `capability_report` says *the project's proposals could not be read (…)*. | A report may not substitute an answer for a failure to determine one. | 0243 |
+| **D1917** | 4 | Step 5: deploy's relay *"over `deploy-project.py`'s own `fail` (read how `test_deploy_*` modules drive a single step)"*; Battery: *"Control: the release set applied with the project set fully applied"*. | Step 6 is inline in the deploy's `main`; the `test_deploy_*` modules prove a step's HELPER and read where it sits from the AST. And the named control is `test_a_set_with_nothing_pending_needs_no_proposal` -- M1's own target, so M1 reaches it. | **The relay proof reads step 6's `fail(...)` under `if migrated.returncode != 0` out of the deploy's AST, evaluates its message expression over the stderr `migrate.py main` printed, and calls the deploy's own `fail`**: exit 5, the sentence intact. **Controls**: `test_the_release_set_is_never_gated` and `test_change_proposal.py::test_the_example_sets_committed_proposal_names_its_lock`, which no mutation reaches; M5-M7 added (status folding an unread set, the approval's `proposal_sha256` uncompared, the relay dropping stderr). | A control the mutation reaches is no control (D499). | 0243 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1310,6 +1316,34 @@ command module, the deploy-step module, `test_cli_contract`,
 `test_acceptance_registry`, `test_evidence_claims`. Commit (`Session 35 Run 4:
 the host applies only a proposed set; the example set's proposal`), push, read
 CI.
+
+**Done.** 2026-10-01. **`reconcile_project_ledger` writes** (the move of
+D1912), so **the gate runs first in `up`** -- before the repair and both dbmate
+runs -- and a refused deploy applies and writes nothing; the release set is
+never gated. **`proposal.gate`** raises `MigrationError` with the four
+sentences (the digest compared whole), returns the approval it read;
+**`status_line`** and **`proposals_naming`** beside it (D1916). What is
+applied is ONE read-only psql script (D1913, rig 35r4a), through
+`container_exec.run`; `rendered_project_versions` is the one version reader.
+`bin/migrate.sh` passes `--project` to `migrate.py` for `render|status|up`
+(D1914), and its usage names the gate. **Deploy step 6** prints the capability
+report after the lock (`capability contract 3d7d6e6d513a1e6c: named by proposal
+35245421404e77d3` for the example; `no capability contract (the manifest
+declares none)` for the second) and relays the gate's sentence through its own
+`fail`. **The example set's proposal**, written by the product's verb on the
+clean tree at `0a13ae1` after the render (`--by "claude-opus-5-5 Session 35
+executor"`, D1915): `proposal 35245421404e77d3 written: … (0 destructive
+finding(s))`, `destructive` [], `approval_gate` [], `dev_apply` exit 0, 41
+migrations in 12.0 s, `bin/dev.sh status` exit 4 before and after; committed
+as `2007883`. **No approval** -- the operator's act, Run 8. **Proofs**:
+`test_proposal_gate.py` -- the eight §2 proofs plus
+`test_approvals_required_is_read_from_the_installed_manifest` (M3's) and
+`test_the_capability_report_names_a_proposal_or_says_none` -- and
+`test_change_proposal.py::test_the_example_sets_committed_proposal_names_its_lock`.
+**Battery**: M1-M4 as planned plus M5-M7, all KILLED as `FAILED`, beside two
+controls no mutation reaches (D1917). **Targeted** (once): 55 modules -- the plan's seven, every tests/contract and tests/security module that reads bin/migrate.py, bin/migrate.sh, bin/deploy-project.py or the proposal module, the selector and stdin-class guards, Docker included -- 2,440 passed, 0 skipped, 0 failed. Rows
+**D1912-D1917**; **NEXT FREE D1918, ADR 0246.** Commits `0a13ae1` (code) and
+`2007883` (the proposal); CI GREEN (run 36867509849), first push on `2007883`.
 
 ### Run 5 — hardening: the edge and the three services bounded, `apg-diag`, D1856
 
