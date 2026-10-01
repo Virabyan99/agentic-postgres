@@ -1,9 +1,9 @@
 # Session 35 — Change governance, the database half of approval, hardening, and the Stage 4 release
 
-**Status: EXECUTING — Runs 1–6 DONE 2026-10-01** (planned 2026-09-30 at
+**Status: EXECUTING — Runs 1–7 DONE 2026-10-01** (planned 2026-09-30 at
 `a018939`). The last session of Stage 4 (`docs/plans/stage-4-plan.md` §3).
 Eleven runs. The plan spends **D1857–D1891** and **ADR 0242–0245**; rows the
-runs add start at **D1892**. **NEXT FREE: D1929, ADR 0246.**
+runs add start at **D1892**. **NEXT FREE: D1935, ADR 0246.**
 
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 35* whole (Builds / Already
 true / Must not / Measures / Closes, `:619-657`), its rows **D1523** (the
@@ -550,6 +550,12 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1926** | 6 | Step 2: *"§17 *Approvals* gains *In the database* (ADR 0242)"*; step 7: *"The pages that said not in the database, re-grepped"*. | Run 2 had already written §17's *In the database too, since 1.13.0* paragraph; the re-grep found no page still claiming a plane-only approval outside the records (`scope-closure.md`'s are history). But **Run 5 made four sentences false**: the operator guide's §2 (*"Its log allowlist covers neither `auth`…"*) and §18 (*"`apg-diag` cannot read that log"*), `backup-operations.md:343`, and `THR-CONNECTOR-INPUT`'s detection and residual cells (*"structured request log"*, *"not readable through `apg-diag`"*) -- and D1918 made the request line itself absent. | §17 not re-added. **The four corrected**: `apg-diag` reads `auth storage mcp` since 1.13.0, and the per-request line is never printed (D1918); a refused inbound request leaves no record an operator can read. The drill sentence keeps its truth: a drill's containers are plain `docker run`, never a service `apg-diag` names. | The direction nobody chases (D954): prose a program stopped agreeing with. | 0245 |
 | **D1927** | 6 | Step 2: *"§10's worked sweep moved … to `bin/session-34-check.sh`"*. | §10 showed `bin/session-25-check.sh`'s flags, the merge named `session-28` files, and the evidence numbers were 1.6.0's. | **§10 is Session 34's third sweep as run** (`~/s34r10/s34-r10c-gate.sh`): `--redeploy-before-file` and `--candidate-manifest` added, the real restore-evidence file, the flags not passed and why, `session-34` merge inputs, and 1.12.0's 188 / 182 / 5 / 1 with the five `not_run` named. Run 9 moves it to `session-35-check.sh`. | A worked example is a measurement or it is a guess. | — |
 | **D1928** | 6 | Step 4: the task statement *"gains goal 8"* and *"names 1.13.0"*. | The goals are what to accomplish, not an order -- the guide proposes at step 11, before the gate -- and the statement's own *"true only if all seven goals"* would have stayed seven. The page is in release 1.12.0 until Run 9's bump. | **Goal 8 appended** with the plan's sentence, *"all eight"*, and *"It is release `1.13.0`"* -- the statement is for 1.13.0's walk, handed on Sheet W with the commit. | A count a list stopped agreeing with is a count nobody reads twice. | 0207 |
+| **D1929** | 7 | D1875: *"one unauthenticated endpoint per class, fixed in Run 1 from rig 35d: REST `GET <rest>/`, auth `GET <app>/auth/jwks.json`, storage and mcp and docs by the endpoint rig 35d finds"*; step 1: *"the endpoint per class is the one rig 35d and the tree fixed in Run 1's Done"*. | **Run 1 fixed two of five**: rig 35d used a rig backend, and its Done names no storage, mcp or docs endpoint. **Read live 2026-10-01** (`~/s35r7/candidates.py`, one unauthenticated GET per candidate on both projects, redirects not followed): rest `/` 200, jwks 200; storage's bare path **404 `{"detail":"Not Found"}`** -- the same answer the PARENT application router gives once storage's router is withdrawn (`runtime_override._storage_labels`) -- but `<storage>/objects/<0>/download-url` **401 `authentication_failed`** (storage alone serves it); `<mcp>` **405** (the plane's own answer); `<docs>` **401** from the edge's `@file` basic-auth middleware. | **The probe's class table**: storage at the object path expecting 401, and for storage ANY 404 is down; mcp 405; docs 401, which says the docs ROUTER exists (Traefik withdraws it with the container), not that the docs process answered -- stated in the probe and owed to the envelope's conditions. Rehearsal (a) read storage's down answers as the parent's JSON 404 exactly. | A probe that cannot tell an outage from a neighbour's 404 measures the router table. | — |
+| **D1930** | 7 | Step 2: *"`--container-name` resolved through `/proc` (D1739)"*. | `/proc` holds no container name, and `op` cannot reach the socket (D1375). Session 33's `s33-r9b-memory.sh` resolved beta's `auth` by a `uvicorn` cmdline plus a mountinfo line under `/secrets/<key>/generations/<gen>/auth/` (`storage` mounts its own directory, `mcp` none). | **`--project` + `--service`** by that method, the cgroup file joined to every cgroup2 mount (D1898), re-resolved after the file vanishes; every tick a line (`bytes`, `unreadable`, `unresolved`). It needs no privilege, so F7a's root script starts it as a child. Rehearsal (b): uid 1000, no capabilities, 240 samples at a median 100.0 ms, the 2-s block at 104.5 MiB against `docker stats`' 104.4, a replaced container re-resolved (`bytes -> unreadable -> unresolved -> bytes`). | The name is the operator's word; the mount is the kernel's. | — |
+| **D1931** | 7 | D1875: *"at 0.5 s per class per project"*; D1874: *"≤ 8 req/s in total from the host"*; step 1: *"refuses to start above it"*. | Five classes on one project at 0.5 s is **10 req/s**: the two rows cannot both hold on F2, F3 or F7b. F4a (rest + auth on both projects, 4 targets) fits at 0.5 s. D1896 found the bucket per ROUTER, so 8 total was conservative, not wrong. | **The budget stands and the interval moves**: F2, F3, F7b run five classes at **0.625 s** (8.0 req/s); F4a at 0.5 s; F7a's neighbour probe at 8 req/s on one target (0.125 s, two targets in phase A at 0.25 s). The probe refuses above 8 (exit 2, naming the least interval -- rehearsed), `--budget` may only lower it, and `--seconds` (not in step 1's list) bounds the 10-s pre-trip control. A window's edges are known to ≤ 0.625 s. | A budget a plan sets is one its instrument enforces. | — |
+| **D1932** | 7 | Step 3: *"`--network <compose.networks.internal from the DEPLOYED document>`"*, *"Read the deployed document for the network name and the PostgREST service alias"*. | The deployed document has **no `compose` member**: the network is `edge.project_internal_network`, and **no member names a service alias**. | The network from `edge.project_internal_network`; the alias `postgrest` and port 3000 CHECKED against `<runtime.release_path>/compose.yaml` (`postgrest` on `internal`, `PGRST_SERVER_PORT`) and the installed render's `compose.env` (`INTERNAL_NETWORK_NAME` equal to the document's); the image from the running auth container found by `naming.compose_project_name`'s labels. The load runs `--read-only --cap-drop ALL`, the bearer on stdin. Rehearsal (c): 12,195 requests in 10 s, all 200; a wrong token, all 401. | D1853: read what the deployed document HAS. | 0002 |
+| **D1933** | 7 | D1873: phases of 120 s; phase B *"K = 24 runs"*; step 4's probe humans `apg-s35-neighbour-<SWEEP>`. | 24 runs of ~5.5 s through a loop that claims one step at a time is ~132 s, longer than the phase: C would start under B's load. One username on both projects collides on a single-cluster rehearsal. | **C starts only after B's runs end** (bounded by `--run-wait-seconds`, 300; a phase that did not drain says so in its conditions); the sampler runs from B's start to the drain; the humans are `-a`/`-b`. The 24 POSTs cross the app router once, inside its burst of 40. | A phase may not inherit another's load. | — |
+| **D1934** | 7 | Step 6: *"the neighbour script's phase logic in a `--dry-run`"*. | The dry run passed. **A real short sitting on the rig stack** (phases of 15 s, 6 runs) then **lost both load readings and exited 0**: the script closed the load child's stdin after feeding the bearer, and `communicate()` raised `ValueError` on it. | **Fixed** (`child.stdin = None`), and **exit 3 when an instrument failed** (no load reading, no answered probe, fewer runs enqueued), files still written; the cleanup also removes the load containers by name. Re-run: both readings present (20,311 and 17,335 requests, all 200), exit 0. The schema admits only https routes, so the rehearsal overlaid the rig's addresses on the op copies AFTER `read_deployed_document` checked the unmodified copies. | A dry run proves the reads; only a run proves the reading. | 0195 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1648,6 +1654,59 @@ copy in `~/s34r10/fetched/` or the fixture render).
 
 **Done** records each script's sha256, each rehearsal's result and control,
 and the budget (req/s) each probe was run at.
+
+**Done.** 2026-10-01. **No product change; nothing in the tree but this
+record.** Seven trip scripts in WSL `~/s35r10/` and the scratchpad `s35r10/`,
+each run here first (rehearsals and transcripts in `~/s35r7/`, `s35r7/`), sha256:
+
+| Script | sha256 | Rehearsed by |
+|---|---|---|
+| `s35-r10-probe.py` | `39bdd07f7ebe756b9dbfca679b818f6ed7e56b64c092c9ed339a983260fbfc06` | (a) |
+| `s35-r10-gaps.py` | `2643848f5c94d088d251ac5e6d7d19f318adca47c3f57b01ce7d9dd042c4acaf` | (a), (d) |
+| `s35-r10-sampler.py` | `b0b25c0a231c8dc4f0e6536e579c4f0e8ac2ec96c728b2fdbfb22d49daf3df37` | (b), (d) |
+| `s35-r10-load.py` | `b034e53894c6fa4adabaca3c23e8f45b1a68efa30bb840d2f39edb08105bffe8` | (c), (d) |
+| `s35-r10-neighbour.py` | `f0b006a1d56b425c5cfe5c65de60c823bf4872b038cb0e09d4862d3059d819fb` | (d) |
+| `s35-r10-neighbour.sh` | `fcf62df382674065815e0099934c5e64955f069790691ee4b32eeb06e32d369b` | F7a's wrapper; read, not run |
+| `s35-r10-classify.py` | `9461ce4f33151738ee0cf31e23c690951c05e5c0f50fcc95e2a6da74701ed282` | (e), (d) |
+
+**(a) The probe and `gaps`** (`rig37a.py`): the pinned Traefik's Docker
+provider, an `auth` backend owning `/api/app` (stays up) and a `svc` backend
+for rest, storage (nested), mcp and docs. Refusals: 5 targets every 0.5 s
+(10 req/s) exit 2 naming 0.625 s, nothing written; a route not `ready` exit 2;
+a project named twice exit 2. **Control**: 20 s at **8.0 req/s** (0.625 s, five
+classes), every target up, `gaps --control` exit 0. **Arm**: `svc`
+force-recreated at ~10 s, stopped by the stop file after 42.1 s: one DOWN
+window each on rest (observed 1,875 ms, bound 3,125), storage (1,250 / 2,887 --
+every answer the PARENT's `{"detail":"Not Found"}`), mcp (625 / 2,261), docs
+(626 / 2,265), **none on auth**; `gaps --control` exit 1. **(b) The sampler**
+(`rig37b.py`, D1898's form): uid 1000, `--cap-drop ALL`, the engine VM's pid
+and cgroup namespaces; 240 samples, median spacing 100.0 ms (max 101.2), base
+4.2 MiB, the block 104.5 MiB held 2.1 s against `docker stats` 4.219 -> 104.4
+MiB (the control, within 0.1 MiB); target replaced -> `unreadable`,
+`unresolved`, then re-resolved to the new pid; asked for `storage`, every line
+`unresolved`. **(c) The load** (`rig37c.py`, rig 35's stack on networks named
+`apg-fixture-alpha-dev-internal` / `-alpine-`, the pinned PostgREST under the
+alias `postgrest`): 8 threads, 10 s, **12,195 requests, 1,218.8/s, all 200**,
+p50/p95 6.01/10.46 ms; **control** a wrong token: 12,307 answers, **all 401**,
+counted non-2xx. **(d) The neighbour script**, imported, the op copies' address
+members overlaid AFTER `read_deployed_document` checked the unmodified copies:
+`--dry-run` exit 0 -- read both documents, the release's compose and both
+renders' `compose.env`, both auth image ids, `notes-roundtrip` v1's scopes
+`[notes:read, notes:write]` from the cluster -- printed every write (hashes
+`<hash>`) and request (body keys only), created no user, made no directory. A
+REAL sitting (15-s phases, 6 runs) found **D1934**, repaired; re-run exit 0 in
+71.7 s: neighbour p50/p95/p99 (ms) A 8.72/15.58/17.98 and 9.07/13.66/15.16, B
+8.66/13.51/15.54, C 9.08/16.11/34.24, D 10.81/15.70/20.70, zero errors, zero
+429; B's 6 runs all bounded (`failed` at the plane -- no `mcp` on the rig,
+which the record says); C and D loads 20,311 and 17,335 requests, all 200;
+LEFT: the agent revoked, the owner kept (the agent references it), both probe
+humans deleted, 0 notes. **(e) The classifier** (`rig37e.py`, integer
+nanoseconds): known windows -> inside **48** at 100 MiB, outside 53 at 60, 3
+without bytes, 1 unbounded run, *enough*; **control** stamps +10 s -> inside 0,
+*not enough*; 19 inside -> *not enough*, 20 -> *enough*. **Budgets each probe
+ran at**: (a) 8.0 req/s; (d) 8.0 req/s (0.25 s x 2 in A, 0.125 s x 1 in B-D);
+the live candidate read 11 GETs per project, 0.3 s apart. Rows
+**D1929-D1934**; **NEXT FREE D1935, ADR 0246.**
 
 ### Run 8 — the operator's approval, and the third reader arranged
 
