@@ -256,6 +256,110 @@ def test_the_redaction_actually_redacts() -> None:
         assert "redacted" in result.stdout
 
 
+#: The services `logs` and `labels` accept, exactly (ADR 0245): the six since
+#: Session 7 and `auth storage mcp` appended. Written out, `VERBS`' reason: a
+#: service added to the script and not here is a log nobody reviewed opening.
+SERVICES = (
+    "postgres",
+    "pgbouncer",
+    "postgrest",
+    "docs",
+    "edge-probe",
+    "dbmate",
+    "auth",
+    "storage",
+    "mcp",
+)
+
+
+def _redact(line: str) -> str:
+    """One line through the script's own `redact` program, as `logs` pipes it."""
+    script = SCRIPT.read_text(encoding="utf-8")
+    body = script[script.index("redact() {") : script.index("verb_containers()")]
+    program = body[body.index("sed") : body.rindex("'") + 1]
+    result = subprocess.run(
+        ["bash", "-c", f"printf '%s\\n' {line!r} | {program}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
+def test_the_log_allowlist_is_exactly_these_services(source: str) -> None:
+    """`SERVICES` is the nine, in order; a tenth is new privilege (ADR 0245)."""
+    declared = re.search(r'^readonly SERVICES="([^"]+)"', source, re.MULTILINE)
+    assert declared, "the script no longer declares a service list"
+    assert tuple(declared.group(1).split()) == SERVICES
+
+
+def test_a_json_quoted_secret_is_redacted() -> None:
+    """auth, storage and mcp log JSON, where the key is quoted: the three older
+    shapes miss `"password": "..."`. The value goes; the key stays."""
+    samples = {
+        '{"password": "hunter2"}': "hunter2",
+        '{"client_secret":"s3cr3t-value"}': "s3cr3t-value",
+        '{"Authorization": "Bearer abc.def"}': "Bearer abc.def",
+        '{"api_key" : "k-123456"}': "k-123456",
+        '{"refresh_token": "opaque-token-value"}': "opaque-token-value",
+    }
+    for line, secret in samples.items():
+        out = _redact(line)
+        assert secret not in out, f"{secret!r} survived: {out!r}"
+        assert "<redacted>" in out, out
+        key = line.split('"')[1]
+        assert f'"{key}"' in out, f"the key {key!r} was lost: {out!r}"
+
+
+def test_the_new_services_log_lines_are_redacted() -> None:
+    """Lines in the three services' REAL shapes, a secret planted in each.
+
+    The shapes are the code's (`main.StructuredRequestLog`: `apg.http.request`
+    then sorted JSON; `mcp_telemetry.Timed`: `apg.mcp.read` then JSON), printed
+    the way rig 35r5a measured the auth image printing them: Python's
+    last-resort handler writes the BARE message for WARNING and above, and
+    uvicorn's own lines start `INFO:     `. A JWT, a 64-hex key and a quoted
+    password member are masked; route, status, tool and outcome are kept.
+    """
+    jwt = "eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiJhZ2VudCJ9.c2lnbmF0dXJlLWJ5dGVz"
+    hexkey = "a3f1" * 16
+    lines = [
+        (
+            'apg.http.request {"elapsed_ms": 4, "method": "POST", "request_id": '
+            '"req-1", "route": "/auth/token", "status": 401, "password": "hunter2"}',
+            ("hunter2",),
+            ('"route": "/auth/token"', '"status": 401'),
+        ),
+        (
+            f'apg.mcp.read {{"tool": "set_note_embedding", "outcome": "failed", '
+            f'"error": "KeyError", "token": "{jwt}"}}',
+            (jwt, "eyJhbGciOiJFZERTQSJ9"),
+            ('"tool": "set_note_embedding"', '"outcome": "failed"'),
+        ),
+        (
+            f"INFO:     connector notes-inbox refused, key {hexkey}",
+            (hexkey,),
+            ("connector notes-inbox refused",),
+        ),
+    ]
+    for line, secrets, kept in lines:
+        out = _redact(line)
+        for secret in secrets:
+            assert secret not in out, f"{secret[:20]!r} survived: {out!r}"
+        for fragment in kept:
+            assert fragment in out, f"{fragment!r} was lost: {out!r}"
+
+
+def test_the_log_cap_is_two_hundred_lines(source: str) -> None:
+    """The cap stands at 200 and is checked before any container is found."""
+    assert re.search(r"^readonly MAX_LOG_LINES=200$", source, re.MULTILINE)
+    logs = source[source.index("verb_logs() {") : source.index("verb_routes() {")]
+    cap = logs.index('[ "${lines}" -le "${MAX_LOG_LINES}" ] || die 2')
+    assert cap < logs.index("container_for"), "the cap is read after a container is resolved"
+    assert 'docker logs --tail "${lines}"' in logs
+
+
 # ---------------------------------------------------------------------------
 # The sudoers rule
 # ---------------------------------------------------------------------------

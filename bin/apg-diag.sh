@@ -62,7 +62,12 @@ readonly VERBS="containers labels logs routes listeners edge-log catalog generat
 # The services a caller may name. Not derived from what is running: a container
 # that appeared under a name nobody deployed is exactly what an operator would
 # want to see in `containers`, and exactly what should not become an argument.
-readonly SERVICES="postgres pgbouncer postgrest docs edge-probe dbmate"
+#
+# `auth storage mcp` since Session 35 (ADR 0245, D380/D1879): the inbound
+# connector route refuses a request in the auth log and nowhere else, and a
+# diagnostic account that cannot read that log has a hole in it. Their lines
+# go through `redact` like every other service's.
+readonly SERVICES="postgres pgbouncer postgrest docs edge-probe dbmate auth storage mcp"
 
 # The complete set of queries `catalog` will run, by name. There is no wildcard,
 # no directory scan, and no way to supply SQL.
@@ -175,8 +180,14 @@ container_for() {
 # error level with query logging off, and PostgreSQL logs connections rather
 # than passwords -- but a diagnostic that hands its output to somebody else
 # should not depend on that staying true.
+#
+# The first expression is ADR 0245's: auth, storage and mcp log JSON, where a
+# key is quoted and the three shapes below miss `"password": "..."` -- the
+# quote after the key is not one of `[=: ]`. Any key CONTAINING one of the
+# words, so `client_secret` and `access_token` are masked too.
 redact() {
   sed -E \
+    -e 's/"([A-Za-z0-9_-]*(password|secret|token|pgpass|authorization|api_key)[A-Za-z0-9_-]*)"[[:space:]]*:[[:space:]]*"[^"]*"/"\1": "<redacted>"/gi' \
     -e 's/(password|secret|token|pgpass)([=: ]+)[^ "]+/\1\2<redacted>/gi' \
     -e 's/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/<redacted-jwt>/g' \
     -e 's/\b[0-9a-f]{32,}\b/<redacted-hex>/g'

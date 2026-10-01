@@ -695,6 +695,36 @@ SERVICE_RESOURCE_DEFAULTS: dict[str, dict[str, int | str]] = {
     "mcp": {"pids_limit": 64, "cpus": "1.0"},
 }
 
+#: The memory cap of each long-running project service that had none (ADR
+#: 0244, D1878, D1900). The other six take theirs from their own tables
+#: (postgres's budget, auth's and storage's manifest settings, mcp's, metrics'
+#: and the store's constants); these four were unbounded until Session 35.
+#:
+#: **The rule, applied to `memory.peak` read off both deployed projects by
+#: Sheet E0 on 2026-09-30**: the larger of 64 MiB and four times the measured
+#: peak rounded UP to a multiple of 32 MiB, one value per service name (the
+#: larger of alpha's and beta's). A cap is a ceiling, never a reservation:
+#: admission charges `unreclaimable_mb`, not these (D767, ADR 0221).
+#:
+#:   ============ =============== ========== =========
+#:   service      peak (a / b)    4 x peak   mem_limit
+#:   ============ =============== ========== =========
+#:   pgbouncer    9.47 / 6.92     37.9       64
+#:   postgrest    26.03 / 24.52   104.1      128
+#:   docs         53.80 / 47.78   215.2      224
+#:   edge-probe   51.51 / 49.42   206.0      224
+#:   ============ =============== ========== =========
+#:
+#: `edge-probe` keeps ADR 0222's literal `pids_limit: 64` and no `cpus`: it is
+#: the health route's server (`restart: on-failure:5`), so it is long-running
+#: for memory, and one-shot-shaped for processes (D1900).
+SERVICE_MEMORY_LIMITS_MB: dict[str, int] = {
+    "pgbouncer": 64,
+    "postgrest": 128,
+    "docs": 224,
+    "edge-probe": 224,
+}
+
 #: Every short-lived service's process limit: one-shots, probes and clients.
 #:
 #: A literal in `compose.yaml` rather than an interpolation, because these

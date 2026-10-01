@@ -74,6 +74,10 @@ services:
     # is the same everywhere are eleven ways to disagree. No `cpus`:
     # a capped one-shot throttles a migration nobody has measured.
     pids_limit: 64
+    # ADR 0244, D1900: but it is the health route's server and runs for as
+    # long as the project does, so it carries a memory cap like the
+    # long-running nine (`config.SERVICE_MEMORY_LIMITS_MB`, Sheet E0).
+    mem_limit: ${EDGE_PROBE_MEMORY_LIMIT:?required}
     build:
       context: ./services/edge-probe
       args:
@@ -563,6 +567,9 @@ services:
     # accepts it (rig 31a).
     pids_limit: ${PGBOUNCER_PIDS_LIMIT:?required}
     cpus: ${PGBOUNCER_CPUS:?required}
+    # ADR 0244: the memory cap, from `config.SERVICE_MEMORY_LIMITS_MB`
+    # through the compose environment, as auth's is (Sheet E0's peak x4).
+    mem_limit: ${PGBOUNCER_MEMORY_LIMIT:?required}
     image: ${PGBOUNCER_IMAGE:?required}
     platform: ${TARGET_PLATFORM:?required}
     profiles: [session4]
@@ -722,6 +729,9 @@ services:
     # accepts it (rig 31a).
     pids_limit: ${POSTGREST_PIDS_LIMIT:?required}
     cpus: ${POSTGREST_CPUS:?required}
+    # ADR 0244: the memory cap, from `config.SERVICE_MEMORY_LIMITS_MB`
+    # through the compose environment, as auth's is (Sheet E0's peak x4).
+    mem_limit: ${POSTGREST_MEMORY_LIMIT:?required}
     image: ${POSTGREST_IMAGE:?required}
     platform: ${TARGET_PLATFORM:?required}
     profiles: [session5]
@@ -923,6 +933,9 @@ services:
     # accepts it (rig 31a).
     pids_limit: ${DOCS_PIDS_LIMIT:?required}
     cpus: ${DOCS_CPUS:?required}
+    # ADR 0244: the memory cap, from `config.SERVICE_MEMORY_LIMITS_MB`
+    # through the compose environment, as auth's is (Sheet E0's peak x4).
+    mem_limit: ${DOCS_MEMORY_LIMIT:?required}
     build:
       context: ./services/docs
       args:

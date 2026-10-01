@@ -21,7 +21,7 @@ point: the reading tells an operator the truth about what it knows, and the
 decision declines to act on what it does not.
 
 **What admission charges.** Not the sum of the services' ``mem_limit``s --
-those are ceilings, sum to 2240 MiB per project against a 3814 MiB host, and
+those are ceilings, sum to 2880 MiB per project against a 3814 MiB host, and
 were never a reservation (D767); a rule built on them refuses the deployment
 that is running today. It charges ``database.budget.unreclaimable_mb``, the
 figure the schema computes and the document publishes as *what the host must
@@ -333,7 +333,7 @@ def ceilings_from_inspect(payload: str) -> tuple[dict[str, int], tuple[str, ...]
 
     These decide nothing. They are reported because an operator reading a
     refusal wants to see both numbers, and because the gap between them is the
-    single most misleading thing about this host: the caps sum to 2240 MiB per
+    single most misleading thing about this host: the caps sum to 2880 MiB per
     project against 3814 MiB of RAM, which is only survivable because a cap is
     a ceiling and not a reservation (D767).
 

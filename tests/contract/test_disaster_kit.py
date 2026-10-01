@@ -338,6 +338,53 @@ def test_the_command_writes_owner_only_refuses_an_existing_directory_and_verifie
     assert command.main(["verify", str(output)]) == 5
 
 
+def test_every_directory_in_the_kit_is_owner_only(
+    host: dict[str, Path], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """D1856: every DIRECTORY is 0700 and every file 0600, walked whole.
+
+    `mkdir(parents=True, mode=0o700)` gave the mode to the last directory only,
+    so every kit carried `projects/` at 0755 under a 0700 root -- and the
+    proof above walked files alone. Under a permissive umask too, because the
+    host's is not this test's to assume.
+    """
+    command = load_command("dr-kit")
+    output = tmp_path / "kit"
+    previous = os.umask(0o022)
+    try:
+        assert (
+            command.main(
+                [
+                    "export",
+                    "--host",
+                    str(REPO_ROOT / "host.example.yaml"),
+                    "--capabilities",
+                    str(REPO_ROOT / "capabilities.example.yaml"),
+                    "--project",
+                    str(REPO_ROOT / "project.example.yaml"),
+                    "--output",
+                    str(output),
+                    "--state-root",
+                    str(host["state_root"]),
+                    "--session",
+                    "18",
+                ]
+            )
+            == 0
+        )
+    finally:
+        os.umask(previous)
+    capsys.readouterr()
+    directories = [output, *(path for path in output.rglob("*") if path.is_dir())]
+    assert output / "projects" in directories and output / "projects" / KEY in directories
+    wrong = [
+        f"{path.relative_to(tmp_path)} {oct(path.stat().st_mode & 0o777)}"
+        for path in [*directories, *(p for p in output.rglob("*") if p.is_file())]
+        if path.stat().st_mode & 0o777 != (0o700 if path.is_dir() else 0o600)
+    ]
+    assert not wrong, wrong
+
+
 def test_the_wrapper_needs_root_for_export_unless_a_state_root_is_given() -> None:
     source = (REPO_ROOT / "bin" / "dr-kit.sh").read_text(encoding="utf-8")
     assert "export needs root" in source and "--state-root" in source

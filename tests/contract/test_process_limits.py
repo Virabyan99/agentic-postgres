@@ -172,17 +172,87 @@ def test_cpus_is_two_for_postgres_and_one_for_every_sidecar() -> None:
         assert cpus == ("2.0" if name == "postgres" else "1.0"), f"{name}: cpus {cpus!r}"
 
 
-def test_the_edge_plane_is_untouched() -> None:
-    """The shared edge is nobody's project and is not bounded here.
+#: ADR 0244's edge values, from Sheet E0 (2026-09-30): memory max(4 x peak
+#: rounded up to 32 MiB, 64), pids max(4 x peak, 64), one core each.
+EDGE_LIMITS = {
+    "traefik": {"mem_limit": "608m", "pids_limit": 76, "cpus": "1.0"},
+    "docker-socket-proxy": {"mem_limit": "64m", "pids_limit": 64, "cpus": "1.0"},
+}
 
-    Recreating Traefik drops every project's ingress at once, which is its own
-    act with its own blast radius. Stated as a test rather than left as an
-    absence, so that adding it later is a decision somebody takes rather than
-    a line somebody slips in.
+
+def test_the_edge_plane_is_bounded() -> None:
+    """The shared edge carries the exact limits ADR 0244 records.
+
+    REPLACES `test_the_edge_plane_is_untouched` (ADR 0244, the one replacement
+    Session 35's plan authorises): that proof pinned the absence *"so that
+    adding it later is a decision somebody takes"* -- and the decision is taken,
+    from a measurement, so the pin moves to the values. Exact, so a looser
+    limit fails as surely as a missing one. Literals: the edge has no render of
+    its own variables, and recreating it is its own act (Sheet F4).
     """
-    edge = REPO_ROOT / "infra" / "edge" / "compose.yaml"
-    assert edge.is_file()
-    assert "pids_limit" not in edge.read_text(encoding="utf-8")
+    edge = yaml.safe_load((REPO_ROOT / "infra" / "edge" / "compose.yaml").read_text("utf-8"))
+    services = edge["services"]
+    assert set(services) == set(EDGE_LIMITS), sorted(services)
+    for name, expected in EDGE_LIMITS.items():
+        found = {key: services[name].get(key) for key in expected}
+        assert found == expected, f"{name}: {found} != ADR 0244's {expected}"
+
+
+def _long_running(model: dict) -> set[str]:
+    """The services that run for as long as the project does, by the FILE'S OWN
+    restart policy -- not a list, so a new long-running service lands here."""
+    return {
+        name
+        for name, service in model["services"].items()
+        if str(service.get("restart", "no")) not in ("no", "")
+    }
+
+
+def test_every_long_running_service_carries_a_memory_limit(model: dict) -> None:
+    """Every service whose restart policy keeps it running carries `mem_limit`
+    (ADR 0244, D1878): the threat model's sentence, made true.
+
+    The walk finds TEN, not the nine `SERVICE_RESOURCE_DEFAULTS` names: the
+    tenth is `edge-probe`, the health route's server (`restart: on-failure:5`),
+    which ADR 0222 classed with the one-shots for processes and which Sheet E0
+    found running and unbounded on both projects (D1900). Asserted as a set so
+    the classification is visible, not inferred.
+    """
+    long_running = _long_running(model)
+    assert long_running == set(config.SERVICE_RESOURCE_DEFAULTS) | {"edge-probe"}, sorted(
+        long_running
+    )
+    without = sorted(name for name in long_running if "mem_limit" not in model["services"][name])
+    assert not without, f"these long-running services are unbounded in memory: {without}"
+
+
+def test_the_four_new_memory_limits_are_rendered_from_config(model: dict) -> None:
+    """`config.SERVICE_MEMORY_LIMITS_MB` reaches the container through one
+    path: the compose file interpolates `${X_MEMORY_LIMIT:?required}` (so an
+    unrendered key refuses the deploy rather than leaving it unbounded), the key
+    is in `COMPOSE_ENV_KEYS`, and an in-process render writes `<n>m`."""
+    from agentic_postgres import naming
+
+    assert set(config.SERVICE_MEMORY_LIMITS_MB) == {"pgbouncer", "postgrest", "docs", "edge-probe"}
+    identity = naming.derive(
+        slug="alpha",
+        environment="dev",
+        domain="alpha.example.com",
+        api_base_path="/api",
+        mcp_base_path="/mcp",
+        storage_enabled=False,
+    )
+    database = {"max_client_connections": 100, "pool_size": 20}
+    raw = rendering.build_compose_env(identity, config.database_budget(database), database)
+    rendered = dict(line.split("=", 1) for line in raw.decode("utf-8").splitlines() if "=" in line)
+    for name, megabytes in config.SERVICE_MEMORY_LIMITS_MB.items():
+        key = f"{name.upper().replace('-', '_')}_MEMORY_LIMIT"
+        assert model["services"][name]["mem_limit"] == f"${{{key}:?required}}", name
+        assert key in rendering.COMPOSE_ENV_KEYS, key
+        assert rendered.get(key) == f"{megabytes}m", (key, rendered.get(key))
+        assert megabytes >= 64 and megabytes % 32 == 0, (
+            f"{name}: {megabytes} breaks ADR 0244's rule"
+        )
 
 
 def test_the_dev_cluster_carries_the_same_limit_as_the_release(tmp_path: Path) -> None:

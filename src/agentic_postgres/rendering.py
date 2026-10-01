@@ -660,6 +660,12 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     # one number that is the same everywhere would be eleven ways to disagree.
     *(f"{service}_PIDS_LIMIT" for service in SERVICE_RESOURCE_ORDER),
     *(f"{service}_CPUS" for service in SERVICE_RESOURCE_ORDER),
+    # Session 35 (ADR 0244). The four long-running services that had no memory
+    # cap, from `config.SERVICE_MEMORY_LIMITS_MB`, as `AUTH_MEMORY_LIMIT` is.
+    "PGBOUNCER_MEMORY_LIMIT",
+    "POSTGREST_MEMORY_LIMIT",
+    "DOCS_MEMORY_LIMIT",
+    "EDGE_PROBE_MEMORY_LIMIT",
     "COMPOSE_PROJECT_NAME",
     "EDGE_NETWORK_NAME",
     "INTERNAL_NETWORK_NAME",
@@ -1824,6 +1830,13 @@ def build_compose_env(
         **{
             f"{service}_CPUS": str(config.SERVICE_RESOURCE_DEFAULTS[service.lower()]["cpus"])
             for service in SERVICE_RESOURCE_ORDER
+        },
+        # Session 35 (ADR 0244). Lowercase `m`, Docker's byte suffix, as
+        # POSTGRES_MEMORY_LIMIT and AUTH_MEMORY_LIMIT are. `edge-probe`'s key
+        # takes `_` for `-`, the only spelling an environment variable has.
+        **{
+            "{}_MEMORY_LIMIT".format(service.upper().replace("-", "_")): f"{limit}m"
+            for service, limit in config.SERVICE_MEMORY_LIMITS_MB.items()
         },
         # Session 10's archiving four (ADR 0144).
         #

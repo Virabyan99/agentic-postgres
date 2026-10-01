@@ -27,6 +27,10 @@ services:
     image: ${DOCKER_SOCKET_PROXY_IMAGE:?required}
     platform: ${TARGET_PLATFORM:?required}
     restart: unless-stopped
+    # ADR 0244, from Sheet E0 (2026-09-30): peak 14.27 MiB / 12 pids -> the floors.
+    mem_limit: 64m
+    pids_limit: 64
+    cpus: "1.0"
     read_only: true
     tmpfs: [/run, /tmp]
     cap_drop: [ALL]
@@ -114,6 +118,10 @@ services:
     image: ${TRAEFIK_IMAGE:?required}
     platform: ${TARGET_PLATFORM:?required}
     restart: unless-stopped
+    # ADR 0244, from Sheet E0 (2026-09-30): peak 149.05 MiB / 19 pids -> 4x each.
+    mem_limit: 608m
+    pids_limit: 76
+    cpus: "1.0"
     depends_on:
       docker-socket-proxy:
         condition: service_healthy

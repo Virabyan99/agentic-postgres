@@ -168,7 +168,7 @@ def read_ceilings(runner: Runner) -> tuple[dict[str, int], tuple[str, ...], str]
     **These decide nothing**, which is why a failure here is a missing report
     line and not a refusal (ADR 0221). They are read at all because an operator
     staring at a refusal wants both numbers, and because the gap between them
-    is this host's most misleading fact: the six caps sum to 2240 MiB per
+    is this host's most misleading fact: the ten caps sum to 2880 MiB per
     project against 3814 MiB of RAM, and that is survivable only because a cap
     is a ceiling and was never a reservation (D767).
     """

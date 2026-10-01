@@ -4480,7 +4480,7 @@
     - tests/contract/test_process_limits.py::test_every_default_is_a_power_of_two_at_least_sixty_four
     - tests/contract/test_process_limits.py::test_postgres_can_hold_its_connections_and_its_workers
     - tests/contract/test_process_limits.py::test_cpus_is_two_for_postgres_and_one_for_every_sidecar
-    - tests/contract/test_process_limits.py::test_the_edge_plane_is_untouched
+    - tests/contract/test_process_limits.py::test_the_edge_plane_is_bounded
     - tests/contract/test_process_limits.py::test_the_dev_cluster_carries_the_same_limit_as_the_release
     - tests/contract/test_process_limits.py::test_a_container_cannot_fork_past_its_pids_limit
     - tests/contract/test_process_limits.py::test_the_same_fork_succeeds_with_no_limit
@@ -4502,7 +4502,9 @@
     past its limit, and its control proves the same fork succeeds without one,
     asserting the PROPERTY that the control's ceiling is nothing like the
     subject's rather than an environment-specific literal. The edge plane is
-    untouched: it is shared between projects and is not a project's to bound.
+    bounded since Session 35 at the exact values ADR 0244 records from Sheet
+    E0 (traefik 608m / 76 / 1.0, the socket proxy 64m / 64 / 1.0), a proof
+    that replaced the one pinning its absence.
 
 - id: OPS-TELEMETRY-001
   priority: P0

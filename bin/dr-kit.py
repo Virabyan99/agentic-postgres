@@ -91,7 +91,7 @@ def export(arguments: argparse.Namespace) -> int:
     try:
         for entry in entries:
             path = output / entry.relative
-            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            _owner_only_directories(output, path.parent)
             with open(path, "wb", opener=lambda p, f: os.open(p, f, 0o600)) as stream:
                 stream.write(entry.content)
         with open(
@@ -126,6 +126,23 @@ def export(arguments: argparse.Namespace) -> int:
     if owner:
         print(f"dr-kit: the kit is owned by {owner}; modes are unchanged (0700/0600).")
     return 0
+
+
+def _owner_only_directories(output: Path, directory: Path) -> None:
+    """Create every directory from ``output`` down to ``directory``, each 0700.
+
+    D1856. `mkdir(parents=True, mode=0o700)` applies the mode to the LAST
+    directory only -- Python creates the missing parents "with default
+    permissions without taking mode into account" -- so every kit since Session
+    18 carried `projects/` at 0755 (the umask's answer) under a 0700 root. Each
+    level is made here, and chmodded after, so a umask cannot widen it either.
+    """
+    current = output
+    for part in directory.relative_to(output).parts:
+        current = current / part
+        if not current.is_dir():
+            os.mkdir(current, 0o700)
+            os.chmod(current, 0o700)
 
 
 def _hand_to_operator(output: Path, host_path: Path) -> str | None:
