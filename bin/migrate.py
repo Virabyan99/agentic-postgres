@@ -200,7 +200,109 @@ def run_dbmate(mode: str, document: dict, rendered_dir: str, service: str = "dbm
     return result.returncode
 
 
-def run_every_set(mode: str, document: dict, rendered_dir: str) -> int:
+def applied_project_versions(document: dict, versions: tuple[str, ...]) -> frozenset[str]:
+    """Which of the project set's ``versions`` the cluster has applied.
+
+    One READ-ONLY psql script as the superuser over the container socket, the
+    way `reconcile_project_ledger` reaches the same tables -- and through
+    `container_exec.run` (the rule for new code, ADR 0218). It reads what the
+    cluster will hold AFTER that repair, so it can be asked before it (D1865).
+    A failure, or a line that is not one of the versions asked about, raises:
+    the gate cannot decide on an applied set it could not read.
+    """
+    result = container_exec.run(
+        document["database"]["container"],
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        document["database"]["name"],
+        "-X",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-qtA",
+        "-f",
+        "-",
+        input=migrations.applied_project_versions_statement(versions),
+    )
+    if result.returncode != 0:
+        raise migrations.MigrationError(
+            "the project set's applied versions could not be read "
+            f"(psql exited {result.returncode}): {result.stderr.strip()}"
+        )
+    applied = frozenset(line.strip() for line in result.stdout.splitlines() if line.strip())
+    unexpected = sorted(applied - set(versions))
+    if unexpected:
+        raise migrations.MigrationError(
+            f"the read of the project set's applied versions returned {unexpected}, which "
+            "it did not ask about"
+        )
+    return applied
+
+
+def pending_project_set(
+    document: dict, rendered_dir: str
+) -> tuple[migrations.MigrationSet, tuple[str, ...]] | None:
+    """The project set and its versions the cluster lacks; None without a set.
+
+    `pending` is the RENDERED set minus what is applied -- what dbmate's `up`
+    would apply, which is the act the gate governs (D1865).
+    """
+    project_set = migrations.project_set_from(document, REPO_ROOT)
+    if project_set is None:
+        return None
+    rendered = migrations.rendered_project_versions(Path(rendered_dir))
+    if not rendered:
+        return project_set, ()
+    applied = applied_project_versions(document, rendered)
+    return project_set, tuple(version for version in rendered if version not in applied)
+
+
+def gate_project_set(document: dict, rendered_dir: str, approvals_required: int) -> None:
+    """The host gate (D1865, ADR 0243), BEFORE anything in `up` writes.
+
+    Before `reconcile_project_ledger` as well as before both dbmate runs: that
+    repair moves ledger rows, and a refused deploy writes nothing (D1912). The
+    release set is never gated -- its own lock reviews it -- and is not applied
+    ahead of a refusal either.
+    """
+    found = pending_project_set(document, rendered_dir)
+    if found is None:
+        return
+    project_set, pending = found
+    if pending:
+        print(f"migrate: {len(pending)} project version(s) pending: {', '.join(pending)}")
+    proposal.gate(
+        project_set.root.parent,
+        migrations.set_digest(project_set),
+        pending,
+        approvals_required,
+    )
+    if pending:
+        print(f"migrate: proposal {migrations.set_digest(project_set)[:16]} admits them")
+
+
+def print_proposal_line(document: dict, rendered_dir: str, approvals_required: int) -> None:
+    """`status`'s proposal line (D1865), after the ledger. A report: an applied
+    set it cannot read is said, never folded into an answer (ADR 0195)."""
+    project_set = migrations.project_set_from(document, REPO_ROOT)
+    if project_set is None:
+        print("migrate: proposal: not applicable (this project applies no set of its own)")
+        return
+    digest = migrations.set_digest(project_set)
+    try:
+        found = pending_project_set(document, rendered_dir)
+    except migrations.MigrationError as error:
+        line = proposal.status_line(
+            project_set.root.parent, digest, None, approvals_required, unread=str(error)
+        )
+    else:
+        assert found is not None
+        line = proposal.status_line(project_set.root.parent, digest, found[1], approvals_required)
+    print(f"migrate: {line}")
+
+
+def run_every_set(mode: str, document: dict, rendered_dir: str, *, approvals_required: int) -> int:
     """One dbmate invocation per set, release first, then the ledger once.
 
     **Each set has its own directory and its own table** since ADR 0206, so each
@@ -221,8 +323,15 @@ def run_every_set(mode: str, document: dict, rendered_dir: str) -> int:
     only if the first succeeded -- the early return below stops before the
     ledger, so a partially applied pair records nothing and says so, rather than
     recording a set that half ran.
+
+    **`up` asks the host gate first** (D1865): a refusal raises
+    `MigrationError` before the ledger repair and before either dbmate run, so
+    a refused deploy has applied and written nothing. ``approvals_required`` is
+    the INSTALLED manifest's, keyword-only: a default would be the one way to
+    call this without the project's own answer.
     """
     if mode == "up":
+        gate_project_set(document, rendered_dir, approvals_required)
         status = reconcile_project_ledger(document, rendered_dir)
         if status != 0:
             return status
@@ -238,6 +347,7 @@ def run_every_set(mode: str, document: dict, rendered_dir: str) -> int:
             return status
 
     if mode != "up":
+        print_proposal_line(document, rendered_dir, approvals_required)
         return 0
     return record_ledger(document, rendered_dir)
 
@@ -894,6 +1004,15 @@ def main(argv: list[str] | None = None) -> int:
             if not arguments.rendered_dir:
                 print("migrate: --rendered-dir is required for status and up", file=sys.stderr)
                 return 2
+            # The INSTALLED manifest (`bin/migrate.sh` passes the one it was
+            # handed -- deploy step 6's copy), because `approvals_required` is
+            # the project's own answer and the gate reads it (D1865).
+            if not arguments.project:
+                print("migrate: --project is required for status and up", file=sys.stderr)
+                return 2
+            approvals_required = config.approvals_required(
+                config.load_project_manifest(Path(arguments.project))
+            )
 
             # Currency first, then integrity (D1053). A stale render is
             # internally consistent, so the integrity check below passes on it
@@ -901,7 +1020,12 @@ def main(argv: list[str] | None = None) -> int:
             # first means the answer names the right remedy.
             assert_installed_render_is_current(rendered, arguments.rendered_dir)
             assert_rendered_files_match(arguments.rendered_dir)
-            return run_every_set(arguments.mode, document, arguments.rendered_dir)
+            return run_every_set(
+                arguments.mode,
+                document,
+                arguments.rendered_dir,
+                approvals_required=approvals_required,
+            )
 
     except config.ManifestError as error:
         # An invalid project manifest, which is INVALID OPERATOR INPUT and not a

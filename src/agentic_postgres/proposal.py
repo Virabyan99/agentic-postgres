@@ -17,8 +17,9 @@ an identity* -- and the host has one operator account. So every record says
 stop an unreviewed or altered set reaching a host; they do not authenticate a
 reviewer.
 
-Pure logic: nothing here reads or writes a file. `bin/migrate.py` writes the
-bytes `record_bytes` returns, with `O_EXCL`.
+Pure logic, with two readers: nothing here writes a file (`bin/migrate.py`
+writes the bytes `record_bytes` returns, with `O_EXCL`), and the host gate and
+`proposals_naming` read the committed records and nothing else.
 """
 
 from __future__ import annotations
@@ -28,6 +29,8 @@ import re
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+
+from agentic_postgres import migrations
 
 #: Where a project's records live, beside its `migrations/` and `contracts/`.
 PROPOSALS_SUBDIR = "proposals"
@@ -211,6 +214,111 @@ def check_names(proposal: dict[str, Any], approval: dict[str, Any]) -> None:
         raise ProposalError(GATE_BAD_APPROVAL)
 
 
+def _approval(project_root: Path, set_digest: str, proposal_data: bytes) -> dict[str, Any] | None:
+    """The approval of these proposal bytes, None when there is no file, or
+    ProposalError(GATE_BAD_APPROVAL) when the file is not one."""
+    path = approval_path(project_root, set_digest)
+    if not path.is_file():
+        return None
+    try:
+        record = json.loads(path.read_bytes().decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise ProposalError(GATE_BAD_APPROVAL) from None
+    if (
+        not isinstance(record, dict)
+        or record.get("kind") != APPROVAL_KIND
+        or record.get("schema_version") != RECORD_SCHEMA_VERSION
+        or record.get("set_digest") != set_digest
+        or record.get("proposal_sha256") != sha256(proposal_data).hexdigest()
+    ):
+        raise ProposalError(GATE_BAD_APPROVAL)
+    return record
+
+
+def gate(
+    project_root: Path,
+    set_digest: str,
+    pending: tuple[str, ...],
+    approvals_required: int,
+) -> dict[str, Any] | None:
+    """The host gate (D1865): refuse an ACT, never a state.
+
+    Returns without reading anything when nothing is pending -- a set fully
+    applied before proposals existed needs none, so the upgrade breaks nobody.
+    Otherwise requires `<project_root>/proposals/<set_digest>.json` whose own
+    `set_digest` is this one, compared WHOLE (a sixteen-character prefix is a
+    display, never an identity), and under `approvals_required: 1` the approval
+    beside it naming that file's sha256 under a second folded name. Raises
+    `migrations.MigrationError` with one of the four fixed sentences; returns
+    the approval record when one was read, else None.
+    """
+    if not pending:
+        return None
+    path = proposal_path(project_root, set_digest)
+    if not path.is_file():
+        raise migrations.MigrationError(GATE_NO_PROPOSAL.format(digest16=set_digest[:16]))
+    data = path.read_bytes()
+    try:
+        record = read_proposal(data)
+    except ProposalError as error:
+        raise migrations.MigrationError(f"{GATE_OTHER_SET} ({error})") from None
+    if record["set_digest"] != set_digest:
+        raise migrations.MigrationError(GATE_OTHER_SET)
+    if approvals_required != 1:
+        return None
+    try:
+        approval = _approval(project_root, set_digest, data)
+        if approval is None:
+            raise migrations.MigrationError(GATE_NO_APPROVAL)
+        check_names(record, approval)
+    except ProposalError as error:
+        raise migrations.MigrationError(str(error)) from None
+    return approval
+
+
+def status_line(
+    project_root: Path,
+    set_digest: str,
+    pending: tuple[str, ...] | None,
+    approvals_required: int,
+    unread: str = "",
+) -> str:
+    """`migrate.sh status`'s one proposal line (D1865), three outcomes and the
+    third reported (ADR 0195): ``pending`` None means the cluster's applied set
+    could not be read, and ``unread`` says why."""
+    head = f"proposal {set_digest[:16]}: "
+    if pending is None:
+        return head + f"whether anything is pending could not be read ({unread})"
+    if not pending:
+        return head + "not needed (nothing pending)"
+    if not proposal_path(project_root, set_digest).is_file():
+        return head + f"absent ({len(pending)} pending; up refuses)"
+    try:
+        approval = gate(project_root, set_digest, pending, approvals_required)
+    except migrations.MigrationError as error:
+        return head + f"present; up refuses: {error}"
+    if approval is not None:
+        return head + f"present, approved by {approval['declared_by']}"
+    return head + "present (approvals_required is 0)"
+
+
+def proposals_naming(project_root: Path, capability_sha: str) -> tuple[str, ...]:
+    """The set digests of this project's proposals that name ``capability_sha``
+    as their capability contract (D1866), sorted. A proposal file that is not
+    one raises ProposalError: a report says it could not read, never *none*."""
+    directory = project_root / PROPOSALS_SUBDIR
+    if not directory.is_dir():
+        return ()
+    naming = []
+    for path in sorted(directory.glob("*.json")):
+        if path.name.endswith(".approval.json"):
+            continue
+        record = read_proposal(path.read_bytes())
+        if record.get("capability_contract_sha256") == capability_sha:
+            naming.append(record["set_digest"])
+    return tuple(naming)
+
+
 __all__ = [
     "APPROVAL_KIND",
     "DIGEST",
@@ -230,9 +338,12 @@ __all__ = [
     "build_proposal",
     "check_names",
     "fold",
+    "gate",
     "proposal_path",
+    "proposals_naming",
     "read_proposal",
     "record_bytes",
     "require_digest",
     "require_name",
+    "status_line",
 ]

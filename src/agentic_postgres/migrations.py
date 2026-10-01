@@ -1217,6 +1217,60 @@ def verify_rendered_directory(rendered_dir: Path) -> list[dict[str, Any]]:
     return entries
 
 
+def rendered_project_versions(rendered_dir: Path) -> tuple[str, ...]:
+    """The PROJECT set's versions this release rendered, sorted; empty for none.
+
+    Read from the rendered manifest, which records which set each payload came
+    from (TEN-SET-001). One reader for the two statements that need the list:
+    the ledger move below and the host gate's read of what is applied (D1865).
+    """
+    from agentic_postgres import rendering
+
+    manifest_path = Path(rendered_dir) / "migrations" / rendering.MIGRATION_MANIFEST_NAME
+    if not manifest_path.is_file():
+        return ()
+    recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    return tuple(
+        sorted(
+            entry["version"]
+            for entry in recorded.get("migrations", [])
+            if entry.get("set") == "project"
+        )
+    )
+
+
+def applied_project_versions_statement(versions: tuple[str, ...]) -> str:
+    """A READ-ONLY psql script: which of ``versions`` the cluster has applied.
+
+    The host gate (D1865) asks it BEFORE `reconcile_project_ledger`, because
+    that repair writes and a refused deploy writes nothing -- so the answer is
+    what the cluster will hold after the repair: the project table's rows, and
+    the release table's rows for a project version (a cluster that predates ADR
+    0206 recorded them there). Either table may not exist yet -- a fresh
+    cluster has neither, and dbmate creates the project's on the set's first
+    run -- so each read is behind psql's `\\if` over `to_regclass` (rig 35r4a:
+    neither, one and both tables read; a broken statement exits 3). One version
+    per line, unaligned, tuples only.
+    """
+    from agentic_postgres import rendering
+
+    listed = ", ".join(quote_literal(version) for version in versions)
+    release_table = rendering.MIGRATIONS_TABLE
+    project_table = rendering.PROJECT_MIGRATIONS_TABLE
+    # S608 as above: module constants, and versions through `quote_literal`.
+    return (
+        f"SELECT to_regclass({quote_literal(project_table)}) IS NOT NULL AS apg_has_project,\n"  # noqa: S608
+        f"       to_regclass({quote_literal(release_table)}) IS NOT NULL AS apg_has_release\n"
+        "\\gset\n"
+        "\\if :apg_has_project\n"
+        f"SELECT version FROM {project_table} WHERE version IN ({listed});\n"
+        "\\endif\n"
+        "\\if :apg_has_release\n"
+        f"SELECT version FROM {release_table} WHERE version IN ({listed});\n"
+        "\\endif\n"
+    )
+
+
 def project_ledger_move_statement(rendered_dir: Path) -> str | None:
     """Move a project set's applied versions into the project table (ADR 0206).
 
@@ -1244,15 +1298,7 @@ def project_ledger_move_statement(rendered_dir: Path) -> str | None:
     """
     from agentic_postgres import rendering
 
-    manifest_path = Path(rendered_dir) / "migrations" / rendering.MIGRATION_MANIFEST_NAME
-    if not manifest_path.is_file():
-        return None
-    recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
-    versions = sorted(
-        entry["version"]
-        for entry in recorded.get("migrations", [])
-        if entry.get("set") == "project"
-    )
+    versions = rendered_project_versions(Path(rendered_dir))
     if not versions:
         return None
 

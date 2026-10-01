@@ -57,6 +57,7 @@ from agentic_postgres import (
     agent_plane,
     api_surface,
     backup_report,
+    capability_manifest,
     capacity_probe,
     capacity_reading,
     config,
@@ -73,6 +74,7 @@ from agentic_postgres import (
     openapi_normalize,
     port_allocations,
     preflight,
+    proposal,
     rendering,
     runtime_override,
     secrets_contract,
@@ -865,6 +867,42 @@ def require_secret_generation(project_key: str) -> dict[str, Any]:
         "fresh": True,
         "materialized_at": manifest["materialized_at"],
     }
+
+
+# ---------------------------------------------------------------------------
+# The capability report (step 6, D1866)
+# ---------------------------------------------------------------------------
+
+
+def capability_report(release: Path, manifest_path: Path) -> str:
+    """ONE line after the capability lock is written: whether a committed
+    proposal of this project names the capability contract being deployed.
+
+    **A report, never a refusal** (D1866): the deployed lock is recompiled at
+    every deploy, so there is no pending capability state to gate on. It still
+    has three outcomes (ADR 0195) -- named, named by none, and a contract or a
+    proposal it could not read, which it says rather than calling *none*.
+    """
+    manifest = config.load_project_manifest(manifest_path)
+    inputs = capability_manifest.project_inputs(manifest, repo_root=release)
+    if inputs is None:
+        return "no capability contract (the manifest declares none)"
+    try:
+        contract_sha = hashlib.sha256(
+            capability_manifest.project_contract_path(inputs.root).read_bytes()
+        ).hexdigest()
+    except OSError as error:
+        return f"capability contract: could not be read ({error})"
+    head = f"capability contract {contract_sha[:16]}: "
+    # `project_inputs` refuses capabilities without a set, so a set is named.
+    project_root = release / str(config.project_migration_set(manifest))
+    try:
+        naming = proposal.proposals_naming(project_root, contract_sha)
+    except (OSError, proposal.ProposalError) as error:
+        return head + f"the project's proposals could not be read ({error})"
+    if naming:
+        return head + "named by proposal " + ", ".join(digest[:16] for digest in naming)
+    return head + "named by no proposal of this project"
 
 
 # ---------------------------------------------------------------------------
@@ -2497,6 +2535,7 @@ def main(argv: list[str] | None = None) -> int:
         lock_path.write_text(compiled.stdout, encoding="utf-8")
         lock_path.chmod(0o444)
         print(f"  capability lock  {lock_path}")
+        print(f"  {capability_report(release, state_directory / 'manifest.yaml')}")
     else:
         print("  no capability lock: this session runs no agent plane")
 

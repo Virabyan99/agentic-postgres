@@ -572,3 +572,29 @@ def test_the_approval_gate_sentences_are_the_four_the_host_will_raise() -> None:
     )
     assert approval_gate.GUARD == "app.require_approval"
     assert config.approvals_required(config.load_project_manifest(MANIFEST)) == 1
+
+
+def test_the_example_sets_committed_proposal_names_its_lock() -> None:
+    """The proposal `bin/migrate.sh propose` wrote and Run 4 committed names
+    the example set as it is: its `set_digest` is the lock's, its versions the
+    lock's, nothing destructive, no unguarded gated tool, applied from empty.
+    A later change to the set moves the digest, and this proof -- like the
+    host gate -- refuses until the set is proposed again. That is the point."""
+    project_set = migrations.MigrationSet(label="project", root=EXAMPLE / "migrations")
+    digest = migrations.set_digest(project_set)
+    path = proposal.proposal_path(EXAMPLE, digest)
+    assert path.is_file(), f"no committed proposal for the example set {digest[:16]}"
+    record = proposal.read_proposal(path.read_bytes())
+    assert record["set_digest"] == digest
+    assert record["set"]["versions"] == [
+        {"version": entry["version"], "name": entry["name"]}
+        for entry in project_set.load_lock()["migrations"]
+    ]
+    assert record["destructive"] == []
+    assert record["approval_gate"] == []
+    assert record["dev_apply"]["exit"] == 0
+    assert (
+        record["capability_contract_sha256"]
+        == sha256(capability_manifest.project_contract_path(EXAMPLE).read_bytes()).hexdigest()
+    )
+    assert path.read_bytes() == proposal.record_bytes(record)

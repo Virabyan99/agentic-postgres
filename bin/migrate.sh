@@ -52,8 +52,14 @@ usage() {
 Usage: bin/migrate.sh --project FILE [--runtime] <subcommand>
 
 Subcommands:
-  status        List applied and pending migrations. Reads only.
+  status        List applied and pending migrations, then the project set's
+                proposal line. Reads only.
   up            Apply every pending migration, in order, transactionally.
+                When the project's own set has a version the cluster lacks,
+                refuses (exit 5, writing nothing) without the committed
+                proposal for that set -- and, under approvals_required: 1,
+                its approval (ADR 0243). A set with nothing pending, and the
+                release's own set, need none.
   render        Render the migration set for this project and report digests.
   freeze-lock   Write a released lock from a clean tree. Without --project,
                 the RELEASE's: migrations/released.lock.json. With --project,
@@ -306,8 +312,11 @@ main() {
         command -v docker >/dev/null 2>&1 || die 3 "docker is not on PATH."
       fi
 
+      # `--project` too: `up`'s gate reads the INSTALLED manifest's
+      # approvals_required, and `status` prints the proposal line (D1865).
       "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" \
-        --mode "${SUBCOMMAND}" --outputs "${document}" --rendered-dir "${rendered_dir}" ;;
+        --mode "${SUBCOMMAND}" --outputs "${document}" --rendered-dir "${rendered_dir}" \
+        --project "${PROJECT_MANIFEST}" ;;
   esac
 }
 
