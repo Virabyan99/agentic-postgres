@@ -1,8 +1,9 @@
 # Session 35 — Change governance, the database half of approval, hardening, and the Stage 4 release
 
-**Status: PLANNED 2026-09-30 at `a018939`; not started.** The last session of
-Stage 4 (`docs/plans/stage-4-plan.md` §3). Eleven runs. The plan spends
-**D1857–D1891** and **ADR 0242–0245**; rows the runs add start at **D1892**.
+**Status: EXECUTING — Run 1 DONE 2026-10-01** (planned 2026-09-30 at
+`a018939`). The last session of Stage 4 (`docs/plans/stage-4-plan.md` §3).
+Eleven runs. The plan spends **D1857–D1891** and **ADR 0242–0245**; rows the
+runs add start at **D1892**. **NEXT FREE: D1901, ADR 0246.**
 
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 35* whole (Builds / Already
 true / Must not / Measures / Closes, `:619-657`), its rows **D1523** (the
@@ -512,6 +513,15 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 
 | # | Run | Plan says | Tree does / measured | Decision | ADR |
 |---|---|---|---|---|---|
+| **D1892** | 1 | Rig 35a owes D1867's premise: the claim and the key header arriving in SQL, the refusal's SQLSTATE and PostgREST status, D1871's replay, the exact 403 body. | **Every premise holds, measured end to end through the REAL loop and plane** (the step token minted by `AuthService.step_token` after the loop parked on the plane's `approval_required` and a second administrator approved): `request.jwt.claims -> 'apg_approval'` arrives as minted, `{id, key, tool}`; the plane's `Idempotency-Key` arrives in `request.headers` equal to the claim's key. The agent's own token on the guarded twin → **403 `{"code":"PT403","details":null,"hint":null,"message":"AP403: approval_required"}`**, 0 rows (with and without a key); control A (ungated twin) → 200 and a row; the owner → 200, `app.agent_id` empty; approved claim + matching key → 200; other key / no key → 403, 0 rows; **a malformed key → 412 `PT412` from `agent_idempotency_key()` before the guard decides**; decision `rejected` / `expired`, run `cancelled` → 403 each, 200 once restored; the run `succeeded` → 403 and `step_token` refuses to mint (*"the approval is not decided for this agent"*). Guard installed first in `api.set_note_embedding` (grants kept): the agent directly → 403, 0 embeddings; the owner → 200; the approved plane call → served, 1 embedding; the loop finished `succeeded`. D1871: the same claim and key twice → served twice (two twin rows; the upsert kept ONE embedding). Control B: no role of seven may execute the prototype (`42501 … schema app`); `POST /rpc/rig_require_approval` → `404 PGRST202`. | **D1867 stands unchanged.** Run 2's proofs and Run 9's live proof assert the 403 body verbatim and a malformed key's `PT412`. | 0242 |
+| **D1893** | 1 | Rig 35a (iv): the refusals the guard's predicate makes. | The rig's added arm *"the run belongs to another agent"* was **uninformative**: `UPDATE app_private.workflow_run SET agent_id = <another>` was refused by a constraint (psql rc 3), nothing changed, and the call was served. The guard's `r.agent_id = v_agent` member was therefore NOT exercised on the stack. | **Owed to Run 2's `test_a_pending_rejected_expired_or_foreign_decision_is_refused`**, which sets `request.jwt.claims` and `app.agent_id` in SQL for a SECOND agent holding the first agent's claim (no forged token needed). A proof that cannot see the foreign case is D1773's shape. | 0242 |
+| **D1894** | 1 | Rig 35a drives `tasks-approval` with an embedding. | **The plane types `p_embedding` as a STRING** (the vector literal): attempt 2 passed a JSON list, the tool schema refused it `string_type` BEFORE any approval check, and the loop classified that as `unclassified_refusal`, failed the step and compensated the run. Argument validation precedes the gate, so an approval is never asked for an invalid call. | Every proof and trip script passes the embedding as the literal text `"[…]"`, as Session 33's do. No product change. | — |
+| **D1895** | 1 | D1861: `apg dev up` ~10–16 s; `propose` reads its `migrations applied` line; it refuses when an environment is up. | Rig 35b: `bin/dev.sh up` exit 0 in **22.5–29.4 s** (three runs); its line is `dev: 39 migrations applied as apg_fixture_alpha_dev_migration_user` — **39 is the whole cluster (36 release + 3 set), not the set**; a second `up` while up → **exit 2**, *"… is already up (since …); `apg dev reset` rebuilds it, `apg dev down` removes it"*; `status` while up → 0; `status` after `down` → **exit 4**, *"no development environment; `apg dev up` creates one"*. `sql_surface.final_surface` over the example set → functions `{set_note_embedding}`, views `{note_embeddings}`. | `propose` checks `bin/dev.sh status` first (0 = up → refuse, exit 2, naming `apg dev down`; 4 = none → proceed); records the dev line verbatim and the SET's count from the set itself, never from the line; the record's `seconds` is measured, never predicted. | 0243 |
+| **D1896** | 1 | D1874: whether the edge's per-source bucket is shared across routers is unmeasured. | Rig 35c (the pinned Traefik v3.7, `apg-rate-limit` copied verbatim, two routers, backend `python3 -m http.server` in the pinned **Python runtime image** — the auth image's own base, not the auth image the plan named): 5/s each for 10 s → 0 429s (control); **15/s each (30/s total) → 0 429s on either**; 25/s to `a` alone → 11 429s of 250; 25/s to `a` with 5/s to `b` → `a` 11 429s, `b` 0. **The bucket is per router** (per source within it). | F7's neighbour probe may probe both projects AT ONCE at ≤ 4 req/s each (≤ 8 total from the host) — no alternation. | — |
+| **D1897** | 1 | D1875: *down* is a transport error or an edge 404/502/503/504; rig 35d fixes the statuses and bodies. | Rig 35d (Traefik's Docker provider, the socket mounted directly — a rig): a steady 200 for 30 s (control, p50 7.2 ms); on `stop`, **2 × `502 Bad Gateway` and 1 transport timeout (the probe's 1-s timeout), then `404 page not found`** (Traefik's body) until the backend returned; on `start`, 1.3 s of 404 then 200; on `up --force-recreate`, **502 ×3, 1 timeout, 404 ×27, then 200: a 3.1-s gap at 0.1 s, 3.5 s at 0.5 s**. A request for a host NO router matches answers the same `404 page not found`. | The probe's *down* is exactly: a transport error, or 502/503/504, or a 404 whose body is `404 page not found`. Its pre-trip control must read 200 on every class first, so a misspelt host is never read as an outage (the two 404s are identical). Resolution 0.5 s per class loses ≤ 0.5 s per edge of a window; stated in the envelope rows. | — |
+| **D1898** | 1 | Rig 35e: *"as a non-root WSL user"*, the sampler resolves the container's cgroup through `/proc/<pid>/cgroup` + `mountinfo`. | **The workstation's Docker is Docker Desktop**: its containers' pids live in the engine VM, and `/proc/<pid>/cgroup` is `No such file` from WSL (first form). Second form: the sampler as **uid 1000, `--cap-drop ALL`, `no-new-privileges`**, in the engine VM's pid namespace. Inside a PRIVATE cgroup namespace `/proc/<pid>/cgroup` reads `0::/../<id>` — relative to the reader's own namespace; with the host's namespace, `/docker/<id>`. Measured: 133 samples, cadence median 100.4 ms, max 100.9 ms, millisecond stamps distinct; base 4.3 MiB, the 100-MiB block seen from the first sample after it was touched (104.5 MiB) and held **2.01 s** (the script's 2 s); `docker stats` 4.23 → 104.4 MiB against the sampler's 4.3 → 104.5. | `s35-r10-sampler.py` runs on the HOST as `op`, never inside a container (so no cgroup namespace makes the path relative), and resolves the file across EVERY cgroup2 mount `/proc/self/mountinfo` lists, recording which held it. D1876's method stands. | — |
+| **D1899** | 1 | THR-CHANGE's interim requirement: *"`DBX-…` the release lock's requirement (grep `verify_lock`'s proof)"*. | There is no `DBX` family. The proof that a set's lock is frozen and verified apart from the release's is `test_project_migration_sets.py::test_the_project_lock_is_frozen_and_verified_apart_from_the_release_lock`, held by **`TEN-SET-001`**. | `THR-CHANGE` cites `TEN-SET-001` and that node until Run 9 rewrites the cells to the `GOV-*` ids (D1816's shape). | — |
+| **D1900** | 1 | D1878: *"pgbouncer, postgrest and docs are long-running and unbounded … the eleven short-lived services exit"*; `doctor capacity`'s `unbounded` falls **10 → 0** once the three and the edge are bounded; §0 attributes the 10 to *"2 projects x pgbouncer, postgrest, docs + the edge's two"* (D1710). | **Sheet E0: the 10 is 4 per project + the edge's 2** — `pgbouncer`, `postgrest`, `docs` AND **`edge-probe`**, which ADR 0222 classed among the one-shots, probes and clients (`compose.yaml:71-98`: a literal `pids_limit: 64`, no `cpus`, no `mem_limit`) but which is the health route's server (`restart: on-failure:5`) and was RUNNING on both projects (peak 51.51 / 49.42 MiB, 9 pids). §0's *2 × three + 2* sums to 8. Bounding the three and the edge would leave `unbounded` at **2**, and the threat model's sentence false by one service per project. | **`edge-probe` joins Run 5's set**: `config.SERVICE_MEMORY_LIMITS_MB` carries FOUR services (`EDGE_PROBE_MEMORY_LIMIT`, 224m by ADR 0244's rule); its `pids_limit` stays the literal 64, no `cpus`. `test_every_long_running_service_carries_a_memory_limit` reads `edge-probe` as long-running (`restart` other than `"no"`, a profile that a deploy starts), so the proof cannot pass with it left out. `unbounded` 10 → 0 stands as the prediction, READ on the trip. | 0244 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -807,6 +817,68 @@ Run `pytest tests/contract/test_acceptance_registry.py tests/contract/
 test_documentation_index.py -q -p no:randomly` (the ADR index and the threat
 rows' requirement ids). Commit (`Session 35 Run 1: the rigs, Sheet E0, THR-CHANGE,
 and ADRs 0242-0245`), push. **No CI read** — documentation only.
+
+**Done (2026-10-01; rigs and Sheet E0 on 2026-09-30).** The deployable-diff
+filter past `1.12.0` names NOTHING (10 files past the tag, none under `src/
+bin/ services/ migrations/ templates/ schemas/ compose.yaml deploy.sh
+VERSION`). **All five rigs ran, each with its control green**; scripts,
+reports and transcripts in WSL `~/s35r1/rig35/` and the scratchpad `rig35/`
+(`rig35.py` = 35a+35b on ONE stack, Session 34's method: `bin/dev.sh up` over
+`project.example.yaml`, the pinned PostgREST verifying the auth application's
+key set, the plane from the checkout, and the REAL loop driven in-process,
+rig33g's method; `rig35cde.py` = 35c, 35d; `rig35e2.py` = 35e). **35a**
+(D1892, D1893, D1894): D1867's premise holds end to end — the approved step
+token's `apg_approval {id, key, tool}` and the plane's `Idempotency-Key` both
+arrive in SQL as sent; the guard refuses the agent's own token **403 `PT403`
+`AP403: approval_required`, 0 rows**, passes the owner, passes the approved
+claim with its key and refuses every other key, no key, a rejected, expired or
+cancelled decision, and an ended run (a malformed key is `PT412` first);
+installed first in `api.set_note_embedding` the agent's direct call writes no
+embedding while the approved plane call writes one and the run finishes
+`succeeded`; no role of seven may execute it, PostgREST cannot address it; the
+foreign-agent arm was uninformative and is owed to Run 2's proof (D1893); the
+plane types `p_embedding` as a string (D1894). Three attempts: the first died
+on `APG_CONNECTOR_KEY_FILE` (required since 1.12.0; a path with no file is the
+facility off), the second on D1894. **35b** (D1895): `dev up` 0 in 22.5–29.4
+s, its line counts the whole cluster (39 = 36 + 3), a second `up` exits 2,
+`status` after `down` exits 4; the example set's final surface is
+`set_note_embedding` + `note_embeddings`. **35c** (D1896): the edge's rate
+limit is kept PER ROUTER — 15/s to each of two routers drew no 429, 25/s to
+one drew 11 of 250 while its neighbour at 5/s drew none. **35d** (D1897):
+*down* through Traefik is a brief `502 Bad Gateway`/transport timeout, then
+`404 page not found` (the same body an unmatched host gets); a force-recreate
+was a 3.1-s gap at 0.1 s, 3.5 s at 0.5 s. **35e** (D1898): the workstation is
+Docker Desktop, so the sampler ran as uid 1000 with no capabilities in the
+engine VM's pid and cgroup namespaces — 133 samples at a median 100.4 ms, the
+2-s 100-MiB block seen and held 2.01 s, `docker stats` agreeing within 0.1 MiB;
+a reader inside a private cgroup namespace reads a RELATIVE path, so the trip's
+sampler runs on the host as `op`, outside any container.
+
+**Sheet E0** (`/home/op/s35-r1-e0.sh`, the operator's one `sudo` line,
+2026-09-30T19:57Z, checkout `8d655b5`; transcript `/home/op/s35-r1-e0.txt` and
+WSL `~/s35r1/s35-r1-e0.txt`). 2 vCPU, kernel 7.0.0-31-generic, 3,814 MiB /
+2,075 available / no swap, `/` 38 G with 21 G free; `doctor capacity` 5 ok,
+4,480 MiB of ceilings, **10 unbounded**. No figure `absent`. The edge's two
+had run since 2026-09-17 (13 days); the project services since
+17:54–17:57Z (~2 h, most of Session 34's third sweep). `memory.peak` /
+`pids.peak` and **ADR 0244's values** (rule: max(4 × peak rounded up to 32
+MiB, 64 MiB); max(4 × pids, 64); the larger of alpha and beta):
+
+| Service | alpha | beta | → `mem_limit` | → `pids_limit` |
+|---|---|---|---|---|
+| `traefik` (edge, current 123.02 MiB) | 149.05 MiB / 19 | — | **608m** | **76**, `cpus "1.0"` |
+| `docker-socket-proxy` (edge, current 6.86 MiB) | 14.27 MiB / 12 | — | **64m** | **64**, `cpus "1.0"` |
+| `pgbouncer` | 9.47 / 9 | 6.92 / 9 | **64m** | unchanged |
+| `postgrest` | 26.03 / 20 | 24.52 / 18 | **128m** | unchanged |
+| `docs` | 53.80 / 9 | 47.78 / 9 | **224m** | unchanged |
+| `edge-probe` (D1900) | 51.51 / 9 | 49.42 / 9 | **224m** | unchanged |
+
+Both edge limits clear 2 × `memory.current` (§9). **D1900**: the tenth
+unbounded container is `edge-probe`, not counted by the plan — it joins Run 5.
+Written: `THR-CHANGE` (citing `TEN-SET-001` until Run 9, D1899); ADRs **0242,
+0243, 0244, 0245**, indexed. Rows **D1892–D1900**; **NEXT FREE D1901, ADR
+0246.** Targeted: `test_acceptance_registry` + `test_documentation_index`, once
+(result in the commit message).
 
 ### Run 2 — the database half of approval: migration 0037, the example set's 0004, the approval-gate check
 
