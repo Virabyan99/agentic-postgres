@@ -1,0 +1,69 @@
+{
+  "approval_gate": [],
+  "capability_contract_sha256": "3d7d6e6d513a1e6c54f8a008238231e705dbc2536d323c2bbb06d403b88e86c5",
+  "declared_at": "2026-10-01T13:10:24Z",
+  "declared_by": "claude-opus-5-5 Session 35 executor",
+  "destructive": [],
+  "dev_apply": {
+    "applied_by": "psql as migration_user",
+    "existing_rows": "none",
+    "exit": 0,
+    "from_empty": true,
+    "migrations_applied": 41,
+    "seconds": 12.0
+  },
+  "harness": {
+    "capabilities": 9,
+    "contract_sha256": "535d19c6fff6444d53ff96d181b2136550bd5e834df9ff36186e5555f94ecac8",
+    "derived": 62,
+    "note": "cases asked of the contract, not results",
+    "written": 19
+  },
+  "kind": "migration_set_proposal",
+  "lint": "passed",
+  "note": "The names in this record are declared, not authenticated (ADR 0243).",
+  "project_slug": "fixture-alpha",
+  "release": {
+    "release_lock_sha256": "4750932cdab0969e063d8e11235e2f4dd950fe7cd1af31d19414c2a175918742",
+    "template_version": "1.12.0"
+  },
+  "schema_version": 1,
+  "set": {
+    "follows_release_version": "20260912120031",
+    "follows_release_version_source": "declared",
+    "root": "projects/example",
+    "versions": [
+      {
+        "name": "note_embeddings",
+        "version": "20260914120001"
+      },
+      {
+        "name": "agent_grants",
+        "version": "20260914120002"
+      },
+      {
+        "name": "note_embedding_events",
+        "version": "20260930120003"
+      },
+      {
+        "name": "approval_in_the_database",
+        "version": "20261001120004"
+      }
+    ]
+  },
+  "set_digest": "35245421404e77d3186c312eb92ce58fc740f9c768b33dca5f69486b2c55a76b",
+  "surface": {
+    "functions": [
+      {
+        "name": "set_note_embedding",
+        "reviewed": true
+      }
+    ],
+    "views": [
+      {
+        "name": "note_embeddings",
+        "reviewed": true
+      }
+    ]
+  }
+}
