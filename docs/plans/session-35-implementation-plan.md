@@ -1,9 +1,9 @@
 # Session 35 — Change governance, the database half of approval, hardening, and the Stage 4 release
 
-**Status: EXECUTING — Runs 1–2 DONE 2026-10-01** (planned 2026-09-30 at
+**Status: EXECUTING — Runs 1–3 DONE 2026-10-01** (planned 2026-09-30 at
 `a018939`). The last session of Stage 4 (`docs/plans/stage-4-plan.md` §3).
 Eleven runs. The plan spends **D1857–D1891** and **ADR 0242–0245**; rows the
-runs add start at **D1892**. **NEXT FREE: D1904, ADR 0246.**
+runs add start at **D1892**. **NEXT FREE: D1912, ADR 0246.**
 
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 35* whole (Builds / Already
 true / Must not / Measures / Closes, `:619-657`), its rows **D1523** (the
@@ -525,6 +525,14 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1901** | 2 | §5 Run 2 step 3: *"`unguarded(contract: dict, bodies: dict[str, str]) -> tuple[Finding, ...]`"*; D1868: *"it REPORTS at render (one line, `approval gate: <tool> does not call app.require_approval first (ADR 0242)`)"* and *"the render's approval-gate line names such a tool `release_function`"*. | `release_function` cannot be named from a contract and bodies alone -- it needs the release's own function set, so `unguarded` takes a third parameter, `migrations.release_functions(release_set())`. **The render's document carries no profile** (`outputs.json` has `capabilities.enabled` and `capabilities.project`, never `mcp.profile`), and a profile is the only way a release tool is gated: `write_rendered_migrations` gains a keyword `profile=` that `render_project` passes from the manifest it already holds, and `rendering.approval_gate_report` builds the tool list from the release's committed canonical contract (filtered to `capabilities.enabled`) plus the project's committed contract. **The report sits beside the lint, which runs only for a project WITH a set**, so `project.second.example.yaml` (no set; its profile gates `update_task_status`) gets no render line -- `check --project` prints its `release_function` line and exits 0. One sentence per reason, not one: `not_first` reads *"… does not call app.require_approval first in api.<fn> (ADR 0242)"*, `absent` *"… does not call app.require_approval in api.<fn> (ADR 0242)"*, `release_function` names D1869. | Kept as built; Run 3's `propose` calls `unguarded` with the release set too. A render line for a set-less project would be a second place the report runs, for a finding no refusing caller makes; the workstation's check is where that author meets it. | 0242 |
 | **D1902** | 2 | §5 Run 2 step 3: *"read whether `final_surface` returns bodies; if it returns names only, add a `final_function_bodies(templates)` beside it"*; step 4: *"the witness list gains `(\"app\", \"require_approval\")` if the guard lists witnesses per function (read it)"*. | `final_surface` records parameter names only. `sql_surface.final_function_bodies(manifest, root)` walks each up section in manifest order (`CREATE [OR REPLACE] FUNCTION api.<name>` replaces, `DROP FUNCTION|ROUTINE [IF EXISTS]` removes, in position order within a template; quoted and spaced names read). **A body that is not dollar-quoted (`AS 'SELECT 1'`, `BEGIN ATOMIC`) is recorded EMPTY, never left out**, so a gated tool over it is `absent` and refused -- a decision failing closed (ADR 0195); a function neither the set nor the release defines is `absent` too. `test_every_call_to_a_released_function_uses_a_released_arity` lists ONE witness PER SCHEMA (`app` is already witnessed by `emit_event`), so that list does not move; the guard's calls in the new proofs are checked by it anyway (arity 1). | Built as described; no pin moved that the tree did not require. | 0242 |
 | **D1903** | 2 | §5 Run 2's targeted list and D1872's pins: the modules a new release migration moves. | **CI on `4920c96` failed ONE proof** in the Session 1 gate and the offline suite: `test_workflow_substrate.py::test_the_migration_applies_as_the_migration_user_and_its_down_refuses` pins the release set's applied count at 36 (`:272`), and 0037 makes it 37. Neither D1872 nor the targeted list named the module, and the run's own grep for count pins read five files, not `tests/`. | Moved to 37 with a dated comment in the pin's own pattern (`994d86f`); a grep of all `tests/` for a count pin on 35 or 36 found no other. A run that adds a release migration greps the WHOLE suite for the old count. | 0242 |
+| **D1904** | 3 | D1861: propose *"refuses before starting when an environment is up (exit 2, naming `apg dev down`)"*; §5 Run 3 step 5: *"3 prerequisite missing — no render, a dev environment up"*. | The plan gives two exit codes for one refusal. `bin/dev.sh status` has FOUR answers (0 running, 4 none, 5 a stopped environment's state, 3 unreadable), and only *none* says nothing of somebody's is there. | **Exit 3**, step 5's code (a prerequisite: no environment), and propose proceeds ONLY on `status` exit 4 -- a stopped environment and an unreadable state are refused too (ADR 0195: a state it cannot read is not one it may assume absent); `dev up` exit 4 (not rendered) is exit 3 as well. | A refusal is one code; the more specific text wins, and the wider refusal is what *never downs somebody's environment* means. | 0243 |
+| **D1905** | 3 | D1863 / step 3: *"`validate_project_semantics` refuses `approvals_required` without `set`"*. | The `migrations` block's schema has `required: ["set"]` (ADR 0198), so a manifest carrying `approvals_required` without `set` is refused by the SCHEMA before `validate_project_semantics` runs; a semantic rule there could never fire. | **Not written**: `test_schema_eight_admits_approvals_required_beside_a_set` proves the schema's refusal instead, and `config.approvals_required` reads 0 below 8 or when absent. | An unreachable rule is a rule no proof can see fail. | 0243 |
+| **D1906** | 3 | Step 6: *"driving `bin/migrate.py` as a subprocess against a tmp copy of a project root … `dev.sh` replaced by a recording stub on `PATH`"*. | `bin/migrate.py` names `bin/dev.sh` by PATH-independent path (`REPO_ROOT/bin/dev.sh`, as every `bin/` command names its siblings) and writes under the checkout's `projects/<slug>/`; a subprocess could redirect neither without a product environment seam. | **The proofs drive `bin/migrate.py`'s own `main(argv)` in process** (it gained `argv`) with two module names pointed elsewhere: `PROJECTS_ROOT` (the records under `tmp_path`, never the tree's `projects/example/proposals/`) and `DEV_SH` (the stub, which prints rig 35b's measured lines and records each call). `test_approval_gate.py`'s shape for `bin/mcp-contract.py`. | No product seam exists only for a test; the command and its arguments are the product's. | 0243 |
+| **D1907** | 3 | Step 6: *"`test_dev_environment_cluster.py::test_propose_applies_the_set_from_empty_through_dev_up` — the REAL `dev.sh`"*. | That module's `environment` fixture holds ONE environment up, module-scoped, for every proof in it; propose refuses while one exists (D1904), and the suite runs shuffled (`pytest-randomly`) in CI, so the proof would meet that environment whenever it ran after the fixture. | **The proof lives in `test_change_proposal.py`**, REAL `bin/dev.sh`, records under `tmp_path`; it skips -- saying why -- if an environment exists when it starts, and asserts none is left after. Measured: 41 migrations (37 + 4), `exit 0`, environment gone. | A proof that passes only in file order is the order-dependence D1854 repaired. | 0243 |
+| **D1908** | 3 | §5 Run 3 step 4: the record's `dev_apply: {exit, migrations_applied, seconds, …}`. | A failed apply is a set no host should receive; recording `exit: 5` and writing the proposal would hand Run 4's gate a proposal for a set that does not apply. | **propose refuses (exit 5, writes nothing)** when `dev up` exits non-zero, does not finish in 180 s, or prints no `dev: N migrations applied as ROLE` line (the count unreadable, ADR 0195); `down` runs in `finally` either way. So `dev_apply.exit` is always 0 in a written record -- a field kept because it says WHICH reading the record carries. | A decision may fail closed. | 0243 |
+| **D1909** | 3 | Step 3: *"The downgrade helpers (`test_project_manifest.py:83-96`, `:725-736`) pop it"*; the targeted list. | Five more sites read the example manifest's VERSION: `test_connector_facility.py:76` (`== 7`) and its two downgrades to 6 (`:85`, `:90`), `test_deploy_connectors.py:390` (`== 7`), `test_project_agent_surface.py:547` (`newest == 7`). Found by grepping `tests/` for the old number before the first run, D1903's lesson applied. | Each moved to 8 (or popped the key) with a dated comment. | A pin moved to what the tree is, never loosened. | 0243 |
+| **D1910** | 3 | Step 5: *"`approval_gate.unguarded` over the committed capability contract"*; D1860: `harness: {contract_sha256, derived, written, capabilities}` *"labelled cases, not results"*. | The committed PROJECT contract cannot show an approval a profile adds to a release tool (D1869), and `check --project` reads the joint contract narrowed by the profile. | **propose reads the gate over the joint contract narrowed by the profile** (`check --project`'s reading; the release's own contract when the project names no capabilities), so a `release_function` finding appears in the record; `harness` carries a fifth member, `note: "cases asked of the contract, not results"` -- the label as a field; `release_lock_sha256` is `set_digest(release_set())`, one function for both locks. | One reading of what a project deploys, in both of the workstation's checks. | 0243 |
+| **D1911** | 3 | D1862: the destructive reading over *"the lint's own stripping"*. | `sql_surface.statements` strips `--` lines only; a `/* DROP TABLE … */` and a `'DROP …'` literal both survive it. | **`destructive_findings` blanks block comments and single-quoted literals after the lint's own reader**, then splits statements on `;`. A dollar-quoted body is READ: a `DO $$ … DROP … $$` runs at apply time, and a function body's `DELETE FROM t;` is named too (an over-report, never a refusal). The release's own set reads 13 findings today; the example's none. | Named, not refused: over-reporting costs a reviewer a line, under-reporting costs a table. | 0243 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1189,6 +1197,45 @@ module that reads `project.example.yaml`** (`git grep -l project.example.yaml
 -- tests`, ~34 — the trip-discipline memory's rule) runs once at the close,
 because both fixtures moved. Commit (`Session 35 Run 3: the proposal record,
 the destructive reading, manifest 8`), push, read CI.
+
+**Done.** 2026-10-01. **`migrations.set_digest`** (the lock's bytes) is the
+one reader of a set's identity; BOTH render sites that recorded
+`migrations.project_set.lock_sha256` (`_migrations_block` and
+`write_rendered_migrations`) call it. **`migrations.destructive_findings`**
+names sixteen kinds (`DESTRUCTIVE_KINDS`) with every spelling read
+(D1911); the example set has none. **Project manifest schema 8**: the enum and
+its description (*"1 to 8"*, D1882's half), `migrations.approvals_required`
+(`enum [0, 1]`), the v8 gate, `config.PROJECT_APPROVALS_FROM = 8`,
+`config.approvals_required`; `project.example.yaml` 8 with `1`,
+`project.second.example.yaml` 8 without; the bounds document did not move
+(`render-config --bounds-doc --write`, no diff). **`proposal.py`** (pure):
+the two records, `NAME` (fullmatch -- `match` with `$` admitted `"ada\n"`),
+`fold`, `build_approval` over the proposal's BYTES, `check_names`, the four
+gate sentences. **`bin/migrate.sh propose|approve`** (`--by`, `--proposal`,
+each refused on any other verb) and `bin/migrate.py --mode propose|approve`
+(`main(argv)`). **Measured with the REAL `bin/dev.sh`** before a proof was
+written: `proposal 35245421404e77d3 written: … (0 destructive finding(s))`,
+`dev_apply` 41 migrations in 12.2 s, surface `set_note_embedding` and
+`note_embeddings` both reviewed, `approval_gate` [], harness 62 derived / 19
+written / 9 capabilities, `status` exit 4 afterwards; approve by
+`"ada  LOVELACE"` refused 5, by `"Grace Hopper"` written, again refused 5.
+**Proofs**: `test_change_proposal.py` (the §2 GOV-LINT-001 five --
+`PLAIN` and `SPELLED`, 32 statements, and `NOT_FINDINGS`, 10 --
+GOV-PROPOSE-001 six plus the real-`dev.sh` proof (D1907), GOV-APPROVE-001
+four, and two of this run's own); `test_project_manifest.py`'s two schema-8
+proofs and `downgrade_to_seven`. **Battery**: M1-M6 all KILLED as `FAILED`.
+M1 (the lock re-serialised) is ALSO caught by
+`test_propose_records_every_reading_and_its_limits` -- which therefore cannot
+be its control -- and was re-run beside
+`test_the_example_set_has_no_destructive_statement` alone, killed; M2-M6 each
+beside both controls green. **Targeted** (once): both example projects
+re-rendered, then 71 modules -- every `tests/contract` and `tests/security`
+module that reads `project.example.yaml` plus the plan's list, Docker
+included -- 3,097 passed, 2 skipped (root-script policy, unrelated), 1
+failed: `test_repository_contract.py::test_deployable_source_does_not_hardcode_a_fixture_identity`
+-- a comment in `bin/migrate.py` quoted rig 35b's line with the fixture's role
+in it; reworded, the module re-run, 235 passed. Rows **D1904-D1911**; **NEXT
+FREE D1912, ADR 0246.** Commit `e2d2e11`; CI GREEN on the first push (run 36863855091, success).
 
 ### Run 4 — the host gate, the status line, the capability report, and the example set's proposal
 
