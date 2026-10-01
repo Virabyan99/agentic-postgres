@@ -1,9 +1,9 @@
 # Session 35 — Change governance, the database half of approval, hardening, and the Stage 4 release
 
-**Status: EXECUTING — Runs 1–5 DONE 2026-10-01** (planned 2026-09-30 at
+**Status: EXECUTING — Runs 1–6 DONE 2026-10-01** (planned 2026-09-30 at
 `a018939`). The last session of Stage 4 (`docs/plans/stage-4-plan.md` §3).
 Eleven runs. The plan spends **D1857–D1891** and **ADR 0242–0245**; rows the
-runs add start at **D1892**. **NEXT FREE: D1923, ADR 0246.**
+runs add start at **D1892**. **NEXT FREE: D1929, ADR 0246.**
 
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 35* whole (Builds / Already
 true / Must not / Measures / Closes, `:619-657`), its rows **D1523** (the
@@ -544,6 +544,12 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1920** | 5 | D1879: the JSON rule `"(password|secret|token|pgpass|authorization|api_key)"\s*:\s*"[^"]*"`. | That pattern requires the key to BE one of the words, so `"client_secret"`, `"access_token"` and `"refresh_token"` pass unmasked; and `\s` is a GNU extension in a script installed as a standalone copy. | **Any quoted key CONTAINING one of the words** (`"[A-Za-z0-9_-]*(…)[A-Za-z0-9_-]*"`), `[[:space:]]` for `\s`, the key kept and the value `<redacted>`; the first `sed` expression, so the older three see the masked line. | Stricter, never looser: widening a redaction masks more. | 0245 |
 | **D1921** | 5 | D1856 / step 4: *"`dr_kit`'s export creates the kit's `projects/` directory `0o700`"*. | The export writes in `bin/dr-kit.py:90-96`, not `dr_kit.py`; the cause is `Path.mkdir(parents=True, exist_ok=True, mode=0o700)`, which gives the mode to the LAST directory only -- Python creates missing parents *"with default permissions without taking mode into account"* -- so `projects/` took the umask's 0755 and `projects/<key>/` 0700. The existing proof walked files only. | **`_owner_only_directories`** makes each level with `os.mkdir(…, 0o700)` and `chmod`s it, so no umask widens it; `test_every_directory_in_the_kit_is_owner_only` exports under umask 022 and walks every directory (0700) and file (0600). The sixteen kits already written keep their 0755 `projects/` -- an export never rewrites a kit. | The class, not the field: every directory, not `projects/`. | — |
 | **D1922** | 5 | Step 2: *"write each reader's answer in the Done"*. | Five readers of `mem_limit` / `HostConfig.Memory` (grep, D979). | **`capacity_reading.ceilings_from_inspect`** sums per compose project: each project 2240 -> **2880 MiB** (+640), and the edge's two (672 MiB) leave `unbounded` and appear under the edge's own compose project, so `doctor capacity` will read *"… across 3 project(s)"* -- **predicted 4480 -> 6432 MiB, `unbounded` 10 -> 0, READ on the trip**; **`decide`** charges `unreclaimable_mb` only (no stop, §9); **the dev cluster** (`run_arguments`) carries no `--memory`, so `test_the_dev_cluster_carries_the_same_limit_as_the_release`'s condition is unchanged; **`bin/admit.py`**'s ceilings line and **the doctor's** text move with the sum, the `, K unbounded` clause vanishing at 0. Three docstrings saying *"2240 MiB per project"* now say 2880; the synthetic 2240s in `test_capacity_reading.py`/`test_doctor_readings.py` are fixture readings, not the tree, and stay. | A reader not asked is a reader that surprises the trip (D979). | 0244 |
+| **D1923** | 6 | Step 3: *"Every command in both steps is run by the executor on a clean tree against a throwaway project root"*; the guide's step 7: *"Set the slug, environment, and domain"*, *"`migrations.set` — delete it now"*. | **The walk** (`~/s35r6/walk.sh`, a clone of `e364d79`, project `walk-demo`) stopped twice at step 7: a domain moved without its origins is refused at render (*api.rest.allowed_cors_origins does not contain 'https://walk-demo-dev.test'*, exit 2) -- the copied origins name the example's domain; and **deleting `migrations.set` alone leaves `approvals_required: 1` in a block the schema refuses** (*migrations: 'set' is a required property*, exit 2). The second is Run 3's: `project.example.yaml` gained the key and no test walks step 7. | **Step 7 now says both**: every `allowed_cors_origins` entry moves with the domain, and the whole `migrations` block goes. The YAML blocks at steps 9 and 13 show schema 8, the version copied (6 renders too, measured, but forbids `approvals_required`). | A step nobody ran is the D1359 shape; this one was run. | 0243 |
+| **D1924** | 6 | Step 3: **step 15** *Propose* and **step 16** *Compose a workflow*, *"after step 10's local database — the order a walker meets it"*; D1881. | `test_session12_documented_path` requires headings numbered 1..N in page order. And **measured** (`~/s35r6/walk2.sh`): once step 11 (now 13) names `mcp.capabilities`, `propose` refuses (exit 2) and `workflow validate` refuses (exit 5), each naming the deploy-only snapshot -- so both steps work offline ONLY before the capability step. After the gate they would also make the walker commit and run the gate twice. | **Inserted as steps 11 and 12**, after the local database; old 11-14 are 13-16, with every internal reference, `docs/handoff.md:72` (16) and the operator guide's `:403` (13) moved, and step 13 saying why 11 and 12 come first. The D1881 comments in both scan lists say 11 and 12. The plan's numbers lose to its own order. | The order a walker can perform is the order the page gives. | — |
+| **D1925** | 6 | Step 3: *"step 16 Compose a workflow over your capability"*. | Before the first deploy the project's lock is the RELEASE's: `workflow init` scaffolded `query_notes@1.0.0` and `create_note@1.0.0`, `validate` compiled it (*1 definition(s) compile against this project's lock … scopes: notes:read, notes:write*), and `dev up` installed it (*workflows 1 definition(s) installed*) -- the project's own capability cannot compile without the snapshot. | **Step 12 is *Compose a workflow***, says the lock is the release's until the first deploy, and that a workflow over the walker's own capability is that capability's name in a step once it exists. | Say what the release does, at the step a walker meets it. | 0228 |
+| **D1926** | 6 | Step 2: *"§17 *Approvals* gains *In the database* (ADR 0242)"*; step 7: *"The pages that said not in the database, re-grepped"*. | Run 2 had already written §17's *In the database too, since 1.13.0* paragraph; the re-grep found no page still claiming a plane-only approval outside the records (`scope-closure.md`'s are history). But **Run 5 made four sentences false**: the operator guide's §2 (*"Its log allowlist covers neither `auth`…"*) and §18 (*"`apg-diag` cannot read that log"*), `backup-operations.md:343`, and `THR-CONNECTOR-INPUT`'s detection and residual cells (*"structured request log"*, *"not readable through `apg-diag`"*) -- and D1918 made the request line itself absent. | §17 not re-added. **The four corrected**: `apg-diag` reads `auth storage mcp` since 1.13.0, and the per-request line is never printed (D1918); a refused inbound request leaves no record an operator can read. The drill sentence keeps its truth: a drill's containers are plain `docker run`, never a service `apg-diag` names. | The direction nobody chases (D954): prose a program stopped agreeing with. | 0245 |
+| **D1927** | 6 | Step 2: *"§10's worked sweep moved … to `bin/session-34-check.sh`"*. | §10 showed `bin/session-25-check.sh`'s flags, the merge named `session-28` files, and the evidence numbers were 1.6.0's. | **§10 is Session 34's third sweep as run** (`~/s34r10/s34-r10c-gate.sh`): `--redeploy-before-file` and `--candidate-manifest` added, the real restore-evidence file, the flags not passed and why, `session-34` merge inputs, and 1.12.0's 188 / 182 / 5 / 1 with the five `not_run` named. Run 9 moves it to `session-35-check.sh`. | A worked example is a measurement or it is a guess. | — |
+| **D1928** | 6 | Step 4: the task statement *"gains goal 8"* and *"names 1.13.0"*. | The goals are what to accomplish, not an order -- the guide proposes at step 11, before the gate -- and the statement's own *"true only if all seven goals"* would have stayed seven. The page is in release 1.12.0 until Run 9's bump. | **Goal 8 appended** with the plan's sentence, *"all eight"*, and *"It is release `1.13.0`"* -- the statement is for 1.13.0's walk, handed on Sheet W with the commit. | A count a list stopped agreeing with is a count nobody reads twice. | 0207 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1534,6 +1540,36 @@ executable, no future-session label, the `--session` literal rule).
 `test_change_governance_page` if written. Commit (`Session 35 Run 6: change
 governance documented; the documented path proposes and composes`), push, read
 CI.
+
+**Done.** 2026-10-01. **`docs/change-governance.md`** (new, indexed in the
+developer loop): ADR 0243's sentence in the first screen, the digest, every
+member and the three readings it cannot take (D1858-D1860) and the apply's
+limits (D1861), `destructive` (sixteen kinds, named never refused), both
+verbs and their exit codes, `approvals_required` and the declared-name rule,
+the host's four sentences, the seven status forms and the four report lines
+as the programs print them, approval in the database (D1869, D1870, D1871),
+and *What is not here*. **`test_change_governance_page.py`** (`pytestmark`
+first) reads each from its constant. **The walk, before a line of the guide
+was written** (D1923): a clone of `e364d79`, project `walk-demo`, the example's
+0001 re-stamped `20261001130001` -- step 7 refused twice and was repaired;
+freeze, render, `dev up` (38 migrations), `propose` (*proposal a097d35e2fb8655c
+written … (0 destructive finding(s))*, 10.4 s, harness not applicable), approve
+under the folded proposer name refused 5, `dev status` exit 4 after,
+`workflow init`/`validate`/`dev up` (1 definition installed); then with
+`mcp.capabilities` named, `propose` exit 2 and `validate` exit 5 (D1924).
+**The guide**: steps 11 and 12 inserted, 13-16 renumbered, step 7 repaired, the
+`done` section names the proposal and the workflow. **Operator guide**: §19;
+§16's limits and `unbounded`; §10 (D1927); §5's retention (D1886); §2/§18
+(D1926). `migrations.md`: the release-function rule, *propose it*, the link.
+`second-walk.md` (D1928). **Both scan lists** gain the three pages (D1881);
+every documented-path guard passed over them unchanged. **Battery**: M1-M5
+(the page drifts, the program drifts, a scan list drops the page, a status form
+moves, a step numbered out of sequence) all KILLED as `FAILED` beside
+`test_the_scan_finds_the_commands_it_is_looking_for` and
+`test_no_page_is_indexed_twice`. **Targeted** (once): 15 modules -- every one
+reading a page or list this run touched, the D1242 guard, `test_release_contract`,
+`test_evidence_claims`, `test_cli_contract` -- 1,092 passed. Rows
+**D1923-D1928**; **NEXT FREE D1929, ADR 0246.** Commit `e746c62`; CI GREEN (run 36875448009), first push.
 
 ### Run 7 — the trip's instruments, rehearsed offline before they meet a host
 
