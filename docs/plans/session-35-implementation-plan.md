@@ -1,9 +1,9 @@
 # Session 35 — Change governance, the database half of approval, hardening, and the Stage 4 release
 
-**Status: EXECUTING — Runs 1–7 DONE 2026-10-01** (planned 2026-09-30 at
+**Status: EXECUTING — Runs 1–8 DONE 2026-10-01** (planned 2026-09-30 at
 `a018939`). The last session of Stage 4 (`docs/plans/stage-4-plan.md` §3).
 Eleven runs. The plan spends **D1857–D1891** and **ADR 0242–0245**; rows the
-runs add start at **D1892**. **NEXT FREE: D1935, ADR 0246.**
+runs add start at **D1892**. **NEXT FREE: D1936, ADR 0246.**
 
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 35* whole (Builds / Already
 true / Must not / Measures / Closes, `:619-657`), its rows **D1523** (the
@@ -556,6 +556,7 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1932** | 7 | Step 3: *"`--network <compose.networks.internal from the DEPLOYED document>`"*, *"Read the deployed document for the network name and the PostgREST service alias"*. | The deployed document has **no `compose` member**: the network is `edge.project_internal_network`, and **no member names a service alias**. | The network from `edge.project_internal_network`; the alias `postgrest` and port 3000 CHECKED against `<runtime.release_path>/compose.yaml` (`postgrest` on `internal`, `PGRST_SERVER_PORT`) and the installed render's `compose.env` (`INTERNAL_NETWORK_NAME` equal to the document's); the image from the running auth container found by `naming.compose_project_name`'s labels. The load runs `--read-only --cap-drop ALL`, the bearer on stdin. Rehearsal (c): 12,195 requests in 10 s, all 200; a wrong token, all 401. | D1853: read what the deployed document HAS. | 0002 |
 | **D1933** | 7 | D1873: phases of 120 s; phase B *"K = 24 runs"*; step 4's probe humans `apg-s35-neighbour-<SWEEP>`. | 24 runs of ~5.5 s through a loop that claims one step at a time is ~132 s, longer than the phase: C would start under B's load. One username on both projects collides on a single-cluster rehearsal. | **C starts only after B's runs end** (bounded by `--run-wait-seconds`, 300; a phase that did not drain says so in its conditions); the sampler runs from B's start to the drain; the humans are `-a`/`-b`. The 24 POSTs cross the app router once, inside its burst of 40. | A phase may not inherit another's load. | — |
 | **D1934** | 7 | Step 6: *"the neighbour script's phase logic in a `--dry-run`"*. | The dry run passed. **A real short sitting on the rig stack** (phases of 15 s, 6 runs) then **lost both load readings and exited 0**: the script closed the load child's stdin after feeding the bearer, and `communicate()` raised `ValueError` on it. | **Fixed** (`child.stdin = None`), and **exit 3 when an instrument failed** (no load reading, no answered probe, fewer runs enqueued), files still written; the cleanup also removes the load containers by name. Re-run: both readings present (20,311 and 17,335 requests, all 200), exit 0. The schema admits only https routes, so the rehearsal overlaid the rig's addresses on the op copies AFTER `read_deployed_document` checked the unmodified copies. | A dry run proves the reads; only a run proves the reading. | 0195 |
+| **D1935** | 8 | Sheet W (D1884): *"(c) No walk for 1.13.0. The Session 25 record is handed to the sweep again; `documented_path` stays `failed`; the Stage 5 report says so first."* | The operator chose (c) AND deferred the walk past Stage 5: *"what if we dont do this fresh person run things and we will do it all after we done stage 5 ?"* (2026-10-01). No person and no fresh model session walks 1.13.0. | **(c), recorded verbatim.** Run 10's sweep keeps `--dx-record-file /home/op/session-25-dx-record.json`; the merged document's expected figure is **198 = 192 passed / 5 not_run / 1 failed** (§7's first case); the Stage 5 decision report says first that the documented path has not been walked by a person since Session 25, by the operator's decision; Run 11 carries the walk in scope-closure §28 and CLAUDE.md as deferred until after Stage 5 -- a walk then is of THAT release, not 1.13.0. | A tier-3 reading is a decision the operator takes, and a deferred one is written down as deferred, never as done. | 0207 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1755,6 +1756,25 @@ the sweep read. **A walk on Run 9's commit is a walk of the release only if the
 deployed commit is Run 9's**; if the trip forces a repair run (Session 34's
 10a), `dx-record check`'s *documents that moved after the walk* reading says
 whether the repair touched what the walker read, and the report says so.
+
+**Done.** 2026-10-01. **Sheet A1**: the operator ran, at the workstation (the
+first attempt was in Windows PowerShell, which refused `&&` before anything
+ran; the second through `wsl bash -lc`), `bin/migrate.sh approve --project
+project.example.yaml --proposal 35245421404e77d3186c312eb92ce58fc740f9c768b33dca5f69486b2c55a76b
+--by 'Andranik'` -> exit 0, *approval of proposal 35245421404e77d3 written:
+projects/example/proposals/35245421404e77d3….approval.json (declared by
+Andranik)*. **The agent never ran it.** Read back: `proposal_sha256`
+`073583a4f212d6a9e6cec22d7b43620012f7554e7377725dff3899e4c1a31cf1` equals
+`sha256sum` of the proposal file; `set_digest` equals the sha256 of
+`projects/example/migrations/released.lock.json` (unmoved since Run 4,
+`2007883`); `declared_by` *Andranik* folds differently from the proposal's
+*claude-opus-5-5 Session 35 executor*. Targeted (`test_change_proposal`,
+`test_proposal_gate`, `test_change_governance_page`) 49 passed. Commit
+`19e8ecc`; **CI GREEN** (run 36894816103), first push. **Sheet W**: the
+operator chose **(c)**, in their words: *"what if we dont do this fresh person
+run things and we will do it all after we done stage 5 ?"* -- no walk for
+1.13.0, the walk deferred until after Stage 5 (D1935). Row **D1935**; **NEXT
+FREE D1936, ADR 0246.**
 
 ### Run 9 — the bump, the registry, the gate, and the trip's proofs
 
