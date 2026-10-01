@@ -1,9 +1,9 @@
 # Session 35 — Change governance, the database half of approval, hardening, and the Stage 4 release
 
-**Status: EXECUTING — Run 1 DONE 2026-10-01** (planned 2026-09-30 at
+**Status: EXECUTING — Runs 1–2 DONE 2026-10-01** (planned 2026-09-30 at
 `a018939`). The last session of Stage 4 (`docs/plans/stage-4-plan.md` §3).
 Eleven runs. The plan spends **D1857–D1891** and **ADR 0242–0245**; rows the
-runs add start at **D1892**. **NEXT FREE: D1901, ADR 0246.**
+runs add start at **D1892**. **NEXT FREE: D1904, ADR 0246.**
 
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 35* whole (Builds / Already
 true / Must not / Measures / Closes, `:619-657`), its rows **D1523** (the
@@ -522,6 +522,9 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1898** | 1 | Rig 35e: *"as a non-root WSL user"*, the sampler resolves the container's cgroup through `/proc/<pid>/cgroup` + `mountinfo`. | **The workstation's Docker is Docker Desktop**: its containers' pids live in the engine VM, and `/proc/<pid>/cgroup` is `No such file` from WSL (first form). Second form: the sampler as **uid 1000, `--cap-drop ALL`, `no-new-privileges`**, in the engine VM's pid namespace. Inside a PRIVATE cgroup namespace `/proc/<pid>/cgroup` reads `0::/../<id>` — relative to the reader's own namespace; with the host's namespace, `/docker/<id>`. Measured: 133 samples, cadence median 100.4 ms, max 100.9 ms, millisecond stamps distinct; base 4.3 MiB, the 100-MiB block seen from the first sample after it was touched (104.5 MiB) and held **2.01 s** (the script's 2 s); `docker stats` 4.23 → 104.4 MiB against the sampler's 4.3 → 104.5. | `s35-r10-sampler.py` runs on the HOST as `op`, never inside a container (so no cgroup namespace makes the path relative), and resolves the file across EVERY cgroup2 mount `/proc/self/mountinfo` lists, recording which held it. D1876's method stands. | — |
 | **D1899** | 1 | THR-CHANGE's interim requirement: *"`DBX-…` the release lock's requirement (grep `verify_lock`'s proof)"*. | There is no `DBX` family. The proof that a set's lock is frozen and verified apart from the release's is `test_project_migration_sets.py::test_the_project_lock_is_frozen_and_verified_apart_from_the_release_lock`, held by **`TEN-SET-001`**. | `THR-CHANGE` cites `TEN-SET-001` and that node until Run 9 rewrites the cells to the `GOV-*` ids (D1816's shape). | — |
 | **D1900** | 1 | D1878: *"pgbouncer, postgrest and docs are long-running and unbounded … the eleven short-lived services exit"*; `doctor capacity`'s `unbounded` falls **10 → 0** once the three and the edge are bounded; §0 attributes the 10 to *"2 projects x pgbouncer, postgrest, docs + the edge's two"* (D1710). | **Sheet E0: the 10 is 4 per project + the edge's 2** — `pgbouncer`, `postgrest`, `docs` AND **`edge-probe`**, which ADR 0222 classed among the one-shots, probes and clients (`compose.yaml:71-98`: a literal `pids_limit: 64`, no `cpus`, no `mem_limit`) but which is the health route's server (`restart: on-failure:5`) and was RUNNING on both projects (peak 51.51 / 49.42 MiB, 9 pids). §0's *2 × three + 2* sums to 8. Bounding the three and the edge would leave `unbounded` at **2**, and the threat model's sentence false by one service per project. | **`edge-probe` joins Run 5's set**: `config.SERVICE_MEMORY_LIMITS_MB` carries FOUR services (`EDGE_PROBE_MEMORY_LIMIT`, 224m by ADR 0244's rule); its `pids_limit` stays the literal 64, no `cpus`. `test_every_long_running_service_carries_a_memory_limit` reads `edge-probe` as long-running (`restart` other than `"no"`, a profile that a deploy starts), so the proof cannot pass with it left out. `unbounded` 10 → 0 stands as the prediction, READ on the trip. | 0244 |
+| **D1901** | 2 | §5 Run 2 step 3: *"`unguarded(contract: dict, bodies: dict[str, str]) -> tuple[Finding, ...]`"*; D1868: *"it REPORTS at render (one line, `approval gate: <tool> does not call app.require_approval first (ADR 0242)`)"* and *"the render's approval-gate line names such a tool `release_function`"*. | `release_function` cannot be named from a contract and bodies alone -- it needs the release's own function set, so `unguarded` takes a third parameter, `migrations.release_functions(release_set())`. **The render's document carries no profile** (`outputs.json` has `capabilities.enabled` and `capabilities.project`, never `mcp.profile`), and a profile is the only way a release tool is gated: `write_rendered_migrations` gains a keyword `profile=` that `render_project` passes from the manifest it already holds, and `rendering.approval_gate_report` builds the tool list from the release's committed canonical contract (filtered to `capabilities.enabled`) plus the project's committed contract. **The report sits beside the lint, which runs only for a project WITH a set**, so `project.second.example.yaml` (no set; its profile gates `update_task_status`) gets no render line -- `check --project` prints its `release_function` line and exits 0. One sentence per reason, not one: `not_first` reads *"… does not call app.require_approval first in api.<fn> (ADR 0242)"*, `absent` *"… does not call app.require_approval in api.<fn> (ADR 0242)"*, `release_function` names D1869. | Kept as built; Run 3's `propose` calls `unguarded` with the release set too. A render line for a set-less project would be a second place the report runs, for a finding no refusing caller makes; the workstation's check is where that author meets it. | 0242 |
+| **D1902** | 2 | §5 Run 2 step 3: *"read whether `final_surface` returns bodies; if it returns names only, add a `final_function_bodies(templates)` beside it"*; step 4: *"the witness list gains `(\"app\", \"require_approval\")` if the guard lists witnesses per function (read it)"*. | `final_surface` records parameter names only. `sql_surface.final_function_bodies(manifest, root)` walks each up section in manifest order (`CREATE [OR REPLACE] FUNCTION api.<name>` replaces, `DROP FUNCTION|ROUTINE [IF EXISTS]` removes, in position order within a template; quoted and spaced names read). **A body that is not dollar-quoted (`AS 'SELECT 1'`, `BEGIN ATOMIC`) is recorded EMPTY, never left out**, so a gated tool over it is `absent` and refused -- a decision failing closed (ADR 0195); a function neither the set nor the release defines is `absent` too. `test_every_call_to_a_released_function_uses_a_released_arity` lists ONE witness PER SCHEMA (`app` is already witnessed by `emit_event`), so that list does not move; the guard's calls in the new proofs are checked by it anyway (arity 1). | Built as described; no pin moved that the tree did not require. | 0242 |
+| **D1903** | 2 | §5 Run 2's targeted list and D1872's pins: the modules a new release migration moves. | **CI on `4920c96` failed ONE proof** in the Session 1 gate and the offline suite: `test_workflow_substrate.py::test_the_migration_applies_as_the_migration_user_and_its_down_refuses` pins the release set's applied count at 36 (`:272`), and 0037 makes it 37. Neither D1872 nor the targeted list named the module, and the run's own grep for count pins read five files, not `tests/`. | Moved to 37 with a dated comment in the pin's own pattern (`994d86f`); a grep of all `tests/` for a count pin on 35 or 36 found no other. A run that adds a release migration greps the WHOLE suite for the old count. | 0242 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1008,6 +1011,61 @@ signatures`, `test_rendered_migrations`, `test_acceptance_registry`,
 Re-render both example projects first (D1678). Commit (`Session 35 Run 2:
 approval in the database -- migration 0037, the example set's 0004, the
 approval-gate check`), push, read CI by full SHA.
+
+**Done.** 2026-10-01. **Migration 0037** (`20261001120037`, `approval_gate`)
+creates `app.require_approval(p_tool text)` with D1867's body exactly:
+`STABLE` (0029 declares `agent_idempotency_key()` `STABLE`), `SECURITY
+DEFINER`, `SET search_path = pg_catalog, pg_temp`, created under `SET LOCAL
+ROLE {{object_owner}}` with `RESET ROLE` below the privileges block, `REVOKE
+ALL … FROM PUBLIC` and no GRANT, no `NOTIFY pgrst`, down `AP900`; release lock
+re-frozen (37 migrations), `verify-lock` 0. **The example set's 0004**
+(`20261001120004`, `approval_in_the_database`) is 0003's function byte for
+byte plus `PERFORM app.require_approval('set_note_embedding');` as the first
+statement after `BEGIN`, no grant restated (it keeps 0003's `NOTIFY pgrst`);
+the project lock frozen `--follows 20260912120031` (declared), `verify-lock
+--project` 0. **`src/agentic_postgres/approval_gate.py`**: `unguarded(contract,
+bodies, release_functions)` → `Finding(tool, function, reason)` with
+`not_first` / `absent` / `release_function`, `refused()` and `describe()`;
+over the new `sql_surface.final_function_bodies` (D1901, D1902). **Callers**:
+`bin/mcp-contract.sh check --project` prints every finding and exits 5 on
+`not_first`/`absent` (the refusal last, D1403), prints `release_function` and
+exits 0 — measured: `project.example.yaml` 0 with no line,
+`project.second.example.yaml` 0 with *"approval gate: update_task_status is
+gated and backed by the release's api.update_task_status, which the database
+does not gate; its approval is a plane control only (ADR 0242, D1869)"*; the
+render (`write_rendered_migrations`, beside the lint) prints `render: approval
+gate: …` per finding on stderr and never refuses. **Pins moved** (D1872):
+`RELEASE_FUNCTIONS` + `("app", "require_approval")`; `GATE_NOBODY` with
+`test_0037_creates_the_guard_and_grants_it_to_nobody` in `test_migrations.py`;
+the example lock's four versions; the dev-cluster ledger
+`endswith("20260930120003,20261001120004")` and the cluster body's first
+statement the guard; `functions == {"set_note_embedding"}` unchanged. **The
+documents**: THR-APPROVAL's residual is Run 1's sentence (its last two
+sentences kept); operator guide §17's residual and `docs/workflows.md`'s
+paragraph now say the database checks it too; ADR 0231 gains a dated
+*Consequences* line; `AGT-APPROVE-001`'s description never carried the old
+sentence (grepped), so the registry is untouched until Run 9. **Proofs**:
+`test_approval_in_database.py` (the nine §2 node ids, all on first execution
+green on a real cluster with the GUCs rig 35a measured; every refusal asserted
+by SQLSTATE, message AND row count; **D1893's foreign-agent arm: a second
+agent of the same owner presenting the first agent's claim and key is refused
+`PT403`, and the same claim from its own agent is served** — the member rig
+35a could not reach); `test_approval_gate.py` (the five §2 node ids plus the
+body reader's own proof; the check through `bin/mcp-contract.py`'s `main`,
+the render through `write_rendered_migrations`);
+`test_project_migration_sets.py::test_the_example_sets_fourth_migration_adds_only_the_guard`.
+**Battery** (`PYTHONDONTWRITEBYTECODE=1`, `__pycache__` cleared, snapshot and
+`cmp` restore, anchors pre-flighted): **M1–M7 all KILLED as `FAILED`**, each
+beside `test_a_caller_with_no_agent_identity_passes` and
+`test_the_example_projects_gated_function_calls_the_guard` `PASSED` in the
+same invocation; M4 is killed by the arm whose claim names the tool and whose
+ROW names another, M2 by the arm whose header and row agree against the
+claim, and M5 (with `authenticated` added to the entry's placeholders) by both
+`test_require_approval_is_executable_by_no_role` and
+`test_0037_creates_the_guard_and_grants_it_to_nobody`. Both example projects
+re-rendered first (D1678). **Targeted** (once, at the close): 531 passed across 19 modules (the five Docker-backed ones included), ruff clean, verify-lock and check --project 0.
+Rows **D1901–D1903**; **NEXT FREE D1904, ADR 0246.** Commit 4920c96, repair 994d86f (D1903); CI
+RED on 4920c96 (run 36856383440: one proof, D1903), GREEN on 994d86f (run 36859972526, success).
 
 ### Run 3 — the proposal: the set digest, the destructive reading, `propose` and `approve`, manifest 8
 
