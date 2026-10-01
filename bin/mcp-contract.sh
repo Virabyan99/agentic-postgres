@@ -61,6 +61,9 @@ Usage: bin/mcp-contract.sh check [--capabilities FILE] [--project FILE]
                      (ADR 0183): a profile is refused here, at compile time.
                      A project that names mcp.capabilities also has its own
                      committed contract compared byte for byte (ADR 0201).
+                     Exits 5 when a gated RPC tool's function does not call
+                     app.require_approval first (ADR 0242); a gated tool backed
+                     by a release function is printed and not refused.
   compile            Compile a candidate and stream it to standard output.
                      Writes no file; redirect it yourself, as yourself. With
                      --project, the PROJECT's own contract, compiled against

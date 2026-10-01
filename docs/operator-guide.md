@@ -1423,11 +1423,16 @@ An approval makes the step claimable at once; its next call carries the
 decision as a signed claim naming that one tool and that one idempotency key,
 and the plane serves exactly that write (ADR 0231). A rejection is a cancel.
 
-**The residual, stated** (D1721): approval governs the agent plane and
-workflows; the database's authority is the SQL grant. An agent holding a
-capability's scope and its own token can still call the underlying function
-through the REST route directly, where no approval is checked. That predates
-workflows and is recorded, not repaired, in this release.
+**In the database too, since 1.13.0** (ADR 0242, D1721): a project's gated
+function calls `app.require_approval` first, so an agent holding the
+capability's scope and its own token that calls the function through the REST
+route directly is refused `403` and writes nothing; the note's owner calling
+it directly is served, and the approved step's call is served once. Two
+things stay plane controls: an approval a deployment's PROFILE adds to a
+release tool (`bin/mcp-contract.sh check --project` prints such a tool as
+`release_function`), and the dry run -- a person's own direct call with a
+`Dry-Run` header still writes. The guard does not make a project function
+idempotent (D1871).
 
 ### Compensation
 

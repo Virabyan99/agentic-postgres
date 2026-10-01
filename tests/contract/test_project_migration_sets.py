@@ -913,7 +913,8 @@ def test_a_project_may_not_publish_a_name_the_release_owns(copied: Path) -> None
 
 #: What the release defines in `api` and `app`, read out of the templates by
 #: rig 34a's reader and written here as an EXACT set. Eight at 1.11.0; migration
-#: 0036 moved it by one (`app.emit_event`, Session 34 Run 3), and the move is
+#: 0036 moved it by one (`app.emit_event`, Session 34 Run 3) and 0037 by one
+#: more (`app.require_approval`, Session 35 Run 2, D1872), and each move is
 #: this proof's to record, never a containment check's to absorb.
 RELEASE_FUNCTIONS = frozenset(
     {
@@ -926,6 +927,7 @@ RELEASE_FUNCTIONS = frozenset(
         ("api", "update_task_status"),
         ("app", "current_user_id"),
         ("app", "emit_event"),
+        ("app", "require_approval"),
     }
 )
 
@@ -1367,6 +1369,61 @@ def test_the_example_sets_third_migration_keeps_the_signature(
     )
 
 
+def test_the_example_sets_fourth_migration_adds_only_the_guard(
+    example: migrations.MigrationSet,
+) -> None:
+    """**ADR 0242, AGT-APPROVE-003.** `0004` replaces `api.set_note_embedding`
+    with 0003's signature, `search_path` and body BYTE FOR BYTE plus one line:
+    `PERFORM app.require_approval('set_note_embedding');`, the FIRST statement
+    after `BEGIN`, so nothing -- not the identity check, not the ownership
+    check -- runs for an agent holding no approved decision. The tool name is
+    the capability's. The lint passes it: a project may call a release
+    function and never define one.
+
+    Offline, the half a file can prove. That the replace kept 0001's and
+    0002's grants, and that the body the cluster runs has the guard first, is
+    measured on the cluster `apg dev up` built:
+    `test_dev_environment_cluster.py::test_the_example_sets_third_migration_kept_its_grants`.
+
+    Goes red if: the body drifts from 0003's in any line but the guard, the
+    guard is not the first statement, it names another tool, the signature
+    changes, a second placeholder is read, a grant is restated, or the lint
+    refuses it.
+    """
+    migrations.lint_project_set(example)
+
+    templates = example.root / "templates"
+    third = (templates / "0003-note-embedding-events.sql").read_text(encoding="utf-8")
+    fourth = (templates / "0004-approval-in-the-database.sql").read_text(encoding="utf-8")
+
+    def function(text: str) -> str:
+        opener = "CREATE OR REPLACE FUNCTION api.set_note_embedding("
+        assert text.count(opener) == 1, "the function is not replaced exactly once"
+        start = text.index(opener)
+        return text[start : text.index("END $fn$;\n", start)]
+
+    before = function(third)
+    after = function(fourth)
+    guard = "  PERFORM app.require_approval('set_note_embedding');\n"
+    assert after.count(guard) == 1, "0004 does not call the guard exactly once"
+    assert after.replace(guard, "") == before, (
+        "0004's function differs from 0003's in a line other than the guard"
+    )
+    begin = "BEGIN\n"
+    assert after.index(begin) + len(begin) == after.index(guard), (
+        "the guard is not the first statement after BEGIN"
+    )
+
+    manifest = example.load_manifest()
+    (entry,) = [
+        item for item in manifest["migrations"] if item["name"] == "approval_in_the_database"
+    ]
+    assert entry["placeholders"] == ["object_owner"]
+    assert entry["version"] > "20260930120003", entry["version"]
+    granting = [line for line in fourth.splitlines() if line.lstrip().upper().startswith("GRANT")]
+    assert granting == [], "0004 re-grants; CREATE OR REPLACE keeps the OID and its ACL"
+
+
 def test_the_example_lock_records_its_migrations_in_order(
     example: migrations.MigrationSet,
 ) -> None:
@@ -1394,10 +1451,15 @@ def test_the_example_lock_records_its_migrations_in_order(
     manifest = example.load_manifest()
 
     versions = [entry["version"] for entry in lock["migrations"]]
-    assert versions == ["20260914120001", "20260914120002", "20260930120003"], (
+    assert versions == [
+        "20260914120001",
+        "20260914120002",
+        "20260930120003",
+        "20261001120004",
+    ], (
         f"the example set's lock records {versions}; the grant migration D1156 needs "
-        "is a SECOND entry and the event Session 34 adds a THIRD, because each one "
-        "before it is frozen and applied"
+        "is a SECOND entry, the event Session 34 adds a THIRD and the approval guard "
+        "Session 35 adds a FOURTH, because each one before it is frozen and applied"
     )
     assert versions == sorted(versions), "the lock records the set out of version order"
     assert versions == [entry["version"] for entry in manifest["migrations"]], (

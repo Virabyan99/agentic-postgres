@@ -37,6 +37,16 @@
       "template": "templates/0003-note-embedding-events.sql",
       "template_sha256": "0ca771d046a26dc609b02bac2bc8a36a478cdb0933cf21959cc764f15aceec03",
       "version": "20260930120003"
+    },
+    {
+      "canonical_render_sha256": "ba6816477914f4401923f0fdecc64f4b5bd0b5923218a172efac3a5b5a64f4b8",
+      "name": "approval_in_the_database",
+      "placeholders": [
+        "object_owner"
+      ],
+      "template": "templates/0004-approval-in-the-database.sql",
+      "template_sha256": "86620a50e1dd0a9092f2f8b1171d660d67cbea23b0f379eafa4cb5b72eb61eb2",
+      "version": "20261001120004"
     }
   ],
   "schema_version": 3

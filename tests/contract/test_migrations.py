@@ -298,6 +298,41 @@ def test_0036_grants_what_it_names_and_revokes_every_new_function_first(
     assert last_revoke < first_grant, "0036 grants a function before it has revoked every one"
 
 
+#: What 0037 creates, all of it granted to nobody (ADR 0242). An exact set, in
+#: `CONNECTIVITY_NOBODY`'s shape: a guard that gained a grant is the change this
+#: arm exists to see, and the cluster's answer -- `has_function_privilege` false
+#: for every role -- is `test_approval_in_database.py`'s (D1814).
+GATE_NOBODY = frozenset({"require_approval"})
+
+
+def test_0037_creates_the_guard_and_grants_it_to_nobody(manifest: dict[str, Any]) -> None:
+    """Migration 0037's privileges, read as text (D464).
+
+    Every function it creates is in `app`, revoked from PUBLIC, and named in no
+    GRANT; it replaces nothing and touches no `api` object, so it carries no
+    `NOTIFY pgrst`. Goes red if a GRANT is added, the REVOKE is dropped, a
+    second function arrives unpinned, or the guard moves out of `app`.
+    """
+    entry = next((item for item in manifest["migrations"] if item["name"] == "approval_gate"), None)
+    assert entry is not None, "the released manifest has no approval_gate migration"
+    text = (migrations.MIGRATIONS_ROOT / entry["template"]).read_text(encoding="utf-8")
+    statements = "\n".join(
+        line.split("--")[0] for line in text.split("-- migrate:down", 1)[0].splitlines()
+    )
+    up = " ".join(statements.split())
+
+    created = set(re.findall(r"CREATE FUNCTION app\.(\w+)\(", up))
+    assert created == GATE_NOBODY, sorted(created)
+    assert not re.search(r"CREATE (?:OR REPLACE )?FUNCTION (?!app\.)", up), (
+        "0037 creates a function outside app"
+    )
+    assert "OR REPLACE" not in up, "0037 replaces a function; it was written to create one"
+    revoked = set(re.findall(r"REVOKE ALL ON FUNCTION app\.(\w+)\(text\) FROM PUBLIC;", up))
+    assert revoked == GATE_NOBODY, sorted(revoked)
+    assert not re.search(r"\bGRANT\s", up), "0037 grants something; the guard is granted to nobody"
+    assert "api." not in up and "NOTIFY pgrst" not in up, "0037 touches the api surface"
+
+
 def test_every_up_block_assumes_and_returns_the_owner_role(manifest: dict[str, Any]) -> None:
     """ADR 0026: objects are owned by object_owner, versions stamped by migration_user.
 

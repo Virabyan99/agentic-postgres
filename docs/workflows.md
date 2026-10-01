@@ -287,11 +287,16 @@ carries the decision as a signed claim, so the plane serves it once. **A
 rejection is a cancel**: the run's cancel is requested, the next claim applies
 it, and any succeeded steps with a compensation are undone.
 
-**Approval governs the agent plane and workflows; the database's authority is
-the SQL grant.** An agent holding a capability's scope and its own token can
-still call the underlying function through the REST API directly, where no
-approval is checked — that predates workflows, and it is recorded rather than
-repaired in this release (ADR 0231).
+**Since 1.13.0 the database checks the approval too** (ADR 0242). A project's
+gated function calls `app.require_approval('<tool>')` as its first statement
+— a release function granted to nobody, so only a reviewed function running
+as the owner can call it — and an agent that reaches the function through the
+REST API with its own token is refused `403 AP403: approval_required` before
+anything else runs. A person's own call passes; the released step's call
+passes because its token carries the decision and the plane sends its key.
+`bin/mcp-contract.sh check --project` refuses a gated function that does not
+call the guard first. An approval a deployment's profile adds to a RELEASE
+tool is still a plane control (D1869).
 
 ## The worker
 

@@ -417,6 +417,16 @@
       "template": "templates/0036-connectivity.sql",
       "template_sha256": "a267e83da5c48cd7df53718ad9ed0832f2bcd2bfda3160e71afcdc85f81f60cd",
       "version": "20260929120036"
+    },
+    {
+      "canonical_render_sha256": "2f2ae928b2c5082a873c06fc16399403dac5710c5522a1a8849dbce66bdc67f8",
+      "name": "approval_gate",
+      "placeholders": [
+        "object_owner"
+      ],
+      "template": "templates/0037-approval-gate.sql",
+      "template_sha256": "67c4a5d4f20cd1b9fd397bb383760d6d774ea942a5e786b080de7f6d73c6d223",
+      "version": "20261001120037"
     }
   ],
   "schema_version": 1

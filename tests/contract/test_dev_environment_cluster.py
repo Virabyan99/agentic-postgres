@@ -273,8 +273,12 @@ def test_the_example_sets_third_migration_kept_its_grants(environment: dict[str,
     `api.set_note_embedding` with `CREATE OR REPLACE` and restated no grant.
     PostgreSQL keeps the OID, so the ACL 0001 and 0002 wrote and 0001's comment
     stand -- measured here on the cluster `apg dev up` built, never assumed.
-    The control is `anon`, which neither migration granted. The body that
-    runs is 0003's: it calls the emitter."""
+    The control is `anon`, which neither migration granted.
+
+    **Since Session 35 the body that runs is 0004's** (ADR 0242): `0004`
+    replaced the function a second time, again restating no grant, so the
+    same four answers are now the proof that BOTH replaces kept the ACL. Its
+    first statement is the approval guard and it still calls the emitter."""
     state = environment["state"]
     roles = state["roles"]
     function = "'api.set_note_embedding(uuid, extensions.vector)'"
@@ -288,7 +292,7 @@ def test_the_example_sets_third_migration_kept_its_grants(environment: dict[str,
         held = as_superuser(
             state, f"SELECT has_function_privilege('{roles[role]}', {function}, 'EXECUTE')"
         )
-        assert held == expected, f"{role} EXECUTE is {held!r} after 0003, not {expected!r}"
+        assert held == expected, f"{role} EXECUTE is {held!r} after 0004, not {expected!r}"
 
     assert (
         as_superuser(
@@ -298,12 +302,16 @@ def test_the_example_sets_third_migration_kept_its_grants(environment: dict[str,
     ), "0001's comment did not survive the replace"
     source = as_superuser(state, f"SELECT prosrc FROM pg_proc WHERE oid = {function}::regprocedure")
     assert "PERFORM app.emit_event('note_embedding.set', 1," in source, source
+    first = source.split("BEGIN", 1)[1].lstrip().splitlines()[0]
+    assert first == "PERFORM app.require_approval('set_note_embedding');", (
+        f"the body the cluster runs does not call the guard first: {first!r}"
+    )
     ledger = as_superuser(
         state,
         "SELECT string_agg(version, ',' ORDER BY version) "
         "FROM app_private.project_schema_migrations",
     )
-    assert ledger.endswith("20260930120003"), ledger
+    assert ledger.endswith("20260930120003,20261001120004"), ledger
 
 
 def test_exactly_two_roles_can_log_in_and_the_object_owner_is_not_one(

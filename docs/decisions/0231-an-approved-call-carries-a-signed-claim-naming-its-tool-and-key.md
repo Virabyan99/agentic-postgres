@@ -90,6 +90,9 @@ refuses an approval claim together with `dry_run`.
 * An operator who needs approval enforced against a direct PostgREST call must
   either withhold the project RPC's grant from `agent_writer` or take the priced
   database half.
+* **2026-10-01, Session 35:** the database half is ADR 0242 —
+  `app.require_approval`, granted to nobody, called first by a gated project
+  function (migration 0037; the example set's `0004`).
 
 ## Alternatives rejected
 

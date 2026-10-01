@@ -24,6 +24,7 @@ import pwd
 import re
 import secrets
 import shutil
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from hashlib import sha256
@@ -2409,7 +2410,59 @@ MIGRATION_DIRECTORY_MODE = 0o755
 MIGRATION_MANIFEST_NAME = "rendered-manifest.json"
 
 
-def write_rendered_migrations(directory: Path, document: dict[str, Any]) -> Path:
+#: The release's approved capability contract: the tools a profile may add an
+#: approval to, which the render's approval-gate report reads (D1869).
+CANONICAL_MCP_CONTRACT = (
+    REPO_ROOT / "contracts" / "snapshots" / "mcp" / "mcp-capabilities.canonical.json"
+)
+
+
+def approval_gate_report(
+    document: dict[str, Any], project_set: Any, profile: dict[str, Any] | None
+) -> list[str]:
+    """One line per gated tool whose function does not call the guard first.
+
+    ADR 0242's render half: a REPORT, never a refusal (D1868). The tools are
+    the release's enabled ones and the project's committed contract's, with
+    every approval the profile adds applied -- the profile is the only way a
+    release tool is gated (D1869) -- and the bodies are the set's final ones.
+    The committed contracts are read here rather than recompiled: the render
+    already refuses a project whose contract was never committed, and
+    `mcp-contract.sh check --project` is what proves either is current.
+    """
+    from agentic_postgres import approval_gate, capability_manifest, migrations, sql_surface
+
+    enabled = set((document.get("capabilities") or {}).get("enabled") or [])
+    tools = [
+        tool
+        for tool in json.loads(CANONICAL_MCP_CONTRACT.read_text(encoding="utf-8"))["tools"]
+        if tool["name"] in enabled
+    ]
+    project = (document.get("capabilities") or {}).get("project")
+    if project:
+        contract_path = capability_manifest.project_contract_path(REPO_ROOT / project["root"])
+        tools += json.loads(contract_path.read_text(encoding="utf-8"))["tools"]
+    gated_by_profile = {
+        name
+        for name, entries in (profile or {}).items()
+        if isinstance(entries, dict) and entries.get("requires_approval") is True
+    }
+    contract = {
+        "tools": [
+            {**tool, "requires_approval": True} if tool["name"] in gated_by_profile else tool
+            for tool in tools
+        ]
+    }
+    bodies = sql_surface.final_function_bodies(project_set.load_manifest(), project_set.root)
+    findings = approval_gate.unguarded(
+        contract, bodies, migrations.release_functions(migrations.release_set())
+    )
+    return [f"render: {approval_gate.describe(finding)}" for finding in findings]
+
+
+def write_rendered_migrations(
+    directory: Path, document: dict[str, Any], *, profile: dict[str, Any] | None = None
+) -> Path:
     """Render every set this project applies into `<directory>/migrations/`.
 
     A rendered payload, not a template: ADR 0028 makes the *rendered* text the
@@ -2450,6 +2503,12 @@ def write_rendered_migrations(directory: Path, document: dict[str, Any]) -> Path
             # the half an adopter edits.
             migrations.verify_lock(manifest, migration_set.load_lock(), migration_set.root)
             migrations.lint_project_set(migration_set)
+            # ADR 0242: REPORTED here and never refused (D1868). An upgrading
+            # project whose manifest rendered yesterday must render today; the
+            # workstation's `mcp-contract.sh check --project` and `propose`
+            # are where an unguarded gated RPC is refused.
+            for line in approval_gate_report(document, migration_set, profile):
+                print(line, file=sys.stderr)
         for entry in manifest["migrations"]:
             payload = migrations.render_migration(entry, manifest, document, migration_set.root)
             # dbmate orders by filename and parses `<version>_<name>.sql`. The
@@ -2659,7 +2718,9 @@ def render_project(
             # reads every identifier out of outputs.json precisely so that the
             # SQL and the Compose model cannot be derived from two different
             # readings of the same manifest (ADR 0002, ADR 0028).
-            write_rendered_migrations(staging, document)
+            write_rendered_migrations(
+                staging, document, profile=(project.get("mcp") or {}).get("profile")
+            )
 
             # The reviewed surface, copied verbatim. Not generated, not
             # normalized here, not re-derived: `bin/api-contract.py` captures and

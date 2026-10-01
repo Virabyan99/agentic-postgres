@@ -60,6 +60,15 @@
         "object_owner"
       ],
       "description": "The example project's write says what happened (D1781, ADR 0235): api.set_note_embedding is replaced with its signature, search_path and body unchanged plus one PERFORM app.emit_event('note_embedding.set', 1, {note_id}) after the upsert, so a parked wait of the same owner is served and an enabled outbound connector receives one delivery -- inside the caller's transaction, and only when something listens. The payload names the note and never carries the embedding. CREATE OR REPLACE keeps the function's OID, so the grants 20260914120001 and 20260914120002 made stand, and a proof reads has_function_privilege rather than assuming it. The stamp sorts after this set's own newest, which is the only ordering a project set has had since ADR 0206; release migration 0036, which creates the emitter, applies before any project set on every cluster that runs this one."
+    },
+    {
+      "version": "20261001120004",
+      "name": "approval_in_the_database",
+      "template": "templates/0004-approval-in-the-database.sql",
+      "placeholders": [
+        "object_owner"
+      ],
+      "description": "The example project's gated write checks the approval in the database too (ADR 0242, D1721): api.set_note_embedding is replaced with 0003's signature, search_path and body byte for byte plus ONE new first statement, PERFORM app.require_approval('set_note_embedding'), so an agent holding note_embeddings:write that calls the RPC through PostgREST with its own token is refused 403 before anything else runs, while the note's owner and the approval workflow's released call are served. The tool name is the capability's. CREATE OR REPLACE keeps the function's OID, so the grants 20260914120001 and 20260914120002 made stand and none is restated. The stamp sorts after this set's own newest; release migration 0037, which creates the guard, applies before any project set on every cluster that runs this one."
     }
   ]
 }

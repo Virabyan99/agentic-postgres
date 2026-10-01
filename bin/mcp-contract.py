@@ -15,6 +15,10 @@
              With ``--project`` it also applies that project's ``mcp.profile``
              to the approved contract and exits 5 if the profile would widen
              any bound (ADR 0183) -- the refusal is here, at compile time.
+             And it exits 5 when a gated RPC tool's function does not call
+             ``app.require_approval`` first (ADR 0242, ``approval_gate``); a
+             gated tool backed by a RELEASE function is printed and never
+             refused (D1869).
 ``lock``     resolves the canonical contract for one project, from that
              project's rendered outputs and its manifest, whose profile narrows
              the lock. ``--project`` is required, so a deploy cannot compile a
@@ -58,11 +62,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from agentic_postgres import (
     REPO_ROOT,
     api_surface,
+    approval_gate,
     capability_compiler,
     capability_manifest,
     config,
+    migrations,
     openapi_normalize,
     scope_registry,
+    sql_surface,
 )
 
 EXIT_OK = 0
@@ -146,6 +153,27 @@ def _require_project_contract_current(inputs: capability_manifest.ProjectInputs)
             "moved underneath it. Re-compile, READ the difference, then commit",
         )
     return None
+
+
+def _approval_findings(manifest: dict, contract: dict) -> tuple:
+    """`approval_gate.unguarded` over the contract this project deploys (ADR 0242).
+
+    ``contract`` is the one `check --project` has just proved: the joint
+    contract, or the release's, narrowed by the profile -- so an approval a
+    profile adds is as visible here as one a capability declares. The bodies
+    are the project set's final ones; a project with no set defines no
+    function, and a gated tool it names is a release function or nothing.
+    """
+    named = config.project_migration_set(manifest)
+    bodies: dict[str, str] = {}
+    if named is not None:
+        project_set = migrations.MigrationSet(
+            label="project", root=REPO_ROOT / named / "migrations"
+        )
+        bodies = sql_surface.final_function_bodies(project_set.load_manifest(), project_set.root)
+    return approval_gate.unguarded(
+        contract, bodies, migrations.release_functions(migrations.release_set())
+    )
 
 
 def _report_profile(canonical: dict, profile: dict | None) -> None:
@@ -287,14 +315,31 @@ def command_check(arguments: argparse.Namespace) -> int:
                     f"compiles to its approved contract; the joint contract "
                     f"{document['contract_id']} carries {document['tool_count']} tools"
                 )
+            deployed = document
             if profile is not None:
-                capability_compiler.apply_profile(document, profile)
+                deployed = capability_compiler.apply_profile(document, profile)
+            findings = _approval_findings(manifest, deployed)
         except FileNotFoundError as exc:
             return fail(EXIT_PREREQUISITE, f"missing input: {exc}")
         except config.ManifestError as exc:
             return fail(EXIT_CONTRACT, f"the project is refused: {exc}")
+        # One line per finding, and the refusal LAST (D1403): a gated RPC whose
+        # function does not call the guard first is refused here, at the
+        # workstation, before a proposal or a deploy exists (ADR 0242). A
+        # release function's line is a report, never a refusal (D1869).
+        refusals = approval_gate.refused(findings)
+        if refusals:
+            for finding in findings:
+                print(f"mcp-contract: {approval_gate.describe(finding)}", file=sys.stderr)
+            return fail(
+                EXIT_CONTRACT,
+                f"the project is refused: {len(refusals)} gated tool(s) do not call "
+                f"{approval_gate.GUARD} first (ADR 0242)",
+            )
         print("\n".join(report))
         _report_profile(document, profile)
+        for finding in findings:
+            print(f"mcp-contract: {approval_gate.describe(finding)}")
         return EXIT_OK
     print("\n".join(report))
     return EXIT_OK

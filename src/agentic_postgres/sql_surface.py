@@ -139,6 +139,58 @@ def final_surface(manifest: dict[str, Any], root: Path) -> dict[str, Any]:
     return {"views": views, "functions": functions, "enums": enums}
 
 
+#: The two statements that decide what body an `api` function ends a set with,
+#: in every spelling the lint's `FUNCTION_DDL` accepts for a name (D1818):
+#: quoted or spaced, `IF EXISTS` on a drop. Case-insensitive, because
+#: PostgreSQL is.
+_FUNCTION_HEADER = re.compile(
+    r"\bCREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+\"?api\"?\s*\.\s*\"?(\w+)\"?", re.IGNORECASE
+)
+_FUNCTION_DROP = re.compile(
+    r"\bDROP\s+(?:FUNCTION|ROUTINE)\s+(?:IF\s+EXISTS\s+)?\"?api\"?\s*\.\s*\"?(\w+)\"?",
+    re.IGNORECASE,
+)
+#: What ends a function's header: its dollar-quoted body opening, or -- for a
+#: body this reader cannot see (a quoted string, `BEGIN ATOMIC`) -- the
+#: statement's terminator.
+_BODY_OPENING = re.compile(r"\bAS\s+(\$\w*\$)|;", re.IGNORECASE)
+
+
+def final_function_bodies(manifest: dict[str, Any], root: Path) -> dict[str, str]:
+    """The body each `api` function has after every migration in one set.
+
+    `final_surface` records a function's parameter names and not its body, and
+    the approval-gate check (ADR 0242) needs the body a cluster will run: the
+    LAST definition, in manifest order, which is the order dbmate applies. A
+    `CREATE [OR REPLACE] FUNCTION api.<name>` replaces and a `DROP FUNCTION`
+    (or `ROUTINE`) removes, in the order they appear within a template.
+
+    A function whose body is not dollar-quoted is recorded with an EMPTY body
+    rather than left out: a reader that dropped what it could not read would
+    report the function as one the set never defined, and a check built on it
+    would pass a gated function nobody had read (ADR 0195). An empty body calls
+    no guard, so the check refuses it -- a decision may fail closed.
+    """
+    bodies: dict[str, str] = {}
+    for entry in manifest["migrations"]:
+        text = statements((root / entry["template"]).read_text(encoding="utf-8"))
+        events = [(match.start(), "drop", match) for match in _FUNCTION_DROP.finditer(text)]
+        events += [(match.start(), "create", match) for match in _FUNCTION_HEADER.finditer(text)]
+        for _, kind, match in sorted(events, key=lambda event: event[0]):
+            name = match.group(1).lower()
+            if kind == "drop":
+                bodies.pop(name, None)
+                continue
+            opening = _BODY_OPENING.search(text, match.end())
+            if opening is None or opening.group(1) is None:
+                bodies[name] = ""
+                continue
+            tag = opening.group(1)
+            closing = text.find(tag, opening.end())
+            bodies[name] = "" if closing == -1 else text[opening.end() : closing]
+    return bodies
+
+
 def published_names(surface: dict[str, Any]) -> set[str]:
     """Every name a surface publishes, across all three kinds.
 
@@ -159,6 +211,7 @@ __all__ = [
     "DROP_VIEW",
     "RAISE",
     "down_section",
+    "final_function_bodies",
     "final_surface",
     "published_names",
     "sql_only",
