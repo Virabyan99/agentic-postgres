@@ -1,9 +1,9 @@
 # Session 35 — Change governance, the database half of approval, hardening, and the Stage 4 release
 
-**Status: EXECUTING — Runs 1–8 DONE 2026-10-01** (planned 2026-09-30 at
+**Status: EXECUTING — Runs 1–9 DONE 2026-10-02** (planned 2026-09-30 at
 `a018939`). The last session of Stage 4 (`docs/plans/stage-4-plan.md` §3).
 Eleven runs. The plan spends **D1857–D1891** and **ADR 0242–0245**; rows the
-runs add start at **D1892**. **NEXT FREE: D1936, ADR 0246.**
+runs add start at **D1892**. **NEXT FREE: D1941, ADR 0246.**
 
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 35* whole (Builds / Already
 true / Must not / Measures / Closes, `:619-657`), its rows **D1523** (the
@@ -557,6 +557,11 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1933** | 7 | D1873: phases of 120 s; phase B *"K = 24 runs"*; step 4's probe humans `apg-s35-neighbour-<SWEEP>`. | 24 runs of ~5.5 s through a loop that claims one step at a time is ~132 s, longer than the phase: C would start under B's load. One username on both projects collides on a single-cluster rehearsal. | **C starts only after B's runs end** (bounded by `--run-wait-seconds`, 300; a phase that did not drain says so in its conditions); the sampler runs from B's start to the drain; the humans are `-a`/`-b`. The 24 POSTs cross the app router once, inside its burst of 40. | A phase may not inherit another's load. | — |
 | **D1934** | 7 | Step 6: *"the neighbour script's phase logic in a `--dry-run`"*. | The dry run passed. **A real short sitting on the rig stack** (phases of 15 s, 6 runs) then **lost both load readings and exited 0**: the script closed the load child's stdin after feeding the bearer, and `communicate()` raised `ValueError` on it. | **Fixed** (`child.stdin = None`), and **exit 3 when an instrument failed** (no load reading, no answered probe, fewer runs enqueued), files still written; the cleanup also removes the load containers by name. Re-run: both readings present (20,311 and 17,335 requests, all 200), exit 0. The schema admits only https routes, so the rehearsal overlaid the rig's addresses on the op copies AFTER `read_deployed_document` checked the unmodified copies. | A dry run proves the reads; only a run proves the reading. | 0195 |
 | **D1935** | 8 | Sheet W (D1884): *"(c) No walk for 1.13.0. The Session 25 record is handed to the sweep again; `documented_path` stays `failed`; the Stage 5 report says so first."* | The operator chose (c) AND deferred the walk past Stage 5: *"what if we dont do this fresh person run things and we will do it all after we done stage 5 ?"* (2026-10-01). No person and no fresh model session walks 1.13.0. | **(c), recorded verbatim.** Run 10's sweep keeps `--dx-record-file /home/op/session-25-dx-record.json`; the merged document's expected figure is **198 = 192 passed / 5 not_run / 1 failed** (§7's first case); the Stage 5 decision report says first that the documented path has not been walked by a person since Session 25, by the operator's decision; Run 11 carries the walk in scope-closure §28 and CLAUDE.md as deferred until after Stage 5 -- a walk then is of THAT release, not 1.13.0. | A tier-3 reading is a decision the operator takes, and a deferred one is written down as deferred, never as done. | 0207 |
+| **D1936** | 9 | §2 `GOV-APPLY-002`: *"`migrate.sh --runtime status` prints the proposal line"*; step 3: *"prints `proposal <digest16>: present, approved by …`"*; Sheet F3: *"`status`'s line `proposal <digest16>: present, approved by <the operator's declared name>`"*. | **Read from the tree** (`proposal.status_line`, `bin/migrate.py:261-302`): a fully applied set prints `not needed (nothing pending)` -- after beta's deploy NOTHING is pending, so `present, approved by` cannot be printed. And beta's manifest stays schema 7 (§4, D1863), so its `approvals_required` is 0 and the gate does not read the approval even AT the act: step 6 prints `migrate: 1 project version(s) pending: 20261001120004` then `migrate: proposal 35245421404e77d3 admits them`. | **The proof reads what a deployment can show afterwards**: the deployed document's `lock_sha256` equals the `set_digest` of the proposal in the release directory (`runtime.release_path`, ending in `source_commit`), the approval beside it names that proposal's sha256 under another folded name, the ledger's newest is the proposal's newest, and `status` prints `proposal 35245421404e77d3: not needed (nothing pending)`. **Sheet F3's expectations become those two step-6 lines and that status line.** Making beta ENFORCE the approval would be its manifest at schema 8 with `approvals_required: 1`, edited on the host before F3 -- the operator's decision, offered, not taken. | A plan's expected line is a prediction; the program's `status_line` is the authority. | 0243 |
+| **D1937** | 9 | §2's proposed node ids. | Collected (`~/s35r9/collect.sh`, 252 ids over the touched modules): GOV-PROPOSE-001's from-empty proof is `test_change_proposal.py::test_propose_applies_the_set_from_empty_through_dev_up`, not `test_dev_environment_cluster.py`; NODE-LIMIT-002's is `..._the_four_new_memory_limits_...` (D1900); six proofs the runs wrote that §2 did not list (`test_the_body_reader_takes_the_last_definition_in_order`, `test_the_shapes_are_every_kind_in_both_tables`, `test_approvals_required_is_read_from_the_installed_manifest`, `test_the_capability_report_names_a_proposal_or_says_none`, `test_the_approval_gate_sentences_are_the_four_the_host_will_raise`, and this run's `test_the_example_sets_approval_names_its_proposal`). §2 cited `test_compose_contract.py`'s edge pins (`:1173-1220`) under NODE-LIMIT-002: they pin ports and the socket, not limits. D1856's `test_every_directory_in_the_kit_is_owner_only` was registered nowhere. | **Registered as collected**: 61 node ids in ten entries, each unlisted proof joined to the requirement whose statement it proves (the descriptions widened to say so); the compose pins stay in their own requirements; D1856's proof joins **REC-KIT-001** -- a stricter proof added to a passing requirement. | D1236: the registry names what the tree has. | — |
+| **D1938** | 9 | D1883: *"every token `parse_arguments` accepts appears once in `usage()` at the start of a line; the refused ones never"*. | `--mode` begins three lines (one per mode), and the synopsis continuation lines begin with flags too; **34's usage had NO entry for `--host`, `--project-a-outputs`, `--public-ipv4`, `--public-ipv6` or `--help`** -- five accepted flags, not one. A first derivation's prose put `--runtime` into the token set (60 -> 61). | **The test reads the parser's own case arms** (an arm whose body starts with `die` refuses; `=` spellings are neither) and the entries are the lines indented EXACTLY two spaces: each accepted flag begins one, `--mode` one per mode, and no refused flag appears anywhere in `--help`. All five missing entries written; the prose reworded; token sets 60 and 60, the parser arms and the body below the usage byte-identical. Battery M3-M7 killed (an entry lost, doubled, a refused flag named, the synopsis without `--dx-record-file`, `--host`'s entry dropped). | A usage block is the only document a gate has, so it gets a proof. | — |
+| **D1939** | 9 | Step 7: *"every first-run failure a row"*. | **Targeted, first run** (19 modules, 1,366 tests): 4 failed -- three because the new gate and modules were not yet in the index (D1014: `test_commands_are_executable_in_the_git_index`, the gate-modes test, `test_every_command_the_documented_path_names_is_shipped_and_executable`), one because the Session 35 paragraph wrapped *ADR 0162 prices it a MINOR* across two comment lines and then did not name the schemas that did not move (`test_the_constants_comment_states_the_class_it_proposes`). **The gates**: the first session-01 run was stopped at 97% by the harness under memory pressure (no exit code written; an orphaned `apg-workflow-gates-*` fixture container removed); **the operator then ran both gates in their own WSL terminal**: `bin/session-01-check.sh` exit 0 (6,888 passed, 0 failed, 3 skipped, 18 m 32 s), `bin/session-35-check.sh --mode offline` exit 0. | Staged, rewrapped, the sentence added; the four re-run green. The gates are the operator's run, read from `~/s35r9/gate1.log` and `gate35.log`. | A gate's verdict is its exit code read from inside, whoever ran it. | — |
+| **D1940** | 9 | Sheet F2b: *"Recreated: … (expected: pgbouncer, postgrest, docs for their new `mem_limit`; auth, storage, mcp, docs for the image)"*. | `git diff --stat 1.12.0..HEAD` over the deployable paths names **nothing under `services/`**: the `services/auth-api` image does not move, and `edge-probe` gained a `mem_limit` too (D1900). | The upgrade guide's 1.13.0 row, the gate's header and the `__init__` paragraph say a deploy recreates **pgbouncer, postgrest, docs and edge-probe**, not auth, storage or mcp. Still READ on the trip, never predicted (ADR 0155, D1581): a mounted generation can move a container no image moved. | Say what the diff says, and let the deploy's own lines say the rest. | 0155 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1891,6 +1896,47 @@ session's proofs copy) and `tests/deployment/test_session34_connectivity.py:
 
 Commit (`Session 35 Run 9: the bump to 1.13.0, the registry, the gate, the
 trip's proofs`), push, read CI.
+
+**Done.** 2026-10-02. **The registry**: `GOV` in the ID regex with the
+family sentence; ten entries under `# Session 35 (ADR 0242-0245)`, 61 node ids
+COLLECTED (D1937), D1856's proof joined to REC-KIT-001; ten claims, seven in
+`OFFLINE_CLAIMS`, ten `CLAIM_INTRODUCED_IN` rows -- counted from the tuples:
+**requirements 291, `CLAIMS` 198, `OFFLINE_CLAIMS` 60, ADRs 245, migrations
+37**; THR-CHANGE's ID cells name the four GOV requirements and five collected
+node ids; `test_the_example_sets_approval_names_its_proposal` (new) joins
+GOV-APPROVE-001; matrix and product contract regenerated, bounds, catalog,
+evaluation report current. **The bump**: `CURRENT_SESSION` 35, `VERSION`
+1.13.0, the Session 35 paragraph (pricing last); README, the upgrade guide's
+1.13.0 row, both release pages, the operator guide's table and §10 on
+`bin/session-35-check.sh`; the literals moved, counted per file (README 1+1,
+api-operations 1+3, operator guide 3+4, pool-operations 1, upgrade guide
+1+1; none left); the example client regenerated (`templateVersion` only).
+**`upgrade plan` offline** (`~/s35r9/upgrade.sh`: a worktree at `14b1b9d`, a
+`tar` copy of this tree, both rendering the installed `project.example.yaml`,
+schema 7): `--also migration_added` -> `bump minor`, **`requires minor`**,
+verdict `ok`, `changes [migration_added]`, `operator_digests_moved []`;
+without -> `requires patch`. **Four leaves, the four D1889 predicted**:
+`template_version` 1.12.0 -> 1.13.0, `migrations.release_lock_sha256`
+(b93eab2e… -> 4750932c…), `migrations.project_set.count` 3 -> 4,
+`migrations.project_set.lock_sha256` (59f70d16… -> 35245421…); 5,993 bytes
+both; the candidate's render printed no approval-gate line. **The trip's
+proofs**: `tests/deployment/test_session35_governance.py`, six, **never
+executed**; `--setup-plan` with the variables on the op copies: every
+fixture resolves, 0 errors; without: 6 skipped. GOV-APPLY-002 reads the
+post-deploy state (D1936). **The gate**: `bin/session-35-check.sh` derived
+(`~/s35r9/derive.py`), header and WHOLE usage rewritten (D1883, D1938); flag
+tokens 60 = 60, parser arms identical, body below the usage identical;
+`test_session_thirty_five_gate_modes.py` derived plus
+`test_every_accepted_flag_has_its_own_usage_entry`; in `SHELL_COMMANDS`.
+**Battery** (`~/s35r9/battery.py`): M1-M7 KILLED as `FAILED` beside
+`test_the_example_sets_committed_proposal_names_its_lock` and
+`test_help_exits_zero_and_names_all_three_modes`. **Targeted** (19 modules):
+1,362 passed, 4 failed first (D1939), re-run green. **Gates, run by the
+operator** (D1939): session-01 **exit 0**, 6,888 passed / 0 failed / 3
+skipped; session-35 offline **exit 0**, `evidence/session-35-offline.json`
+**60 claims, 60 passed**, the seven new among them, `checkout_commit`
+`f7fb96d`. Commit `f7fb96d`; CI GREEN (run 37056944389), first push. Rows **D1936-D1940**; **NEXT
+FREE D1941, ADR 0246.**
 
 ### Run 10 — the trip: the release on both projects with the probe, the edge recreated, one sweep, the neighbour sitting, the tag
 
