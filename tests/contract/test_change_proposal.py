@@ -598,3 +598,26 @@ def test_the_example_sets_committed_proposal_names_its_lock() -> None:
         == sha256(capability_manifest.project_contract_path(EXAMPLE).read_bytes()).hexdigest()
     )
     assert path.read_bytes() == proposal.record_bytes(record)
+
+
+def test_the_example_sets_approval_names_its_proposal() -> None:
+    """The approval the OPERATOR wrote (Run 8, Sheet A1) names the committed
+    proposal's own bytes under a name the proposer's does not fold to -- and
+    the host gate itself, asked with something pending under
+    `approvals_required: 1`, admits the set and returns that approval. A
+    proposal rewritten after it was approved moves its sha256 and this proof
+    refuses, as the gate would."""
+    project_set = migrations.MigrationSet(label="project", root=EXAMPLE / "migrations")
+    digest = migrations.set_digest(project_set)
+    source = proposal.proposal_path(EXAMPLE, digest)
+    target = proposal.approval_path(EXAMPLE, digest)
+    assert target.is_file(), f"no committed approval for the example set {digest[:16]}"
+    record = proposal.read_proposal(source.read_bytes())
+    approval = json.loads(target.read_text(encoding="utf-8"))
+    assert approval["kind"] == proposal.APPROVAL_KIND
+    assert approval["set_digest"] == digest
+    assert approval["proposal_sha256"] == sha256(source.read_bytes()).hexdigest()
+    assert proposal.fold(approval["declared_by"]) != proposal.fold(record["declared_by"])
+    assert approval["note"] == proposal.NOTE
+    admitted = proposal.gate(EXAMPLE, digest, (record["set"]["versions"][-1]["version"],), 1)
+    assert admitted == approval

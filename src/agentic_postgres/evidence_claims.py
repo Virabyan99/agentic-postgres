@@ -284,6 +284,27 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "connector_schedule",
         "connector_command",
         "delivery_storm_rehearsal",
+        # Session 35 (ADR 0242-0245). SEVEN, each a property of a CHECKOUT:
+        # migration 0037 and the example set's 0004 under a real cluster this
+        # workstation starts, and the approval-gate check over the compiled
+        # contract (`approval_in_database`); a reading over committed SQL
+        # (`destructive_lint`); a command's records over a tmp root and a
+        # real `apg dev` apply (`change_proposal`, `proposal_approval`); the
+        # gate over files and a recording dbmate (`proposal_gate`); compose
+        # text (`every_service_bounded`); and a shell reader's allowlist and
+        # redaction (`diagnostic_reach`).
+        #
+        # The session's other THREE are deliberately not here: an agent
+        # refused by a deployed database, the set a deployment applied, and
+        # the limits a running container carries are each a question only a
+        # deployment answers.
+        "approval_in_database",
+        "destructive_lint",
+        "change_proposal",
+        "proposal_approval",
+        "proposal_gate",
+        "every_service_bounded",
+        "diagnostic_reach",
     }
 )
 
@@ -604,6 +625,22 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "event_wait_live": ("EVT-WAIT-002",),
     "connector_schedule_live": ("CONN-SCHED-002",),
     "delivery_restore": ("REC-EVT-001",),
+    # Session 35 (ADR 0242-0245). TEN claims, landing with the constant
+    # (D690), seven offline and three host -- counted from these tuples and
+    # from `OFFLINE_CLAIMS`, never by hand (D1628). Each requirement is its
+    # own claim (ADR 0089, D1150). The session's subject is the ACT of
+    # changing a deployment: approval checked in the database, a set applied
+    # only as proposed, and every long-running service bounded.
+    "approval_in_database": ("AGT-APPROVE-003",),
+    "destructive_lint": ("GOV-LINT-001",),
+    "change_proposal": ("GOV-PROPOSE-001",),
+    "proposal_approval": ("GOV-APPROVE-001",),
+    "proposal_gate": ("GOV-APPLY-001",),
+    "every_service_bounded": ("NODE-LIMIT-002",),
+    "diagnostic_reach": ("OPS-DIAG-001",),
+    "approval_in_database_live": ("AGT-APPROVE-004",),
+    "proposed_set_applied": ("GOV-APPLY-002",),
+    "every_service_bounded_live": ("NODE-LIMIT-003",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

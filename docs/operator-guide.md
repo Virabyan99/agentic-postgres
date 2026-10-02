@@ -19,17 +19,17 @@ plane, migrations — this page hands to it and does not repeat it.
 
 ## 1. The release you are operating, in one screen
 
-> **This page is part of release `1.12.0`.** It describes that release as it
+> **This page is part of release `1.13.0`.** It describes that release as it
 > runs on this deployment. A release that moves `VERSION` and does not move
 > this line, and the table below it, is a release documented by a page about a
 > different one (ADR 0209, D1388).
 
 | | |
 |---|---|
-| `template_version` / `CURRENT_SESSION` | **1.12.0** / **34** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
-| Released migrations | **36**, fix-forward; every down block raises `AP900` (D912). 0033 adds two prune functions granted to nobody and a size reading (ADR 0213) — nothing removes an agent record unless an operator asks. 0034 is the workflow substrate: four `app_private` tables nobody may read, eight functions granted to `auth_service` and the install granted to nobody (ADR 0227, §17). 0035 adds the approval and attempt tables nobody may read, a run status `compensating`, and the audit reader at nine arguments with a counter beside it (ADR 0230, 0233, 0234). 0036 is connectivity: four `app_private` connector tables nobody may read, `app.emit_event` granted to NOBODY and called only by a project's reviewed definer function, and the connector functions -- seven granted to `auth_service`, the install and the rehearsal's to nobody (ADR 0235-0238, §18) |
+| `template_version` / `CURRENT_SESSION` | **1.13.0** / **35** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
+| Released migrations | **37**, fix-forward; every down block raises `AP900` (D912). 0033 adds two prune functions granted to nobody and a size reading (ADR 0213) — nothing removes an agent record unless an operator asks. 0034 is the workflow substrate: four `app_private` tables nobody may read, eight functions granted to `auth_service` and the install granted to nobody (ADR 0227, §17). 0035 adds the approval and attempt tables nobody may read, a run status `compensating`, and the audit reader at nine arguments with a counter beside it (ADR 0230, 0233, 0234). 0036 is connectivity: four `app_private` connector tables nobody may read, `app.emit_event` granted to NOBODY and called only by a project's reviewed definer function, and the connector functions -- seven granted to `auth_service`, the install and the rehearsal's to nobody (ADR 0235-0238, §18) |
 | Deployed document | outputs schema **v19** (`connectors.enabled`); `document_kind: deployed` |
-| Project manifest | schema versions **1–7** accepted; 5 adds `migrations.set`, 6 adds `mcp.capabilities`, 7 adds `connectors` (the facility and the outbound endpoints) |
+| Project manifest | schema versions **1–8** accepted; 5 adds `migrations.set`, 6 adds `mcp.capabilities`, 7 adds `connectors` (the facility and the outbound endpoints), 8 adds `migrations.approvals_required` (§19) |
 | Capability manifest / lock | schema **4** / **4** (vocabulary + `tools_sha256`) |
 | Verifiers | **four** — PostgREST, `auth`, `storage`, the agent plane — reading one published key set; only `auth` signs (ADR 0170) |
 | Migration sets | the release's, and a project's own under `projects/<slug>/`, each in its own directory and its own ledger table (ADR 0198, 0206). A project's lock is schema **3**: it records whether `follows_release_version` was computed or declared (ADR 0210) |
@@ -200,12 +200,12 @@ it.
    that is missing:
    ```bash
    sudo bin/materialize-secrets.sh --project project.alpha.yaml \
-        --requirements secrets.required.yaml --session 34
+        --requirements secrets.required.yaml --session 35
    ```
 6. **Deploy, unredirected, at the terminal:**
    ```bash
    sudo ./deploy.sh --host host.yaml --project project.alpha.yaml \
-        --capabilities capabilities.yaml --through-session 34
+        --capabilities capabilities.yaml --through-session 35
    ```
    The first pass of a new project records the two loopback ports and the
    app route `unavailable` — the documented first-deploy state, not a failure
@@ -506,7 +506,7 @@ place.
 measured sequence and its traps for the three the API plane holds: capture
 the pre-rotation value to a root-only file first (a proof you cannot admit
 skips), replace it at the provider by hand and confirm it saved, **`project-runtime.sh
-… --through-session 34 down` for a credential a container mounts** (D253:
+… --through-session 35 down` for a credential a container mounts** (D253:
 `resume` runs `compose up` without `--force-recreate`, and PostgREST kept a
 generation two rotations stale and crash-looped), materialize, deploy,
 declare it to the gate with the matching `--rotated-*-from-file`. Performed
@@ -546,8 +546,9 @@ A release is closed by an evidence document, and an evidence document is three
 halves merged: **host** (root, on the deployment), **external** (from a
 network that is not the host), **offline** (a checkout with Docker, declared
 never inferred, ADR 0202). The newest shipped gate's `--help` is the
-authority for the flags -- `bin/session-34-check.sh` in this checkout -- and
-this is the sequence Session 34's third sweep ran (`s34-r10c-gate.sh`).
+authority for the flags -- `bin/session-35-check.sh` in this checkout, which
+accepts exactly the flags Session 34's did -- and this is the sequence Session
+34's third sweep ran (`s34-r10c-gate.sh`), with the gate and the files moved to 35.
 
 **Before the sweep**, as `op`: the renders of §4 (both host manifests and
 both example fixtures — the gate's fixture check compares the rendered
@@ -561,11 +562,11 @@ flag omitted is a claim that silently goes `not_run` fifteen minutes later:
 
 ```bash
 sudo -v      # first, in the foreground (D1376)
-sudo bin/session-34-check.sh --mode host --host host.yaml \
+sudo bin/session-35-check.sh --mode host --host host.yaml \
   --project-a-outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json \
   --project-b-outputs /etc/agentic-postgres/projects/beta-dev/outputs.json \
   --admin-password-file /root/alpha-dev-administrator \
-  --redeploy-before-file /root/s34-redeploy-before.json \
+  --redeploy-before-file /root/s35-redeploy-before.json \
   --candidate-manifest /home/op/s31-third.yaml \
   --sentinel-file "$(sudo python3 -c "
 import json
@@ -610,7 +611,7 @@ account and `apg-agent@` is refused), and **both** outputs files, or the merge
 refuses on `project_keys` (D757):
 
 ```bash
-bin/session-34-check.sh --mode external --public-ipv4 <address> \
+bin/session-35-check.sh --mode external --public-ipv4 <address> \
   --project-a-outputs ./alpha-dev-outputs.json --project-b-outputs ./beta-dev-outputs.json \
   --ssh-destination op@<host>
 ```
@@ -624,11 +625,11 @@ mode stops being something a host is asked to run.
 **The merge**, from a checkout at the branch head:
 
 ```bash
-python bin/write-session-evidence.py --session 34 \
-  --host-input evidence/session-34-host.json \
-  --external-input evidence/session-34-external.json \
-  --offline-input evidence/session-34-offline.json \
-  --output evidence/session-34.json
+python bin/write-session-evidence.py --session 35 \
+  --host-input evidence/session-35-host.json \
+  --external-input evidence/session-35-external.json \
+  --offline-input evidence/session-35-offline.json \
+  --output evidence/session-35.json
 ```
 
 `--offline-input` is required for a session with an offline claim and refused
@@ -676,7 +677,7 @@ with the row that measured it.
 | `render-jwks`: *whether the key set CHANGED cannot be told from here* | there was no previous copy at that path — the normal case, because a deploy replaces the whole rendered directory first (D1374, D1427) | it is neither evidence of a rotation nor evidence against one; `sudo bin/rotate-signing-key.sh --outputs <outputs.json> acknowledge` reads what each verifier is holding |
 | a rotation proof: *the value declared as pre-rotation is the active one* | nothing was rotated: the provider did not take the edit, or materialization did not run | confirm at the provider, materialize, deploy again |
 | a rotation proof fails `401 PT401` | a bootstrap-minted token missing `credential_version`, `authz_version` or the scope array (D298, D675) | repair the identity, not the thing the proof names |
-| PostgREST crash-loops after a credential rotation, route 502 | a container holding a stale generation (D253) | `project-runtime.sh … --through-session 34 down`, then deploy |
+| PostgREST crash-loops after a credential rotation, route 502 | a container holding a stale generation (D253) | `project-runtime.sh … --through-session 35 down`, then deploy |
 | the edge answers 502 on a project route after a deploy | the deploy leaves the previous document until step 7; or the edge is not attached | `bin/edge-network.sh status --project-key <key>`; `reconcile` |
 | `edge.sh status` says `staging` after a promotion | before 1.0.1 it could never say `production` as `op` (D1050) | since: `unknown` when it cannot read; read as root |
 | `TimeoutError` reading Infisical | a transient (D976) | run the command again |
@@ -931,7 +932,7 @@ is irreversible and would print success.
 
    ```
    sudo bin/materialize-secrets.sh --project /home/op/project.<key>.yaml \
-     --requirements secrets.required.yaml --session 34
+     --requirements secrets.required.yaml --session 35
    ```
 
    then read the written file's **shape**, never its content:
@@ -974,7 +975,7 @@ is irreversible and would print success.
    value is wrong and this deploy has left the project half converged.
 3. **Down and up**, so every verifier is recreated:
    `sudo bin/project-runtime.sh --host host.yaml --project-key <key>
-   --through-session 34 down`, then redeploy. A restart is not enough, and after
+   --through-session 35 down`, then redeploy. A restart is not enough, and after
    the key set file has been replaced a restart is measured to leave the
    container unable to start at all.
    **Take `acknowledge` once before this, too.** On 2026-09-19 it came back

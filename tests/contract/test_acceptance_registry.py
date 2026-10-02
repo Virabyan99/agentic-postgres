@@ -98,7 +98,12 @@ ID_PATTERN = re.compile(
     # Session 34 (ADR 0235-0239) adds `EVT` for what an event is and who may
     # write or wait on one, and `CONN` for what a connector is, how it is
     # bound, delivered and started; the restore row is `REC`'s.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN)-[A-Z0-9]+(-\d+)?$"
+    # Session 35 (ADR 0242-0245) adds `GOV` for what a proposed change to a
+    # project's set is, who records its review, and what a host refuses to
+    # apply without one; the database half of approval extends `AGT-APPROVE`,
+    # the bounded edge `NODE-LIMIT`, and the diagnostic account's reach is
+    # `OPS-DIAG`.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV)-[A-Z0-9]+(-\d+)?$"
 )
 
 

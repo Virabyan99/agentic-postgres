@@ -2578,6 +2578,7 @@
     - tests/contract/test_disaster_kit.py::test_the_kit_carries_no_value_the_host_holds
     - tests/contract/test_disaster_kit.py::test_a_kit_verifies_whole_and_refuses_a_missing_or_altered_artifact
     - tests/contract/test_disaster_kit.py::test_the_command_writes_owner_only_refuses_an_existing_directory_and_verifies
+    - tests/contract/test_disaster_kit.py::test_every_directory_in_the_kit_is_owner_only
     - tests/deployment/test_session18_recovery.py::test_the_kit_exported_from_this_host_verifies_and_holds_no_value
   description: >-
     dr-kit.sh export writes every artifact the node-loss runbook names -- the
@@ -5755,3 +5756,203 @@
     -- the live cluster held at the target, rebuilt from each row's own
     times so a delivery that moved after the target is not a false
     difference (D1802).
+
+# Session 35 (ADR 0242-0245)
+- id: AGT-APPROVE-003
+  priority: P0
+  target_session: 35
+  test_nodeids:
+    - tests/contract/test_approval_in_database.py::test_require_approval_is_executable_by_no_role
+    - tests/contract/test_approval_in_database.py::test_a_caller_with_no_agent_identity_passes
+    - tests/contract/test_approval_in_database.py::test_an_agent_without_a_claim_is_refused_and_nothing_is_written
+    - tests/contract/test_approval_in_database.py::test_a_claim_for_another_tool_is_refused
+    - tests/contract/test_approval_in_database.py::test_a_key_that_differs_from_the_header_is_refused
+    - tests/contract/test_approval_in_database.py::test_a_pending_rejected_expired_or_foreign_decision_is_refused
+    - tests/contract/test_approval_in_database.py::test_a_decision_on_an_ended_run_is_refused
+    - tests/contract/test_approval_in_database.py::test_an_approved_claim_on_a_running_run_passes
+    - tests/contract/test_approval_in_database.py::test_every_refusal_is_one_sentence
+    - tests/contract/test_approval_gate.py::test_a_gated_rpc_that_does_not_call_the_guard_first_is_refused
+    - tests/contract/test_approval_gate.py::test_a_guard_after_another_statement_is_refused
+    - tests/contract/test_approval_gate.py::test_a_gated_release_function_is_reported_never_refused
+    - tests/contract/test_approval_gate.py::test_the_render_reports_and_never_refuses
+    - tests/contract/test_approval_gate.py::test_the_example_projects_gated_function_calls_the_guard
+    - tests/contract/test_approval_gate.py::test_the_body_reader_takes_the_last_definition_in_order
+    - tests/contract/test_project_migration_sets.py::test_the_example_sets_fourth_migration_adds_only_the_guard
+  description: >-
+    Migration 0037 creates `app.require_approval(p_tool)`, SECURITY DEFINER,
+    owned by the object owner and executable by NO role. Called from a
+    definer function it returns for a caller with no agent identity, and for
+    an agent only when the `apg_approval` claim names the tool, the
+    `Idempotency-Key` header equals the claim's key, and an `approved`
+    decision for that tool and key exists on a `running` run of that agent;
+    otherwise `PT403` `AP403: approval_required` and the caller's write does
+    not happen. The example set's `0004` makes it `set_note_embedding`'s
+    first statement; `mcp-contract.sh check --project` and `propose` refuse
+    a gated RPC tool whose function does not call it first (the final body,
+    the last definition in order), and the render reports one and never
+    refuses; a gated RELEASE function is reported, never refused (ADR 0242,
+    D1867-D1869).
+
+- id: AGT-APPROVE-004
+  priority: P0
+  target_session: 35
+  test_nodeids:
+    - tests/deployment/test_session35_governance.py::test_an_agents_direct_call_to_a_gated_rpc_is_refused_by_the_database
+    - tests/deployment/test_session35_governance.py::test_the_owners_direct_call_is_served
+    - tests/deployment/test_session35_governance.py::test_the_approved_call_through_the_plane_is_served_once
+  description: >-
+    On the deployment: an agent holding `note_embeddings:write` that calls
+    `POST /rpc/set_note_embedding` on beta DIRECTLY with its own token is
+    refused 403 with the guard's one sentence and no embedding is written,
+    counted as the superuser; the note's owner calling it directly is
+    served; an approval workflow's released call is served once, the plane's
+    audit holding its refusal and one `served` row (D1721's database half).
+
+- id: GOV-LINT-001
+  priority: P0
+  target_session: 35
+  test_nodeids:
+    - tests/contract/test_change_proposal.py::test_each_destructive_shape_is_named_with_its_object
+    - tests/contract/test_change_proposal.py::test_every_accepted_spelling_is_read
+    - tests/contract/test_change_proposal.py::test_a_commented_statement_or_a_down_section_is_not_a_finding
+    - tests/contract/test_change_proposal.py::test_a_finding_never_refuses_the_lint
+    - tests/contract/test_change_proposal.py::test_the_example_set_has_no_destructive_statement
+    - tests/contract/test_change_proposal.py::test_the_shapes_are_every_kind_in_both_tables
+  description: >-
+    `migrations.destructive_findings` names every `DROP` of a table, view,
+    materialized view, function, procedure, index, type, sequence, trigger
+    or policy, every `ALTER TABLE ... DROP COLUMN|CONSTRAINT`, `... ALTER
+    COLUMN ... TYPE`, `... RENAME`, every `TRUNCATE` and every `DELETE` with
+    no `WHERE`, in an up section, with its migration and object, in every
+    spelling PostgreSQL accepts (`IF EXISTS`, quoted, schema-qualified); a
+    commented statement and a down section are not read; a finding never
+    refuses; the example set has none (ADR 0243).
+
+- id: GOV-PROPOSE-001
+  priority: P0
+  target_session: 35
+  test_nodeids:
+    - tests/contract/test_change_proposal.py::test_the_digest_is_the_renders_lock_sha256
+    - tests/contract/test_change_proposal.py::test_propose_records_every_reading_and_its_limits
+    - tests/contract/test_change_proposal.py::test_propose_refuses_while_a_dev_environment_is_up
+    - tests/contract/test_change_proposal.py::test_propose_refuses_an_unguarded_gated_function
+    - tests/contract/test_change_proposal.py::test_propose_refuses_an_existing_proposal
+    - tests/contract/test_change_proposal.py::test_a_proposal_is_deterministic_but_for_its_times
+    - tests/contract/test_change_proposal.py::test_the_example_sets_committed_proposal_names_its_lock
+    - tests/contract/test_change_proposal.py::test_propose_applies_the_set_from_empty_through_dev_up
+  description: >-
+    `bin/migrate.sh propose --project M --by NAME` writes
+    `projects/<slug>/proposals/<set_digest>.json` (the render's
+    `lock_sha256`, one function), naming the set's versions, the lint
+    result, the destructive findings, the dev-cluster apply from EMPTY
+    through `bin/dev.sh up` (exit, migrations applied, seconds, and its
+    limits), the set's final `api` surface against the reviewed contract,
+    the approval-gate check, the harness's cases (never results), the
+    committed capability contract's digest, the release it was proposed
+    against, and `declared_by`; it refuses while a dev environment is up,
+    when the lint or the approval-gate check fails, and when the file
+    exists; everything but its times is deterministic; the example set's
+    committed proposal names its lock (ADR 0243, D1857-D1861).
+
+- id: GOV-APPROVE-001
+  priority: P0
+  target_session: 35
+  test_nodeids:
+    - tests/contract/test_project_manifest.py::test_schema_eight_admits_approvals_required_beside_a_set
+    - tests/contract/test_project_manifest.py::test_seven_forbids_approvals_required
+    - tests/contract/test_change_proposal.py::test_approve_refuses_the_proposers_own_name
+    - tests/contract/test_change_proposal.py::test_approve_names_the_proposal_by_its_bytes
+    - tests/contract/test_change_proposal.py::test_approve_refuses_a_missing_proposal_or_an_existing_approval
+    - tests/contract/test_change_proposal.py::test_the_records_say_their_names_are_declared
+    - tests/contract/test_change_proposal.py::test_the_example_sets_approval_names_its_proposal
+  description: >-
+    Project manifest schema 8 admits `migrations.approvals_required: 0|1`
+    beside a `set`, forbidden below 8 and without a set; `bin/migrate.sh
+    approve --project M --proposal DIGEST --by NAME` writes
+    `<digest>.approval.json` naming the proposal file's own sha256 and a
+    declared name, and refuses the proposer's name (case and spacing
+    folded), a missing proposal and an existing approval; both records say
+    their names are declared, not authenticated; the example set's committed
+    approval names its committed proposal's bytes under another name, and
+    the host gate admits the set with it (ADR 0243, D1864).
+
+- id: GOV-APPLY-001
+  priority: P0
+  target_session: 35
+  test_nodeids:
+    - tests/contract/test_proposal_gate.py::test_a_pending_set_without_a_proposal_is_refused
+    - tests/contract/test_proposal_gate.py::test_a_proposal_for_another_set_is_refused
+    - tests/contract/test_proposal_gate.py::test_an_unapproved_proposal_is_refused_when_approvals_are_required
+    - tests/contract/test_proposal_gate.py::test_an_approval_by_the_proposer_or_for_other_bytes_is_refused
+    - tests/contract/test_proposal_gate.py::test_a_set_with_nothing_pending_needs_no_proposal
+    - tests/contract/test_proposal_gate.py::test_the_release_set_is_never_gated
+    - tests/contract/test_proposal_gate.py::test_status_prints_the_proposal_line
+    - tests/contract/test_proposal_gate.py::test_deploy_relays_the_gates_sentence
+    - tests/contract/test_proposal_gate.py::test_approvals_required_is_read_from_the_installed_manifest
+    - tests/contract/test_proposal_gate.py::test_the_capability_report_names_a_proposal_or_says_none
+    - tests/contract/test_change_proposal.py::test_the_approval_gate_sentences_are_the_four_the_host_will_raise
+  description: >-
+    `migrate.py up` on a project set with a version the project ledger lacks
+    refuses (exit 5, one of four fixed sentences, before anything writes)
+    without a proposal for the set being applied, with one naming another
+    set, and -- under `approvals_required: 1`, read from the installed
+    manifest -- without an approval naming that proposal's bytes by another
+    name; a set with nothing pending needs nothing; the release set is never
+    gated; `status` prints the proposal line; deploy step 6 relays the
+    sentence and reports which proposals name the committed capability
+    contract, or says none (ADR 0243, D1865, D1866).
+
+- id: GOV-APPLY-002
+  priority: P0
+  target_session: 35
+  test_nodeids:
+    - tests/deployment/test_session35_governance.py::test_the_applied_set_is_the_proposed_one
+  description: >-
+    On the deployment: beta's deployed document's
+    `migrations.project_set.lock_sha256` equals the `set_digest` of the
+    proposal committed in the release directory the document names, which
+    carries the approval naming that proposal's bytes under another name;
+    the project ledger's newest version is the proposal's newest; and
+    `migrate.sh --runtime status` prints the set's proposal line -- on a
+    fully applied set, nothing pending (D1936).
+
+- id: NODE-LIMIT-002
+  priority: P0
+  target_session: 35
+  test_nodeids:
+    - tests/contract/test_process_limits.py::test_the_edge_plane_is_bounded
+    - tests/contract/test_process_limits.py::test_every_long_running_service_carries_a_memory_limit
+    - tests/contract/test_process_limits.py::test_the_four_new_memory_limits_are_rendered_from_config
+  description: >-
+    The edge's `traefik` and `docker-socket-proxy` carry `mem_limit`,
+    `pids_limit` and `cpus` at the values ADR 0244 records (608m/76/1.0 and
+    64m/64/1.0, from Sheet E0); pgbouncer, postgrest, docs and edge-probe
+    carry `mem_limit` from `config.SERVICE_MEMORY_LIMITS_MB` through the
+    compose environment; every long-running service in `compose.yaml`
+    carries a `mem_limit` (ADR 0244, D1877, D1878, D1900).
+
+- id: NODE-LIMIT-003
+  priority: P0
+  target_session: 35
+  test_nodeids:
+    - tests/deployment/test_session35_governance.py::test_the_edge_containers_are_bounded_on_the_host
+    - tests/deployment/test_session35_governance.py::test_no_running_compose_container_is_unbounded
+  description: >-
+    On the host: both edge containers run with the committed `Memory`,
+    `PidsLimit` and `NanoCpus`, read from `HostConfig`, and `doctor
+    capacity`'s own reader counts no running Compose container unbounded.
+
+- id: OPS-DIAG-001
+  priority: P0
+  target_session: 35
+  test_nodeids:
+    - tests/contract/test_diagnostic_surface.py::test_the_log_allowlist_is_exactly_these_services
+    - tests/contract/test_diagnostic_surface.py::test_a_json_quoted_secret_is_redacted
+    - tests/contract/test_diagnostic_surface.py::test_the_new_services_log_lines_are_redacted
+    - tests/contract/test_diagnostic_surface.py::test_the_log_cap_is_two_hundred_lines
+  description: >-
+    `apg-diag`'s log allowlist is exactly `postgres pgbouncer postgrest docs
+    edge-probe dbmate auth storage mcp`; its redaction masks a JSON-quoted
+    secret key's value as well as the three existing shapes, over lines in
+    the three new services' real log shapes; the 200-line cap stands (ADR
+    0245, D1879).

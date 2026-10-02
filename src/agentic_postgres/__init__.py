@@ -761,7 +761,77 @@ from pathlib import Path
 #: class is confirmed against a DEPLOYMENT in the same session: Run 10's
 #: `upgrade plan` on both projects, with the same three declarations, before
 #: the deploy -- and a `major` there is a stop condition.
-CURRENT_SESSION = 34
+#:
+#: **Session 35 moves it to 35, all-or-nothing again** (D690): TEN requirements
+#: and ten claims -- `CLAIMS` 188 -> 198 and `OFFLINE_CLAIMS` 53 -> 60, counted
+#: from the tuples rather than by hand (D1628) -- seven declared offline and
+#: three host, with every offline half written in the run that built its plane
+#: (Runs 2-6) and every live half here. One family joins the registry: `GOV`
+#: (what a proposed change to a project's set is, who records its review, and
+#: what a host refuses to apply without one).
+#:
+#: **The session's subject is the ACT of changing a deployment**, and the four
+#: ADRs are its shape. ADR 0242: approval is enforced in the DATABASE by
+#: `app.require_approval`, granted to NOBODY, which a gated project RPC calls
+#: first -- an agent's direct call is refused `PT403` unless its token's
+#: `apg_approval` names the tool, its `Idempotency-Key` equals the claim's key,
+#: and an approved decision for both exists on a running run of that agent; a
+#: human's own call passes. ADR 0243: a change to a project's migration set is
+#: PROPOSED (`bin/migrate.sh propose`, a committed record keyed by the sha256
+#: of the set's lock, with the lint, the destructive findings, a from-empty
+#: apply, the reviewed surface and the approval-gate check) and APPROVED by a
+#: second declared name (`approve`), and a host applies a set with a pending
+#: version only when the committed proposal names it -- the names are declared,
+#: not authenticated, and the records say so. ADR 0244: the edge's two
+#: containers and every long-running project service are bounded. ADR 0245:
+#: the diagnostic account reads the auth, storage and MCP logs.
+#:
+#: **One migration, 0037, and it is the floor once applied** (ADR 0162 §3): one
+#: function, no table, no column, no `api` object. **The project manifest moves
+#: to schema 8** (`migrations.approvals_required: 0|1`), and 1-7 still load
+#: unchanged; **no outputs, capability, lock, secret or host schema moves**.
+#:
+#: **`VERSION` moves to `1.13.0`.** What moved: migration 0037; the example
+#: set's `0004` (`api.set_note_embedding` with the guard first) and its
+#: committed proposal and approval; `bin/migrate.sh propose|approve` and the
+#: host gate in `up`, with `status`'s proposal line and deploy step 6's
+#: capability report; `migrations.destructive_findings`; the approval-gate
+#: check (refused by `mcp-contract.sh check --project` and `propose`, reported
+#: by the render); `mem_limit`, `pids_limit` and `cpus` on `traefik` and
+#: `docker-socket-proxy`, and `mem_limit` on pgbouncer, postgrest, docs and
+#: edge-probe, so a deploy recreates those four and `bin/edge.sh restart`
+#: recreates the edge; `apg-diag`'s allowlist and its JSON-key redaction; a DR
+#: kit's every directory 0700 (D1856). The `services/auth-api` image does not
+#: move.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig as Session 34
+#: ran it (D1844): a git worktree at `14b1b9d`, the commit that IS deployed,
+#: and a `tar`-piped copy of this working tree, both rendering the INSTALLED
+#: tree's `project.example.yaml` (schema 7, no `approvals_required`). With
+#: `--also migration_added`: `bump minor`, **`requires minor`**, verdict `ok`,
+#: `changes [migration_added]`, `reasons []`, `operator_digests_moved []`.
+#: Without the declaration: `requires patch`, the documents' own floor -- the
+#: fourth release in a row whose price the command sees only by declaration
+#: (D1561, D1703, D1811, D1889). **Four leaves differ, the four D1889
+#: predicted**: `template_version` 1.12.0 -> 1.13.0, `migrations.
+#: release_lock_sha256`, `migrations.project_set.count` 3 -> 4 and
+#: `migrations.project_set.lock_sha256` (the example set's `0004`); the
+#: compose limits reach no document leaf; 5,993 bytes on both sides.
+#: **ADR 0162 prices it a MINOR, and `1.13.0` is that floor exactly**: a
+#: released migration is a minor by the table; **no outputs, capability, lock,
+#: secret or host schema moves**, and the project manifest's schema 8
+#: invalidates no older manifest, so an operator supplies nothing new. What an
+#: operator must KNOW the reading cannot show: 0037 cannot be taken back by an
+#: image; **a project that ADDS a migration now proposes
+#: it first, and a host refuses a pending set without its proposal** -- a new
+#: step, not an invalidated manifest, and a set already applied needs none;
+#: and **the edge's limits take effect only when the edge is recreated**,
+#: which drops every project's ingress for the measured interval. **This
+#: session takes a host trip** (Run 10), so the class is confirmed against a
+#: DEPLOYMENT in the same session: `upgrade plan` on both projects, with the
+#: same declaration, before the deploy -- and a `major` there is a stop
+#: condition.
+CURRENT_SESSION = 35
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

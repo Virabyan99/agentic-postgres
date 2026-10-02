@@ -1173,6 +1173,20 @@ CLAIM_INTRODUCED_IN = {
     "event_wait_live": 34,
     "connector_schedule_live": 34,
     "delivery_restore": 34,
+    # Session 35 (ADR 0242-0245). TEN, seven offline and three host,
+    # landing with the constant (D690): approval in the database, the
+    # proposal record and its gate, the bounded edge and services, and the
+    # diagnostic account's reach.
+    "approval_in_database": 35,
+    "destructive_lint": 35,
+    "change_proposal": 35,
+    "proposal_approval": 35,
+    "proposal_gate": 35,
+    "every_service_bounded": 35,
+    "diagnostic_reach": 35,
+    "approval_in_database_live": 35,
+    "proposed_set_applied": 35,
+    "every_service_bounded_live": 35,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer
