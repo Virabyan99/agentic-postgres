@@ -1,6 +1,6 @@
 # 0043 — The access broker is a release, reached through a trampoline
 
-Status: accepted, with two amendments made on acceptance
+Status: superseded by [0246](0246-stage-5s-boundary-a-hosted-product-on-one-node.md) as the product's boundary (Session 36); before that accepted, with two amendments made on acceptance. The broker it describes still runs unchanged.
 Date: 2026-08-08
 Accepted: 2026-08-09 (Session 4, Run 6)
 Session: 4, Run 1

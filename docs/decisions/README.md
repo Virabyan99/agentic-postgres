@@ -105,9 +105,9 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0039](0039-a-claim-belongs-to-the-session-that-introduced-it.md) | A claim belongs to the session that introduced it | 3 | Accepted |
 | [0040](0040-a-loopback-publication-is-not-a-public-port.md) | A loopback publication is not a public port | 4 | Accepted, superseded in part |
 | [0041](0041-two-transports-three-access-profiles.md) | Two transports, three access profiles | 4 | Accepted |
-| [0042](0042-host-port-allocation-is-state-keyed-by-the-volumes-identity.md) | Host port allocation is state, keyed by the identity the volume carries | 4 | Accepted, amended |
-| [0043](0043-the-access-broker-is-a-release-reached-through-a-trampoline.md) | The access broker is a release, reached through a trampoline | 4 | Accepted, amended |
-| [0044](0044-there-is-no-publication.md) | There is no publication | 4 | Accepted |
+| [0042](0042-host-port-allocation-is-state-keyed-by-the-volumes-identity.md) | Host port allocation is state, keyed by the identity the volume carries | 4 | Superseded, by 0246 |
+| [0043](0043-the-access-broker-is-a-release-reached-through-a-trampoline.md) | The access broker is a release, reached through a trampoline | 4 | Superseded, by 0246 |
+| [0044](0044-there-is-no-publication.md) | There is no publication | 4 | Superseded, by 0246 |
 | [0045](0045-a-claim-is-shaped-by-where-it-can-be-measured.md) | A claim is shaped by where it can be measured | 4 | Accepted |
 | [0046](0046-a-nologin-stub-is-a-fact-with-an-expiry-date.md) | A NOLOGIN stub is a fact with an expiry date | 4 | Accepted |
 | [0047](0047-an-absence-proof-expires-when-a-later-session-supplies-the-thing.md) | An absence proof expires when a later session supplies the thing | 4 | Accepted |
@@ -279,8 +279,8 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0213](0213-the-agent-record-is-pruned-by-an-operator-who-states-a-horizon-and-by-nothing-else.md) | The agent record is pruned by an operator who states a horizon, and by nothing else | 28 | Accepted |
 | [0214](0214-the-reading-before-a-tag-states-facts-and-names-the-judgement-it-cannot-make.md) | The reading before a tag states the facts and names the one judgement it cannot make | 28 | Accepted |
 | [0215](0215-an-acknowledgement-is-read-through-the-containers-own-mount-namespace.md) | An acknowledgement is read through the container's own mount namespace, by pid, and never by a path the host resolves | 28 | Accepted |
-| [0216](0216-no-public-postgres-endpoint-in-stage-4-the-seam-stays-a-refusal.md) | No public Postgres endpoint in Stage 4; the seam stays a refusal, and the Stage 5 reading's preconditions are named | 30 | Accepted |
-| [0217](0217-stage-4s-boundary-nothing-may-require-a-hosted-trust-model-to-be-safe.md) | Stage 4's boundary: nothing built in Sessions 31-35 may require a hosted trust model to be safe | 30 | Accepted |
+| [0216](0216-no-public-postgres-endpoint-in-stage-4-the-seam-stays-a-refusal.md) | No public Postgres endpoint in Stage 4; the seam stays a refusal, and the Stage 5 reading's preconditions are named | 30 | Superseded, by 0246 |
+| [0217](0217-stage-4s-boundary-nothing-may-require-a-hosted-trust-model-to-be-safe.md) | Stage 4's boundary: nothing built in Sessions 31-35 may require a hosted trust model to be safe | 30 | Superseded, by 0246 |
 | [0218](0218-no-product-child-reads-the-terminal.md) | No product child reads the terminal: one exec helper, stdin closed unless input is given, and the class guarded by a scan | 30 | Accepted |
 | [0219](0219-the-reading-before-a-tag-takes-a-ref.md) | The reading before a tag takes a ref, and reads VERSION from it rather than from the working tree | 30 | Accepted |
 | [0220](0220-a-mirror-pass-has-three-outcomes-and-the-verb-reports-three.md) | A mirror pass has three outcomes, and the verb reports three: one immediate second pass separates a flake from a failure | 30 | Accepted |
@@ -309,3 +309,7 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0243](0243-a-change-to-a-project-set-is-proposed-and-a-host-applies-only-a-proposed-set.md) | A change to a project's migration set is proposed, recorded with the readings that exist, and a host applies a pending set only when a committed proposal names it; the names in both records are declared | 35 | Accepted |
 | [0244](0244-the-edge-and-every-long-running-service-are-bounded.md) | The edge and every long-running project service are bounded in memory, processes and CPU, and recreating the edge is a measured act | 35 | Accepted |
 | [0245](0245-the-diagnostic-account-reads-the-auth-storage-and-mcp-logs.md) | The diagnostic account reads the auth, storage and MCP logs, and its redaction knows a JSON key | 35 | Accepted |
+| [0246](0246-stage-5s-boundary-a-hosted-product-on-one-node.md) | Stage 5's boundary: a hosted product on one node; ADRs 0042, 0043, 0044, 0216 and 0217 superseded together | 36 | Accepted |
+| [0247](0247-the-reality-ledger-is-a-programs-input.md) | The Reality Ledger is a program's input | 36 | Accepted |
+| [0248](0248-retention-extends-adr-0213-to-the-stage-4-record-by-aggregate-with-a-verb.md) | Retention extends ADR 0213 to the Stage 4 record, by aggregate, with a verb | 36 | Accepted |
+| [0249](0249-the-request-and-worker-lines-are-printed.md) | The request and worker lines are printed | 36 | Accepted |

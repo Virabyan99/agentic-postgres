@@ -1,6 +1,7 @@
 # Session 36 — Preconditions: the boundary, the rescale, and the operating debt
 
-**Status: PLANNED 2026-10-03 at `1ea6259`, not started.** The first session of
+**Status: IN PROGRESS — Run 1 done 2026-10-03 (rows D2006–D2012).** Planned
+2026-10-03 at `1ea6259`. The first session of
 Stage 5 (`docs/plans/stage-5-plan.md` §3). Eleven runs and **two sittings on
 two days** — the server rescaled in place and the release deployed (one outage
 of both projects, measured), then the three rotations, a reboot and the one
@@ -382,7 +383,13 @@ second table below it, in execution order.
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
-| | | | | | |
+| **D2006** | §1 D1998, §5 Run 7 item 9, Run 10 S1: *"every declaration the gate accepts **except** `--replacement-host-outputs` and `--replacement-bootstrap-state`"*. | **Session 35's F6 sweep DECLARED `--replacement-bootstrap-state /home/op/replacement-bootstrap-state.json`** (`~/s35r10/s35-r10-gate.sh:151`); the flag admits REC-KIT-002's live half (`session-35-check.sh:441-447`; `test_session18_recovery.py:267` requires `APG_REPLACEMENT_BOOTSTRAP_STATE`), and **`disaster_kit` (REC-KIT-001, -002) is `passed` in `evidence/session-35.json`** — measured in Run 1. The file is the record Session 18's adoption left; it names no replacement this session makes. | **S1 declares `--replacement-bootstrap-state` exactly as F6 did.** Only `--replacement-host-outputs` (which F6 did not declare either) stays undeclared, and `replacement_host_restore` stays `not_run` by D1028. Run 7's `s36-sweep.sh` is derived from F6 by diff, so the flag survives by construction; the derivation's token diff must show it present. | Following D1998 as written would have moved a `passed` claim to `not_run` — a regression produced by a plan sentence, caught by reading the previous sweep's actual line (D977's habit). | — |
+| **D2007** | §2 `OPS-LOG-002` and §5 Run 4: *"after a request with a known `X-Request-Id` … `docker logs` … holds one `apg.http.request` line naming that request id"*. | **Rig 36c: the line's `request_id` is never the caller's.** `request_id.py:1-5`: *"Nothing in this module reads an inbound `X-Request-Id`"*; the plane mints the id and returns it on the response's `X-Request-Id`. In the rig, three requests carrying caller ids `…0001`–`…0003` produced lines naming three other ids, and `…0001` appeared in no line. | **The live proof reads the id from the RESPONSE's `X-Request-Id`** and asserts exactly one line names it; it also sends a planted caller id and asserts that id appears in no line (the control that the minting holds). `OPS-LOG-002`'s text is written that way in Run 8. | A proof that sent an id and looked for it would fail on first execution (CLAUDE.md §7 question 2) — or, worse, pass the day someone made the plane trust a caller's id. | 0160, **0249** |
+| **D2008** | §1 D1989 / §5 Run 2 item 2: *"no `parked` step … whose `await_event` equals the event's `name`"*. | `workflow_step.await_event` holds **`name@version`** (`0036:173`'s CHECK regex); `connector_event` holds `name` and `version` in two columns (`:116-117`). **D1989's question, read in Run 1**: `0036:877-878` — *"An event emitted before the park does not serve it"*; `app.emit_event` serves waits only at emission (`:230-241`), `workflow_await_event` clears the payload when it parks (`:899-902`), and the only other readers of `connector_event` join it through a delivery (`:453`, `:823`). | **The guard compares `s.await_event = e.name \|\| '@' \|\| e.version`** (rig 36b ran it that way and kept the awaited event). The guard is **belt-and-braces**: no reader would serve a parked step from a stored event. Kept, because it costs one `NOT EXISTS`. | The plan's wording would have compared `order.paid@1` with `order.paid` and never matched — a guard that silently guards nothing. | 0248 |
+| **D2009** | §1 D1998's header row and ADR 0247's field list (§5 Run 1): `today_evidence` — *"a claim or envelope subject or `null`"*; §1 D2000 and §2 `LEDGER-001`: *"every `available`/`beta` row's `evidence` resolves"*. | The plan names two different fields for the evidence, in two places, without saying whether they are one. | **Two fields, two meanings** (ADR 0247): `today_evidence` proves the `today` sentence (what the appliance does now for its operator, nullable); `evidence` proves a customer-facing `available`/`beta` status (non-empty exactly then, empty otherwise). The guard resolves both. | A substrate claim that passed for the operator is not evidence that a customer can reach the thing; one field would let the first be read as the second. | **0247** |
+| **D2010** | §5 Run 1, ADR 0246 item (1): *"their index rows' Status cells become `Superseded by 0246`"*. | `test_the_index_status_agrees_with_each_adr` (`test_acceptance_registry.py:552-581`) compares the FILE's first word with the index cell **up to its first comma, whole** — `Superseded by 0246` read as `superseded by 0246` ≠ `superseded`; measured red in Run 1's first targeted run. | **The cells read `Superseded, by 0246`** (the house shape: `Accepted, superseded in part`); the files' status lines begin `superseded by [0246](…)` / `Superseded by [0246](…)`. Re-run: 24 passed. | The test is right; the plan's cell text was a transcription of the ADR template's line, not of the index's convention. | 0246 |
+| **D2011** | §5 Run 1, the Scope sentence: *"The Scope section gains: … Denial of service is in scope for the creation paths and the public Postgres port as admission and rate limits"*. | `docs/threat-model.md`'s Scope list excluded *"Denial of service"* outright (`:166-167` before the edit). Adding the sentence alone would leave the section contradicting itself. | **The bullet is narrowed** to *"Denial of service as availability"*, pointing at the new sentence; the sentence is added as the plan wrote it. | One section saying DoS is in and out of scope is the self-contradiction D1996 is about, one document over. | 0246 |
+| **D2012** | §1 D2003: *"at Session 35's saturation (~480 req/s) nine minutes"*. | Session 35's saturation was measured **against the REST path (PostgREST)**, which never passes through the auth container whose log this is; the auth container serves `/api/app/*` only. | **ADR 0249 states the figure with its condition**: ~250,000 requests per container before rotation; *"at a sustained 480 requests per second (Session 35's saturation rate, measured against the REST path, not this container) it would be about nine minutes"*, and days at measured traffic. | A rate from another service presented as this one's would be a number that looks measured (D593, D603). | **0249** |
 
 ---
 
@@ -650,9 +657,64 @@ them).
 - **ADR 0250 is NOT written in Run 1**; Run 6 writes it if E0 allows.
 - All four indexed in `docs/decisions/README.md` (after `:311`).
 
-**Done.** *(executor: the four rigs' numbers and their controls; E0's
-readings — host facts, unit states, the provider's key names or why none,
-beta's counts, the F6 file list; D1996's answer; the rows added.)*
+**Done.** 2026-10-03, at `b151779`. Rigs in WSL `~/s36/rig36/` (scripts,
+SQL and transcripts; backed up to the scratchpad's `rig36/`).
+
+- **36a** (`POSTGRES_IMAGE` 18.4, `DBMATE_IMAGE` 2.34.1): (i) `ALTER TYPE t ADD
+  VALUE 'c'; UPDATE … SET v = 'c'` in ONE transaction → `ERROR: unsafe use of
+  new value "c" of enum type t`, `HINT: New enum values must be committed before
+  they can be used.` (55P04); the type rolled back with it (`a,b`). (ii) **The
+  control** — two transactions → rc 0, value `c`. (iii) two dbmate files, `up
+  --strict` → both `Applied`, rc 0. (iv) `psql -1 -f` per file (`apg dev up`'s
+  shape) → rc 0 each. (v) **ONE dbmate file → dbmate prints `Applied:
+  20261003120001_both.sql in 2.457985ms` and THEN `Error: … unsafe use of new
+  value "c" … (55P04)`**, rc 2, ledger 0 rows, value `a` — D941's class again.
+  **D1987's two-file shape is REQUIRED, not merely safer.**
+- **36b** (`apg dev up` on `project.second.example.yaml`, 37 migrations as the
+  migration user; the rig in one transaction, rolled back): fixtures 8 runs (every
+  status + one ended 1 min ago), 8 steps, 16 attempts, 3 approvals, 3 receipts,
+  6 deliveries, 4 events, 4 agents. **Control — runs deleted first → `23503 …
+  violates foreign key constraint "workflow_step_run_id_fkey"`.** The FK graph
+  read from `pg_constraint` matches §0 exactly (every Stage 4 FK `NO ACTION`;
+  `agent_credentials`/`agent_quota` `CASCADE`). Run prune bounded to 2 → 2, then
+  unbounded → 2: survivors `queued`, `running`, `compensating`, the
+  1-minute-old `succeeded`; approvals left: the running run's `pending`;
+  receipts left: the running run's and the run-less one. `LIMIT NULL` = no limit
+  (5 of 5). Delivery prune → 4: events left `ev_awaited` (a parked step awaits
+  `order.paid@1`), `ev_new`, `ev_pending`; deliveries left: the recent
+  `delivered`, the `pending`. Agent prune → 2 (the free revoked one and the one
+  whose run was just pruned; credentials and quota 4 → 2 by CASCADE); kept
+  `ag_active`, `ag_rev_conn`. `0025:143` moves `updated_at` on every status
+  change, so a revoked agent's `updated_at` is no earlier than its revocation.
+  **D1989: belt-and-braces** (D2008).
+- **36c** (the image's uvicorn argv from two copies of `app/`, `APP_MODE=auth`,
+  `--lifespan off`, 5 requests each): **control 0 `apg.http.request` lines;
+  arm exactly 5** (one per request; `"route": "/health/live"` ×4,
+  `"<unmatched>"` for the 404 POST); planted token, query, body and path: 0
+  occurrences in either; **the caller's `X-Request-Id` in no line** (D2007).
+  Lines ~140 bytes.
+- **36d** (10,000 approvals across 2,000 runs, half ended, 2,000 pending; on the
+  same throwaway cluster with `withdrawn` committed first): first call 82.7 ms
+  (1,000 withdrawn); the UPDATE's plan on the second pass 0.84 ms (bitmap scan
+  of the existing `workflow_approval_status_requested_idx`, hash join to 1,000
+  ended runs); the function three more times 1.06 / 1.43 / 1.15 ms. **Under 50
+  ms: no partial index.**
+- **D1996**: §9 is right — the authenticator and documentation passwords were
+  rotated and proved on 2026-08-13 (`session-06-implementation-plan.md:309-316`)
+  and again in Session 11's window (`session-11-…:974-976`, `:1243`). **§13's
+  *"have still never been performed"* is wrong for those two.** No plan records
+  an application-credential rotation. The trio stays `not_run` because no sweep
+  since has declared all four files together. Run 8 corrects §13.
+- **Documents**: ADRs 0246–0249 written and indexed; 0042, 0043, 0044, 0216,
+  0217 → *Superseded, by 0246* (file and index; D2010); `docs/threat-model.md`
+  gains *Hosted threats, written before their controls (Stage 5)* — fifteen
+  items, no `|` line — and the Scope sentence (D2011); `docs/product-contract.md`
+  §2 and §5 amended (D2004). `test_acceptance_registry` (after D2010's fix: 24
+  passed), `test_documentation_index` and `test_session12_documented_path`
+  (with it: 80 passed, 1 failed → the D2010 cell, fixed, module re-run green).
+- **Rows added**: D2006–D2012. D2006 is the one that mattered: the plan would
+  have dropped a declaration that keeps `disaster_kit` passing.
+- **Sheet E0**: *(pending — the operator's)*.
 
 ### Run 2 — migrations 0038 and 0039, and the worker's call
 

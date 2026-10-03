@@ -50,9 +50,17 @@ are not.
 
 **Outside the boundary — deliberately not reproduced:**
 
-- Autoscaling, scale-to-zero, and compute/storage separation.
-- Instant branching and copy-on-write database forks.
-- A hosted control plane, web console, or multi-region availability.
+*Amended by ADR 0246 (Session 36).* Stage 5 offers the appliance to people who
+do not operate it, on one node; a hosted control plane and console are no
+longer outside the boundary, and two items below are narrowed rather than
+removed.
+
+- Autoscaling and compute/storage separation. *(Sleep — stopping a project's
+  containers, triggered by its owner or by idleness — is not scale-to-zero and
+  is Stage 5's to build.)*
+- Copy-on-write database forks. *(A branch restored from a backup at a
+  recovery point is Stage 5's to build; an instant fork is not.)*
+- Multi-region availability.
 - Managed failover. Recovery here is restore-based and has a real RTO.
 
 The honest summary: this gives a small team most of the *ergonomics* of a
@@ -471,14 +479,23 @@ enforced in `src/agentic_postgres/config.py`:
 
 These are not deferred. They are outside the product.
 
-- A shared, multi-tenant control plane, or any cross-project shared catalog.
-- A hosted web console or SaaS offering.
-- Autoscaling, scale-to-zero, or compute/storage separation.
-- Database branching or copy-on-write forks.
+*Amended by ADR 0246 (Session 36).* Removed from this list: a hosted control
+plane and a hosted web console, which Stage 5 builds (Sessions 37 and 42).
+Narrowed: scale-to-zero, branching and cross-project reporting, as written
+below. Kept whole: everything else.
+
+- Any cross-project shared catalog in a project's request path. *(The control
+  plane's own registry of projects is the control plane's, and no project's
+  request reads it.)*
+- Autoscaling or compute/storage separation. *(Sleep that stops a project's
+  containers is not scale-to-zero, and is in the product from Stage 5.)*
+- Copy-on-write database forks. *(A branch restored from a backup at a
+  recovery point is in the product from Stage 5.)*
 - Automatic failover or multi-region replication.
 - Arbitrary SQL execution by an agent, under any authentication.
 - General-purpose ORM support beyond the endpoint contract in `DBX`.
-- Cross-project reporting or aggregation.
+- Cross-project reporting over project data. *(The control plane counts its own
+  records and reads each project's readings; it never reads a project's rows.)*
 
 What the first and last of those protect is **the surface a project serves**:
 nothing a project's users, agents or routes can reach may see another project,
@@ -486,6 +503,10 @@ and no shared catalog sits in any request's path. An operator's read over the
 deployed documents already on a host's own disk — run as root at a terminal,
 holding no credential, served to nobody and read by nothing — is not that
 catalog, and ADR 0185 says where the line is.
+
+**A product surface runs no SQL** (ADR 0246): the console, Studio, `/api/v1`,
+MCP, a workflow and a connector. A customer's own client, with the customer's
+own database credential, may; an agent never does.
 
 The agent constraint is the load-bearing one. An agent's reachable surface is
 exactly the set of capabilities enumerated in `capabilities.yaml`, each bound

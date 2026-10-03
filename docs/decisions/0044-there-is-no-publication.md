@@ -1,6 +1,6 @@
 # 0044 — There is no publication
 
-Status: accepted
+Status: superseded by [0246](0246-stage-5s-boundary-a-hosted-product-on-one-node.md) as the product's boundary (Session 36); before that accepted. `publication()` still raises and `compose.yaml` still has no `ports:` key until Session 39's ADR.
 Date: 2026-08-10
 Session: 4, Run 9
 Supersedes in part: [0040](0040-a-loopback-publication-is-not-a-public-port.md)

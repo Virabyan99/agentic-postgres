@@ -1,6 +1,6 @@
 # 0216 — No public Postgres endpoint in Stage 4; the seam stays a refusal
 
-- **Status:** Accepted
+- **Status:** Superseded by [0246](0246-stage-5s-boundary-a-hosted-product-on-one-node.md) (Session 36), as its own wording foresaw: it bound Sessions 31–35
 - **Date:** 2026-09-18
 - **Session:** 30, Run 2 (D1518)
 - **Affects:** no requirement, no schema, no migration, no deployed field. This

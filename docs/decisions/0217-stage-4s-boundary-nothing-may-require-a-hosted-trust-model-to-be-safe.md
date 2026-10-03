@@ -1,6 +1,6 @@
 # 0217 — Stage 4's boundary: nothing built in 31–35 may require a hosted trust model to be safe
 
-- **Status:** Accepted
+- **Status:** Superseded by [0246](0246-stage-5s-boundary-a-hosted-product-on-one-node.md) (Session 36), as its own wording foresaw: it bound Sessions 31–35. Commitments 1 and 4 are carried forward by 0246 unchanged; commitment 3 lapses.
 - **Date:** 2026-09-18
 - **Session:** 30, Run 2 (D1517, D1527)
 - **Affects:** no requirement directly. It binds the design of every plane

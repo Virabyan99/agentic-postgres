@@ -154,17 +154,111 @@ proof is claimed to hold each one, and that the proof runs in the sweep that
 would record it. A cell whose proof is weak looks exactly like a cell whose
 proof is strong.
 
+## Hosted threats, written before their controls (Stage 5)
+
+ADR 0246 makes Stage 5 a hosted product: people who do not operate the node
+hold accounts, API keys, database credentials and projects they did not
+deploy. The threats below are theirs. **They are a list, not table rows, on
+purpose**: a row in the table must name a registered requirement
+(`test_every_threat_row_names_at_least_one_requirement`), and none of these
+controls exists yet. A row with an invented requirement would be a control that
+looks measured. **Each item moves into the table, as a `THR-*` row with its
+requirement and its negative test, in the run that registers the requirement**
+— and every building session adds its own items in its first run (D1527's
+discipline, carried into Stage 5).
+
+Each names the session that builds its control and the negative test it owes.
+Signup abuse is not here: Stage 5 is invite-only (D1951). Support-grant misuse
+is not here either: no support grant is built, and the Reality Ledger says why
+— *"the operator of this single node has root on it; support access is not
+technically bounded in this beta"* (D1971).
+
+1. **Invitation abuse and enumeration** (Session 37). An attacker guesses,
+   replays or reuses an invitation token, or learns from the refusal whether an
+   address or organisation exists. Owed: a used, expired or unknown token is
+   refused with one indistinguishable answer; a token is single-use under
+   concurrency.
+2. **API-key compromise and replay** (Session 37). A leaked management key is
+   used after its owner is removed or the key revoked, or used against a project
+   of another organisation. Owed: a revoked key, and a key whose member left,
+   are refused; a key never opens a database; a key of organisation A is
+   refused on every resource of organisation B.
+3. **Organisation privilege escalation** (Session 37). A `member` or `viewer`
+   grants itself `admin`, mints a key with a scope it does not hold, or an
+   `admin` acts without the second factor `owner` and `admin` require. Owed:
+   each role refused every operation above it; a key's scopes never exceed its
+   minter's; `owner`/`admin` without TOTP refused.
+4. **Project and branch enumeration** (Sessions 37, 40). A caller learns that a
+   project or branch of another organisation exists from a status code, a
+   timing or an error body. Owed: a foreign id and a missing id return the same
+   answer.
+5. **Endpoint confusion and gateway attacks** (Session 39). A plaintext
+   connection, a wrong or absent SNI, or one project's hostname used to reach
+   another project's database through the shared Postgres port. Owed: plaintext
+   refused; a wrong SNI refused; project A's credential refused at project B's
+   endpoint (the isolation matrix extended to the listener).
+6. **Wake-on-connect abuse** (Session 39). Unauthenticated connections used to
+   keep a sleeping project awake or to make the node wake many projects at once.
+   Owed: the measured rule for what wakes a project, and a wake that admission
+   would refuse is refused — or, if Session 39's rig refuses wake-on-connect,
+   the Ledger says `planned` and the client sees `project_sleeping`.
+7. **Project-creation and branch-creation exhaustion** (Sessions 38, 40). A
+   member creates projects or branches until the node or the slots run out.
+   Owed: the entitlement refused as `plan_limit_reached` before an operation
+   exists; capacity refused as `capacity_exhausted` with *"No resources were
+   created"*; neither code produced by the other's reader.
+8. **Plan-limit bypass and usage tampering** (Session 41). A caller raises its
+   own limits, creates concurrently past a limit, or writes its own usage.
+   Owed: a limit enforced under concurrency; no customer surface writes a usage
+   sample or an entitlement.
+9. **Restore abuse** (Session 40). A restore aimed at another project's
+   repository, at a recovery point outside the window, or at the parent's live
+   volume. Owed: a foreign repository refused; the parent untouched; a branch
+   refuses the parent's credentials after its re-key.
+10. **Control-plane / data-plane credential confusion** (Sessions 37, 38, 39).
+    A control-plane session or API key presented to a project's data or admin
+    plane, or a project credential presented to `/api/v1`. Owed: each refused
+    at the other plane; the control plane holds no credential that opens a
+    project (ADR 0246's boundary sentence).
+11. **Project-deletion races and slot reuse** (Session 38). A deletion that
+    leaves a route, a role or a repository a later project inherits, or an
+    operation that runs against a project mid-deletion. Owed: a deleted
+    project's names derive nothing a new one is given; a slot is single-use.
+12. **Connector abuse by a customer** (Session 42). A customer-defined
+    connector used to reach another project, an internal address, or the
+    node's own services. Owed: the connector planes' existing refusals hold for
+    a customer's definitions, and an endpoint stays the manifest's.
+13. **Observability poisoning and ClickStack exhaustion** (Session 41). A
+    customer writes log lines or query text that forge another project's
+    telemetry, or floods the telemetry store until the node's own readings
+    fail. Owed: every series and line names its project from the platform, not
+    from the payload; ClickStack bounded in memory, processes and CPU and
+    charged by admission.
+14. **Cross-project leakage through any new surface** (every session). Any
+    console page, `/api/v1` operation, snippet, notification, usage figure or
+    diagnostics bundle that carries another project's data. Owed: each session
+    extends the isolation matrix to the surface it adds.
+15. **Storage exhaustion** (Session 38). One project fills the shared disk until
+    its neighbours' databases or backups stop. Owed: the measured reading and
+    the refusal admission makes; until a per-project disk quota exists, the
+    Ledger says storage is `planned`, not limited.
+
 ## Scope
 
-This model covers the deployed system. It deliberately excludes:
+This model covers the deployed system. **From Stage 5 (ADR 0246) external users
+are in scope.** Denial of service is in scope for the creation paths and the
+public Postgres port as admission and rate limits — still not as an
+availability SLA. It deliberately excludes:
 
 - Physical and hypervisor-level attacks on the host.
 - Compromise of the container registry or the base images themselves; that is
   mitigated separately by digest pinning (`CFG-014`), which proves you got the
   bytes you asked for, not that those bytes are trustworthy.
 - Supply-chain compromise of a locked Python dependency.
-- Denial of service. Rate limiting is a protective control here, not an
-  authorization control, and no availability SLA is claimed.
+- Denial of service as availability. Rate limiting and admission are
+  protective controls here, not authorization controls, and no availability
+  SLA is claimed — the creation paths and the public Postgres port are in scope
+  as limits, above, and nothing else is.
 - Availability under a neighbour's load. `THR-NOISY-NEIGHBOUR` is in the table
   above and its claim is narrow on purpose: **a neighbour's load is bounded,
   not a claim about availability**. Session 31 gives every project service a

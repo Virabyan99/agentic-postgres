@@ -1,6 +1,6 @@
 # 0042 — Host port allocation is state, keyed by the identity the volume carries
 
-Status: accepted, amended by [0044](0044-there-is-no-publication.md)
+Status: superseded by [0246](0246-stage-5s-boundary-a-hosted-product-on-one-node.md) as the product's boundary (Session 36); before that accepted, amended by [0044](0044-there-is-no-publication.md). The allocation it describes still runs unchanged.
 
 The allocation no longer names a port the host publishes; it names the LOCAL
 port a developer binds at the near end of a tunnel. Everything this ADR
