@@ -1,33 +1,33 @@
-# Session 36 — Preconditions: the boundary, the move, and the operating debt
+# Session 36 — Preconditions: the boundary, the rescale, and the operating debt
 
 **Status: PLANNED 2026-10-03 at `1ea6259`, not started.** The first session of
-Stage 5 (`docs/plans/stage-5-plan.md` §3). Twelve runs and **four sittings on
-four days** — the new host prepared (no outage), the move and the release (an
-outage of both projects, measured), the three rotations and the one sweep, the
-old host retired. The plan spends **D1985–D2009** and **ADR 0246–0251** (0251
-only if Run 6 builds; §2); rows the runs add start at **D2010**. **NEXT FREE
-after this plan: D2010, ADR 0252.**
+Stage 5 (`docs/plans/stage-5-plan.md` §3). Eleven runs and **two sittings on
+two days** — the server rescaled in place and the release deployed (one outage
+of both projects, measured), then the three rotations, a reboot and the one
+sweep. **Revised the same day** from a move to a new VPS: the operator chose to
+rescale the existing Hetzner server, CPU and RAM only (§1 D1991). The plan
+spends **D1985–D2005** and **ADR 0246–0250** (0250 only if Run 6 builds; §2);
+rows the runs add start at **D2006**. **NEXT FREE after this plan: D2006, ADR
+0251.**
 
 **Brief:** `docs/plans/stage-5-plan.md` §5 *Session 36* whole (Builds / Already
 true / Must not / Measures / Closes), its rows **D1946** (the hosted decision;
-§6's four items become this session's preconditions), **D1948** (the move,
-*"the first time the replacement path runs to the end"*), **D1949** (ADR 0246,
+§6's four items become this session's preconditions), **D1948** (a new, larger VPS — superseded by the operator's in-place rescale,
+§1 D1991), **D1949** (ADR 0246,
 the lapsed boundary), **D1973** (the retention plane), **D1974** (the three
-rotations and a schedule), **D1975** (the edge window: the move is its one
-scheduled recreation), **D1976** (D1581 answered by a rig before Session 38
+rotations and a schedule), **D1975** (the edge window: nothing here recreates
+the edge; the rescale and the reboot restart it with the host), **D1976** (D1581 answered by a rig before Session 38
 builds on it), **D1977** (D1918, D1547), **D1978** (the hosted `THR-*` rows
 before any code), **D1979** (the Reality Ledger and its guard), §2.3 (the open
-items), §2.4 (every `not_run` touched, none promised), §4's two cautions (the
-rotations; the move), §8–§9, §11. Plus `docs/stage-5-decision-report.md` §5–§6,
-`docs/scope-closure.md` §28, `docs/node-loss-runbook.md` whole (214 lines),
-`docs/operator-guide.md` §3 (`:308-420`), §9 (`:497-545`), §13 (`:702-730`),
-§15 (`:830-1170`), `docs/api-operations.md` §*Rotating a credential*
-(`:84-200`), and `docs/plans/session-18-implementation-plan.md` Run 6
-(`:469-559`, the only replacement host this project has built, to the restore
-and no further).
+items), §2.4 (every `not_run` touched, none promised), §4's caution about the rotations (its caution about a move is moot: the host is rescaled, §1 D1991), §8–§9, §11. Plus `docs/stage-5-decision-report.md` §5–§6,
+`docs/scope-closure.md` §28, `docs/operator-guide.md` §9 (`:497-545`), §13
+(`:702-730`), §15 (`:830-1170`), §16 (the node as a finite resource),
+`docs/api-operations.md` §*Rotating a credential* (`:84-200`), and Hetzner's
+rescale rules (docs.hetzner.com/cloud/servers/faq, read 2026-10-03, quoted in
+§1 D1991).
 
-**Shape:** twelve runs. **Run 1** is documentation — four rigs, one host
-reading sheet on the OLD host (E0, reads only), the hosted threats, five ADRs,
+**Shape:** eleven runs. **Run 1** is documentation — four rigs, one host
+reading sheet (E0, reads only), the hosted threats, five ADRs,
 the product contract amended — and reads **no** CI verdict. **Runs 2–6** change
 code: each pushes and reads that commit's own CI verdict by full SHA (`gh api
 "repos/Virabyan99/agentic-postgres/actions/runs?head_sha=<40 chars>" --jq
@@ -35,15 +35,14 @@ code: each pushes and reads that commit's own CI verdict by full SHA (`gh api
 status, three buckets — success / failure / not registered; an empty list is
 not a verdict, D1057). **Run 6 is conditional** on Sheet E0's answer (§1
 D1997). **Run 7** writes the trip's instruments and rehearses them offline,
-committing nothing but its `**Done.**`. **Run 8** is the bump. **Runs 9–11**
-are the sittings. **Run 12** is the close (the envelope's new rows are `src/`,
+committing nothing but its `**Done.**`. **Run 8** is the bump. **Runs 9–10**
+are the sittings. **Run 11** is the close (the envelope's new rows are `src/`,
 so it gates and reads CI).
 
 **Product version at close:** `CURRENT_SESSION` **36**; `template_version`
 **`1.14.0`** — predicted *minor by declaration* (two released migrations, a new
 command; `upgrade plan` reads a migration only when declared, D1703, so Run 8
-declares `--also migration_added`) and **read from `upgrade plan` on the new
-host, never chosen** (§1 D2002). **Migration 0038** (`approval_withdrawn`: one
+declares `--also migration_added`) and **read from `upgrade plan` on the host, never chosen** (§1 D2001). **Migration 0038** (`approval_withdrawn`: one
 `ALTER TYPE … ADD VALUE 'withdrawn'`), **migration 0039** (`record_retention`:
 three prunes, one withdrawal, one size reading — all in `app_private`, no
 table, no column, no `api` object, so no `NOTIFY pgrst`), **the worker calls the
@@ -54,7 +53,7 @@ Reality Ledger** (`docs/reality-ledger.yaml`, its schema, its renderer, its
 guard, its page), **the hosted threats** as a list in `docs/threat-model.md`,
 **ADR 0246** (the hosted boundary; 0042/0043/0044/0216/0217 superseded;
 `product-contract.md` §2 and §5 amended), and — if E0 allows — **a secret-age
-reading** (`doctor --reading secrets`, ADR 0251). **Outputs stay at schema 19,
+reading** (`doctor --reading secrets`, ADR 0250). **Outputs stay at schema 19,
 manifest at 8, host.yaml at 3. No new container, role, network, route, router,
 secret, scope or port.** A `major` is §9's stop.
 
@@ -65,8 +64,9 @@ than the one that planned it.** Every path below was read from the tree on
 direct reads of `docs/node-loss-runbook.md`, `docs/operator-guide.md` §2–§3,
 §9, §13, `docs/api-operations.md` §*Rotating*, `bin/backup.sh --help`,
 `bin/project-runtime.sh --help`, `bin/upgrade.sh --help`, `bin/provision-host.sh`
-`:85-140`, and Sessions 30 and 35's plans. **The new host does not exist yet;
-every fact about it is a reading Run 9 owes.** Every path is cited by
+`:85-140`, and Sessions 30 and 35's plans. **The rescaled size is the operator's
+choice on the day; every fact about the host after the rescale is a reading
+Run 9 owes.** Every path is cited by
 `path:line`. Every third-party or product claim is measured in Run 1's rigs
 with a control, or is marked as the measurement a run owes — never assumed.
 **Read CLAUDE.md §1 in the launch folder before the first command, then this
@@ -78,26 +78,23 @@ editing** — the numbers were right on 2026-10-03 and `ruff format` moves them.
 
 **The seven sentences the executor most needs, in case nothing else is read:**
 
-1. **The move is a cutover, not a rehearsal, and the old cluster must never run
-   again once the new one archives** (§1 D1991, ADR 0249). Both hosts would
-   write one pgBackRest repository; the restored cluster continues on a new
-   timeline in the SAME stanza. So the order is fixed: final incremental
-   backup → `pg_switch_wal()` and wait until `pg_stat_archiver` has archived
-   that segment → stop and DISABLE the project units and the three backup
-   timers on the old host → move DNS → restore on the new host **from the
-   primary** (`--from primary --latest`; the mirror lags by up to a day) → deploy
-   the KIT's release (`f7fb96d`) → read the row counts against the ones taken
-   before the stop. The old host is destroyed on day 4 and started by nothing
-   before then.
-2. **One sweep, on day 3, after the rotations and a reboot** (§1 D1998). It is
-   the only run that writes `evidence/session-36-host.json`; day 2 verifies the
-   move with `-k` (which writes nothing). `port_allocation` needs
+1. **The host is rescaled in place, not replaced** (§1 D1991, the operator's
+   decision of 2026-10-03). Hetzner's rescale needs the server OFF, keeps its
+   disk with **"CPU and RAM only"** (so a downgrade stays possible), keeps the
+   architecture (x86), and may change the CPU vendor. The order is fixed: an
+   incremental backup and the row counts → `sudo systemctl poweroff` → the
+   console rescale → **the Primary IPv4 read on the console BEFORE power-on**
+   → power on → the units `active` → the doctors and the counts `EQUAL` →
+   `host.yaml`'s `memory_mb` re-declared with the reserve UNCHANGED (D1992).
+   Nothing moves: same address, disk, documents, kits, timers and identities.
+2. **One sweep, on day 2, after the rotations and a reboot** (§1 D1998). It is
+   the only run that writes `evidence/session-36-host.json`; day 1 verifies the
+   rescale and the release with `-k` (which writes nothing). `port_allocation` needs
    `--after-reboot` in the sweep that writes the evidence, and the rotation trio
    needs its four `--rotated-*` files in the same one.
 3. **The three rotations are alpha's, one sheet each** (§1 D1995). The proofs
    read `APG_PROJECT_A_OUTPUTS` only; the fourth file is the retired signing
-   JWK Session 30 kept at `/home/op/s30-retired-alpha-dev-jwk.json`, which
-   must be copied to the new host. Every rotation is: capture the old value to
+   JWK Session 30 kept at `/home/op/s30-retired-alpha-dev-jwk.json`. Every rotation is: capture the old value to
    a root-only file → replace it at the provider by hand → `project-runtime.sh
    … down` (D253, still live) → materialize → deploy → doctor.
 4. **Retention prunes by AGGREGATE, never per table, and nothing prunes on its
@@ -159,7 +156,7 @@ EVIDENCE        evidence/session-35.json: 198 claims, 192 passed, 5 not_run,
                 credential_rotation_planes, port_allocation,
                 replacement_host_restore. Host 1082/1/7, external 25/0/8,
                 offline 60/60.
-OLD HOST        62.238.99.122 (apg-vps-01), ~op/agentic-postgres at f7fb96d.
+HOST            62.238.99.122 (apg-vps-01), ~op/agentic-postgres at f7fb96d.
                 Both projects 1.13.0, doctor 12 ok, ledgers 37 / 37+4. 3,814
                 MiB, no swap, 2 vCPU; host.yaml capacity 3814 / 2214 reserve /
                 38 GiB / 8 GiB reserve. Beta: manifest 7, connectors ON (four,
@@ -171,8 +168,11 @@ OLD HOST        62.238.99.122 (apg-vps-01), ~op/agentic-postgres at f7fb96d.
                 gate's --kit-dir stays kit-2026-09-11 (D1282). Session 35's
                 script set s35-r10-* in /home/op and WSL ~/s35r10/ (deriver
                 ~/s35r10/s35r10-derive.py -- THE MODEL for this trip's).
-NEW HOST        Does not exist. The operator provisions it (Sheet N0): size and
-                provider are the operator's (stage plan D1948).
+RESCALE         A Hetzner Cloud server. Rescaled IN PLACE, CPU and RAM only
+                (D1991): powered off first; an x86 plan of the operator's
+                size (at least 4 vCPU / 8 GB; 8 / 16 if Session 41's ClickStack
+                is to fit); the disk stays 38 GB; the Primary IPv4 is read on
+                the console before power-on.
 ```
 
 **What exists, measured at `1ea6259`, and the session builds on:**
@@ -293,30 +293,21 @@ NEW HOST        Does not exist. The operator provisions it (Sheet N0): size and
   the canonical snapshot is captured from a deployment (`sudo
   bin/api-contract.sh --update … > candidate.json`; there is no `--write`), and
   the generated client embeds its digest (`client_ir.py:288-312`).
-- **The move's commands** (`docs/node-loss-runbook.md`): verify the kit
-  (`:68`); `bootstrap-providers.sh --adopt --state …/bootstrap-state.json
-  --operator-credential-file /root/.config/agentic-postgres/bootstrap/
-  infisical-control-plane-credential` then `--apply` (`:69-71`, `:87-88`);
-  materialize and render (`:111-112`); `restore.sh … --plan`, then the restore
-  (`:128-131`); `deploy.sh … --through-session <N>` (`:149`); DNS last (`:168-174`).
-  **The runbook is loss-shaped**: it restores from the MIRROR and archives to a
-  NEW primary bucket (`:104-108`) because the old host *"is gone or is
-  production's"*. `bin/restore.sh` also takes `--from primary`
-  (`:35-36`; refusals `:50-52`; exit 7 *plan refused as unsafe*; writes
-  `evidence/restore-<key>-<id>.json`). `bin/provision-host.sh` creates **no
-  user** and installs **no `apg-diag`** (operator guide `:117`, `:321-328`);
-  three `--apply` passes (`:104-140`); it installs every unit and enables only
-  the docker firewall — **backup timers are installed, not enabled**.
-  `initial_acme_environment` is `const: staging` (`host.schema.json:152-155`);
-  `edge.sh promote-acme --to production --confirm <host.id>` refuses without a
-  staging certificate and restarts the edge (`bin/edge.sh:292-334`). The host
-  manifest has **no domain field**; a project's hostname is its manifest's
-  `project.domain` (`schemas/project.schema.json:49-55`), one per project.
-  Edge state: `/var/lib/agentic-postgres/edge` (`edge_state.py:46`), ACME
-  stores under `acme/` (`:47`), `production.json` 0600 in a 0700 directory
-  (`:109`).
-- **The claims the move and the rotations can move.**
-  `replacement_host_restore` = REC-NODE-001 (`test_node_restore.py` × 6 +
+- **The host's own restart path.** `provision-host.sh` installed and enabled
+  `agentic-postgres-project@<key>.service`, `agentic-postgres-edge.service` and
+  the docker firewall; the backup timers are enabled by `bin/backup.sh
+  --outputs … schedule enable` (`bin/backup.sh --help`). The last reboot
+  (2026-09-17, a kernel update) cost 8 s and `port_allocation` passed on it
+  (D1500); `bin/project-runtime.sh --host FILE --project-key KEY
+  --through-session N up|resume|down|status` (`down` detaches the edge and
+  stops the project, volumes kept). `host.yaml` declares `capacity:
+  {memory_mb: 3814, reserve_memory_mb: 2214, disk_gb: 38, reserve_disk_gb: 8}`;
+  admission is `memory_mb − reserve_memory_mb − committed`
+  (`capacity_reading.py:433`); `HOST_MEMORY_GUARDRAIL_MB = 1600` (`config.py:646`)
+  is a per-project database check, not a host cap (`config.py:1342-1348`).
+- **The claims the reboot and the rotations can move — and one they cannot.**
+  `replacement_host_restore` stays `not_run` by D1028 (a rescale is not a
+  replacement); for the record it = REC-NODE-001 (`test_node_restore.py` × 6 +
   `tests/deployment/test_session18_recovery.py::test_restore_refuses_the_
   populated_volume_on_the_replacement`, which needs `APG_KIT_DIR` +
   `APG_RESTORE_EVIDENCE_FILE` whose `project_key` is project A's, `:307`) and
@@ -357,11 +348,11 @@ NEW HOST        Does not exist. The operator provisions it (Sheet N0): size and
 ## 1. The divergence table
 
 Six columns. Each row is a **measured fact about the tree at `1ea6259`** (or
-about the old host as the Session 35 records left it) set against what the
-brief (the stage plan's §5 *Session 36*, its §1 rows, §2.3, §4, §8–§9, the
-Stage 5 report §6 and scope-closure §28) says, with the decision this plan
-takes. **Next free number after this table is D2010.** Rows the runs add go in
-a second table below it, in execution order.
+about the host as the Session 35 records left it) set against what the brief
+(the stage plan's §5 *Session 36*, its §1 rows, §2.3, §4, §8–§9, the Stage 5
+report §6 and scope-closure §28) says, with the decision this plan takes.
+**Next free number after this table is D2006.** Rows the runs add go in a
+second table below it, in execution order.
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -369,29 +360,25 @@ a second table below it, in execution order.
 | **D1986** | Stage plan D1973: *"one definer function per table in FK order (attempts → approvals → steps → receipts → runs; deliveries → events; then agents with no run)"*. | Every FK among the ten tables is NO ACTION (`0034:39`); a step, an approval, an attempt and a receipt have no meaning without their run; `workflow_definition` and `connector` are installed configuration (deploy steps 6d/6e), not record; `workflow_worker` is one row; humans (`users`) are referenced by approvals, connectors, refresh families and storage objects. | **Three prunes, by aggregate**, each deleting its children in FK order inside one function: **`workflow_run_prune(p_before, p_limit)`** (ended runs — `succeeded\|failed\|cancelled\|stopped` — whose `finished_at < p_before`; deletes their attempts, approvals, receipts, steps, then the runs); **`connector_delivery_prune(p_before, p_limit)`** (deliveries `delivered\|dead` whose `coalesce(delivered_at, dead_at) < p_before`, then events older than the horizon that no delivery and no waiting step references, D1989); **`agent_prune(p_before, p_limit)`** (agents `revoked` whose `updated_at < p_before` and that no run and no connector references; credentials and quota go by their CASCADE; audit and idempotency rows keep the id by convention). **Never pruned**: definitions, connectors, the worker row, humans, a `queued\|running\|compensating` run, a `pending` delivery. `p_limit` bounds the number of ROOTS (runs, deliveries, agents). | A prune per table would let an operator delete a run's steps and leave the run, which no reader can explain; the aggregate is the unit the record means. Humans are referenced from six places and their deletion is an identity question, not a retention one. | **0248** |
 | **D1987** | Stage plan D1973: *"an approval on an ended run moved to a new `cancelled` status by the run's end (D1775)"*. | Four definer functions end a run (`workflow_begin_compensation` `0035:185`, `workflow_finish_step` `:462`, `workflow_cancel` `0034:817`, `workflow_claim_step` `0035:282`), each hundreds of lines; replacing them "byte for byte plus one statement" is D1834's method and its largest risk. `ALTER TYPE … ADD VALUE` is accepted in a transaction on PostgreSQL ≥ 12 but **the new value cannot be used in that transaction** (to be measured on 18.4, rig 36a); dbmate runs each migration in its own transaction. *"cancelled"* already names a RUN status, and a run cancelled is not an approval cancelled. | **The value is `withdrawn`, added by migration 0038 alone; migration 0039 adds `workflow_withdraw_ended_approvals() RETURNS bigint`** (pending approvals whose run is `succeeded\|failed\|cancelled\|stopped` → `withdrawn`), **granted to `{{auth_service}}` and called by the worker on an IDLE iteration** (immediately before each `await sleep(POLL_SECONDS)`, `workflow_worker.py:828`, `:896`) — so a parked approval is withdrawn within one poll of its run ending, and the 7 on beta are withdrawn by the first idle loop after the deploy. **No 0035 function is replaced.** `workflow_run_prune` also deletes withdrawn approvals with their run. The CHECK (`decided_by`/`decided_at` set exactly for approved/rejected) holds for `withdrawn` unchanged. | Fix-forward with the smallest surface (D912): one enum value and one function, called by the process that already owns the run lifecycle. The rig decides whether 0038 and 0039 must be two files; if rig 36a shows the value is usable in the same transaction on 18.4 the plan still keeps two (the down of each is `AP900`; two is the shape that works on every supported version). | **0248** |
 | **D1988** | ADR 0213: a prune refuses only a missing or future horizon. | An inbound connector's receipt is its replay protection: `POST /connectors/{name}` refuses a signature outside ±300 s and a `(connector_id, delivery_id)` already received (0036's receipt PK). A receipt older than 300 s cannot be replayed anyway. A run can finish two seconds after its receipt arrived. | **`workflow_run_prune` refuses a horizon newer than `now() - interval '600 seconds'`** with `AP422: a retention horizon inside the inbound replay window`, so no receipt younger than twice the signature window is ever deleted with its run. The other two prunes keep ADR 0213's two refusals. | Deleting a receipt inside the window would re-open a replay the route refuses today; the bound is the window itself, doubled. | 0248 |
-| **D1989** | — | An event resumes a parked `wait` step whose `await_event` names it (0036: `workflow_step.await_event\|await_match\|await_payload\|await_served_at`, `:172-176`; the emitter `:250`, `:855`). Whether a parked step can be served by an event emitted BEFORE it parked is in 0036's matching function and **was not read by this plan**. | **`connector_delivery_prune` never deletes an event that a `parked` step of a non-ended run names in `await_event`**, whatever the matching rule; **Run 2's first act reads 0036's event-matching function** (grep `await_event` in `0036-connectivity.sql`) and, if an event is matched only at emission, writes a row saying the guard is belt-and-braces. | A guard that costs one `NOT EXISTS` is cheaper than a wrong reading of a 1,000-line migration. | 0248 |
+| **D1989** | — | An event resumes a parked `wait` step whose `await_event` names it (0036: `workflow_step.await_event\|await_match\|await_payload\|await_served_at`, `:172-176`; the emitter `:250`, `:855`). Whether a parked step can be served by an event emitted BEFORE it parked is in 0036's matching function and **was not read by this plan**. | **`connector_delivery_prune` never deletes an event that a `parked` step of a non-ended run names in `await_event`**, whatever the matching rule; **Run 1's rig 36b reads 0036's event-matching function** (grep `await_event` in `0036-connectivity.sql`) and, if an event is matched only at emission, writes a row saying the guard is belt-and-braces. | A guard that costs one `NOT EXISTS` is cheaper than a wrong reading of a 1,000-line migration. | 0248 |
 | **D1990** | Stage plan D1977: *"`api.delete_note(id)` under the notes grants, owner-only by RLS, with the release's next migration"*. | A new `api` function moves the reviewed contract (`postgrest-api-surface.yaml`), the canonical snapshot (captured only from a deployment, `api-contract.sh --update`), the generated example client's embedded digest (`client_ir.py:288-312`, D1690), and four pinned sets (`test_api_surface_contract.py:79`, `test_api_migrations.py:207-218`, `RELEASE_FUNCTIONS`, the MCP catalog if a capability names it). What it buys: an operator removing a sentinel row without root `psql` — which the operator already has. From Session 39 a customer deletes rows with the customer's own credential. | **Deferred.** D1547 stays open in §10 with this cost written beside it; Session 36 changes no `api` object. | The cost is five artefacts and a deployment-captured snapshot for a convenience the one person who needs it already has. | — |
-| **D1991** | Stage plan D1948: *"`bin/dr-kit.sh export` → `provision-host.sh` → `bin/restore.sh --from mirror` → deploy (ADR 0189/0192)"*. Runbook §3: *"`backup.bucket` names the **new** primary bucket"*; §4: `--from mirror --latest`. | **The runbook is shaped for a LOST host**: the old primary *"is gone or is production's"* (`:107-108`), so it restores from the mirror (copied nightly at 04:30, so up to a day behind) and archives to a new bucket. **A planned move has a living old host whose cluster can archive to the same repository.** pgBackRest continues a restored cluster on a new timeline in the same stanza (the PITR shape the tree already uses); two clusters archiving into one stanza would fork it. `bin/restore.sh` takes `--from primary` (`:35-36`). The project's storage bucket, mirror bucket and Infisical project are unchanged by a move. | **ADR 0249: a planned move stops the old cluster first and restores from the primary.** Order, fixed: kit exported → `backup --type incr` → `SELECT pg_walfile_name(pg_switch_wal())` and wait until `pg_stat_archiver.last_archived_wal` equals it (timeout 180 s, a stop condition) → row counts recorded → the project unit and its three backup timers **disabled and stopped** on the old host → DNS moved → `restore.sh --from primary --latest` on the new host → deploy the kit's release → row counts compared. **Same buckets, same Infisical project (adopted by id), same stanza.** The old host's project units are never started again and the host is destroyed on day 4 (§4). The runbook gains §8 *A planned move* in Run 8, and its §3–§4 keep the loss path. | A move restored from the mirror would lose every write since 04:30; a move to new buckets would need four new provider resources and a second stanza for no gain. The order is what makes one repository have one writer at every instant. | 0189, 0192; **0249** |
-| **D1992** | Stage plan §2.3: *"`replacement_host_restore` — open by decision (D1028); re-read at the move."* | D1028 (Session 18) ended a **rehearsal** at the restore because adoption cannot give a rehearsal copy a credential of its own, so `APG_REPLACEMENT_HOST_OUTPUTS` has never existed (D1568). REC-NODE-001 needs `APG_KIT_DIR` and a restore record whose `project_key` is project A's; REC-NODE-002 needs the replacement's deployed document whose `database.observed.instance_uuid` equals the kit's. The gate's `--kit-dir` must hold documents OLDER than outputs v19 (D1282: `kit-2026-09-11`, v17). | **The move is not a rehearsal, so D1028's decision does not apply to it**: Run 11's sweep declares `--replacement-host-outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json` (the new host's own document — the replacement IS the deployment now), `--restore-evidence-file <alpha's evidence/restore-alpha-dev-*.json from M3a>`, and `--kit-dir /home/op/kit-2026-09-11` (copied to the new host). **Sheet E0 reads whether `kit-2026-09-11`'s alpha `instance_uuid` equals the deployed one**; if it does not, the row says which kit the proof needs and why the claim stays `not_run`. | A claim's `not_run` that names a decision is honest only while the decision's premise holds; a real move removes the premise. | 0189, 0192 |
-| **D1993** | Runbook §5: *"the production domain's certificate is issued on first request after the record moves"*. | `initial_acme_environment` is `const: staging` (`host.schema.json:152-155`); `promote-acme` refuses without a staging certificate and restarts the edge (`edge.sh:292-334`); under staging a first deploy prints one `CERTIFICATE_VERIFY_FAILED` line per route per kind and exits 0 (D1047, operator guide `:349-358`). HTTP-01 needs the name to resolve to the new host first. Failed validations cap at 5/hour/hostname. Copying the old host's `production.json` would skip issuance but moves a private key between machines by hand. | **Fresh issuance, in this order:** the edge up on the new host the day BEFORE the move (no route, no request to the CA); on the day, DNS moved (M2) and resolution confirmed from the workstation against `1.1.1.1` AND `8.8.8.8` before any deploy; the deploys issue staging certificates; `promote-acme --to production --confirm <new host.id>` once both hostnames hold a staging certificate; the doctor's `tls` reads ok. **Two failed validations on one hostname within an hour stop the sitting** (§9). The record TTL is read on E0. | The runbook's sentence is right about production and silent about the staging step the host schema forces; the order above is the documented path for a host from empty (operator guide §3 step 3) applied to two existing names. | — |
-| **D1994** | Stage plan §5: *"`provision-host.sh`"*. | `provision-host.sh` creates **no user** (no `useradd` in `bin/`) and installs **no `apg-diag`**; the operator user is made by hand with its key and sudoers line and proved with a new session while root still works (operator guide `:321-328`, D659); `apg-diag` and `infra/host/apg-agent.sudoers` are installed by hand (`:117`; `bin/apg-diag.sh:42-45`). | **Sheet N0 is the operator's by hand**: the VPS, `op` with the workstation's `agentic_postgres_ed25519.pub`, `apg-agent` with `apg_agent_ed25519.pub`, the bundle checked out at `f7fb96d`, proved with new sessions; then N1's three `--apply` passes; `apg-diag` installed at `/usr/local/bin/apg-diag` from the checkout with the sudoers file (`visudo -c`), and read by the agent as `apg-agent` before the move. | The documented path, unchanged; naming it on the sheet is what keeps the agent from assuming an account exists. | 0071 |
-| **D1995** | Stage plan D1974: *"the three remaining rotations"*; D1469: *"the application credential, on both projects"*. | The nine node ids read **project A only** (`test_session5_convergence.py`, `test_session4_convergence.py:454-512` reads `APG_PROJECT_A_OUTPUTS` for the comparison; the B document only for context). Each rotation is a provider replacement, a `down`, a materialize and a deploy — an outage of the project's API each time. | **Three rotations, all on alpha, one sheet each (X1 authenticator, X2 documentation, X3 application credential), on day 3 before the sweep.** Beta's three are named in §10 as the first entries a rotation schedule must carry. The sheet says at its top that the trio moves on alpha's evidence because that is what the proofs read. | Rotating beta too would cost three outages that no proof reads; the claim is about the plane's ability to rotate, which one project proves. | 0088, 0174 |
-| **D1996** | — | `docs/operator-guide.md` §9 (`:507-513`) says the authenticator and documentation rotations were *"Performed … on 2026-08-13 and in Session 11's window"*; §13 (`:710-712`) says the three *"have still never been performed"*. The trio was `not_run` at every evidence document since. | **Run 1 reads the Session 6 and Session 11 plans' Done records** (`grep -n "2026-08-13" docs/plans/session-0[6-9]*.md docs/plans/session-1[01]*.md`) and writes which is true; **Run 8 corrects the guide** to one sentence with its date. Either way the trio is moved only by Run 11's sweep. | A guide that contradicts itself about whether an irreversible act has been done is the sentence an operator reads before doing it. | — |
-| **D1997** | Stage plan D1974: *"each declared secret gets a `max_age_days` … the doctor reads each secret generation's age"*. | **No per-secret time exists anywhere**: a generation id is `secrets.token_hex(8)`, *"Not a timestamp"* (`materialize-secrets.py:64-72`); a generation's `manifest.json` carries one `materialized_at` for the whole set, and every deploy materializes a new generation with identical values; `infisical_client.read_secret` (`:254-287`) reads `secretValue` and nothing else. Whether the provider's response carries a per-secret `version`, `createdAt` or `updatedAt` **has never been measured**. | **Sheet E0 measures it** (one root read on the old host: the KEY NAMES of `response["secret"]` for `docs_basic_auth_password`, never a value). **If a per-secret update time exists**, Run 6 builds `doctor --reading secrets` (ADR 0251): `max_age_days` optional per secret in `secrets.required.yaml` (schema field, default absent = no reading), each read as `ok \| overdue \| unknown`, never a rotation. **If it does not**, Run 6 is replaced by a row and no code, ADR 0251 is not written, and the schedule waits for a session that records rotation times itself. | A schedule needs an age; an age the system cannot read is a value that looks measured (D600). The branch is decided by one reading before any code. | **0251** (conditional) |
-| **D1998** | Stage plan §5: *"three sittings on three days … one sweep"*. | `port_allocation`'s reboot proof needs `APG_AFTER_REBOOT` in the sweep that writes the evidence; the trio needs the four `--rotated-*` files in the same one; a `-k` run writes no evidence; one 15-minute-or-more sweep per trip (the last ran ~53 min, 1,083 tests). | **One sweep, on day 3**, after X1–X3 and a reboot (B1): every declaration the gate accepts except `--dx-record-file`'s new walk (it keeps the Session 25 record) — §7 lists them. **Day 2 verifies with `-k` only** (`"session18_recovery or session4_transports or session11"` and the doctor). The tag goes on the deployed commit after day 3's merge (D1425). | The evidence document is one sweep's; splitting the claims across two sweeps is a merge `write-session-evidence` refuses. | — |
-| **D1999** | Stage plan D1978: *"Session 36 writes the hosted rows before any code"*. | `parse_threat_table` reads **every `\|` line** in `docs/threat-model.md` (`test_acceptance_registry.py:425`) and `test_every_threat_row_names_at_least_one_requirement` (`:484`) fails a row with no registered requirement. The hosted controls (invitations, keys, the reconciler, the gateway, branches, plans) have no requirement until Sessions 37–41 register them. | **The hosted threats are a numbered LIST under a new heading `## Hosted threats, written before their controls (Stage 5)`**, placed before `## Scope`, one item per surviving specification §49 threat (D1978's list) naming the session that builds its control and the negative test it owes. **Each moves into the table, as a `THR-*` row with its requirement, in the run that registers the requirement.** The Scope paragraph gains the sentence D1978 writes. | A row with an invented requirement would be a control that looks measured; a list is the honest form of a threat whose control does not exist yet. | 0246 |
+| **D1991** | Stage plan D1948: *"A new, larger VPS — the operator's decision of 2026-10-03. Session 36 moves alpha and beta onto it with `bin/dr-kit.sh export` → `provision-host.sh` → `bin/restore.sh --from mirror` → deploy … switches the DNS A records … The old host is retired on a later day."* | The host is a **Hetzner Cloud** server (`apg-vps-01`, 62.238.99.122: 3,814 MiB, 2 vCPU x86, 38 GB disk). **Hetzner's rescale** (docs.hetzner.com/cloud/servers/faq, read 2026-10-03) upgrades the same server in place from the Hetzner Console: the server is **powered off** first; the target plan must have the **same architecture** (x86 → x86; no Arm CAX); the **CPU vendor (Intel or AMD) may change**; with **"CPU and RAM only"** the disk keeps its size and a later downgrade stays possible (a plan with a smaller disk is never offered); the disk, its data and the server object are kept. | **The operator decided on 2026-10-03, after this plan was first written, to RESCALE the existing server — CPU and RAM only — instead of moving to a new VPS. The stage plan's D1948 move is superseded by this row.** Nothing moves: same address, same disk, same deployed documents, kits, timers, Infisical identities and buckets; **no** provisioning, adoption, restore, DNS change or certificate issuance. **The target size is the operator's on the day** (at least 4 vCPU / 8 GB; 8 vCPU / 16 GB if Session 41's ClickStack is to fit). **The Primary IP staying attached is read on the console before power-on** (Sheet H2), and the address is read again by the agent after boot. `replacement_host_restore` stays `not_run` **by D1028's decision, unchanged** — a rescale is not a replacement. | The move existed only to buy memory and CPU; a rescale buys the same with one power cycle instead of two restores, two deploys, a DNS cutover and a one-writer-per-repository hazard. The one thing lost — the first end-to-end replacement — was a side benefit, not the session's purpose. | — |
+| **D1992** | Stage plan D1948: *"declares its capacity in `host.yaml`"*. | Admission computes `safe_available = memory_mb − reserve_memory_mb − committed` (`capacity_reading.py:433`); `HOST_MEMORY_GUARDRAIL_MB = 1600` (`config.py:646`) is a **per-project database** check (`config.py:1342-1348`), not a host cap; `host_config.py:106` notes that on the reference host the reserve equals 3814 − 1600. `host.yaml` declares `capacity: {memory_mb: 3814, reserve_memory_mb: 2214, disk_gb: 38, reserve_disk_gb: 8}`. | **After the rescale, `memory_mb` is the new `free -m` total; `reserve_memory_mb` stays 2214** — it stands for what is NOT the projects' (the OS, Docker, the edge, the margin), which a bigger RAM does not grow; **`disk_gb` and `reserve_disk_gb` are unchanged** (CPU and RAM only). Claimable rises from 1,600 MiB to `memory_mb − 2214`. The agent edits `/home/op/agentic-postgres/host.yaml` as `op` with a backup and the diff printed; the operator installs it (`/etc/agentic-postgres/host.yaml`, `provision-host.sh --apply` or the path `doctor capacity` reads — Run 7 reads `bin/provision-host.sh` and `host_config.py` for which copy admission reads, and the sheet names it). **Session 38 re-derives both numbers** with the control project, ClickStack and the profiles in view. | A reserve copied unchanged is honest because what it reserves did not change; a reserve recomputed from a bigger total would hand projects memory the OS still needs. | 0221, 0222 |
+| **D1993** | — | `provision-host.sh` installed and enabled `agentic-postgres-project@<key>.service`, `agentic-postgres-edge.service` and the docker firewall (the backup timers are enabled by `backup.sh schedule enable`); `port_allocation`'s reboot proof (`test_session4_convergence.py:361-445`) passed after the 2026-09-17 reboot, which cost 8 s (D1500). A power-off from the console is a hard stop; `systemctl poweroff` stops every unit, and Docker stops the cluster with SIGTERM — a fast shutdown, which checkpoints. | **The rescale is a clean shutdown from inside the OS, then the console**: before it, a `backup --type incr` per project and the row counts recorded (`s36-counts.py --before`); then `sudo systemctl poweroff`; the console rescale (CPU and RAM only); power on; the agent waits for SSH, then for the three units to read `active` three times 10 s apart; the doctor (12 ok each); the counts compared (`EQUAL`); `free -m`, `nproc`, `lscpu`'s model name read. **The backup timers stay enabled** — they fire at night, and the window is daytime. **The window — `poweroff` issued to both doctors ok — is measured** into the envelope. | The documented reboot path, with a bigger machine on the other side of it; the counts are the evidence that nothing was lost, not the shutdown's exit code (D145). | — |
+| **D1994** | — | The envelope's latency rows (Session 35's neighbour phases, the deploy windows) were sampled on the old 2-vCPU CPU; Hetzner may hand the rescaled server another vendor's CPU. Nothing in the product reads the CPU model; `cpus` limits (`SERVICE_RESOURCE_DEFAULTS`, `config.py:686`) are counts. | **Every envelope row Session 36 adds names the CPU it ran on** (`lscpu` model, vCPU count) in its conditions; the Session 35 rows keep theirs (*"the 3,814 MB deployment host, no swap, 2 vCPU"*) and are not re-labelled. The deploy windows are re-measured on R2 (the probe). | A number moves with the machine it was sampled on (D593, D603); saying which machine is what keeps an old row from reading as a new one. | — |
+| **D1995** | Stage plan D1974: *"the three remaining rotations"*; D1469: *"the application credential, on both projects"*. | The nine node ids read **project A only** (`test_session5_convergence.py`, `test_session4_convergence.py:454-512` reads `APG_PROJECT_A_OUTPUTS` for the comparison; the B document only for context). Each rotation is a provider replacement, a `down`, a materialize and a deploy — an outage of the project's API each time. | **Three rotations, all on alpha, one sheet each (X1 authenticator, X2 documentation, X3 application credential), on day 2 before the sweep.** Beta's three are named in §10 as the first entries a rotation schedule must carry. The sheet says at its top that the trio moves on alpha's evidence because that is what the proofs read. | Rotating beta too would cost three outages that no proof reads; the claim is about the plane's ability to rotate, which one project proves. | 0088, 0174 |
+| **D1996** | — | `docs/operator-guide.md` §9 (`:507-513`) says the authenticator and documentation rotations were *"Performed … on 2026-08-13 and in Session 11's window"*; §13 (`:710-712`) says the three *"have still never been performed"*. The trio was `not_run` at every evidence document since. | **Run 1 reads the Session 6 and Session 11 plans' Done records** (`grep -n "2026-08-13" docs/plans/session-0[6-9]*.md docs/plans/session-1[01]*.md`) and writes which is true; **Run 8 corrects the guide** to one sentence with its date. Either way the trio is moved only by Run 10's sweep. | A guide that contradicts itself about whether an irreversible act has been done is the sentence an operator reads before doing it. | — |
+| **D1997** | Stage plan D1974: *"each declared secret gets a `max_age_days` … the doctor reads each secret generation's age"*. | **No per-secret time exists anywhere**: a generation id is `secrets.token_hex(8)`, *"Not a timestamp"* (`materialize-secrets.py:64-72`); a generation's `manifest.json` carries one `materialized_at` for the whole set, and every deploy materializes a new generation with identical values; `infisical_client.read_secret` (`:254-287`) reads `secretValue` and nothing else. Whether the provider's response carries a per-secret `version`, `createdAt` or `updatedAt` **has never been measured**. | **Sheet E0 measures it** (one root read: the KEY NAMES of `response["secret"]` for `docs_basic_auth_password`, never a value). **If a per-secret update time exists**, Run 6 builds `doctor --reading secrets` (ADR 0250): `max_age_days` optional per secret in `secrets.required.yaml` (schema field, default absent = no reading), each read as `ok \| overdue \| unknown`, never a rotation. **If it does not**, Run 6 is replaced by a row and no code, ADR 0250 is not written, and the schedule waits for a session that records rotation times itself. | A schedule needs an age; an age the system cannot read is a value that looks measured (D600). The branch is decided by one reading before any code. | **0250** (conditional) |
+| **D1998** | Stage plan §5: *"one sweep"*. | `port_allocation`'s reboot proof needs `APG_AFTER_REBOOT` in the sweep that writes the evidence; the trio needs the four `--rotated-*` files in the same one; a `-k` run writes no evidence; one sweep per trip (the last ran ~53 min, 1,083 tests). The rescale's own boot is on day 1, and three deploys follow it on day 2. | **One sweep, on day 2**, after X1–X3 and a reboot (B1, so the reboot the sweep declares is the last thing before it): every declaration the gate accepts **except** `--replacement-host-outputs` and `--replacement-bootstrap-state` (no replacement exists, D1991) and `--dx-record-file`'s new walk (it keeps the Session 25 record) — §7 lists them. **Day 1 verifies with `-k` only.** The tag goes on the deployed commit after day 2's merge (D1425). | The evidence document is one sweep's; splitting the claims across two sweeps is a merge `write-session-evidence` refuses. | — |
+| **D1999** | Stage plan D1978: *"Session 36 writes the hosted rows before any code"*. | `parse_threat_table` reads **every `\|` line** in `docs/threat-model.md` (`test_acceptance_registry.py:425`) and `test_every_threat_row_names_at_least_one_requirement` (`:484`) fails a row with no registered requirement. The hosted controls (invitations, keys, the reconciler, the gateway, branches, plans) have no requirement until Sessions 37–41 register them. | **The hosted threats are a numbered LIST under a new heading `## Hosted threats, written before their controls (Stage 5)`**, placed before `## Scope`, one item per surviving specification §49 threat (the stage plan's D1978 list) naming the session that builds its control and the negative test it owes. **Each moves into the table, as a `THR-*` row with its requirement, in the run that registers the requirement.** The Scope paragraph gains the sentence D1978 writes. | A row with an invented requirement would be a control that looks measured; a list is the honest form of a threat whose control does not exist yet. | 0246 |
 | **D2000** | Stage plan D1979: the Ledger's guard checks *"(1) every console control and every `/api/v1` operation type maps to an entry; (2) an entry `planned` has no operation type and no enabled control; (3) the forbidden words appear in no served page, no `docs/` page and no API string"*. | There is no console, no `/api/v1`, no operation type and no served customer string. `docs/` uses *autoscaling*, *multi-region* and *failover* in the non-goals (`product-contract.md:476-479`) and in the specification's quotation in the stage plan — negations. | **The guard ships with the halves that have a subject**: the schema; every `available`/`beta` row's `evidence` resolves (a claim in `CLAIMS` that is `passed` in the newest `evidence/session-*.json`, or a `capacity.ENVELOPE` subject); every `planned` row's `controls` is `[]`; **the §59 words appear in no row's `customer_text`**; the rendered page is current. **The control and operation-type halves land in Sessions 37 and 42** — Run 5's test says so in a docstring and asserts the two sets it would read are empty today. | A guard over a set that does not exist yet passes vacuously; one that names its empty set fails loudly the day the set appears. | **0247** |
-| **D2001** | Stage plan D1948: *"declares its capacity in `host.yaml`"*. | Admission computes `safe_available = memory_mb − reserve_memory_mb − committed` (`capacity_reading.py:433`); `HOST_MEMORY_GUARDRAIL_MB = 1600` (`config.py:646`) is a **per-project database** check (`config.py:1342-1348`), not a host cap, and `host_config.py:106` notes that on the reference host the reserve equals 3814 − 1600. The old host declares 3814 / 2214 / 38 / 8. | **The new host's `capacity` is written from E1's readings** (`free -m` total, `df -BG` at the Docker root), and **`reserve_memory_mb = memory_mb − claimable`, where claimable = `free -m` *available* with the edge running and no project, minus 1,024 MiB** (room for the OS's growth and a deploy's transient), recorded with its inputs in Run 9's Done; `reserve_disk_gb` stays 8 unless E1's disk is under 50 GB. **Session 38 re-derives both** with the compute profiles and the control project in view. | A reserve copied from the old host would give a 16 GB host 1,600 MiB of claimable memory; a reserve computed from a reading is ADR 0221's rule. | 0221, 0222 |
-| **D2002** | Stage plan §2.2: *"one minor per session — unless `upgrade plan` prices it at major"*. | ADR 0162: a released migration is minor; `upgrade plan` reads a migration only when declared (D1703); a new `bin/` command is not a manifest, contract or secret change. No manifest, outputs or host schema moves here. | **`1.14.0`, minor by declaration**: Run 8 runs `upgrade plan … --also migration_added` against the restored documents ON THE NEW HOST before the first 1.14.0 deploy (R1) and the release paragraph says the floor is minor *by declaration*. A `major` is §9's stop. | The version is read, never chosen (D704). | 0162 |
-| **D2003** | ADR 0213: *"Retention is an act an operator performs, on a horizon the operator states … Nothing in this product deletes an agent record on its own"*; its prunes are called by *"a human at a TTY"*. | No verb exists; the documented removal is a root `psql` with names typed by hand. | **`bin/record.sh` is the operator's TTY act made a command**: root, `--project KEY` resolved to the deployed document, `--before` REQUIRED (ISO 8601, validated before any connection), `--confirm KEY` equal to the project key, `--what runs\|deliveries\|agents\|audit\|idempotency`, counts printed before and after from `record_size()`; never run by a unit, a timer or the reconciler (a test greps `systemd/` and `bin/` for a caller). ADR 0248 extends 0213 and says the rule is kept. | A verb that requires a stated horizon and a typed confirmation is the TTY act with fewer ways to mistype a container name. | 0213; **0248** |
-| **D2004** | Stage plan D1977: *"one `logging` handler configured in `create_app` for `apg.*` at INFO, JSON lines on stdout"*. Scope-closure §28: D1918 is *"a product change with a log-volume question; the operator's"*. | The `apg.http.request` line carries the route TEMPLATE, the request id, the method, the status and the elapsed time, never a path, a header or a body (`main.py:412-427`); `apg.mcp.read` a fixed field set (`mcp_telemetry.py:58-67`); Docker's `local` driver keeps 10 MB × 5 per container. The operator's acceptance of the Stage 5 plan carried D1977. | **ADR 0250: one stdout handler, installed once, on the loggers `apg` and `app.workflow_worker` at INFO**, in a new `services/auth-api/app/log_setup.py` called first in `create_app` — idempotent (a marker attribute on the handler; `create_app` called twice installs one), `propagate = False` on both so a host harness's root handler never doubles a line, the formatter `%(message)s` (the lines are already `<name> <json>`). **The log-volume answer, in the ADR**: one line of ~200 bytes per request; 50 MB per container holds ~250,000 requests — at Session 35's saturation (~480 req/s) nine minutes, at the measured idle-to-light traffic days. | The lines were designed to be safe to print and were never printed; the canary already guards their content. The volume figure is the operator's question answered with the tree's own numbers. | **0250** |
-| **D2005** | Stage plan D1949: *"amends `product-contract.md` §5"*. | §2 *"Outside the boundary — deliberately not reproduced"* (`:51-56`) lists *"A hosted control plane, web console, or multi-region availability"* and *"Autoscaling, scale-to-zero, and compute/storage separation"* and *"Instant branching and copy-on-write database forks"* — the same decisions §5 records, in a second place. | **ADR 0246 amends §2's list and §5's together**, with one sentence in each pointing at the ADR; the generated blocks (`:88-395`, `:404-468`) are not touched. | Two lists stating one boundary must move together or one becomes a stale promise (D954's direction). | **0246** |
-| **D2006** | Stage plan D1948: *"restore … → deploy"*. | The kit names `source_commit f7fb96d` (the old host's checkout, D1642); the restored volume's ledger is 37; a deploy of 1.14.0 directly onto a restored volume would apply 0038/0039 in the same act as proving the move. | **Two phases on day 2: the move deploys `f7fb96d` with `--through-session 35`** (doctor 12 ok, ledgers 37 / 37+4, counts equal: the move's outcome), **then the checkout moves to the 1.14.0 commit and the release deploys with `--through-session 36`** (the release's outcome), each on its own sheets. | One sheet, one outcome (D1510): a failure in the second phase must not be readable as a failure of the first. | — |
-| **D2007** | — | The mirror timer runs `mc mirror --overwrite --remove` from the primary to the B2 bucket (`services/backup-mirror/mirror.sh:40`); `backup.sh … schedule enable` refuses until the repository holds a full backup (`bin/backup.sh --help`). Two hosts' mirror timers would both copy the one primary — harmless — but two hosts' backup timers would both write it. | **The old host's three timers per project are disabled in M1, before anything starts on the new host; the new host's are enabled in M6 after the deploys**, by `sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/<key>/outputs.json schedule enable`, with `schedule status` read after. | One writer per repository at every instant is D1991's rule; the timers are writers. | 0249 |
-| **D2008** | Stage plan §5: *"one sweep"*. | Session 35's sweep (its Sheet F6, `session-35-implementation-plan.md:2508-2515`) named files that live ONLY on the old host: `/root/alpha-dev-administrator` (the admin password file), `/home/op/s31-third.yaml` (`--candidate-manifest`), `/home/op/snippets-dev-outputs.json` (`--fresh-host-outputs`), the removed-project file, the rehearsal evidence directory, the induced-alert file, `/home/op/kit-2026-09-11/`, `/home/op/s30-retired-alpha-dev-jwk.json`, and the Session 25 walk record. | **Run 7 lists every file Session 35's F6 line names, with its owner and mode, and Sheet N3/M-phase copy them to the new host**: op-owned files by the agent (`ssh op@OLD "cat FILE" \| ssh op@NEW "umask 077; cat > FILE"`, never touching the workstation's disk for a secret); the root file by the operator (`sudo install -o op -m 0600 /root/alpha-dev-administrator /home/op/xfer-admin` on the old host, the agent's pipe, `sudo install -o root -g root -m 0600 /home/op/xfer-admin /root/alpha-dev-administrator` on the new, `shred -u /home/op/xfer-admin` on both). | A sweep on the new host with a flag pointing at a file that stayed behind is a `pytest.fail` (`tests/conftest.py`), found 50 minutes in. | — |
-| **D2009** | Stage plan §2.3: *"D1936 … Session 36's move re-renders beta's manifest anyway; the sheet offers the edit as a separate line the operator may skip."* | Beta's manifest is schema 7, `approvals_required` absent (= 0), so the host does not read beta's committed approval (D1936). The move copies beta's manifest from the kit unchanged. | **Sheet R2b offers ONE optional line before beta's 1.14.0 deploy**: the manifest raised to `schema_version: 8` with `migrations.approvals_required: 1` (the agent edits `/home/op/agentic-postgres/project.beta.yaml` as `op` with a backup, the operator says yes or no on the sheet). The deploy then reads the committed approval for the example set (already applied, so nothing pending — the gate refuses only an act). The answer is recorded in Run 9's Done. | The operator's edit, offered at the one moment the manifest is in the agent's hands anyway. | 0243 |
+| **D2001** | Stage plan §2.2: *"one minor per session — unless `upgrade plan` prices it at major"*. | ADR 0162: a released migration is minor; `upgrade plan` reads a migration only when declared (D1703); a new `bin/` command is not a manifest, contract or secret change. No manifest, outputs or host schema moves here (the rescale changes `host.yaml`'s VALUES, not its schema). | **`1.14.0`, minor by declaration**: Run 9's Sheet R1 runs `upgrade plan … --also migration_added` against the deployed documents before the first 1.14.0 deploy, and the release paragraph says the floor is minor *by declaration*. A `major` is §9's stop. | The version is read, never chosen (D704). | 0162 |
+| **D2002** | ADR 0213: *"Retention is an act an operator performs, on a horizon the operator states … Nothing in this product deletes an agent record on its own"*; its prunes are called by *"a human at a TTY"*. | No verb exists; the documented removal is a root `psql` with names typed by hand. | **`bin/record.sh` is the operator's TTY act made a command**: root, `--project KEY` resolved to the deployed document, `--before` REQUIRED (ISO 8601, validated before any connection), `--confirm KEY` equal to the project key, `--what runs\|deliveries\|agents\|audit\|idempotency`, counts printed before and after from `record_size()`; never run by a unit, a timer or another command (a test greps `systemd/`, `bin/` and `services/` for a caller). ADR 0248 extends 0213 and says the rule is kept. | A verb that requires a stated horizon and a typed confirmation is the TTY act with fewer ways to mistype a container name. | 0213; **0248** |
+| **D2003** | Stage plan D1977: *"one `logging` handler configured in `create_app` for `apg.*` at INFO, JSON lines on stdout"*. Scope-closure §28: D1918 is *"a product change with a log-volume question; the operator's"*. | The `apg.http.request` line carries the route TEMPLATE, the request id, the method, the status and the elapsed time, never a path, a header or a body (`main.py:412-427`); `apg.mcp.read` a fixed field set (`mcp_telemetry.py:58-67`); Docker's `local` driver keeps 10 MB × 5 per container. The operator's acceptance of the Stage 5 plan carried D1977. | **ADR 0249: one stdout handler, installed once, on the loggers `apg` and `app.workflow_worker` at INFO**, in a new `services/auth-api/app/log_setup.py` called first in `create_app` — idempotent (a marker attribute on the handler; `create_app` called twice installs one), `propagate = False` on both so a host harness's root handler never doubles a line, the formatter `%(message)s` (the lines are already `<name> <json>`). **The log-volume answer, in the ADR**: one line of ~200 bytes per request; 50 MB per container holds ~250,000 requests — at Session 35's saturation (~480 req/s) nine minutes, at the measured idle-to-light traffic days. | The lines were designed to be safe to print and were never printed; the canary already guards their content. The volume figure is the operator's question answered with the tree's own numbers. | **0249** |
+| **D2004** | Stage plan D1949: *"amends `product-contract.md` §5"*. | §2 *"Outside the boundary — deliberately not reproduced"* (`:51-56`) lists *"A hosted control plane, web console, or multi-region availability"* and *"Autoscaling, scale-to-zero, and compute/storage separation"* and *"Instant branching and copy-on-write database forks"* — the same decisions §5 records, in a second place. | **ADR 0246 amends §2's list and §5's together**, with one sentence in each pointing at the ADR; the generated blocks (`:88-395`, `:404-468`) are not touched. | Two lists stating one boundary must move together or one becomes a stale promise (D954's direction). | **0246** |
+| **D2005** | Stage plan §2.3: *"D1936 … the sheet offers the edit as a separate line the operator may skip."* | Beta's manifest is schema 7, `approvals_required` absent (= 0), so the host does not read beta's committed approval (D1936). | **Sheet R2b offers ONE optional line before beta's 1.14.0 deploy**: the manifest raised to `schema_version: 8` with `migrations.approvals_required: 1` (the agent edits `/home/op/agentic-postgres/project.beta.yaml` as `op` with a backup, the operator says yes or no on the sheet). The deploy then reads the committed approval for the example set (already applied, so nothing pending — the gate refuses only an act). The answer is recorded in Run 9's Done. | The operator's edit, offered at a moment the release is being deployed anyway. | 0243 |
 
-**Rows the runs add** (D2010 onward), in execution order:
+**Rows the runs add** (D2006 onward), in execution order:
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -403,7 +390,7 @@ a second table below it, in execution order.
 
 **One new family, `LEDGER`** (ADR 0247): the regex at
 `tests/contract/test_acceptance_registry.py:~106` gains `LEDGER`, and the family
-paragraphs gain one sentence: *Session 36 (ADR 0246-0251) adds `LEDGER` for the
+paragraphs gain one sentence: *Session 36 (ADR 0246-0250) adds `LEDGER` for the
 Reality Ledger — the record of what each product concept is today, read by a
 program; record retention extends `OPS-RETAIN` and the request log `OPS-LOG`.*
 **Six requirements, six claims, all `target_session: 36`, all P0 — four
@@ -412,7 +399,7 @@ requirement belongs to a claim (D697); a new requirement gets a claim of its
 own (ADR 0089). **Node ids below are proposed; Run 8 writes what the runs
 actually wrote, read out of the tree with `pytest --collect-only -q`** (D1236,
 D1762). Registry entries are committed by Run 8 with the constant (D690), in a
-block under **`# Session 36 (ADR 0246-0251)`**.
+block under **`# Session 36 (ADR 0246-0250)`**.
 
 | Requirement | What it states | Offline node ids (proposed) | Live half |
 |---|---|---|---|
@@ -427,10 +414,10 @@ block under **`# Session 36 (ADR 0246-0251)`**.
 
 **Expected counts** — Run 8 counts them from the tuples, never from this prose
 (D1628): requirements **291 → 297** (299 with Run 6), `CLAIMS` **198 → 204**
-(206), `OFFLINE_CLAIMS` **60 → 64** (65), ADRs **245 → 250** (251).
+(206), `OFFLINE_CLAIMS` **60 → 64** (65), ADRs **245 → 249** (250).
 
 **Claims** (`src/agentic_postgres/evidence_claims.py` `CLAIMS`, in a block
-commented *Session 36 (ADR 0246-0251)*): offline — `record_retention:
+commented *Session 36 (ADR 0246-0250)*): offline — `record_retention:
 ("OPS-RETAIN-001",)`, `record_command: ("OPS-RETAIN-002",)`, `request_log:
 ("OPS-LOG-001",)`, `reality_ledger: ("LEDGER-001",)` (+ `secret_age:
 ("OPS-ROTATE-001",)`) — **these in `OFFLINE_CLAIMS`**, with the per-session
@@ -464,18 +451,15 @@ accepts** — the derivation diff proves it (D1133).
 | Operation | Where | What makes it safe |
 |---|---|---|
 | Migrations **0038** and **0039** frozen into `migrations/released.lock.json` | Run 2 | `bin/migrate.sh freeze-lock` is the only writer; the proofs apply every released migration as `migration_user` on a fresh container before the freeze; each down is `AP900`; once applied on the host they are the floor (ADR 0162 §3); **no earlier migration is amended** (D912); 0038 adds one enum value and nothing else, 0039 adds five functions and no table, column or `api` object |
+| **The server rescaled** (CPU and RAM only) | Run 9, Sheets H1–H2 | An incremental backup and the counts first; a clean `systemctl poweroff`; **"CPU and RAM only"** keeps the 38 GB disk and therefore the option to downgrade — the only part of a Hetzner rescale that is one-way is a disk upgrade, which this plan never takes; the Primary IPv4 read before power-on; the counts compared after |
+| `host.yaml`'s `memory_mb` re-declared | Run 9, Sheet H4 | A backup (`host.yaml.pre-s36`) and the diff first; the reserve and the disk fields refused by the script if they would move (D1992) |
 | **Rows deleted on beta** by `record.sh prune` | Run 9, Sheet R4 | The operator states each horizon on the sheet (the plan proposes `2026-10-01T00:00:00Z` for runs and deliveries — before Session 35's trip — and the operator may write another); `size` is printed before and after; the backups taken that night still hold every deleted row for the retention window (`repo1-retention-full` 2); **no prune runs on alpha** |
-| **The old host's projects stopped and their units and timers disabled** | Run 9, Sheet M1 | After the kit, the final incremental backup and the WAL switch read archived; the row counts recorded; **from this line until the new host serves, both projects are down** (the move's window, measured); the old host's units are never re-enabled (§9) |
-| **DNS A records moved** to the new host | Run 9, Sheet M2 | Grey cloud, by hand in Cloudflare (no repository command touches DNS); the old address is written in the sheet so moving back is one edit; **moving back is only safe before M3's restore archives anything** (D1991) |
-| **The restored clusters archive into the same stanza on a new timeline** | Run 9, M4 (the first deploy's step 6c) | The old cluster stopped and its timers disabled first; this is the act that makes restarting the old host unsafe, and the reason §9 makes it a stop |
-| `promote-acme` to production on the new host | Run 9, Sheet M5 | Only after both hostnames hold a staging certificate (the documented order); never retried in a loop (5 failures/hour/hostname) |
 | `CURRENT_SESSION` 35 → 36; `VERSION` 1.13.0 → 1.14.0 | Run 8 | All-or-nothing (D690); every `target_session: 36` entry in the same commit; the upgrade guide gains a `1.14.0` row; `README.md:7` moves; every `--session 35` / `--through-session 35` literal on the documented path moved and counted per file (D678/D1484) |
 | `bin/session-36-check.sh` | Run 8 | Derived from 35's by diff (D1482); header and usage rewritten whole (D1488); `SHELL_COMMANDS` gains it and `chmod 755` before `git add` (D1014, D1188); the flag diff empty |
-| Deploy `--through-session 36` on alpha, then beta, on the new host | Run 9, Sheets R2a/R2b | `upgrade plan` OK first (R1); alpha first; under `script(1)`; **0038 and 0039 applied** (ledger 37 → 39; beta 39 + 4) |
+| Deploy `--through-session 36` on alpha, then beta | Run 9, Sheets R2a/R2b | `upgrade plan` OK first (R1); alpha first; under `script(1)`; **0038 and 0039 applied** (ledger 37 → 39; beta 39 + 4) |
 | **Three credentials rotated on alpha** | Run 10, Sheets X1–X3 | The old value captured to a root-only file before the provider is touched (the proofs refuse a false declaration); one rotation per sheet; `project-runtime.sh … down` before each deploy (D253); the doctor read after each |
-| The reboot of the new host | Run 10, Sheet B1 | After X3's doctor; the units' `active` state read before the sweep |
+| The reboot | Run 10, Sheet B1 | After X3's doctor; the units' `active` state read before the sweep |
 | Tag `1.14.0` on the deployed commit | Run 10 | After the merge exits 0 or 5 for the expected reasons only (§7); `release-reading --ref <deployed sha>` first |
-| **The old host destroyed** at the provider, and its Infisical runtime identities revoked | Run 11, Sheet Z1 | Only after Run 10's sweep has been read and the new host has served one full day; the identities' names read from the kit's `bootstrap-state.json`; the operator's act at two consoles |
 
 ---
 ## 5. Build order, run by run
@@ -508,7 +492,8 @@ that touches a documentation page runs `test_documentation_index` and
 per run: the fast modules after each edit, the Docker-backed ones ONCE just
 before the commit.
 
-### Run 1 — the rigs, Sheet E0, the hosted threats, the product contract, and ADRs 0246–0250
+### Run 1 — the rigs, Sheet E0, the hosted threats, the product contract, and ADRs 0246–0249
+
 
 **Documentation only. Push, say it is pushed, read NO CI verdict** — except
 that, because `docs/threat-model.md` and `docs/decisions/README.md` are parsed
@@ -523,9 +508,9 @@ retention.sql` whole; `0034-workflow-substrate.sql:100-320`, `:540-580`,
 with twenty lines around it (D1989); `0011-identity-registry.sql:30-210`;
 `services/auth-api/app/workflow_worker.py:80-110`, `:730-900`;
 `services/auth-api/app/main.py:225-440`; `mcp_telemetry.py:40-180`;
-`docs/node-loss-runbook.md` whole; `docs/operator-guide.md:92-420`,
+`docs/operator-guide.md:92-420`,
 `:497-545`, `:702-730`; `docs/api-operations.md:84-200`; `docs/decisions/0042-*.md`,
-`0043-*.md`, `0044-*.md`, `0185-*.md`, `0189-*.md`, `0192-*.md`, `0213-*.md`,
+`0043-*.md`, `0044-*.md`, `0185-*.md`, `0213-*.md`,
 `0216-*.md`, `0217-*.md`, `0221-*.md`, `0245-*.md`; `docs/product-contract.md:
 1-60`, `:470-545`; `docs/threat-model.md` whole; this plan's §1; the Stage 5
 plan's §1 rows D1949, D1973–D1979.
@@ -582,28 +567,26 @@ control; each prints its own exit status from inside. Any Python that imports
   function gains a partial index `ON workflow_approval (run_id) WHERE status =
   'pending'` in 0039 and the rig re-measures.
 
-**Sheet E0 — the old host's readings** (appendix; `sudo`, reads only, one
-script that tees its own transcript to `/home/op/s36-e0.txt`). The agent writes
-`/home/op/s36-e0.sh` over SSH as `op` (read it back), the operator runs it.
-It reads: (1) `free -m`, `nproc`, `df -BG /var/lib/docker /`; (2) for each
-project, `systemctl is-enabled is-active agentic-postgres-project@<key>` and the
-three timers; (3) **the KEY NAMES of the provider's response for
-`docs_basic_auth_password` on alpha** (D1997), through the runtime credential
-the deploy uses — a Python one-off under `PYTHONPATH=src` that calls the same
-endpoint `infisical_client.read_secret` calls (`:254-287`) and prints
-`sorted(response["secret"].keys())` and NOTHING else (read the client first;
-if it cannot be made to print keys without the value passing through a
-variable the script also prints, the line is dropped and D1997 is decided
-`no reading` with that reason); (4) `jq '.database.observed.instance_uuid'` of
-`/home/op/kit-2026-09-11/projects/alpha-dev/outputs.json` against the deployed
-document's (D1992); (5) on beta, `SELECT app_private.workflow_counts()` and a
-direct count of pending approvals whose run is not running (the 7 of D1775);
-(6) the list of every file Session 35's Sheet F6 line names, `ls -l` of each
-(D2008); (7) `ls -la /var/lib/agentic-postgres/edge /var/lib/agentic-postgres/
-edge/acme`. And from the WORKSTATION (no root): `dig +noall +answer
-<alpha domain> @1.1.1.1` and the same for beta — the A record and its TTL
-(D1993). The domains are `project.domain` in the op-owned copies
-`/home/op/<key>-dev-outputs.json` (read with `jq`, never typed).
+**Sheet E0 — readings before anything is built** (appendix; `sudo`, reads
+only, one script that tees its own transcript to `/home/op/s36-e0.txt`). The
+agent writes `/home/op/s36-e0.sh` over SSH as `op` (read it back), the operator
+runs it. It reads: (1) `free -m`, `nproc`, `lscpu`'s model, `df -BG
+/var/lib/docker /`, `cat /sys/class/dmi/id/sys_vendor /sys/class/dmi/id/
+product_name` (the provider's own name for the machine, for the record); (2)
+for each project, `systemctl is-enabled is-active agentic-postgres-project@<key>`
+and the three timers, and `systemctl is-enabled is-active agentic-postgres-edge`
+— the units the rescale's boot depends on; (3) **the KEY NAMES of the
+provider's response for `docs_basic_auth_password` on alpha** (D1997), through
+the runtime credential the deploy uses — a Python one-off under
+`PYTHONPATH=src` that calls the same endpoint `infisical_client.read_secret`
+calls (`:254-287`) and prints `sorted(response["secret"].keys())` and NOTHING
+else (read the client first; if it cannot be made to print keys without the
+value passing through a variable the script also prints, the line is dropped
+and D1997 is decided `no reading` with that reason); (4) on beta, `SELECT
+app_private.workflow_counts()` and a direct count of pending approvals whose
+run is not running (the 7 of D1775); (5) `ls -l` of every file Session 35's
+Sheet F6 line names (they are on this host and stay on it — the sweep reuses
+them).
 
 **Then the documents.**
 
@@ -626,7 +609,7 @@ edge/acme`. And from the WORKSTATION (no root): `dig +noall +answer
   Denial of service is in scope for the creation paths and the public Postgres
   port as admission and rate limits — still not as an availability SLA."*
 - **`docs/product-contract.md`**: §2's *"Outside the boundary"* list (`:51-56`)
-  and §5 (`:470-493`) amended per ADR 0246 (D2005): removed — the hosted control
+  and §5 (`:470-493`) amended per ADR 0246 (D2004): removed — the hosted control
   plane and the hosted console; narrowed — scale-to-zero (*sleep that stops a
   project's containers, triggered by its owner or by idleness*), branching (*a
   branch restored from a backup at a recovery point; copy-on-write forks stay
@@ -644,7 +627,7 @@ edge/acme`. And from the WORKSTATION (no root): `dig +noall +answer
   may publish: 80, 443, and one Postgres port whose shape Session 39 measures and
   records in its own ADR; until that ADR, none** — `publication()` keeps raising
   and `compose.yaml` keeps zero `ports:` keys; (3) the product contract's
-  amendments (D2005); (4) **the boundary sentences** — the control plane holds
+  amendments (D2004); (4) **the boundary sentences** — the control plane holds
   nothing that opens a project's data or admin plane; the reconciler runs only a
   closed set of typed operations; a product surface runs no SQL; a customer's
   own client with the customer's own credential may; an agent never does; (5)
@@ -661,22 +644,15 @@ edge/acme`. And from the WORKSTATION (no root): `dig +noall +answer
   `target_session`), the guard's halves (D2000), the rule that a row moves in
   the run that builds the thing.
 - **ADR 0248** — *Retention extends ADR 0213 to the Stage 4 record, by
-  aggregate, with a verb* (D1985–D1989, D2003).
-- **ADR 0249** — *A planned move stops the old cluster before the new one
-  archives, and restores from the primary* (D1991, D2007), with the
-  alternatives priced: the mirror (loses up to a day), new buckets (four
-  provider resources, a second stanza), copying the volume (`docker` volume
-  export: a crash-consistent copy of a RUNNING cluster, refused by D1008's rule
-  that a volume holding a cluster is never written).
-- **ADR 0250** — *The request and worker lines are printed* (D2004, with the
+  aggregate, with a verb* (D1985–D1989, D2002).
+- **ADR 0249** — *The request and worker lines are printed* (D2003, with the
   log-volume figures).
-- **ADR 0251 is NOT written in Run 1**; Run 6 writes it if E0 allows.
-- All five indexed in `docs/decisions/README.md` (after `:311`).
+- **ADR 0250 is NOT written in Run 1**; Run 6 writes it if E0 allows.
+- All four indexed in `docs/decisions/README.md` (after `:311`).
 
 **Done.** *(executor: the four rigs' numbers and their controls; E0's
 readings — host facts, unit states, the provider's key names or why none,
-the kit's `instance_uuid` comparison, beta's counts, the F6 file list, the DNS
-TTLs; D1996's answer; the rows added.)*
+beta's counts, the F6 file list; D1996's answer; the rows added.)*
 
 ### Run 2 — migrations 0038 and 0039, and the worker's call
 
@@ -853,7 +829,7 @@ they carry one. Targeted: `test_record_command`, `test_cli_contract`,
 **Reads first**: Run 1's rig 36c and its Done; `services/auth-api/app/main.py:
 225-440`; `mcp_telemetry.py:40-180`; `workflow_worker.py:80-110`;
 `tests/contract/test_mcp_budgets.py:500-560`, `:640-680`;
-`tests/deployment/test_session7_storage.py:690-760`; ADR 0250.
+`tests/deployment/test_session7_storage.py:690-760`; ADR 0249.
 
 **Build.** `services/auth-api/app/log_setup.py`: `configure_logging()` —
 for each of `("apg", "app.workflow_worker")`: if no handler carrying the
@@ -962,11 +938,11 @@ artefacts, CLAUDE.md §5's table).
 
 **If E0 found no per-secret update time in the provider's response**: write
 D-row(s) saying so with the key names E0 printed, mark this run **Done.** with
-*"not built: no age to read"*, do not write ADR 0251, and §2's two `OPS-ROTATE`
+*"not built: no age to read"*, do not write ADR 0250, and §2's two `OPS-ROTATE`
 rows are not registered (the counts in §2 take their lower values). **Stop
 here.**
 
-**If it did**: ADR 0251 (*a secret's age is the provider's update time, read,
+**If it did**: ADR 0250 (*a secret's age is the provider's update time, read,
 never acted on*); `schemas/secret-contract.schema.json` gains optional
 `max_age_days` (integer 1–3650) per secret; `secrets.required.yaml` declares it
 for `postgrest_authenticator_password`, `docs_basic_auth_password`,
@@ -984,88 +960,76 @@ returns the value too → the planted-value test FAILED.
 ### Run 7 — the trip's instruments, written and rehearsed offline
 
 **Commits nothing but its `**Done.**`** (no CI). Everything here is a script in
-WSL `~/s36/` (backed up to the scratchpad's `s36/`) and, where it runs on a
-host, copied to `/home/op` on that host by the agent and read back.
+WSL `~/s36/` (backed up to the scratchpad's `s36/`) and, where it runs on the
+host, copied to `/home/op` by the agent and read back.
 
 **Reads first**: `~/s35r10/NOTES.md` and `~/s35r10/s35r10-derive.py` (**the
 model**: it derives each trip script from the plan's sheet text and the
 deployed documents so nothing is typed twice); Session 35's Sheets F1–F8
 (`docs/plans/session-35-implementation-plan.md:2399-2552`) and what went wrong
-on them (D1941–D1944); Session 18's Run 6 Done (`session-18-implementation-
-plan.md:469-559`); this plan's appendix.
+on them (D1941–D1944); Session 29's reboot (D1500) and Session 30's Run 7 Done
+(the redeploy-before recipe, D1570); `bin/provision-host.sh` and
+`src/agentic_postgres/host_config.py` for **which copy of `host.yaml` admission
+and `doctor capacity` read** (the checkout's, or `/etc/agentic-postgres/
+host.yaml` that `provision-host.sh --apply` installs) — D1992's sheet line
+depends on it; this plan's appendix.
 
 **Write**, each with a `--help` and its own transcript (`tee`), each deriving
 container, database and volume names from a deployed document and never typing
 one (D1184):
 
-1. `s36-e1-read.sh` — the NEW host's readings for `host.yaml` (D2001): `free -m`,
-   `nproc`, `df -BG /var/lib/docker /`, `ip -4 addr` / `ip -6 addr` on the public
-   interface, `lsb_release -a`, `docker info --format '{{.ServerVersion}}'`.
-2. `s36-hostyaml.py` — writes `/home/op/agentic-postgres/host.yaml` on the new
-   host from the KIT's `host.yaml` with exactly these edits, a backup first and
-   the diff printed: `host.id` (the operator's choice, e.g. `apg-vps-02`),
-   `host.expected_public_ipv4|_ipv6` (E1), `ssh.*` unchanged unless E1 says
-   otherwise, `capacity` per D2001's formula with its inputs printed; the
-   `infisical` block BYTE-identical (adoption refuses a difference, runbook
-   `:58-61`).
-3. `s36-copy.sh` — the files D2008 lists, op-owned ones by `ssh … cat | ssh …
-   'umask 077; cat > …'` from the workstation, each `sha256sum`'d on both ends;
-   prints the root-owned ones it did NOT copy, for Sheet N3.
-4. `s36-m1-stop.py` (root, OLD host) — per project, in order, printing a UTC
-   timestamp before each step: (a) the row counts (`app.notes`, the release
-   ledger, the project ledger, `app_private.agents`, `workflow_run`,
-   `connector_delivery`) through `docker exec … psql -U postgres`; (b)
-   `bin/backup.sh --outputs <doc> backup --type incr` (exit 0 required); (c)
-   `SELECT pg_walfile_name(pg_switch_wal())`, then poll `SELECT
-   last_archived_wal FROM pg_stat_archiver` every 2 s until it is `>=` that name
-   (timeout 180 s → exit 5, nothing stopped); (d) `systemctl disable --now
-   agentic-postgres-backup-full@<key>.timer agentic-postgres-backup-incr@<key>
-   .timer agentic-postgres-backup-mirror@<key>.timer`; (e) `systemctl disable
-   --now agentic-postgres-project@<key>.service`, then `docker ps` shows none of
-   the project's containers. It writes `/root/s36-m1-<key>.json` (counts,
-   timestamps, the WAL name) and copies it 0644 to `/home/op/`.
-   **Rehearse (a)–(c) against a throwaway `apg dev` cluster on the workstation**
-   (no `systemctl` there: (d)–(e) run with `--dry-run`, printing the commands);
-   the control is a WAL name that never arrives (an archiver pointed at
-   `/bin/false`) producing exit 5 with nothing stopped.
-5. `s36-counts.py` (root, NEW host) — the same counts after each restore and
-   deploy, compared with `/home/op/s36-m1-<key>.json`; prints `EQUAL` or the
-   differing relation (a stop, §9).
-6. `s36-d1581.py` (root) — before and after a deploy: every project container's
+1. `s36-counts.py` (root) — per project, through `docker exec … psql -U
+   postgres`: `app.notes`, the release ledger, the project ledger,
+   `app_private.agents`, `workflow_run`, `connector_delivery`, and
+   `pg_postmaster_start_time()`; `--before` writes `/root/s36-counts-<key>.json`
+   (and a 0644 copy in `/home/op/`), `--after` compares and prints `EQUAL` or the
+   differing relation. Rehearse against a throwaway `apg dev` cluster on the
+   workstation (no root there: a `--document` flag points it at the dev
+   render), the control a row inserted between `--before` and `--after`
+   producing the differing relation's name.
+2. `s36-host-read.sh` — `free -m`, `nproc`, `lscpu | grep -E 'Model name|^CPU\(s\)'`,
+   `df -BG /var/lib/docker /`, `ip -4 addr show <public interface>` (the
+   interface from `host.yaml`'s `host.public_interface`), `uptime -s`.
+3. `s36-hostyaml.py` (op) — edits `/home/op/agentic-postgres/host.yaml`'s
+   `capacity.memory_mb` to the read `free -m` total and NOTHING else (D1992), a
+   backup first (`host.yaml.pre-s36`), the diff printed; refuses if
+   `reserve_memory_mb`, `disk_gb` or `reserve_disk_gb` would change.
+4. `s36-units.sh` (op) — polls `systemctl is-active
+   agentic-postgres-project@alpha-dev agentic-postgres-project@beta-dev
+   agentic-postgres-edge` every 10 s until all three read `active` three times
+   in a row; prints the elapsed seconds from its start; gives up at 15 minutes.
+5. `s36-d1581.py` (root) — before and after a deploy: every project container's
    id, image id, `Created` and `StartedAt`, and the active secret generation id
-   (`active-secret-generation.json`), as one JSON line each; a `diff` mode. **This
-   answers D1581/D1713 on R3** (stage plan D1976).
-7. The probe pair `s36-probe-start.sh` / `s36-probe-stop.sh`, derived from
+   (`active-secret-generation.json`), as one JSON line each; a `--diff` mode.
+   **This answers D1581/D1713 on R3** (stage plan D1976).
+6. The probe pair `s36-probe-start.sh` / `s36-probe-stop.sh`, derived from
    Session 35's (the probe stops itself after 4 hours: start it when the sheet is
-   handed, D1943), targets re-derived from the new host's documents — **it runs
-   on the new host as `op`, through the edge**.
-8. `s36-dns.sh` (workstation) — `dig +short <domain> @1.1.1.1` and `@8.8.8.8`
-   for both domains every 15 s until both resolvers return the new address
-   (prints the elapsed seconds), never longer than 30 minutes.
+   handed, D1943) — **it runs on the host as `op`, through the edge**.
+7. `s36-capture.py` and `s36-shape.py` (root) — after reading
+   `docs/api-operations.md` §*Rotating a credential* step 1: the first copies
+   the ACTIVE generation's value of one secret to `/root/s36-prev-<name>`
+   (0600), the path derived from `active-secret-generation.json` and the
+   generation's manifest; the second reads the NEW generation's value and prints
+   only its length, its character class and whether it differs from the
+   captured one. Neither prints a value. Rehearse both against a throwaway
+   generation directory the script builds in `/tmp`.
+8. `s36-redeploy-before.py` (root) — Session 30's redeploy-before recipe as
+   D1570 corrected it: a sentinel note on alpha and
+   `/root/s36-redeploy-before.json` with `sentinel_title` and the CURRENT
+   `generation_id`.
 9. `s36-sweep.sh` — the sweep line (Sheet S1), derived from Session 35's F6 by
-   diff: the gate's name, the new host's paths, `--after-reboot`, the four
-   `--rotated-*` flags, `--replacement-host-outputs`, `--restore-evidence-file`
-   (alpha's record from M3a), `--kit-dir /home/op/kit-2026-09-11`,
-   `--redeploy-before-file /root/s36-redeploy-before.json` (R3's). Detached:
-   `setsid nohup bash /home/op/g36-host.sh > /dev/null 2>&1 < /dev/null &`, the
-   exit code written to a file by the script.
-10. `s36-capture.py` and `s36-shape.py` (root, the new host) — after reading
-    `docs/api-operations.md` §*Rotating a credential* step 1: the first copies
-    the ACTIVE generation's value of one secret to `/root/s36-prev-<name>`
-    (0600) with the path derived from `active-secret-generation.json` and the
-    generation's manifest; the second reads the NEW generation's value and
-    prints only its length, its character class and whether it differs from
-    the captured one. Neither prints a value. Rehearse both against a throwaway
-    generation directory the script builds in `/tmp`.
-11. `s36-redeploy-before.py` (root) — Session 30's redeploy-before recipe as
-    D1570 corrected it (read Session 30 Run 7's Done and D1570 first): a
-    sentinel note on alpha and `/root/s36-redeploy-before.json` with
-    `sentinel_title` and the CURRENT `generation_id`.
-12. `s36-external.sh` (workstation) — Session 35's external line with
-    `--public-ipv4 <new>` and `--ssh-destination op@<new>` (+ `--public-ipv6` if
-    E1 found one), an ephemeral `ssh-agent` (D466).
+   diff: the gate's name, `--after-reboot`, the four `--rotated-*` flags,
+   `--redeploy-before-file /root/s36-redeploy-before.json`, `--kit-dir
+   /home/op/kit-2026-09-11`, and every other declaration F6 named; **NOT**
+   `--replacement-host-outputs` / `--replacement-bootstrap-state` (D1998).
+   Detached: `setsid nohup bash /home/op/g36-host.sh > /dev/null 2>&1 <
+   /dev/null &`, the exit code written to a file by the script.
+10. `s36-external.sh` (workstation) — Session 35's external line unchanged
+    (`--public-ipv4 62.238.99.122`, `--ssh-destination op@62.238.99.122`), an
+    ephemeral `ssh-agent` (D466).
 
-**Done.** *(executor: each script's rehearsal and its control's result.)*
+**Done.** *(executor: each script's rehearsal and its control's result; which
+`host.yaml` copy admission reads.)*
 
 ### Run 8 — the bump, the registry, the gate, the documents
 
@@ -1077,7 +1041,7 @@ files).
 - `src/agentic_postgres/__init__.py`: a `#:` paragraph for Session 36 above the
   constant (the shape of `:769-833`: what the release adds, the pricing,
   **`VERSION` moves to `1.14.0`**), `CURRENT_SESSION = 36`. `VERSION` → `1.14.0`.
-- `tests/acceptance-registry.yaml`: the block `# Session 36 (ADR 0246-0251)`
+- `tests/acceptance-registry.yaml`: the block `# Session 36 (ADR 0246-0250)`
   with §2's entries and the node ids COLLECTED (`pytest --collect-only -q` over
   the new modules); `LEDGER` in the ID regex and the family sentence.
 - `evidence_claims.py`: `CLAIMS` and `OFFLINE_CLAIMS` per §2;
@@ -1085,9 +1049,9 @@ files).
 - **`bin/session-36-check.sh`, derived from 35's by diff** (D1482): `readonly
   SESSION=36`; the header and the usage block REWRITTEN whole (D1488) — what
   1.14.0 adds, the four (or five) offline claims, the two (or three) host
-  claims, that this gate's sweep is the one that declares `--replacement-host-
-  outputs` from a REAL move for the first time (D1992) and the four
-  `--rotated-*` files (D1995); **no flag added or removed** (the sorted
+  claims, that this gate's sweep is the first to declare all four `--rotated-*`
+  files (D1995) and that `--replacement-*` stay undeclared because the host was
+  rescaled, not replaced (D1991); **no flag added or removed** (the sorted
   flag-token sets equal — prove it in the commit message as Session 35 did).
   `tests/contract/test_session_thirty_six_gate_modes.py` derived from 35's
   (`SESSION = 36`, `SESSION_PREVIOUS`, the new claims asserted in the offline
@@ -1096,15 +1060,12 @@ files).
   two migrations; a new command); `README.md:7` (*Session 36 implemented*) and
   the `template_version` phrase; every `--session 35` / `--through-session 35`
   literal a reader executes, moved and counted per file (D678/D1484; the
-  `test_documentation_index.py:435` guard); `docs/node-loss-runbook.md` gains
-  **`## 8. A planned move`** — ADR 0249's order as numbered steps with the
-  commands of Sheets M1–M6, and one sentence at the top of §3 and §4 pointing
-  to it; `docs/operator-guide.md` §9/§13 corrected per D1996, §13's
-  *"a rehearsal past the restore"* line rewritten after Run 10 (not now — a
-  sentence about a move that has not happened would be D267), §2's
-  `apg-agent` paragraph unchanged; `docs/threat-model.md`'s list items for the
-  record (*retention*) — none; `docs/product-contract.md`'s requirement block
-  regenerated (`bin/render-acceptance-matrix.py --write`; read `--help`).
+  `test_documentation_index.py:435` guard); `docs/operator-guide.md` §9/§13
+  corrected per D1996, and §16 (*the node as a finite resource*) gains
+  **a paragraph on rescaling a Hetzner server** — CPU and RAM only, the clean
+  shutdown, `memory_mb` re-declared with the reserve unchanged (D1992, D1993);
+  `docs/product-contract.md`'s requirement block regenerated
+  (`bin/render-acceptance-matrix.py --write`; read `--help`).
 - `bin/render-acceptance-matrix.py`'s `AREAS` (`:42-53`) lists ten families and
   not `NODE`, `GOV`, `CONN` and the rest — **do not widen it here**; a row
   records it (the matrix is generated from what it lists, and widening it is a
@@ -1126,124 +1087,75 @@ Push; read CI by full SHA.
 **Done.** *(executor: the counts read from the tuples, the gate's flag diff,
 the offline half's numbers, CI.)*
 
-### Run 9 — sittings 1 and 2: the new host prepared, then the move and the release
+### Run 9 — sitting 1 (day 1): the rescale, then the release
 
 **Before the day** (agent, offline): CI green on Run 8's commit by full SHA;
-`pytest --setup-plan` for `tests/deployment/test_session36_operations.py`,
-`test_session18_recovery.py` and `test_session4_convergence.py` with the
-variables SET (D671, D676), outputs kept; WSL's outbound TCP probed (a
-`/dev/tcp` connect timed inside a script — CLAUDE.md §1); Run 7's scripts read
-once more against the sheet text; **the previous trips' *"if something goes
-wrong"* sections read** (`docs/node-loss-runbook.md` §7, operator guide §12,
-Session 35's Run 10 and D1941–D1944 — D977).
+`pytest --setup-plan` for `tests/deployment/test_session36_operations.py` and
+`test_session4_convergence.py` with the variables SET (D671, D676), outputs
+kept; WSL's outbound TCP probed (a `/dev/tcp` connect timed inside a script —
+CLAUDE.md §1); Run 7's scripts read once more against the sheet text; **the
+previous trips' *"if something goes wrong"* sections read** (operator guide
+§12, Session 35's Run 10 and D1941–D1944, Session 29's reboot — D977).
+**Announced: both projects are down from H1's `poweroff` to H3's doctors.**
 
-**Sitting 1 (day 1) — the new host prepared. No outage.** Sheets N0–N3 in the
-appendix, one outcome each, read before the next is issued (D1510):
+In order, one sheet per outcome, each read before the next is issued (D1510):
 
-1. *(N0, the operator by hand)* the VPS created at the operator's provider
-   (Ubuntu at a release `host.yaml`'s `supported_os_releases` lists); `op` and
-   `apg-agent` created with the workstation's public keys; the bundle of
-   `f7fb96d` (the KIT's release) cloned to `~op/agentic-postgres`, `git
-   rev-parse HEAD` read; proved with a NEW session as `op` and as `apg-agent`
-   while root still works (operator guide §3 step 1). The operator writes the
-   new address on the sheet.
-2. *(agent, as `op`)* `ssh -o StrictHostKeyChecking=accept-new -i
-   ~/.ssh/agentic_postgres_ed25519 op@<new>`; `s36-e1-read.sh`; the kit
-   **`kit-<date>-move`** exported on the OLD host (Sheet N1's first line, `sudo
-   bin/dr-kit.sh export --host host.yaml --capabilities capabilities.yaml
-   --output /home/op/kit-<date>-move --project project.alpha.yaml --project
-   project.beta.yaml`) and copied old → workstation `~/dr-kits/` → new host
-   `/home/op/` (0700/0600 kept; `bin/dr-kit.sh verify` on the new host as `op`);
-   `s36-hostyaml.py`; the manifests `project.alpha.yaml`, `project.beta.yaml`
-   and `capabilities.yaml` copied from the kit into the checkout (they are
-   gitignored operator inputs); `uv sync` per CLAUDE.md §5; `s36-copy.sh`.
-3. *(N1)* `sudo bin/provision-host.sh --host host.yaml --check`, then the three
-   `--apply` passes with their armed rollbacks and `--confirm-ssh-ok` /
-   `--confirm-firewall-ok` after NEW sessions (`bin/provision-host.sh:104-140`);
-   then `apg-diag` installed by hand and its sudoers line (`infra/host/
-   apg-agent.sudoers`, `visudo -c`); the agent reads `sudo apg-diag containers`
-   as `apg-agent`.
-4. *(N2)* `sudo bin/edge.sh --host host.yaml up` and `status` — staging, no route
-   yet, no request to the CA (D1993).
-5. *(N3)* per project: the control-plane credential placed at
-   `/root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential`
-   (two lines, 0600 root, `docs/provider-bootstrap.md`), `bin/dr-kit.sh verify`,
-   `bootstrap-providers.sh … --adopt …`, then `… --apply …` (runbook `:68-95`);
-   **every line `--apply` prints must read *already present at the provider;
-   not overwritten*** — a *create* is a stop; the credential shredded; then
-   `sudo bin/materialize-secrets.sh --project project.<name>.yaml --requirements
-   secrets.required.yaml --session 35` per project; the root file of D2008
-   copied (Sheet N3's last lines). The agent renders both as `op`:
-   `./deploy.sh --project project.<name>.yaml --capabilities capabilities.yaml
-   --render-only`.
-
-**Sitting 2 (day 2) — the move, then the release.** Announced: both projects are
-down from M1 to M5. Sheets M1–M6 and R1–R4:
-
-6. *(M1, OLD host)* `sudo python3 /home/op/s36-m1-stop.py --project alpha-dev`,
-   then `--project beta-dev` — each exits 0 with `archived` and `stopped`
-   printed. The agent reads `/home/op/s36-m1-*.json`.
-7. *(M2, the operator at Cloudflare)* both A records → the new address, grey
-   cloud; the agent runs `s36-dns.sh` until both resolvers agree.
-8. *(M3a, M3b, NEW host)* per project: `restore.sh … --from primary --latest
-   --plan` (read), then the restore (the runbook's `:128-131` with `--from
-   primary`); the record `evidence/restore-<key>-<id>.json` named (its last line names the
-   timeline and the identity; the counts wait for M4, because the restore
-   leaves the cluster stopped).
-9. *(M4a, M4b)* `sudo ./deploy.sh --host host.yaml --project project.<name>.yaml
-   --capabilities capabilities.yaml --through-session 35` under `script -q -e -c
-   '…' /home/op/s36-m4-<key>.txt`, nothing after it. Expect exit 0, step 6
-   applying nothing (ledgers 37 / 37+4), step 6c's `check` passing into the SAME
-   stanza, staging `CERTIFICATE_VERIFY_FAILED` lines (D1047). Then
-   `s36-counts.py` → `EQUAL` for both.
-10. *(M5)* `sudo bin/edge.sh --host host.yaml promote-acme --to production
-    --confirm <new host.id>` once both hostnames hold a staging certificate;
-    then `sudo bin/doctor.sh --project <key>` both → 12 ok. **The move's window
-    is M1's first stop timestamp to this doctor's ok, per project** — recorded.
-11. *(M6)* `sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/<key>/
-    outputs.json backup --type full` per project (a first full on the new
-    timeline — `schedule enable` refuses without one), then `… schedule enable`
-    and `… schedule status`; the op-owned copies installed (`sudo install -o op
-    -g op -m 0600 /etc/agentic-postgres/projects/<key>/outputs.json
-    /home/op/<key>-dev-outputs.json`); a kit `kit-<date>-post-move` exported and
-    copied to `~/dr-kits/`.
-12. *(op)* the 1.14.0 commit transported: `git bundle create /tmp/apg-<sha12>
-    .bundle main`, `scp`, `git bundle verify`, `git fetch <bundle> main`, **`git
-    rev-parse FETCH_HEAD` equal to the pushed SHA**, `git checkout -B main
-    FETCH_HEAD`, `cat VERSION` → `1.14.0`, porcelain 0; the FOUR renders as `op`
-    (D1507): `project.alpha.yaml`, `project.beta.yaml`, `project.example.yaml`,
-    `project.second.example.yaml`.
-13. *(R1)* `bin/upgrade.sh check --project <key>` and `plan --project <key>
-    --candidate .generated/<key>/outputs.json --json` (with `--also
-    migration_added` — read `--help`), both projects: expect `bump minor`, verdict
-    `ok`.
-14. *(R2a, R2b)* the probe started (`s36-probe-start.sh`); `sudo ./deploy.sh
-    --host host.yaml --project project.<name>.yaml --capabilities
-    capabilities.yaml --through-session 36` under `script`; alpha, then beta —
-    **R2b's optional first line is D2009's manifest edit, the operator's yes or
-    no**. Expect ledgers 39 / 39+4. The probe stopped; the windows per class read.
-15. *(R3)* the redeploy-before file for `deployment_convergence` (Session 30's
-    recipe as corrected by D1570 — read Session 30's Run 7 Done), then
-    `s36-d1581.py --before`, the SAME deploy of alpha again with nothing
-    changed, `s36-d1581.py --after --diff`: **which containers are new, which
-    restarted, whether the generation moved** (D1581/D1713 answered, D1976).
-16. *(R4, beta)* `sudo bin/record.sh --project beta-dev size`; the operator writes
+1. *(op)* the 1.14.0 commit transported: `git bundle create /tmp/apg-<sha12>
+   .bundle main`, `scp`, `git bundle verify`, `git fetch <bundle> main`, **`git
+   rev-parse FETCH_HEAD` equal to the pushed SHA**, `git checkout -B main
+   FETCH_HEAD`, `cat VERSION` → `1.14.0`, porcelain 0; `uv pip sync` only if
+   `git diff --stat f7fb96d..HEAD -- requirements-dev.txt requirements-dev.in
+   .python-version` is non-empty (D1491); the FOUR renders as `op` (D1507):
+   `project.alpha.yaml`, `project.beta.yaml`, `project.example.yaml`,
+   `project.second.example.yaml`. **The checkout moving does not touch what
+   runs**: the deployed release lives under `/opt/agentic-postgres/releases/
+   f7fb96d…`.
+2. *(H1, before the rescale)* a `backup --type incr` per project; `s36-counts.py
+   --before` per project; `s36-host-read.sh` (the OLD size, for the envelope);
+   then `sudo systemctl poweroff`. **The window starts at this line** — the
+   agent records the time it was issued.
+3. *(H2, the operator at the Hetzner Console)* the server is off; **Rescale**,
+   **"CPU and RAM only"**, an x86 plan of the size the operator chose (write it
+   on the sheet); **before power-on, the server's Primary IPv4 read on the
+   console and written on the sheet** — it must be `62.238.99.122`; power on.
+4. *(op)* `ssh` as `op` until it answers; `s36-units.sh`; `s36-host-read.sh`
+   (the NEW size: `free -m`, `nproc`, the CPU model); `ip -4 addr` shows
+   `62.238.99.122`.
+5. *(H3)* `sudo bin/doctor.sh --project alpha-dev` and `--project beta-dev` →
+   12 ok each; `sudo python3 /home/op/s36-counts.py --after` per project →
+   `EQUAL`. **The window ends at the second doctor's ok** — recorded per project.
+6. *(op, then H4)* `s36-hostyaml.py` (the new `memory_mb`, nothing else, D1992);
+   the operator installs it where Run 7 found admission reads it; `sudo
+   bin/doctor.sh capacity --host host.yaml` — the declared memory, the reserve
+   unchanged, committed 608 MiB, safe available `memory_mb − 2214 − 608`.
+7. *(R1)* `sudo bin/upgrade.sh check --project <key>` and `sudo bin/upgrade.sh
+   plan --project <key> --candidate .generated/<key>/outputs.json --json` (with
+   `--also migration_added` — read `--help`), both projects: expect `bump
+   minor`, verdict `ok`.
+8. *(R2a, R2b)* the probe started (`s36-probe-start.sh`); `sudo ./deploy.sh
+   --host host.yaml --project project.<name>.yaml --capabilities
+   capabilities.yaml --through-session 36` under `script`; alpha, then beta —
+   **R2b's optional first line is D2005's manifest edit, the operator's yes or
+   no**. Expect ledgers 39 / 39+4. The probe stopped; the windows per class read.
+9. *(R3)* `s36-redeploy-before.py` (for `deployment_convergence`), then
+   `s36-d1581.py --before`, the SAME deploy of alpha again with nothing
+   changed, `s36-d1581.py --after --diff`: **which containers are new, which
+   restarted, whether the generation moved** (D1581/D1713 answered, D1976).
+10. *(R4, beta)* `sudo bin/record.sh --project beta-dev size`; the operator writes
     the horizons on the sheet (proposed: `2026-10-01T00:00:00Z` for `runs` and
     `deliveries`, the same for `agents` after runs); `prune --what runs …`,
     `--what deliveries …`, `--what agents …` each with `--confirm beta-dev`; `size`
     after. Expect `workflow_approval (pending on an ended run)` = 0 already (the
     worker withdrew them after R2b).
-17. *(V1)* the verification, `-k` (writes no evidence): `sudo bin/session-36-
-    check.sh --mode host … -k "session18_recovery or session4_transports or
-    session36"`.
+11. *(V1)* the verification, `-k` (writes no evidence): `sudo bin/session-36-
+    check.sh --mode host … -k "session4_transports or session36"`.
 
-**Done.** *(executor: the new host's facts; the kit names; adoption's lines;
-the restore records and their wall times; the counts; the move's window per
-project; the staging→production issuance; the upgrade plans; the deploy
-windows per class from the probe; D1581's answer; the prune counts; V1's
-result; the rows.)*
+**Done.** *(executor: the old and new sizes and CPU models; the Primary IP on
+the console; the rescale's window per project; the counts; the capacity
+reading; the upgrade plans; the deploy windows per class from the probe;
+D1581's answer; the prune counts; V1's result; the rows.)*
 
-### Run 10 — sitting 3: the three rotations, the reboot, the one sweep, the tag
+### Run 10 — sitting 2 (day 2): the three rotations, the reboot, the one sweep, the tag
 
 **The rotations are alpha's, one sheet each** (D1995): **X1** the authenticator
 password (`postgrest_authenticator_password`, consumer `postgrest`), **X2** the
@@ -1251,45 +1163,42 @@ documentation password (`docs_basic_auth_password`, the root plane — the
 middleware is written inline since ADR 0086, so no edge restart), **X3** the
 application credential (`app_runtime_password`, consumers `pgbouncer` and the
 client fixtures). **What they move, said at the top of every sheet**: with the
-retired signing JWK (Session 30), the four files the nine node ids need; a
-claim moves only if every one of its node ids passes in S1.
+retired signing JWK Session 30 kept at `/home/op/s30-retired-alpha-dev-jwk.json`,
+the four files the nine node ids need; a claim moves only if every one of its
+node ids passes in S1.
 
 Each sheet, from `docs/api-operations.md` §*Rotating a credential* (read it
 whole first — its traps D252–D254 are why the steps are in this order):
 
-1. the current value captured to `/root/s36-prev-<name>` (0600 root) from the
-   active generation — the path read from `active-secret-generation.json` and
-   the generation's own manifest, never typed;
+1. the current value captured to `/root/s36-prev-<name>` (0600 root) by
+   `s36-capture.py`;
 2. **the operator replaces the value at Infisical by hand** (a new random value
    of the same shape — the contract's `format` for the secret) and confirms it
    saved;
 3. `sudo bin/project-runtime.sh --host host.yaml --project-key alpha-dev
    --through-session 36 down` (D253 — still live);
 4. `sudo bin/materialize-secrets.sh --project project.alpha.yaml --requirements
-   secrets.required.yaml --session 36`, then **the shape check** (the new value's
-   length and character class read through the generation, never printed —
-   Session 30 Run 8's lesson);
+   secrets.required.yaml --session 36`, then `s36-shape.py` (the new value's
+   length and class, differing from the captured one; never printed — Session
+   30 Run 8's lesson);
 5. `sudo ./deploy.sh … --project project.alpha.yaml … --through-session 36` under
    `script`;
 6. `sudo bin/doctor.sh --project alpha-dev` → 12 ok.
 
-Then **B1**: `sudo systemctl reboot`; the agent waits for SSH, then for
-`systemctl is-active agentic-postgres-project@alpha-dev agentic-postgres-
-project@beta-dev agentic-postgres-edge` to read `active` three times, 10 s apart.
+Then **B1**: `sudo systemctl reboot`; the agent runs `s36-units.sh`.
 
 Then **S1, the one sweep** (`s36-sweep.sh`, detached; ~55 min): every
-declaration `--help` lists, with **`--after-reboot`**, **`--rotated-from-file
-/root/s36-prev-app_runtime_password`**, **`--rotated-authenticator-from-file
-/root/s36-prev-postgrest_authenticator_password`**, **`--rotated-docs-from-file
-/root/s36-prev-docs_basic_auth_password`**, **`--rotated-jwt-from-file
-/home/op/s30-retired-alpha-dev-jwk.json`**, **`--replacement-host-outputs
-/etc/agentic-postgres/projects/alpha-dev/outputs.json`**, **`--restore-
-evidence-file <M3a's record>`**, `--kit-dir /home/op/kit-2026-09-11`,
-`--redeploy-before-file /root/s36-redeploy-before.json`, and the rest as
-Session 35's F6 named them (the files D2008 copied); `--dx-record-file` keeps
-the Session 25 record (no person walked, D1935). If a proof FAILS: read it; an
-instrument repaired in the window and re-run with `-k`; the sweep once more
-only if a claim's reading changed; a product defect **recorded and left**.
+declaration `--help` lists except the two `--replacement-*` (D1998), with
+**`--after-reboot`**, **`--rotated-from-file /root/s36-prev-app_runtime_password`**,
+**`--rotated-authenticator-from-file /root/s36-prev-postgrest_authenticator_password`**,
+**`--rotated-docs-from-file /root/s36-prev-docs_basic_auth_password`**,
+**`--rotated-jwt-from-file /home/op/s30-retired-alpha-dev-jwk.json`**,
+`--kit-dir /home/op/kit-2026-09-11`, `--redeploy-before-file
+/root/s36-redeploy-before.json`, and the rest as Session 35's F6 named them;
+`--dx-record-file` keeps the Session 25 record (no person walked, D1935). If a
+proof FAILS: read it; an instrument repaired in the window and re-run with
+`-k`; the sweep once more only if a claim's reading changed; a product defect
+**recorded and left**.
 
 Then the external half from WSL (`s36-external.sh`), the host half copied to
 WSL, and the merge: `python bin/write-session-evidence.py --session 36
@@ -1300,50 +1209,37 @@ the offline half at the deployed commit first (Session 30 Run 7's lesson: the
 merge reports the commit difference rather than folding it).
 
 **The tag** (D1425): `bin/apg.sh release-reading --ref <deployed sha>` quoted;
-`git tag -a 1.14.0 <deployed sha>`; `git push origin 1.14.0`.
+`git tag -a 1.14.0 <deployed sha>`; `git push origin 1.14.0`. A post kit:
+`sudo bin/dr-kit.sh export --host host.yaml --capabilities capabilities.yaml
+--output /home/op/kit-<date>-post --project project.alpha.yaml --project
+project.beta.yaml`, copied to WSL `~/dr-kits/`.
 
 **Done.** *(executor: the three rotations' timings and doctor readings; the
-reboot's downtime; the claim table; the halves; the tag.)*
+reboot's downtime; the claim table; the halves; the tag; the kit.)*
 
-### Run 11 — sitting 4: the old host retired
-
-**Only after Run 10's merge has been read and the new host has served for at
-least one full day.** Sheet Z1: on the OLD host, `systemctl is-enabled` of
-every unit Run 9 disabled (all `disabled`), `docker ps -a` (no project
-container running); the operator revokes the old host's Infisical runtime
-identities in the console (their names read from the move kit's
-`projects/<key>/bootstrap-state.json` — the identity `--adopt` replaced, runbook
-`:79-81`); **the operator destroys the VPS at the provider** (its disk with it).
-The agent removes the old address from WSL's `~/.ssh/known_hosts` and records
-that `62.238.99.122` no longer answers SSH.
-
-**Done.** *(executor)*
-
-### Run 12 — the close
+### Run 11 — the close
 
 **Code (the envelope rows) — `bin/session-01-check.sh` once and CI.**
 
 - **`capacity.ENVELOPE`**: Session 36 rows, read from the trip's own files by a
   script that pastes them (`~/s36/s36-envelope.py`, Session 35's
-  `s35-r11-envelope.py` the model — never retyped): **the move's window** per
-  project (M1's first stop → M5's doctor ok), **the restore from the primary**
-  per project (`restore.sh`'s wall time, with the repository's size from `backup.sh
-  info`), **the new host's capacity** (E1), **the deploy windows per class on
-  the new host** (R2's probe), **the reboot's window** (B1), and — as a
+  `s35-r11-envelope.py` the model — never retyped), each naming the CPU model
+  and size it ran on (D1994): **the rescale's window** per project (H1's
+  `poweroff` → H3's doctor ok), **the rescaled host's capacity** (`free -m`,
+  `nproc`, the CPU model, the new claimable), **the deploy windows per class on
+  the rescaled host** (R2's probe), **the reboot's window** (B1), and — as a
   CONFIGURATION row — D1581's answer. `bin/render-capacity-envelope.py --write`.
 - **The Reality Ledger**: no row changes status this session (nothing a customer
-  reaches was built); the `today` and `today_evidence` of `backups_and_pitr`
-  gain the move's restore. `bin/render-reality-ledger.py --write`.
+  reaches was built). `bin/render-reality-ledger.py --write`.
 - `docs/scope-closure.md` **§29** — what Session 36 closed, what it left, what
   Session 37 inherits (the shape of §28).
-- `docs/plans/stage-5-plan.md`'s Status block re-read and rewritten (Session 36
-  done, the new host's facts, next free numbers).
-- `docs/operator-guide.md` §13: *"a rehearsal past the restore"* rewritten to
-  what the move did; §3: *"Complete bring-ups from empty"* gains the new host.
+- `docs/plans/stage-5-plan.md`: the Status block re-read and rewritten (Session
+  36 done, the rescaled size, next free numbers); its D1948 row already carries the supersession, written 2026-10-03 with this plan's revision
+- `docs/operator-guide.md` §13: *"The kernel restart and `--after-reboot`"* line
+  updated with B1.
 - CLAUDE.md §2 rewritten for Session 37's planner (copy it to the scratchpad
-  first): HOST block with the new address; the gate's script set `s36-*`; the
-  envelope's new rows; **CLAUDE.md §5's SSH lines and the agent's `apg-diag`
-  line carry the new address**.
+  first): the HOST block with the new size; the gate's script set `s36-*`; the
+  envelope's new rows.
 - The plan's header `Status:` set to COMPLETE with the rows each run added.
 
 **Done.** *(executor)*
@@ -1353,21 +1249,21 @@ that `62.238.99.122` no longer answers SSH.
 ## 7. Evidence and claims
 
 **Expected at the merge** (Run 10): **204 claims** (206 with Run 6). **Passed:
-everything that passed at Session 35, plus the six (eight) new ones, plus —
-for the first time on this deployment — `port_allocation` (declared after a
-reboot), `replacement_host_restore` (a real move's three inputs, D1992), and
-the rotation trio** (`api_authorization`, `bootstrap_identity`,
-`credential_rotation_planes`: all nine node ids, D1995). **`failed` 1:
-`documented_path`**, by decision (D1935; the person's walk is Session 42's).
-**`not_run` 0 is the prediction, and it is a prediction**: each of the five is
-moved by evidence the sweep must actually produce, and any that does not is
-reported with its reason and the plan says which (§2.4 of the stage plan).
-Exit 5 for `documented_path` and no other reason.
+everything that passed at Session 35, plus the six (eight) new ones, plus — for
+the first time since Session 29 — `port_allocation` (declared after B1), and
+— for the first time on this deployment — the rotation trio**
+(`api_authorization`, `bootstrap_identity`, `credential_rotation_planes`: all
+nine node ids, D1995). **`failed` 1: `documented_path`**, by decision (D1935;
+the person's walk is Session 42's). **`not_run` 1: `replacement_host_restore`**,
+by D1028's decision, unchanged (D1991). These are predictions: each of the four
+claims expected to move is moved only by evidence the sweep actually produces,
+and any that does not is reported with its reason. Exit 5 for `documented_path`
+and `replacement_host_restore` and no other reason.
 
 **The three modes.** Offline: `bin/session-36-check.sh --mode offline` at the
-deployed commit (64 or 65 claims). Host: S1. External: from WSL against the new
-address, `--ssh-destination op@<new>`. Two live halves naming different commits
-do not merge (Session 29's rule) — deploy fully, THEN sweep.
+deployed commit (64 or 65 claims). Host: S1. External: from WSL, unchanged
+address. Two live halves naming different commits do not merge (Session 29's
+rule) — deploy fully, THEN sweep.
 
 ---
 
@@ -1379,11 +1275,10 @@ do not merge (Session 29's rule) — deploy fully, THEN sweep.
 | **A function granted to nobody is reached only by the owner or a superuser at a TTY** | Four of 0039's five functions are granted to nobody; `record.sh` requires root and `--confirm` |
 | **The worker holds nothing the agent does not** (ADR 0217's first commitment, carried by ADR 0246) | The worker gains one function that moves `pending` approvals of ENDED runs to `withdrawn` — a state no agent can act on and no token is minted from (`workflow_approval_for_token` requires `approved` on a `running` run) |
 | **No URL, key, token or caller value in a log line** | The handler prints lines whose fields are fixed by the code that builds them; `test_a_request_prints_one_line_with_the_template_and_no_caller_value` and the live proof plant and grep |
-| **One service cannot read another's credential** | The move re-materializes every generation on the new host from the same provider through adopted identities; no value crosses the workstation (D2008: only the admin password, by the operator, through `op`'s 0600 file, shredded) |
-| **A restore never overwrites the active volume** | `restore.sh` on an empty new host; its refusals unchanged; REC-NODE-001 re-proves the refusal on the populated volume |
-| **One writer per backup repository** (new, ADR 0249) | The old cluster stopped and its timers disabled before the new one archives; the old host destroyed before anything could restart it |
+| **One service cannot read another's credential** | The rotations re-materialize per consumer; the captured old values are root-only 0600 files read only by the sweep; no value is printed (`s36-shape.py`) |
+| **A deploy over a broken archiver fails** | Unchanged; the rescale stops nothing but the machine, and step 6c runs on every R deploy |
 | **There is no public Postgres endpoint** | Still true: ADR 0246 permits Session 39 to measure one and changes nothing at runtime; `publication()` raises; zero `ports:` keys |
-| **A report may not substitute an answer for a failure to determine one** (ADR 0195) | `record.sh size` reports *could not be read* and exits 6; the secret-age reading (if built) reports `unknown`; the move's counts print the differing relation, never `EQUAL` by default |
+| **A report may not substitute an answer for a failure to determine one** (ADR 0195) | `record.sh size` reports *could not be read* and exits 6; the secret-age reading (if built) reports `unknown`; the counts print the differing relation, never `EQUAL` by default |
 
 ---
 
@@ -1391,15 +1286,12 @@ do not merge (Session 29's rule) — deploy fully, THEN sweep.
 
 Stop and ask the operator, without improvising, when:
 
-- `pg_stat_archiver` does not reach the switched WAL within 180 s on M1 (nothing
-  is stopped; the move is postponed);
-- **anything would start a project unit or a backup timer on the OLD host after
-  M1** — including a reboot of it (its units are disabled; if the provider
-  reboots it, read `systemctl is-active` and `docker ps` before anything else);
-- adoption's `--apply` prints a line it would *create* (a value the old host
-  never had — runbook `:91-93`);
-- a restore's counts differ from M1's (`s36-counts.py` not `EQUAL`);
-- two failed ACME validations on one hostname within an hour (D1993);
+- the incremental backup on H1 fails (nothing is shut down);
+- the Hetzner Console offers no x86 plan of the chosen size with **"CPU and RAM
+  only"**, or the Primary IPv4 on the console is not `62.238.99.122` before
+  power-on;
+- the units do not reach `active` within 15 minutes of power-on, or a count
+  differs after the rescale (`s36-counts.py` not `EQUAL`);
 - a migration would need to replace a 0035 function, or a prune would need to
   touch `users`, `workflow_definition`, `connector` or `workflow_worker`;
 - `upgrade plan` prices 1.14.0 at `major`, or for a reason this plan did not name;
@@ -1409,7 +1301,6 @@ Stop and ask the operator, without improvising, when:
 - the sweep would run without `--after-reboot` after B1, or after a code commit
   past the deployed one;
 - a currently-passing test would be weakened to make a new one pass;
-- the old host would be destroyed before Run 10's merge has been read;
 - `--render-only` stops working with no host and no root.
 
 ---
@@ -1418,11 +1309,11 @@ Stop and ask the operator, without improvising, when:
 
 **Carried, untouched, each still true:** D1547 (`delete_note`, deferred with its
 cost, D1990); D1798 (no redelivery); D1869, D1871, D1722/D1806, D1784, D1792,
-ADR 0241's bound; D1045; D1375; D976; D688 (unless E1 finds IPv6 — then Run 9
-declares `expected_public_ipv6` and the external half passes `--public-ipv6`);
-D771; D340; D466; D540; D942; D1203; D1205; D1211; the 24 unclaimed
-requirements; `process-max` 1 (D593) — **the move's restore time is its newest
-sample**.
+ADR 0241's bound; D1045; D1375; D976; D688; D771; D340; D466; D540; D942; D1203;
+D1205; D1211; the 24 unclaimed requirements; `process-max` 1 (D593);
+**`replacement_host_restore`, `not_run` by D1028** — a rescale is not a
+replacement, and the first end-to-end replacement waits for a session that
+needs one.
 
 **Created, and named so Session 37 does not inherit them silently:**
 
@@ -1436,14 +1327,13 @@ sample**.
 - **The hosted threats are a list** (D1999) — each moves into the table with its
   requirement in Sessions 37–42.
 - **The Reality Ledger's control and operation-type guards** (D2000) — 37 and 42.
-- **The new host's capacity is declared for two projects and the edge** (D2001)
-  — Session 38 re-derives it with the control project and the profiles.
+- **The reserve is the old host's** (D1992) — Session 38 re-derives it with the
+  control project, ClickStack and the profiles.
+- **The disk is still 38 GB** (D1991: CPU and RAM only) — Session 40's branches
+  and Session 41's ClickStack retention are the two readers that may need more,
+  and a disk rescale is one-way; each of those sessions measures its need first.
 - **`render-acceptance-matrix.py`'s `AREAS` lists ten families** of twenty-six —
   recorded, not widened (Run 8).
-- **The old host's kits** (`kit-2026-09-11` … `kit-2026-10-03-post`) stay in WSL
-  `~/dr-kits/`; their `host.yaml` names a machine that no longer exists, which
-  is correct for a kit and wrong for a restore — the runbook's §0 sentence on
-  export dates covers it.
 
 ---
 
@@ -1461,132 +1351,55 @@ agent's over SSH. Remote loops go in a script file run with `ssh host 'bash -s'
 < script`, which exports `PATH="$HOME/.local/bin:$PATH"`.
 
 **The sheets.** One outcome each; the next is issued only after the previous is
-read. Paths are the new host's unless a sheet says OLD.
+read.
 
-### Sheet E0 — the old host's readings (Run 1; `sudo`; reads only)
+### Sheet E0 — readings before anything is built (Run 1; `sudo`; reads only)
 
 ```
 sudo -v
 sudo bash /home/op/s36-e0.sh      # tees /home/op/s36-e0.txt; changes nothing
 ```
 
-### Sheet N0 — the new host exists (Run 9, day 1; the operator, by hand)
-
-1. Create the VPS (size and provider yours; Ubuntu at a release the kit's
-   `host.yaml` lists in `supported_os_releases`). Write its IPv4 (and IPv6) here: ________
-2. As root: create `op` with the workstation's `agentic_postgres_ed25519.pub` and
-   its sudoers line; create `apg-agent` with `apg_agent_ed25519.pub`
-   (`docs/operator-guide.md` §3 step 1; `docs/session-02-operator-guide.md` §0).
-3. As `op`: clone the bundle of `f7fb96d` the agent placed in `/tmp` (`git clone
-   -b main …`), `git rev-parse HEAD` = `f7fb96d…`.
-4. Open a NEW session as `op` and as `apg-agent` while root still works.
-
-### Sheet N1 — the old host's kit, then the new host's baseline (Run 9, day 1)
-
-```
-# OLD host
-sudo -v
-sudo bin/dr-kit.sh export --host host.yaml --capabilities capabilities.yaml \
-     --output /home/op/kit-<date>-move --project project.alpha.yaml --project project.beta.yaml
-# NEW host (after the agent placed host.yaml)
-sudo -v
-sudo bin/provision-host.sh --host host.yaml --check
-sudo bin/provision-host.sh --host host.yaml --apply          # pass 1
-#   arm apg-ssh-rollback exactly as it prints; --apply; NEW session; then:
-sudo bin/provision-host.sh --host host.yaml --confirm-ssh-ok
-#   arm apg-ufw-rollback exactly as it prints; --apply; NEW session; then:
-sudo bin/provision-host.sh --host host.yaml --confirm-firewall-ok
-sudo install -o root -g root -m 0755 bin/apg-diag.sh /usr/local/bin/apg-diag
-sudo install -o root -g root -m 0440 infra/host/apg-agent.sudoers /etc/sudoers.d/apg-agent
-sudo visudo -c
-```
-(Read `infra/host/apg-agent.sudoers`'s header for its installed name before
-the last two lines; the sheet uses what it says.)
-
-### Sheet N2 — the edge (Run 9, day 1)
-
-```
-sudo bin/edge.sh --host host.yaml up
-sudo bin/edge.sh --host host.yaml status
-```
-
-### Sheet N3 — the providers adopted, the secrets materialized (Run 9, day 1)
-
-```
-# the control-plane credential placed by you at:
-#   /root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential  (0600 root, two lines)
-bin/dr-kit.sh verify /home/op/kit-<date>-move
-sudo bin/bootstrap-providers.sh --host host.yaml --project /home/op/kit-<date>-move/projects/alpha-dev/project.yaml \
-     --adopt --state /home/op/kit-<date>-move/projects/alpha-dev/bootstrap-state.json \
-     --operator-credential-file /root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential
-sudo bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml --apply \
-     --operator-credential-file /root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential
-#   (the same two lines for beta-dev / project.beta.yaml)
-sudo shred -u /root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential
-sudo bin/materialize-secrets.sh --project project.alpha.yaml --requirements secrets.required.yaml --session 35
-sudo bin/materialize-secrets.sh --project project.beta.yaml  --requirements secrets.required.yaml --session 35
-# OLD host: sudo install -o op -g op -m 0600 /root/alpha-dev-administrator /home/op/xfer-admin
-#   (the agent pipes it across)
-# NEW host: sudo install -o root -g root -m 0600 /home/op/xfer-admin /root/alpha-dev-administrator
-#           shred -u /home/op/xfer-admin      (and on the OLD host)
-```
-
-### Sheet M1 — the old host stopped (Run 9, day 2; OLD host) — **the outage begins**
+### Sheet H1 — before the rescale (Run 9, day 1) — **the outage begins at the last line**
 
 ```
 sudo -v
-sudo python3 /home/op/s36-m1-stop.py --project alpha-dev
-sudo python3 /home/op/s36-m1-stop.py --project beta-dev
+sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json backup --type incr
+sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/beta-dev/outputs.json  backup --type incr
+sudo python3 /home/op/s36-counts.py --before --project alpha-dev
+sudo python3 /home/op/s36-counts.py --before --project beta-dev
+sudo systemctl poweroff
 ```
 
-### Sheet M2 — DNS (Run 9, day 2; the operator at Cloudflare)
+### Sheet H2 — the rescale (Run 9, day 1; the operator at the Hetzner Console)
 
-Both projects' A records → the new IPv4 (grey cloud). The old address, for the
-record: `62.238.99.122`. Tell the agent when saved; it confirms resolution.
+1. The server shows **off**.
+2. **Rescale** → an x86 plan (shared or dedicated vCPU) of the size you chose:
+   ________ (vCPU / RAM).
+3. Tick **"CPU and RAM only"** — the disk stays 38 GB, and a downgrade stays possible.
+4. Confirm; wait for the rescale to finish.
+5. **Before powering on**: the server's Primary IPv4 on the console reads ________
+   (must be `62.238.99.122`).
+6. Power on. Tell the agent.
 
-### Sheets M3a / M3b — the restores (Run 9, day 2)
-
-```
-sudo bin/restore.sh --outputs /home/op/kit-<date>-move/projects/alpha-dev/outputs.json \
-     --project project.alpha.yaml --rendered-dir .generated/alpha-dev --from primary --latest --plan
-sudo bin/restore.sh --outputs /home/op/kit-<date>-move/projects/alpha-dev/outputs.json \
-     --project project.alpha.yaml --rendered-dir .generated/alpha-dev --from primary --latest
-# M3b: the same for beta-dev / project.beta.yaml
-```
-
-### Sheets M4a / M4b — the kit's release deployed (Run 9, day 2)
+### Sheet H3 — the doctors and the counts (Run 9, day 1) — **the outage ends**
 
 ```
-sudo -v
-script -q -e -c 'sudo ./deploy.sh --host host.yaml --project project.alpha.yaml --capabilities capabilities.yaml --through-session 35' /home/op/s36-m4-alpha.txt
-sudo python3 /home/op/s36-counts.py --project alpha-dev
-# M4b: beta
-```
-
-### Sheet M5 — production certificates, the doctor (Run 9, day 2) — **the outage ends**
-
-```
-sudo bin/edge.sh --host host.yaml promote-acme --to production --confirm <new host.id>
 sudo bin/doctor.sh --project alpha-dev
 sudo bin/doctor.sh --project beta-dev
+sudo python3 /home/op/s36-counts.py --after --project alpha-dev
+sudo python3 /home/op/s36-counts.py --after --project beta-dev
 ```
 
-### Sheet M6 — backups and the post-move kit (Run 9, day 2)
+### Sheet H4 — the capacity re-declared (Run 9, day 1)
 
 ```
-sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json backup --type full
-sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json schedule enable
-sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json schedule status
-#   (the same three for beta-dev)
-sudo install -o op -g op -m 0600 /etc/agentic-postgres/projects/alpha-dev/outputs.json /home/op/alpha-dev-dev-outputs.json
-sudo install -o op -g op -m 0600 /etc/agentic-postgres/projects/beta-dev/outputs.json  /home/op/beta-dev-dev-outputs.json
-sudo bin/dr-kit.sh export --host host.yaml --capabilities capabilities.yaml \
-     --output /home/op/kit-<date>-post-move --project project.alpha.yaml --project project.beta.yaml
+# the agent has edited /home/op/agentic-postgres/host.yaml (memory_mb only) and shown you the diff
+<the install line Run 7 found — e.g. sudo install -o root -g root -m 0600 host.yaml /etc/agentic-postgres/host.yaml>
+sudo bin/doctor.sh capacity --host host.yaml
 ```
-(The op-owned copies' names are the ones the gate's lines use — read Session
-35's F6 for the exact pair before writing them; D1494/D1506.)
 
-### Sheet R1 — the release priced (Run 9, day 2; after the agent's checkout of 1.14.0)
+### Sheet R1 — the release priced (Run 9, day 1)
 
 ```
 sudo bin/upgrade.sh check --project alpha-dev
@@ -1594,24 +1407,24 @@ sudo bin/upgrade.sh plan --project alpha-dev --candidate .generated/alpha-dev/ou
 #   (beta the same; `--also migration_added` per `bin/upgrade.sh --help`)
 ```
 
-### Sheets R2a / R2b — 1.14.0 deployed (Run 9, day 2)
+### Sheets R2a / R2b — 1.14.0 deployed (Run 9, day 1)
 
 ```
 script -q -e -c 'sudo ./deploy.sh --host host.yaml --project project.alpha.yaml --capabilities capabilities.yaml --through-session 36' /home/op/s36-r2-alpha.txt
-# R2b, optional first line (D2009): "raise beta's manifest to schema 8 with approvals_required: 1?"  yes / no: ____
+# R2b, optional first line (D2005): "raise beta's manifest to schema 8 with approvals_required: 1?"  yes / no: ____
 script -q -e -c 'sudo ./deploy.sh --host host.yaml --project project.beta.yaml --capabilities capabilities.yaml --through-session 36' /home/op/s36-r2-beta.txt
 ```
 
-### Sheet R3 — the no-change redeploy and D1581 (Run 9, day 2)
+### Sheet R3 — the no-change redeploy and D1581 (Run 9, day 1)
 
 ```
-sudo python3 /home/op/s36-redeploy-before.py        # Run 7's recipe; writes /root/s36-redeploy-before.json
+sudo python3 /home/op/s36-redeploy-before.py        # writes /root/s36-redeploy-before.json
 sudo python3 /home/op/s36-d1581.py --before --project alpha-dev
 script -q -e -c 'sudo ./deploy.sh --host host.yaml --project project.alpha.yaml --capabilities capabilities.yaml --through-session 36' /home/op/s36-r3-alpha.txt
 sudo python3 /home/op/s36-d1581.py --after --diff --project alpha-dev
 ```
 
-### Sheet R4 — beta's record pruned (Run 9, day 2)
+### Sheet R4 — beta's record pruned (Run 9, day 1)
 
 ```
 sudo bin/record.sh --project beta-dev size
@@ -1622,18 +1435,18 @@ sudo bin/record.sh --project beta-dev prune --what agents     --before <agents h
 sudo bin/record.sh --project beta-dev size
 ```
 
-### Sheet V1 — the move verified, writing nothing (Run 9, day 2)
+### Sheet V1 — the day verified, writing nothing (Run 9, day 1)
 
 ```
-sudo bin/session-36-check.sh --mode host <Session 35 F6's declarations, from s36-sweep.sh> -k "session18_recovery or session4_transports or session36"
+sudo bin/session-36-check.sh --mode host <the declarations s36-sweep.sh names, without --after-reboot and the --rotated-* four> -k "session4_transports or session36"
 ```
 
-### Sheets X1 / X2 / X3 — one rotation each (Run 10, day 3; alpha)
+### Sheets X1 / X2 / X3 — one rotation each (Run 10, day 2; alpha)
 
 **At the top of each: this rotation moves no claim by itself; the trio moves
-only if all nine node ids pass in S1 (D1469, D1995).** The six steps of Run
-10, with `<name>` = `postgrest_authenticator_password` (X1),
-`docs_basic_auth_password` (X2), `app_runtime_password` (X3):
+only if all nine node ids pass in S1 (D1469, D1995).** With `<name>` =
+`postgrest_authenticator_password` (X1), `docs_basic_auth_password` (X2),
+`app_runtime_password` (X3):
 
 ```
 sudo python3 /home/op/s36-capture.py --project alpha-dev --secret <name>   # writes /root/s36-prev-<name>, 0600
@@ -1644,25 +1457,16 @@ sudo python3 /home/op/s36-shape.py --project alpha-dev --secret <name>     # the
 script -q -e -c 'sudo ./deploy.sh --host host.yaml --project project.alpha.yaml --capabilities capabilities.yaml --through-session 36' /home/op/s36-x-<name>.txt
 sudo bin/doctor.sh --project alpha-dev
 ```
-(`s36-capture.py` and `s36-shape.py` are Run 7's items 10; both derive the
-generation path and print no value.)
 
-### Sheet B1 — the reboot (Run 10, day 3)
+### Sheet B1 — the reboot (Run 10, day 2)
 
 ```
 sudo systemctl reboot
 ```
 
-### Sheet S1 — the one sweep (Run 10, day 3)
+### Sheet S1 — the one sweep (Run 10, day 2)
 
 ```
 sudo -v
 sudo setsid nohup bash /home/op/g36-host.sh > /dev/null 2>&1 < /dev/null &
 ```
-
-### Sheet Z1 — the old host retired (Run 11, day 4)
-
-On the OLD host: `systemctl is-enabled` of every unit M1 disabled; `docker ps
--a`. At Infisical: revoke the old host's runtime identities (names from
-`/home/op/kit-<date>-move/projects/<key>/bootstrap-state.json`). At the
-provider: destroy the VPS and its disk.
