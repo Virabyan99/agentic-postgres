@@ -1,9 +1,10 @@
 # Session 36 — Preconditions: the boundary, the rescale, and the operating debt
 
-**Status: IN PROGRESS — Runs 1–5 done 2026-10-03 (rows D2006–D2020; CI
-green on `4b23773`; Run 5's verdict is recorded with Run 6). Sheet E0 read
-2026-10-03: Run 6 BUILDS (D2019); the two host.yaml copies differ (D2020).
-Next: Run 6. NEXT FREE D2021.** Planned
+**Status: IN PROGRESS — Runs 1–5 done 2026-10-03 (rows D2006–D2021; CI
+green on `4b23773`; Run 5 RED on `53023e0`, repaired by D2021 — the repair's
+verdict is recorded with Run 6). Sheet E0 read 2026-10-03: Run 6 BUILDS
+(D2019); the two host.yaml copies differ (D2020). Next: Run 6. NEXT FREE
+D2022.** Planned
 2026-10-03 at `1ea6259`. The first session of
 Stage 5 (`docs/plans/stage-5-plan.md` §3). Eleven runs and **two sittings on
 two days** — the server rescaled in place and the release deployed (one outage
@@ -401,6 +402,7 @@ second table below it, in execution order.
 | **D2018** | §5 Run 4: *"The live proofs (written now, run by the sweep) — all three of the session's host proofs live in one new module"*; §5 Run 8 registers the node ids. | **CI RED on `edffc00`** (run 37129543490, both jobs: 1 failed / 6,922 and 6,930 passed): `test_deployment_suite_shape.py::test_every_deployment_proof_is_a_node_id_of_some_requirement` (`:182-197`) refuses a `tests/deployment/` proof no registry entry names, **on the day it is written** (`KNOWN_UNREGISTERED` is EMPTY and compared for equality, `:126-147`: *"an entry added here again is a decision someone has to defend in a plan"*). Sessions 32–35 each wrote their live module in the BUMP run, with the registry. Run 4's targeted list did not include that module — the D1486 class (a list derived from the diff cannot see a guard the diff does not name). | **The module leaves the tree until Run 8**: `tests/deployment/test_session36_operations.py` is removed in Run 4's repair and kept, unchanged, in WSL `~/s36/run4/tests/deployment/` (and the scratchpad's `s36/`); **Run 8 adds it back in the same commit as `OPS-RETAIN-003` / `OPS-LOG-002`** and runs `test_deployment_suite_shape` in its targeted list. Its `--setup-plan` (rc 0, five fixtures) stands as Run 4 measured it. | Registering early would move `target_session: 36` entries ahead of the constant (D690); widening the frozen list would be the undefended entry the guard exists to refuse. | — |
 | **D2019** | §1 D1997: *"If a per-secret update time exists, Run 6 builds `doctor --reading secrets`"*. | **Sheet E0 (3)**: Infisical's `GET /api/v3/secrets/raw/{name}` returns `secret.createdAt`, `secret.updatedAt` (strings), `secret.version` (int), `isRotatedSecret`, `rotationId` and `secretReminderRepeatDays`. Key names and types only were read. **What `updatedAt` moves on is unmeasured**: a value change, or any edit (a comment, a tag, metadata). The documentation password was rotated on 2026-08-13 (D1996), so its `updatedAt` on alpha is a known reference point. | **Run 6 builds**, ADR 0250 written. **Its first step is a reading, not code**: for alpha's `docs_basic_auth_password`, print `updatedAt`, `createdAt` and `version` (never the value) and set them against the 2026-08-13 rotation. If `updatedAt` does not track the value, the age is read from `version`'s history or stated as unmeasured, and the ADR says which. The X2 rotation on day 2 is the control: `updatedAt` must move and `version` increment. | The branch D1997 left open is decided; what the field means is the next question, and an age read from a field that moves on a comment edit would be D600's value that looks measured. | **0250** |
 | **D2020** | §1 D1992: the operator installs the edited `host.yaml` *"where Run 7 found admission reads it"*. | **Sheet E0 (5): the two copies DIFFER.** `/etc/agentic-postgres/host.yaml` is 3,579 B dated 2026-09-06; the checkout's `/home/op/agentic-postgres/host.yaml` is 5,618 B dated 2026-09-19 (Session 31 declared schema 3's `capacity` block, which the deploys pass as `--host host.yaml`). `materialize-secrets.py` reads `HOST_MANIFEST = /etc/agentic-postgres/host.yaml` (`:47`) — the OLDER copy. | **Run 7 reads every reader of a host manifest** (grep `HOST_MANIFEST`, `--host`, `load_host_manifest` in `bin/` and `src/`) and states which copy each reads. Sheet H4 then names the copy admission reads, and whether `/etc` must be brought level (a root `install`, diff printed first). Nothing is edited until then. | Two copies of the host's declaration read by different commands are two answers to *"how big is this host"*; the rescale is the moment one of them would silently be wrong. | 0221 |
+| **D2021** | §1 D2000, §2 `LEDGER-001` and §5 Run 5: *"every `available`/`beta` row's `evidence` resolves (a claim … `passed` in the newest `evidence/session-*.json` …)"*; *"the `today_evidence` check read[s] the NEWEST `evidence/session-*.json`"*. | **`evidence/*` is gitignored** (`.gitignore:7-8`, runbook §6.1; only `evidence/.gitkeep` is tracked), so a fresh clone holds no evidence document. **CI RED on `53023e0`** (run 37132504350, both jobs: 1 failed / 6,931 and 6,939 passed): `test_available_and_beta_rows_name_evidence_that_resolves` raised *"no evidence/session-NN.json"*. The workstation holds the documents, so the targeted run was green: a fixture the workstation shares with the code and CI does not (CLAUDE.md §7 question 6). | **Two halves.** `test_every_evidence_name_is_a_claim_or_an_envelope_subject` (new) runs in every checkout: the status rules, plus every `evidence` and `today_evidence` name is a claim in `CLAIMS` or an envelope subject. `test_available_and_beta_rows_name_evidence_that_resolves` adds the PASSED half against the newest document and **skips, saying why, in a checkout without one**; `newest_evidence` returns `None` rather than raising. ADR 0247 item 2 corrected in place (written this session, never released). Measured: a copy of the tracked files only (`git ls-files` → tar) 8 passed, 1 skipped with the reason; battery M7 (a `today_evidence` naming `port_allocation`, `not_run` at 35) is killed by the passed half while the names half stays green. | Committing an evidence document would reverse the runbook's rule for one test; a skip that names its reason is ADR 0195's third outcome, and the session gates (workstation and host) run with the documents present, so the passed half is read where the evidence is. | **0247** |
 
 ---
 
@@ -1169,7 +1171,15 @@ the page indexed once under *Evidence and assurance*, marked generated.
 **The local `session-01-check.sh` was not run**: CI runs it (`ci.yml:104`),
 `render-reality-ledger.py --check` was run directly (rc 0), and the operator's
 standing rule keeps gates to trips and closes — CI's verdict on the commit is
-the gate's.
+the gate's. **CI RED on `53023e0`** (run 37132504350): the evidence documents
+are gitignored, so CI's checkout had none — **D2021**. Repaired by splitting
+the evidence test in two (a names half everywhere, a passed half where a
+document exists, skipping with its reason elsewhere); ADR 0247 item 2 corrected
+in place; **nine tests**. Battery re-run with the split: M3 and M4 now killed by
+the names half, and **M7** (`today_evidence: port_allocation`, `not_run` at 35)
+killed by the passed half with the names half green — seven of seven killed,
+every control green, `cmp` identical. A tracked-files-only copy: 8 passed, 1
+skipped (*"no evidence/session-NN.json in this checkout"*).
 
 ### Run 6 — the secret-age reading (conditional on Sheet E0)
 

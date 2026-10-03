@@ -6,12 +6,13 @@ guard's questions about it, and renders `docs/reality-ledger.md`
 (`bin/render-reality-ledger.py`).
 
 Every guard question returns the list of rows that fail it, never a boolean, so
-a refusal can name what it refused. Evidence is resolved against the NEWEST
-`evidence/session-NN.json` by session number: a claim name resolves when that
-document reports it `passed` and `evidence_claims.CLAIMS` still names it; an
-envelope subject resolves when `capacity.ENVELOPE` holds it. A claim the newest
-document did not run is not evidence (ADR 0195: the third outcome is reported,
-never folded into the first).
+a refusal can name what it refused. Evidence is resolved in two halves. In
+every checkout, a name must be a claim `evidence_claims.CLAIMS` names or a
+`capacity.ENVELOPE` subject. Where the checkout holds an evidence document
+(`evidence/*` is gitignored, so CI's does not -- D2021), a claim must also be
+`passed` in the NEWEST `evidence/session-NN.json` by session number. A claim
+that did not pass is not evidence, and a half that could not be read is
+reported as unread, never as held (ADR 0195).
 """
 
 from __future__ import annotations
@@ -84,43 +85,62 @@ def validate(document: dict[str, Any]) -> None:
         raise LedgerError(f"rows share an id: {duplicated}")
 
 
-def newest_evidence(directory: Path = EVIDENCE_DIR) -> tuple[Path, dict[str, Any]]:
-    """The merged evidence document with the highest session number."""
+def newest_evidence(directory: Path = EVIDENCE_DIR) -> tuple[Path, dict[str, Any]] | None:
+    """The merged evidence document with the highest session number, or `None`
+    when this checkout holds none -- `evidence/*` is gitignored (runbook §6.1),
+    so a fresh clone, CI's included, has nothing to read (D2021)."""
     found = [
         (int(match.group(1)), path)
         for path in directory.glob("session-*.json")
         if (match := _EVIDENCE_NAME.match(path.name))
     ]
     if not found:
-        raise LedgerError(f"no evidence/session-NN.json under {directory}")
+        return None
     _, path = max(found)
     return path, json.loads(path.read_text(encoding="utf-8"))
 
 
+def _is_subject(name: str) -> bool:
+    return any(measurement.subject == name for measurement in capacity.ENVELOPE)
+
+
+def known(name: str) -> bool:
+    """A claim `evidence_claims.CLAIMS` names, or an envelope subject. Readable
+    in every checkout; whether the claim PASSED needs an evidence document."""
+    return name in CLAIMS or _is_subject(name)
+
+
 def resolves(name: str, evidence: dict[str, Any]) -> bool:
     """A claim `passed` in this evidence document, or an envelope subject."""
-    if any(measurement.subject == name for measurement in capacity.ENVELOPE):
+    if _is_subject(name):
         return True
     reported = evidence.get("claims", {}).get(name)
     return name in CLAIMS and isinstance(reported, dict) and reported.get("status") == "passed"
 
 
-def unresolved_evidence(document: dict[str, Any], evidence: dict[str, Any]) -> list[str]:
-    """Rows whose evidence does not hold, each with the reason."""
+def evidence_problems(document: dict[str, Any], evidence: dict[str, Any] | None) -> list[str]:
+    """Rows whose evidence does not hold, each with the reason.
+
+    With `evidence=None` (no document in this checkout) the status rules and the
+    names are checked and the PASSED half is not -- the caller reports that it
+    was not read, never that it held (ADR 0195)."""
     problems: list[str] = []
     for row in document["rows"]:
-        names = row["evidence"]
+        names = list(row["evidence"])
         if row["status"] in REACHABLE and not names:
             problems.append(f"{row['id']}: {row['status']} with no evidence")
         if row["status"] not in REACHABLE and names:
             problems.append(f"{row['id']}: {row['status']} carries evidence {names}")
-        for name in names:
-            if not resolves(name, evidence):
-                problems.append(f"{row['id']}: evidence {name!r} does not resolve")
-        if row["today_evidence"] is not None and not resolves(row["today_evidence"], evidence):
-            problems.append(
-                f"{row['id']}: today_evidence {row['today_evidence']!r} does not resolve"
-            )
+        labelled = [("evidence", name) for name in names]
+        if row["today_evidence"] is not None:
+            labelled.append(("today_evidence", row["today_evidence"]))
+        for field, name in labelled:
+            if not known(name):
+                problems.append(
+                    f"{row['id']}: {field} {name!r} is no claim and no envelope subject"
+                )
+            elif evidence is not None and not resolves(name, evidence):
+                problems.append(f"{row['id']}: {field} {name!r} did not pass")
     return problems
 
 

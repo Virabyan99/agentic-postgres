@@ -68,7 +68,13 @@ an SLA, billing) is not `planned` — nothing will build it — and saying
 2. every `available` or `beta` row's `evidence` is non-empty and every entry
    resolves — a claim `passed` in the newest `evidence/session-*.json`, or a
    `capacity.ENVELOPE` subject; every `today_evidence` that is not `null`
-   resolves the same way;
+   resolves the same way. **The evidence documents are gitignored** (runbook
+   §6.1), so this is read in two halves (D2021, corrected in place in Run 5):
+   *every checkout*, CI's included, checks that each name is a claim in
+   `evidence_claims.CLAIMS` or an envelope subject; *a checkout holding an
+   evidence document* — the workstation and the host, where the session gates
+   run — also checks that each claim passed in the newest one, and a checkout
+   without one skips that half and says so;
 3. every `planned`, `not_metered` and `not_offered` row has `controls: []` —
    the fake-complete guard: nothing a customer can press acts on a thing that
    is not there;

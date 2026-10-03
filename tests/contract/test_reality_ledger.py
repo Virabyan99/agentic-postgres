@@ -2,8 +2,9 @@
 
 `docs/reality-ledger.yaml` says what each product concept is today. These are
 the guard's halves that have a subject now (D2000): the file validates; every
-`available` or `beta` row names evidence that resolves against the newest
-evidence document, and so does every `today_evidence`; a concept a customer
+`available` or `beta` row names evidence, every name is a claim or an envelope
+subject, and -- where the checkout holds an evidence document (D2021) -- each
+passed in the newest one, `today_evidence` included; a concept a customer
 cannot reach carries no control; no customer sentence uses a specification §59
 word; the rendered page is current. The halves without a subject -- every
 console control and every `/api/v1` operation type maps to a row -- are
@@ -53,16 +54,32 @@ def test_the_ledger_validates(ledger: dict) -> None:
     assert tuple(enum) == reality_ledger.STATUSES
 
 
-def test_available_and_beta_rows_name_evidence_that_resolves(ledger: dict) -> None:
-    """Read against the NEWEST `evidence/session-NN.json`. A claim that was
-    `not_run` or `failed` there is not evidence, and a status the evidence
-    cannot back is the surface claiming what the node does not do."""
-    path, evidence = reality_ledger.newest_evidence()
-    problems = reality_ledger.unresolved_evidence(ledger, evidence)
-    assert not problems, f"against {path.name}: {problems}"
+def test_every_evidence_name_is_a_claim_or_an_envelope_subject(ledger: dict) -> None:
+    """The half every checkout can read, CI's included (D2021): `evidence` is
+    non-empty exactly for `available`/`beta`, and every name in `evidence` and
+    `today_evidence` is a claim in `CLAIMS` or a `capacity.ENVELOPE` subject."""
+    problems = reality_ledger.evidence_problems(ledger, None)
+    assert not problems, problems
     by_id = {row["id"]: row for row in ledger["rows"]}
     unproved = [name for name in SUBSTRATE if by_id[name]["today_evidence"] is None]
     assert not unproved, f"substrate rows with no today_evidence: {unproved}"
+
+
+def test_available_and_beta_rows_name_evidence_that_resolves(ledger: dict) -> None:
+    """Read against the NEWEST `evidence/session-NN.json`. A claim that was
+    `not_run` or `failed` there is not evidence, and a status the evidence
+    cannot back is the surface claiming what the node does not do.
+
+    `evidence/*` is gitignored (runbook §6.1), so a checkout with no evidence
+    document cannot read this half and SKIPS saying so (D2021) -- the third
+    outcome, reported. The workstation and the host, where the session gates
+    run, hold the documents."""
+    newest = reality_ledger.newest_evidence()
+    if newest is None:
+        pytest.skip("no evidence/session-NN.json in this checkout (evidence/* is gitignored)")
+    path, evidence = newest
+    problems = reality_ledger.evidence_problems(ledger, evidence)
+    assert not problems, f"against {path.name}: {problems}"
 
 
 def test_a_claim_that_did_not_pass_is_not_evidence() -> None:
@@ -88,7 +105,10 @@ def test_the_newest_evidence_is_chosen_by_session_number(tmp_path: Path) -> None
         ("session-11-host.json", "half"),
     ):
         (tmp_path / name).write_text(json.dumps({"marker": marker}), encoding="utf-8")
-    path, document = reality_ledger.newest_evidence(tmp_path)
+    assert reality_ledger.newest_evidence(tmp_path / "absent") is None
+    newest = reality_ledger.newest_evidence(tmp_path)
+    assert newest is not None
+    path, document = newest
     assert (path.name, document["marker"]) == ("session-10.json", "ten")
 
 
