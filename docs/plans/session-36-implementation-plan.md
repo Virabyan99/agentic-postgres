@@ -392,6 +392,8 @@ second table below it, in execution order.
 | **D2012** | §1 D2003: *"at Session 35's saturation (~480 req/s) nine minutes"*. | Session 35's saturation was measured **against the REST path (PostgREST)**, which never passes through the auth container whose log this is; the auth container serves `/api/app/*` only. | **ADR 0249 states the figure with its condition**: ~250,000 requests per container before rotation; *"at a sustained 480 requests per second (Session 35's saturation rate, measured against the REST path, not this container) it would be about nine minutes"*, and days at measured traffic. | A rate from another service presented as this one's would be a number that looks measured (D593, D603). | **0249** |
 | **D2013** | §1 D1987, §5 Run 2 item 4: call the withdrawal *"immediately before each `await sleep(POLL_SECONDS)` (`:828`, `:896`)"*. | `workflow_worker.py:828` is `run_forever`'s IDLE sleep; **`:896` is `supervise`'s restart sleep, reached only after the loop RAISED** (`log.exception("the workflow loop raised; restarting it")`) — an error path, where the database is a likely cause. | **Only the idle sleep** (`_withdraw_ended_approvals(repository)` before `await sleep(POLL_SECONDS)` in `run_forever`). The supervisor's sleep is unchanged; the loop it restarts reaches the idle call within one poll anyway. | Housekeeping on the error path would add a database call exactly when one just failed, and log a second warning for one fault. | 0248 |
 | **D2014** | §5 Run 2 item 4: *"make each one say what it does with `withdrawn` — `workflow_worker.py:746` and `service.py:1035` at least (D979)"*. | **`service.py:1035`'s `"expired"` is the PASSWORD-RESET refusal** (`consume_password_reset`), not an approval reader. The approval-status readers (grepped in `services/auth-api/app/`, `bin/`, `src/`, and every `0035`–`0037` SQL reader): `workflow_worker.py:746` (`_close_gate`: `pending`/`expired` → expire, anything else → `approval_<status>` by its own word, ADR 0195), and SQL that filters `= 'pending'`/`= 'approved'` or passes `a.status::text` through (`0035:692-694`, `:892-893`, `:1223-1225`; `0036:938-939`). `models.py:381`'s `Literal["approved", "rejected"]` is a DECISION input, not a status. | **No Python reader changes.** `_close_gate` reads a gate only on a step this worker holds on a `running` run, and a `withdrawn` approval exists only on an ENDED run, so its `else` branch (`approval_withdrawn`) is unreachable and already honest if reached. | D979 asks for every reader to be grepped, not edited; the grep found one that is not a reader and none that misreads the new value. | 0248 |
+| **D2015** | §1 D2002 and §5 Run 3: `record.sh` calls *"the five function names"*, including 0033's two; §2 names no existing test that moves. | **`test_agent_audit_plane.py::test_nothing_in_this_release_calls_a_prune` (`:2952`, AGT-RETAIN-001, passing) asserts that NOTHING in `src/`, `bin/`, `services/` or the templates names `agent_audit_prune` or `agent_idempotency_prune`** — `bin/record.py` does, by D2002's decision. The plan did not see the collision. | **Replaced by a stricter test under ADR 0248** (which now says so): the callers are EXACTLY `bin/record.py`'s two — a second caller fails, and so does the command losing its call — and `test_record_command.py::test_nothing_schedules_a_prune` proves nothing calls `record.sh`/`record.py`. AGT-RETAIN-001's description says *"nothing … calls either prune on its own … the ONE caller is `bin/record.py`"*. | A contract test changes only with an ADR (CLAUDE.md §6); widening an allowlist to a measured, named set is not weakening, and the exact-set form asserts one thing more than the old one did. | **0248** |
+| **D2016** | §5 Run 3's usage: *"`sudo bin/record.sh --project KEY size [--json]`"*, and *"the command in `COMMANDS_WITH_VERBS`"*. | `test_cli_contract.verbs_documented_by` (`:495-520`) derives a verb as the FIRST lowercase word after the command's name on a usage line; `--project` first derives none, and `test_every_command_documenting_verbs_is_named_in_the_control` would then refuse the entry. | **Verb first**: `sudo bin/record.sh size --project KEY [--json]` and `… prune --project KEY --what … --before … [--limit N] --confirm KEY`. `size --help` and `prune --help` are reads (no root, no docker). | The derivation is the guard; the usage line is written so the guard can read it, never the guard narrowed (D464's habit). | 0248 |
 
 ---
 
@@ -822,7 +824,34 @@ workflow_worker.py:730-900`; the repository module the worker calls (grep
    `test_change_proposal`, `test_database_function_signatures` (grep it for
    `app_private` pins first), `test_acceptance_registry`, `test_evidence_claims`.
 
-**Done.** *(executor)*
+**Done.** 2026-10-03, commit `7cd3372db4c05f31759e932d083e5d3c072fa7b5`.
+`migrations/templates/0038-approval-withdrawn.sql` (ONE statement under `SET
+LOCAL ROLE`, rig 36a's reason in its header) and `0039-record-retention.sql`
+(0033's shape: five functions, all `REVOKE`d from PUBLIC, one `GRANT` — the
+withdrawal to `{{auth_service}}` — after every revoke; no table, column, type,
+index or `api` object). Versions `20261003120038`/`20261003120039`;
+`freeze-lock` → 39, `verify-lock` agrees. The new future-horizon refusal reads
+*"must be in the past"* (0033's reads *"is in the past"* for the same case; 0033
+is not amended, D912). `WorkflowRepository.withdraw_ended_approvals()`;
+`run_forever` calls `_withdraw_ended_approvals` before the IDLE sleep only
+(D2013) — a WARNING naming the exception's type on failure, INFO
+`workflow.approvals_withdrawn {"count": n}` when non-zero. Approval-status
+readers grepped: none changes (D2014). Tests: `test_record_retention.py` (new,
+11 proofs, **11 passed on first execution**); `test_migrations.py` +2;
+`test_workflow_worker.py` + the idle/busy proof, the fake gains the method and
+the heartbeat test's idle sequence gains the call (stricter);
+`test_workflow_substrate.py:274` → 39. **Battery 6/6 killed** (anchors
+pre-flighted — the first pass refused on an M1 anchor that did not match, with
+nothing mutated; each target FAILED, never ERROR, with its control PASSED; both
+files restored `cmp`-equal): M1 run prune takes `running`; M2 the 600-s bound
+removed; M3 the awaited-event guard removed; M4 `workflow_run_prune` granted to
+`auth_service` (killed by the cluster proof AND the text proof); M5 the
+withdrawal takes `running`; M6 the worker withdraws every iteration. Both example
+projects re-rendered (rc 0). **Targeted list once: 394 passed, 0 failed, 0
+skipped** (7 m 51 s; the plan's modules plus `test_workflow_repository.py`, which
+holds D1680's guard). A detached `setsid nohup` launch from `wsl bash -lc` died
+with its shell before writing a byte; the harness's background mode ran it. CI
+for `7cd3372`: *(read in Run 3's Done)*.
 
 ### Run 3 — `bin/record.sh size|prune`
 
@@ -884,7 +913,37 @@ paragraph (`:316-321` in Session 35's numbering; re-find it) rewritten to name
 they carry one. Targeted: `test_record_command`, `test_cli_contract`,
 `test_documentation_index`, `test_session12_documented_path`.
 
-**Done.** *(executor)*
+**Done.** 2026-10-03. `bin/record.sh` (preamble, `--help` anywhere is a read,
+docker checked only for a verb) and `bin/record.py` (stdlib +
+`agentic_postgres` only, ADR 0093): **verb-first usage** (D2016); the key
+matched against `^[a-z][a-z0-9-]{0,62}$` before a path is built; the document
+read through `deployed_output.read_deployed_document`; every exec through
+`container_exec.run` (ADR 0218); the horizon `fromisoformat`, timezone required,
+refused in the future, all before root, the document or a container; the
+statement `SELECT app_private.<fn>(:'before'::timestamptz, <int|NULL>)` with the
+horizon as `psql -v before=…`; size → call → size; a database refusal printed
+verbatim, exit 5; an unreadable or ill-shaped reading *"the record could not be
+read"*, exit 6; a prune that did not answer is exit 6 saying its outcome is
+unknown. Root (3) measured by hand as a user: `size --project alpha-dev` → 3.
+`tests/contract/test_record_command.py` (new, 8 proofs, `pytestmark`; 8 passed
+first run) — the plan's six plus `…refusal_is_printed_verbatim_and_exits_5` and
+`test_size_refuses_without_root` (the real `require_root`); the no-scheduler scan
+needs a word boundary (`bin/dx-record.py` names `dx-record.sh`). Registered in
+`SHELL_COMMANDS`, `PYTHON_COMMANDS`, `COMMANDS_WITH_VERBS`; `git add`ed first
+(D1188). **D2015**: `test_nothing_in_this_release_calls_a_prune` replaced by its
+exact-set form under ADR 0248; AGT-RETAIN-001's description corrected;
+`render-acceptance-matrix --write` (matrix + product contract). Docs: operator
+guide §5's two paragraphs rewritten around `record.sh` and the withdrawal, its
+migrations row 37 → 39 (0037–0039 described); the *"Pruning events, deliveries
+and receipts"* rows removed from `docs/workflows.md` and `docs/connectors.md`.
+**Battery 2/2 killed** (M1 the future check removed →
+`…unparseable_or_future_horizon…` FAILED; M2 `--confirm` case-folded →
+`…requires_a_horizon_and_a_confirmation` FAILED; each control PASSED;
+`record.py` restored `cmp`-equal). shellcheck clean. **Targeted once: 849
+passed** (`test_record_command`, `test_cli_contract`, `test_documentation_index`,
+`test_session12_documented_path`, `test_agent_audit_plane`,
+`test_acceptance_registry`, `test_evidence_claims`; 5 m 22 s). CI: *(Run 4's
+Done)*.
 
 ### Run 4 — the request log (D1918)
 

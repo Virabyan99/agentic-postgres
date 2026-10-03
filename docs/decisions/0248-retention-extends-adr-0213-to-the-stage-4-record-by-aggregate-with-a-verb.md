@@ -167,6 +167,17 @@ after the 1.14.0 deploy.
 (measured: about a millisecond); a run cannot be pruned for ten minutes after
 it ends.
 
+**A contract test is replaced by a stricter one** (D2015).
+`test_agent_audit_plane.py::test_nothing_in_this_release_calls_a_prune`
+asserted that nothing in `src/`, `bin/`, `services/` or the templates names
+0033's two prunes; `bin/record.py` now names both, by this decision. It asserts
+instead that the callers are EXACTLY `bin/record.py`'s two — a second caller
+fails, and so does the command losing its call — and
+`test_record_command.py::test_nothing_schedules_a_prune` asserts that nothing
+calls `record.sh` or `record.py` but themselves. Together they say what the old
+test said (nothing prunes on its own) and one thing more (the verb exists and
+calls what it says).
+
 **Not closed:** D1798 (a dead letter cannot be redelivered); humans are never
 pruned (35 probe humans on beta stay — Session 37's accounts decide what a
 person's deletion means).

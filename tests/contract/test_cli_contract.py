@@ -102,6 +102,10 @@ SHELL_COMMANDS = (
     "bin/project-retire.sh",
     "bin/project-runtime.sh",
     "bin/provision-host.sh",
+    # Session 36 (ADR 0248): the record's size and an operator's prune -- ADR
+    # 0213's TTY act made a command. Listed the run it landed (D1014) and
+    # `git add`ed before this module runs (D1188).
+    "bin/record.sh",
     "bin/rehearse.sh",
     # Session 28 (ADR 0214): the reading taken before a tag is cut. Listed here
     # the run it landed and `git add`ed before this module runs, because
@@ -260,6 +264,7 @@ PYTHON_COMMANDS = (
     "bin/render-jwks.py",
     "bin/render-mount-digests.py",
     "bin/render-secret-override.py",
+    "bin/record.py",
     "bin/rehearse.py",
     # Session 20, ADR 0199. The one place a rendered document's path is
     # resolved and its absence interpreted, so that `[ -f ]` -- which answers
@@ -481,6 +486,9 @@ COMMANDS_WITH_VERBS = {
     "bin/doctor.sh",
     "bin/dr-kit.sh",
     "bin/mcp-contract.sh",
+    # Session 36: `size` and `prune`, written verb-first so the derivation
+    # reads them (the plan's `--project KEY size` would derive none).
+    "bin/record.sh",
     "bin/rehearse.sh",
     "bin/upgrade.sh",
     # Session 32: six verbs, all six documented from the day the command lands.

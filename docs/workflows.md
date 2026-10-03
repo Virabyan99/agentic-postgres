@@ -337,7 +337,6 @@ stopped.
 | Not yet | Why |
 |---|---|
 | Redelivering a dead letter | A human write to the outbox: a route, a scope and an audit story of its own. Dead letters are VISIBLE in `bin/connector.sh status`, not replayable (D1798) |
-| Pruning events, deliveries and receipts | They join runs and approvals in the retention story an operator horizon would answer (ADR 0213's shape) |
 | An event from anywhere but your own SQL | Events are emitted by your project's definer functions and reach only your project |
 
 Events, schedules, outbound delivery and inbound connectors arrived in 1.12.0:

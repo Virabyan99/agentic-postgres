@@ -4076,9 +4076,10 @@
     role — so no reachable identity can delete a row. `agent_record_size()`
     reports four numbers and no verdict, and is granted only to the record's
     existing reader, adding no audience and no fact. Nothing in this release
-    calls either prune: there is no schedule, no timer and no caller in `src/`,
-    `bin/`, `services/` or the templates, so the record grows until somebody
-    asks for it not to. Pruning an idempotency claim RE-ARMS its key, which the
+    calls either prune on its own: there is no schedule and no timer, and since
+    1.14.0 the ONE caller in `src/`, `bin/`, `services/` or the templates is
+    `bin/record.py`, behind the operator's `sudo bin/record.sh prune ... --confirm
+    KEY` (ADR 0248), so the record grows until somebody asks for it not to. Pruning an idempotency claim RE-ARMS its key, which the
     function's own comment states because its result cannot show it. On the
     deployment: both projects carry the three functions with the identity
     argument lists this release creates, neither prune is reachable by any

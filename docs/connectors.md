@@ -233,7 +233,6 @@ letters by event and token. **Never an endpoint, a payload or a key.**
 | Redelivering a dead letter | a human write to the outbox, which needs its own scope and audit story; dead letters are visible, not replayable (D1798) |
 | A `test` verb | a real delivery is not a test, and one that did not deliver would test nothing (D1797); `validate` compiles, `workflow dry-run` rehearses the definition, and a real signed request is the check |
 | Events from anywhere but your own SQL | an event reaches only its own project |
-| Pruning events, deliveries and receipts | the retention story an operator horizon would answer (ADR 0213's shape) |
 | A per-connector key rotation | one master per project (D1784); rotating it rotates every connector's key |
 
 The operator's half -- enabling the facility, handing a key over, the doctor's

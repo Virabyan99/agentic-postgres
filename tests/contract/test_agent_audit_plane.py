@@ -2961,6 +2961,13 @@ def test_nothing_in_this_release_calls_a_prune() -> None:
     The scan covers what this repository ships and runs: `src/`, `bin/`,
     `services/` and the migration templates. `tests/` is excluded because the
     proofs above call these functions, which is the point of them.
+
+    **Since 1.14.0 there is exactly ONE caller, and it is a person's** (ADR 0248,
+    D2015): `bin/record.py`, behind `sudo bin/record.sh prune ... --confirm KEY`
+    -- ADR 0213's *human at a TTY* made a command. The set is asserted EXACTLY,
+    so a second caller fails here and so does the command losing its call; that
+    nothing calls `record.sh` itself is
+    `test_record_command.py::test_nothing_schedules_a_prune`.
     """
     callers: list[str] = []
     for root in ("src", "bin", "services", "migrations/templates"):
@@ -2976,7 +2983,11 @@ def test_nothing_in_this_release_calls_a_prune() -> None:
                 if path.name == "0033-agent-record-retention.sql":
                     continue
                 callers.append(f"{path.relative_to(REPO_ROOT)}: {name}")
-    assert not callers, (
-        f"something in the release names a prune: {callers}. ADR 0213's decision is that "
-        "nothing deletes an agent record on its own; a caller here makes that false"
+    assert sorted(callers) == [
+        "bin/record.py: agent_audit_prune",
+        "bin/record.py: agent_idempotency_prune",
+    ], (
+        f"the release names a prune from {callers}. ADR 0213's decision is that nothing "
+        "deletes an agent record on its own, and ADR 0248's that the operator's verb is "
+        "bin/record.sh alone"
     )

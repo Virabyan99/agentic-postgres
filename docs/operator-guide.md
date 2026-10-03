@@ -27,7 +27,7 @@ plane, migrations — this page hands to it and does not repeat it.
 | | |
 |---|---|
 | `template_version` / `CURRENT_SESSION` | **1.13.0** / **35** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
-| Released migrations | **37**, fix-forward; every down block raises `AP900` (D912). 0033 adds two prune functions granted to nobody and a size reading (ADR 0213) — nothing removes an agent record unless an operator asks. 0034 is the workflow substrate: four `app_private` tables nobody may read, eight functions granted to `auth_service` and the install granted to nobody (ADR 0227, §17). 0035 adds the approval and attempt tables nobody may read, a run status `compensating`, and the audit reader at nine arguments with a counter beside it (ADR 0230, 0233, 0234). 0036 is connectivity: four `app_private` connector tables nobody may read, `app.emit_event` granted to NOBODY and called only by a project's reviewed definer function, and the connector functions -- seven granted to `auth_service`, the install and the rehearsal's to nobody (ADR 0235-0238, §18) |
+| Released migrations | **39**, fix-forward; every down block raises `AP900` (D912). 0033 adds two prune functions granted to nobody and a size reading (ADR 0213) — nothing removes an agent record unless an operator asks. 0034 is the workflow substrate: four `app_private` tables nobody may read, eight functions granted to `auth_service` and the install granted to nobody (ADR 0227, §17). 0035 adds the approval and attempt tables nobody may read, a run status `compensating`, and the audit reader at nine arguments with a counter beside it (ADR 0230, 0233, 0234). 0036 is connectivity: four `app_private` connector tables nobody may read, `app.emit_event` granted to NOBODY and called only by a project's reviewed definer function, and the connector functions -- seven granted to `auth_service`, the install and the rehearsal's to nobody (ADR 0235-0238, §18). 0037 is `app.require_approval`, granted to nobody (ADR 0242). 0038 adds the approval status `withdrawn`, alone in its file; 0039 adds three prunes and a size reading granted to nobody and the withdrawal granted to `auth_service` (ADR 0248, §5) |
 | Deployed document | outputs schema **v19** (`connectors.enabled`); `document_kind: deployed` |
 | Project manifest | schema versions **1–8** accepted; 5 adds `migrations.set`, 6 adds `mcp.capabilities`, 7 adds `connectors` (the facility and the outbound endpoints), 8 adds `migrations.approvals_required` (§19) |
 | Capability manifest / lock | schema **4** / **4** (vocabulary + `tools_sha256`) |
@@ -318,24 +318,36 @@ What each page owns:
 - **`docs/api-operations.md`** — the connection budget, statement timeouts,
   restarting, and rotating each credential (§9 below).
 
-**The agent record is pruned by an operator who states a horizon, and by
-nothing else** (ADR 0213). Migration 0033's
-`app_private.agent_audit_prune(p_before, p_limit)` and
-`app_private.agent_idempotency_prune(p_before, p_limit)` delete rows older than
-the horizon you give, refuse a `NULL` or future one (`PT422`), and are granted
-to nobody: they are reached as the database superuser over the container
-socket, and nothing in the release calls either. `doctor.sh usage` reads the
-two row counts; `fleet.sh` counts denials by boundary out of the audit table,
-so a prune shortens the window it can count.
+**The record is pruned by an operator who states a horizon, and by nothing
+else** (ADR 0213, extended by ADR 0248 in 1.14.0). The verb is
+`bin/record.sh`, as root:
 
-**Ten tables are pruned by nothing** (D1886): the workflow tables
-(`workflow_definition`, `workflow_run`, `workflow_step`, `workflow_worker`,
-`workflow_approval`, `workflow_attempt`) and the connector tables
-(`connector`, `connector_event`, `connector_delivery`, `connector_receipt`). A
-run references its agent and an approval its approver, so a pruning plane is a
-design of its own — one function per table in foreign-key order and a horizon
-rule per table — and it is not in this release. Their row counts are yours to
-watch.
+```bash
+sudo bin/record.sh size --project alpha-dev
+sudo bin/record.sh prune --project alpha-dev --what runs --before 2026-10-01T00:00:00Z --confirm alpha-dev
+```
+
+`size` prints one line per prunable relation — its rows and its oldest time —
+and the pending approvals left on ended runs, or *"the record could not be
+read"* with exit 6. `prune` prints the size, calls ONE function, and prints the
+size again. `--what` is one of five: `runs` (ended runs with their steps,
+attempts, approvals and inbound receipts; never a queued, running or
+compensating run, and never a horizon inside the last 600 seconds — the inbound
+replay window), `deliveries` (delivered and dead outbound deliveries, then the
+events left with none), `agents` (revoked agents no run and no connector names,
+with their credentials and quota), and migration 0033's `audit` and
+`idempotency` — **every idempotency claim removed re-arms its key**. Every
+prune is granted to nobody in the database and refuses a missing or future
+horizon (`PT422`); `--before` needs a timezone and `--confirm` the key again.
+`--limit N` bounds the roots one call removes: call again until it removes 0.
+Prune `runs` before `agents` — a run pins its agent. **Never pruned**:
+workflow definitions, connectors, the worker row, and people. `fleet.sh`
+counts denials out of the audit table, so an audit prune shortens the window it
+can count.
+
+**A pending approval on a run that has ended becomes `withdrawn`** on its own,
+within one poll of the workflow worker (5 s) — a status, never a deletion, and
+it names no person (ADR 0248, D1775).
 
 ---
 
