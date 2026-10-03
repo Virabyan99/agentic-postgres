@@ -1,10 +1,11 @@
 # Session 36 — Preconditions: the boundary, the rescale, and the operating debt
 
-**Status: IN PROGRESS — Runs 1–6 done 2026-10-03 (rows D2006–D2023; CI
-green on `4b23773` and on Run 5's repair `c4582ab`, run 37133402800; Run 6's
-verdict is recorded with Run 7). Sheet E0 read 2026-10-03: Run 6 BUILT
-(D2019, D2022, ADR 0250); the two host.yaml copies differ (D2020). Next: Run
-7. NEXT FREE D2024.** Planned
+**Status: IN PROGRESS — Runs 1–7 done 2026-10-03 (rows D2006–D2026; CI
+green on `4b23773`, on Run 5's repair `c4582ab` (run 37133402800) and on Run
+6's `e5469b9` (run 37136556399)). Sheet E0 read 2026-10-03: Run 6 BUILT
+(D2019, D2022, ADR 0250); the two host.yaml copies differ (D2020) and admission
+reads the checkout's (D2025). The trip's instruments are in WSL `~/s36/run7/`
+and `/home/op`. Next: Run 8. NEXT FREE D2027.** Planned
 2026-10-03 at `1ea6259`. The first session of
 Stage 5 (`docs/plans/stage-5-plan.md` §3). Eleven runs and **two sittings on
 two days** — the server rescaled in place and the release deployed (one outage
@@ -405,6 +406,9 @@ second table below it, in execution order.
 | **D2021** | §1 D2000, §2 `LEDGER-001` and §5 Run 5: *"every `available`/`beta` row's `evidence` resolves (a claim … `passed` in the newest `evidence/session-*.json` …)"*; *"the `today_evidence` check read[s] the NEWEST `evidence/session-*.json`"*. | **`evidence/*` is gitignored** (`.gitignore:7-8`, runbook §6.1; only `evidence/.gitkeep` is tracked), so a fresh clone holds no evidence document. **CI RED on `53023e0`** (run 37132504350, both jobs: 1 failed / 6,931 and 6,939 passed): `test_available_and_beta_rows_name_evidence_that_resolves` raised *"no evidence/session-NN.json"*. The workstation holds the documents, so the targeted run was green: a fixture the workstation shares with the code and CI does not (CLAUDE.md §7 question 6). | **Two halves.** `test_every_evidence_name_is_a_claim_or_an_envelope_subject` (new) runs in every checkout: the status rules, plus every `evidence` and `today_evidence` name is a claim in `CLAIMS` or an envelope subject. `test_available_and_beta_rows_name_evidence_that_resolves` adds the PASSED half against the newest document and **skips, saying why, in a checkout without one**; `newest_evidence` returns `None` rather than raising. ADR 0247 item 2 corrected in place (written this session, never released). Measured: a copy of the tracked files only (`git ls-files` → tar) 8 passed, 1 skipped with the reason; battery M7 (a `today_evidence` naming `port_allocation`, `not_run` at 35) is killed by the passed half while the names half stays green. | Committing an evidence document would reverse the runbook's rule for one test; a skip that names its reason is ADR 0195's third outcome, and the session gates (workstation and host) run with the documents present, so the passed half is read where the evidence is. | **0247** |
 | **D2022** | §1 D2019: *"Run 6's first step is a reading: for alpha's `docs_basic_auth_password`, print `updatedAt`, `createdAt` and `version` … and set them against the 2026-08-13 rotation"*. | **Read 2026-10-03 16:10Z** (`sudo bash /home/op/s36-r6.sh`, all 22 declared secrets on BOTH projects, three fields, never a value; transcript `~/s36/s36-r6.txt`, sha256 `37c0468c…`). Four known rotations: `auth_jwt_signing_key` `2` / 2026-09-19 on both (ADR 0224); alpha's `docs_basic_auth_password` and `postgrest_authenticator_password` `3` / **2026-08-28** — NOT 2026-08-13: rotated then and again in Session 11's window, which is what operator guide §9 says. **Control**: the 37 never rotated read `version` 1, `updatedAt` = `createdAt`. Three 404s: `auth_jwt_prepared_key` on both (exists only mid-rotation) and alpha's `connector_signing_key` (alpha has no connectors facility). | **`updatedAt` is the last value replacement; `version` is 1 + the replacements.** Run 6 builds on `updatedAt`, ADR 0250 states it with what was NOT measured (a non-value edit in the provider's console), and X2 on day 2 is the next control. D1996 is answered by the provider too: §9's sentence is true and §13's *"never been performed"* is not — Run 8 corrects §13. | Two independent references and 37 controls agree; the plan's single reference date was off by one rotation, which the version count exposes. | **0250**, 0224 |
 | **D2023** | §5 Run 6: *"`bin/doctor.py --reading secrets` (beside `capacity` and `usage`)"*. | `bin/doctor.sh`'s header said the command *"never reads a secret"* and its help *"reads no secret material"*. The reading logs in to the provider with the project's runtime credential (`/etc/agentic-postgres/credentials/<key>/infisical-client-*`, the materializer's), which IS secret material. Two contract tests read the shell's verb arm as the literal `capacity\|usage)` (`test_doctor_readings.py:237-248`). | **Built in the doctor, as planned, and the sentences now say what is true**: the doctor never reads a secret VALUE; the `secrets` reading holds the provider credential, and every other mode holds none. The value never enters the doctor: `read_secret_times` reduces the response inside the client. `secrets` got its own `case` arm, so the two tests' literal stands unedited. ADR 0250 records the change and the alternative (a separate command) it rejected. | A property a command's help states is one an operator relies on; widening what the command holds is acceptable only when the sentence moves with it. | **0250**, 0159 |
+| **D2024** | §1 D1998 and §5 Run 7 item 9: the sweep declares *"every declaration the gate accepts **except** `--replacement-host-outputs` and `--replacement-bootstrap-state`"*. | `--replacement-bootstrap-state` is what `REC-KIT-002`'s proof reads (`tests/deployment/test_session18_recovery.py:267-279`, `requires_environment("APG_KIT_DIR", "APG_REPLACEMENT_BOOTSTRAP_STATE")`), and `disaster_kit = ("REC-KIT-001", "REC-KIT-002")` **passed** at Session 35 on it (`evidence/session-35.json`); Session 35's F6 declared it (`/home/op/replacement-bootstrap-state.json`, the Session 18 rehearsal's adoption record). The plan read it as part of a replacement this trip does not make. | **Kept.** `s36-sweep.sh` declares Session 35's fourteen flags unchanged plus `--after-reboot` and the four `--rotated-*` (flag tokens 15 → 20, none removed, every one accepted by the gate — measured in Run 7). Only `--replacement-host-outputs` stays undeclared, as at Session 35. §7's prediction (`not_run` 1) depends on it. | Dropping it would send a passing claim to `not_run` and make the merge exit 5 for a reason §7 does not name; the flag reads the record of a past rehearsal, not a replacement this trip makes. | — |
+| **D2025** | §1 D1992 and D2020; Sheet H4: *"<the install line Run 7 found — e.g. sudo install -o root -g root -m 0600 host.yaml /etc/agentic-postgres/host.yaml>"*. | Read in Run 7 (an Explore pass over `bin/` and `src/`, the deciding lines re-read): deploy step 0's admission reads the file `deploy.sh --host` names (`deploy.sh:200` makes it absolute; `deploy-project.py:2270` `capacity_probe.read(arguments.host, …)`; `capacity_probe.py:240` `declared_capacity`), and `doctor capacity` reads its required `--host` (`doctor.py:1326-1330`). `host_config.declared_capacity` is the ONLY reader of `capacity.*`. The `/etc` copy is read through hard-coded paths for `infisical.api_url` alone (`materialize-secrets.py:47`, the doctor's `secrets` reading) and by the systemd launchers (the edge's `host.id` and edge settings; the project launcher's materialize). Nothing compares the two copies — D22's promised drift refusal was never built — and the only installer of the `/etc` copy is `provision-host.sh --apply` (`:905`), which also re-installs units, sudoers, the firewall, Docker's `daemon.json` and the ufw rules. The checkout copy declares `disk_gb: 37` (D1992 says 38). | **Sheet H4 installs nothing**: `s36-hostyaml.py` edits the checkout's `host.yaml`, the copy every admission and capacity reading is handed, and `doctor capacity --host host.yaml` reads it back. The `/etc` copy keeps its 2026-09-06 bytes; bringing it level is NOT done here (§10). `disk_gb` 37 stands — CPU and RAM only. | An install into a copy nothing reads for capacity is a step with no reader (D816); running the whole `--apply` to make two copies agree would re-run the host's baseline inside the outage window. | 0221, 0009 |
+| **D2026** | §5 Run 10 and Sheet S1: *"`sudo setsid nohup bash /home/op/g36-host.sh > /dev/null 2>&1 < /dev/null &`"*; §5 Run 7 item 10: *"Session 35's external line unchanged"*. | No Session 36 sheet installs the op-owned document copies (`/home/op/<key>-outputs.json`) after the 1.14.0 deploys — Session 35's F5 did, LAST before the sweep (D1767) — and the external half refuses copies naming another commit. `g36-host.sh` names no script; Session 35's shape is a sweep script detached by a root launcher that clears the exit file first (`s35-r10-launch.sh`). Session 35's sweep and external scripts TYPED the deployed commit, which for 1.14.0 does not exist until Run 8. | **Sheet S1 installs the two copies (Session 35's F5 line) and launches with `sudo bash /home/op/s36-launch.sh`**, which detaches `/home/op/s36-sweep.sh`. No commit is typed in any trip script: the sweep requires HEAD to equal BOTH deployed documents' `source_commit` and the kernel to have booted after both `observed_at`s (else exit file 95, nothing run); the external half requires both copies to name the host half's commit. | A commit read from the deployed documents cannot go stale between Run 8 and the trip; the copies after X3 are the documents the external half and the merge compare. | 0218 |
 
 ---
 
@@ -1317,8 +1321,67 @@ one (D1184):
     (`--public-ipv4 62.238.99.122`, `--ssh-destination op@62.238.99.122`), an
     ephemeral `ssh-agent` (D466).
 
-**Done.** *(executor: each script's rehearsal and its control's result; which
-`host.yaml` copy admission reads.)*
+**Done.** 2026-10-03, rows **D2024–D2026**; committed nothing but this text.
+**Run 6's CI verdict: green on `e5469b9`** (run 37136556399 — Session 1 gate,
+Session 2 offline contract, P0 inventory, all `success`). The scripts are in WSL
+`~/s36/run7/` (and the scratchpad's `s36/run7/`); the twelve that run on the host
+are in `/home/op`, sha256 equal on both sides (`shipped-sha256.txt`). Eight were
+written new; five (`s36-probe-start.sh`, `s36-probe-stop.sh`, `s36-sweep.sh`,
+`s36-launch.sh`, `s36-external.sh`) were DERIVED from Session 35's by
+`s36-derive.py` — named substitutions, every count asserted, all on the first
+pass; the probe instruments `s35-r10-probe.py` / `s35-r10-gaps.py` are called
+unchanged (sha256 equal in WSL and on the host). `bash -n`, `shellcheck -S
+warning`, `py_compile` and `ruff` F/E9 clean; every script answers `--help`.
+**No commit is typed in any of them** (D2026). **Which copy admission reads: the
+checkout's `host.yaml`** — Sheet H4 installs nothing (D2025). **The sweep keeps
+`--replacement-bootstrap-state`** (D2024): flag tokens 15 → 20, `--after-reboot`
+and the four `--rotated-*` added, none removed, all accepted by the gate.
+
+*Offline* (`rehearse-offline.txt`: 34 checks, 0 unexpected; an `apg dev` cluster
+of `fixture-alpha-dev` and a `/tmp` rig whose secret files and manifests were
+written by the product's own `render_secret` / `build_manifest`. The first pass
+failed on the RIG — its generation ids broke the schema's `^[a-z0-9]{8,32}$` —
+and was re-run whole): **counts** `--before` 7 relations + the postmaster start,
+a second `--before` refused (2), unchanged → `EQUAL` (the control), after the
+sentinel note → `DIFFERS: app.notes` (1), a document naming no container →
+*could not read* (6). **redeploy-before**: the note written through
+`api.create_note` as the `authenticated` role read from the document, the owner
+returned, count 1, the 0600 file read back; a re-run reuses the row; another
+key's document refused. **capture**: three 0600 files holding the planted value
+— the authenticator's the password, not the pgpass line; a second capture
+refused (1); a manifest not recording the consumer → nothing written (2).
+**shape**: the same generation → STOP (1); a new generation with the same value →
+STOP (1); a non-hex value → *not as declared* (1); a rotation → `SHAPE OK` (0) ×3.
+No planted value in any transcript. **d1581** (a Compose project `s36rig`):
+nothing done → `UNTOUCHED` ×2, generation `NOT MOVED`; one recreated, one
+restarted, the generation moved → `NEW` / `RESTARTED` / `MOVED`; no container →
+6. **hostyaml**: a dry run byte-identical; a write changes one line and the
+backup is the original; again → *nothing to do*; another value with the backup
+present → refused (1); `memory_mb` twice → refused, no backup. **host-read** 0,
+an unreadable interface 6. **external's commit check**: the copies equal to the
+host half → 0, one naming another commit → 1.
+
+*On the host, as op* (`rehearse-host.txt`): all six root scripts import under
+the host's system `python3`, and the three capture paths derive (`pgbouncer`,
+`postgrest` pgpass, `_root`). **The OLD size, read**: `free -m` 3814, 2 vCPU
+*Intel Xeon Processor (Skylake, IBRS, no TSX)*, `/` 38 G (21 free), `eth0`
+62.238.99.122, booted 2026-09-17 20:16:17. **units**: the first pass found NO
+unit — `/etc/agentic-postgres/projects/<key>/` is root 0700, so op cannot read
+the documents; repaired to read the state directories' NAMES (`projects/` is
+0755): all three `active` three readings running in 20 s; the control (a
+missing unit, 25 s) gave up (1). **hostyaml** against the real checkout file:
+3814 → *nothing to do*; 7800 `--dry-run` → one line, claimable 5586 MiB, the
+product's loader accepts it, the file byte-identical, no backup; its line-26
+comment still names 3814 (listed by the script, not rewritten). **The sweep's
+preflight** (the path pointed at the op copies): HEAD `f7fb96d` equals both
+documents, the boot 2026-09-17 is BEFORE both deploys → refused (1), correct
+today; a HEAD that is not deployed → both flagged. **The probe control**
+`r7-control` (rest + docs on alpha, 3.2 req/s, 18 s): 29 up each, 0 down, 0 ×
+429, *CONTROL PASSED*; a second start under the label refused (2).
+
+**Not executable before Run 8**: the sweep and the external half call
+`bin/session-36-check.sh`, which Run 8 writes; their preflights are rehearsed
+above, and Run 9's before-day reads all of them once more against the sheets.
 
 ### Run 8 — the bump, the registry, the gate, the documents
 
@@ -1623,6 +1686,12 @@ needs one.
   and a disk rescale is one-way; each of those sessions measures its need first.
 - **`render-acceptance-matrix.py`'s `AREAS` lists ten families** of twenty-six —
   recorded, not widened (Run 8).
+- **The two `host.yaml` copies drift, and nothing says so** (D2020, D2025) —
+  `/etc`'s is 2026-09-06's, read for the provider URL and by the systemd
+  launchers; the checkout's is what admission reads. D22's drift refusal was
+  never built, and the only installer is the whole `provision-host.sh --apply`.
+  Session 38's host re-derivation is where a narrow install or a drift check
+  belongs.
 
 ---
 
@@ -1683,8 +1752,8 @@ sudo python3 /home/op/s36-counts.py --after --project beta-dev
 ### Sheet H4 — the capacity re-declared (Run 9, day 1)
 
 ```
-# the agent has edited /home/op/agentic-postgres/host.yaml (memory_mb only) and shown you the diff
-<the install line Run 7 found — e.g. sudo install -o root -g root -m 0600 host.yaml /etc/agentic-postgres/host.yaml>
+# the agent has edited /home/op/agentic-postgres/host.yaml (memory_mb only, s36-hostyaml.py) and shown you the diff
+# nothing is installed (D2025): admission and `doctor capacity` read the --host copy, which is this one
 sudo bin/doctor.sh capacity --host host.yaml
 ```
 
@@ -1757,5 +1826,7 @@ sudo systemctl reboot
 
 ```
 sudo -v
-sudo setsid nohup bash /home/op/g36-host.sh > /dev/null 2>&1 < /dev/null &
+sudo install -o op -g op -m 0600 /etc/agentic-postgres/projects/alpha-dev/outputs.json /home/op/alpha-dev-outputs.json
+sudo install -o op -g op -m 0600 /etc/agentic-postgres/projects/beta-dev/outputs.json /home/op/beta-dev-outputs.json
+sudo bash /home/op/s36-launch.sh      # detaches /home/op/s36-sweep.sh and returns at once (D2026)
 ```
