@@ -1,0 +1,738 @@
+# The Reality Ledger (ADR 0247, LEDGER-001).
+#
+# One row per product concept, saying what it is TODAY. A program reads this
+# file: tests/contract/test_reality_ledger.py guards it, and
+# bin/render-reality-ledger.py renders docs/reality-ledger.md from it (that
+# page is generated -- edit this file, then `--write`).
+#
+# The fields are ADR 0247's. `customer_text` is the sentence a customer would
+# read; `today` is what the appliance does now for its operator. `today_evidence`
+# proves `today`; `evidence` proves a customer-facing `available` or `beta`
+# status and is empty for every other status (D2009). A row moves in the run
+# that builds the thing, never at a session's close.
+#
+# Session 36 writes today's truth: no customer exists, so every concept a
+# customer would use is `planned` (or `not_offered`, cut by decision), and the
+# substrate the operator already runs is `planned` FOR A CUSTOMER with the
+# claim that proves it for the operator.
+
+schema_version: 1
+rows:
+  # -------------------------------------------------------------------------
+  # Accounts and the management surface (Session 37)
+  # -------------------------------------------------------------------------
+  - id: accounts
+    concept: Accounts
+    status: planned
+    customer_text: >-
+      Not open yet. Accounts will be created by invitation only; there is no
+      public signup.
+    today: >-
+      A project's auth service holds people and their sessions for that one
+      project. No account spans projects, and nothing outside a project's own
+      auth service knows who a person is.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      An account in the control project, created when a person accepts an
+      invitation an owner or admin minted and handed over (D1951).
+    eventual: Self-service signup with verified email.
+    controls: []
+    since_session: 36
+    target_session: 37
+
+  - id: organizations
+    concept: Organizations
+    status: planned
+    customer_text: >-
+      Not open yet. An organization will group people and projects, with the
+      roles owner, admin, member and viewer.
+    today: There is no organization. The operator holds every project.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      Organizations and memberships in the control project's own migration set;
+      TOTP required for owners and admins.
+    eventual: Organizations with single sign-on and audit export.
+    controls: []
+    since_session: 36
+    target_session: 37
+
+  - id: api_keys
+    concept: Management API keys
+    status: planned
+    customer_text: >-
+      Not open yet. A key will authorise management operations only and will
+      never open a database.
+    today: >-
+      No management key exists. An agent identity's secret opens that project's
+      agent plane and nothing else.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      Keys shown once, stored as Argon2id hashes, scoped from a closed
+      vocabulary, owned by a member and revoked with them (D1952).
+    eventual: Keys with expiry, rotation reminders and per-key usage.
+    controls: []
+    since_session: 36
+    target_session: 37
+
+  - id: management_api
+    concept: Management API (/api/v1)
+    status: planned
+    customer_text: Not open yet.
+    today: >-
+      Each project serves its own routes; nothing manages projects over HTTP.
+      The operator manages them with bin/ commands over SSH.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      One management API in the control project's app mode, frozen as a
+      contract and checked like the other four.
+    eventual: A versioned public API with published client libraries.
+    controls: []
+    since_session: 36
+    target_session: 37
+
+  - id: cli_remote
+    concept: CLI against the hosted service
+    status: planned
+    customer_text: >-
+      Not open yet. The apg command will sign in and act through the management
+      API only.
+    today: >-
+      apg is a dispatcher over the checkout's bin/ commands, run on the host or
+      against a local development cluster.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      New verbs (login, logout, context, org, project) that are clients of
+      /api/v1; later sessions add branch, backup, compute, usage and plan.
+    eventual: The same, plus completion and a published binary.
+    controls: []
+    since_session: 36
+    target_session: 37
+
+  - id: console
+    concept: Web console
+    status: planned
+    customer_text: Not open yet.
+    today: >-
+      There is no web console. Studio is a loopback page an operator or
+      developer runs locally against one project.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      Static pages served by the control project, calling /api/v1 only, with no
+      SQL tab; project views open that project's own Studio forwarders.
+    eventual: A full web console with in-browser data tools.
+    controls: []
+    since_session: 36
+    target_session: 42
+
+  # -------------------------------------------------------------------------
+  # Managed projects (Session 38)
+  # -------------------------------------------------------------------------
+  - id: projects_self_service
+    concept: Create a project
+    status: planned
+    customer_text: >-
+      Not open yet. Creating a project will be refused with "capacity
+      exhausted" when this server has no room, and nothing will be created.
+    today: >-
+      The operator creates a project by writing a manifest and running the
+      deploy as root; admission refuses a project that does not fit the declared
+      host (exit 12).
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      project.create as an operation the reconciler executes into a prepared
+      slot, through the same admission and deploy.
+    eventual: Placement across a fleet of servers.
+    controls: []
+    since_session: 36
+    target_session: 38
+
+  - id: project_deletion
+    concept: Delete a project
+    status: planned
+    customer_text: Not open yet.
+    today: >-
+      The operator retires a project with bin/project-retire.sh, which removes
+      only what the project's names derive.
+    today_evidence: null
+    evidence: []
+    stage5_reality: project.delete as an operation (D1972).
+    eventual: The same, with a grace period and recovery.
+    controls: []
+    since_session: 36
+    target_session: 38
+
+  - id: export
+    concept: Export a project
+    status: planned
+    customer_text: Not open yet.
+    today: >-
+      The operator can take a backup and run a restore drill; there is no
+      export a customer downloads.
+    today_evidence: null
+    evidence: []
+    stage5_reality: project.export as an operation producing an archive (D1972).
+    eventual: Scheduled exports to a customer's own storage.
+    controls: []
+    since_session: 36
+    target_session: 38
+
+  - id: region
+    concept: Region
+    status: planned
+    customer_text: >-
+      Every project runs in one location, the one server this beta runs on.
+    today: >-
+      One server in one Hetzner location. The host manifest does not name a
+      region.
+    today_evidence: null
+    evidence: []
+    stage5_reality: A host.yaml field read everywhere, with one value (D1957).
+    eventual: Placement across locations.
+    controls: []
+    since_session: 36
+    target_session: 38
+
+  - id: compute_profiles
+    concept: Compute size
+    status: planned
+    customer_text: >-
+      Not open yet. Changing a project's size will restart it, and the message
+      will say how long the restart was measured to take.
+    today: >-
+      Memory, process and CPU limits per service come from release defaults a
+      manifest can override for memory and pool size; there is no named size.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      Named profiles in a release file, selected in the manifest, changed by
+      project.resize with the measured window (D1955).
+    eventual: Compute scheduled independently of storage.
+    controls: []
+    since_session: 36
+    target_session: 38
+
+  - id: sleep
+    concept: Sleep and wake
+    status: planned
+    customer_text: Not open yet.
+    today: Nothing sleeps. A project's containers run until the operator stops them.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      project.sleep and project.wake stop and start the project's containers,
+      volumes kept; what a caller sees while it sleeps is measured first
+      (D1956).
+    eventual: Compute suspended and resumed independently of storage.
+    controls: []
+    since_session: 36
+    target_session: 38
+
+  # -------------------------------------------------------------------------
+  # Connection endpoints (Session 39)
+  # -------------------------------------------------------------------------
+  - id: pooled_endpoint
+    concept: Pooled connection string
+    status: planned
+    customer_text: Not open yet.
+    today: >-
+      There is no public Postgres endpoint. The operator reaches a project's
+      pooler through an SSH forward.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      A TLS endpoint per project on the edge, routed to the project's PgBouncer,
+      plaintext refused (ADR 0246's one Postgres port).
+    eventual: The same, behind a fleet-wide gateway.
+    controls: []
+    since_session: 36
+    target_session: 39
+
+  - id: direct_endpoint
+    concept: Direct connection string
+    status: planned
+    customer_text: Not open yet.
+    today: >-
+      There is no public Postgres endpoint. The operator reaches a project's
+      database through an SSH forward.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      A TLS endpoint per project routed to the database for migrations, used by
+      the customer_admin role.
+    eventual: The same, behind a fleet-wide gateway.
+    controls: []
+    since_session: 36
+    target_session: 39
+
+  - id: wake_on_connect
+    concept: Wake on connect
+    status: planned
+    customer_text: Not open yet.
+    today: Nothing sleeps, so nothing wakes.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      Built only if Session 39's gateway rig shows a connection can be held
+      while a project starts; otherwise it stays planned (D1956).
+    eventual: A connection that wakes a sleeping project transparently.
+    controls: []
+    since_session: 36
+    target_session: 39
+
+  # -------------------------------------------------------------------------
+  # Branches and restore (Session 40)
+  # -------------------------------------------------------------------------
+  - id: branches
+    concept: Branches
+    status: planned
+    customer_text: >-
+      Not open yet. A branch will be a full copy restored from backups, so
+      creating one will take time in proportion to the project's size.
+    today: >-
+      The operator's restore drill restores a project at a point in time into a
+      disposable volume and deletes it.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      branch.create restores the parent's repository at a target time into the
+      branch's own names, re-keyed before its endpoint opens (D1961).
+    eventual: Storage-native copy-on-write branches.
+    controls: []
+    since_session: 36
+    target_session: 40
+
+  - id: restore_to_branch
+    concept: Restore to a new branch
+    status: planned
+    customer_text: Not open yet.
+    today: >-
+      The operator restores to a point in time into a disposable volume (the
+      restore drill) or onto a replacement host.
+    today_evidence: null
+    evidence: []
+    stage5_reality: restore.create is branch.create with a target time (D1963).
+    eventual: The same, faster.
+    controls: []
+    since_session: 36
+    target_session: 40
+
+  - id: in_place_restore
+    concept: Restore a project in place
+    status: not_offered
+    customer_text: >-
+      Not available, by decision. Restore to a new branch instead; your project
+      is never overwritten by a restore.
+    today: >-
+      An in-place restore exists only for the operator onto a replacement host;
+      the restore refuses a volume that holds a cluster.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      Cut (D1963): a destructive restore is the one action whose failure loses
+      the data the product exists to keep.
+    eventual: An in-place restore with a pre-restore snapshot.
+    controls: []
+    since_session: 36
+    target_session: null
+
+  - id: branch_promotion
+    concept: Promote a branch
+    status: not_offered
+    customer_text: >-
+      Not available, by decision. Apply the change to your main branch as a
+      reviewed migration instead.
+    today: >-
+      A change reaches a project as a migration through the proposal record
+      (ADR 0243).
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      Cut (D1962): promotion needs write coordination across two clusters,
+      which nothing here does.
+    eventual: Promotion with route cutover and verification.
+    controls: []
+    since_session: 36
+    target_session: null
+
+  # -------------------------------------------------------------------------
+  # Telemetry, insights, usage and plans (Session 41)
+  # -------------------------------------------------------------------------
+  - id: query_insights
+    concept: Query Insights
+    status: planned
+    customer_text: Not open yet.
+    today: pg_stat_statements is not loaded; no query is recorded.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      pg_stat_statements loaded, normalised statements served per project, with
+      no recommendation engine (D1965).
+    eventual: Longer history and recommendations.
+    controls: []
+    since_session: 36
+    target_session: 41
+
+  - id: monitoring
+    concept: Monitoring
+    status: planned
+    customer_text: Not open yet.
+    today: >-
+      Each project has its own collector and Prometheus store, routed nowhere;
+      the operator reads them through doctor.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      A curated signal list, each naming its source, and ClickStack bounded on
+      the host (D1964).
+    eventual: Dashboards and alert routing.
+    controls: []
+    since_session: 36
+    target_session: 41
+
+  - id: usage
+    concept: Usage
+    status: planned
+    customer_text: Not open yet.
+    today: >-
+      doctor usage reads eight figures per project at the moment it is asked;
+      nothing is recorded over time.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      The reconciler samples each project's readings on an interval; usage is
+      aggregated per project and per organization (D1966).
+    eventual: Metered usage that drives billing.
+    controls: []
+    since_session: 36
+    target_session: 41
+
+  - id: egress_metering
+    concept: Network egress usage
+    status: not_metered
+    customer_text: >-
+      Not measured. Usage pages will not show network egress, provider calls or
+      embeddings.
+    today: Nothing reads egress, provider calls or embedding usage.
+    today_evidence: null
+    evidence: []
+    stage5_reality: Not metered in Stage 5 (D1966).
+    eventual: Metered egress.
+    controls: []
+    since_session: 36
+    target_session: null
+
+  - id: plan_free
+    concept: Free plan
+    status: planned
+    customer_text: Not open yet. During the beta every project is on the Free plan, at no cost.
+    today: There are no plans and no entitlements.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      A release file of plans; the limits enforced are the ones an existing
+      mechanism can enforce (D1967).
+    eventual: The same.
+    controls: []
+    since_session: 36
+    target_session: 41
+
+  - id: plan_premium
+    concept: Premium plan
+    status: planned
+    customer_text: >-
+      Defined but not available during the beta. You can ask to be told when
+      it is.
+    today: There are no plans.
+    today_evidence: null
+    evidence: []
+    stage5_reality: Defined and shown as unavailable; "Notify me" records interest (D1967).
+    eventual: A paid plan.
+    controls: []
+    since_session: 36
+    target_session: 41
+
+  - id: notifications
+    concept: Notifications
+    status: planned
+    customer_text: Not open yet. Notifications will be shown in the console only.
+    today: Nothing notifies anyone.
+    today_evidence: null
+    evidence: []
+    stage5_reality: A table and a list route (D1968).
+    eventual: In-app, email and webhook notifications.
+    controls: []
+    since_session: 36
+    target_session: 41
+
+  - id: email
+    concept: Email
+    status: planned
+    customer_text: >-
+      This beta sends no email. Invitations and password resets are handed to
+      you by the person who issued them.
+    today: >-
+      Nothing sends email. A password-reset token is issued by an administrator
+      and handed over out of band.
+    today_evidence: null
+    evidence: []
+    stage5_reality: Not built in Stage 5 (D1951).
+    eventual: Transactional email.
+    controls: []
+    since_session: 36
+    target_session: null
+
+  - id: passkeys
+    concept: Passkeys
+    status: planned
+    customer_text: >-
+      Not available yet. Owners and admins will use a password and a one-time
+      code.
+    today: There are no passkeys and no second factor.
+    today_evidence: null
+    evidence: []
+    stage5_reality: Not built in Stage 5; TOTP is (D1951).
+    eventual: Passkeys for every role.
+    controls: []
+    since_session: 36
+    target_session: null
+
+  # -------------------------------------------------------------------------
+  # Cut by decision
+  # -------------------------------------------------------------------------
+  - id: sql_editor
+    concept: SQL editor
+    status: not_offered
+    customer_text: >-
+      Not available, by decision. Connect with psql or your own client through
+      your project's direct connection string.
+    today: No product surface runs SQL (ADR 0246).
+    today_evidence: null
+    evidence: []
+    stage5_reality: Cut (D1969); the Connect page shows a psql snippet instead.
+    eventual: A browser SQL editor acting as the person, never a shared credential.
+    controls: []
+    since_session: 36
+    target_session: null
+
+  - id: support_access
+    concept: Temporary support access
+    status: not_offered
+    customer_text: >-
+      The operator of this single node has root on it; support access is not
+      technically bounded in this beta.
+    today: >-
+      The operator holds root. The standing read-only path is apg-diag behind
+      one SSH key, with no lifetime.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      Grants are not built (D1971); a support bundle a member downloads is.
+    eventual: Time-bounded, audited support grants.
+    controls: []
+    since_session: 36
+    target_session: null
+
+  - id: autoscaling
+    concept: Autoscaling
+    status: not_offered
+    customer_text: >-
+      Not available. A project's size changes only when you resize it, and a
+      resize restarts it.
+    today: Nothing changes a project's size on its own.
+    today_evidence: null
+    evidence: []
+    stage5_reality: Not built (product contract §5, ADR 0246).
+    eventual: Compute that grows and shrinks with load.
+    controls: []
+    since_session: 36
+    target_session: null
+
+  - id: high_availability
+    concept: High availability
+    status: not_offered
+    customer_text: >-
+      Not available. Every project runs on one server; if it fails, your
+      project is down until it is restored from backup.
+    today: >-
+      One server. Recovery from its loss is a restore from backups onto a
+      replacement host.
+    today_evidence: null
+    evidence: []
+    stage5_reality: Not built (product contract §5, ADR 0246).
+    eventual: Replicas and automatic failover.
+    controls: []
+    since_session: 36
+    target_session: null
+
+  - id: multi_region
+    concept: Multiple regions
+    status: not_offered
+    customer_text: Not available. Every project runs in one location.
+    today: One server in one location.
+    today_evidence: null
+    evidence: []
+    stage5_reality: Not built (product contract §5, ADR 0246).
+    eventual: Projects placed and replicated across locations.
+    controls: []
+    since_session: 36
+    target_session: null
+
+  - id: sla
+    concept: Service level agreement
+    status: not_offered
+    customer_text: Not available. This beta carries no uptime commitment.
+    today: Nothing measures or promises uptime.
+    today_evidence: null
+    evidence: []
+    stage5_reality: Not offered in Stage 5.
+    eventual: A measured, contractual service level.
+    controls: []
+    since_session: 36
+    target_session: null
+
+  - id: billing
+    concept: Billing
+    status: not_offered
+    customer_text: Not available. The beta is free and takes no payment details.
+    today: Nothing charges anyone.
+    today_evidence: null
+    evidence: []
+    stage5_reality: >-
+      No checkout, invoice, card form or tax field (D1967).
+    eventual: Payments and invoicing.
+    controls: []
+    since_session: 36
+    target_session: null
+
+  # -------------------------------------------------------------------------
+  # The substrate: true today for the operator, not yet reachable by a customer
+  # -------------------------------------------------------------------------
+  - id: postgresql
+    concept: PostgreSQL
+    status: planned
+    customer_text: >-
+      Not open yet. Projects will run PostgreSQL 18 with pgvector.
+    today: >-
+      Every project runs the locked PostgreSQL 18.4 image, with pgvector in the
+      extensions schema.
+    today_evidence: database_extensions
+    evidence: []
+    stage5_reality: >-
+      The same cluster per project, reachable by a customer through the
+      Session 39 endpoints.
+    eventual: The same, with a choice of major version.
+    controls: []
+    since_session: 36
+    target_session: 39
+
+  - id: project_isolation
+    concept: Project isolation
+    status: planned
+    customer_text: >-
+      Not open yet. Each project will have its own database cluster, roles,
+      network, volumes and credentials; projects on the server share only the
+      edge that routes requests.
+    today: >-
+      Two projects on one host share exactly the edge; the isolation matrix
+      compares every project-scoped name in their deployed documents.
+    today_evidence: isolation_matrix
+    evidence: []
+    stage5_reality: The same isolation for every project the reconciler creates.
+    eventual: Isolation across servers as well.
+    controls: []
+    since_session: 36
+    target_session: 38
+
+  - id: backups_and_pitr
+    concept: Backups and point-in-time recovery
+    status: planned
+    customer_text: >-
+      Not open yet. Backups are continuous to off-site object storage, with a
+      nightly copy to a second provider.
+    today: >-
+      pgBackRest archives each project to R2 with a nightly B2 mirror; a
+      timestamp-targeted restore into a disposable volume succeeds.
+    today_evidence: point_in_time_recovery
+    evidence: []
+    stage5_reality: >-
+      The doctor's backup readings served through /api/v1, the restore window
+      computed from pgBackRest, never declared (D1963).
+    eventual: More redundancy and faster restores.
+    controls: []
+    since_session: 36
+    target_session: 40
+
+  - id: agents
+    concept: Agents (MCP)
+    status: planned
+    customer_text: Not open yet.
+    today: >-
+      Each project serves an agent plane: tools compiled into a lock, scoped
+      identities, budgets, approvals, idempotency and an audit record.
+    today_evidence: agent_surface
+    evidence: []
+    stage5_reality: >-
+      Every project the reconciler creates carries its agent plane; the console
+      opens it through the project's Studio forwarders.
+    eventual: The same.
+    controls: []
+    since_session: 36
+    target_session: 38
+
+  - id: workflows
+    concept: Workflows
+    status: planned
+    customer_text: Not open yet.
+    today: >-
+      Each project runs reviewed workflows as its agents, with approvals,
+      compensation and provenance, in a worker inside its auth service.
+    today_evidence: workflow_run
+    evidence: []
+    stage5_reality: >-
+      Every project the reconciler creates carries them; the console reaches
+      them through Studio forwarders (D1970).
+    eventual: The same.
+    controls: []
+    since_session: 36
+    target_session: 38
+
+  - id: connectors
+    concept: Connectors
+    status: planned
+    customer_text: Not open yet.
+    today: >-
+      A project with the connectors facility delivers signed events out,
+      accepts signed requests in and runs workflows on a schedule.
+    today_evidence: connector_delivery_live
+    evidence: []
+    stage5_reality: >-
+      Every project the reconciler creates can enable them; the console reaches
+      them through Studio forwarders (D1970).
+    eventual: The same.
+    controls: []
+    since_session: 36
+    target_session: 38
+
+  - id: audit
+    concept: Audit log
+    status: planned
+    customer_text: Not open yet.
+    today: >-
+      Every agent call is recorded before and after its work, a denial
+      included, and kept until an operator prunes it on a stated horizon.
+    today_evidence: agent_audit_record
+    evidence: []
+    stage5_reality: >-
+      Every project the reconciler creates carries it; the console reaches it
+      through Studio forwarders.
+    eventual: Audit export to a customer's own storage.
+    controls: []
+    since_session: 36
+    target_session: 38

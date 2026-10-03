@@ -226,6 +226,9 @@ step "6. Generated documentation is current"
 # drift above, one level down -- and it is the one an ADOPTER reads, because the
 # release's catalog says nothing about the tools they wrote.
 "$(python_bin)" bin/render-mcp-catalog.py --check --project project.example.yaml
+# Session 36, Run 5 (ADR 0247). The Reality Ledger's page is rendered from the
+# ledger a program reads; --check also refuses a ledger the schema refuses.
+"$(python_bin)" bin/render-reality-ledger.py --check
 
 # ---------------------------------------------------------------------------
 step "7. Compose validates and no project container is running"

@@ -1,8 +1,9 @@
 # Session 36 — Preconditions: the boundary, the rescale, and the operating debt
 
-**Status: IN PROGRESS — Runs 1–4 done 2026-10-03 (rows D2006–D2018; CI
-green on `4b23773`). Sheet E0 read 2026-10-03: Run 6 BUILDS (D2019); the two
-host.yaml copies differ (D2020). Next: Run 5. NEXT FREE D2021.** Planned
+**Status: IN PROGRESS — Runs 1–5 done 2026-10-03 (rows D2006–D2020; CI
+green on `4b23773`; Run 5's verdict is recorded with Run 6). Sheet E0 read
+2026-10-03: Run 6 BUILDS (D2019); the two host.yaml copies differ (D2020).
+Next: Run 6. NEXT FREE D2021.** Planned
 2026-10-03 at `1ea6259`. The first session of
 Stage 5 (`docs/plans/stage-5-plan.md` §3). Eleven runs and **two sittings on
 two days** — the server rescaled in place and the release deployed (one outage
@@ -1123,7 +1124,52 @@ Targeted: `test_reality_ledger`, `test_cli_contract`,
 `bin/session-01-check.sh` ALONE on the clean tree after the commit (generated
 artefacts, CLAUDE.md §5's table).
 
-**Done.** *(executor)*
+**Done.** 2026-10-03. **The ledger**: 42 rows — 35 customer concepts (23
+`planned` with a `target_session` from the stage plan's §3 and §5; `email` and
+`passkeys` `planned` with `target_session: null`, since no Stage 5 session builds
+them (D1951); `sql_editor`, `in_place_restore`, `branch_promotion`,
+`support_access` (D1971's sentence verbatim), `autoscaling`,
+`high_availability`, `multi_region`, `sla`, `billing` `not_offered`;
+`egress_metering` `not_metered`) and the seven substrate rows, `planned` with a
+claim `passed` in `evidence/session-35.json`: `postgresql` →
+`database_extensions` (DBX-PG-001: the server's major version matches the
+lock, pgvector in `extensions`), `project_isolation` → `isolation_matrix`
+(DEP-ISO-001), `backups_and_pitr` → `point_in_time_recovery` (REC-PITR-001),
+`agents` → `agent_surface` (AGT-PLANE-001), `workflows` → `workflow_run`
+(WF-RUN-001), `connectors` → `connector_delivery_live` (CONN-OUT-002), `audit` →
+`agent_audit_record` (AGT-AUDIT-001). The substrate rows target 38 (a project
+the reconciler creates carries them), except `postgresql` 39 (the endpoint is
+how a customer reaches it) and `backups_and_pitr` 40 (the backups surface).
+The `not_offered` rows say what is not offered without a §59 word — the
+guard reads every `customer_text`, the cut rows' included. **Executor's
+choices, no conflict with the plan**: the file's root is `{schema_version: 1,
+rows: [...]}` (every schema here is versioned); the status-dependent rules
+(evidence non-empty exactly for `available`/`beta`, no control on an
+unreachable row) are the guard's, not the schema's, so each mutation fails the
+one test named for it; ids are checked unique in `validate()`. **Two tests
+beyond §2's six**: `test_a_claim_that_did_not_pass_is_not_evidence` (written
+when the battery's M5 — the resolver accepting `not_run`/`failed` — would
+otherwise have survived: no row names a non-passed claim) and
+`test_the_newest_evidence_is_chosen_by_session_number` (`session-9` vs
+`session-10`, per-mode halves ignored). Run 8 registers all eight from
+`--collect-only`. **Battery** (PYTHONDONTWRITEBYTECODE, caches cleared, six
+anchors preflighted once, JUnit-classified, restore by copy, `cmp` identical):
+M1 a control on `accounts` → FAILED (control: the forbidden-word test PASSED);
+M2 *"No Autoscaling"* in a `customer_text` → FAILED (control PASSED; the
+match is case-insensitive); M3 `today_evidence` renamed to a claim that never
+was → FAILED; M4 `accounts` made `beta` with no evidence → FAILED; M5 →
+FAILED; M6 the newest evidence ordered by file name → FAILED; every control
+PASSED. **Targeted**: `test_reality_ledger`, `test_cli_contract`,
+`test_documentation_index`, `test_session12_documented_path` and
+`test_acceptance_registry` (the D1242 selector guard) — 729 passed, 1 failed:
+`test_commands_are_executable_in_the_git_index`, the new command not yet
+`git add`ed (D1014's order); after staging, `test_reality_ledger` +
+`test_cli_contract` 650 passed. `--check` added to `session-01-check.sh` step 6;
+the page indexed once under *Evidence and assurance*, marked generated.
+**The local `session-01-check.sh` was not run**: CI runs it (`ci.yml:104`),
+`render-reality-ledger.py --check` was run directly (rc 0), and the operator's
+standing rule keeps gates to trips and closes — CI's verdict on the commit is
+the gate's.
 
 ### Run 6 — the secret-age reading (conditional on Sheet E0)
 

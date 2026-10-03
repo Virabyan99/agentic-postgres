@@ -260,6 +260,8 @@ PYTHON_COMMANDS = (
     "bin/render-capacity-envelope.py",
     "bin/render-evaluation-report.py",
     "bin/render-mcp-catalog.py",
+    # Session 36 (ADR 0247). Validates the ledger before rendering its page.
+    "bin/render-reality-ledger.py",
     "bin/render-config.py",
     "bin/render-jwks.py",
     "bin/render-mount-digests.py",

@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/reality-ledger.schema.json",
+  "title": "Agentic Postgres Reality Ledger",
+  "description": "One row per product concept, saying what it is TODAY (ADR 0247). This schema is the shape; the guard in tests/contract/test_reality_ledger.py is the meaning: whether a row's evidence resolves, whether a row that is not reachable carries a control, and whether a customer sentence uses a word the release may not use. A file that validates here may still be refused there, because what a claim name resolves to depends on the newest evidence document and no schema can carry that.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "rows"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "1, the only version."
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/row"
+      },
+      "description": "The concepts, in the order the page renders them. Ids are unique; the guard checks it, because a schema cannot compare one property across items."
+    }
+  },
+  "$defs": {
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "concept",
+        "status",
+        "customer_text",
+        "today",
+        "today_evidence",
+        "evidence",
+        "stage5_reality",
+        "eventual",
+        "controls",
+        "since_session",
+        "target_session"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,62}$",
+          "description": "A stable snake_case name. A console control and an /api/v1 operation type name the row they act on by this id (Sessions 37 and 42)."
+        },
+        "concept": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The concept as a customer would name it."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "beta",
+            "planned",
+            "not_metered",
+            "not_offered"
+          ],
+          "description": "`not_offered` is ADR 0247's addition: a concept cut by decision, which `planned` would promise."
+        },
+        "customer_text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The sentence a customer reads about the concept. The only text in the ledger the forbidden-word guard reads."
+        },
+        "today": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the appliance does now, for its operator."
+        },
+        "today_evidence": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "description": "A claim in evidence_claims.CLAIMS that passed in the newest evidence document, or a capacity.ENVELOPE subject, proving `today`; null when nothing does (D2009)."
+        },
+        "evidence": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "For an `available` or `beta` row, the claims or envelope subjects proving the customer-facing status; empty for every other status (D2009)."
+        },
+        "stage5_reality": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What Stage 5 builds of it, or why it does not."
+        },
+        "eventual": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What a fuller product would do. Never promised."
+        },
+        "controls": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "The console controls and /api/v1 operation types that act on the concept; empty until a session builds one."
+        },
+        "since_session": {
+          "type": "integer",
+          "minimum": 36,
+          "description": "The session the row's current status was set in."
+        },
+        "target_session": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 36,
+          "maximum": 42,
+          "description": "The Stage 5 session that builds it, or null when no Stage 5 session does."
+        }
+      }
+    }
+  }
+}
