@@ -1,10 +1,10 @@
 # Session 36 — Preconditions: the boundary, the rescale, and the operating debt
 
-**Status: IN PROGRESS — Runs 1–5 done 2026-10-03 (rows D2006–D2021; CI
-green on `4b23773`; Run 5 RED on `53023e0`, repaired by D2021 — the repair's
-verdict is recorded with Run 6). Sheet E0 read 2026-10-03: Run 6 BUILDS
-(D2019); the two host.yaml copies differ (D2020). Next: Run 6. NEXT FREE
-D2022.** Planned
+**Status: IN PROGRESS — Runs 1–6 done 2026-10-03 (rows D2006–D2023; CI
+green on `4b23773` and on Run 5's repair `c4582ab`, run 37133402800; Run 6's
+verdict is recorded with Run 7). Sheet E0 read 2026-10-03: Run 6 BUILT
+(D2019, D2022, ADR 0250); the two host.yaml copies differ (D2020). Next: Run
+7. NEXT FREE D2024.** Planned
 2026-10-03 at `1ea6259`. The first session of
 Stage 5 (`docs/plans/stage-5-plan.md` §3). Eleven runs and **two sittings on
 two days** — the server rescaled in place and the release deployed (one outage
@@ -403,6 +403,8 @@ second table below it, in execution order.
 | **D2019** | §1 D1997: *"If a per-secret update time exists, Run 6 builds `doctor --reading secrets`"*. | **Sheet E0 (3)**: Infisical's `GET /api/v3/secrets/raw/{name}` returns `secret.createdAt`, `secret.updatedAt` (strings), `secret.version` (int), `isRotatedSecret`, `rotationId` and `secretReminderRepeatDays`. Key names and types only were read. **What `updatedAt` moves on is unmeasured**: a value change, or any edit (a comment, a tag, metadata). The documentation password was rotated on 2026-08-13 (D1996), so its `updatedAt` on alpha is a known reference point. | **Run 6 builds**, ADR 0250 written. **Its first step is a reading, not code**: for alpha's `docs_basic_auth_password`, print `updatedAt`, `createdAt` and `version` (never the value) and set them against the 2026-08-13 rotation. If `updatedAt` does not track the value, the age is read from `version`'s history or stated as unmeasured, and the ADR says which. The X2 rotation on day 2 is the control: `updatedAt` must move and `version` increment. | The branch D1997 left open is decided; what the field means is the next question, and an age read from a field that moves on a comment edit would be D600's value that looks measured. | **0250** |
 | **D2020** | §1 D1992: the operator installs the edited `host.yaml` *"where Run 7 found admission reads it"*. | **Sheet E0 (5): the two copies DIFFER.** `/etc/agentic-postgres/host.yaml` is 3,579 B dated 2026-09-06; the checkout's `/home/op/agentic-postgres/host.yaml` is 5,618 B dated 2026-09-19 (Session 31 declared schema 3's `capacity` block, which the deploys pass as `--host host.yaml`). `materialize-secrets.py` reads `HOST_MANIFEST = /etc/agentic-postgres/host.yaml` (`:47`) — the OLDER copy. | **Run 7 reads every reader of a host manifest** (grep `HOST_MANIFEST`, `--host`, `load_host_manifest` in `bin/` and `src/`) and states which copy each reads. Sheet H4 then names the copy admission reads, and whether `/etc` must be brought level (a root `install`, diff printed first). Nothing is edited until then. | Two copies of the host's declaration read by different commands are two answers to *"how big is this host"*; the rescale is the moment one of them would silently be wrong. | 0221 |
 | **D2021** | §1 D2000, §2 `LEDGER-001` and §5 Run 5: *"every `available`/`beta` row's `evidence` resolves (a claim … `passed` in the newest `evidence/session-*.json` …)"*; *"the `today_evidence` check read[s] the NEWEST `evidence/session-*.json`"*. | **`evidence/*` is gitignored** (`.gitignore:7-8`, runbook §6.1; only `evidence/.gitkeep` is tracked), so a fresh clone holds no evidence document. **CI RED on `53023e0`** (run 37132504350, both jobs: 1 failed / 6,931 and 6,939 passed): `test_available_and_beta_rows_name_evidence_that_resolves` raised *"no evidence/session-NN.json"*. The workstation holds the documents, so the targeted run was green: a fixture the workstation shares with the code and CI does not (CLAUDE.md §7 question 6). | **Two halves.** `test_every_evidence_name_is_a_claim_or_an_envelope_subject` (new) runs in every checkout: the status rules, plus every `evidence` and `today_evidence` name is a claim in `CLAIMS` or an envelope subject. `test_available_and_beta_rows_name_evidence_that_resolves` adds the PASSED half against the newest document and **skips, saying why, in a checkout without one**; `newest_evidence` returns `None` rather than raising. ADR 0247 item 2 corrected in place (written this session, never released). Measured: a copy of the tracked files only (`git ls-files` → tar) 8 passed, 1 skipped with the reason; battery M7 (a `today_evidence` naming `port_allocation`, `not_run` at 35) is killed by the passed half while the names half stays green. | Committing an evidence document would reverse the runbook's rule for one test; a skip that names its reason is ADR 0195's third outcome, and the session gates (workstation and host) run with the documents present, so the passed half is read where the evidence is. | **0247** |
+| **D2022** | §1 D2019: *"Run 6's first step is a reading: for alpha's `docs_basic_auth_password`, print `updatedAt`, `createdAt` and `version` … and set them against the 2026-08-13 rotation"*. | **Read 2026-10-03 16:10Z** (`sudo bash /home/op/s36-r6.sh`, all 22 declared secrets on BOTH projects, three fields, never a value; transcript `~/s36/s36-r6.txt`, sha256 `37c0468c…`). Four known rotations: `auth_jwt_signing_key` `2` / 2026-09-19 on both (ADR 0224); alpha's `docs_basic_auth_password` and `postgrest_authenticator_password` `3` / **2026-08-28** — NOT 2026-08-13: rotated then and again in Session 11's window, which is what operator guide §9 says. **Control**: the 37 never rotated read `version` 1, `updatedAt` = `createdAt`. Three 404s: `auth_jwt_prepared_key` on both (exists only mid-rotation) and alpha's `connector_signing_key` (alpha has no connectors facility). | **`updatedAt` is the last value replacement; `version` is 1 + the replacements.** Run 6 builds on `updatedAt`, ADR 0250 states it with what was NOT measured (a non-value edit in the provider's console), and X2 on day 2 is the next control. D1996 is answered by the provider too: §9's sentence is true and §13's *"never been performed"* is not — Run 8 corrects §13. | Two independent references and 37 controls agree; the plan's single reference date was off by one rotation, which the version count exposes. | **0250**, 0224 |
+| **D2023** | §5 Run 6: *"`bin/doctor.py --reading secrets` (beside `capacity` and `usage`)"*. | `bin/doctor.sh`'s header said the command *"never reads a secret"* and its help *"reads no secret material"*. The reading logs in to the provider with the project's runtime credential (`/etc/agentic-postgres/credentials/<key>/infisical-client-*`, the materializer's), which IS secret material. Two contract tests read the shell's verb arm as the literal `capacity\|usage)` (`test_doctor_readings.py:237-248`). | **Built in the doctor, as planned, and the sentences now say what is true**: the doctor never reads a secret VALUE; the `secrets` reading holds the provider credential, and every other mode holds none. The value never enters the doctor: `read_secret_times` reduces the response inside the client. `secrets` got its own `case` arm, so the two tests' literal stands unedited. ADR 0250 records the change and the alternative (a separate command) it rejected. | A property a command's help states is one an operator relies on; widening what the command holds is acceptable only when the sentence moves with it. | **0250**, 0159 |
 
 ---
 
@@ -1202,7 +1204,47 @@ value absent from every return and every printed line — plant one and grep);
 the live proof in `test_session36_operations.py`. Battery: (M1) the reader
 returns the value too → the planted-value test FAILED.
 
-**Done.** *(executor)*
+**Done.** 2026-10-03. **The reading first** (D2022): `sudo bash
+/home/op/s36-r6.sh` read `version`/`createdAt`/`updatedAt` for all 22 secrets on
+both projects, never a value — `updatedAt` is the last value replacement
+(signing key `2`/2026-09-19 on both; alpha's documentation and authenticator
+passwords `3`/2026-08-28; the 37 never rotated `1` with `updatedAt` =
+`createdAt`). **Built, ADR 0250**: `max_age_days` (1–3650, optional) in
+`schemas/secret-contract.schema.json`, declared 90 on the three trio
+credentials only; `InfisicalClient.read_secret_times` → `SecretTimes(version,
+created_at, updated_at)`, the response reduced inside the function;
+`src/agentic_postgres/secret_age.py` (`declared`, `judge`, `unreadable`; ok /
+overdue / unknown, every unknown with its reason, the update time re-rendered
+from the parsed value, ADR 0159); `diagnosis.secret_age_report` (overdue a
+WARN, exit 0; unknown exit 6); `bin/doctor.py --reading secrets` and
+`sudo bin/doctor.sh secrets --project KEY [--json]` with its own `case` arm
+(D2023: the help's *"reads no secret material"* corrected to what is true).
+Today, by the reading's numbers, every declared age is `ok` on both projects
+(36–55 days). **`tests/contract/test_secret_age.py`**: 24 cases — a planted
+value in every provider response and a planted client secret in the
+credential file, absent from every return and every rendering (plain,
+verbose, JSON); the bounds; the three outcomes; one GET per declaring secret;
+a failed login is `unknown` for each. **Live proof**
+`test_every_declared_secret_age_is_read` added to the PARKED module
+(`~/s36/run4/tests/deployment/test_session36_operations.py`, now sha256
+`f1bfb219…`; Run 8 brings it into the tree with OPS-ROTATE-002). **Battery**
+(seven, PYTHONDONTWRITEBYTECODE, anchors preflighted, JUnit-classified, control
+`test_max_age_days_is_bounded_by_the_schema[1-True]`, `cmp` identical): M1 the
+reader returns the value in `updated_at` → FAILED; M2 overdue a PROBLEM →
+FAILED; M3 `>=` at the declared day → FAILED; M4 a future time read as an age
+→ FAILED; M5 every failed read called absent → FAILED; M6 the doctor reads
+every secret, not the declaring ones → FAILED (its first form left a bracket
+open and ERRORED — a broken mutation, rewritten, not counted); M7 a failed
+login swallowed → FAILED. **Targeted** (once): `test_secret_age`,
+`test_doctor_readings`, `test_doctor_redaction`, `test_diagnosis`,
+`test_secret_contract`, `test_infisical_client`, `test_optional_secrets`,
+`test_secret_override`, `test_secret_origin`, `test_secret_generation_manifest`,
+`test_rotation_surface`, `test_bootstrap_state`, `test_cli_contract`,
+`test_apg_dispatcher`, `test_acceptance_registry` — 1,027 passed, 2 failed
+(the verb-arm literal, D2023), then `test_doctor_readings` + `test_cli_contract`
++ `test_diagnosis` 713 passed (a first re-run hit seven `PermissionError`s on
+`doctor.sh`: the Edit tool stripped its executable bit, CLAUDE.md §1; `chmod`
+restored it).
 
 ### Run 7 — the trip's instruments, written and rehearsed offline
 

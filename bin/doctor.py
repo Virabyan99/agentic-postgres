@@ -42,6 +42,7 @@ from agentic_postgres import (
     access_broker,
     agent_plane,
     backup_report,
+    bootstrap_state,
     capacity_probe,
     capacity_reading,
     config,
@@ -49,9 +50,13 @@ from agentic_postgres import (
     deployed_output,
     diagnosis,
     fleet,
+    host_config,
+    infisical_client,
     migrations,
     naming,
     runtime_override,
+    secret_age,
+    secrets_contract,
 )
 
 EXIT_INPUT = 2
@@ -1182,6 +1187,91 @@ def diagnose(
     return tuple(checks)
 
 
+# ---------------------------------------------------------------------------
+# The project -- secret age (Session 36, ADR 0250)
+# ---------------------------------------------------------------------------
+
+#: The materializer's two paths, read the same way it reads them -- the host
+#: manifest for the provider's address, the root-only credential directory for
+#: the project's runtime identity (D2020 maps every reader of the manifest).
+HOST_MANIFEST = Path("/etc/agentic-postgres/host.yaml")
+CREDENTIAL_ROOT = Path("/etc/agentic-postgres/credentials")
+
+
+def probe_secret_ages(
+    project_key: str,
+    document: dict[str, Any],
+    *,
+    client_factory: Callable[[str], Any] = infisical_client.InfisicalClient,
+    now: datetime | None = None,
+) -> tuple[secret_age.Age, ...]:
+    """The provider's update time for each secret this project holds that
+    declares `max_age_days` -- read with `read_secret_times`, which returns no
+    value, so no value is ever in this process's hands (ADR 0250).
+
+    Every failure is the third outcome for every secret it prevented reading,
+    with the reason; never a verdict the reading did not take (ADR 0195). Only
+    the provider's STATUS reaches a reason -- never its message (ADR 0159).
+    """
+    contract = secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")
+    declared = secret_age.declared(
+        secrets_contract.active_secrets(
+            contract,
+            document["deployed_through_session"],
+            facilities=secrets_contract.enabled_facilities(document),
+        )
+    )
+    if not declared:
+        return ()
+
+    def every(reason: str) -> tuple[secret_age.Age, ...]:
+        return tuple(
+            secret_age.Age(s["name"], s["max_age_days"], secret_age.UNKNOWN, reason)
+            for s in declared
+        )
+
+    try:
+        host = host_config.load_host_manifest(HOST_MANIFEST)
+    except (OSError, config.ManifestError):
+        return every(f"{HOST_MANIFEST} could not be read")
+    try:
+        state = bootstrap_state.load_state(bootstrap_state.state_path(project_key))
+    except (OSError, config.ManifestError):
+        return every("this project has no bootstrap state on this host")
+
+    moment = now or datetime.now(UTC)
+    ages: list[secret_age.Age] = []
+    try:
+        client = client_factory(host["infisical"]["api_url"])
+        directory = CREDENTIAL_ROOT / project_key
+        client.login(
+            infisical_client.Credential.from_files(
+                directory / "infisical-client-id", directory / "infisical-client-secret"
+            )
+        )
+    except infisical_client.InfisicalError as problem:
+        status = f"HTTP {problem.status}" if problem.status is not None else "no response"
+        return every(f"the provider login failed ({status})")
+    try:
+        for secret in declared:
+            try:
+                times = client.read_secret_times(
+                    name=secret["provider_key"],
+                    project_id=state["infisical_project_id"],
+                    environment=state["environment_slug"],
+                    secret_path=secret["provider_path"],
+                )
+            except infisical_client.InfisicalError as problem:
+                ages.append(
+                    secret_age.unreadable(secret["name"], secret["max_age_days"], problem.status)
+                )
+                continue
+            ages.append(secret_age.judge(secret["name"], secret["max_age_days"], times, now=moment))
+    finally:
+        client.logout()
+    return tuple(ages)
+
+
 def _render(
     checks: tuple[diagnosis.Check, ...], arguments: argparse.Namespace, *, project_key: str
 ) -> None:
@@ -1212,7 +1302,8 @@ def main(argv: list[str] | None = None) -> int:
     # maps to this flag. Absent, the twelve checks run exactly as before --
     # which is what keeps `bin/fleet.py` and `rehearsal._doctor`, both of which
     # invoke `--project KEY --json`, working untouched.
-    parser.add_argument("--reading", choices=("capacity", "usage"), default=None)
+    # Session 36 (ADR 0250) adds `secrets`: one project's declared secret ages.
+    parser.add_argument("--reading", choices=("capacity", "usage", "secrets"), default=None)
     parser.add_argument("--host", type=Path, default=None)
     # Where the deployed documents live. The host's root by default; a fleet
     # inventory or a proof may point it elsewhere. It changes where the
@@ -1253,6 +1344,14 @@ def main(argv: list[str] | None = None) -> int:
             probe_usage(document, arguments.root),
             units=capacity_reading.USAGE_FIGURE_UNITS,
         )
+        _render(checks, arguments, project_key=arguments.project)
+        return diagnosis.exit_code(checks)
+
+    if arguments.reading == "secrets":
+        if arguments.project is None:
+            return _die(EXIT_INPUT, "--project is required with the secrets reading")
+        document = load_document(arguments.project, arguments.root)
+        checks = diagnosis.secret_age_report(probe_secret_ages(arguments.project, document))
         _render(checks, arguments, project_key=arguments.project)
         return diagnosis.exit_code(checks)
 

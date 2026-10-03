@@ -996,5 +996,33 @@ def usage_report(figures: Any, *, units: dict[str, str]) -> tuple[Check, ...]:
     return tuple(checks)
 
 
+def secret_age_report(ages: Any) -> tuple[Check, ...]:
+    """How long since the provider last replaced each secret that declares an age.
+
+    One check per declaring secret (ADR 0250). `ok` and `unknown` map to the
+    doctor's own verdicts; `overdue` is a WARN -- a schedule that has slipped is
+    something an operator should see, not a deployment that is unwell, so it
+    exits 0 the way any warning does. An `unknown` exits 6: a reading that could
+    not be taken is not a healthy one.
+
+    The evidence is the declaration, the update time as this program parsed and
+    re-rendered it, the age and the version -- never a value, which the reading
+    never held.
+    """
+    verdicts = {"ok": OK, "overdue": WARN, "unknown": UNKNOWN}
+    checks: list[Check] = []
+    for age in ages:
+        facts = _pairs(
+            max_age_days=age.max_age_days,
+            updated_at=age.updated_at,
+            age_days=age.age_days,
+            version=age.version,
+        )
+        checks.append(_check(f"secret {age.name}", verdicts[age.outcome], age.reason, facts))
+    if not checks:
+        checks.append(_check("secret age", OK, "no secret in the contract declares max_age_days"))
+    return tuple(checks)
+
+
 def _tail(detail: str) -> str:
     return f" ({detail})" if detail else ""

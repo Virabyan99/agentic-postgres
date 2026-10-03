@@ -313,3 +313,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0247](0247-the-reality-ledger-is-a-programs-input.md) | The Reality Ledger is a program's input | 36 | Accepted |
 | [0248](0248-retention-extends-adr-0213-to-the-stage-4-record-by-aggregate-with-a-verb.md) | Retention extends ADR 0213 to the Stage 4 record, by aggregate, with a verb | 36 | Accepted |
 | [0249](0249-the-request-and-worker-lines-are-printed.md) | The request and worker lines are printed | 36 | Accepted |
+| [0250](0250-a-secrets-age-is-the-providers-update-time-read-never-acted-on.md) | A secret's age is the provider's update time, read, never acted on | 36 | Accepted |

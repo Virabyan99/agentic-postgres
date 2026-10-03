@@ -92,6 +92,20 @@ class Credential:
         )
 
 
+@dataclass(frozen=True)
+class SecretTimes:
+    """What the provider says about one secret's history, and nothing else.
+
+    Measured in Session 36 (D2022): ``version`` counts value replacements and
+    ``updated_at`` is the last one's time. Each field is ``None`` when the
+    response did not carry it in the expected type -- never a substitute.
+    """
+
+    version: int | None
+    created_at: str | None
+    updated_at: str | None
+
+
 def _read_credential(path: Path) -> str:
     """Read one credential file, refusing anything a stray copy would produce."""
     if path.is_symlink():
@@ -285,6 +299,44 @@ class InfisicalClient:
         if not isinstance(value, str) or not value:
             raise InfisicalError(f"secret {name!r} returned no value")
         return value
+
+    def read_secret_times(
+        self,
+        *,
+        name: str,
+        project_id: str,
+        environment: str,
+        secret_path: str = "/",  # noqa: S107 -- a provider folder, as above
+    ) -> SecretTimes:
+        """When the provider last changed one secret -- NEVER its value.
+
+        The same GET ``read_secret`` makes (ADR 0250). The response carries the
+        value, so it is reduced to three fields inside this function and only
+        those leave it; a caller holding the return holds no secret. A separate
+        function rather than a flag on ``read_secret``, so no call site can ask
+        for the value and the time together.
+        """
+        response = self._request(
+            "GET",
+            f"/api/v3/secrets/raw/{urllib.parse.quote(name, safe='')}",
+            query={
+                "workspaceId": project_id,
+                "environment": environment,
+                "secretPath": secret_path,
+                "expandSecretReferences": "false",
+                "includeImports": "false",
+            },
+            idempotent=True,
+        )
+        secret = response.get("secret") or {}
+        version = secret.get("version")
+        created_at = secret.get("createdAt")
+        updated_at = secret.get("updatedAt")
+        return SecretTimes(
+            version=version if isinstance(version, int) and not isinstance(version, bool) else None,
+            created_at=created_at if isinstance(created_at, str) else None,
+            updated_at=updated_at if isinstance(updated_at, str) else None,
+        )
 
     def logout(self) -> None:
         """Drop the token.

@@ -12,11 +12,17 @@
 #                                          it sums are 0700 root (D1606).
 #   sudo bin/doctor.sh usage --project K   ONE project: how much of the node it
 #                                          is using, in eight figures.
+#   sudo bin/doctor.sh secrets --project K ONE project: how long since the
+#                                          provider last replaced each secret
+#                                          that declares max_age_days (ADR 0250).
 #
 # A VERB is a third mode and not a third flag. `capacity` asks about the node
 # and takes no project; `usage` asks about one project. Both are
 # READINGS: two verdicts only, OK with the numbers or UNKNOWN naming the figure
 # that could not be read, and never a threshold -- ADR 0221, ADR 0213, D1441.
+# `secrets` (Session 36) is the one reading with a threshold, and the threshold
+# is the operator's own declaration (`max_age_days`), never one this command
+# invented; overdue is a WARN, so it still cannot fail a host that works.
 #
 # **The split is what keeps the bare `python` below correct.** Workstation mode
 # checks the developer's OWN interpreter against `.python-version`, so it must
@@ -41,7 +47,11 @@
 # fail a host that works. Session 28 records the reading and does not take it.
 #
 # This command reports tool presence, versions, paths and live health. It never
-# prints the environment (runbook §2, §9 check 7) and never reads a secret.
+# prints the environment (runbook §2, §9 check 7) and never reads a secret
+# VALUE. One reading holds secret material at all: `secrets` logs in to the
+# provider with the project's runtime credential -- the root-only files the
+# materializer reads -- and asks for update times through a client function
+# that returns no value (ADR 0250, D2023). Every other mode holds none.
 #
 # Exit codes: 0 (ready, warnings allowed), 2 (bad input), 3 (missing local
 # prerequisite), 4 (the project was never deployed here), 6 (a check failed or
@@ -63,6 +73,7 @@ Usage: bin/doctor.sh [--verbose] [--help]
        sudo bin/doctor.sh --project <project-key> [--verbose]
        sudo bin/doctor.sh capacity --host <host.yaml> [--project KEY] [--json]
        sudo bin/doctor.sh usage --project <project-key> [--json]
+       sudo bin/doctor.sh secrets --project <project-key> [--json]
 
   capacity           Reading. What this NODE has (/proc/meminfo and the Docker
                      root's filesystem), what host.yaml declared, what every
@@ -87,6 +98,15 @@ Usage: bin/doctor.sh [--verbose] [--help]
                      routed nowhere; every series it returns must name this
                      project or the figure is unknown.
                      Needs root.
+
+  secrets            Reading. For each secret this project holds that declares
+                     max_age_days in secrets.required.yaml: the days since the
+                     secrets provider last replaced it, against the declaration.
+                     Three outcomes: ok; overdue, a WARN that exits 0 -- a
+                     schedule that slipped, never a rotation; unknown, naming
+                     why, exit 6. Logs in with the project's runtime credential
+                     and reads update times only; no value is requested back,
+                     held or printed. Needs root: the credential is root's.
 
   (no arguments)     Workstation mode. Checks that this machine can run the
                      gate: required tools at usable versions, the pinned
@@ -131,7 +151,8 @@ could fail a host that works. It reads the two tables rather than migration
 0033's functions, so it answers the same on a deployment that has not applied
 the retention migration (ADR 0213, ADR 0195, D1441).
 
-Prints no environment variables and reads no secret material. --verbose adds
+Prints no environment variables and no secret value. Only the secrets reading
+holds secret material: the provider credential it logs in with. --verbose adds
 resolution, never a third party's bytes: no subprocess output, no environment,
 no path under the secret root. Half-redacting a stderr would be worse than
 omitting it, so it is omitted (ADR 0159).
@@ -284,6 +305,8 @@ main() {
   # straight through, so nothing in the dispatcher moves (D1587).
   case "${1-}" in
     capacity|usage) reading="$1"; shift ;;
+    # Session 36 (ADR 0250). Its own arm, so the two above read as they did.
+    secrets) reading="$1"; shift ;;
   esac
 
   while [ "$#" -gt 0 ]; do
