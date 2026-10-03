@@ -417,7 +417,7 @@ Measured, not predicted: the deploy prints no per-container line (D1941), and th
 
 ### Recreating the edge: both projects unreachable, on the host
 
-**24.4-24.4 s observed on all four targets (bound 27.1 s), both projects at once**
+**24.4 s observed on all four targets (bound 27.1 s), both projects at once**
 
 Sampled under:
 

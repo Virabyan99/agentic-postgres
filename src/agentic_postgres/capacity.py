@@ -763,7 +763,7 @@ ENVELOPE: tuple[Measurement, ...] = (
     ),
     Measurement(
         subject="Recreating the edge: both projects unreachable, on the host",
-        value="24.4-24.4 s observed on all four targets (bound 27.1 s), both projects at once",
+        value="24.4 s observed on all four targets (bound 27.1 s), both projects at once",
         kind=MACHINE,
         conditions=(
             "the 3,814 MB deployment host, no swap, 2 vCPU",
