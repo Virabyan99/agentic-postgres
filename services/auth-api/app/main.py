@@ -53,6 +53,7 @@ from app import scopes as scope_map
 from app import settings as settings_module
 from app.connector_repository import ConnectorRepository
 from app.hashing import BoundedHasher
+from app.log_setup import configure_logging
 from app.profile import HASH_CONCURRENCY
 from app.repository import Repository
 from app.request_id import StampRequestId, current_request_id
@@ -255,6 +256,9 @@ def create_app(mode: str | None = None) -> Any:
     guard -- and "the mode decides the surface" would stop being true of the
     place that says so.
     """
+    # First, before the mode is resolved, so `auth`, `storage` and `mcp` all
+    # print the lines they already write (ADR 0249, D1918). Idempotent.
+    configure_logging()
     resolved = mode if mode is not None else os.environ.get("APP_MODE", "")
     if resolved not in settings_module.APP_MODES:
         raise settings_module.MissingSetting(

@@ -63,8 +63,15 @@ and `mcp` all get it:
 - **idempotent**: the handler carries a marker attribute, and a logger that
   already holds a marked handler gains none — `create_app` called twice installs
   one;
-- **`propagate = False`** on both loggers, so a host harness's root handler (a
-  test's, a future collector's) never prints a line twice;
+- **propagation is left ON** (D2017, corrected in Run 4 before anything
+  shipped): nothing in the image puts a handler on the root logger — rig 36c,
+  re-run from Run 3's commit with propagation on, printed exactly one line per
+  request (5 for 5) through the image's uvicorn argv — and the Run 1 draft's
+  `propagate = False` would have blinded every `caplog` canary that reads these
+  loggers (`test_mcp_budgets.py`, `test_mcp_tools.py`,
+  `test_connector_delivery.py`) as soon as any test in the process had built an
+  application. A doubled line needs a ROOT handler, and the proof asserts
+  `create_app` adds none;
 - nothing else: no field is added to any line, no other logger is configured,
   uvicorn's own logging is untouched.
 

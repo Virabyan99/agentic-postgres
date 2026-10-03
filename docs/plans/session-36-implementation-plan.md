@@ -394,6 +394,7 @@ second table below it, in execution order.
 | **D2014** | §5 Run 2 item 4: *"make each one say what it does with `withdrawn` — `workflow_worker.py:746` and `service.py:1035` at least (D979)"*. | **`service.py:1035`'s `"expired"` is the PASSWORD-RESET refusal** (`consume_password_reset`), not an approval reader. The approval-status readers (grepped in `services/auth-api/app/`, `bin/`, `src/`, and every `0035`–`0037` SQL reader): `workflow_worker.py:746` (`_close_gate`: `pending`/`expired` → expire, anything else → `approval_<status>` by its own word, ADR 0195), and SQL that filters `= 'pending'`/`= 'approved'` or passes `a.status::text` through (`0035:692-694`, `:892-893`, `:1223-1225`; `0036:938-939`). `models.py:381`'s `Literal["approved", "rejected"]` is a DECISION input, not a status. | **No Python reader changes.** `_close_gate` reads a gate only on a step this worker holds on a `running` run, and a `withdrawn` approval exists only on an ENDED run, so its `else` branch (`approval_withdrawn`) is unreachable and already honest if reached. | D979 asks for every reader to be grepped, not edited; the grep found one that is not a reader and none that misreads the new value. | 0248 |
 | **D2015** | §1 D2002 and §5 Run 3: `record.sh` calls *"the five function names"*, including 0033's two; §2 names no existing test that moves. | **`test_agent_audit_plane.py::test_nothing_in_this_release_calls_a_prune` (`:2952`, AGT-RETAIN-001, passing) asserts that NOTHING in `src/`, `bin/`, `services/` or the templates names `agent_audit_prune` or `agent_idempotency_prune`** — `bin/record.py` does, by D2002's decision. The plan did not see the collision. | **Replaced by a stricter test under ADR 0248** (which now says so): the callers are EXACTLY `bin/record.py`'s two — a second caller fails, and so does the command losing its call — and `test_record_command.py::test_nothing_schedules_a_prune` proves nothing calls `record.sh`/`record.py`. AGT-RETAIN-001's description says *"nothing … calls either prune on its own … the ONE caller is `bin/record.py`"*. | A contract test changes only with an ADR (CLAUDE.md §6); widening an allowlist to a measured, named set is not weakening, and the exact-set form asserts one thing more than the old one did. | **0248** |
 | **D2016** | §5 Run 3's usage: *"`sudo bin/record.sh --project KEY size [--json]`"*, and *"the command in `COMMANDS_WITH_VERBS`"*. | `test_cli_contract.verbs_documented_by` (`:495-520`) derives a verb as the FIRST lowercase word after the command's name on a usage line; `--project` first derives none, and `test_every_command_documenting_verbs_is_named_in_the_control` would then refuse the entry. | **Verb first**: `sudo bin/record.sh size --project KEY [--json]` and `… prune --project KEY --what … --before … [--limit N] --confirm KEY`. `size --help` and `prune --help` are reads (no root, no docker). | The derivation is the guard; the usage line is written so the guard can read it, never the guard narrowed (D464's habit). | 0248 |
+| **D2017** | §1 D2003, §2 `OPS-LOG-001` and §5 Run 4: *"`propagate = False` on both, so a host harness's root handler never doubles a line"*; battery M1 *"`propagate = False` removed and a root handler attached by the test"*. | **Six `caplog` canaries read these loggers through the ROOT logger** — `test_mcp_budgets.py:516-565` (three, one asserting `len(caplog.records) == 1`), `test_mcp_tools.py:2164-2185`, `test_connector_delivery.py:428-466` (`app.workflow_worker`), `test_connector_routes.py:366-393` — and with propagation off every one of them goes blind or red the moment any earlier test in the process has called `create_app`: an ORDER-dependent failure the full suite (CI) would hit and a targeted run might not. **Rig 36c re-run** from Run 3's commit (`git archive HEAD`, so the control is the tree without the handler): control 0 lines; arm with propagation ON exactly 5 lines for 5 requests through the image's uvicorn argv — nothing in the image puts a handler on the root logger. (A first re-run copied the working tree, which already carried Run 4's wiring; it was discarded as invalid — its "control" printed 5.) | **Propagation is left ON.** ADR 0249 corrected in place (written this session, never released); `test_no_line_is_printed_twice` now asserts `create_app` adds no ROOT handler, the line prints ONCE, and `caplog` still receives the record; `test_create_app_installs_one_handler_on_each_logger` asserts `propagate is True`. Battery M1 becomes *`propagate = False` added* → the `caplog` half FAILED. | The plan's guard protected against a handler nothing installs and would have disabled the canaries that guard the lines' content — the class CLAUDE.md §7 question 5 names: a decision implemented without grepping every reader of the thing it changes. | **0249** |
 
 ---
 
@@ -988,7 +989,41 @@ times 5 s apart — two worker polls and a margin) and
 `row_count` equals a direct `count(*)` through the container, both read inside
 one `REPEATABLE READ` transaction so the two cannot drift).
 
-**Done.** *(executor)*
+**Done.** 2026-10-03. `services/auth-api/app/log_setup.py`
+(`configure_logging()`: one marked `StreamHandler(sys.stdout)`, formatter
+`%(message)s`, on `apg` and `app.workflow_worker`, level INFO, idempotent by the
+marker) called as the first statement of `create_app`, before the mode is
+resolved. **D2017: propagation is left ON** — the plan's `propagate = False`
+would have blinded six `caplog` canaries order-dependently; rig 36c re-run from
+`git archive HEAD`: control 0 lines, arm 5 for 5 with propagation on (a first
+re-run that copied the working tree was discarded — its control already carried
+the wiring). ADR 0249 corrected in place. `tests/contract/test_request_log.py`
+(new, 4 proofs, `capsys` for the stream; ruff removed two unused imports): one
+handler per logger after three `create_app` calls with `propagate is True`; two
+requests → exactly two lines (`/health/live`, `<unmatched>`), each `request_id`
+equal to the response's `X-Request-Id`, no planted token/query/body/path/caller
+id; the worker's `workflow.approvals_withdrawn {"count": 3}` printed through
+`_withdraw_ended_approvals`; one line on stdout, no root handler added, and
+`caplog` still receives the record. **Battery 2/2 killed** (M1 `propagate =
+False` added → `test_no_line_is_printed_twice` FAILED; M2 the marker check
+removed → `…installs_one_handler…` FAILED; controls PASSED; restored
+`cmp`-equal). `tests/deployment/test_session36_operations.py` (new; `p0`,
+`live_host`, `requires_environment(APG_LIVE_HOST, APG_PROJECT_A_OUTPUTS,
+APG_PROJECT_B_OUTPUTS)`): the request-line proof reads the id from the RESPONSE
+(D2007) and asserts the planted caller id and `Bearer ` absent; the pending-
+approval proof reads `bin/record.sh size --json` up to three times 5 s apart; the
+size proof compares `record_size()` with eleven direct counts inside ONE
+`REPEATABLE READ` transaction. `--setup-plan` with the three variables set
+(the fixture renders as A and B): rc 0, five fixtures resolved, no error. Fast
+pass with the `create_app` modules BEFORE the canaries in one process: 263
+passed. **Targeted once: 400 passed** (`test_workflow_routes`, `test_request_log`,
+`test_mcp_budgets`, `test_mcp_tools`, `test_connector_delivery`,
+`test_connector_routes`, `test_auth_service_shape`, `test_runtime_override`,
+`test_lock_roster`, `test_deployment_module_shape`, `test_printed_commands`,
+`test_acceptance_registry`, `test_evidence_claims`; 3 m 22 s). **CI**: the
+workflow cancels a branch's in-progress run on every push (`ci.yml:36-38`), so
+`7cd3372` (Run 2) reads `cancelled` and `6f65c12` (Run 3) is cancelled by this
+push; this commit, which carries Runs 2-4's code, is the one verdict — read below.
 
 ### Run 5 — the Reality Ledger
 
