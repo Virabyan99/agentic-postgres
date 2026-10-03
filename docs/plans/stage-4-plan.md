@@ -54,6 +54,10 @@ NEXT            docs/stage-5-decision-report.md, section 6 accepted by the
                 rotations, the shared edge's window, the smaller operating
                 items, then the hosted question as an ADR only if a customer
                 is wanted. docs/scope-closure.md section 28 is the ledger.
+                SUPERSEDED THE SAME DAY: the operator chose the hosted product
+                during Stage 5's audit (D1946); section 6's items became Session
+                36's preconditions. docs/plans/stage-5-plan.md is the plan of
+                record; divergences continue from D1985 there.
 PostgreSQL      18.4 (pgvector/pgvector:pg18 by digest). Decided 2026-09-18 (D1515).
 DIRECTION       APPLIANCE FIRST, HOSTING DEFERRED (D1517, D1518), and the Stage 5
                 report recommends keeping it so until the operating debt is paid.
