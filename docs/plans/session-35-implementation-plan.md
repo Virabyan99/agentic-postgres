@@ -1,9 +1,9 @@
 # Session 35 — Change governance, the database half of approval, hardening, and the Stage 4 release
 
-**Status: EXECUTING — Runs 1–9 DONE 2026-10-02** (planned 2026-09-30 at
+**Status: EXECUTING — Runs 1–10 DONE 2026-10-03** (planned 2026-09-30 at
 `a018939`). The last session of Stage 4 (`docs/plans/stage-4-plan.md` §3).
 Eleven runs. The plan spends **D1857–D1891** and **ADR 0242–0245**; rows the
-runs add start at **D1892**. **NEXT FREE: D1941, ADR 0246.**
+runs add start at **D1892**. **NEXT FREE: D1945, ADR 0246.**
 
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 35* whole (Builds / Already
 true / Must not / Measures / Closes, `:619-657`), its rows **D1523** (the
@@ -562,6 +562,10 @@ columns: `# | Run | Plan says | Tree does / measured | Decision | ADR`):
 | **D1938** | 9 | D1883: *"every token `parse_arguments` accepts appears once in `usage()` at the start of a line; the refused ones never"*. | `--mode` begins three lines (one per mode), and the synopsis continuation lines begin with flags too; **34's usage had NO entry for `--host`, `--project-a-outputs`, `--public-ipv4`, `--public-ipv6` or `--help`** -- five accepted flags, not one. A first derivation's prose put `--runtime` into the token set (60 -> 61). | **The test reads the parser's own case arms** (an arm whose body starts with `die` refuses; `=` spellings are neither) and the entries are the lines indented EXACTLY two spaces: each accepted flag begins one, `--mode` one per mode, and no refused flag appears anywhere in `--help`. All five missing entries written; the prose reworded; token sets 60 and 60, the parser arms and the body below the usage byte-identical. Battery M3-M7 killed (an entry lost, doubled, a refused flag named, the synopsis without `--dx-record-file`, `--host`'s entry dropped). | A usage block is the only document a gate has, so it gets a proof. | — |
 | **D1939** | 9 | Step 7: *"every first-run failure a row"*. | **Targeted, first run** (19 modules, 1,366 tests): 4 failed -- three because the new gate and modules were not yet in the index (D1014: `test_commands_are_executable_in_the_git_index`, the gate-modes test, `test_every_command_the_documented_path_names_is_shipped_and_executable`), one because the Session 35 paragraph wrapped *ADR 0162 prices it a MINOR* across two comment lines and then did not name the schemas that did not move (`test_the_constants_comment_states_the_class_it_proposes`). **The gates**: the first session-01 run was stopped at 97% by the harness under memory pressure (no exit code written; an orphaned `apg-workflow-gates-*` fixture container removed); **the operator then ran both gates in their own WSL terminal**: `bin/session-01-check.sh` exit 0 (6,888 passed, 0 failed, 3 skipped, 18 m 32 s), `bin/session-35-check.sh --mode offline` exit 0. | Staged, rewrapped, the sentence added; the four re-run green. The gates are the operator's run, read from `~/s35r9/gate1.log` and `gate35.log`. | A gate's verdict is its exit code read from inside, whoever ran it. | — |
 | **D1940** | 9 | Sheet F2b: *"Recreated: … (expected: pgbouncer, postgrest, docs for their new `mem_limit`; auth, storage, mcp, docs for the image)"*. | `git diff --stat 1.12.0..HEAD` over the deployable paths names **nothing under `services/`**: the `services/auth-api` image does not move, and `edge-probe` gained a `mem_limit` too (D1900). | The upgrade guide's 1.13.0 row, the gate's header and the `__init__` paragraph say a deploy recreates **pgbouncer, postgrest, docs and edge-probe**, not auth, storage or mcp. Still READ on the trip, never predicted (ADR 0155, D1581): a mounted generation can move a container no image moved. | Say what the diff says, and let the deploy's own lines say the rest. | 0155 |
+| **D1941** | 10 | Sheet F2b: *"Recreated: read the lines, do not predict them"*; Run 10's Done: *"the deploy's own `Recreated` lines"*; D1940: *"a deploy recreates pgbouncer, postgrest, docs and edge-probe, not auth, storage or mcp"*. | **The deploy prints NO per-container line at all** (compose runs quiet; `grep Recreat` over both transcripts: 0). Read from start times instead (the after-reads): docs, pgbouncer and edge-probe start at step 5 (alpha 20:26:28, beta 20:30:55); **auth, storage, mcp and postgrest start at 6b** (20:27:01, 20:31:34) because step 5 brings the project up WITHOUT them (`project-runtime: <key> is up without auth,mcp,postgrest,storage`) -- on every deploy, whatever their image. The probe's windows are exactly those two moments: docs ~12 s, the four 10-16 s. | D1940's sentence is right about IMAGES and wrong about RESTARTS: Run 11's envelope says a deploy takes rest, auth, storage and mcp away for the bootstrap and docs for its recreation, and names the measured windows. Whether a held-back service is a NEW container is not told by a start time (D1581 stays open). | Read the program's lines; when it prints none, read the containers. | 0155 |
+| **D1942** | 10 | Sheet F4b: *"`doctor capacity` ... -> **0 unbounded**"*; *"`sudo apg-diag logs auth`"*. | `doctor capacity`'s ceilings line names an unbounded count ONLY when it is non-zero (`diagnosis.py:940`): it read `6432 MiB of mem_limit across 3 project(s)` with no count, and E0's table showed every one of the 22 running containers with `hc_memory` set. `apg-diag logs` takes `<project> <service>`; the sheet's form omits the project (the agent's first read put the service first: rc 4, *no deployed project named 'auth'*). | Recorded as read: 0 unbounded from the table and the line's silence; logs read as `apg-diag logs <key> auth|storage|mcp` on both projects. | A sheet's expected text is checked against the program's own format before the trip. | 0245 |
+| **D1943** | 10 | Run 10: *"the agent starts the probe ... BEFORE handing the line ... and stops it AFTER reading the transcript's last line"*; the external half *"run DETACHED"*. | **F7b's probe expired before the sheet ran**: started 21:53Z, the operator ran the sheet at 05:28Z, the probe's 4-h hard limit had stopped it at ~01:53Z -- the rehearsal (rc 0, 8.3 s) was unobserved. At the operator's choice the rehearsal was run AGAIN with a fresh probe (rc 0, 6.9 s, rest DOWN 3.1 s). The background sweep waiter was reaped by the harness under memory pressure (the sweep itself unaffected, read by hand), and the external half launched with `setsid nohup` from `wsl bash -lc` died before writing its log; it ran in the foreground (107 s). | Two rehearsal evidence files on the host (`...2026100305288308` unobserved, `...20261003053087a0` observed); the window quoted is the second's. | A probe's life is shorter than an operator's night: start it when the line is handed, and say its limit. | 0193 |
+| **D1944** | 10 | Sheet F5/F8 and D1712: *"`doctor usage` (exit 6 expected)"*. | F5: exit 6, *UNKNOWN traffic* (mcp just recreated). **F8: exit 0** -- `traffic 1470 requests, 72 calls`: the sweep's agent calls ran in the CURRENT mcp process, so its series existed. | Both readings correct; the expectation was a prediction of the process's history, not of the check. | D1712's own rule: the series is per process. | — |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -2025,6 +2029,77 @@ capacity`'s ceilings and `unbounded` count, `apg-diag logs auth` read as
 neighbour phases' figures and conditions, the classifier's verdict, the
 database-restart window, the retention counts (F8), the probe humans and agents
 left, the merged document's totals, the tag and its message.
+
+**Done.** 2026-10-02/03. **Prep**: WSL TCP 0.12 s; `~/s35r10/s35r10-derive.py`
+derived 11 host scripts from `~/s34r10/s34-r10-*` (named substitutions, every
+count asserted; shellcheck clean); the gate's declaration block **15 tokens in,
+15 out**, differing only by the gate and the before-file; new: the retention
+reader (rigged on `apg dev`: 10 tables rc 0; control a missing table ->
+`unreadable` rc 1), `s35-r10-e0.sh` (Run 1's E0 re-staged), the probe's
+start/stop wrappers. The bundle carried `f7fb96d` as `s35-deploy` (`main` is
+709d828); 20 scripts shipped, sha256 equal both sides, Run 7's instruments
+unchanged. Host checkout 8d655b5 -> **f7fb96d**, FETCH_HEAD confirmed, clean,
+1.13.0 / 35, the set's lock sha256 == the proposal's name, deps unmoved. Four
+renders exit 0, v19, **0 approval-gate lines**; beta's `project_set` count 4,
+lock `35245421...`. **The probe's control**: 10 targets, 8.0 req/s, 13.1 s,
+all up, 0 down / 0 x 429.
+**F1** (20:23Z): upgrade check rc 0 both; doctor 11 ok + migrations PROBLEM 36
+of 37 / 39 of 41; fleet both 14b1b9d; `upgrade plan --also migration_added`
+bump minor / requires minor / ok (alpha 2 leaves, beta 4), without: requires
+patch; PRE kit `kit-2026-10-02-pre` export 0 verify 0 -- **`projects/` 0700 on
+the host (D1856's repair live)**. **F2a**: sentinel `s35-redeploy-sentinel-
+2026-10-02`, generation cba533741e36e09c. **F2b** alpha (exit 0): admitted
+(beta 304 committed); new generation aa4139d14e41684a; **Applied 0037 in 10.7
+ms, ledger 37**; 6d/6e none. **F3** beta (exit 0): admitted; generation
+33f494dd57262942; capability report *contract 3d7d6e6d513a1e6c: named by
+proposal 35245421404e77d3*; **`migrate: 1 project version(s) pending:
+20261001120004` / `migrate: proposal 35245421404e77d3 admits them`**; 0037 25.5
+ms, set 0004 8.5 ms, ledger 41; 6d seven definitions; 6e four `unchanged`.
+After-reads: alpha 37 [X] Pending 0, `proposal: not applicable`; beta 37 + 4
+Pending 0 twice, **`proposal 35245421404e77d3: not needed (nothing pending)`**
+(D1936); both documents 1.13.0 f7fb96d through 35, beta's lock the proposal's
+digest, the release directory carrying the proposal and its approval; doctor
+**12 ok** each. **Probe windows (8 req/s, through the edge)**: alpha docs 12.5
+s (bound 13.8), rest 10.2, mcp 14.8, auth 16.4, storage 16.4; beta docs 11.9,
+rest 11.5, auth 12.7, storage 12.7, mcp 14.2 -- docs at step 5, the four
+held-back services between 5 and 6b (D1941); 0 x 429, 0 other. **F4a** edge
+restart (exit 0): both recreated healthy (proxy 11.9 s, traefik 21.7 s), 2
+networks reattached, production ACME; **EDGE window 24.4 s (bound 27.0) on
+both projects**, transport errors only. **F4b**: every running container
+bounded -- traefik 608 MiB (peak 47), socket proxy 64 (peak 10), pgbouncer 64,
+postgrest 128, docs 224, edge-probe 224; `doctor capacity` ceilings **6432
+MiB** across 3 projects (4480 + 1280 + 672), no unbounded count (D1942);
+`apg-diag logs` as apg-agent: auth/storage 4 lines, mcp 6 with one
+`invalid_token <redacted>`, nothing credential-shaped. **F5**: copies both
+f7fb96d; beta BEFORE 414 audit rows, 92 runs, dead 4; usage rc 6.
+**F6 THE SWEEP** (20:39-21:36Z, 53 m, exit 5): **1082 passed, 1 failed
+(documented_path, by decision), 7 skipped, 0 errors**; host half 133 claims,
+127 / 5 not_run / 1 failed; **approval_in_database_live, proposed_set_applied,
+every_service_bounded_live PASSED on first execution**; every Session 30-34
+claim passed again. **F7a the neighbour sitting** (exit 0), neighbour REST
+p50/p95/p99 ms: A idle 41.84/53.96/76.82 and 41.18/53.00/77.46; B (24 runs on
+beta) 41.15/55.36/74.23; C (alpha loaded 472.9 req/s, 57,706 x 200)
+49.58/107.78/156.62; D (beta loaded 490.9 req/s, 59,888 x 200)
+50.37/98.34/133.94; 0 errors, 0 x 429. B: 24 succeeded, 0.31/0.41/0.65 s,
+15.1 s enqueue-to-last; **classifier: inside 104 samples median 63.13 MB max
+73.38, outside 1108 median 62.91 max 73.61 -> ENOUGH (D1711 read: no cost
+while runs execute)**. **F7b** (D1943): rehearsal re-run with a fresh probe --
+6.9 s to ok, no dependent restarted, agent route 401; **DATABASE window
+(induced) rest 3.1 s (bound 4.4), 6 x 503**, no other class. **F8**: sentinel
+DELETE 1; four connectors disabled (read); 48 notes deleted by title (beta);
+**retention (D1886)**, beta rows / oldest: definitions 7 / 09-26, runs 133 /
+09-26, steps 372 / 09-26, worker 1, approvals 29 / 09-28, attempts 327 /
+09-28, connectors 4 / 09-30, events 9 / 09-30, deliveries 9 / 09-30, receipts
+10 / 09-30; alpha all 0 but the worker; doctor beta AFTER 599 audit rows, 133
+runs, dead 5, approvals pending 7 (D1775 +1), usage rc 0 (D1944); left:
+agents revoked s35 3, humans s35 3; POST kit `kit-2026-10-03-post` export 0
+verify 0, both kits in `~/dr-kits`. **External** (D1943): 25 passed / 0
+failed / 8 skipped, exit 0. **Merged `evidence/session-35.json`: 198 claims --
+192 passed, 5 not_run, 1 failed (documented_path)** -- section 7's prediction
+exactly; source and offline checkout commit both f7fb96d. `release-reading
+--ref f7fb96d`: tag owed, 22 commits, migrations 36 -> 37, ADRs 241 -> 245.
+**Tag `1.13.0` on f7fb96d** (tag object 72a8078b), pushed. Rows
+**D1941-D1944**; **NEXT FREE D1945, ADR 0246.**
 
 ### Run 11 — the close: the envelope, the threat model's number, the Stage 5 decision report, the ledger
 
