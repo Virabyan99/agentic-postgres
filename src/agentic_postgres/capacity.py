@@ -584,7 +584,7 @@ ENVELOPE: tuple[Measurement, ...] = (
             "AFTER RESTART: the same container ~30 s after `rehearse.sh worker-restart` "
             "SIGKILLed the process and the restart policy brought it back",
             "**NOT under a run** -- no figure was taken while a run executed (D1711); "
-            "see UNMEASURED",
+            "Session 35 read it: see the row below",
         ),
         note=(
             "+1.35 MiB with the loop and +2.54 MiB after the restart -- a fraction of "
@@ -599,6 +599,353 @@ ENVELOPE: tuple[Measurement, ...] = (
             "the loop's own cost, because it held everything else still."
         ),
     ),
+    # ---- Session 35: the act of changing a deployment, on the host --------
+    #
+    # Session 35 Run 10, 2026-10-02/03, both projects at 1.13.0 (f7fb96d). Each
+    # number below was read from the trip's own files by
+    # ~/s35r11/s35-r11-envelope.py and pasted, never retyped: the probe's gaps
+    # documents (Sheets F2, F3, F4a, F7b), the neighbour sitting's four phase
+    # documents (F7a) and the classifier's output over its sampler.
+    Measurement(
+        subject="A deploy's downtime for the rest class, through the edge, on the host",
+        value=(
+            "alpha-dev 10.2 s (bound 11.4 s), beta-dev 11.5 s (bound 12.7 s) unreachable "
+            "through the edge during a 1.13.0 deploy"
+        ),
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, no swap, 2 vCPU",
+            (
+                "release 1.13.0 at f7fb96d, deployed 2026-10-02 (alpha 20:25:51-20:27:25Z, "
+                "beta 20:30:21-20:31:55Z)"
+            ),
+            (
+                "s35-r10-probe.py from the host as op: one unauthenticated GET per class every "
+                "0.625 s, 8 req/s in total, 2 s timeout, through the public edge"
+            ),
+            (
+                "down = a transport error, a 502/503/504 or Traefik's 404; the rest service "
+                "was held back at step 5 and started at 6b, after the bootstrap (D1941)"
+            ),
+            "bound = observed + one probe interval either side; both projects idle otherwise",
+        ),
+        note=(
+            "Measured, not predicted: the deploy prints no per-container line (D1941), and "
+            "these windows are the caller's view of the restarts its after-read dated. Every "
+            "deploy pays them -- step 5 brings a project up WITHOUT auth, mcp, postgrest and "
+            "storage and step 6b starts them, whatever their image -- so a deploy is a 10-17 s "
+            "outage of the API by design, not a defect. 0 x 429, 0 unexplained answers."
+        ),
+    ),
+    Measurement(
+        subject="A deploy's downtime for the auth class, through the edge, on the host",
+        value=(
+            "alpha-dev 16.4 s (bound 17.7 s), beta-dev 12.7 s (bound 13.9 s) unreachable "
+            "through the edge during a 1.13.0 deploy"
+        ),
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, no swap, 2 vCPU",
+            (
+                "release 1.13.0 at f7fb96d, deployed 2026-10-02 (alpha 20:25:51-20:27:25Z, "
+                "beta 20:30:21-20:31:55Z)"
+            ),
+            (
+                "s35-r10-probe.py from the host as op: one unauthenticated GET per class every "
+                "0.625 s, 8 req/s in total, 2 s timeout, through the public edge"
+            ),
+            (
+                "down = a transport error, a 502/503/504 or Traefik's 404; the auth service "
+                "was held back at step 5 and started at 6b, after the bootstrap (D1941)"
+            ),
+            "bound = observed + one probe interval either side; both projects idle otherwise",
+        ),
+        note=(
+            "Measured, not predicted: the deploy prints no per-container line (D1941), and "
+            "these windows are the caller's view of the restarts its after-read dated. Every "
+            "deploy pays them -- step 5 brings a project up WITHOUT auth, mcp, postgrest and "
+            "storage and step 6b starts them, whatever their image -- so a deploy is a 10-17 s "
+            "outage of the API by design, not a defect. 0 x 429, 0 unexplained answers."
+        ),
+    ),
+    Measurement(
+        subject="A deploy's downtime for the storage class, through the edge, on the host",
+        value=(
+            "alpha-dev 16.4 s (bound 17.7 s), beta-dev 12.7 s (bound 14.0 s) unreachable "
+            "through the edge during a 1.13.0 deploy"
+        ),
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, no swap, 2 vCPU",
+            (
+                "release 1.13.0 at f7fb96d, deployed 2026-10-02 (alpha 20:25:51-20:27:25Z, "
+                "beta 20:30:21-20:31:55Z)"
+            ),
+            (
+                "s35-r10-probe.py from the host as op: one unauthenticated GET per class every "
+                "0.625 s, 8 req/s in total, 2 s timeout, through the public edge"
+            ),
+            (
+                "down = a transport error, a 502/503/504 or Traefik's 404; the storage service "
+                "was held back at step 5 and started at 6b, after the bootstrap (D1941)"
+            ),
+            "bound = observed + one probe interval either side; both projects idle otherwise",
+        ),
+        note=(
+            "Measured, not predicted: the deploy prints no per-container line (D1941), and "
+            "these windows are the caller's view of the restarts its after-read dated. Every "
+            "deploy pays them -- step 5 brings a project up WITHOUT auth, mcp, postgrest and "
+            "storage and step 6b starts them, whatever their image -- so a deploy is a 10-17 s "
+            "outage of the API by design, not a defect. 0 x 429, 0 unexplained answers."
+        ),
+    ),
+    Measurement(
+        subject="A deploy's downtime for the mcp class, through the edge, on the host",
+        value=(
+            "alpha-dev 14.8 s (bound 16.1 s), beta-dev 14.2 s (bound 15.4 s) unreachable "
+            "through the edge during a 1.13.0 deploy"
+        ),
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, no swap, 2 vCPU",
+            (
+                "release 1.13.0 at f7fb96d, deployed 2026-10-02 (alpha 20:25:51-20:27:25Z, "
+                "beta 20:30:21-20:31:55Z)"
+            ),
+            (
+                "s35-r10-probe.py from the host as op: one unauthenticated GET per class every "
+                "0.625 s, 8 req/s in total, 2 s timeout, through the public edge"
+            ),
+            (
+                "down = a transport error, a 502/503/504 or Traefik's 404; the mcp service was "
+                "held back at step 5 and started at 6b, after the bootstrap (D1941)"
+            ),
+            "bound = observed + one probe interval either side; both projects idle otherwise",
+        ),
+        note=(
+            "Measured, not predicted: the deploy prints no per-container line (D1941), and "
+            "these windows are the caller's view of the restarts its after-read dated. Every "
+            "deploy pays them -- step 5 brings a project up WITHOUT auth, mcp, postgrest and "
+            "storage and step 6b starts them, whatever their image -- so a deploy is a 10-17 s "
+            "outage of the API by design, not a defect. 0 x 429, 0 unexplained answers."
+        ),
+    ),
+    Measurement(
+        subject="A deploy's downtime for the docs class, through the edge, on the host",
+        value=(
+            "alpha-dev 12.5 s (bound 13.8 s), beta-dev 11.9 s (bound 13.1 s) unreachable "
+            "through the edge during a 1.13.0 deploy"
+        ),
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, no swap, 2 vCPU",
+            (
+                "release 1.13.0 at f7fb96d, deployed 2026-10-02 (alpha 20:25:51-20:27:25Z, "
+                "beta 20:30:21-20:31:55Z)"
+            ),
+            (
+                "s35-r10-probe.py from the host as op: one unauthenticated GET per class every "
+                "0.625 s, 8 req/s in total, 2 s timeout, through the public edge"
+            ),
+            (
+                "down = a transport error, a 502/503/504 or Traefik's 404; the docs service "
+                "was recreated at deploy step 5 (its mounted content moved, ADR 0155)"
+            ),
+            "bound = observed + one probe interval either side; both projects idle otherwise",
+        ),
+        note=(
+            "Measured, not predicted: the deploy prints no per-container line (D1941), and "
+            "these windows are the caller's view of the restarts its after-read dated. Every "
+            "deploy pays them -- step 5 brings a project up WITHOUT auth, mcp, postgrest and "
+            "storage and step 6b starts them, whatever their image -- so a deploy is a 10-17 s "
+            "outage of the API by design, not a defect. 0 x 429, 0 unexplained answers."
+        ),
+    ),
+    Measurement(
+        subject="Recreating the edge: both projects unreachable, on the host",
+        value="24.4-24.4 s observed on all four targets (bound 27.1 s), both projects at once",
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, no swap, 2 vCPU",
+            (
+                "release 1.13.0 at f7fb96d, deployed 2026-10-02; `sudo bin/edge.sh --host "
+                "host.yaml restart` 2026-10-02T20:33:50Z"
+            ),
+            (
+                "traefik and docker-socket-proxy removed and recreated with their new limits "
+                "(ADR 0244); the proxy healthy at 11.9 s, traefik at 21.7 s, then two networks "
+                "reattached"
+            ),
+            "s35-r10-probe.py: rest and auth on each project, 4 targets every 0.625 s (6.4 req/s)",
+        ),
+        note=(
+            "Every failed request was a refused connection: the shared ingress is ONE "
+            "container, so its recreation is an outage of every project on the host for its "
+            "whole start. This is the price of any change to the shared edge, and the reading "
+            "a hosted design must beat."
+        ),
+    ),
+    Measurement(
+        subject="A database restart, induced by the rehearsal: what a caller sees, on the host",
+        value=(
+            "rest 3.1 s unreachable (bound 4.4 s, every answer a 503); auth, storage, mcp and "
+            "docs no window; every dependent reconnected in 6.9 s"
+        ),
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, no swap, 2 vCPU",
+            (
+                "release 1.13.0 at f7fb96d, deployed 2026-10-02; `bin/rehearse.sh "
+                "database-restart` on alpha-dev, 2026-10-03T05:30Z (evidence "
+                "rehearsal-alpha-dev-database-restart-20261003053087a0)"
+            ),
+            (
+                "INDUCED by the rehearsal (`docker restart -t 30` of the cluster), not a "
+                "deploy and not an outage the product had"
+            ),
+            "s35-r10-probe.py: five classes on alpha every 0.625 s, 8 req/s",
+        ),
+        note=(
+            "PostgREST answers 503 while its database is gone and recovers without a restart; "
+            "the other classes' probe endpoints answer before any database, so their silence "
+            "here says the route stayed, not that a database-backed call would have succeeded. "
+            "No dependent restarted."
+        ),
+    ),
+    Measurement(
+        subject="The noisy neighbour, phase A: the other project's REST latency, on the host",
+        value=(
+            "alpha-dev p50/p95/p99 41.84/53.96/76.82 ms (n 481); beta-dev p50/p95/p99 "
+            "41.18/53.0/77.46 ms (n 480), 0 errors, 0 x 429"
+        ),
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, no swap, 2 vCPU",
+            (
+                "release 1.13.0 at f7fb96d, deployed 2026-10-02; sitting c772ea89, "
+                "2026-10-02T21:43-21:52Z, 120 s per phase"
+            ),
+            "both projects idle; delivery pass idle (no connector enabled, D1888)",
+            (
+                "the neighbour read by s35-r10-probe.py through the edge, GET <rest>/ at 8 "
+                "req/s; the load from s35-r10-load.py inside the loaded project's own internal "
+                "network (8 threads)"
+            ),
+        ),
+        note="The baseline: both projects idle.",
+    ),
+    Measurement(
+        subject="The noisy neighbour, phase B: the other project's REST latency, on the host",
+        value=(
+            "alpha-dev p50/p95/p99 41.15/55.36/74.23 ms (n 967), 0 errors, 0 x 429; 24 runs "
+            "enqueued ({'201': 24}), statuses ['succeeded']"
+        ),
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, no swap, 2 vCPU",
+            (
+                "release 1.13.0 at f7fb96d, deployed 2026-10-02; sitting c772ea89, "
+                "2026-10-02T21:43-21:52Z, 120 s per phase"
+            ),
+            (
+                "beta-dev's step pass loaded by 24 runs of notes-roundtrip v1 enqueued at once "
+                "by one probe agent; alpha-dev idle; delivery pass idle (D1888); the sampler "
+                "ran from the window's start until every run had ended"
+            ),
+            (
+                "the neighbour read by s35-r10-probe.py through the edge, GET <rest>/ at 8 "
+                "req/s; the load from s35-r10-load.py inside the loaded project's own internal "
+                "network (8 threads)"
+            ),
+        ),
+        note="Workflow runs on one project do not move the other's latency at all.",
+    ),
+    Measurement(
+        subject="The noisy neighbour, phase C: the other project's REST latency, on the host",
+        value=(
+            "beta-dev p50/p95/p99 49.58/107.78/156.62 ms (n 953), 0 errors, 0 x 429; the "
+            "loaded side served 57,706 requests in 122.016 s = 472.94 req/s, all 200, "
+            "p50/p95/p99 13.81/38.32/57.84 ms"
+        ),
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, no swap, 2 vCPU",
+            (
+                "release 1.13.0 at f7fb96d, deployed 2026-10-02; sitting c772ea89, "
+                "2026-10-02T21:43-21:52Z, 120 s per phase"
+            ),
+            (
+                "alpha-dev's REST loaded from inside its internal network (8 threads, GET "
+                "/notes?limit=50 as a probe human); beta-dev idle; delivery pass idle (D1888)"
+            ),
+            (
+                "the neighbour read by s35-r10-probe.py through the edge, GET <rest>/ at 8 "
+                "req/s; the load from s35-r10-load.py inside the loaded project's own internal "
+                "network (8 threads)"
+            ),
+        ),
+        note=(
+            "Saturating one project's REST moves its neighbour's p50 by ~8 ms and p95 by ~50 "
+            "ms, with no error: the two share a CPU (2 vCPU), nothing else."
+        ),
+    ),
+    Measurement(
+        subject="The noisy neighbour, phase D: the other project's REST latency, on the host",
+        value=(
+            "alpha-dev p50/p95/p99 50.37/98.34/133.94 ms (n 957), 0 errors, 0 x 429; the "
+            "loaded side served 59,888 requests in 122.008 s = 490.85 req/s, all 200, "
+            "p50/p95/p99 13.76/35.27/50.49 ms"
+        ),
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, no swap, 2 vCPU",
+            (
+                "release 1.13.0 at f7fb96d, deployed 2026-10-02; sitting c772ea89, "
+                "2026-10-02T21:43-21:52Z, 120 s per phase"
+            ),
+            (
+                "beta-dev's REST loaded from inside its internal network (8 threads, GET "
+                "/notes?limit=50 as a probe human); alpha-dev idle; delivery pass idle (D1888)"
+            ),
+            (
+                "the neighbour read by s35-r10-probe.py through the edge, GET <rest>/ at 8 "
+                "req/s; the load from s35-r10-load.py inside the loaded project's own internal "
+                "network (8 threads)"
+            ),
+        ),
+        note="The mirror of C, with the roles swapped; the same shape.",
+    ),
+    Measurement(
+        subject="The auth container's memory WHILE workflow runs execute, on the host",
+        value=(
+            "median 63.13 MB, max 73.38 MB over 104 samples inside a run; outside 62.91 / "
+            "73.61 MB (1108 samples) -- against ADR 0226's 96 MiB under-load criterion"
+        ),
+        kind=MACHINE,
+        conditions=(
+            "the 3,814 MB deployment host, no swap, 2 vCPU",
+            (
+                "release 1.13.0 at f7fb96d, deployed 2026-10-02; beta-dev's `auth`, neighbour "
+                "sitting c772ea89 phase B, 2026-10-02T21:45Z"
+            ),
+            (
+                "cgroup memory.current sampled every 0.1 s as op through /proc (D1739), the "
+                "container resolved by its uvicorn cmdline and secrets mount (D1930)"
+            ),
+            (
+                "24 runs of notes-roundtrip v1 enqueued at once by one probe agent, all "
+                "succeeded, each 0.31-0.65 s; a sample is INSIDE when it falls between a run's "
+                "started_at and finished_at (microseconds, D1876)"
+            ),
+            "the delivery pass idle (no connector enabled, D1888)",
+        ),
+        note=(
+            "D1711 read at last, three trips after it was first owed: the step loop under 24 "
+            "concurrent runs costs nothing measurable -- inside and outside differ by 0.2 MB "
+            "at the median -- and the maximum stays under ADR 0226's 96 MiB criterion by more "
+            "than 20 MB."
+        ),
+    ),
 )
 
 
@@ -609,36 +956,6 @@ ENVELOPE: tuple[Measurement, ...] = (
 #: dishonest reporting §7 warns about — arriving as a document that looks
 #: complete rather than as a claim that is false.
 UNMEASURED: tuple[Unmeasured, ...] = (
-    Unmeasured(
-        subject="The auth container's memory WHILE a workflow run executes, on the host",
-        reason=(
-            "ADR 0226's second flip criterion is an under-load delta of 96 MiB, and "
-            "Session 32's trip did not read it (D1711). The plan sampled beta's "
-            "`auth` cgroup during the sweep, but every sweep RECREATES the services "
-            "early -- an inherited proof does it -- so the container id being read "
-            "vanished, and the samples that were taken (56.6 MiB steady, one 61.2 "
-            "MiB) are of a container created AFTER the workflow proofs had finished: "
-            "an idle loop, not a loaded one. A figure labelled 'under run' from "
-            "them would be the value that looked measured and was not. **Session 33 "
-            "Run 9 sampled it and still has no figure** (D1776): a sampler as `op` "
-            "followed beta's `auth` through every recreation, every 10 s over both "
-            "sweeps (513 samples), but each Session 33 run lasted ~5.5 s and a sample "
-            "is stamped to the whole second, so NONE lies wholly inside a run's "
-            "window; seven fall on a window's last second (59.8-127.8 MB). And the "
-            "127 MB readings are single-sample spikes that occur equally outside "
-            "every Session 33 run (18:08:32, 19:18:51, 19:19:54), against ~60 MB "
-            "otherwise -- so even the boundary figures cannot be charged to a run."
-        ),
-        unblocked_by=(
-            "a sampler whose cadence is well under a run's ~5.5 s and whose stamps "
-            "are sub-second, read against the runs' own `started_at`/`finished_at` "
-            "(`app_private.workflow_run`) -- or a rig that drives runs through the "
-            "loop and reads the cgroup throughout. The container is found as `op` by "
-            "its mountinfo (`/secrets/<key>/generations/<gen>/auth/`); what the "
-            "127 MB spikes are (the human fixtures' password hashes is the "
-            "unmeasured hypothesis) is the same reading's other half"
-        ),
-    ),
     Unmeasured(
         subject="The deployment's own numbers, on the deployment",
         reason=(
