@@ -1,6 +1,7 @@
 # Session 36 — Preconditions: the boundary, the rescale, and the operating debt
 
-**Status: IN PROGRESS — Run 1 done 2026-10-03 (rows D2006–D2012).** Planned
+**Status: IN PROGRESS — Runs 1–4 done 2026-10-03 (rows D2006–D2018; CI
+green on `4b23773`). Next: Run 5. Sheet E0 not yet run. NEXT FREE D2019.** Planned
 2026-10-03 at `1ea6259`. The first session of
 Stage 5 (`docs/plans/stage-5-plan.md` §3). Eleven runs and **two sittings on
 two days** — the server rescaled in place and the release deployed (one outage
@@ -1029,8 +1030,9 @@ workflow cancels a branch's in-progress run on every push (`ci.yml:36-38`), so
 on the three unregistered live proofs (D2018); every other proof passed (6,922
 and 6,930). **Repair**: the live module leaves the tree until Run 8 registers it
 (kept unchanged in WSL `~/s36/run4/tests/deployment/`); `test_deployment_suite_shape`
-run locally after the removal. The repair commit's verdict is recorded beside it
-below.
+run locally after the removal (30 passed with `test_deployment_module_shape`
+and `test_acceptance_registry`). **Repair `4b23773423d485e398b7102ae3107d3baadbcd57`:
+CI GREEN** (run 37130719449) — the first green verdict on Runs 2-4's code.
 
 ### Run 5 — the Reality Ledger
 
