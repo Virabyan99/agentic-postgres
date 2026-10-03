@@ -333,6 +333,75 @@ def test_0037_creates_the_guard_and_grants_it_to_nobody(manifest: dict[str, Any]
     assert "api." not in up and "NOTIFY pgrst" not in up, "0037 touches the api surface"
 
 
+def _up_statements(manifest: dict[str, Any], name: str) -> str:
+    """A released migration's up half, comments dropped and whitespace folded."""
+    entry = next((item for item in manifest["migrations"] if item["name"] == name), None)
+    assert entry is not None, f"the released manifest has no {name} migration"
+    text = (migrations.MIGRATIONS_ROOT / entry["template"]).read_text(encoding="utf-8")
+    statements = "\n".join(
+        line.split("--")[0] for line in text.split("-- migrate:down", 1)[0].splitlines()
+    )
+    return " ".join(statements.split())
+
+
+def test_0038_adds_only_the_withdrawn_value(manifest: dict[str, Any]) -> None:
+    """Migration 0038 is ONE statement, alone in its file (ADR 0248, rig 36a).
+
+    A value added by `ALTER TYPE ... ADD VALUE` cannot be used in the
+    transaction that added it (55P04), and dbmate applies a file in one
+    transaction -- so anything that USES `withdrawn` beside the ALTER would fail
+    on the host after dbmate printed `Applied`. Goes red if a second statement
+    joins it, if it creates or grants anything, or if the value moves.
+    """
+    up = _up_statements(manifest, "approval_withdrawn")
+    statements = [part.strip() for part in up.split(";") if part.strip()]
+    assert statements == [
+        "SET LOCAL ROLE {{object_owner}}",
+        "ALTER TYPE app_private.workflow_approval_status ADD VALUE 'withdrawn'",
+        "RESET ROLE",
+    ], statements
+
+
+#: What 0039 creates (ADR 0248): one function granted to the worker's role, and
+#: four granted to nobody -- the three prunes and the size reading. Exact sets,
+#: so a grant added to a prune is the change this arm exists to see.
+RETENTION_GRANTED = frozenset({"workflow_withdraw_ended_approvals"})
+RETENTION_NOBODY = frozenset(
+    {"workflow_run_prune", "connector_delivery_prune", "agent_prune", "record_size"}
+)
+
+
+def test_0039_grants_the_prunes_to_nobody(manifest: dict[str, Any]) -> None:
+    """Migration 0039's privileges, read as text (D464).
+
+    Every function it creates is in `app_private`, revoked from PUBLIC, and
+    only the withdrawal is granted -- to `{{auth_service}}`, after every revoke.
+    It creates no table and replaces nothing, and touches no `api` object, so it
+    carries no `NOTIFY pgrst`.
+    """
+    up = _up_statements(manifest, "record_retention")
+
+    created = set(re.findall(r"CREATE FUNCTION app_private\.(\w+)\(", up))
+    assert created == RETENTION_GRANTED | RETENTION_NOBODY, sorted(created)
+    assert not re.search(r"CREATE (?:OR REPLACE )?FUNCTION (?!app_private\.)", up)
+    assert "OR REPLACE" not in up, "0039 replaces a function; it was written to create five"
+    assert not re.search(r"CREATE (?:TABLE|TYPE|INDEX)|ALTER TABLE", up), "0039 moves a relation"
+
+    revoked = set(
+        re.findall(r"REVOKE ALL ON FUNCTION app_private\.(\w+)\([^)]*\) FROM PUBLIC;", up)
+    )
+    assert revoked == RETENTION_GRANTED | RETENTION_NOBODY, sorted(revoked)
+    grants = re.findall(r"GRANT EXECUTE ON FUNCTION app_private\.(\w+)\([^)]*\) TO ([^;]+);", up)
+    assert {name for name, _ in grants} == RETENTION_GRANTED, grants
+    assert {grantee.strip() for _, grantee in grants} == {"{{auth_service}}"}
+    assert len(re.findall(r"\bGRANT\s", up)) == 1, "0039 grants more than the withdrawal"
+
+    last_revoke = max(m.start() for m in re.finditer(r"REVOKE ALL ON FUNCTION", up))
+    first_grant = min(m.start() for m in re.finditer(r"GRANT EXECUTE ON FUNCTION", up))
+    assert last_revoke < first_grant, "0039 grants a function before it has revoked every one"
+    assert "api." not in up and "NOTIFY pgrst" not in up, "0039 touches the api surface"
+
+
 def test_every_up_block_assumes_and_returns_the_owner_role(manifest: dict[str, Any]) -> None:
     """ADR 0026: objects are owned by object_owner, versions stamped by migration_user.
 

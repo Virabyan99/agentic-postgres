@@ -825,7 +825,30 @@ async def run_forever(
         if once:
             return
         if step is None and not delivered:
+            await _withdraw_ended_approvals(repository)
             await sleep(POLL_SECONDS)
+
+
+async def _withdraw_ended_approvals(repository: Any) -> None:
+    """The idle iteration's housekeeping: ended runs' pending approvals withdrawn.
+
+    **Only on an idle iteration** (ADR 0248, D1987): a busy loop is claiming
+    steps, and a withdrawal is never urgent -- nobody can act on the approval of
+    a run that has ended. Not before `supervise`'s restart sleep either: that
+    sleep follows an exception, and the database may be the reason (D2013).
+
+    Caught and logged by the exception's TYPE only, never its text, and the loop
+    goes on to sleep: housekeeping that fails must not stop the steps.
+    """
+    try:
+        moved = await repository.withdraw_ended_approvals()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        log.warning("the approval withdrawal raised %s; continuing", type(exc).__name__)
+        return
+    if moved:
+        log.info("workflow.approvals_withdrawn %s", json.dumps({"count": moved}))
 
 
 async def _connector_passes(*, connectors: Any, connector_key: str, holder: str) -> bool:

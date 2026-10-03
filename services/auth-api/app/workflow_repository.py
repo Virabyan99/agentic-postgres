@@ -289,6 +289,18 @@ class WorkflowRepository:
         assert row is not None
         return dict(row["counts"])
 
+    async def withdraw_ended_approvals(self) -> int:
+        """Move every pending approval whose run has ended to `withdrawn`.
+
+        The loop's call on an idle iteration (migration 0039, ADR 0248, D1775):
+        a status, never a deletion, and it names no person. Granted to this
+        role alone, in the same release as this caller (D1680). Returns how many
+        moved; rig 36d measured a repeat call that finds nothing at ~1 ms.
+        """
+        row = await self._one("SELECT app_private.workflow_withdraw_ended_approvals() AS moved", ())
+        assert row is not None
+        return int(row["moved"])
+
     # -- the gates, and provenance (migration 0035, ADR 0230-0234) ----------
     #
     # Six more calls, each one definer function, shipped in the same commit

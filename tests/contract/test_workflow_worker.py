@@ -93,6 +93,10 @@ class FakeRepository:
     async def heartbeat(self, **kwargs: Any) -> None:
         self.calls.append(("heartbeat", kwargs))
 
+    async def withdraw_ended_approvals(self) -> int:
+        self.calls.append(("withdraw_ended_approvals", {}))
+        return 0
+
     async def claim(self, **kwargs: Any) -> Any:
         self.calls.append(("claim", kwargs))
         return self._steps.pop(0) if self._steps else None
@@ -767,8 +771,64 @@ def test_the_heartbeat_is_written_each_poll(monkeypatch: Any) -> None:
                 sleep=sleep,
             )
         )
-    assert repository.names == ["heartbeat", "claim"]
+    # Since 1.14.0 an idle poll also withdraws ended runs' approvals before it
+    # sleeps (ADR 0248); the heartbeat is still the first call.
+    assert repository.names == ["heartbeat", "claim", "withdraw_ended_approvals"]
     assert slept == [worker.POLL_SECONDS]
+
+
+def test_an_idle_iteration_withdraws_ended_approvals() -> None:
+    """OPS-RETAIN-001's loop half (ADR 0248, D1987): an IDLE iteration calls the
+    withdrawal exactly once, immediately before it sleeps; a BUSY one -- a step
+    claimed -- never does; and a withdrawal that raises is logged by its type
+    and the loop still sleeps, so housekeeping cannot stop the steps."""
+
+    class Stop(Exception):
+        pass
+
+    def loop(repository: FakeRepository, sleeps: list[float]) -> None:
+        async def sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            raise Stop
+
+        with pytest.raises(Stop):
+            asyncio.run(
+                worker.run_forever(
+                    repository=repository,
+                    service=FakeService(),
+                    url="http://mcp:8080/mcp",
+                    holder="host:1:aa",
+                    sleep=sleep,
+                )
+            )
+
+    idle = FakeRepository()
+    slept: list[float] = []
+    loop(idle, slept)
+    assert idle.names.count("withdraw_ended_approvals") == 1
+    assert idle.names[-1] == "withdraw_ended_approvals", idle.names
+    assert slept == [worker.POLL_SECONDS]
+
+    # Busy: one wait step is claimed and parked, and the loop goes straight back
+    # to claim without sleeping; the SECOND iteration is idle and withdraws.
+    busy = FakeRepository([FakeStep(step={**FakeStep().step, "kind": "wait", "seconds": 5})])
+    loop(busy, [])
+    first_idle = busy.names.index("withdraw_ended_approvals")
+    assert busy.names.count("claim") == 2, busy.names
+    assert first_idle > [i for i, name in enumerate(busy.names) if name == "claim"][1], (
+        "the withdrawal ran on the busy iteration"
+    )
+    assert busy.names.count("withdraw_ended_approvals") == 1
+
+    class Raising(FakeRepository):
+        async def withdraw_ended_approvals(self) -> int:
+            self.calls.append(("withdraw_ended_approvals", {}))
+            raise RuntimeError("the substrate is not there")
+
+    failing = Raising()
+    slept_after_failure: list[float] = []
+    loop(failing, slept_after_failure)
+    assert slept_after_failure == [worker.POLL_SECONDS], "a failed withdrawal stopped the loop"
 
 
 def test_an_exception_in_the_loop_does_not_stop_the_verifier() -> None:

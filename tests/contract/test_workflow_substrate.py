@@ -271,7 +271,10 @@ def test_the_migration_applies_as_the_migration_user_and_its_down_refuses(
     # `workflow_counts` in place with unchanged signatures (rig 34e).
     # 37 since Session 35: 0037 adds `app.require_approval` and replaces none
     # of these functions (ADR 0242, D1903).
-    assert len(applied["versions"]) == 37, len(applied["versions"])
+    # 39 since Session 36: 0038 adds the approval value `withdrawn` and 0039 the
+    # retention functions and the withdrawal; neither replaces a 0034-0036
+    # function (ADR 0248, D1987).
+    assert len(applied["versions"]) == 39, len(applied["versions"])
 
     template = (REPO_ROOT / "migrations" / "templates" / "0034-workflow-substrate.sql").read_text(
         encoding="utf-8"

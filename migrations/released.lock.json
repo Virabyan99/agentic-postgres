@@ -427,6 +427,27 @@
       "template": "templates/0037-approval-gate.sql",
       "template_sha256": "67c4a5d4f20cd1b9fd397bb383760d6d774ea942a5e786b080de7f6d73c6d223",
       "version": "20261001120037"
+    },
+    {
+      "canonical_render_sha256": "e757442423aefc1fc20c70f21fd2aeb4c08af731f95a81992afae9f60a65bcd5",
+      "name": "approval_withdrawn",
+      "placeholders": [
+        "object_owner"
+      ],
+      "template": "templates/0038-approval-withdrawn.sql",
+      "template_sha256": "5de6bb1907bdec056989cd4d14186f2f2c0273345b5bcdb2c487d9824c0fdbb2",
+      "version": "20261003120038"
+    },
+    {
+      "canonical_render_sha256": "0500b5f3f409080379c6274db5b52b7ce72d530dc355883df88039534601980d",
+      "name": "record_retention",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0039-record-retention.sql",
+      "template_sha256": "4562f5857adf59ccfd875a086d65617c83dc84f65d0895dffe8b0a7dda91c7c0",
+      "version": "20261003120039"
     }
   ],
   "schema_version": 1
