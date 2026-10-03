@@ -1,7 +1,8 @@
 # Session 36 — Preconditions: the boundary, the rescale, and the operating debt
 
 **Status: IN PROGRESS — Runs 1–4 done 2026-10-03 (rows D2006–D2018; CI
-green on `4b23773`). Next: Run 5. Sheet E0 not yet run. NEXT FREE D2019.** Planned
+green on `4b23773`). Sheet E0 read 2026-10-03: Run 6 BUILDS (D2019); the two
+host.yaml copies differ (D2020). Next: Run 5. NEXT FREE D2021.** Planned
 2026-10-03 at `1ea6259`. The first session of
 Stage 5 (`docs/plans/stage-5-plan.md` §3). Eleven runs and **two sittings on
 two days** — the server rescaled in place and the release deployed (one outage
@@ -397,6 +398,8 @@ second table below it, in execution order.
 | **D2016** | §5 Run 3's usage: *"`sudo bin/record.sh --project KEY size [--json]`"*, and *"the command in `COMMANDS_WITH_VERBS`"*. | `test_cli_contract.verbs_documented_by` (`:495-520`) derives a verb as the FIRST lowercase word after the command's name on a usage line; `--project` first derives none, and `test_every_command_documenting_verbs_is_named_in_the_control` would then refuse the entry. | **Verb first**: `sudo bin/record.sh size --project KEY [--json]` and `… prune --project KEY --what … --before … [--limit N] --confirm KEY`. `size --help` and `prune --help` are reads (no root, no docker). | The derivation is the guard; the usage line is written so the guard can read it, never the guard narrowed (D464's habit). | 0248 |
 | **D2017** | §1 D2003, §2 `OPS-LOG-001` and §5 Run 4: *"`propagate = False` on both, so a host harness's root handler never doubles a line"*; battery M1 *"`propagate = False` removed and a root handler attached by the test"*. | **Six `caplog` canaries read these loggers through the ROOT logger** — `test_mcp_budgets.py:516-565` (three, one asserting `len(caplog.records) == 1`), `test_mcp_tools.py:2164-2185`, `test_connector_delivery.py:428-466` (`app.workflow_worker`), `test_connector_routes.py:366-393` — and with propagation off every one of them goes blind or red the moment any earlier test in the process has called `create_app`: an ORDER-dependent failure the full suite (CI) would hit and a targeted run might not. **Rig 36c re-run** from Run 3's commit (`git archive HEAD`, so the control is the tree without the handler): control 0 lines; arm with propagation ON exactly 5 lines for 5 requests through the image's uvicorn argv — nothing in the image puts a handler on the root logger. (A first re-run copied the working tree, which already carried Run 4's wiring; it was discarded as invalid — its "control" printed 5.) | **Propagation is left ON.** ADR 0249 corrected in place (written this session, never released); `test_no_line_is_printed_twice` now asserts `create_app` adds no ROOT handler, the line prints ONCE, and `caplog` still receives the record; `test_create_app_installs_one_handler_on_each_logger` asserts `propagate is True`. Battery M1 becomes *`propagate = False` added* → the `caplog` half FAILED. | The plan's guard protected against a handler nothing installs and would have disabled the canaries that guard the lines' content — the class CLAUDE.md §7 question 5 names: a decision implemented without grepping every reader of the thing it changes. | **0249** |
 | **D2018** | §5 Run 4: *"The live proofs (written now, run by the sweep) — all three of the session's host proofs live in one new module"*; §5 Run 8 registers the node ids. | **CI RED on `edffc00`** (run 37129543490, both jobs: 1 failed / 6,922 and 6,930 passed): `test_deployment_suite_shape.py::test_every_deployment_proof_is_a_node_id_of_some_requirement` (`:182-197`) refuses a `tests/deployment/` proof no registry entry names, **on the day it is written** (`KNOWN_UNREGISTERED` is EMPTY and compared for equality, `:126-147`: *"an entry added here again is a decision someone has to defend in a plan"*). Sessions 32–35 each wrote their live module in the BUMP run, with the registry. Run 4's targeted list did not include that module — the D1486 class (a list derived from the diff cannot see a guard the diff does not name). | **The module leaves the tree until Run 8**: `tests/deployment/test_session36_operations.py` is removed in Run 4's repair and kept, unchanged, in WSL `~/s36/run4/tests/deployment/` (and the scratchpad's `s36/`); **Run 8 adds it back in the same commit as `OPS-RETAIN-003` / `OPS-LOG-002`** and runs `test_deployment_suite_shape` in its targeted list. Its `--setup-plan` (rc 0, five fixtures) stands as Run 4 measured it. | Registering early would move `target_session: 36` entries ahead of the constant (D690); widening the frozen list would be the undefended entry the guard exists to refuse. | — |
+| **D2019** | §1 D1997: *"If a per-secret update time exists, Run 6 builds `doctor --reading secrets`"*. | **Sheet E0 (3)**: Infisical's `GET /api/v3/secrets/raw/{name}` returns `secret.createdAt`, `secret.updatedAt` (strings), `secret.version` (int), `isRotatedSecret`, `rotationId` and `secretReminderRepeatDays`. Key names and types only were read. **What `updatedAt` moves on is unmeasured**: a value change, or any edit (a comment, a tag, metadata). The documentation password was rotated on 2026-08-13 (D1996), so its `updatedAt` on alpha is a known reference point. | **Run 6 builds**, ADR 0250 written. **Its first step is a reading, not code**: for alpha's `docs_basic_auth_password`, print `updatedAt`, `createdAt` and `version` (never the value) and set them against the 2026-08-13 rotation. If `updatedAt` does not track the value, the age is read from `version`'s history or stated as unmeasured, and the ADR says which. The X2 rotation on day 2 is the control: `updatedAt` must move and `version` increment. | The branch D1997 left open is decided; what the field means is the next question, and an age read from a field that moves on a comment edit would be D600's value that looks measured. | **0250** |
+| **D2020** | §1 D1992: the operator installs the edited `host.yaml` *"where Run 7 found admission reads it"*. | **Sheet E0 (5): the two copies DIFFER.** `/etc/agentic-postgres/host.yaml` is 3,579 B dated 2026-09-06; the checkout's `/home/op/agentic-postgres/host.yaml` is 5,618 B dated 2026-09-19 (Session 31 declared schema 3's `capacity` block, which the deploys pass as `--host host.yaml`). `materialize-secrets.py` reads `HOST_MANIFEST = /etc/agentic-postgres/host.yaml` (`:47`) — the OLDER copy. | **Run 7 reads every reader of a host manifest** (grep `HOST_MANIFEST`, `--host`, `load_host_manifest` in `bin/` and `src/`) and states which copy each reads. Sheet H4 then names the copy admission reads, and whether `/etc` must be brought level (a root `install`, diff printed first). Nothing is edited until then. | Two copies of the host's declaration read by different commands are two answers to *"how big is this host"*; the rescale is the moment one of them would silently be wrong. | 0221 |
 
 ---
 
@@ -721,7 +724,28 @@ SQL and transcripts; backed up to the scratchpad's `rig36/`).
   (with it: 80 passed, 1 failed → the D2010 cell, fixed, module re-run green).
 - **Rows added**: D2006–D2012. D2006 is the one that mattered: the plan would
   have dropped a declaration that keeps `disaster_kit` passing.
-- **Sheet E0**: *(pending — the operator's)*.
+- **Sheet E0** (run by the operator 2026-10-03T15:01:49Z, checkout `f7fb96d`;
+  transcript `/home/op/s36-e0.txt`, copied to WSL `~/s36/s36-e0.txt`, sha256
+  `e6591422…`): **(1)** 2 vCPU `Intel Xeon Processor (Skylake, IBRS, no TSX)`,
+  x86_64, DMI `Hetzner` / `vServer`, kernel 7.0.0-31, 3,814 MiB total, no swap,
+  `/` 38 G (16 G used, 21 G free; `/var/lib/docker` is on `/`), up since
+  2026-09-17 20:16:17 — the OLD size, Run 9's H1 reads it again. **(2)** all
+  eleven units enabled and active (both project units, edge, docker firewall,
+  docker, six backup timers); next timer firings 02:04–04:47 UTC (the fulls on
+  Sunday 2026-10-04). **(3) D1997: the provider DOES carry a per-secret time** —
+  `secret` holds `createdAt` (str), `updatedAt` (str), `version` (int),
+  `isRotatedSecret`, `rotationId`, `secretReminderRepeatDays` and 13 more keys;
+  no value printed. **Run 6 builds** (D2019 says what it must measure first).
+  **(4) D1775 on beta**: `workflow_counts()` reads runs failed 15 / stopped 15 /
+  cancelled 19 / succeeded 84 (none in flight), `approvals_pending: 0` (the
+  reader counts running runs only); the direct count is **7 `pending` approvals,
+  all on `cancelled` runs** — the D1775 set, which 0039's withdrawal will move.
+  Also 19 `parked` and 50 `queued` steps belong to ended runs; the run prune
+  removes a run's steps whatever their status. **(5)** every file Session 35's
+  sweep declared is present (both retired JWKs 0600 op; the current sentinel
+  under generation `811a56fcab83e1f2`); **the two `host.yaml` copies DIFFER**
+  (`/etc/agentic-postgres/host.yaml` 3,579 B, 2026-09-06; the checkout's 5,618
+  B, 2026-09-19) — D2020.
 
 ### Run 2 — migrations 0038 and 0039, and the worker's call
 
