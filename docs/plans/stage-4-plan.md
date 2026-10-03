@@ -25,57 +25,45 @@ those take.
 ## Status — read this first
 
 ```
-STAGE 3 IS CLOSED.  Tagged 1.6.0 on a16cb84 (2026-09-15). Sessions 26-29 were
-                interludes: 26 documentation (ADR 0208), 27 the repair release
-                1.6.1 / 1.6.2 (ADR 0209), 28 offline (ADR 0210-0215, migration
-                0033), 29 THE TRIP. None of 26, 27, 29 registered a requirement,
-                so the ordinal skips them the way it skips 19 (D1063).
-RELEASE         1.12.0, tagged 2026-09-30 on 14b1b9de1267 -- THE COMMIT THAT WAS
-                DEPLOYED (D1425, with D1641's method stated in the tag: the
-                third sweep's INSTRUMENTS came from 8d655b5, tests only, whose
-                deployable diff was asserted NONE -- D1853, D1854).
-SESSIONS DONE   30 (2026-09-19, 1.8.0), 31 (2026-09-21, 1.9.0), 32
-                (2026-09-26, 1.10.0: the durable step substrate and the worker
-                loop) and 33 (2026-09-28, 1.11.0: approval gates, compensation,
-                provenance, the audit filters; migration 0035) and 34
-                (2026-09-30, 1.12.0: governed connectivity -- the outbox,
-                outbound delivery, the signed inbound route, scheduled
-                connectors, event-triggered runs; migration 0036; ADR 0241).
-                ONE LEFT: 35 change-governance (with D1721's database half,
-                the operator's decision of 2026-09-29), hardening, the third
-                reader, the Stage 5 decision report.
-EVIDENCE        evidence/session-34.json: 188 claims, 182 passed, 5 not_run,
-                1 failed (documented_path, deliberately -- §2.4). All sixteen
-                claims Session 34 added passed, the five host ones on their
-                FIRST executions anywhere (the third sweep; D1853, D1854).
-CURRENT_SESSION 34. Stage 4 numbers its sessions 30-35.
-template_version 1.12.0. host.yaml schema 3. Outputs schema v19, project
-                manifest 7 (both moved in 34, migratable: `connectors`, D1785),
-                capability manifest 4, lock 4, project lock 3, api-surface 2.
-                Session 32 ADDED schemas/workflow.schema.json; Session 33
-                widened it; Session 34 ADDED schemas/connector.schema.json and
-                the capability schema's scope enum gained two names.
-ADRs            241, next free 0242.   migrations 36, released and applied on
-                both projects, fix-forward only -- 0036 applied 2026-09-30.
-                requirements 281.   claims 188, 53 declared offline.
-divergences     D1-D1513 recorded in the session plans. D1514-D1536 recorded
-                here. D1537-D1581 in Session 30's plan, D1582-D1644 in Session
-                31's (D1633 never issued), D1645-D1713 in Session 32's,
-                D1714-D1777 in Session 33's, D1778-D1856 in Session 34's.
-                **Next free: D1857.**
-PostgreSQL      18.4 (pgvector/pgvector:pg18 by digest). STAYS. Decided by the
-                operator on 2026-09-18 (D1515).
-DIRECTION       APPLIANCE FIRST, HOSTING DEFERRED. Decided by the operator on
-                2026-09-18 (D1517, D1518). No public endpoint, no organisations,
-                no login, no remote contexts, no hosted Studio, no support
-                grants in Stage 4.
+STAGE 4 IS CLOSED.  Tagged 1.13.0 on f7fb96d (2026-10-03) -- THE COMMIT THAT WAS
+                DEPLOYED AND SWEPT, no instrument moved (D1425). Stage 3 closed
+                with 1.6.0 on a16cb84 (2026-09-15); Sessions 26-29 were
+                interludes that registered no requirement (D1063).
+SESSIONS        30 (2026-09-19, 1.8.0: the rotation, ADR 0216/0217), 31
+                (2026-09-21, 1.9.0: the node as a finite resource), 32
+                (2026-09-26, 1.10.0: the step substrate and the worker loop), 33
+                (2026-09-28, 1.11.0: gates, compensation, provenance), 34
+                (2026-09-30, 1.12.0: governed connectivity), 35 (2026-10-03,
+                1.13.0: approval in the database, proposals, every container
+                bounded, deploy downtime and the noisy neighbour measured).
+EVIDENCE        evidence/session-35.json: 198 claims, 192 passed, 5 not_run,
+                1 failed (documented_path, by decision: no walk of 1.13.0,
+                Sheet W (c) -- the operator deferred the walk until after
+                Stage 5, D1935). Every claim Stage 4 added passed.
+CURRENT_SESSION 35. Stage 4 numbered its sessions 30-35.
+template_version 1.13.0. host.yaml schema 3. Outputs schema v19, project
+                manifest 8 (`migrations.approvals_required`), capability
+                manifest 4, lock 4, project lock 3, api-surface 2.
+ADRs            245, next free 0246.   migrations 37, released and applied on
+                both projects, fix-forward only -- 0037 applied 2026-10-02.
+                requirements 291.   claims 198, 60 declared offline.
+divergences     D1-D1513 in the session plans; D1514-D1536 here; D1537-D1944 in
+                Sessions 30-35's plans. **Next free: D1945.**
+NEXT            docs/stage-5-decision-report.md, section 6 accepted by the
+                operator on 2026-10-03: the retention plane, the three remaining
+                rotations, the shared edge's window, the smaller operating
+                items, then the hosted question as an ADR only if a customer
+                is wanted. docs/scope-closure.md section 28 is the ledger.
+PostgreSQL      18.4 (pgvector/pgvector:pg18 by digest). Decided 2026-09-18 (D1515).
+DIRECTION       APPLIANCE FIRST, HOSTING DEFERRED (D1517, D1518), and the Stage 5
+                report recommends keeping it so until the operating debt is paid.
 OBSERVABILITY   The OTel collector and Prometheus that already run, bounded.
-                No ClickStack. Decided 2026-09-18 (D1519).
+                No ClickStack (D1519).
 ```
 
 **Every number in §1 onward was measured on 2026-09-18 at `de9ecbb`**, or says
 whose it is; **the Status block above is re-read at each session's close** and
-currently stands at Session 34's, 2026-09-30.
+stands at Stage 4's close, Session 35, 2026-10-03.
 
 ---
 

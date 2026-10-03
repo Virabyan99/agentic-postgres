@@ -1,9 +1,12 @@
 # Session 35 — Change governance, the database half of approval, hardening, and the Stage 4 release
 
-**Status: EXECUTING — Runs 1–10 DONE 2026-10-03** (planned 2026-09-30 at
-`a018939`). The last session of Stage 4 (`docs/plans/stage-4-plan.md` §3).
+**Status: COMPLETE 2026-10-03 — STAGE 4 CLOSED, 1.13.0 tagged on `f7fb96d`**
+(planned 2026-09-30 at `a018939`; executed 2026-10-01 to 10-03). Rows the runs
+added: Run 1 D1892–D1900, 2 D1901–D1903, 3 D1904–D1911, 4 D1912–D1917, 5
+D1918–D1922, 6 D1923–D1928, 7 D1929–D1934, 8 D1935, 9 D1936–D1940, 10
+D1941–D1944, 11 none. The last session of Stage 4 (`docs/plans/stage-4-plan.md` §3).
 Eleven runs. The plan spends **D1857–D1891** and **ADR 0242–0245**; rows the
-runs add start at **D1892**. **NEXT FREE: D1945, ADR 0246.**
+runs add start at **D1892**. **NEXT FREE: D1945, ADR 0246.** (Stage 5 starts here.)
 
 **Brief:** `docs/plans/stage-4-plan.md` §5 *Session 35* whole (Builds / Already
 true / Must not / Measures / Closes, `:619-657`), its rows **D1523** (the
@@ -2158,6 +2161,37 @@ once detached, push, read CI (D1644).** Then documentation commits (no CI).
    migrations 37; requirements 291; claims 198); CLAUDE.md in the launch folder
    (**copy it to the scratchpad first** — it is not in git) rewritten
    compactly for Stage 5's planner; the project memory updated.
+
+**Done.** 2026-10-03. **The envelope** (`da55df1`, CI GREEN run 37100881452):
+twelve MACHINE rows read from Run 10's files by `~/s35r11/s35-r11-envelope.py`
+and pasted -- five deploy-downtime rows (alpha / beta: rest 10.2 / 11.5 s, auth
+16.4 / 12.7, storage 16.4 / 12.7, mcp 14.8 / 14.2, docs 12.5 / 11.9; each with
+its bound and its cause, D1941), the edge's recreation (24.4 s, both projects),
+the induced database restart (rest 3.1 s, 6.9 s to every dependent), the four
+neighbour phases, and **D1711 moved from `UNMEASURED` to `ENVELOPE`** (median
+63.13 MB, max 73.38, 104 samples inside 24 runs; verdict `enough`); ENVELOPE 21
+-> 33, UNMEASURED 6 -> 5; `docs/capacity-envelope.md` regenerated.
+`THR-NOISY-NEIGHBOUR`'s residual and the out-of-scope paragraph state the
+figures as a sample, the disk-I/O sentence kept. Targeted 333 passed.
+**`bin/session-01-check.sh` on `da55df1`, run by the operator: PASSED**, 6,888 /
+0 / 3 in 23 m 45 s (their PowerShell wrote its own `$?`, `True`, into the code
+file -- the log's `PASSED` is the verdict). **The Stage 5 decision report**
+(`2b781a2`, CI GREEN run 37107494337): `docs/stage-5-decision-report.md`, 176 lines, filled by
+`~/s35r11/s35-r11-fill.py` (template `stage5-template.md`, section 6 from
+`recommendation.md`) from `evidence/session-35.json`, `capacity.ENVELOPE`, the
+registry, `OFFLINE_CLAIMS`, the released lock, `docs/decisions/`, this plan's
+divergence table and Run 10's transcripts; every value read and asserted, no
+placeholder left; the read: claims 198, passed 192, failed 1, not_run 5,
+requirements 291 (267 reported on), offline 60, migrations 37, ADRs 245,
+divergences D1-D1944; Stage 4's 69 claims all passed. **Section 6 written by
+the executor and ACCEPTED BY THE OPERATOR as written** ("accept it, commit and
+go ahead", 2026-10-03). Indexed in `docs/README.md`; documentation tests 309
+passed. The same commit re-applied the edge row's value (a range of one,
+"24.4-24.4 s", now "24.4 s"). **The records**: this header (COMPLETE, the rows
+per run), `docs/scope-closure.md` **section 28**, the stage plan's Status block
+**STAGE 4 CLOSED**, CLAUDE.md in the launch folder (pre-close copy in the
+scratchpad), the project memory. **Run 11 added no row; NEXT FREE D1945, ADR
+0246.**
 
 ---
 ## 7. Evidence and claims

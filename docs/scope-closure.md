@@ -1208,3 +1208,72 @@ session-scoped login held a 900-second token for 933 seconds).
 6. **ADR 0241's rule for any reader Session 35 adds**: a reader of a document
    that already exists goes through `deployed_output.read_deployed_document`;
    the class guard will say so.
+
+## 28. What Session 35 closed, what it left, and what Stage 5 inherits
+
+**Session 35 is the session whose subject is the ACT of changing a deployment,
+and the last of Stage 4.** Eleven runs, `D1857`–`D1944`: thirty-five rows
+written at planning and **fifty-three written by executing it**. `1.13.0` is
+deployed on both projects, swept, merged and tagged at `f7fb96d` — the deploy,
+the sweep and the tag on one commit with no instrument moved (D1425) — and the
+merged evidence reads **198 claims: 192 passed, 5 not_run, 1 failed** — §7's
+prediction exactly. All ten claims the session added passed; the three host
+ones on their first execution anywhere: `approval_in_database_live` (an agent's
+own token refused BY THE DATABASE with no row written, the owner served, the
+approved call through the plane served once), `proposed_set_applied` (beta's
+deployed lock is the committed proposal's digest, the approval beside it), and
+`every_service_bounded_live` (no running container on the host unbounded).
+Every Session 32–34 workflow and connector claim passed again through the new
+guard, which is the evidence that it admits what it must.
+
+**The sentence this session would most want carried forward: a deploy is an
+outage by design, and now it has a number.** Step 5 brings a project up
+without auth, mcp, postgrest and storage and 6b starts them, on every deploy
+whatever their image (D1941): a caller loses a project's API for 10–17 s and
+its docs for ~12 s. Recreating the shared edge loses BOTH projects for 24.4 s.
+These are in `capacity.ENVELOPE` beside the noisy neighbour (a saturated REST
+path moves the other project's p95 from ~54 to ~100 ms, no errors; workflow
+runs move nothing) and D1711, read at last: `auth` holds a median 63 MB while
+24 runs execute, the same as idle.
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **D1721** — approval was a plane control only | **Closed on production.** Migration 0037: `app.require_approval(p_tool)`, granted to nobody, called first by a gated project function (the example set's 0004); a human caller passes, an agent passes only with the signed claim, the key header and the decided row (ADR 0242). `approval_in_database_live` read the refusal and the row count on beta. |
+| **D1523** — the proposal record, the destructive reading, `approvals_required` | **Closed as a record** (ADR 0243): `bin/migrate.sh propose|approve` write committed records keyed by the set's digest; deploy step 6 applies a pending set only when a committed proposal names it, and reads the approval under manifest 8's `approvals_required`. The lock-risk estimate stays unbuilt, by the brief. |
+| **D1524** — a deploy's downtime per service class | **Closed as a measurement** — the envelope's Session 35 rows (no candidate stack was built, by the brief). |
+| **D1711** — no memory figure under a run | **Closed**: 104 sub-second samples inside 24 runs, classifier verdict `enough` (median 63.13 MB, max 73.38). |
+| **D1586 / D1710** — the edge's unbounded containers | **Closed on production** (ADR 0244): traefik 608 MiB, the socket proxy 64 MiB, and pgbouncer, postgrest, docs and edge-probe bounded on both projects; ceilings 6,432 MiB. |
+| **D380** — `apg-diag` could not read auth, storage or mcp | **Closed** (ADR 0245): read live as `apg-agent`, redaction seen on a real line. |
+| **D1856** — kits' `projects/` dir 755 | **Closed on production**: both of this trip's kits are 0700 throughout. |
+| **D1883 / D1882** — the gate's usage block; the prose | **Closed** (Run 9): every accepted flag has its own entry, proved. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **D1886 / D1700 / D1775** — retention | **The bill is now measured** (Sheet F8, in the Stage 5 report): on beta 133 runs, 372 steps, 327 attempts, 29 approvals, 9 events and 9 deliveries since 2026-09-26, nothing pruned; 83 revoked probe agents across s32–s35, 7 `pending` approvals on ended runs. A retention plane is ten definer functions in FK order — a session. |
+| **D1936** — beta does not read the approval | Beta's manifest is still schema 7, so its `approvals_required` is 0; making the host enforce the approval is that manifest at schema 8 with `approvals_required: 1`, the operator's edit. |
+| **D1918** — the `apg.*` INFO lines never reach `docker logs` | A handler is a product change with a log-volume question; the operator's. |
+| **D1869, D1871** — a profile-added approval on a release tool; the guard is not idempotency | Plane control only; exactly-once needs ADR 0181's claim, which a project set cannot reach. |
+| **D1581 / D1713 / D1941** — why a deploy recreates what it does | The held-back four restart on every deploy (D1941); whether one is a NEW container, and what moves a generation, is still undetermined. |
+| **D1642** — a kit names the checkout's commit | This trip's kits name `f7fb96d`, which happened to be the deployed commit. |
+| **D1547** — no `delete_note` | Sentinel and canary notes are still removed by root `psql`. |
+| **D1722 / D1806, D1798, D1784, D1792, ADR 0241's bound** | Unchanged. |
+| `documented_path` | **`failed` by decision**: no walk of 1.13.0 (Sheet W (c), D1935); the operator deferred the walk until after Stage 5. |
+| `port_allocation`, the rotation trio, `replacement_host_restore` | Unchanged, and for the same reasons. |
+
+### What Stage 5 inherits, in order
+
+From the Stage 5 decision report's §6, accepted by the operator on 2026-10-03:
+
+1. **The retention plane** (D1886, D1700, D1775).
+2. **The three remaining rotations, and a rotation schedule**, so the rotation
+   trio can move.
+3. **The shared edge's window**: whether an edge change can avoid taking every
+   project away at once, measured against the 24.4-s reading.
+4. **The smaller operating items**: D1918, D1547, D1581/D1941.
+5. **The hosted question as an ADR** superseding 0042, 0043 and 0044 together,
+   only when the operator wants a customer — with the documentation walk the
+   operator scheduled for after Stage 5 (D1935).
