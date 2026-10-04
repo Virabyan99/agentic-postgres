@@ -1,12 +1,11 @@
 # Session 36 — Preconditions: the boundary, the rescale, and the operating debt
 
-**Status: IN PROGRESS — Runs 1–7 done 2026-10-03, Runs 8–10 2026-10-04 (rows
-D2006–D2041; CI
-green on `4b23773`, on Run 5's repair `c4582ab` (run 37133402800) and on Run
-6's `e5469b9` (run 37136556399) and on Run 8's `58929e2` (run 37186749247) and on Run 9's `2538ac0` (run 37191526105)). Sheet E0 read 2026-10-03: Run 6 BUILT
-(D2019, D2022, ADR 0250); the two host.yaml copies differ (D2020) and admission
-reads the checkout's (D2025). The trip's instruments are in WSL `~/s36/run7/`
-and `/home/op`. 1.14.0 is DEPLOYED on both projects at `2538ac0`, swept (206 claims, 204 passed) and TAGGED; the rescale was NOT taken (D2032). Next: Run 11. NEXT FREE D2042.** Planned
+**Status: COMPLETE 2026-10-04.** Runs 1–7 2026-10-03, Runs 8–11 2026-10-04; rows
+D1985–D2005 at planning and **D2006–D2041** by executing it (each run's Done
+names its own); ADRs 0246–0250. **1.14.0 deployed on both
+projects, swept, merged (206 claims, 204 passed) and tagged on `2538ac0`**; the
+rescale was NOT taken (D2032). CI green on every code commit, the last `34dd8c2`.
+**NEXT FREE D2042, ADR 0251.** Planned
 2026-10-03 at `1ea6259`. The first session of
 Stage 5 (`docs/plans/stage-5-plan.md` §3). Eleven runs and **two sittings on
 two days** — the server rescaled in place and the release deployed (one outage
@@ -1690,7 +1689,23 @@ sides.
   envelope's new rows.
 - The plan's header `Status:` set to COMPLETE with the rows each run added.
 
-**Done.** *(executor)*
+**Done.** 2026-10-04, commit `34dd8c2`; no row added (NEXT FREE stays D2042).
+**`capacity.ENVELOPE`**: five Session 36 rows read from the trip's files by
+`~/s36/run11/s36-envelope.py` and pasted (the gaps documents of R2a, R2b, R3, R5
+and X1–X3, the units transcripts, the host readings, the D1581 diff), every
+substitution count-asserted: a cold start (131 s power-on / 124 s reboot), a 1.14.0
+deploy per class, a new commit with no product change, what a redeploy takes away
+(CONFIGURATION, D2034) and a rotation's window. **No "rescaled host" row**: the
+rescale was not taken, so `UNMEASURED` names it (D2032), and every MACHINE row says
+it ran on the CX23. Session 35's five deploy rows keep their numbers; their note's
+*"every deploy pays them"* now carries D2034's correction. `docs/capacity-envelope.md`
+rendered; **the Reality Ledger re-rendered unchanged** (no row changes status, as
+planned). `docs/operator-guide.md` §9, §10, §12, §13 and §16; `docs/scope-closure.md`
+**§29**; the Stage 5 plan's Status block re-read and rewritten; CLAUDE.md §2, §3 item
+0 and §9 rewritten for Session 37's planner (copied to the scratchpad first; not in
+git). Targeted (capacity envelope, capacity reading, reality ledger, documentation
+index, session12 documented path, admission): 124 passed. **`bin/session-01-check.sh`
+once on the clean tree: PASSED** (6,993 passed, 0 failed, 3 skipped; 33 min). **CI on `34dd8c2`: GREEN** (run 37203737909; P0 inventory, the Session 1 gate and the Session 2 offline contract all `success`, read for that full SHA).
 
 ---
 
