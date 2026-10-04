@@ -1277,3 +1277,72 @@ From the Stage 5 decision report's §6, accepted by the operator on 2026-10-03:
 5. **The hosted question as an ADR** superseding 0042, 0043 and 0044 together,
    only when the operator wants a customer — with the documentation walk the
    operator scheduled for after Stage 5 (D1935).
+
+---
+
+## 29. What Session 36 closed, what it left, and what Session 37 inherits
+
+**Session 36 is the first of Stage 5: the preconditions a hosted product needs
+before it has a customer.** Eleven runs, `D1985`–`D2041`: twenty-one rows
+written at planning and **thirty-six written by executing it**, ADRs 0246–0250.
+`1.14.0` is deployed on both projects, swept, merged and tagged at `2538ac0` —
+the deploy, the sweep and the tag on one commit (D1425; the commit moved once,
+from `7fa90c5`, when the trip's own filtered check found two defects, D2036–
+D2038) — and the merged evidence reads **206 claims: 204 passed, 1 not_run, 1
+failed** — §7's prediction exactly. All eight claims the session added passed,
+the three host ones on their first sweep; and **`port_allocation` and the
+rotation trio passed** (`api_authorization`, `bootstrap_identity`,
+`credential_rotation_planes`), the trio for the first time on this deployment:
+alpha's three credentials were rotated in one sitting and declared to the sweep
+after a reboot.
+
+**The sentence this session would most want carried forward: a deploy's
+outage depends on what moved, and now we know what.** Redeploying the SAME
+commit recreates nothing and costs nothing — the secret generation still moves
+(R3); a NEW commit recreates auth, mcp and storage for ~8–14 s even when no
+product file moved (R5); rest and docs go only when their own definition
+changes (D2034, which corrects Session 35's D1941). A rotation that needs
+`down` costs ~85–97 s; the documentation password needs none and costs nothing
+(D2039). All of it is in `capacity.ENVELOPE`. **The server was not rescaled**:
+the console had no CX33 in `hel1` (D2032), so every number above ran on the
+same 3,814 MB CX23 as Session 35's.
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **D1886 / D1700 / D1775** — nothing in `app_private` was ever pruned | **Closed on production** (ADR 0248). Migration 0039: prunes by aggregate root in FK order, granted to nobody, and `record_size`; `bin/record.sh size|prune` with an operator's horizon and `--confirm`. Beta pruned at 2026-10-01: 92 runs (with their steps, attempts, approvals, receipts), 7 deliveries, 69 revoked agents; the 7 `pending` approvals on ended runs were withdrawn by the worker (migration 0038's `withdrawn`). `record_retention_live` passed. |
+| **D1918** — the `apg.*` INFO lines never reached `docker logs` | **Closed** (ADR 0249): one stdout handler; `request_log_live` read a request's line in the auth container's log by the id the response carried. |
+| **The three rotations** (D1974) | **Performed on alpha** 2026-10-04 and declared; the trio passed. **A schedule** is the declaration `max_age_days: 90` on each and `doctor secrets` reading every declared secret's age at the provider (ADR 0250); `secret_age_live` passed. |
+| **D1581 / D1713 / D1941** — what a deploy recreates | **Closed as a measurement** (D2034): see above. Why a new commit reaches the three is not read. |
+| **D1975** — the shared edge's window | Nothing in this session recreates the edge; its 24.4-s reading stands, and the power cycle and reboot restarted it with the host (units active 131 s / 124 s after boot). |
+| **D1978 / D1999** — the hosted threats | **Written as a list** (ADR 0246), each to move into the threat table with its requirement in Sessions 37–42. |
+| **D1979** — the Reality Ledger | **Built** (ADR 0247): `docs/reality-ledger.yaml`, its schema and renderer; `reality_ledger` is an offline claim (narrowed, D2030). |
+| **D2037** — a filtered live gate said PASSED on a red proof | **Closed in `bin/session-36-check.sh`**: exit 6. Gates 30–35 keep the fold; they are not run again. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **D2032 / D1991** — the rescale | Not taken: CX33 out of stock in `hel1`. The same short sheet when it is stocked, or a planned move with its address change audited. `capacity.UNMEASURED` names it. |
+| **Beta's three rotations** (D1995) | Never rotated; the first entries a schedule acts on. |
+| **D1936 / D2005** — beta does not read the approval | Still schema 7; the operator did not choose schema 8 at R2b. |
+| **D1547** — no `delete_note` | Deferred with its cost (D1990). |
+| **D1985 / D1986** — the doctor does not report the record; humans are never pruned | By decision: `record.sh size` is the reading; humans are Session 37's identity question (35 probe humans on beta). |
+| **D2020 / D2025** — the two `host.yaml` copies drift | Session 38's host re-derivation. |
+| **D2031** — `cloud-init-hotplugd` | Recurs on a hotplug event; `running` after a boot is not a fix. |
+| **D1642, D1798, D1869, D1871, D1722 / D1806, D1784, D1792, ADR 0241's bound** | Unchanged. |
+| `documented_path` | **`failed` by decision** (D1935): the person's walk is Session 42's. |
+| `replacement_host_restore` | **`not_run` by decision** (D1028): a rescale is not a replacement. |
+
+### What Session 37 inherits, in order
+
+1. **The control plane** (stage plan §5 *Session 37*): `/api/v1`, organisations,
+   invitations, TOTP, API keys — on this host, at this size, unless the
+   rescale is taken first.
+2. **The identity questions this session parked**: humans are never pruned
+   (D1986); 35 probe humans and 15 revoked probe agents on beta.
+3. **The hosted threats list** (ADR 0246): the ones Session 37's surface
+   reaches move into the threat table with their requirements.
+4. **The rescale** (D2032), whenever the operator takes it — before Session
+   38's slots and profiles re-derive the reserve (D1992).

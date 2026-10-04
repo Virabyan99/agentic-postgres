@@ -38,27 +38,32 @@ shape those take.
 ## Status — read this first
 
 ```
-STAGE 5 IS PLANNED, NOT STARTED.  This plan was written 2026-10-03 at 42bf306
-                (Stage 4 closed: 1.13.0 tagged on f7fb96d; HEAD is ahead of the
-                tag by records and capacity.py's envelope rows only).
+STAGE 5 IS EXECUTING. SESSION 36 CLOSED 2026-10-04: 1.14.0 deployed, swept,
+                merged and TAGGED on 2538ac0 (the deploy, the sweep and the tag
+                on one commit, D1425). docs/plans/session-36-implementation-
+                plan.md is its record; docs/scope-closure.md §29 what it closed,
+                left and hands Session 37. This plan was written 2026-10-03 at
+                42bf306.
 DIRECTION       HOSTED. The operator's decision of 2026-10-03, taken during this
-                audit (D1946). The Stage 5 decision report's §6 order survives
-                as Session 36's PRECONDITIONS: retention, the three rotations
-                and a schedule, the edge window, D1918/D1547/D1941.
-SESSIONS        36-42 (D1945), seven, numbered on from 35. Session 36 has two
-                sittings (the in-place rescale and the release; the rotations
-                and the sweep) -- revised 2026-10-03, D1991 there.
-CURRENT_SESSION 35. Moves 36 -> 42, all-or-nothing per session (D690).
-template_version 1.13.0. host.yaml schema 3. Outputs v19, project manifest 8,
+                audit (D1946). The Stage 5 decision report's §6 order was
+                Session 36's PRECONDITIONS, now paid: retention (ADR 0248), the
+                three rotations on alpha + a schedule (ADR 0250), D1918 (ADR
+                0249), D1581/D1941 measured (Session 36's D2034); D1547 deferred
+                (D1990); the edge window untouched by design (D1975).
+SESSIONS        36-42 (D1945), seven, numbered on from 35. 36 DONE; NEXT: 37,
+                the control plane (/api/v1, orgs, invitations, TOTP, API keys).
+CURRENT_SESSION 36. Moves 37 -> 42, all-or-nothing per session (D690).
+template_version 1.14.0. host.yaml schema 3. Outputs v19, project manifest 8,
                 capability manifest 4, lock 4, project lock 3, api-surface 2.
 POSTGRESQL      18.4 STAYS -- the operator, 2026-10-03 (D1947). Measured that
                 day on Docker Hub: postgres 19beta4 is the newest 19 tag; no
                 19rc, no 19 GA, no pgvector pg19 image.
-HOST            THE SAME HETZNER SERVER, RESCALED IN PLACE (CPU and RAM only) --
-                the operator, 2026-10-03, superseding the new-VPS move of D1948
-                (Session 36's D1991). Same address, disk (38 GB), documents and
-                kits. Every capacity number below that names 3814 MiB is the
-                pre-rescale host's and is re-read after it.
+HOST            THE SAME HETZNER SERVER, TO BE RESCALED IN PLACE (CPU and RAM
+                only; D1948 superseded by Session 36's D1991) -- **NOT YET
+                RESCALED**: on 2026-10-04 the console had no CX33 in hel1
+                (Session 36's D2032). Still CX23: 3,814 MiB, 2 vCPU Skylake,
+                38 GB, 62.238.99.122, kernel 7.0.0-34. Every capacity number
+                that names 3814 MiB is still current.
 CONTROL PLANE   PYTHON, DOGFOODED -- the operator, 2026-10-03 (D1950): the
                 control plane is a project the product itself deploys, with
                 its own migration set and the existing auth service. No
@@ -67,15 +72,18 @@ ACCOUNTS        INVITE-ONLY -- the operator, 2026-10-03 (D1951). No public signu
 OBSERVABILITY   ClickStack ADDED, bounded, on-host -- the operator, 2026-10-03,
                 reversing D1519 for Stage 5 (D1964). The per-project collector
                 and Prometheus stay; one source per customer-visible metric.
-EVIDENCE        evidence/session-35.json: 198 claims, 192 passed, 5 not_run, 1
-                failed (documented_path, by decision, D1935).
-ADRs            245, next free 0246.   migrations 37.   requirements 291.
-                claims 198, 60 declared offline.
-divergences     D1-D1944 in earlier plans; D1945-D1984 here. **Next free: D1985.**
+EVIDENCE        evidence/session-36.json: 206 claims, 204 passed, 1 not_run
+                (replacement_host_restore, D1028), 1 failed (documented_path,
+                by decision, D1935). port_allocation and the rotation trio
+                passed.
+ADRs            250, next free 0251.   migrations 39.   requirements 299.
+                claims 206, 65 declared offline.
+divergences     D1-D1944 in earlier plans; D1945-D1984 here; D1985-D2041 in
+                Session 36's. **Next free: D2042.**
 ```
 
 **Every number in §0 onward was measured on 2026-10-03 at `42bf306`**, or says
-whose it is. **The Status block above is re-read at each session's close.**
+whose it is. **The Status block above is re-read at each session's close.** (Re-read and rewritten at Session 36's close, 2026-10-04.)
 
 ---
 

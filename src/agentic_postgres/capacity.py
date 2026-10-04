@@ -631,10 +631,11 @@ ENVELOPE: tuple[Measurement, ...] = (
         ),
         note=(
             "Measured, not predicted: the deploy prints no per-container line (D1941), and "
-            "these windows are the caller's view of the restarts its after-read dated. Every "
-            "deploy pays them -- step 5 brings a project up WITHOUT auth, mcp, postgrest and "
-            "storage and step 6b starts them, whatever their image -- so a deploy is a 10-17 s "
-            "outage of the API by design, not a defect. 0 x 429, 0 unexplained answers."
+            "these windows are the caller's view of the restarts its after-read dated. "
+            "D1941 read them as paid by every deploy; Session 36 corrected it (D2034): the same "
+            "commit redeployed takes nothing away, a new commit recreates auth, mcp and "
+            "storage, and rest and docs went here because 1.13.0 changed their own definitions "
+            "(mem_limit). 0 x 429, 0 unexplained answers."
         ),
     ),
     Measurement(
@@ -662,10 +663,11 @@ ENVELOPE: tuple[Measurement, ...] = (
         ),
         note=(
             "Measured, not predicted: the deploy prints no per-container line (D1941), and "
-            "these windows are the caller's view of the restarts its after-read dated. Every "
-            "deploy pays them -- step 5 brings a project up WITHOUT auth, mcp, postgrest and "
-            "storage and step 6b starts them, whatever their image -- so a deploy is a 10-17 s "
-            "outage of the API by design, not a defect. 0 x 429, 0 unexplained answers."
+            "these windows are the caller's view of the restarts its after-read dated. "
+            "D1941 read them as paid by every deploy; Session 36 corrected it (D2034): the same "
+            "commit redeployed takes nothing away, a new commit recreates auth, mcp and "
+            "storage, and rest and docs went here because 1.13.0 changed their own definitions "
+            "(mem_limit). 0 x 429, 0 unexplained answers."
         ),
     ),
     Measurement(
@@ -693,10 +695,11 @@ ENVELOPE: tuple[Measurement, ...] = (
         ),
         note=(
             "Measured, not predicted: the deploy prints no per-container line (D1941), and "
-            "these windows are the caller's view of the restarts its after-read dated. Every "
-            "deploy pays them -- step 5 brings a project up WITHOUT auth, mcp, postgrest and "
-            "storage and step 6b starts them, whatever their image -- so a deploy is a 10-17 s "
-            "outage of the API by design, not a defect. 0 x 429, 0 unexplained answers."
+            "these windows are the caller's view of the restarts its after-read dated. "
+            "D1941 read them as paid by every deploy; Session 36 corrected it (D2034): the same "
+            "commit redeployed takes nothing away, a new commit recreates auth, mcp and "
+            "storage, and rest and docs went here because 1.13.0 changed their own definitions "
+            "(mem_limit). 0 x 429, 0 unexplained answers."
         ),
     ),
     Measurement(
@@ -724,10 +727,11 @@ ENVELOPE: tuple[Measurement, ...] = (
         ),
         note=(
             "Measured, not predicted: the deploy prints no per-container line (D1941), and "
-            "these windows are the caller's view of the restarts its after-read dated. Every "
-            "deploy pays them -- step 5 brings a project up WITHOUT auth, mcp, postgrest and "
-            "storage and step 6b starts them, whatever their image -- so a deploy is a 10-17 s "
-            "outage of the API by design, not a defect. 0 x 429, 0 unexplained answers."
+            "these windows are the caller's view of the restarts its after-read dated. "
+            "D1941 read them as paid by every deploy; Session 36 corrected it (D2034): the same "
+            "commit redeployed takes nothing away, a new commit recreates auth, mcp and "
+            "storage, and rest and docs went here because 1.13.0 changed their own definitions "
+            "(mem_limit). 0 x 429, 0 unexplained answers."
         ),
     ),
     Measurement(
@@ -755,10 +759,11 @@ ENVELOPE: tuple[Measurement, ...] = (
         ),
         note=(
             "Measured, not predicted: the deploy prints no per-container line (D1941), and "
-            "these windows are the caller's view of the restarts its after-read dated. Every "
-            "deploy pays them -- step 5 brings a project up WITHOUT auth, mcp, postgrest and "
-            "storage and step 6b starts them, whatever their image -- so a deploy is a 10-17 s "
-            "outage of the API by design, not a defect. 0 x 429, 0 unexplained answers."
+            "these windows are the caller's view of the restarts its after-read dated. "
+            "D1941 read them as paid by every deploy; Session 36 corrected it (D2034): the same "
+            "commit redeployed takes nothing away, a new commit recreates auth, mcp and "
+            "storage, and rest and docs went here because 1.13.0 changed their own definitions "
+            "(mem_limit). 0 x 429, 0 unexplained answers."
         ),
     ),
     Measurement(
@@ -946,6 +951,188 @@ ENVELOPE: tuple[Measurement, ...] = (
             "than 20 MB."
         ),
     ),
+    # ---- Session 36: the sittings of 2026-10-04, on the host -----------------
+    #
+    # Session 36 Runs 9 and 10, both projects at 1.14.0. Each number below was read
+    # from the trip's own files by ~/s36/run11/s36-envelope.py and pasted, never
+    # retyped: the probe's gaps documents (R2a, R2b, R3, R5, X1-X3), the units
+    # transcripts of the power-on and the reboot, the host readings and the D1581
+    # instrument's diff. The server was NOT rescaled (D2032), so every MACHINE row
+    # here ran on the same CX23 as Session 35's.
+    Measurement(
+        subject=(
+            "A cold start on the host: the three units active after a power-on, and after a reboot"
+        ),
+        value=(
+            "power-on: all three active 131 s after boot (the edge by 50 s, both projects by "
+            "110 s); reboot: 124 s (the edge by 43 s, both projects by 104 s)"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 3,814 MB deployment host (Hetzner CX23, NOT rescaled -- D2032), no swap, "
+                "2 vCPU Intel Xeon Processor (Skylake, IBRS, no TSX)"
+            ),
+            "kernel 7.0.0-34-generic on both boots (the power-on took it, D2031)",
+            (
+                "power-on 2026-10-04, boot 08:49:00Z, release 1.13.0 at f7fb96d; reboot "
+                "2026-10-04, boot 10:26:50Z, release 1.14.0 at 2538ac0"
+            ),
+            (
+                "s36-units.sh as op: `systemctl is-active` every 10 s on "
+                "agentic-postgres-project@alpha-dev, @beta-dev and agentic-postgres-edge; done "
+                "= all three active three readings in a row"
+            ),
+        ),
+        note=(
+            "Measured from the boot the kernel reports, so the BIOS and the console are not in "
+            "it. The rescale sitting's whole outage was ~26 min per project (08:26:31Z "
+            "poweroff -> ~08:52:30Z doctors), 22.5 of them powered off while a size was chosen "
+            "at the console -- that is the operator's time, not the machine's, and it is not a "
+            "rescale's cost (none was taken)."
+        ),
+    ),
+    Measurement(
+        subject="A deploy's downtime per class, through the edge, on the host: 1.13.0 -> 1.14.0",
+        value=(
+            "alpha-dev (R2a): auth 7.1 s (bound 9.6 s), mcp 12.5 s (bound 15.0 s), storage "
+            "10.8 s (bound 13.3 s), rest 0 s, docs 0 s; beta-dev (R2b): auth 8.3 s (bound 10.8 "
+            "s), mcp 12.5 s (bound 15.0 s), storage 8.3 s (bound 10.8 s), rest 0 s, docs 0 s; "
+            "the neighbour 0 s on every class during each"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 3,814 MB deployment host (Hetzner CX23, NOT rescaled -- D2032), no swap, "
+                "2 vCPU Intel Xeon Processor (Skylake, IBRS, no TSX)"
+            ),
+            (
+                "release 1.14.0 at 7fa90c5 over 1.13.0, 2026-10-04 (alpha ended 08:59:01Z, "
+                "beta 09:03:11Z)"
+            ),
+            (
+                "s35-r10-probe.py from the host as op through the public edge: one "
+                "unauthenticated GET per class and project every 1.25 s, 10 targets, 8 req/s "
+                "in total, 2 s timeout"
+            ),
+            (
+                "down = a transport error, a 502/503/504 or Traefik's 404; bound = observed + "
+                "one interval either side"
+            ),
+            (
+                "services/auth-api moved in this release; migrations 0038 and 0039 applied by "
+                "each deploy"
+            ),
+        ),
+        note=(
+            "Only auth, mcp and storage were recreated (their containers created at the "
+            "deploy; postgrest and docs kept the boot's) -- D2034. Session 35's rest and docs "
+            "windows came from 1.13.0 changing those services' own definitions (mem_limit), "
+            "not from every deploy."
+        ),
+    ),
+    Measurement(
+        subject="A deploy of a NEW commit that moves no product file, per class, on the host",
+        value=(
+            "alpha-dev: auth 8.3 s (bound 10.8 s), mcp 13.8 s (bound 16.2 s), storage 8.3 s "
+            "(bound 10.8 s), rest 0 s, docs 0 s; beta-dev: auth 10.9 s (bound 13.4 s), mcp "
+            "12.8 s (bound 15.4 s), storage 8.8 s (bound 11.2 s), rest 0 s, docs 0 s"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 3,814 MB deployment host (Hetzner CX23, NOT rescaled -- D2032), no swap, "
+                "2 vCPU Intel Xeon Processor (Skylake, IBRS, no TSX)"
+            ),
+            (
+                "7fa90c5 -> 2538ac0 (only bin/session-36-check.sh and two test modules moved), "
+                "2026-10-04, alpha ended 09:32:27Z, beta 09:33:50Z, one after the other"
+            ),
+            (
+                "s35-r10-probe.py from the host as op through the public edge: one "
+                "unauthenticated GET per class and project every 1.25 s, 10 targets, 8 req/s "
+                "in total, 2 s timeout"
+            ),
+            (
+                "down = a transport error, a 502/503/504 or Traefik's 404; bound = observed + "
+                "one interval either side"
+            ),
+        ),
+        note="The agent predicted 0 s from R3 (the same commit) and was wrong -- D2034.",
+    ),
+    Measurement(
+        subject=(
+            "What a redeploy takes away (D1581, D1713): the same commit, a new commit, a "
+            "changed definition"
+        ),
+        value=(
+            "the SAME commit redeployed: nothing -- 10 of 10 containers UNTOUCHED (same id, "
+            "StartedAt, 0 restarts), 0 down windows over 10 probe targets, the secret "
+            "generation MOVED; a NEW commit: auth, mcp and storage recreated even when no "
+            "product file moved; rest and docs only when their own definition changes"
+        ),
+        kind=CONFIGURATION,
+        conditions=(
+            (
+                "deploy.sh step 5 brings a project up 'without auth,mcp,postgrest,storage' and "
+                "6b starts them"
+            ),
+            (
+                "s36-d1581.py as root: every project container's id, image, Created, "
+                "StartedAt, RestartCount, before and after"
+            ),
+            (
+                "R3 alpha-dev at 7fa90c5 twice (2026-10-04 09:06Z); R2 1.13.0 -> 1.14.0; R5 "
+                "7fa90c5 -> 2538ac0"
+            ),
+        ),
+        note=(
+            "'up without' does not stop a running container: Compose leaves one whose "
+            "definition did not change. What ties auth, mcp and storage to the COMMIT is not "
+            "measured (the release directory is keyed by commit -- a hypothesis). The "
+            "containers keep the generation they started with after a same-commit redeploy "
+            "(D253's class: harmless while the values are identical)."
+        ),
+    ),
+    Measurement(
+        subject="A credential rotation's downtime on alpha, per class (X1 / X3; X2 took none)",
+        value=(
+            "X1 the authenticator / X3 the application credential: rest 97.2 / 85.3 s, auth "
+            "96.8 / 85.5 s, mcp 94.7 / 84.1 s, storage 96.7 / 86.6 s, docs 56.3 / 46.2 s; X2 "
+            "the documentation password, with no `down`: 0 s on every class; beta-dev 0 s "
+            "throughout"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 3,814 MB deployment host (Hetzner CX23, NOT rescaled -- D2032), no swap, "
+                "2 vCPU Intel Xeon Processor (Skylake, IBRS, no TSX)"
+            ),
+            (
+                "release 1.14.0 at 2538ac0, 2026-10-04, X1 deploy ended 10:17:34Z, X2 "
+                "10:21:13Z, X3 10:24:44Z"
+            ),
+            (
+                "docs/api-operations.md's sequence: capture, the value replaced at Infisical "
+                "by hand, project-runtime.sh down (X1, X3 only -- D2039), materialize, shape "
+                "check, deploy"
+            ),
+            (
+                "s35-r10-probe.py from the host as op through the public edge: one "
+                "unauthenticated GET per class and project every 1.25 s, 10 targets, 8 req/s "
+                "in total, 2 s timeout"
+            ),
+            (
+                "down = a transport error, a 502/503/504 or Traefik's 404; bound = observed + "
+                "one interval either side"
+            ),
+        ),
+        note=(
+            "The window runs from `down` to the deploy's 6b, so it includes the operator's "
+            "pace between the lines (materialize and the shape check were typed by hand). A "
+            "root-plane credential needs no `down` and costs nothing (ADR 0086)."
+        ),
+    ),
 )
 
 
@@ -956,6 +1143,17 @@ ENVELOPE: tuple[Measurement, ...] = (
 #: dishonest reporting §7 warns about — arriving as a document that looks
 #: complete rather than as a claim that is false.
 UNMEASURED: tuple[Unmeasured, ...] = (
+    Unmeasured(
+        subject="The rescaled host's capacity and its deploy windows (Session 36's D1991)",
+        reason=(
+            "The rescale was not taken: Hetzner had no CX33 (4 vCPU / 8 GB) in hel1 on "
+            "2026-10-04 (D2032), and a server elsewhere is a new Primary IPv4. Every Session 36 "
+            "MACHINE row ran on the unchanged CX23."
+        ),
+        unblocked_by=(
+            "CX33 in hel1 when stocked (Sheets H1-H3), or a planned move with its address change"
+        ),
+    ),
     Unmeasured(
         subject="The deployment's own numbers, on the deployment",
         reason=(

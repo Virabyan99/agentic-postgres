@@ -524,7 +524,16 @@ generation two rotations stale and crash-looped), materialize, deploy,
 declare it to the gate with the matching `--rotated-*-from-file`. Performed
 for alpha's authenticator and documentation passwords on 2026-08-13 and
 again on 2026-08-28, in Session 11's window — the provider reads version 3
-for both (D2022); the application credential has never been rotated.
+for both (D2022) — and **all three on alpha on 2026-10-04** (Session 36, Sheets
+X1–X3), declared to that trip's sweep: the three rotation claims passed for the
+first time. The documentation password needs no `down` (it is the root plane,
+written inline into the middleware) and cost no downtime; the other two cost
+alpha ~85–97 s each (D2039, `capacity.ENVELOPE`). **At Infisical the secret
+already exists**: open the project's own Infisical project, its environment, the
+folder named by `provider_path` and the key named by `provider_key` in
+`secrets.required.yaml`, and replace the value — 64 lowercase hex characters
+(`python3 -c "import secrets; print(secrets.token_hex(32))"`) for a
+`random_hex` secret (D2040).
 
 **The signing key was rotated on both projects on 2026-09-19** (D860; §15 is
 the record). The slot has been free since ADR 0170 retired the bootstrap issuer (Session 15;
@@ -653,11 +662,13 @@ for one without (ADR 0202); the writer prints the commit each half measured
 rather than folding a difference.
 
 **One sweep per trip; a second only when the first found a defect; `-k` to
-iterate**, which writes no evidence. What the document says for 1.13.0
-(`evidence/session-35.json`): 198 claims, 192 passed, 5 `not_run`, 1 failed
-(`documented_path`, by decision until a person walks it). The `not_run` are
-`port_allocation` (no reboot), the three rotation claims (they need four
-rotations) and `replacement_host_restore` (D1028).
+iterate**, which writes no evidence. What the document says for 1.14.0
+(`evidence/session-36.json`): 206 claims, 204 passed, 1 `not_run`
+(`replacement_host_restore`, D1028), 1 failed (`documented_path`, by decision
+until a person walks it). `port_allocation` and the three rotation claims passed
+on that trip because it rotated three credentials and rebooted before its sweep;
+a later trip that does neither will see them `not_run` again — a declaration is
+only made when it is true.
 
 ---
 
@@ -707,11 +718,12 @@ with the row that measured it.
 | exit 12 with `committed unknown (…)` | not root, or a deployed document this run could not parse | `sudo`; then `doctor.sh capacity --host host.yaml`, whose `committed` check names the project it could not read |
 | `Get-NetNat` empty, `ping` to the gateway 100% loss, `mtu 1280`, Tailscale up — on the **workstation**, WSL has no outbound TCP | none of the four is the fault; the trigger is sleep/resume and the fix is a reboot (`CLAUDE.md` §1) | reboot Windows; the host and Docker keep the network throughout |
 
-The host reports `systemctl is-system-running` = `degraded`: some unit has
-failed, unrelated to the deployment (both projects doctor clean), and not
-investigated (`CLAUDE.md` §2). The kernel restart has not been taken since
-Session 20; `--after-reboot` admits the proof that the clusters come back by
-themselves, and nobody has passed it since.
+The host has read `systemctl is-system-running` = `degraded` between boots:
+`cloud-init-hotplugd.service`, socket-activated, fails when a hotplug event
+arrives (D1502; again 2026-10-02, D2031). After a boot it reads `running` until
+the next event, which is not evidence the unit is fixed. The kernel was last
+restarted on 2026-10-04 (Session 36's B1, `7.0.0-34`, the three units active
+124 s after boot), and `--after-reboot` passed on that trip's sweep.
 
 ---
 
@@ -723,12 +735,12 @@ Named so nothing on this page reads as measured when it is not.
   projects, after being declined at five trips (D860). §15 is the record. It
   closes no claim on its own (D1469): the rotation claims need the three
   below declared to one sweep beside it.
-- **The application credential rotation** — never performed: the provider
-  reads version 1 for it on both projects (2026-10-03, D2022). The
-  authenticator and documentation passwords WERE rotated on alpha, on
-  2026-08-13 and again on 2026-08-28 (§9), but no sweep has declared either
-  since, so the three rotation claims are still `not_run`.
-- **A rescale of the server** (§16) — Session 36's sitting is its first.
+- ~~**The application credential rotation**~~ — **PERFORMED 2026-10-04** on
+  alpha with the other two (§9), and the three rotation claims passed on
+  Session 36's sweep. **Beta's three have never been rotated.**
+- **A rescale of the server** (§16) — attempted 2026-10-04 and **not taken**:
+  CX33 was out of stock in `hel1` (D2032). The power cycle around it was
+  performed, and is measured in `capacity.ENVELOPE`.
 - **The R2 credential rotation** by `storage-admin.sh`'s six steps: no record
   found.
 - **A `major` upgrade**: every plan has priced `minor`.
@@ -741,9 +753,9 @@ Named so nothing on this page reads as measured when it is not.
   sweep has driven it, a person has not, on record.
 - ~~**The kernel restart and `--after-reboot`**~~ — **BOTH DONE 2026-09-17**
   by Session 29 (D1500): `7.0.0-29` to `7.0.0-31`, eight seconds of
-  downtime, `--after-reboot` declared and `port_allocation` passed. It is
-  `not_run` again at Session 30 because that trip performed no reboot and
-  the declaration would not have been true (D1568).
+  downtime, `--after-reboot` declared and `port_allocation` passed. It was
+  `not_run` from Session 30 because no trip rebooted (D1568), and **passed
+  again on 2026-10-04** (Session 36's B1, `7.0.0-34`).
 - **A person's walk** of the documented path (ADR 0207's residual); two
   sessions of a model have walked it, and `documented_path` is `failed` on the
   second's record.
@@ -1374,6 +1386,14 @@ is provisioned, adopted, restored or re-issued. The sequence:
 provider's address and by the systemd units, never for capacity, and only
 `provision-host.sh --apply` installs it — so after a rescale it still carries
 the old `memory_mb`, and nothing reads that number (D2025).
+
+**Session 36's sitting (2026-10-04) did not rescale.** The console offered no
+CX33 in `hel1` (D2032): a size can be out of stock in the server's location,
+and a server in another location is a new Primary IPv4 — a move, not a rescale.
+Check the plan's availability on the Rescale page before step 2, so the outage
+is not spent choosing. The power cycle itself also takes any kernel waiting in
+`/var/run/reboot-required` (D2031): read it before step 2 and expect `uname -r`
+to move.
 
 ## 17. Workflows, on a deployment
 
