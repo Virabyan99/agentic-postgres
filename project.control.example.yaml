@@ -1,0 +1,96 @@
+# Control-plane example project manifest (ADR 0251).
+#
+# The shape of the manifest that makes a deployment the CONTROL PLANE: its
+# `auth` container runs `APP_MODE=control` (health, `/auth/me` and the
+# management API `/v1` -- nothing else, no worker), a control router publishes
+# `{api}/v1`, and its migration set `projects/control` holds the accounts,
+# organisations, invitations, second factors, keys and project registry.
+#
+# The operator's real manifest lives at /home/op/control.yaml on the host and
+# never in this checkout (D971); this file is the committed example the
+# control-set proofs render. Its key is `fixture-control-dev`, the fixtures'
+# naming, and deliberately NOT the deployment's `control-prod` -- a proof that
+# renders this example deletes what it published under `.generated/<key>`, and
+# on the host that must never be the deployed project's directory (D2092).
+#
+# Not a gate fixture: `rendered_fixtures.FIXTURE_KEYS` names the two projects
+# the gate reads (D1507) and this is not one of them.
+
+# Schema version 9 (ADR 0251): `control` makes this deployment the control
+# plane. It requires `migrations.set` -- the control plane's tables ARE its set.
+schema_version: 9
+
+control:
+  enabled: true
+
+# The control plane's own migration set. No `approvals_required`: the set
+# publishes nothing in `api`, so it carries no PostgREST contract and no
+# proposal (ADR 0251, D2048, D2076).
+migrations:
+  set: projects/control
+
+project:
+  slug: fixture-control
+  environment: dev
+  domain: fixture-control-dev.test
+  lifecycle:
+    kind: permanent
+
+database:
+  name: fixture_control_dev
+  pooled_public: false
+  pooled_public_cidrs: []
+  max_client_connections: 100
+  pool_size: 20
+
+# REST off (D2049): the control plane's people need an identity, not a data
+# plane. A disabled block carries an empty origin list (D2076).
+api:
+  public_base_path: /api
+  max_rows: 500
+  rest:
+    enabled: false
+    request_body_max_bytes: 1048576
+    request_body_memory_bytes: 1048576
+    pool_size: 10
+    pool_acquisition_timeout_seconds: 5
+    pool_max_idle_seconds: 30
+    pool_max_lifetime_seconds: 1800
+    anonymous_access: deny_data
+    allowed_cors_origins: []
+    statement_timeouts:
+      anon: 2s
+      authenticated: 5s
+
+# `mcp` has no switch: it is rendered, no agent is created on the control
+# project, and no capability manifest of its own is named (D2049).
+mcp:
+  public_base_path: /mcp
+  profile:
+    query_resource:
+      max_rows: 100
+      max_response_bytes: 262144
+
+# Storage off, with the shape a disabled block must have (D2076). The R2
+# storage pair is still owed by the secret contract (D2077).
+storage:
+  enabled: false
+  account_id: null
+  upload_url_ttl_seconds: 600
+  download_url_ttl_seconds: 300
+  max_upload_bytes: 26214400
+  pool_size: 4
+  allowed_cors_origins: []
+
+# Backed up and mirrored from its first day: the control plane is the
+# platform's single point of failure (ADR 0251, D2062).
+backup:
+  enabled: true
+  stanza: fixture-control-dev
+  repository_prefix: pgbackrest/fixture-control-dev/
+  retain_full: 2
+  account_id: 0123456789abcdef0123456789abcdef
+  mirror:
+    enabled: true
+    endpoint: s3.eu-central-003.backblazeb2.com
+    region: eu-central-003

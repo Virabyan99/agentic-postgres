@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "placeholders": {
+    "object_owner": {
+      "type": "identifier",
+      "source": "database.roles.object_owner",
+      "description": "The role every object in this set is created as, reached by SET LOCAL ROLE and never by connecting (ADR 0026). Every control table forces row level security, so the definer functions it owns see only what the policies allow -- design G, ADR 0251."
+    },
+    "auth_service": {
+      "type": "identifier",
+      "source": "database.roles.auth_service",
+      "description": "The identity service's role, which the control project's auth container connects as in APP_MODE=control. Readable only by a set whose project enables the control facility, and only in GRANT EXECUTE ON FUNCTION app.<name>(...) and GRANT USAGE ON SCHEMA app (ADR 0251, D2046, D2073): it is given functions to execute and a schema to name them in, and no table."
+    }
+  },
+  "migrations": [
+    {
+      "version": "20261004120001",
+      "name": "control_identity",
+      "template": "templates/0001-control-identity.sql",
+      "placeholders": [
+        "object_owner",
+        "auth_service"
+      ],
+      "description": "The control plane's people (ADR 0251, ADR 0252): the four organisation roles as an enum and a rank, accounts (a display copy of identity-registry users), organisations, memberships, invitations (account and membership, stored as the SHA-256 of a token shown once, at most 168 hours) and TOTP factors (a readable seed, ADR 0252's stated residual risk; last_step the replay guard). Every table in app with FORCE row level security and design G's policies: the caller from app.current_user_id(), an organisation scope set only after the caller's own membership was read, every scope reset on entry because a setting outlives its function (D2074). Definer functions granted to the identity service alone; control_totp_reset is invoker-rights and granted to nobody, for the operator."
+    },
+    {
+      "version": "20261004120002",
+      "name": "control_keys",
+      "template": "templates/0002-control-keys.sql",
+      "placeholders": [
+        "object_owner",
+        "auth_service"
+      ],
+      "description": "Management API keys (ADR 0253): apg_<key_id>_<secret>, the secret's SHA-256 stored, scopes bounded by a CHECK to Session 37's four read scopes, looked up with the owner's CURRENT role so a departed member's key finds none. control_remove_member lives here because it revokes the member's keys before deleting the membership; a key references its organisation and account, never the membership, so revoked keys remain as history (D2094)."
+    },
+    {
+      "version": "20261004120003",
+      "name": "control_registry",
+      "template": "templates/0003-control-registry.sql",
+      "placeholders": [
+        "object_owner",
+        "auth_service"
+      ],
+      "description": "The project registry, adopted from deployed documents by root through control_adopt_project (invoker-rights, granted to nobody, D2068), and the operations table Session 38 fills -- no function inserts an operation, because no operation type is accepted while its Reality Ledger row is planned (ADR 0254, D2054). Members read their organisations' rows."
+    }
+  ]
+}

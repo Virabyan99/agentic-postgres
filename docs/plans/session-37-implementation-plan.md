@@ -1,6 +1,6 @@
 # Session 37 — The control plane
 
-**Status: EXECUTING. Runs 1–2 DONE 2026-10-04 (rows D2073–D2091; NEXT FREE D2092, ADR 0255).** The second session
+**Status: EXECUTING. Runs 1–3 DONE 2026-10-04 (rows D2073–D2099; NEXT FREE D2100, ADR 0255).** The second session
 of Stage 5 (`docs/plans/stage-5-plan.md` §3). Twelve runs and **two sittings
 on two days** — the release deployed on alpha and beta and the control project
 brought up beside them (day 1), then a person invited, an organisation, a key,
@@ -501,6 +501,14 @@ order.
 | **D2089** | — | Run 2 rendered the control router for the first time; no project in `.generated/` enables the facility, and `projects/control/` does not exist until Run 3, so no RENDER of a control project ran — the labels, the compose variables and the outputs members were proved by calling `build_override`, `build_compose_env` and `build_outputs` directly. | **Run 3 owes the first full render of `project.control.example.yaml`** (with its set) and asserts the rendered `compose.env` and override from the files on disk; Run 10's deploy is the first time Traefik reads them. | A builder proved in isolation and never rendered is question 2 in §7 of CLAUDE.md. | — |
 | **D2090** | CLAUDE.md §1: the harness kills background tasks when the laptop is low on memory. | **WSL stopped answering three times in Runs 1–2** (`Wsl/Service/0x8007274c`). Measured: `vmmemWSL` 6.9 GB of 15.7 GB RAM (WSL saw 7.6 GB, 5.3 GB of it page cache); Docker held **4,290 volumes, 206 GB, 99 % reclaimable** — the anonymous data volume every Docker-backed test and rig left behind — plus 20.2 GB of images and 8.7 GB of build cache, in a 176.4 GB `docker_data.vhdx`. | **With the operator's consent, 2026-10-04:** `docker volume prune -f` (205.9 GB; named volumes and the three attached kept), `docker builder prune -f` (4.2 GB), 32 unpinned project images removed (every image `versions.env` pins kept and checked present; other projects' images untouched); the operator compacted the VHDX as administrator (176.4 → 20.7 GB). **`C:\Users\gmpar\.wslconfig`: `memory=6GB`, `swap=4GB`, `autoMemoryReclaim=gradual`** — WSL now reads 5,926 MiB total and 4,096 swap. A later session that sees WSL drop reads `docker system df` first. | The volumes are the cost of every proof that starts a throwaway cluster; nothing in the suite removes them. | — |
 | **D2091** | Run 2's targeted list (28 modules, the plan's plus every module the diff touched). | **CI red on `45a2a14`** (run 37224201524; Session 1 gate and Session 2 offline contract, 1 failed each of ~7,030): `test_doctor_redaction.py::test_every_schema_block_is_classified_by_this_file` requires every top-level block of the deployed document in `PRINTABLE_BLOCKS` or `SENSITIVE_BLOCKS`, and outputs 20's `control` was in neither. The module reads the outputs schema and touched nothing in the diff, so a targeted list derived from the diff could not see it (D1486's shape). | **`control` is PRINTABLE** (one boolean, no credential or address -- `connectors`' classification and reason); repaired in the next commit, module re-run locally. **A run that adds a top-level deployed-document member adds `test_doctor_redaction` to its targeted list.** | The guard did its job; the list was the defect. | 0251 |
+| **D2092** | Run 2 item 7: `project.control.example.yaml` has slug `control`, environment `prod`, domain `control.example.test`. | That derives the key **`control-prod` -- the real deployment's**. A proof that renders the example publishes `.generated/control-prod` and must delete it (CLAUDE.md §1); on the host, where the operator's `/home/op/control.yaml` renders to the same directory, the cleanup would delete the deployed project's render source. | **The example is slug `fixture-control`, environment `dev` (key `fixture-control-dev`, domain `fixture-control-dev.test`)** -- the fixtures' naming. Still not a gate fixture (`FIXTURE_KEYS` unchanged). | An example that shares a key with production turns every test cleanup into a production edit. | 0251 |
+| **D2093** | Run 3 item 1/3: `control_totp_reset`, `control_adopt_project`, `control_registry_rows` are definer functions **granted to nobody**. | Owned by `{{object_owner}}` and SECURITY DEFINER, they would run as the owner, under FORCE row security, with no caller to scope by -- a reset that must find a user by name would read nothing. The bootstrap superuser is the one role row security does not bind. | **The three are SECURITY INVOKER and granted to nobody**: only the superuser (`docker exec … psql -U postgres`, `bin/control.sh`) executes them, and it reads every row by being the superuser. Proved: `test_the_operator_functions_are_executable_by_no_role` (no role, the identity service included, executes them); `test_a_non_member_sees_nothing` adopts a project through `control_adopt_project` as the superuser. | Granting nobody is the control; invoker rights are what make the function usable by the one caller allowed. | 0251 |
+| **D2094** | Run 3 item 2: `control_keys` has `FOREIGN KEY (organization_id, user_id) REFERENCES control_memberships ON DELETE NO ACTION`, and *"the removal function revokes, then deletes the membership"*. | A revoked key still references its membership, so NO ACTION refuses the delete -- the two sentences cannot both hold. | **A key references `control_organizations(id)` and `control_accounts(user_id)` separately**; `control_remove_member` revokes the member's keys and then deletes the membership; `control_key_lookup` joins the CURRENT membership and returns `member_role` NULL once the member left, so even an unrevoked key finds no role. Revoked keys remain as history. | A foreign key that forbids the documented removal would have surfaced as an error on the first `DELETE /v1/organizations/{org}/members/{id}`. | 0253 |
+| **D2095** | Run 3 item 1: `control_set_member_role` updates the membership's `role`. | **The project lint refused the set**: `SET_ROLE = \bSET\s+(?:LOCAL\s+)?ROLE\b` matched `UPDATE app.control_memberships SET role = p_role` -- a column named `role`, read as a role switch. | **The one statement quotes the column, `SET "role" = p_role`**, with a comment saying why; the lint is not widened (a boundary that refuses a false positive is working). | Loosening the pattern to spare a column name would open a door to the thing it guards. | — |
+| **D2096** | Plan §0: *"`test_every_committed_project_set_still_passes` (`:1111`) globs `projects/*/migrations/manifest.json`, so `projects/control` is linted by construction"*. | It lints every set WITHOUT the facility, so the control set -- which passes only with it -- fails it. | **The test now lints each set with the facility of the committed example manifest(s) naming it, and fails a set that no committed manifest names**, and asserts the control set is named by a manifest enabling the facility. Stricter than the glob: a set nobody can render is now a failure. | The facility is read from a manifest at every real caller; the test reads it the same way. | 0251 |
+| **D2097** | ADR 0251 item 6 / D2048: if a reader refuses a set with no contract, widen that one reader to accept a set that creates no `api` object, with a stricter test beside it. | **The reader that refused is a test**: `test_the_project_reader_finds_every_object_the_project_contract_names` (TEN-SURF-001) loads every set's `contracts/postgrest-api-surface.yaml`. The render and the deploy path do not (rig 37e, D2076). | **Widened exactly as ADR 0251 says**: `_publishes_nothing_and_carries_no_contract(root, published)` -- a set with no contract must publish nothing in `api` (asserted), and every set with one is compared both ways as before; the loop also asserts at least one set carries a contract. **Stricter half**: `test_a_set_that_publishes_without_a_contract_is_refused` -- the control set copied, one `CREATE VIEW api.control_projects` added, refused by name. | ADR 0050's invariant (nothing in `api` the contract does not name) holds for the control set because it publishes nothing. | 0251, 0050 |
+| **D2098** | — | **The existing cluster fixtures remove their container with `docker rm -f` and no `-v`** (`test_auth_endpoints.py:271` and its siblings), leaving the anonymous data volume behind on every run -- the source of D2090's 4,290 volumes. | **`tests/contract/control_cluster.py` removes with `docker rm -fv`**, and Run 3's battery reports `leaked clusters: none`. The older fixtures are not edited in this run (a test-wide change outside Run 3's subject); **§10 carries it**, and a later run that touches a fixture adds `-v`. | The workstation cost of every Docker-backed proof is a volume, until the fixture says otherwise. | — |
+| **D2099** | Run 3 item 1: invitations -- an account invitation needs `admin_users:write`. Battery M2: *"`GRANT … TO {{authenticated}}` added on `control_list_members`"*. | The registry administrator's authority is a SCOPE on their token, which the database cannot read; and the control set declares no `authenticated` placeholder, so the plan's M2 would fail to render rather than reach the test. | **`control_mint_invitation` with a NULL organisation records `issued_by` and trusts the control mode to have checked `admin_users:write` and an enabled factor** (Run 4's route proof, CTL-INV-001, owes it; the function's comment says so). **M2 grants `control_list_members` to `PUBLIC`** -- the same class (a request-reachable grant) the test exists to refuse. | A check the database cannot make is named where it is made instead. | 0252 |
 
 ---
 
@@ -1018,7 +1026,7 @@ FAILED; (M4) `control` accepted at schema 8 → the manifest test FAILED.
 the grep found, `test_rendered_migrations`, `test_acceptance_registry`,
 `test_evidence_claims`; both example projects re-rendered first.
 
-**Done.** 2026-10-04 (code). **CI: `45a2a14` RED** (run 37224201524, one unclassified document block, D2091) → repair commit, verdict recorded in Run 3's commit. Scripts in WSL
+**Done.** 2026-10-04 (code). **CI: `45a2a14` RED** (run 37224201524, one unclassified document block, D2091) → repair **`cb58e31` CI GREEN** (run 37225177397, all four jobs). Scripts in WSL
 `~/s37/run2/` (`r2_*.py` the edits, `r2_battery.py`, `r2-targeted.txt`).
 
 - **Built**: project manifest schema 9 (`control: {enabled}`, the v9 gate,
@@ -1182,7 +1190,45 @@ it; do not count it as killed).
 `test_migrations_apply_as_the_migration_user`, `test_rendered_migrations`,
 `test_acceptance_registry`, `test_evidence_claims`.
 
-**Done.** *(the executor writes it)*
+**Done.** 2026-10-04 (code; CI: see the push). Scripts in WSL `~/s37/run3/`.
+
+- **Built**: `projects/control/migrations/` -- `manifest.json` (placeholders
+  `object_owner`, `auth_service`), three templates (`20261004120001`
+  identity, `…002` keys, `…003` registry), the lock frozen with
+  `bin/migrate.sh --project project.control.example.yaml freeze-lock`
+  (3 migrations, `follows_release_version 20261003120039` computed;
+  `verify-lock` agrees); `project.control.example.yaml` (key
+  `fixture-control-dev`, D2092); `tests/contract/control_cluster.py` (the
+  shared cluster, removed with `-fv`, D2098); `tests/contract/test_control_set.py`.
+- **The set**: 8 tables, all FORCE RLS; design G policies with an
+  organisation scope set only after the caller's own membership was read, and
+  `app.control_enter` resetting every scope first (D2074); 25 definer
+  functions granted to the identity service, 3 helpers and 3 invoker-rights
+  operator functions granted to nobody (D2093); `GRANT USAGE ON SCHEMA app`
+  (D2073); no `api` object, no PostgREST contract (D2097); keys reference the
+  organisation and account (D2094); no function inserts an operation (D2054).
+- **First execution**: all 8 `test_control_set.py` tests PASSED on the first
+  run against the locked image -- catalog (FORCE on all 8 tables, PUBLIC and
+  every request role executing nothing, the identity service executing exactly
+  the 25), scoping as the identity service (own organisations only; a member's
+  call in one transaction leaves nothing to a non-member -- D2074 proved; a
+  non-member gets no row and AP404, a foreign and a missing id alike; the
+  service reads no table directly), and **the first full render of a control
+  project** (D2089: `routes.control`, `AUTH_APP_MODE=control`, 3 rendered
+  project migrations; the directory removed after).
+- **Lint**: refused the set once -- `SET role =` read as a role switch
+  (D2095, column quoted). Passes with the facility, refused without it.
+- **Battery** (`r3_battery.py`): M1 FORCE removed from `control_totp`, M2
+  `control_list_members` to PUBLIC (D2099), M3 `control_adopt_project` to the
+  identity service, M4 the membership check removed from
+  `control_list_members` -- **4/4 KILLED** (target FAILED, control PASSED,
+  restored `cmp`-equal), no cluster leaked. **M5 owed to Run 4** (the
+  concurrent-acceptance proof), not counted.
+- **Targeted once** (13 modules): 431 passed, 1 failed
+  (`test_the_project_reader_finds_every_object_the_project_contract_names`,
+  D2097) → widened with its stricter half → that module re-run: **69 passed**.
+  `test_every_committed_project_set_still_passes` made stricter (D2096).
+- **Rows D2092–D2099.** NEXT FREE: D2100, ADR 0255.
 
 ### Run 4 — the control mode, part one: sessions, TOTP, invitations, organisations, members
 
@@ -1935,6 +1981,9 @@ requirements; `process-max` 1 (D593); `documented_path` (D1935);
   project from now on; *restore it first* is Session 42's sentence (D2069).
 - **Manifest schema 9 is `control`** — Session 38's `compute` is schema 10
   (D2044).
+- **The older cluster fixtures leak a Docker volume per run** (`docker rm -f`
+  without `-v`, D2098) -- `control_cluster.py` does not; the rest are fixed by
+  the next run that touches each.
 
 ---
 

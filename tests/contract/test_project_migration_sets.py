@@ -29,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, api_surface, migrations, rendering, sql_surface
+from agentic_postgres import REPO_ROOT, api_surface, config, migrations, rendering, sql_surface
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -1113,11 +1113,33 @@ def test_every_committed_project_set_still_passes() -> None:
 
     §4 of the Session 34 plan: every project set under `projects/*/migrations`
     passes the new rule.
+
+    **Linted with the facility of the committed manifest that names it**
+    (Session 37, ADR 0251, D2096): the control set passes only as the control
+    plane's, so each set must be named by a committed example manifest, and
+    `config.control_enabled` of that manifest is what the lint is given -- the
+    reading every real caller makes. A set no committed manifest names fails
+    here, which is stricter than the glob alone was.
     """
     roots = sorted((REPO_ROOT / "projects").glob("*/migrations/manifest.json"))
     assert roots, "no committed project set to measure"
+    named: dict[str, list[dict[str, Any]]] = {}
+    for path in sorted(REPO_ROOT.glob("project*.example.yaml")):
+        document = config.load_project_manifest(path)
+        set_path = config.project_migration_set(document)
+        if set_path is not None:
+            named.setdefault(set_path, []).append(document)
     for manifest in roots:
-        migrations.lint_project_set(migrations.MigrationSet(label="project", root=manifest.parent))
+        relative = str(manifest.parent.parent.relative_to(REPO_ROOT))
+        assert relative in named, f"{relative} is named by no committed example manifest"
+        for document in named[relative]:
+            migrations.lint_project_set(
+                migrations.MigrationSet(label="project", root=manifest.parent),
+                control=config.control_enabled(document),
+            )
+    assert any(config.control_enabled(d) for d in named.get("projects/control", [])), (
+        "the control set must be named by a manifest that enables the facility"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1185,6 +1207,55 @@ def test_project_set_from_reads_the_document_and_not_the_manifest(
     assert migrations.project_set_from(document) is not None
 
 
+def _publishes_nothing_and_carries_no_contract(root: Path, published: set[str]) -> bool:
+    """ADR 0251 (D2048, D2097): a set that creates NOTHING in `api` -- the
+    control plane's, whose functions are granted to the identity service and
+    never published -- carries no PostgREST contract, because a contract naming
+    something only so it is not empty would describe nothing real.
+
+    True for exactly that set. A set with no contract that DOES publish is
+    refused here, by name: ADR 0050's invariant -- nothing in `api` the
+    reviewed contract does not name -- holds for it as for every other.
+    """
+    if api_surface.project_contract_path(root).exists():
+        return False
+    assert not published, (
+        f"{root.name}: the SQL publishes {sorted(published)} in api and the set carries no "
+        "reviewed contract. An object in api needs one (ADR 0050); only a set that "
+        "publishes nothing may omit it (ADR 0251)."
+    )
+    return True
+
+
+def test_a_set_that_publishes_without_a_contract_is_refused(tmp_path: Path) -> None:
+    """The widening's stricter half (ADR 0251, D2097): the control set without
+    a contract passes because it publishes nothing; the same set with one view
+    added in `api`, and still no contract, is refused."""
+    copied = tmp_path / "control"
+    shutil.copytree(REPO_ROOT / "projects" / "control", copied)
+    migration_set = migrations.MigrationSet(label="project", root=copied / "migrations")
+    surface = sql_surface.final_surface(migration_set.load_manifest(), migration_set.root)
+    assert _publishes_nothing_and_carries_no_contract(copied, sql_surface.published_names(surface))
+
+    template = copied / "migrations" / "templates" / "0003-control-registry.sql"
+    body = template.read_text(encoding="utf-8")
+    anchor = "-- migrate:down"
+    assert body.count(anchor) == 1
+    template.write_text(
+        body.replace(
+            anchor,
+            "CREATE VIEW api.control_projects AS SELECT key FROM app.control_projects;\n\n"  # noqa: S608 -- a literal the proof writes
+            + anchor,
+        ),
+        encoding="utf-8",
+    )
+    surface = sql_surface.final_surface(migration_set.load_manifest(), migration_set.root)
+    published = sql_surface.published_names(surface)
+    assert published == {"control_projects"}, published
+    with pytest.raises(AssertionError, match="carries no reviewed contract"):
+        _publishes_nothing_and_carries_no_contract(copied, published)
+
+
 def test_the_project_reader_finds_every_object_the_project_contract_names() -> None:
     """TEN-SURF-001, over EVERY set in `projects/`, not just the example's.
 
@@ -1206,13 +1277,17 @@ def test_the_project_reader_finds_every_object_the_project_contract_names() -> N
         if path.is_dir() and (path / "migrations" / "manifest.json").is_file()
     )
     assert roots, "there are no project sets in projects/, so this loop proves nothing"
+    assert any(api_surface.project_contract_path(root).exists() for root in roots), (
+        "no project set carries a contract, so the comparison below proves nothing"
+    )
 
     for root in roots:
-        contract = api_surface.load_project_surface(api_surface.project_contract_path(root))
         migration_set = migrations.MigrationSet(label="project", root=root / "migrations")
         surface = sql_surface.final_surface(migration_set.load_manifest(), migration_set.root)
-
         published = sql_surface.published_names(surface)
+        if _publishes_nothing_and_carries_no_contract(root, published):
+            continue
+        contract = api_surface.load_project_surface(api_surface.project_contract_path(root))
         assert published, f"{root.name}: the reader found no objects in this project's SQL"
 
         named = set(contract["relations"]) | set(contract["rpcs"]) | set(contract["enums"])

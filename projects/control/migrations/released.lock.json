@@ -1,0 +1,40 @@
+{
+  "follows_release_version": "20261003120039",
+  "follows_release_version_source": "computed",
+  "migrations": [
+    {
+      "canonical_render_sha256": "b37ed4b05bc452f872a8dceec8e275cf1b100263dca3c2e0dd180d114f9393f3",
+      "name": "control_identity",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0001-control-identity.sql",
+      "template_sha256": "bdf8e272e2a920481c6a01dd7c85e4ca1137974f48c9eb66a12e72eec37ef3c0",
+      "version": "20261004120001"
+    },
+    {
+      "canonical_render_sha256": "fcc7e395a36367bafd40a418e074594a971c7397509a7ac27f2a272fd6e8a15b",
+      "name": "control_keys",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0002-control-keys.sql",
+      "template_sha256": "468b58e1b2b4855c4be18f876f78963e45abb3e08213b0ec181c6acde4ed5e7f",
+      "version": "20261004120002"
+    },
+    {
+      "canonical_render_sha256": "c7f49c34d0381d81066b8ae38ed6870769fe5e7d67a884acecbeabb8c5f9926d",
+      "name": "control_registry",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0003-control-registry.sql",
+      "template_sha256": "1d447763a1e9807456200eb19b0c3783a9824d7a7a5a2b7a587d6144eaf86473",
+      "version": "20261004120003"
+    }
+  ],
+  "schema_version": 3
+}
