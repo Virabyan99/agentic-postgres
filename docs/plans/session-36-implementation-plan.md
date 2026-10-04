@@ -1,11 +1,12 @@
 # Session 36 — Preconditions: the boundary, the rescale, and the operating debt
 
-**Status: IN PROGRESS — Runs 1–7 done 2026-10-03 (rows D2006–D2026; CI
+**Status: IN PROGRESS — Runs 1–7 done 2026-10-03, Run 8 2026-10-04 (rows
+D2006–D2030; CI
 green on `4b23773`, on Run 5's repair `c4582ab` (run 37133402800) and on Run
-6's `e5469b9` (run 37136556399)). Sheet E0 read 2026-10-03: Run 6 BUILT
+6's `e5469b9` (run 37136556399) and on Run 8's `58929e2` (run 37186749247)). Sheet E0 read 2026-10-03: Run 6 BUILT
 (D2019, D2022, ADR 0250); the two host.yaml copies differ (D2020) and admission
 reads the checkout's (D2025). The trip's instruments are in WSL `~/s36/run7/`
-and `/home/op`. Next: Run 8. NEXT FREE D2027.** Planned
+and `/home/op`. 1.14.0 is committed. Next: Run 9. NEXT FREE D2031.** Planned
 2026-10-03 at `1ea6259`. The first session of
 Stage 5 (`docs/plans/stage-5-plan.md` §3). Eleven runs and **two sittings on
 two days** — the server rescaled in place and the release deployed (one outage
@@ -409,6 +410,10 @@ second table below it, in execution order.
 | **D2024** | §1 D2006: *"Run 7's `s36-sweep.sh` is derived from F6 by diff, so the flag survives by construction; the derivation's token diff must show it present."* | **Not a new divergence: D2006, measured.** Run 7 re-found the same flag from the evidence (`disaster_kit` passed at Session 35; `test_session18_recovery.py:267-279` reads `APG_REPLACEMENT_BOOTSTRAP_STATE`) before reading D2006 — a row spent on a decision the table already held, which is the reason to read §1's rows before a run, not only the rows it names. | **The token diff D2006 asked for**: `s36-sweep.sh`'s gate invocation carries 20 flag tokens against F6's 15 — `--after-reboot` and the four `--rotated-*` added, **none removed**, so `--replacement-bootstrap-state /home/op/replacement-bootstrap-state.json` is present; every token is a flag `session-35-check.sh` accepts. | D2006 named the measurement; this is it. | — |
 | **D2025** | §1 D1992 and D2020; Sheet H4: *"<the install line Run 7 found — e.g. sudo install -o root -g root -m 0600 host.yaml /etc/agentic-postgres/host.yaml>"*. | Read in Run 7 (an Explore pass over `bin/` and `src/`, the deciding lines re-read): deploy step 0's admission reads the file `deploy.sh --host` names (`deploy.sh:200` makes it absolute; `deploy-project.py:2270` `capacity_probe.read(arguments.host, …)`; `capacity_probe.py:240` `declared_capacity`), and `doctor capacity` reads its required `--host` (`doctor.py:1326-1330`). `host_config.declared_capacity` is the ONLY reader of `capacity.*`. The `/etc` copy is read through hard-coded paths for `infisical.api_url` alone (`materialize-secrets.py:47`, the doctor's `secrets` reading) and by the systemd launchers (the edge's `host.id` and edge settings; the project launcher's materialize). Nothing compares the two copies — D22's promised drift refusal was never built — and the only installer of the `/etc` copy is `provision-host.sh --apply` (`:905`), which also re-installs units, sudoers, the firewall, Docker's `daemon.json` and the ufw rules. The checkout copy declares `disk_gb: 37` (D1992 says 38). | **Sheet H4 installs nothing**: `s36-hostyaml.py` edits the checkout's `host.yaml`, the copy every admission and capacity reading is handed, and `doctor capacity --host host.yaml` reads it back. The `/etc` copy keeps its 2026-09-06 bytes; bringing it level is NOT done here (§10). `disk_gb` 37 stands — CPU and RAM only. | An install into a copy nothing reads for capacity is a step with no reader (D816); running the whole `--apply` to make two copies agree would re-run the host's baseline inside the outage window. | 0221, 0009 |
 | **D2026** | §5 Run 10 and Sheet S1: *"`sudo setsid nohup bash /home/op/g36-host.sh > /dev/null 2>&1 < /dev/null &`"*; §5 Run 7 item 10: *"Session 35's external line unchanged"*. | No Session 36 sheet installs the op-owned document copies (`/home/op/<key>-outputs.json`) after the 1.14.0 deploys — Session 35's F5 did, LAST before the sweep (D1767) — and the external half refuses copies naming another commit. `g36-host.sh` names no script; Session 35's shape is a sweep script detached by a root launcher that clears the exit file first (`s35-r10-launch.sh`). Session 35's sweep and external scripts TYPED the deployed commit, which for 1.14.0 does not exist until Run 8. | **Sheet S1 installs the two copies (Session 35's F5 line) and launches with `sudo bash /home/op/s36-launch.sh`**, which detaches `/home/op/s36-sweep.sh`. No commit is typed in any trip script: the sweep requires HEAD to equal BOTH deployed documents' `source_commit` and the kernel to have booted after both `observed_at`s (else exit file 95, nothing run); the external half requires both copies to name the host half's commit. | A commit read from the deployed documents cannot go stale between Run 8 and the trip; the copies after X3 are the documents the external half and the merge compare. | 0218 |
+| **D2027** | §2: *"`OPS-LOG-001` | `create_app` installs exactly one stdout handler …"*, *"`OPS-LOG-002` | On the deployment …"* and *"record retention extends `OPS-RETAIN` and the request log `OPS-LOG`"*. | `OPS-LOG-001` is **Session 11's** requirement (*one request ID spans ingress, API, agent and audit*, claim `log_correlation`, `passed` in every evidence document since 11); `OPS-RETAIN` did not exist (Session 33's retention is `AGT-RETAIN-001`). Run 8's first targeted pass: `test_ids_are_unique` FAILED on `OPS-LOG-001`, six `test_evidence_claims` proofs with it. | **The request log registers as `OPS-LOG-002` (offline, `request_log`) and `OPS-LOG-003` (live, `request_log_live`)**; ADR 0249's *Affects* line and the two modules' docstrings follow; the family sentence says `OPS-RETAIN` is new and `OPS-LOG` is extended. | A plan's proposed id is a proposal; the registry's uniqueness proof is what reads it. | 0249 |
+| **D2028** | §5 Run 8: *"`docs/operator-guide.md` §9/§13 corrected per D1996"*. | §9's second paragraph opened *"**The signing key has never been rotated on this deployment** (D860)"* and closed *"is the first item on Stage 4's bill"* — one paragraph below D1996's sentence, while §13 and §15 record the rotation on both projects on 2026-09-19. §10 still quoted 1.12.0's evidence numbers. | **Corrected with D1996's**: *"The signing key was rotated on both projects on 2026-09-19 (D860; §15 is the record)"*, the bill sentence dropped; §10 reads 1.13.0's (198 / 192 / 5 / 1). | The same page contradicting itself about an irreversible act is D1996's class. | 0224 |
+| **D2029** | §5 Run 8's targeted list: *"`test_acceptance_registry`, `test_evidence_claims`, `test_cli_contract`, `test_session_thirty_six_gate_modes`, `test_documentation_index`, `test_session12_documented_path`, `test_reality_ledger`"*. | `test_record_command.py::test_nothing_schedules_a_prune` scans `bin/` and `src/` for the record command's file name and holds the exact set `{bin/record.sh, bin/record.py}`; Run 8's release paragraph and the derived gate's header and usage named `bin/record.sh` in prose. The list did not hold the module, and **both gates on `55c002c` failed that one proof** (offline 7,000 passed / 1 failed, `record_command` failed; session-01 6,991 / 1). | **The prose says "the record command"** (`1c52fc4`); the scan and its exact set are unchanged, so no gate derived from 36 inherits a mention. | A targeted list chosen from what a run edits cannot see a reader of the TEXT it writes (D1187, D1486) — the gate can, which is what it is for. | 0248 |
+| **D2030** | §2 `LEDGER-001`'s node ids, as Run 5 left them (D2021's split: *"a passed half where a document exists, skipping with its reason elsewhere"*). | CI on `1c52fc4` (run 37185795215): `session-01-check` PASSED, 6,991 / 0, then the offline-half step exited 5 — `reality_ledger` `not_run`, because `test_available_and_beta_rows_name_evidence_that_resolves` skips where no `evidence/session-NN.json` exists and CI's checkout has none (gitignored). The workstation's gate passed it. | **The operator chose to narrow the claim** (2026-10-04): the proof leaves `LEDGER-001`'s node ids and stays in the suite, so every workstation gate still fails on a bad row; the description says what the claim covers and why that check is not part of it (`58929e2`). Rejected: CI red on every push; a committed evidence snapshot outside `evidence/`, which stales. | An offline claim is what any checkout can decide (ADR 0202); a proof whose input is gitignored is a workstation's guard, not a checkout's claim. | 0202, 0247 |
 
 ---
 
@@ -1437,8 +1442,44 @@ reads if no code moves before Run 10) and `bin/session-01-check.sh`, both
 ONCE, both run detached with their exit codes written to files (CLAUDE.md §1).
 Push; read CI by full SHA.
 
-**Done.** *(executor: the counts read from the tuples, the gate's flag diff,
-the offline half's numbers, CI.)*
+**Done.** 2026-10-04, commits `55c002c` (the bump), `1c52fc4` and `58929e2`
+(two repairs). **Counts read from the tuples**: requirements 291 → 299 (eight at
+36), `CLAIMS` 198 → 206, `OFFLINE_CLAIMS` 60 → 65, ADRs 250, `CURRENT_SESSION`
+36, `VERSION` 1.14.0. The live module returned from `~/s36/run4/` (sha256
+`f1bfb219…`), changed only in its two docstring ids (D2027); `--setup-plan` with
+the variables set: 5 SETUP, 0 errors; without them: 4 skipped. **The gate's flag
+diff**: `bin/session-36-check.sh` derived from 35's with every substitution
+counted; sorted flag tokens 60 = 60, parser arms (34) identical, the body below
+the usage unchanged, between the header and the usage only `SESSION=36`. Its
+header follows D2006, not this run's own sentence: `--replacement-bootstrap-state`
+is still given and only `--replacement-host-outputs` stays undeclared.
+**`upgrade plan` offline** (a worktree at `f7fb96d`, the candidate this tree,
+both rendering the installed `project.example.yaml`, schema 8): declared,
+`requires minor`, verdict `ok`, `changes [implementation, migration_added]`,
+`operator_digests_moved []`; undeclared, `requires patch`; three leaves differ
+(`template_version`, `migrations.release_lock_sha256`,
+`inputs.secrets_contract_sha256`), 5,993 bytes both. **Battery 9/9 killed**
+(each target FAILED, both controls PASSED every time, files `cmp`-restored): a
+host claim declared offline; `secret_age` undeclared; `CLAIM_INTRODUCED_IN` at
+35; a node id renamed; `LEDGER` out of the regex; `SESSION=35`; the help naming
+35's offline half; `--rotated-from-file`'s entry dropped; `OPS-ROTATE-002` at
+35. **Targeted**: first pass 14 failed / 933 passed — the `OPS-LOG-001`
+collision (D2027), three new files not yet in the index (D1014's order), the
+paragraph not saying which schemas did not move, and the two fixture renders
+removed after the setup-plan (the gate and `generate` read them, D1507); after
+the repairs, 783 passed. Docs: operator guide §1, §9 (D1996/D2022, D2028), §10,
+§13 and a §16 subsection on the rescale (D1992, D1993, D2025); the upgrade
+guide's 1.14.0 row; every `--session 35` / `--through-session 35` literal moved
+(README 1+1, api-operations 1+3, operator guide 3+4, pool-operations 1, upgrade
+guide 1+1). **The offline half's numbers**: the two gates on `55c002c`, run once
+in the harness's background — WSL stopped answering for about fifteen minutes
+while they ran (5.6 GB in its VM, 1.2 GB free on the laptop) and came back on
+its own: offline 7,000 passed / 1 failed / 3 skipped, `record_command` failed;
+session-01 6,991 / 1; both the same proof (D2029). **That
+`evidence/session-36-offline.json` is NOT the half to merge** — it names
+`55c002c` and a failed claim; the half Run 10 merges is written again at the
+deployed commit before the trip. CI on `1c52fc4`: red at the offline-half step
+(D2030). **CI on `58929e2`**: **GREEN** (run 37186749247; P0 inventory, the Session 1 gate and the Session 2 offline contract all `success`, judged on the run for that full SHA). That run's `session-01-evidence` artifact carries a `session-36-offline.json` for `58929e2`.
 
 ### Run 9 — sitting 1 (day 1): the rescale, then the release
 
