@@ -1726,7 +1726,10 @@ def test_a_value_outside_its_contract_is_refused_and_never_clamped(
     filter disappear.
     """
     admin = _login(drive).json()["access_token"]
-    auditor = _auditor(drive, admin, f"auditor-{abs(hash(query)) % 100000}")
+    # A uuid, not `hash(query) % 100000`: string hashes are randomised per
+    # process, so two cases could share a name in this module's one cluster
+    # and the second creation failed on the unique username (D2100).
+    auditor = _auditor(drive, admin, f"auditor-{uuid_module.uuid4().hex[:12]}")
     response = drive("GET", f"/admin/audit?{query}", headers={"Authorization": f"Bearer {auditor}"})
     assert response.status_code == 422, f"{why}: {response.status_code} {response.text}"
     assert response.json()["error"] == "invalid_request"
@@ -2002,7 +2005,7 @@ def test_a_timestamp_or_member_outside_its_contract_is_refused(
     values and not about the parameters.
     """
     admin = _login(drive).json()["access_token"]
-    auditor = _auditor(drive, admin, f"auditor-t{abs(hash(query)) % 100000}")
+    auditor = _auditor(drive, admin, f"auditor-t{uuid_module.uuid4().hex[:12]}")  # D2100
     headers = {"Authorization": f"Bearer {auditor}"}
     response = drive("GET", f"/admin/audit?{query}", headers=headers)
     assert response.status_code == 422, f"{why}: {response.status_code} {response.text}"

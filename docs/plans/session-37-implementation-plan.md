@@ -1,6 +1,6 @@
 # Session 37 — The control plane
 
-**Status: EXECUTING. Runs 1–3 DONE 2026-10-04 (rows D2073–D2099; NEXT FREE D2100, ADR 0255).** The second session
+**Status: EXECUTING. Runs 1–3 DONE 2026-10-04 (rows D2073–D2100; NEXT FREE D2101, ADR 0255).** The second session
 of Stage 5 (`docs/plans/stage-5-plan.md` §3). Twelve runs and **two sittings
 on two days** — the release deployed on alpha and beta and the control project
 brought up beside them (day 1), then a person invited, an organisation, a key,
@@ -509,6 +509,7 @@ order.
 | **D2097** | ADR 0251 item 6 / D2048: if a reader refuses a set with no contract, widen that one reader to accept a set that creates no `api` object, with a stricter test beside it. | **The reader that refused is a test**: `test_the_project_reader_finds_every_object_the_project_contract_names` (TEN-SURF-001) loads every set's `contracts/postgrest-api-surface.yaml`. The render and the deploy path do not (rig 37e, D2076). | **Widened exactly as ADR 0251 says**: `_publishes_nothing_and_carries_no_contract(root, published)` -- a set with no contract must publish nothing in `api` (asserted), and every set with one is compared both ways as before; the loop also asserts at least one set carries a contract. **Stricter half**: `test_a_set_that_publishes_without_a_contract_is_refused` -- the control set copied, one `CREATE VIEW api.control_projects` added, refused by name. | ADR 0050's invariant (nothing in `api` the contract does not name) holds for the control set because it publishes nothing. | 0251, 0050 |
 | **D2098** | — | **The existing cluster fixtures remove their container with `docker rm -f` and no `-v`** (`test_auth_endpoints.py:271` and its siblings), leaving the anonymous data volume behind on every run -- the source of D2090's 4,290 volumes. | **`tests/contract/control_cluster.py` removes with `docker rm -fv`**, and Run 3's battery reports `leaked clusters: none`. The older fixtures are not edited in this run (a test-wide change outside Run 3's subject); **§10 carries it**, and a later run that touches a fixture adds `-v`. | The workstation cost of every Docker-backed proof is a volume, until the fixture says otherwise. | — |
 | **D2099** | Run 3 item 1: invitations -- an account invitation needs `admin_users:write`. Battery M2: *"`GRANT … TO {{authenticated}}` added on `control_list_members`"*. | The registry administrator's authority is a SCOPE on their token, which the database cannot read; and the control set declares no `authenticated` placeholder, so the plan's M2 would fail to render rather than reach the test. | **`control_mint_invitation` with a NULL organisation records `issued_by` and trusts the control mode to have checked `admin_users:write` and an enabled factor** (Run 4's route proof, CTL-INV-001, owes it; the function's comment says so). **M2 grants `control_list_members` to `PUBLIC`** -- the same class (a request-reachable grant) the test exists to refuse. | A check the database cannot make is named where it is made instead. | 0252 |
+| **D2100** | — | **CI red on `89655ed`** (run 37227231821): the Session 1 gate PASSED and the Session 2 offline contract job failed 1 of 7,039 -- `test_auth_endpoints.py::test_a_value_outside_its_contract_is_refused_and_never_clamped[agent_id=not-a-uuid-…]` with `duplicate key … users_username_normalised_key (auditor-73424)`. Pre-existing and unrelated to Run 3: two parametrised tests name their user `auditor-{abs(hash(query)) % 100000}`, and string hashes are randomised per process, so two cases can share a name inside the module's one cluster. | **Both names take a uuid suffix** (`uuid4().hex[:12]`); the assertions are unchanged. The 17 selected cases re-run locally: 17 passed. | A proof that fails one CI run in a few hundred for a reason it does not test teaches a reader to re-run instead of read. | — |
 
 ---
 
@@ -1190,7 +1191,7 @@ it; do not count it as killed).
 `test_migrations_apply_as_the_migration_user`, `test_rendered_migrations`,
 `test_acceptance_registry`, `test_evidence_claims`.
 
-**Done.** 2026-10-04 (code; CI: see the push). Scripts in WSL `~/s37/run3/`.
+**Done.** 2026-10-04 (code). **CI: `89655ed` RED** (run 37227231821, a pre-existing username collision in `test_auth_endpoints.py`, D2100) → repair commit, its verdict recorded in Run 4's commit. Scripts in WSL `~/s37/run3/`.
 
 - **Built**: `projects/control/migrations/` -- `manifest.json` (placeholders
   `object_owner`, `auth_service`), three templates (`20261004120001`
@@ -1228,7 +1229,7 @@ it; do not count it as killed).
   (`test_the_project_reader_finds_every_object_the_project_contract_names`,
   D2097) → widened with its stricter half → that module re-run: **69 passed**.
   `test_every_committed_project_set_still_passes` made stricter (D2096).
-- **Rows D2092–D2099.** NEXT FREE: D2100, ADR 0255.
+- **Rows D2092–D2100.** NEXT FREE: D2101, ADR 0255.
 
 ### Run 4 — the control mode, part one: sessions, TOTP, invitations, organisations, members
 
