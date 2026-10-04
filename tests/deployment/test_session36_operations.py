@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT
+from agentic_postgres import REPO_ROOT, naming
 
 pytestmark = [
     pytest.mark.p0,
@@ -72,8 +72,14 @@ def _run(*command: str, stdin: str | None = None, timeout: int = 60) -> subproce
 
 
 def _service_container(document: dict[str, Any], service: str) -> str:
-    """The one running container of `service` in this project's compose project."""
-    project = document["compose"]["project_name"]
+    """The one running container of `service` in this project's compose project.
+
+    The Compose project is DERIVED from the key (ADR 0002), as Sessions 32 and 34
+    do: `compose.project_name` exists only in a RENDERED document, and the
+    fixtures here are deployed ones -- the first version raised `KeyError:
+    'compose'` on its first host run (D2036), the class Session 5's
+    `service_container` had already recorded."""
+    project = naming.compose_project_name(document["project"]["key"])
     listing = _run(
         "docker", "ps", "-q", "--no-trunc",
         "--filter", f"label=com.docker.compose.project={project}",

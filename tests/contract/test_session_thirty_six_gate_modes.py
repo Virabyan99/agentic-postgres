@@ -731,6 +731,23 @@ def test_a_filtered_run_writes_no_evidence(source: str) -> None:
     )
 
 
+def test_a_filtered_run_reports_a_red_proof(source: str) -> None:
+    """D2037 (ADR 0195: a decision may fail closed, a report may not). A `-k` run
+    writes no evidence, and that is not the same as having no verdict: the host
+    mode printed `the suite reported failures (pytest exit 1)` and then `host
+    PASSED`, exit 0, on Session 36's V1. Each live mode's no-evidence branch must
+    turn a non-zero suite into exit 6 before it can print PASSED."""
+    for mode in ("mode_host", "mode_external"):
+        body = body_of(source, mode)
+        branch = body.split("if ! evidence_is_supportable; then", 1)[1].split("return 0", 1)[0]
+        assert 'if [ "${suite_status}" -ne 0 ]; then' in branch and "die 6" in branch, (
+            f"{mode}: a filtered run whose suite went red still reports PASSED"
+        )
+        assert branch.index("die 6") < branch.index("PASSED"), (
+            f"{mode}: PASSED is printed before the red suite is reported"
+        )
+
+
 def test_every_mode_says_its_half_is_not_the_document(source: str) -> None:
     """Three halves now, and each must say so.
 

@@ -1638,6 +1638,13 @@ mode_host() {
 
   if ! evidence_is_supportable; then
     announce_no_evidence
+    # D2037: no evidence is not no verdict. A filtered run whose proof went red
+    # said PASSED and exited 0 here from D1373 to Session 36's V1 -- the offline
+    # mode already reported it as 6.
+    if [ "${suite_status}" -ne 0 ]; then
+      die 6 "no evidence is written (-k), and the filtered suite reported \
+failures (pytest exit ${suite_status}); read the output above."
+    fi
     printf '\n\033[1m%s: host PASSED\033[0m\n' "${PROGRAM}"
     return 0
   fi
@@ -1708,6 +1715,13 @@ mode_external() {
 
   if ! evidence_is_supportable; then
     announce_no_evidence
+    # D2037: no evidence is not no verdict. A filtered run whose proof went red
+    # said PASSED and exited 0 here from D1373 to Session 36's V1 -- the offline
+    # mode already reported it as 6.
+    if [ "${suite_status}" -ne 0 ]; then
+      die 6 "no evidence is written (-k), and the filtered suite reported \
+failures (pytest exit ${suite_status}); read the output above."
+    fi
     printf '\n\033[1m%s: external PASSED\033[0m\n' "${PROGRAM}"
     return 0
   fi
