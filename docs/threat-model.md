@@ -173,25 +173,51 @@ is not here either: no support grant is built, and the Reality Ledger says why
 — *"the operator of this single node has root on it; support access is not
 technically bounded in this beta"* (D1971).
 
-1. **Invitation abuse and enumeration** (Session 37). An attacker guesses,
-   replays or reuses an invitation token, or learns from the refusal whether an
-   address or organisation exists. Owed: a used, expired or unknown token is
-   refused with one indistinguishable answer; a token is single-use under
-   concurrency.
-2. **API-key compromise and replay** (Session 37). A leaked management key is
-   used after its owner is removed or the key revoked, or used against a project
-   of another organisation. Owed: a revoked key, and a key whose member left,
-   are refused; a key never opens a database; a key of organisation A is
-   refused on every resource of organisation B.
-3. **Organisation privilege escalation** (Session 37). A `member` or `viewer`
-   grants itself `admin`, mints a key with a scope it does not hold, or an
-   `admin` acts without the second factor `owner` and `admin` require. Owed:
-   each role refused every operation above it; a key's scopes never exceed its
-   minter's; `owner`/`admin` without TOTP refused.
+1. **Invitation abuse and enumeration** (Session 37, ADR 0252). An attacker
+   guesses, replays or reuses an invitation token, or learns from the refusal
+   whether an address or organisation exists. Owed: a used, expired, revoked or
+   unknown token is refused with one byte-identical answer
+   (`test_control_invitations.py::test_every_invalid_token_gets_the_same_answer`);
+   a token is single-use under concurrency
+   (`::test_one_of_two_concurrent_acceptances_succeeds` -- rig 37b measured the
+   second of two concurrent acceptances wait for the first and update no row);
+   the token is stored only as its SHA-256
+   (`::test_a_token_is_shown_once_and_stored_hashed`); a taken username leaves
+   the token unspent (`::test_a_taken_username_leaves_the_token_unspent`); and
+   live, through the public endpoint only
+   (`tests/external/test_session37_control.py::test_an_invitation_is_accepted_once`).
+2. **API-key compromise and replay** (Session 37, ADR 0253). A leaked
+   management key is used after its owner is removed or the key revoked, used
+   against a project of another organisation, or used to mint its own
+   successor. Owed: a revoked key, and a key whose member left, are refused on
+   the next request
+   (`test_control_keys.py::test_a_revoked_key_and_a_departed_owners_key_are_refused`);
+   a key mints no key, invitation or factor (`::test_a_key_mints_nothing`); a
+   key of organisation A is refused on every resource of organisation B
+   (`::test_a_key_reaches_no_other_organisation`); and live
+   (`tests/external/test_session37_control.py::test_a_departed_members_key_stops`).
+3. **Organisation privilege escalation** (Session 37, ADR 0252). A `member` or
+   `viewer` grants itself `admin`, mints a key with a scope it does not hold, or
+   an `admin` acts without the second factor `owner` and `admin` require. Owed:
+   each role refused every operation above it
+   (`test_control_roles.py::test_every_route_and_role_answers_as_the_matrix_says`);
+   an admin cannot make an owner (`::test_an_admin_cannot_make_an_owner`); the
+   last owner stays (`::test_the_last_owner_stays`); a key's scopes never
+   exceed its minter's
+   (`test_control_keys.py::test_scopes_are_bounded_by_the_vocabulary_and_the_role`,
+   `::test_a_demotion_narrows_a_key`); an `owner` or `admin` without a factor
+   reaches only enrolment
+   (`test_control_sessions.py::test_an_owner_without_a_factor_reaches_only_enrolment`);
+   and live
+   (`tests/external/test_session37_control.py::test_login_enforces_the_second_factor`).
 4. **Project and branch enumeration** (Sessions 37, 40). A caller learns that a
    project or branch of another organisation exists from a status code, a
    timing or an error body. Owed: a foreign id and a missing id return the same
-   answer.
+   answer -- Session 37's half for organisations, members and projects
+   (`test_control_roles.py::test_a_foreign_id_and_a_missing_id_look_the_same`),
+   and a non-member reads no row of an organisation in the database itself
+   (`test_control_set.py::test_a_non_member_sees_nothing`). The branch half is
+   Session 40's.
 5. **Endpoint confusion and gateway attacks** (Session 39). A plaintext
    connection, a wrong or absent SNI, or one project's hostname used to reach
    another project's database through the shared Postgres port. Owed: plaintext
@@ -219,7 +245,14 @@ technically bounded in this beta"* (D1971).
     A control-plane session or API key presented to a project's data or admin
     plane, or a project credential presented to `/api/v1`. Owed: each refused
     at the other plane; the control plane holds no credential that opens a
-    project (ADR 0246's boundary sentence).
+    project (ADR 0246's boundary sentence). Session 37's half: the control mode
+    reads no other project's document, URL or secret
+    (`test_control_boundary.py::test_the_control_mode_reads_no_other_projects_credential`);
+    a member's key is refused by alpha's app and REST routes
+    (`tests/external/test_session37_control.py::test_a_key_lists_projects_and_opens_no_project`);
+    and the control project's `auth` container serves no release admin route
+    (`tests/deployment/test_session37_control.py::test_the_control_mode_serves_no_release_admin_route`).
+    Sessions 38 and 39 owe the halves their surfaces add.
 11. **Project-deletion races and slot reuse** (Session 38). A deletion that
     leaves a route, a role or a repository a later project inherits, or an
     operation that runs against a project mid-deletion. Owed: a deleted
@@ -237,11 +270,26 @@ technically bounded in this beta"* (D1971).
 14. **Cross-project leakage through any new surface** (every session). Any
     console page, `/api/v1` operation, snippet, notification, usage figure or
     diagnostics bundle that carries another project's data. Owed: each session
-    extends the isolation matrix to the surface it adds.
+    extends the isolation matrix to the surface it adds. Session 37's: the
+    control project's deployed document shares no isolated value with either
+    neighbour's
+    (`tests/deployment/test_session37_control.py::test_the_control_project_is_isolated_from_both`),
+    and a caller sees only their own organisations' rows
+    (`test_control_set.py::test_a_caller_sees_only_their_own_organisations`).
 15. **Storage exhaustion** (Session 38). One project fills the shared disk until
     its neighbours' databases or backups stop. Owed: the measured reading and
     the refusal admission makes; until a per-project disk quota exists, the
     Ledger says storage is `planned`, not limited.
+16. **TOTP seed disclosure** (Session 37, ADR 0252). A dump of the control
+    project's database, or a backup read with its cipher pass, reveals every
+    enrolled second-factor seed, so the factor stops being a second factor for
+    whoever holds the copy. Owed: seeds reachable only through definer
+    functions granted to the control project's identity service
+    (`test_control_set.py::test_no_request_role_can_execute_a_control_function`);
+    a seed shown once at enrolment and never logged
+    (`test_control_sessions.py::test_no_seed_reaches_a_log_line`). Residual:
+    seeds are plaintext at rest, because computing the code needs the key;
+    encrypting them is `planned`, and ADR 0252 says so.
 
 ## Scope
 

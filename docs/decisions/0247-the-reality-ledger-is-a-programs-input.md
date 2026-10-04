@@ -1,6 +1,8 @@
 # 0247 — The Reality Ledger is a program's input
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by ADR 0254 (Session 37): a row's STATUS moves
+  in the run whose evidence makes it true, its TEXT with the build; and the
+  guard's operations half is written
 - **Date:** 2026-10-03
 - **Session:** 36, Run 1 (D1979, D2000)
 - **Affects:** `LEDGER-001` (registered by Run 8). `docs/reality-ledger.yaml`,

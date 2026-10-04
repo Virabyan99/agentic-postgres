@@ -248,7 +248,7 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0182](0182-a-dry-run-attempts-the-write-and-rolls-it-back.md) | A dry-run attempts the write and rolls it back, and approval is a refusal | 16 | Accepted |
 | [0183](0183-a-profile-narrows-the-compiled-contract-and-never-widens-it.md) | A profile narrows the compiled contract and never widens it | 16 | Accepted |
 | [0184](0184-an-adversarial-case-is-derived-from-the-contract-and-carries-no-reason.md) | An adversarial case is derived from the contract and carries no reason | 16 | Accepted |
-| [0185](0185-an-operators-read-over-the-hosts-own-documents-is-not-a-cross-project-catalog.md) | An operator's read over the host's own documents is not a cross-project catalog | 17 | Accepted |
+| [0185](0185-an-operators-read-over-the-hosts-own-documents-is-not-a-cross-project-catalog.md) | An operator's read over the host's own documents is not a cross-project catalog | 17 | Accepted, superseded in part by 0251 |
 | [0186](0186-permanent-is-what-every-earlier-manifest-meant-and-expiry-is-a-fact-an-operator-reads.md) | Permanent is what every earlier manifest meant, and expiry is a fact an operator reads | 17 | Accepted |
 | [0187](0187-a-retirement-removes-what-its-key-derives-and-never-a-backup.md) | A retirement removes what its key derives and its state records, on this host, and never a backup | 17 | Accepted |
 | [0188](0188-the-secondary-repository-is-a-mirror-of-the-primary-at-a-second-provider.md) | The secondary repository is a mirror of the primary, at a second provider, under the primary's key | 18 | Accepted |
@@ -310,7 +310,11 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0244](0244-the-edge-and-every-long-running-service-are-bounded.md) | The edge and every long-running project service are bounded in memory, processes and CPU, and recreating the edge is a measured act | 35 | Accepted |
 | [0245](0245-the-diagnostic-account-reads-the-auth-storage-and-mcp-logs.md) | The diagnostic account reads the auth, storage and MCP logs, and its redaction knows a JSON key | 35 | Accepted |
 | [0246](0246-stage-5s-boundary-a-hosted-product-on-one-node.md) | Stage 5's boundary: a hosted product on one node; ADRs 0042, 0043, 0044, 0216 and 0217 superseded together | 36 | Accepted |
-| [0247](0247-the-reality-ledger-is-a-programs-input.md) | The Reality Ledger is a program's input | 36 | Accepted |
+| [0247](0247-the-reality-ledger-is-a-programs-input.md) | The Reality Ledger is a program's input | 36 | Accepted, amended by 0254 |
 | [0248](0248-retention-extends-adr-0213-to-the-stage-4-record-by-aggregate-with-a-verb.md) | Retention extends ADR 0213 to the Stage 4 record, by aggregate, with a verb | 36 | Accepted |
 | [0249](0249-the-request-and-worker-lines-are-printed.md) | The request and worker lines are printed | 36 | Accepted |
 | [0250](0250-a-secrets-age-is-the-providers-update-time-read-never-acted-on.md) | A secret's age is the provider's update time, read, never acted on | 36 | Accepted |
+| [0251](0251-the-control-plane-is-a-project-its-own-set-and-a-fourth-app-mode.md) | The control plane is a project: `control-prod`, its own set, and a fourth app mode of its `auth` container | 37 | Accepted |
+| [0252](0252-accounts-by-invitation-organisations-roles-and-totp.md) | Accounts by invitation, organisations, roles and TOTP | 37 | Accepted |
+| [0253](0253-management-api-keys-the-v1-contract-and-the-clis-state.md) | Management API keys, the `/v1` contract and the CLI's state | 37 | Accepted |
+| [0254](0254-an-operation-type-is-accepted-only-when-its-ledger-row-is-available-or-beta.md) | An operation type is accepted only when its Ledger row is `available` or `beta`; a row's status moves with its evidence | 37 | Accepted |

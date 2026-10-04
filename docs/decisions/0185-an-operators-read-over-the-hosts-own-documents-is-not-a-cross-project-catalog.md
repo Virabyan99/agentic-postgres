@@ -1,6 +1,9 @@
 # 0185 — An operator's read over the host's own documents is not a cross-project catalog
 
-- **Status:** accepted
+- **Status:** accepted; superseded in part by ADR 0251 (Session 37): for the
+  control plane, the project registry is an authoritative table written by a
+  root verb (`bin/control.sh adopt`); for everything else this ADR stands and
+  `fleet.sh` stays a read
 - **Date:** 2026-09-04
 - **Session:** 17, Run 1 (`FLEET-INV-001`, `FLEET-INV-002`, D945–D948)
 - **Related:** `docs/product-contract.md` §5 (the non-goals), **D709** (every
