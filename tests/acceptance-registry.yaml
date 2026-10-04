@@ -6068,7 +6068,6 @@
   target_session: 36
   test_nodeids:
     - tests/contract/test_reality_ledger.py::test_the_ledger_validates
-    - tests/contract/test_reality_ledger.py::test_available_and_beta_rows_name_evidence_that_resolves
     - tests/contract/test_reality_ledger.py::test_every_evidence_name_is_a_claim_or_an_envelope_subject
     - tests/contract/test_reality_ledger.py::test_a_claim_that_did_not_pass_is_not_evidence
     - tests/contract/test_reality_ledger.py::test_the_newest_evidence_is_chosen_by_session_number
@@ -6079,14 +6078,16 @@
   description: >-
     `docs/reality-ledger.yaml` validates against `schemas/reality-
     ledger.schema.json` with unique ids; every evidence name is a registered
-    claim or a `capacity.ENVELOPE` subject, and where an evidence document
-    exists every `available` or `beta` row's claim is `passed` in the newest
-    one, chosen by session number -- a claim `not_run` or `failed` is not
+    claim or a `capacity.ENVELOPE` subject; the newest evidence document is
+    chosen by session number, and a claim `not_run` or `failed` in it is not
     evidence; a `planned` row has no control; no row's `customer_text` uses
     a specification §59 word, case folded; `docs/reality-ledger.md` is
     `bin/render-reality-ledger.py`'s current output; the operation-type and
     console-control sets the guard will read are empty today (ADR 0247,
-    D2021).
+    D2021). That every `available` or `beta` row's claim is `passed` in the
+    newest evidence document needs a document a checkout does not carry, so
+    its proof runs in every workstation suite and is no node id here
+    (D2030).
 
 - id: OPS-ROTATE-001
   priority: P0
