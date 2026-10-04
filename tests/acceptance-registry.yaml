@@ -5957,3 +5957,166 @@
     secret key's value as well as the three existing shapes, over lines in
     the three new services' real log shapes; the 200-line cap stands (ADR
     0245, D1879).
+
+# Session 36 (ADR 0246-0250)
+- id: OPS-RETAIN-001
+  priority: P0
+  target_session: 36
+  test_nodeids:
+    - tests/contract/test_record_retention.py::test_every_prune_is_executable_by_no_role
+    - tests/contract/test_record_retention.py::test_the_withdrawal_is_executable_by_the_auth_service_alone
+    - tests/contract/test_record_retention.py::test_a_horizon_is_required_past_and_bounded
+    - tests/contract/test_record_retention.py::test_a_run_horizon_inside_the_replay_window_is_refused
+    - tests/contract/test_record_retention.py::test_a_run_prune_removes_ended_runs_and_exactly_their_children
+    - tests/contract/test_record_retention.py::test_a_live_run_is_never_pruned
+    - tests/contract/test_record_retention.py::test_a_delivery_prune_keeps_pending_deliveries_and_awaited_events
+    - tests/contract/test_record_retention.py::test_an_agent_prune_keeps_active_and_referenced_agents
+    - tests/contract/test_record_retention.py::test_the_bound_counts_roots
+    - tests/contract/test_record_retention.py::test_the_withdrawal_moves_only_pending_approvals_of_ended_runs
+    - tests/contract/test_record_retention.py::test_the_size_reading_names_every_prunable_relation
+    - tests/contract/test_workflow_worker.py::test_an_idle_iteration_withdraws_ended_approvals
+    - tests/contract/test_migrations.py::test_0038_adds_only_the_withdrawn_value
+    - tests/contract/test_migrations.py::test_0039_grants_the_prunes_to_nobody
+  description: >-
+    Migration 0038 adds the approval status `withdrawn` and nothing else;
+    0039 adds five `app_private` functions and no table, column, type, index
+    or `api` object: `workflow_run_prune`, `connector_delivery_prune` and
+    `agent_prune` (each `(p_before timestamptz, p_limit integer DEFAULT
+    NULL) RETURNS bigint`, SECURITY DEFINER, executable by NO role, refusing
+    a missing, future or bound-less horizon with `PT422`, and
+    `workflow_run_prune` also one inside the last 600 seconds),
+    `record_size()` (executable by no role) and
+    `workflow_withdraw_ended_approvals()` (executable by `auth_service`
+    alone). A run prune removes ended runs and exactly their attempts,
+    approvals, receipts and steps, never a `queued`, `running` or
+    `compensating` run; a delivery prune never removes a `pending` delivery
+    or an event a parked step awaits; an agent prune never removes an active
+    agent or one a run or connector references; the bound counts roots; the
+    withdrawal moves exactly the pending approvals of ended runs; the worker
+    calls it on an idle iteration and never on a busy one (ADR 0248, D2013,
+    D2014).
+
+- id: OPS-RETAIN-002
+  priority: P0
+  target_session: 36
+  test_nodeids:
+    - tests/contract/test_record_command.py::test_prune_requires_a_horizon_and_a_confirmation
+    - tests/contract/test_record_command.py::test_an_unparseable_or_future_horizon_is_refused_before_any_connection
+    - tests/contract/test_record_command.py::test_the_container_and_database_are_read_from_the_deployed_document
+    - tests/contract/test_record_command.py::test_prune_prints_before_count_and_after
+    - tests/contract/test_record_command.py::test_a_database_refusal_is_printed_verbatim_and_exits_5
+    - tests/contract/test_record_command.py::test_size_refuses_without_root
+    - tests/contract/test_record_command.py::test_size_reports_unknown_when_the_cluster_does_not_answer
+    - tests/contract/test_record_command.py::test_nothing_schedules_a_prune
+  description: >-
+    `sudo bin/record.sh size --project KEY [--json]` reads `record_size()`
+    through the project's database container, named by the deployed
+    document, and prints one line per relation, with "the record could not
+    be read" (exit 6) as its third answer; `sudo bin/record.sh prune
+    --project KEY --what runs|deliveries|agents|audit|idempotency --before
+    ISO8601 [--limit N] --confirm KEY` refuses an unparseable, zoneless or
+    future horizon before root, the document or a container is touched,
+    refuses without root (3) and with `--confirm` not exactly the key, and
+    prints the size before, the function's count and the size after; a
+    database refusal is printed verbatim with exit 5; every exec goes
+    through `container_exec.run`; no unit, timer or other command calls a
+    prune (ADR 0248, D2015, D2016).
+
+- id: OPS-RETAIN-003
+  priority: P0
+  target_session: 36
+  test_nodeids:
+    - tests/deployment/test_session36_operations.py::test_no_pending_approval_outlives_its_run
+    - tests/deployment/test_session36_operations.py::test_the_record_size_reading_matches_the_tables
+  description: >-
+    On the deployment: beta carries no `pending` approval on an ended run
+    after the 1.14.0 deploy, read through `bin/record.sh size --json` up to
+    three times 5 s apart; and `record.sh --project beta-dev size --json`
+    agrees with a direct count of every relation it names, both read inside
+    one REPEATABLE READ transaction.
+
+- id: OPS-LOG-002
+  priority: P0
+  target_session: 36
+  test_nodeids:
+    - tests/contract/test_request_log.py::test_create_app_installs_one_handler_on_each_logger
+    - tests/contract/test_request_log.py::test_a_request_prints_one_line_with_the_template_and_no_caller_value
+    - tests/contract/test_request_log.py::test_the_worker_logger_prints_info
+    - tests/contract/test_request_log.py::test_no_line_is_printed_twice
+  description: >-
+    `create_app` first installs exactly one marked stdout handler on the
+    `apg` and `app.workflow_worker` loggers at INFO -- three calls, still
+    one -- with propagation left ON, so `caplog` still receives every record
+    and no root handler is added; a request prints one `apg.http.request`
+    line carrying the route template and the request id the response
+    returned, and no path, header, token, query, body or caller id; the
+    worker's INFO line prints; no line prints twice (ADR 0249, D2017).
+
+- id: OPS-LOG-003
+  priority: P0
+  target_session: 36
+  test_nodeids:
+    - tests/deployment/test_session36_operations.py::test_a_request_line_reaches_the_auth_containers_log
+  description: >-
+    On the deployment: after a request to alpha's auth service, `docker
+    logs` of alpha's `auth` container holds one `apg.http.request` line
+    naming the request id the RESPONSE returned (D2007), and holds neither
+    the planted caller id nor a bearer token.
+
+- id: LEDGER-001
+  priority: P0
+  target_session: 36
+  test_nodeids:
+    - tests/contract/test_reality_ledger.py::test_the_ledger_validates
+    - tests/contract/test_reality_ledger.py::test_available_and_beta_rows_name_evidence_that_resolves
+    - tests/contract/test_reality_ledger.py::test_every_evidence_name_is_a_claim_or_an_envelope_subject
+    - tests/contract/test_reality_ledger.py::test_a_claim_that_did_not_pass_is_not_evidence
+    - tests/contract/test_reality_ledger.py::test_the_newest_evidence_is_chosen_by_session_number
+    - tests/contract/test_reality_ledger.py::test_a_planned_row_has_no_control
+    - tests/contract/test_reality_ledger.py::test_no_customer_text_uses_a_forbidden_word
+    - tests/contract/test_reality_ledger.py::test_the_page_is_current
+    - tests/contract/test_reality_ledger.py::test_the_sets_the_guard_will_read_are_empty_today
+  description: >-
+    `docs/reality-ledger.yaml` validates against `schemas/reality-
+    ledger.schema.json` with unique ids; every evidence name is a registered
+    claim or a `capacity.ENVELOPE` subject, and where an evidence document
+    exists every `available` or `beta` row's claim is `passed` in the newest
+    one, chosen by session number -- a claim `not_run` or `failed` is not
+    evidence; a `planned` row has no control; no row's `customer_text` uses
+    a specification §59 word, case folded; `docs/reality-ledger.md` is
+    `bin/render-reality-ledger.py`'s current output; the operation-type and
+    console-control sets the guard will read are empty today (ADR 0247,
+    D2021).
+
+- id: OPS-ROTATE-001
+  priority: P0
+  target_session: 36
+  test_nodeids:
+    - tests/contract/test_secret_age.py::test_max_age_days_is_bounded_by_the_schema
+    - tests/contract/test_secret_age.py::test_the_contract_declares_an_age_for_exactly_the_three_rotated_credentials
+    - tests/contract/test_secret_age.py::test_an_age_is_ok_through_the_declaration_and_overdue_after_it
+    - tests/contract/test_secret_age.py::test_a_time_the_reading_cannot_use_is_unknown
+    - tests/contract/test_secret_age.py::test_a_field_in_the_wrong_type_is_none_never_a_substitute
+    - tests/contract/test_secret_age.py::test_a_failed_read_is_unknown_and_only_404_means_absent
+    - tests/contract/test_secret_age.py::test_a_failed_login_is_unknown_for_every_declared_secret
+    - tests/contract/test_secret_age.py::test_overdue_warns_and_exits_zero_and_unknown_exits_six
+    - tests/contract/test_secret_age.py::test_the_time_reader_never_returns_the_value
+    - tests/contract/test_secret_age.py::test_the_reading_prints_no_value_at_any_rendering
+  description: >-
+    `secrets.required.yaml` admits an optional `max_age_days` (1-3650) per
+    secret and declares 90 on exactly the three credentials the rotation
+    trio proves; `sudo bin/doctor.sh secrets --project KEY [--json]` reads
+    each declaring secret's provider update time -- never its value -- and
+    reports `ok` through the declared day, `overdue` after it (a warning,
+    exit 0) or `unknown` with its reason (exit 6), a failed login being
+    `unknown` for every one; no value reaches a return or any rendering;
+    nothing rotates a secret because it is old (ADR 0250, D2022, D2023).
+
+- id: OPS-ROTATE-002
+  priority: P0
+  target_session: 36
+  test_nodeids:
+    - tests/deployment/test_session36_operations.py::test_every_declared_secret_age_is_read
+  description: >-
+    On the deployment: `doctor secrets` reads every secret that declares an
+    age on alpha with an outcome other than `unknown`.

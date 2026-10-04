@@ -1187,6 +1187,17 @@ CLAIM_INTRODUCED_IN = {
     "approval_in_database_live": 35,
     "proposed_set_applied": 35,
     "every_service_bounded_live": 35,
+    # Session 36 (ADR 0246-0250). EIGHT, five offline and three host,
+    # landing with the constant (D690): record retention and its command,
+    # the request log, the Reality Ledger, and the secret-age reading.
+    "record_retention": 36,
+    "record_command": 36,
+    "request_log": 36,
+    "reality_ledger": 36,
+    "secret_age": 36,
+    "record_retention_live": 36,
+    "request_log_live": 36,
+    "secret_age_live": 36,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

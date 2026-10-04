@@ -1,4 +1,4 @@
-"""The request and worker lines reach stdout, once each (OPS-LOG-001, ADR 0249).
+"""The request and worker lines reach stdout, once each (OPS-LOG-002, ADR 0249).
 
 D1918: the service wrote `apg.http.request` and `apg.mcp.read` at INFO and nothing
 printed them -- no handler anywhere under `services/auth-api/app/`, so Python's

@@ -3,7 +3,8 @@
 - **Status:** Accepted
 - **Date:** 2026-10-03
 - **Session:** 36, Run 1 (D1918, D1977, D2003; rig 36c)
-- **Affects:** `OPS-LOG-001`, `OPS-LOG-002` (registered by Run 8). A new
+- **Affects:** `OPS-LOG-002`, `OPS-LOG-003` (registered by Run 8; the plan's `OPS-LOG-001`
+  is Session 11's request id, D2027). A new
   `services/auth-api/app/log_setup.py`, called first in `create_app`
   (`services/auth-api/app/main.py`); `tests/contract/test_request_log.py` and
   `tests/deployment/test_session36_operations.py` (Run 4).

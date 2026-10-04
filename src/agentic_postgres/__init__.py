@@ -831,7 +831,65 @@ from pathlib import Path
 #: DEPLOYMENT in the same session: `upgrade plan` on both projects, with the
 #: same declaration, before the deploy -- and a `major` there is a stop
 #: condition.
-CURRENT_SESSION = 35
+#:
+#: **Session 36 moves it to 36, all-or-nothing again** (D690): EIGHT
+#: requirements and eight claims -- `CLAIMS` 198 -> 206 and `OFFLINE_CLAIMS`
+#: 60 -> 65, counted from the tuples rather than by hand (D1628) -- five
+#: declared offline and three host, with every offline half written in the run
+#: that built its plane (Runs 2-6) and every live half registered here. One
+#: family joins the registry: `LEDGER` (the Reality Ledger).
+#:
+#: **The session's subject is what a hosted reading needs before the host is
+#: hosted** -- Stage 5's preconditions (ADR 0246) -- and four ADRs are its
+#: shape. ADR 0248: the Stage 4 record is pruned by an operator who states a
+#: horizon -- three prunes by aggregate (runs, deliveries, agents), a size
+#: reading, and the worker's withdrawal of pending approvals on ended runs on
+#: its idle polls -- reached through `bin/record.sh size|prune`, which nothing
+#: schedules. ADR 0249: the `apg.*` and worker INFO lines reach `docker logs`
+#: through one stdout handler `create_app` installs first, with propagation
+#: left on (D2017). ADR 0247: the Reality Ledger, `docs/reality-ledger.yaml`, a
+#: program's record of what each product concept is today, whose `available`
+#: and `beta` rows must name evidence that passed. ADR 0250: each secret that
+#: declares `max_age_days` has its provider update time read by `doctor
+#: secrets` -- never its value, and nothing rotates a secret because it is old.
+#: The hosted threats are a list until their controls exist (D1999).
+#:
+#: **Two migrations, 0038 and 0039, and they are the floor once applied** (ADR
+#: 0162 §3): an enum value and five functions, no table, column or `api`
+#: object. **No outputs, manifest, capability, lock or host schema moves**; the
+#: secret contract admits an optional `max_age_days`.
+#:
+#: **`VERSION` moves to `1.14.0`.** What moved: migrations 0038 and 0039;
+#: `bin/record.sh` and `bin/record.py`; the worker's idle withdrawal;
+#: `services/auth-api/app/log_setup.py`; `docs/reality-ledger.yaml`, its
+#: schema, `bin/render-reality-ledger.py` and the generated page;
+#: `max_age_days` on three secrets, `InfisicalClient.read_secret_times`,
+#: `secret_age.py` and `doctor secrets`. The `services/auth-api` image moves.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig as Sessions
+#: 34 and 35 ran it: a git worktree at `f7fb96d`, the commit that IS deployed,
+#: and a `tar`-piped copy of this working tree, both rendering the INSTALLED
+#: tree's `project.example.yaml` (schema 8). With `--also migration_added`:
+#: `bump minor`, **`requires minor`**, verdict `ok`, `changes [implementation,
+#: migration_added]`, `reasons []`, `operator_digests_moved []`. Without the
+#: declaration: `requires patch` -- the fifth release in a row whose price the
+#: command sees only by declaration (D1561, D1703, D1811, D1889, D2001).
+#: **Three leaves differ**: `template_version` 1.13.0 -> 1.14.0,
+#: `migrations.release_lock_sha256`, and `inputs.secrets_contract_sha256` (the
+#: `max_age_days` declarations -- a release digest, so `implementation`);
+#: 5,993 bytes on both sides. **ADR 0162 prices it a MINOR, and `1.14.0` is
+#: that floor exactly**: a released migration is a minor by the table; no
+#: manifest, outputs, capability, lock or host schema moves; and the secret
+#: contract's schema only ADMITS an optional `max_age_days`, which invalidates
+#: no contract. What an operator must KNOW the reading cannot show:
+#: 0038 and 0039 cannot be taken back by an image; a prune removes rows for
+#: good, and an idempotency prune re-arms every key it removes; and the auth
+#: container's log now carries a line per request. **This session takes a host
+#: trip** (Runs 9 and 10), so the class is confirmed against a DEPLOYMENT in
+#: the same session: `upgrade plan` on both projects, with the same
+#: declaration, before the first 1.14.0 deploy -- and a `major` there is a stop
+#: condition.
+CURRENT_SESSION = 36
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

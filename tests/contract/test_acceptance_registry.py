@@ -103,7 +103,12 @@ ID_PATTERN = re.compile(
     # apply without one; the database half of approval extends `AGT-APPROVE`,
     # the bounded edge `NODE-LIMIT`, and the diagnostic account's reach is
     # `OPS-DIAG`.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV)-[A-Z0-9]+(-\d+)?$"
+    # Session 36 (ADR 0246-0250) adds `LEDGER` for the Reality Ledger -- the
+    # record of what each product concept is today, read by a program;
+    # record retention is `OPS-RETAIN`, the request log extends `OPS-LOG`
+    # (whose `-001` is Session 11's request id), and the secret-age reading
+    # is `OPS-ROTATE`.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV|LEDGER)-[A-Z0-9]+(-\d+)?$"
 )
 
 

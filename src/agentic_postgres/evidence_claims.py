@@ -305,6 +305,23 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "proposal_gate",
         "every_service_bounded",
         "diagnostic_reach",
+        # Session 36 (ADR 0246-0250). FIVE, each a property of a CHECKOUT:
+        # migrations 0038 and 0039 under a real cluster this workstation
+        # starts, and the worker's idle call against a fake repository
+        # (`record_retention`); a command over a recording `docker`
+        # (`record_command`); `create_app` in process (`request_log`); a
+        # committed file, its schema and its page (`reality_ledger`); and a
+        # reading over a fake provider (`secret_age`).
+        #
+        # The session's other THREE are deliberately not here: the approvals
+        # a deployed worker withdrew and the record a deployed cluster holds,
+        # the line a running container's log carries, and the update times a
+        # real provider returns are each a question only a deployment answers.
+        "record_retention",
+        "record_command",
+        "request_log",
+        "reality_ledger",
+        "secret_age",
     }
 )
 
@@ -641,6 +658,20 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "approval_in_database_live": ("AGT-APPROVE-004",),
     "proposed_set_applied": ("GOV-APPLY-002",),
     "every_service_bounded_live": ("NODE-LIMIT-003",),
+    # Session 36 (ADR 0246-0250). EIGHT claims, landing with the constant
+    # (D690), five offline and three host -- counted from these tuples and
+    # from `OFFLINE_CLAIMS`, never by hand (D1628). Each requirement is its
+    # own claim (ADR 0089, D1150). The session's subject is what a hosted
+    # reading needs before a host is hosted: a record that can be pruned,
+    # lines that reach the log, a ledger of what is true, a secret's age.
+    "record_retention": ("OPS-RETAIN-001",),
+    "record_command": ("OPS-RETAIN-002",),
+    "request_log": ("OPS-LOG-002",),
+    "reality_ledger": ("LEDGER-001",),
+    "secret_age": ("OPS-ROTATE-001",),
+    "record_retention_live": ("OPS-RETAIN-003",),
+    "request_log_live": ("OPS-LOG-003",),
+    "secret_age_live": ("OPS-ROTATE-002",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined
