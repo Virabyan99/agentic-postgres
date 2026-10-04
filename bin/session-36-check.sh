@@ -2,7 +2,7 @@
 #
 # The Session 36 gate: what a hosted reading needs before the host is hosted.
 # The Stage 4 record pruned by an operator who states a horizon (migrations
-# 0038 and 0039, `bin/record.sh`), and the pending approvals of ended runs
+# 0038 and 0039, the record command), and the pending approvals of ended runs
 # withdrawn by the worker; the request and worker lines printed where `docker
 # logs` reads them; the Reality Ledger, a program's record of what each product
 # concept is today; and each declared secret's age read from the provider
@@ -55,7 +55,7 @@
 #
 # **THREE claims are HOST claims and are deliberately NOT declared.**
 # `record_retention_live`: beta carries no `pending` approval on an ended run
-# after the deploy, and `record.sh size --json` agrees with a direct count of
+# after the deploy, and the record command's `size --json` agrees with a count of
 # every relation it names. `request_log_live`: alpha's `auth` container's log
 # holds the request line naming the id its response returned, and no bearer
 # token. `secret_age_live`: `doctor secrets` reads every declared age on alpha
@@ -205,7 +205,7 @@ USAGE
 
   --mode offline   Contracts, schemas and models, plus Session 36's own FIVE
                    offline halves: migrations 0038 and 0039 under a real
-                   cluster, with the worker's idle withdrawal; `bin/record.sh`
+                   cluster, with the worker's idle withdrawal; the record command
                    over a recording docker; `create_app`'s stdout handler; the
                    Reality Ledger, its schema and its page; and the secret-age
                    reading over a fake provider. Step 3's sweep carries all
@@ -228,8 +228,8 @@ USAGE
                    earlier half owed.
                    `record_retention_live`: beta carries no `pending` approval
                    on an ended run after the deploy -- the worker withdraws
-                   them on its idle polls -- read through `bin/record.sh size
-                   --json` up to three times 5 s apart; and that reading
+                   them on its idle polls -- read through the record command's
+                   `size --json` up to three times 5 s apart; and that reading
                    agrees with a direct count of every relation it names,
                    both inside one REPEATABLE READ transaction.
                    `request_log_live`: after a request to alpha's auth

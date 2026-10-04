@@ -844,7 +844,7 @@ from pathlib import Path
 #: shape. ADR 0248: the Stage 4 record is pruned by an operator who states a
 #: horizon -- three prunes by aggregate (runs, deliveries, agents), a size
 #: reading, and the worker's withdrawal of pending approvals on ended runs on
-#: its idle polls -- reached through `bin/record.sh size|prune`, which nothing
+#: its idle polls -- reached through the record command, which nothing
 #: schedules. ADR 0249: the `apg.*` and worker INFO lines reach `docker logs`
 #: through one stdout handler `create_app` installs first, with propagation
 #: left on (D2017). ADR 0247: the Reality Ledger, `docs/reality-ledger.yaml`, a
@@ -860,7 +860,7 @@ from pathlib import Path
 #: secret contract admits an optional `max_age_days`.
 #:
 #: **`VERSION` moves to `1.14.0`.** What moved: migrations 0038 and 0039;
-#: `bin/record.sh` and `bin/record.py`; the worker's idle withdrawal;
+#: the record command (`size`, `prune`); the worker's idle withdrawal;
 #: `services/auth-api/app/log_setup.py`; `docs/reality-ledger.yaml`, its
 #: schema, `bin/render-reality-ledger.py` and the generated page;
 #: `max_age_days` on three secrets, `InfisicalClient.read_secret_times`,
