@@ -1,12 +1,12 @@
 # Session 36 — Preconditions: the boundary, the rescale, and the operating debt
 
-**Status: IN PROGRESS — Runs 1–7 done 2026-10-03, Runs 8–9 2026-10-04 (rows
-D2006–D2038; CI
+**Status: IN PROGRESS — Runs 1–7 done 2026-10-03, Runs 8–10 2026-10-04 (rows
+D2006–D2041; CI
 green on `4b23773`, on Run 5's repair `c4582ab` (run 37133402800) and on Run
 6's `e5469b9` (run 37136556399) and on Run 8's `58929e2` (run 37186749247) and on Run 9's `2538ac0` (run 37191526105)). Sheet E0 read 2026-10-03: Run 6 BUILT
 (D2019, D2022, ADR 0250); the two host.yaml copies differ (D2020) and admission
 reads the checkout's (D2025). The trip's instruments are in WSL `~/s36/run7/`
-and `/home/op`. 1.14.0 is DEPLOYED on both projects at `2538ac0`; the rescale was NOT taken (D2032). Next: Run 10. NEXT FREE D2039.** Planned
+and `/home/op`. 1.14.0 is DEPLOYED on both projects at `2538ac0`, swept (206 claims, 204 passed) and TAGGED; the rescale was NOT taken (D2032). Next: Run 11. NEXT FREE D2042.** Planned
 2026-10-03 at `1ea6259`. The first session of
 Stage 5 (`docs/plans/stage-5-plan.md` §3). Eleven runs and **two sittings on
 two days** — the server rescaled in place and the release deployed (one outage
@@ -422,6 +422,9 @@ second table below it, in execution order.
 | **D2036** | Run 4's `tests/deployment/test_session36_operations.py`, never executed against a deployment before V1. | V1 (`-k "session4_transports or session36"`, 09:09Z on `7fa90c5`): 13 passed, **1 failed** — `test_a_request_line_reaches_the_auth_containers_log` read `document["compose"]["project_name"]`, which only a RENDERED document carries: `KeyError: 'compose'` — the class Session 5's `service_container` had already recorded in its docstring. | **`2538ac0`**: the helper derives the Compose project from the key (`naming.compose_project_name`, ADR 0002), as Sessions 32 and 34 do. V2 on `2538ac0`: **14 passed**. | The sixteenth never-executed proof to fail on first execution (§7's second question); its fixture was the rendered fixture, which shares the belief. | 0002 |
 | **D2037** | Every gate since D1373: under `-k`, *"No evidence written … cannot support a claim about the whole"*. | V1 printed *"the suite reported failures (pytest exit 1)"*, then **`host PASSED`, exit 0**: the host and external modes' no-evidence branch returned 0 whatever the suite said; the offline mode already reported 6. | **`2538ac0`**: both live branches `die 6` on a non-zero suite before PASSED; new contract test `test_a_filtered_run_reports_a_red_proof`, battery 3/3 killed with the control green; CI green (run 37191526105). Gates 30–35 keep the fold (history, not used again). | ADR 0195: no evidence is not no verdict — a report may not fold a red proof into PASSED. | 0195 |
 | **D2038** | D1425 and Run 9 step 1: *the deploy, the sweep and the tag on ONE commit* — `7fa90c5`. | D2036 and D2037 are a code commit after the deploy. | **The deploy commit is `2538ac0`**: shipped as a bundle (`7fa90c5..main`), FETCH_HEAD confirmed, renders 4 × 0, setup-plan 13 / 0; Sheet R5 redeployed alpha and beta (generations `4177a626`, `1cb320c0`; ledgers 39 / 43; no migration); the op copies refreshed; V2 14 passed. The offline half Run 10 merges is the one CI wrote for `2538ac0` (run 37191526105's `session-01-evidence` artifact), or the offline gate run at `2538ac0`. `/root/s36-redeploy-before.json` still names `8c0934fc` — the generation has moved twice since, which is what the proof reads. | A repair found by the trip's own check moves the commit, and the commit is redeployed before anything is swept. | — |
+| **D2039** | Sheets X1–X3: `project-runtime.sh … down` on every rotation (§5 Run 10 step 3). | `docs/api-operations.md` §*Rotating a credential* step 3 stops the project only *"if the credential is one a container mounts"*; `docs_basic_auth_password` is the ROOT plane (`_root/`), written inline into the middleware since ADR 0086. | **X2 ran without `down`**: the probe saw NOTHING down on any of alpha's five classes through X2's deploy (X1 ~97 s, X3 ~85 s, both with `down`); the sweep's docs rotation proof passed. | A sheet's step is taken from the runbook's condition, not copied to every instance. | 0086 |
+| **D2040** | Sheets X1–X3: *"YOU: replace `<name>` at Infisical by hand"*. | The operator could not act on it: the sheet named neither the Infisical project (alpha's, `slug: alpha`), the environment (`dev`), the folder (`provider_path`, `/database` or `/runtime`) nor the key (`provider_key`), and did not say the secret EXISTS and is edited, not created; the operator generated a 32-character value where `random_hex` is `token_hex(32)`, 64 characters. | Walked through in the conversation; each sheet then named the project, environment, folder, key and the 64-character generator; all three `SHAPE OK` (64, lowercase hex, differs). | A hand step on a third party's console names every coordinate the contract already holds (`provider_path`, `provider_key`, `value_kind`). | — |
+| **D2041** | §5 Run 10: *"`git tag -a 1.14.0 <deployed sha>`; `git push origin 1.14.0`"* — no place named. | The operator ran both on the HOST: *"Committer identity unknown"* (no tag created) and the push went to `/tmp/apg.bundle` (the host's only remote, *"src refspec 1.14.0 does not match any"*). Nothing was created. | **The tag is the workstation's**: created in WSL on `2538ac0` with a message file and pushed (tag object `ca8a2d00`, `ls-remote` read back). The host stays without a GitHub credential (§6). | A step that needs the GitHub remote names the workstation. | — |
 
 ---
 
@@ -1634,8 +1637,33 @@ merge reports the commit difference rather than folding it).
 --output /home/op/kit-<date>-post --project project.alpha.yaml --project
 project.beta.yaml`, copied to WSL `~/dr-kits/`.
 
-**Done.** *(executor: the three rotations' timings and doctor readings; the
-reboot's downtime; the claim table; the halves; the tag; the kit.)*
+**Done.** 2026-10-04, rows **D2039–D2041**; nothing committed but this text.
+**The three rotations** (alpha; the probe `x-alpha` on both projects, 8 req/s):
+**X1** the authenticator, captured 10:15:05 UTC (the pgpass line's password, 64
+characters), `down`, materialized, `SHAPE OK`, the deploy ended 10:17:34 with
+*API authenticator credential set*, doctor 12 ok — alpha's rest, auth, mcp and
+storage DOWN ~97 s, docs 56 s; **X2** the documentation password, captured
+10:18:45, **no `down`** (D2039), deploy ended 10:21:13, doctor 12 ok — **nothing
+down**; **X3** the application password, captured 10:22:09, `down`, deploy ended
+10:24:44, doctor 12 ok — ~85 s, docs 46 s. Beta 0 down throughout. The Infisical
+step needed its coordinates named (D2040). **B1**: booted 10:26:50 UTC, kernel
+7.0.0-34, the three units active 124 s after boot. **S1** (detached, 10:3x →
+11:33:22 UTC): `GATE_36_HOST_EXIT=5` (D686), 1,092 passed / 1 failed
+(`documented_path`, by decision) / 1 skipped (`APG_REPLACEMENT_HOST_OUTPUTS`, by
+decision); **`port_allocation` and the rotation trio (`api_authorization`,
+`bootstrap_identity`, `credential_rotation_planes`) PASSED**; Session 36's three
+host claims passed on their first sweep; nothing from Sessions 30–35 went back.
+**The offline half**: CI's for `2538ac0` (run 37191526105, 65 / 65 passed; the
+local `55c002c` half set aside). **External** (foreground, WSL): 25 passed / 0
+failed / 8 skipped, 140.6 s, exit 0. **The merge**: `evidence/session-36.json`,
+**206 claims, 204 passed, 1 failed (`documented_path`), 1 `not_run`
+(`replacement_host_restore`)**, `source_commit` = `offline_checkout_commit` =
+`2538ac0` — exactly §7's prediction; exit 5. **The tag**: `release-reading --ref
+2538ac0` → `tag_is_owed` (25 commits, 74 files, migrations 37 → 39, ADRs 245 →
+250); **`1.14.0` on `2538ac0`** (object `ca8a2d00`), from the workstation
+(D2041). **The kit**: `kit-2026-10-04-post` exported 12:08:17 UTC (10 artifacts,
+release `2538ac0`), verifies on the host and in WSL `~/dr-kits/`, 0700/0600 both
+sides.
 
 ### Run 11 — the close
 
