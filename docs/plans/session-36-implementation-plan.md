@@ -6,7 +6,7 @@ green on `4b23773`, on Run 5's repair `c4582ab` (run 37133402800) and on Run
 6's `e5469b9` (run 37136556399) and on Run 8's `58929e2` (run 37186749247) and on Run 9's `2538ac0` (run 37191526105)). Sheet E0 read 2026-10-03: Run 6 BUILT
 (D2019, D2022, ADR 0250); the two host.yaml copies differ (D2020) and admission
 reads the checkout's (D2025). The trip's instruments are in WSL `~/s36/run7/`
-and `/home/op`. **1.14.0 is DEPLOYED on both projects at `2538ac0`; the rescale was NOT taken (D2032).** Next: Run 10. NEXT FREE D2039.** Planned
+and `/home/op`. 1.14.0 is DEPLOYED on both projects at `2538ac0`; the rescale was NOT taken (D2032). Next: Run 10. NEXT FREE D2039.** Planned
 2026-10-03 at `1ea6259`. The first session of
 Stage 5 (`docs/plans/stage-5-plan.md` §3). Eleven runs and **two sittings on
 two days** — the server rescaled in place and the release deployed (one outage
