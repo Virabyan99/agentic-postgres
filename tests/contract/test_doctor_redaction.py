@@ -69,6 +69,9 @@ PRINTABLE_BLOCKS = {
     # Version 19 (ADR 0237). One boolean: whether the project has the
     # connectors facility. The endpoints are in no document (D1786).
     "connectors",
+    # Version 20 (ADR 0251). One boolean: whether the project is the control
+    # plane -- the fact `bin/control.sh` finds it by. No credential or address.
+    "control",
 }
 
 #: Blocks that must never appear in output, at any verbosity.

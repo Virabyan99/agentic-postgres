@@ -1,6 +1,6 @@
 # Session 37 — The control plane
 
-**Status: EXECUTING. Runs 1–2 DONE 2026-10-04 (rows D2073–D2090; NEXT FREE D2091, ADR 0255).** The second session
+**Status: EXECUTING. Runs 1–2 DONE 2026-10-04 (rows D2073–D2091; NEXT FREE D2092, ADR 0255).** The second session
 of Stage 5 (`docs/plans/stage-5-plan.md` §3). Twelve runs and **two sittings
 on two days** — the release deployed on alpha and beta and the control project
 brought up beside them (day 1), then a person invited, an organisation, a key,
@@ -500,6 +500,7 @@ order.
 | **D2088** | D2045: outputs 20 adds `routes.control`; ADR 0241's reader reads 20 and 19. | The rendered-document migrator must produce `routes.control` for an archived 19 document without inventing a host; `output_migrations` imports nothing from `naming` (it writes `HEALTH_ROUTE_PATH` itself). | **`migrate_v19_to_v20(document)` takes no argument**: `control: {enabled: false}` and `routes.control` = the document's own `routes.app` with `/app` replaced by `/v1`; a `routes.app` not ending in `/app` is refused. Its two suffix constants are tied to `naming.APP_PATH_SUFFIX`/`CONTROL_PATH_SUFFIX` by `test_v20_derives_the_control_route_from_the_app_route`. `READABLE_PREVIOUS_VERSION` moves to 19 by construction. | An archived document already names its host; deriving from it is the one value the step may compute. | 0241 |
 | **D2089** | — | Run 2 rendered the control router for the first time; no project in `.generated/` enables the facility, and `projects/control/` does not exist until Run 3, so no RENDER of a control project ran — the labels, the compose variables and the outputs members were proved by calling `build_override`, `build_compose_env` and `build_outputs` directly. | **Run 3 owes the first full render of `project.control.example.yaml`** (with its set) and asserts the rendered `compose.env` and override from the files on disk; Run 10's deploy is the first time Traefik reads them. | A builder proved in isolation and never rendered is question 2 in §7 of CLAUDE.md. | — |
 | **D2090** | CLAUDE.md §1: the harness kills background tasks when the laptop is low on memory. | **WSL stopped answering three times in Runs 1–2** (`Wsl/Service/0x8007274c`). Measured: `vmmemWSL` 6.9 GB of 15.7 GB RAM (WSL saw 7.6 GB, 5.3 GB of it page cache); Docker held **4,290 volumes, 206 GB, 99 % reclaimable** — the anonymous data volume every Docker-backed test and rig left behind — plus 20.2 GB of images and 8.7 GB of build cache, in a 176.4 GB `docker_data.vhdx`. | **With the operator's consent, 2026-10-04:** `docker volume prune -f` (205.9 GB; named volumes and the three attached kept), `docker builder prune -f` (4.2 GB), 32 unpinned project images removed (every image `versions.env` pins kept and checked present; other projects' images untouched); the operator compacted the VHDX as administrator (176.4 → 20.7 GB). **`C:\Users\gmpar\.wslconfig`: `memory=6GB`, `swap=4GB`, `autoMemoryReclaim=gradual`** — WSL now reads 5,926 MiB total and 4,096 swap. A later session that sees WSL drop reads `docker system df` first. | The volumes are the cost of every proof that starts a throwaway cluster; nothing in the suite removes them. | — |
+| **D2091** | Run 2's targeted list (28 modules, the plan's plus every module the diff touched). | **CI red on `45a2a14`** (run 37224201524; Session 1 gate and Session 2 offline contract, 1 failed each of ~7,030): `test_doctor_redaction.py::test_every_schema_block_is_classified_by_this_file` requires every top-level block of the deployed document in `PRINTABLE_BLOCKS` or `SENSITIVE_BLOCKS`, and outputs 20's `control` was in neither. The module reads the outputs schema and touched nothing in the diff, so a targeted list derived from the diff could not see it (D1486's shape). | **`control` is PRINTABLE** (one boolean, no credential or address -- `connectors`' classification and reason); repaired in the next commit, module re-run locally. **A run that adds a top-level deployed-document member adds `test_doctor_redaction` to its targeted list.** | The guard did its job; the list was the defect. | 0251 |
 
 ---
 
@@ -1017,7 +1018,7 @@ FAILED; (M4) `control` accepted at schema 8 → the manifest test FAILED.
 the grep found, `test_rendered_migrations`, `test_acceptance_registry`,
 `test_evidence_claims`; both example projects re-rendered first.
 
-**Done.** 2026-10-04 (code; CI: see the push below). Scripts in WSL
+**Done.** 2026-10-04 (code). **CI: `45a2a14` RED** (run 37224201524, one unclassified document block, D2091) → repair commit, verdict recorded in Run 3's commit. Scripts in WSL
 `~/s37/run2/` (`r2_*.py` the edits, `r2_battery.py`, `r2-targeted.txt`).
 
 - **Built**: project manifest schema 9 (`control: {enabled}`, the v9 gate,
@@ -1046,7 +1047,7 @@ the grep found, `test_rendered_migrations`, `test_acceptance_registry`,
 - **Targeted once** (28 modules, Docker up): **1,160 passed, 1 failed**
   (`test_acceptance_matrix_is_generated_from_the_registry`, the moved node id)
   → `render-acceptance-matrix.py --write` → that module re-run: **24 passed**.
-- **Rows D2085–D2090.** NEXT FREE: D2091, ADR 0255.
+- **Rows D2085–D2091.** NEXT FREE: D2092, ADR 0255.
 
 ### Run 3 — the control project's migration set
 
