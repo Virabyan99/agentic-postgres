@@ -1268,7 +1268,14 @@ services:
       # Omitting it does not default to auth -- `create_app` refuses to build,
       # because an image that picked a mode by omission would start the wrong
       # service with a correct-looking configuration.
-      APP_MODE: auth
+      #
+      # Interpolated since Session 37 (ADR 0251): `control` on the one project
+      # whose manifest enables the control-plane facility -- the same process,
+      # serving health, `/auth/me` and `/v1` and nothing else -- and `auth` on
+      # every other, rendered by the one reader of the facility. `:?required`,
+      # so a render that forgot it fails `compose config` instead of starting
+      # the auth plane by default.
+      APP_MODE: ${AUTH_APP_MODE:?required}
       APG_PROJECT_KEY: ${PROJECT_KEY:?required}
       APG_PROJECT_ENVIRONMENT: ${PROJECT_ENVIRONMENT:?required}
       # The project's JWT identity, and the same two variables PostgREST's

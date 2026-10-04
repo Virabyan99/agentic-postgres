@@ -93,6 +93,7 @@ def deployed_document(rendered: dict[str, Any]) -> dict[str, Any]:
         app_status="unavailable",
         app_docs_status="unavailable",
         storage_status="unavailable",
+        control_status="unavailable",
         mcp_status="unavailable",
         metrics_status="unavailable",
         api=deployed_output.API_NOT_PUBLISHED,
@@ -781,17 +782,19 @@ def _previous_version(rendered: dict[str, Any]) -> dict[str, Any]:
     what the current version added -- Session 20's fixture-by-subtraction
     shape, so this document is the one an older release actually wrote.
 
-    **This helper moves with the outputs version.** At 19 the subtraction is
-    `connectors` (ADR 0237; at 18 it was `mcp.project_capabilities`, at 17 the
-    `migrations` block); when a run bumps the version it must subtract that
-    version's addition instead, and the assertion below is what says so.
+    **This helper moves with the outputs version.** At 20 the subtraction is
+    `control` and `routes.control` (ADR 0251; at 19 it was `connectors`, at 18
+    `mcp.project_capabilities`, at 17 the `migrations` block); when a run bumps
+    the version it must subtract that version's addition instead, and the
+    assertion below is what says so.
     """
     document = deployed_document(rendered)
-    assert deployed_output.SCHEMA_VERSION == 19, (
+    assert deployed_output.SCHEMA_VERSION == 20, (
         "the outputs version moved; teach this helper what the new version added"
     )
-    del document["connectors"]
-    document["schema_version"] = 18
+    del document["control"]
+    del document["routes"]["control"]
+    document["schema_version"] = 19
     return document
 
 

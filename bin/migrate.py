@@ -499,6 +499,18 @@ def project_set_from_manifest(project_path: str) -> migrations.MigrationSet:
     return migrations.MigrationSet(label="project", root=REPO_ROOT / named / "migrations")
 
 
+def _control_facility(project_path: str) -> bool:
+    """Does the manifest naming this set enable the control-plane facility? (ADR 0251.)
+
+    Read from the manifest for `project_set_from_manifest`'s reason: these verbs run
+    on a workstation before anything is deployed, and the lint needs the facility
+    to know whether the identity service's role may be granted anything.
+    """
+    from agentic_postgres import config
+
+    return config.control_enabled(config.load_project_manifest(Path(project_path)))
+
+
 def freeze_project_lock(project_path: str, declared_follows: str | None = None) -> int:
     """Freeze the project's own lock. The release's is never touched.
 
@@ -542,7 +554,7 @@ def freeze_project_lock(project_path: str, declared_follows: str | None = None) 
     # breaks would make `verify-lock` the first thing to notice, which is one
     # commit too late.
     migrations.verify_lock(manifest, lock, migration_set.root)
-    migrations.lint_project_set(migration_set)
+    migrations.lint_project_set(migration_set, control=_control_facility(project_path))
 
     migration_set.lock_path.write_text(
         json.dumps(lock, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -568,7 +580,7 @@ def verify_project_lock(project_path: str) -> str:
     manifest = migration_set.load_manifest()
     lock = migration_set.load_lock()
     migrations.verify_lock(manifest, lock, migration_set.root)
-    migrations.lint_project_set(migration_set)
+    migrations.lint_project_set(migration_set, control=_control_facility(project_path))
 
     # The record AND its provenance, because the sentence is what an operator
     # reads before a deploy and "which release was this reviewed against" has
@@ -768,7 +780,7 @@ def propose(project_path: str, by: str) -> int:
     set_manifest = project_set.load_manifest()
     lock = project_set.load_lock()
     migrations.verify_lock(set_manifest, lock, project_set.root)
-    migrations.lint_project_set(project_set)
+    migrations.lint_project_set(project_set, control=config.control_enabled(manifest))
 
     digest = migrations.set_digest(project_set)
     project_root = PROJECTS_ROOT / named

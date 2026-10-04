@@ -164,6 +164,7 @@ def build(rendered: dict, **overrides):
         # the Cloudflare step run for it -- which is all of them until Session 7
         # reaches a host.
         "storage_status": "unavailable",
+        "control_status": "unavailable",
         # Version 12, unpublished by default for the plainest reason of all: no
         # deployment anywhere publishes an agent plane yet, so `unavailable` with
         # `MCP_NOT_PUBLISHED` beside it is what every project on every host

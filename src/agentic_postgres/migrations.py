@@ -97,6 +97,34 @@ PROJECT_PLACEHOLDER_SOURCES = frozenset(
     }
 )
 
+#: The one further source a CONTROL-PLANE set may read (ADR 0251, D2046, D2073).
+#:
+#: The control mode connects as the identity service's role, and accepting an
+#: invitation must create an identity-registry user (`auth_create_user`, granted
+#: to that role alone) and a membership in one transaction -- so the control
+#: set's functions have to be executable by it. Only a set whose project enables
+#: the `control` facility may read this source, and only inside the two
+#: statement forms below; every other set is refused it exactly as before.
+CONTROL_PLACEHOLDER_SOURCE = "database.roles.auth_service"
+
+#: The two statements a control set may name the identity service's role in,
+#: and no third. `{name}` is the placeholder's name, escaped.
+#:
+#: The schema grant is the operator's decision of 2026-10-04 (D2073): rig 37b
+#: measured that the role holds no USAGE on `app`, so a function grant alone
+#: leaves every control function unnameable ("permission denied for schema
+#: app"). With it, the role reads no table -- it holds no table privilege --
+#: and executes only what is granted to it, plus `app.current_user_id()`, the
+#: one release function in `app` left PUBLIC-executable.
+CONTROL_GRANT_FORMS = (
+    r"GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+app\.\w+\s*\([^;]*\)\s+TO\s+\{{\{{{name}\}}\}}",
+    r"GRANT\s+USAGE\s+ON\s+SCHEMA\s+app\s+TO\s+\{{\{{{name}\}}\}}",
+)
+
+#: A dollar-quoted body. A placeholder inside one is inside a function or a DO
+#: block, which is neither grant form whatever the body says.
+_DOLLAR_QUOTED = re.compile(r"(\$\w*\$).*?\1", re.DOTALL)
+
 #: The schema version a PROJECT lock is written at. ADR 0210 moved it 2 -> 3
 #: to carry `follows_release_version_source`; a schema-2 lock still loads and
 #: reads as `computed`, which is what every lock written before ADR 0210 is.
@@ -792,8 +820,16 @@ def release_functions(release: MigrationSet) -> frozenset[tuple[str, str]]:
     return frozenset(defined)
 
 
-def lint_project_set(project: MigrationSet, release: MigrationSet | None = None) -> None:
+def lint_project_set(
+    project: MigrationSet, release: MigrationSet | None = None, *, control: bool = False
+) -> None:
     """Refuse a project set before anything renders it. ADR 0198.
+
+    ``control`` is whether the project whose manifest names this set enables the
+    control-plane facility (ADR 0251), read by every caller from that manifest
+    or document through `config.control_enabled` -- never inferred from the set.
+    It admits exactly one further placeholder source, the identity service's
+    role, and only inside `CONTROL_GRANT_FORMS`.
 
     **Every refusal here is a boundary, not a style rule.** The product's whole
     security argument is that PostgreSQL is the final authorization authority
@@ -811,13 +847,20 @@ def lint_project_set(project: MigrationSet, release: MigrationSet | None = None)
     """
     release = release or release_set()
     manifest = project.load_manifest()
+    allowed = PROJECT_PLACEHOLDER_SOURCES | (
+        {CONTROL_PLACEHOLDER_SOURCE} if control else frozenset()
+    )
 
     # The placeholder allowlist. Checked against the manifest's declared
     # SOURCES rather than against placeholder names, because the name is the
     # adopter's to choose and the source is what actually reaches the SQL.
+    identity_service_names = []
     for name, specification in manifest["placeholders"].items():
         source = specification["source"]
-        if source not in PROJECT_PLACEHOLDER_SOURCES:
+        if source == CONTROL_PLACEHOLDER_SOURCE and control:
+            identity_service_names.append(name)
+            continue
+        if source not in allowed:
             detail = ""
             if source == "database.roles.app_runtime":
                 # ADR 0211. The adopter who meets this copied the grant from the
@@ -835,9 +878,19 @@ def lint_project_set(project: MigrationSet, release: MigrationSet | None = None)
                     "the SELECT is still denied; the schema revoke is the one that holds. "
                     "Removing the line changes nothing your cluster does."
                 )
+            elif source == CONTROL_PLACEHOLDER_SOURCE:
+                # ADR 0251. The only set that may read it is the control plane's,
+                # and saying so is what an adopter who copied the control set's
+                # grant needs to read.
+                detail = (
+                    " auth_service in particular is readable only by the set of a project "
+                    "whose manifest enables the control-plane facility (ADR 0251), and there "
+                    "only in GRANT EXECUTE ON FUNCTION app.<name>(...) and GRANT USAGE ON "
+                    "SCHEMA app."
+                )
             raise ProjectSetError(
                 f"{project.root}: placeholder {name!r} reads {source!r}, which a project set "
-                f"may not read. Allowed: {sorted(PROJECT_PLACEHOLDER_SOURCES)}. A project's "
+                f"may not read. Allowed: {sorted(allowed)}. A project's "
                 "SQL names the request roles and its own database, and none of the platform's "
                 f"other identities.{detail}"
             )
@@ -860,6 +913,9 @@ def lint_project_set(project: MigrationSet, release: MigrationSet | None = None)
                     "the object owner through the platform's own migration plane; the platform's "
                     "state is not addressable from it."
                 )
+
+        for name in identity_service_names:
+            _refuse_identity_service_outside_its_grants(applied, name, where)
 
         for statement in SET_ROLE.findall(applied):
             if statement.strip() != PROJECT_ROLE_PREAMBLE:
@@ -935,6 +991,43 @@ def lint_project_set(project: MigrationSet, release: MigrationSet | None = None)
                 f"{where} has a `down` block that does not raise {PROJECT_DOWN_SENTINEL}. "
                 "A project that shipped a working rollback would be one `dbmate down` away "
                 "from dropping a tenant's table on a host."
+            )
+
+
+def _refuse_identity_service_outside_its_grants(applied: str, name: str, where: str) -> None:
+    """Every use of the identity service's placeholder is one of two grants (ADR 0251).
+
+    A use inside a dollar-quoted body is refused outright: it is inside a
+    function or a DO block, where a `format()` could grant anything. Outside
+    one, the statement around each use -- the text between its semicolons,
+    with bodies blanked so a semicolon inside one does not split it -- must
+    match `CONTROL_GRANT_FORMS` whole: one grantee, no `WITH GRANT OPTION`, a
+    function in `app` or the schema `app` itself.
+    """
+    token = "{{" + name + "}}"
+    blanked = _DOLLAR_QUOTED.sub(lambda match: " " * len(match.group(0)), applied)
+    forms = [
+        re.compile(rf"^{form.format(name=re.escape(name))}$", re.IGNORECASE | re.DOTALL)
+        for form in CONTROL_GRANT_FORMS
+    ]
+    start = 0
+    while (position := applied.find(token, start)) != -1:
+        start = position + len(token)
+        if blanked[position : position + len(token)] != token:
+            raise ProjectSetError(
+                f"{where} names {token} inside a function or DO body. The identity service's "
+                "role may appear only in GRANT EXECUTE ON FUNCTION app.<name>(...) and GRANT "
+                "USAGE ON SCHEMA app (ADR 0251)."
+            )
+        opening = blanked.rfind(";", 0, position) + 1
+        closing = blanked.find(";", position)
+        statement = " ".join(applied[opening : closing if closing != -1 else None].split())
+        if not any(form.match(statement) for form in forms):
+            raise ProjectSetError(
+                f"{where} names {token} in {statement!r}. In a control-plane set the identity "
+                "service's role may appear only as the sole grantee of GRANT EXECUTE ON "
+                "FUNCTION app.<name>(...) or GRANT USAGE ON SCHEMA app -- it is given functions "
+                "to execute and a schema to name them in, and nothing else (ADR 0251, D2073)."
             )
 
 
@@ -1098,6 +1191,8 @@ def destructive_findings(migration_set: MigrationSet) -> tuple[DestructiveFindin
 
 
 __all__ = [
+    "CONTROL_GRANT_FORMS",
+    "CONTROL_PLACEHOLDER_SOURCE",
     "DESTRUCTIVE_KINDS",
     "FOLLOWS_COMPUTED",
     "FOLLOWS_DECLARED",

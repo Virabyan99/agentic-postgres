@@ -63,6 +63,7 @@ def deployed(rendered: dict[str, Any]) -> dict[str, Any]:
         app_status="unavailable",
         app_docs_status="unavailable",
         storage_status="unavailable",
+        control_status="unavailable",
         mcp_status="unavailable",
         metrics_status="unavailable",
         api=deployed_output.API_NOT_PUBLISHED,

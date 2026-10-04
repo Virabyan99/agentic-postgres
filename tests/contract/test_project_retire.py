@@ -58,6 +58,7 @@ def build(rendered: dict[str, Any], **overrides: Any) -> dict[str, Any]:
         "app_status": "unavailable",
         "app_docs_status": "unavailable",
         "storage_status": "unavailable",
+        "control_status": "unavailable",
         "mcp_status": "unavailable",
         "metrics_status": "unavailable",
         "api": deployed_output.API_NOT_PUBLISHED,

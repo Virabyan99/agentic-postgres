@@ -1719,3 +1719,125 @@ def test_the_render_reports_a_project_sets_refusal_instead_of_a_stack(monkeypatc
     monkeypatch.setattr(module.rendering, "render_project", something_else)
     with pytest.raises(RuntimeError, match="a defect in the renderer"):
         module.render(project, capabilities)
+
+
+# ---------------------------------------------------------------------------
+# CTL-SET-001 -- the control-plane facility's two grant forms (ADR 0251)
+# ---------------------------------------------------------------------------
+
+#: A one-migration control set: a FORCE-RLS table, a definer function revoked
+#: from PUBLIC, and the two statements a control set may name the identity
+#: service's role in (D2046, D2073).
+CONTROL_BODY = """CREATE TABLE app.control_accounts (user_id uuid PRIMARY KEY);
+ALTER TABLE app.control_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.control_accounts FORCE ROW LEVEL SECURITY;
+CREATE FUNCTION app.control_me() RETURNS uuid
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp
+  AS $$ SELECT app.current_user_id() $$;
+REVOKE ALL ON FUNCTION app.control_me() FROM PUBLIC;
+"""
+CONTROL_GRANTS = """GRANT USAGE ON SCHEMA app TO {{auth_service}};
+GRANT EXECUTE ON FUNCTION app.control_me() TO {{auth_service}};
+"""
+
+
+def _control_set(root: Path, extra: str = "") -> migrations.MigrationSet:
+    """Write a control set under ``root`` whose up section is the table, the
+    function, the two permitted grants and ``extra``."""
+    (root / "migrations" / "templates").mkdir(parents=True)
+    manifest = {
+        "schema_version": 1,
+        "placeholders": {
+            "object_owner": {
+                "type": "identifier",
+                "source": "database.roles.object_owner",
+                "description": "the owner",
+            },
+            "auth_service": {
+                "type": "identifier",
+                "source": "database.roles.auth_service",
+                "description": "the identity service, which the control mode connects as",
+            },
+        },
+        "migrations": [
+            {
+                "version": "20261004120001",
+                "name": "control_accounts",
+                "template": "templates/0001-control-accounts.sql",
+                "placeholders": ["object_owner", "auth_service"],
+                "description": "the proof's control set",
+            }
+        ],
+    }
+    (root / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    template = (
+        "-- migrate:up\n"
+        f"{PREAMBLE}\n\n{CONTROL_BODY}{CONTROL_GRANTS}{extra}\n"
+        "-- migrate:down\n"
+        "DO $$ BEGIN RAISE EXCEPTION 'AP900: project migrations are fix-forward only'; END $$;\n"
+    )
+    (root / "migrations" / "templates" / "0001-control-accounts.sql").write_text(
+        template, encoding="utf-8"
+    )
+    return migrations.MigrationSet(label="project", root=root / "migrations")
+
+
+def test_the_lint_refuses_auth_service_without_the_control_facility(
+    tmp_path: Path, example: migrations.MigrationSet
+) -> None:
+    """ADR 0251. The identity service's role is a source only the control
+    plane's set may read: refused without the facility -- naming the facility, so
+    an adopter who copied the grant learns why -- and accepted with it, in the
+    same invocation. The example set still passes with the facility off (D499)."""
+    candidate = _control_set(tmp_path / "control")
+    with pytest.raises(
+        migrations.ProjectSetError, match=r"database\.roles\.auth_service"
+    ) as raised:
+        migrations.lint_project_set(candidate)
+    assert "control-plane facility" in str(raised.value)
+    with pytest.raises(migrations.ProjectSetError, match=r"database\.roles\.auth_service"):
+        migrations.lint_project_set(candidate, control=False)
+
+    migrations.lint_project_set(candidate, control=True)
+    migrations.lint_project_set(example)
+    assert migrations.CONTROL_PLACEHOLDER_SOURCE not in migrations.PROJECT_PLACEHOLDER_SOURCES
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "GRANT SELECT ON app.control_accounts TO {{auth_service}};",
+        "GRANT EXECUTE ON FUNCTION app.control_me() TO {{auth_service}}, {{object_owner}};",
+        "GRANT EXECUTE ON FUNCTION app.control_me() TO {{object_owner}}, {{auth_service}};",
+        "GRANT EXECUTE ON FUNCTION app.control_me() TO {{auth_service}} WITH GRANT OPTION;",
+        "GRANT USAGE ON SCHEMA api TO {{auth_service}};",
+        "GRANT USAGE ON SCHEMA app, api TO {{auth_service}};",
+        "GRANT EXECUTE ON FUNCTION api.create_note(text) TO {{auth_service}};",
+        "ALTER FUNCTION app.control_me() OWNER TO {{auth_service}};",
+        "GRANT {{auth_service}} TO {{object_owner}};",
+        "SET LOCAL ROLE {{auth_service}};",
+        "DO $$ BEGIN EXECUTE 'GRANT SELECT ON app.control_accounts TO {{auth_service}}'; END $$;",
+    ],
+    ids=[
+        "table-grant",
+        "second-grantee-after",
+        "second-grantee-before",
+        "grant-option",
+        "schema-api",
+        "two-schemas",
+        "function-outside-app",
+        "owner",
+        "role-membership",
+        "set-role",
+        "inside-a-body",
+    ],
+)
+def test_the_lint_accepts_auth_service_only_in_a_function_grant(tmp_path: Path, extra: str) -> None:
+    """With the facility ON, the role is accepted in exactly two statement forms
+    -- `GRANT EXECUTE ON FUNCTION app.<name>(...)` and `GRANT USAGE ON SCHEMA
+    app`, each with it as the sole grantee -- and refused in every other, a
+    dollar-quoted body included. The control, in every arm: the same set without
+    the extra statement passes (D499)."""
+    with pytest.raises(migrations.ProjectSetError, match=r"\{\{auth_service\}\}"):
+        migrations.lint_project_set(_control_set(tmp_path / "refused", extra), control=True)
+    migrations.lint_project_set(_control_set(tmp_path / "control"), control=True)

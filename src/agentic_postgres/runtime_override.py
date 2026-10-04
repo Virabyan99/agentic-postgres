@@ -24,7 +24,7 @@ from typing import Any
 
 import yaml
 
-from agentic_postgres.naming import HEALTH_ROUTE_PATH
+from agentic_postgres.naming import CONTROL_PATH_SUFFIX, HEALTH_ROUTE_PATH
 
 #: The two services Session 4 publishes on host loopback, and the ports they
 #: listen on *inside* the container. The pooler's is the 6432 convention rather
@@ -582,6 +582,12 @@ def build_override(
     metrics_router_name: str,
     metrics_auth_middleware_name: str,
     publications: dict[str, Any] | None = None,
+    #: Is this project the control plane (ADR 0251)? Declared, from the
+    #: rendered `AUTH_APP_MODE`, never sniffed: off, the `auth` container
+    #: carries exactly the labels it carried before Session 37.
+    control: bool = False,
+    control_router_name: str = "",
+    control_stripprefix_middleware_name: str = "",
     #: Does this project declare a migration set of its own (ADR 0206)?
     #:
     #: Declared here rather than sniffed here: this function is given a
@@ -636,6 +642,11 @@ def build_override(
         raise ValueError("app_stripprefix_middleware_name is required")
     if not app_docs_router_name:
         raise ValueError("app_docs_router_name is required")
+    if control and not (control_router_name and control_stripprefix_middleware_name):
+        raise ValueError(
+            "control_router_name and control_stripprefix_middleware_name are required "
+            "for the control plane"
+        )
     if not storage_router_name:
         raise ValueError("storage_router_name is required")
     if not storage_buffering_middleware_name:
@@ -828,12 +839,31 @@ def build_override(
                 ],
             },
             AUTH_SERVICE: {
-                "labels": _app_labels(
-                    https_entrypoint=https_entrypoint,
-                    app_router_name=app_router_name,
-                    app_buffering_middleware_name=app_buffering_middleware_name,
-                    app_stripprefix_middleware_name=app_stripprefix_middleware_name,
-                ),
+                "labels": {
+                    **_app_labels(
+                        https_entrypoint=https_entrypoint,
+                        app_router_name=app_router_name,
+                        app_buffering_middleware_name=app_buffering_middleware_name,
+                        app_stripprefix_middleware_name=app_stripprefix_middleware_name,
+                        control=control,
+                    ),
+                    # Session 37 (ADR 0251, D2059). The control project's `auth`
+                    # container serves `/v1` in APP_MODE=control, behind a router of
+                    # its own; on every other project this is empty and the
+                    # container's labels are what they were before.
+                    **(
+                        _control_labels(
+                            https_entrypoint=https_entrypoint,
+                            control_router_name=control_router_name,
+                            app_buffering_middleware_name=app_buffering_middleware_name,
+                            control_stripprefix_middleware_name=(
+                                control_stripprefix_middleware_name
+                            ),
+                        )
+                        if control
+                        else {}
+                    ),
+                },
                 # Session 21 (ADR 0200, D1126). The issuer's ceilings are a
                 # function of the deployment's scope vocabulary, and the
                 # vocabulary lives in the compiled lock -- so the auth service
@@ -1254,8 +1284,19 @@ def _app_labels(
     app_router_name: str,
     app_buffering_middleware_name: str,
     app_stripprefix_middleware_name: str,
+    control: bool = False,
 ) -> dict[str, str]:
     """The application API router: the auth service, published (Run 10).
+
+    **On the control plane the rule refuses `{app}/v1` and below** (ADR 0251,
+    D2059, D2075). The container serves `/v1/...` there, and the strip below
+    would otherwise hand `/api/app/v1/x` to it as `/v1/x` -- a second address for
+    the management API. Measured in rig 37d against the locked Traefik with a
+    control: with the negation `/api/app/v1` and `/api/app/v1/organizations`
+    answer Traefik's own 404 and `/api/app/auth/me` still reaches `/auth/me`;
+    without it, `/api/app/v1/organizations` reaches the service. The negation is
+    the boundary PAIR, because `!PathPrefix(`/api/app/v1`)` alone was measured to
+    hide `/api/app/v1x` too.
 
     **The boundary rule, re-measured for this route.** ``PathPrefix`` is a
     string prefix, so the pair is what gives a segment boundary. Measured
@@ -1287,11 +1328,13 @@ def _app_labels(
     buffering = f"traefik.http.middlewares.{app_buffering_middleware_name}"
     stripprefix = f"traefik.http.middlewares.{app_stripprefix_middleware_name}"
     path = "${API_APP_PATH:?required}"
+    rule = f"Host(`${{PROJECT_DOMAIN:?required}}`) && (Path(`{path}`) || PathPrefix(`{path}/`))"
+    if control:
+        hidden = f"{path}{CONTROL_PATH_SUFFIX}"
+        rule += f" && !(Path(`{hidden}`) || PathPrefix(`{hidden}/`))"
     return {
         "traefik.enable": "true",
-        f"{router}.rule": (
-            f"Host(`${{PROJECT_DOMAIN:?required}}`) && (Path(`{path}`) || PathPrefix(`{path}/`))"
-        ),
+        f"{router}.rule": rule,
         f"{router}.entrypoints": https_entrypoint,
         f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
         f"{router}.middlewares": (
@@ -1307,6 +1350,45 @@ def _app_labels(
         f"{buffering}.buffering.maxrequestbodybytes": "${AUTH_REQUEST_BODY_MAX_BYTES:?required}",
         f"{buffering}.buffering.memrequestbodybytes": "${AUTH_REQUEST_BODY_MAX_BYTES:?required}",
         f"{stripprefix}.stripprefix.prefixes": path,
+    }
+
+
+def _control_labels(
+    *,
+    https_entrypoint: str,
+    control_router_name: str,
+    app_buffering_middleware_name: str,
+    control_stripprefix_middleware_name: str,
+) -> dict[str, str]:
+    """The management API router (ADR 0251, D2059), on the control project's
+    `auth` container only.
+
+    The boundary pair `_app_labels` uses, so `{api}/v1x` is not the management
+    API. The strip removes the API base path ALONE, so the service sees
+    `/v1/...`. The buffering middleware is the app router's, defined by labels on
+    this same container -- sharing one across containers was measured to disable
+    the borrowing router when the definer stops, and here there is one container
+    -- because the service's body bound is one number for every route it serves.
+    The strip is this router's own: a middleware name is host-wide and the two
+    prefixes differ.
+    """
+    router = f"traefik.http.routers.{control_router_name}"
+    service = f"traefik.http.services.{control_router_name}"
+    stripprefix = f"traefik.http.middlewares.{control_stripprefix_middleware_name}"
+    path = "${CONTROL_ROUTE_PATH:?required}"
+    return {
+        f"{router}.rule": (
+            f"Host(`${{PROJECT_DOMAIN:?required}}`) && (Path(`{path}`) || PathPrefix(`{path}/`))"
+        ),
+        f"{router}.entrypoints": https_entrypoint,
+        f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
+        f"{router}.middlewares": (
+            f"${{BASELINE_MIDDLEWARE_CHAIN:?required}},"
+            f"{app_buffering_middleware_name},{control_stripprefix_middleware_name}"
+        ),
+        f"{router}.service": control_router_name,
+        f"{service}.loadbalancer.server.port": str(AUTH_SERVICE_PORT),
+        f"{stripprefix}.stripprefix.prefixes": "${API_CONTROL_PATH:?required}",
     }
 
 
@@ -1579,6 +1661,12 @@ def render_override(
     metrics_router_name: str,
     metrics_auth_middleware_name: str,
     publications: dict[str, Any] | None = None,
+    #: Is this project the control plane (ADR 0251)? Declared, from the
+    #: rendered `AUTH_APP_MODE`, never sniffed: off, the `auth` container
+    #: carries exactly the labels it carried before Session 37.
+    control: bool = False,
+    control_router_name: str = "",
+    control_stripprefix_middleware_name: str = "",
     project_migrations: bool = False,
 ) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
@@ -1605,6 +1693,9 @@ def render_override(
         metrics_router_name=metrics_router_name,
         metrics_auth_middleware_name=metrics_auth_middleware_name,
         publications=publications,
+        control=control,
+        control_router_name=control_router_name,
+        control_stripprefix_middleware_name=control_stripprefix_middleware_name,
     )
     header = (
         "# Generated from host.yaml and the rendered compose.env by ./deploy.sh.\n"

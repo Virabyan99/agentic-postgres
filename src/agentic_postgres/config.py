@@ -61,7 +61,7 @@ MAX_MANIFEST_BYTES = 65_536
 #: `project.lifecycle`. Versions 1 and 2 still load and render as permanent
 #: projects, because both host manifests are version 1 and no commit can edit
 #: them.
-SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8})
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9})
 SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
 
 #: The project manifest version at which `mcp.capabilities` exists (ADR 0201):
@@ -80,6 +80,12 @@ PROJECT_CONNECTORS_FROM = 7
 #: exists (ADR 0243): optional at 8, forbidden below. Below 8, or absent, it
 #: reads as 0 -- a host needs the set's proposal and no approval.
 PROJECT_APPROVALS_FROM = 8
+
+#: The project manifest version at which `control` exists (ADR 0251):
+#: optional at 9, forbidden below. A manifest below 9 is not the control
+#: plane, and the deployed document records `control.enabled: false` for it
+#: (outputs version 20).
+PROJECT_CONTROL_FROM = 9
 
 #: The project manifest version at which `backup.mirror` exists (ADR 0188):
 #: optional at 4, forbidden below. A manifest below 4 has no mirror, and the
@@ -452,6 +458,19 @@ def connectors_enabled(document: dict[str, Any]) -> bool:
     this, never the key directly.
     """
     return bool((document.get("connectors") or {}).get("enabled", False))
+
+
+def control_enabled(document: dict[str, Any]) -> bool:
+    """Is this project the control plane? (ADR 0251, D2044.)
+
+    `connectors_enabled`'s shape and for its reason: a manifest (schema 9) and a
+    rendered or deployed document (outputs 20) carry `control.enabled` at the
+    same place, and an absent block means off -- every manifest below 9, and a
+    document migrated from 19. The render, the lint, the router labels, the
+    deploy's observer and `bin/control.sh` all ask this, never the key directly,
+    and `bin/control.sh` finds the control project by it rather than by a name.
+    """
+    return bool((document.get("control") or {}).get("enabled", False))
 
 
 def connector_endpoints(manifest: dict[str, Any]) -> dict[str, str]:
@@ -1238,6 +1257,18 @@ def validate_project_semantics(
                 f"migrations/manifest.json ({manifest_path}). A set is a manifest, its "
                 "templates and its own lock."
             )
+
+    # ADR 0251 (D2044). The control plane's tables ARE its migration set, so a
+    # manifest that enables the facility and names no set describes a control
+    # plane with nowhere to keep an account -- a deploy that would start `/v1`
+    # over a database with no control table and answer every request with an
+    # undefined-function error. Refused at the render, where a human is looking.
+    if control_enabled(document) and set_path is None:
+        raise ManifestError(
+            "control.enabled is true and the manifest declares no migrations.set. The control "
+            "plane's accounts, organisations, keys and registry are tables in its own "
+            "migration set (ADR 0251); name it, e.g. `migrations: {set: projects/control}`."
+        )
 
     # ADR 0201, the same rule for a project's capability manifest: the schema
     # constrains the path's shape and only the filesystem can say whether the

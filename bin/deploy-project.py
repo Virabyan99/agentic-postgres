@@ -413,6 +413,23 @@ OVERRIDE_NAME_KEYS: dict[str, str] = {
 }
 
 
+def _override_control(compose_env: Path) -> dict[str, Any]:
+    """The control-plane arguments `render_override` takes (ADR 0251).
+
+    Read from the same compose.env as the names, so the mode the container is
+    rendered with and the routers its labels carry cannot disagree: the
+    facility is `AUTH_APP_MODE == control`, and the two names are emitted for
+    every project, so `_env_value` refuses a render that forgot one.
+    """
+    return {
+        "control": _env_value(compose_env, "AUTH_APP_MODE") == "control",
+        "control_router_name": _env_value(compose_env, "CONTROL_ROUTER_NAME"),
+        "control_stripprefix_middleware_name": _env_value(
+            compose_env, "CONTROL_STRIPPREFIX_MIDDLEWARE_NAME"
+        ),
+    }
+
+
 def _override_names(compose_env: Path) -> dict[str, str]:
     """The name arguments `render_override` takes, read from one compose.env.
 
@@ -1534,6 +1551,38 @@ def observe_app(url: str, *, administrator: bool) -> str:
     return word
 
 
+def observe_control(url: str, *, control: bool) -> str:
+    """`ready` when the management API refuses an anonymous `GET {url}/me` with 401.
+
+    ADR 0251, `observe_app`'s shape: the router matched, the strip handed the
+    service `/v1/me`, and the service refused a caller with no credential. A
+    project that is not the control plane records `unavailable` without a
+    request -- its `auth` container serves no `/v1` path, so there is nothing to
+    observe, and spending the observation window on it would be D974 again.
+    """
+    if not control:
+        return "unavailable"
+    result = run(
+        "curl",
+        "-ksS",
+        "-o",
+        "/dev/null",
+        "-w",
+        "%{http_code}",
+        "--max-time",
+        "10",
+        f"{url}/me",
+    )
+    status = result.stdout.strip()
+    word = observed(status, ready_when="401")
+    if word != "ready":
+        print(
+            f"  the management API answered {status or '(nothing)'} rather than 401: "
+            f"recorded {word}"
+        )
+    return word
+
+
 #: The two halves of the R2 credential, by the names `secrets.required.yaml`
 #: gives them. Read from the ACTIVE generation's required set rather than from
 #: the manifest, because the manifest says what a deployment wants and the
@@ -2165,6 +2214,7 @@ def render_runtime_only(arguments: argparse.Namespace) -> int:
     compose_env = rendered_directory / "compose.env"
     payload = runtime_override.render_override(
         **_override_names(compose_env),
+        **_override_control(compose_env),
         https_entrypoint=host["edge"]["https_entrypoint"],
         rendered_directory=str(rendered_directory),
         project_migrations=_has_project_migrations(rendered_directory),
@@ -2349,6 +2399,7 @@ def main(argv: list[str] | None = None) -> int:
 
     override_payload = runtime_override.render_override(
         **_override_names(rendered_dir / "compose.env"),
+        **_override_control(rendered_dir / "compose.env"),
         https_entrypoint=host["edge"]["https_entrypoint"],
         # The installed path, not the checkout's. The override is written into
         # the staging copy of the very directory it names, and the name has to
@@ -2748,6 +2799,10 @@ def main(argv: list[str] | None = None) -> int:
     # a challenge is what a working route looks like from here -- the same
     # condition `observe_docs` already uses, and for the same reason.
     metrics_status = "unavailable"
+    # Version 20's (ADR 0251). `unavailable` for every project that is not the
+    # control plane, without a request, and for the control plane until its
+    # route refuses an anonymous caller with 401.
+    control_status = "unavailable"
     jwt_block = dict(deployed_output.JWT_NOT_PUBLISHED)
     api_block = dict(deployed_output.API_NOT_PUBLISHED)
     mcp_block = dict(deployed_output.MCP_NOT_PUBLISHED)
@@ -2874,6 +2929,17 @@ def main(argv: list[str] | None = None) -> int:
                 "bootstrap \\\n        --username <name> --display-name <name>\n\n"
                 "  A project awaiting its first administrator is not a failed deploy."
             )
+        # Session 37 (ADR 0251). The control plane's second router onto the same
+        # container; observed for itself, because Traefik accepts or drops each
+        # router's labels one at a time (D208).
+        control = config.control_enabled(rendered)
+        if control:
+            control_status = observation.await_observation(
+                lambda: observe_control(rendered["routes"]["control"], control=True),
+                lambda observed: observed == "ready",
+            )
+        else:
+            control_status = observe_control(rendered["routes"]["control"], control=False)
 
     if arguments.through_session >= STORAGE_PLANE_SESSION:
         # The credential is read first, for the reason the administrator above
@@ -3046,6 +3112,7 @@ def main(argv: list[str] | None = None) -> int:
         # `publishedRoute` forces a null URL for it, so an unpublished storage
         # surface names no address.
         storage_status=storage_status,
+        control_status=control_status,
         # Version 12. `unavailable` until an MCP runtime answers on the route
         # (D326's shape, a third time) -- and until Run 7 there is nothing to
         # answer. `publishedRoute` forces a null URL for it, so an unpublished

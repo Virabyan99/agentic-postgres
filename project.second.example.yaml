@@ -9,7 +9,10 @@
 # one rendered from project.example.yaml. See runbook §8 and
 # tests/contract/test_render_isolation.py.
 
-# Schema version 8 (ADR 0243) since Session 35, WITHOUT
+# Schema version 9 (ADR 0251) since Session 37, WITHOUT `control`: not the
+# control plane, so nothing it renders moves except the version.
+#
+# Version 8 (ADR 0243) since Session 35, WITHOUT
 # `migrations.approvals_required` -- it has no set, and the key lives inside
 # the `migrations` block. The control for `project.example.yaml`'s 1.
 #
@@ -24,7 +27,7 @@
 # has neither. A version 6 manifest omitting both keys applies exactly the
 # release's migrations and serves exactly the release's agent surface -- which
 # is what every manifest below version 5 also does.
-schema_version: 8
+schema_version: 9
 
 project:
   slug: fixture-alpine

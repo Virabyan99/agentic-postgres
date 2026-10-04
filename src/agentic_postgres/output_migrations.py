@@ -101,7 +101,7 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 19
+CURRENT_VERSION = 20
 
 #: What a project with no capability manifest of its own records at version 18
 #: (ADR 0201), on both branches: `capabilities.project` rendered and
@@ -330,7 +330,10 @@ def migrate_rendered(
     if detect_version(document) == 17:
         document = migrate_v17_to_v18(document)
 
-    return migrate_v18_to_v19(document)
+    if detect_version(document) == 18:
+        document = migrate_v18_to_v19(document)
+
+    return migrate_v19_to_v20(document)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -1408,6 +1411,58 @@ def migrate_v18_to_v19(document: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+#: What a document below version 20 means about the control plane: not it. No
+#: manifest below schema 9 could enable the facility, and outputs 20 arrives
+#: with it.
+NO_CONTROL = {"enabled": False}
+
+#: The two suffixes `routes.control` is derived across, written here as this
+#: module writes `HEALTH_ROUTE_PATH` -- a migrator that imported `naming` would
+#: change what an archived document migrates to whenever a live derivation
+#: moved. `test_v20_derives_the_control_route_from_the_app_route` ties both to
+#: `naming.APP_PATH_SUFFIX` and `naming.CONTROL_PATH_SUFFIX`.
+APP_ROUTE_SUFFIX = "/app"
+CONTROL_ROUTE_SUFFIX = "/v1"
+
+
+def migrate_v19_to_v20(document: dict[str, Any]) -> dict[str, Any]:
+    """Return a version 20 ``rendered`` document derived from a version 19 one.
+
+    Version 20 adds `control` (ADR 0251): whether the project is the control
+    plane -- `{"enabled": false}` for every archived document, because no
+    manifest below schema 9 could say otherwise -- and `routes.control`, the
+    management API's address, which every project names (D326). The address is
+    the document's own `routes.app` with its application suffix replaced, so the
+    step takes no argument and invents no host: `{api}/app` becomes `{api}/v1`.
+    A `routes.app` that does not end in the suffix is refused rather than
+    guessed at. Everything else is left exactly as it was found (ADR 0199).
+    """
+    version = detect_version(document)
+    if version == 20:
+        raise MigrationError("document is already version 20; migration would be a no-op")
+    if version != 19:
+        raise MigrationError(f"only version 19 can be migrated to 20, got {version}")
+
+    require_kind(document, "rendered")
+
+    if "control" in document or "control" in document.get("routes", {}):
+        raise MigrationError(
+            "the document already carries `control`; this is not a version 19 document"
+        )
+    app = document.get("routes", {}).get("app")
+    if not isinstance(app, str) or not app.endswith(APP_ROUTE_SUFFIX):
+        raise MigrationError(
+            f"routes.app is {app!r}, which does not end in {APP_ROUTE_SUFFIX!r}; the "
+            "management API's address is derived from it and is not guessed"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["routes"]["control"] = app[: -len(APP_ROUTE_SUFFIX)] + CONTROL_ROUTE_SUFFIX
+    migrated["control"] = dict(NO_CONTROL)
+    migrated["schema_version"] = 20
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -1419,10 +1474,13 @@ def _copy(value: Any) -> Any:
 __all__ = [
     "ACCESS_PROFILE_MEMBERS",
     "ACCESS_PROFILE_TRANSPORTS",
+    "APP_ROUTE_SUFFIX",
     "BUDGET_MEMBERS",
+    "CONTROL_ROUTE_SUFFIX",
     "CURRENT_VERSION",
     "HEALTH_ROUTE_PATH",
     "NO_CONNECTORS",
+    "NO_CONTROL",
     "NO_MIRROR",
     "NO_PROJECT_CAPABILITIES",
     "NO_PROJECT_SET",
@@ -1449,5 +1507,6 @@ __all__ = [
     "migrate_v16_to_v17",
     "migrate_v17_to_v18",
     "migrate_v18_to_v19",
+    "migrate_v19_to_v20",
     "require_kind",
 ]

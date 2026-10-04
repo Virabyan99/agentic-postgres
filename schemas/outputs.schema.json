@@ -31,13 +31,14 @@
         "capabilities",
         "template_version",
         "migrations",
-        "connectors"
+        "connectors",
+        "control"
       ],
       "properties": {
         "schema_version": {
           "type": "integer",
           "enum": [
-            19
+            20
           ]
         },
         "document_kind": {
@@ -170,7 +171,8 @@
             "health",
             "app_docs",
             "storage",
-            "metrics"
+            "metrics",
+            "control"
           ],
           "properties": {
             "rest": {
@@ -212,6 +214,10 @@
             "storage": {
               "$ref": "#/$defs/httpsUrl",
               "description": "Version 11. The object-storage surface's URL, derived by `naming` like every other route here and published whether or not storage is enabled -- a rendered document names what a deployment would create, and the readiness claim lives on the deployed branch."
+            },
+            "control": {
+              "$ref": "#/$defs/httpsUrl",
+              "description": "Version 20 (ADR 0251). The management API's URL, `{api.public_base_path}/v1`, derived by `naming` like every other route here and published whether or not the project is the control plane -- a rendered document names what a deployment would create, and the readiness claim lives on the deployed branch (D326)."
             }
           }
         },
@@ -296,6 +302,9 @@
         },
         "connectors": {
           "$ref": "#/$defs/connectorsFacility"
+        },
+        "control": {
+          "$ref": "#/$defs/controlFacility"
         }
       }
     },
@@ -325,14 +334,15 @@
         "backup",
         "backup_state",
         "migrations",
-        "connectors"
+        "connectors",
+        "control"
       ],
       "description": "Root-owned, mode 0600, written under /etc/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
       "properties": {
         "schema_version": {
           "type": "integer",
           "enum": [
-            19
+            20
           ]
         },
         "document_kind": {
@@ -457,7 +467,8 @@
             "app_docs",
             "storage",
             "mcp",
-            "metrics"
+            "metrics",
+            "control"
           ],
           "description": "Version 5 added `rest` and `docs` beside `health`, which Session 2 built as a status-carrying object for exactly this (ADR 0053). The rendered branch names the same three URLs and remains their single derivation; this branch records what is being served against them. Version 11 added `storage`. Version 12 added `mcp` -- which the RENDERED branch has named since version 1 and this one had never carried (D395). That is D389's shape exactly, in a second place: a route published in the document a manifest produces and absent from the document every plane reads. It is caught here before a host trip rather than by one. The two branches' route sets are compared AS SETS by a contract test, so the next route added to one and forgotten in the other fails offline.",
           "properties": {
@@ -509,6 +520,10 @@
             "mcp": {
               "$ref": "#/$defs/publishedRoute",
               "description": "Version 12, and it follows `app` and `storage` exactly (D326's two-stage convergence): `unavailable` with a null URL until the agent plane is deployed and something answers on the route, `ready` on the deploy that observes it. The rendered branch has named this URL since version 1 and nothing has ever published its readiness -- D395. What the status is NOT is a claim about the MCP runtime's own protocol: that lives in `mcp`, beside `api`, and the two are bound by the same coherence rule `api` and `routes.rest` are (`_refuse_incoherent_publication`)."
+            },
+            "control": {
+              "$ref": "#/$defs/publishedRoute",
+              "description": "Version 20 (ADR 0251). The management API, observed: `ready` only on a project whose `control.enabled` is true and whose `{url}/me` refused an anonymous request with 401; `unavailable` everywhere else, with no request made where the facility is off."
             }
           }
         },
@@ -690,6 +705,9 @@
         },
         "connectors": {
           "$ref": "#/$defs/connectorsFacility"
+        },
+        "control": {
+          "$ref": "#/$defs/controlFacility"
         }
       }
     },
@@ -2369,6 +2387,19 @@
         }
       },
       "description": "Version 19 (ADR 0237). Whether the project has the connectors facility, read from the manifest's `connectors.enabled` by `config.connectors_enabled` -- the one reader, which reads a manifest and a document at the same place. Carried whole to the deployed document, because three callers decide a project's facilities from a rendered or deployed document (D1785). The endpoints are NOT here: they are per-deployment values that leave the installed manifest only for the connector's row (D1786). A boolean facility flag is not a project-scoped identity and joins no isolation pointer."
+    },
+    "controlFacility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "description": "Version 20 (ADR 0251). Whether the project is the control plane, read from the manifest's `control.enabled` by `config.control_enabled` -- the one reader, which reads a manifest and a document at the same place. Carried whole to the deployed document, because the lint, the deploy's observer and `bin/control.sh` decide from a rendered or deployed document, and the control project is found by this boolean, never by its name (D2068). A facility flag is not a project-scoped identity and joins no isolation pointer."
     }
   }
 }

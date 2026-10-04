@@ -455,6 +455,11 @@ def build_outputs(
             # added since version 5 -- the readiness claim lives on the deployed
             # branch, where something can observe it.
             "metrics": identity.route_metrics,
+            # Version 20 (ADR 0251). The management API, named for EVERY project
+            # as `storage` is, whether or not the project is the control plane:
+            # the readiness claim lives on the deployed branch (D326), where only
+            # a project with the facility can observe it `ready`.
+            "control": identity.route_control,
         },
         "jwt": {"issuer": identity.jwt_issuer, "audience": identity.jwt_audience},
         "secrets": {
@@ -539,6 +544,11 @@ def build_outputs(
         # callers decide a project's facilities from a rendered or deployed
         # document, so the boolean is here; the endpoints never are (D1786).
         "connectors": {"enabled": config.connectors_enabled(project)},
+        # Version 20 (ADR 0251, D2045, D2068). The facility, `connectors`' shape:
+        # the lint, the deploy's observer and `bin/control.sh` decide from a
+        # rendered or deployed document, and the control project is found by
+        # this boolean -- never by its name.
+        "control": {"enabled": config.control_enabled(project)},
     }
 
 
@@ -902,6 +912,20 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "STORAGE_BUFFERING_MIDDLEWARE_NAME",
     "STORAGE_STRIPPREFIX_MIDDLEWARE_NAME",
     "STORAGE_CORS_MIDDLEWARE_NAME",
+    # Session 37 (ADR 0251). The auth container's mode -- `control` only where
+    # the manifest enables the facility, `auth` everywhere else, so `alpha-dev`
+    # and `beta-dev` render the value `compose.yaml` carried as a literal --
+    # and the management API's route in the two shapes above: the paths a rule
+    # matches and a strip removes (values, interpolated) and the names
+    # `runtime_override.py` renders into label keys (ADR 0013). Rendered for
+    # every project, because `compose.yaml` interpolates them with `:?` and a
+    # variable a project lacks would fail its `compose config`; the labels that
+    # read them exist only on the control project.
+    "AUTH_APP_MODE",
+    "API_CONTROL_PATH",
+    "CONTROL_ROUTE_PATH",
+    "CONTROL_ROUTER_NAME",
+    "CONTROL_STRIPPREFIX_MIDDLEWARE_NAME",
     # The origin allowlist, as one comma-separated value (ADR 0109). Measured:
     # Traefik parses a comma-separated label into a list, read back from its own
     # API as `['https://a.example', 'https://b.example']`.
@@ -1747,8 +1771,15 @@ def build_compose_env(
     api: dict[str, Any] | None = None,
     storage: dict[str, Any] | None = None,
     backup: dict[str, Any] | None = None,
+    *,
+    control: bool = False,
 ) -> bytes:
     """Exactly :data:`COMPOSE_ENV_KEYS`, in that order, and nothing else.
+
+    ``control`` is `config.control_enabled` of the manifest (ADR 0251), passed by
+    the render rather than re-read here, because this function is handed the
+    manifest's blocks and not the manifest. Off renders `AUTH_APP_MODE=auth`,
+    which is what every project ran before Session 37.
 
     Anything from ``versions.env`` belongs to ``versions.env``, and anything
     from ``host.yaml`` belongs to the root-owned runtime env file: all three
@@ -2066,6 +2097,15 @@ def build_compose_env(
         "STORAGE_BUFFERING_MIDDLEWARE_NAME": identity.storage_buffering_middleware,
         "STORAGE_STRIPPREFIX_MIDDLEWARE_NAME": identity.storage_stripprefix_middleware,
         "STORAGE_CORS_MIDDLEWARE_NAME": identity.storage_cors_middleware,
+        # Session 37 (ADR 0251, D2043, D2059). The mode from the one reader of
+        # the facility; the strip is the API base path ALONE, so the service sees
+        # `/v1/...`, and the route path is `identity`'s, so the URL the document
+        # publishes and the rule the router matches are one expression (ADR 0061).
+        "AUTH_APP_MODE": "control" if control else "auth",
+        "API_CONTROL_PATH": identity.route_control_strip_path,
+        "CONTROL_ROUTE_PATH": identity.route_control_path,
+        "CONTROL_ROUTER_NAME": identity.control_router,
+        "CONTROL_STRIPPREFIX_MIDDLEWARE_NAME": identity.control_stripprefix_middleware,
         # The same sorted list the rendered document publishes, comma-joined --
         # measured to parse into a list by the locked Traefik, read back from
         # its own API rather than inferred from a response header.
@@ -2518,7 +2558,7 @@ def write_rendered_migrations(
             # asymmetry is deliberate rather than an omission: a project set is
             # the half an adopter edits.
             migrations.verify_lock(manifest, migration_set.load_lock(), migration_set.root)
-            migrations.lint_project_set(migration_set)
+            migrations.lint_project_set(migration_set, control=config.control_enabled(document))
             # ADR 0242: REPORTED here and never refused (D1868). An upgrading
             # project whose manifest rendered yesterday must render today; the
             # workstation's `mcp-contract.sh check --project` and `propose`
@@ -2649,6 +2689,7 @@ def render_project(
                     project["api"],
                     project.get("storage"),
                     project.get("backup"),
+                    control=config.control_enabled(project),
                 ),
             )
             # The archiver's configuration, rendered beside `compose.env` and

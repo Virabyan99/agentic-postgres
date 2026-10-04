@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import REPO_ROOT, access_policy, backup_report, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
@@ -493,6 +493,10 @@ def build_deployed_document(
     storage_status: str,
     mcp_status: str,
     metrics_status: str,
+    # Version 20 (ADR 0251). Required with no default, for the reason every
+    # status above is: a default would let a deploy that observed nothing
+    # publish the same document as one that did.
+    control_status: str,
     api: dict[str, Any],
     jwt: dict[str, Any],
     mcp: dict[str, Any],
@@ -630,6 +634,9 @@ def build_deployed_document(
             # nothing answers on it, which is a different fact from the
             # route not existing (ADR 0005's reservation, redeemed).
             "metrics": published_route(rendered["routes"]["metrics"], metrics_status),
+            # Version 20 (ADR 0251), and it follows `storage` exactly (D326): every
+            # project names the address, and only the control plane can serve it.
+            "control": published_route(rendered["routes"]["control"], control_status),
         },
         "api": dict(api),
         "jwt": dict(jwt),
@@ -715,6 +722,9 @@ def build_deployed_document(
         # Version 19 (ADR 0237). Carried from the render, not recomputed: the
         # facility the deployment was rendered with is the one it has.
         "connectors": dict(rendered["connectors"]),
+        # Version 20 (ADR 0251). Carried from the render for `connectors`' reason:
+        # the facility the deployment was rendered with is the one it has.
+        "control": dict(rendered["control"]),
         "observed_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }
     return validate_deployed_document(document)
@@ -910,6 +920,19 @@ def _refuse_incoherent_publication(document: dict[str, Any]) -> None:
             f"{routes.get('mcp', {}).get('status')!r}. An agent plane is served over a "
             "route; a document that publishes the first without the second describes "
             "a tool surface no agent can reach"
+        )
+
+    # Version 20 (ADR 0251). The converse direction this time, because the
+    # failure it refuses is the reassuring one: a `ready` management API on a
+    # project that is not the control plane would be a surface the document
+    # promises and no container in this deployment serves.
+    if routes.get("control", {}).get("status") == "ready" and not (
+        document.get("control") or {}
+    ).get("enabled", False):
+        raise ManifestError(
+            "routes.control is 'ready' while control.enabled is false. Only the control "
+            "plane serves the management API (ADR 0251); a document that publishes it for "
+            "any other project describes a surface nothing here answers"
         )
 
     jwt = document.get("jwt", {})

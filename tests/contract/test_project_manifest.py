@@ -819,7 +819,8 @@ def test_schema_eight_admits_approvals_required_beside_a_set(
     never anything else. It lives inside `migrations`, whose schema requires
     `set`, so a manifest carrying it without a set is refused by the schema."""
     assert config.PROJECT_APPROVALS_FROM == 8
-    assert base["schema_version"] == 8
+    # The base is version 9 since Session 37 (ADR 0251); the key arrived at 8.
+    assert base["schema_version"] == 9
     assert config.approvals_required(check(tmp_path, base)) == 1
 
     for value in (0, 1):
@@ -843,7 +844,7 @@ def test_schema_eight_admits_approvals_required_beside_a_set(
         check(tmp_path, without_set)
 
     second = config.load_project_manifest(REPO_ROOT / "project.second.example.yaml")
-    assert second["schema_version"] == 8
+    assert second["schema_version"] == 9  # 9 since Session 37 (ADR 0251)
     assert config.approvals_required(second) == 0
 
 

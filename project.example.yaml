@@ -9,7 +9,13 @@
 # project.second.example.yaml they also exercise the collision contract --
 # "fixture-alpha" and "fixture-alpine" share a 12-character prefix.
 
-# Schema version 8 (ADR 0243): `migrations.approvals_required` -- 1 here, so a
+# Schema version 9 (ADR 0251): `control` makes a deployment the control plane.
+# Optional at 9, forbidden below it, and omitted here: this project is not the
+# control plane, so its `auth` container runs `APP_MODE=auth` exactly as before
+# and no control router is rendered. `project.control.example.yaml` is the
+# example that enables it.
+#
+# Version 8 (ADR 0243): `migrations.approvals_required` -- 1 here, so a
 # host applies a pending version of this set only when its committed proposal
 # (`bin/migrate.sh propose`) carries a committed approval by a SECOND declared
 # name (`bin/migrate.sh approve`). This fixture sets it to demonstrate the
@@ -47,7 +53,7 @@
 # read (D929), with `mcp.profile`. Versions 1 to 4 still load -- both host
 # manifests are version 1 -- and render as permanent, unmirrored projects with
 # no set of their own, which is what they always were.
-schema_version: 8
+schema_version: 9
 
 # This project's own migrations, and the whole of what an adopter adds. The
 # directory is tracked in this checkout: a release is exactly the commit it is

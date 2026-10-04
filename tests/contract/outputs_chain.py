@@ -46,6 +46,7 @@ def _steps(metrics_url: str) -> dict[int, Callable[[dict[str, Any]], dict[str, A
         16: output_migrations.migrate_v16_to_v17,
         17: output_migrations.migrate_v17_to_v18,
         18: output_migrations.migrate_v18_to_v19,
+        19: output_migrations.migrate_v19_to_v20,
     }
 
 

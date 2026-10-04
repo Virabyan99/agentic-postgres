@@ -118,6 +118,14 @@ REST_PATH_SUFFIX = "/rest"
 #: together, and `jwt_issuer` is built from the same expression again.
 APP_PATH_SUFFIX = "/app"
 
+#: Suffix appended to a project's `api.public_base_path` for the management API
+#: (Session 37, ADR 0251) -- `/api/v1`, BESIDE `/api/app` rather than under it,
+#: because the control plane's surface is a contract of its own (the fifth) and
+#: not a second surface of the application API. Served only by a project whose
+#: manifest enables the `control` facility; named for every project, as storage
+#: is, and observed `ready` only where it is served (D326).
+CONTROL_PATH_SUFFIX = "/v1"
+
 #: Suffix appended to the application API's path for the object-storage surface
 #: (Session 7). It sits UNDER `APP_PATH_SUFFIX` rather than beside it, because
 #: storage is a second surface of the application API and shares its issuer and
@@ -402,6 +410,28 @@ def app_stripprefix_middleware_name(key: str) -> str:
     return traefik_name(f"apg-{key}-app-stripprefix", context="traefik_middleware_app_strip")
 
 
+def control_router_name(key: str) -> str:
+    """The router publishing the management API, `{api}/v1` (ADR 0251, D2059).
+
+    A second router onto the SAME container as `app_router_name`'s -- the
+    control project's `auth` container serves `/v1` in `APP_MODE=control` --
+    and derived for every project, as the storage router is, while its labels
+    are rendered only where the manifest enables the facility.
+    """
+    return traefik_name(f"apg-{key}-control", context="traefik_router_control")
+
+
+def control_stripprefix_middleware_name(key: str) -> str:
+    """The management API's strip-prefix middleware: it removes
+    `{api.public_base_path}` alone, so the service sees `/v1/...` -- the path
+    its routes are declared at and its contract names. Its own rather than the
+    app route's, because the two prefixes differ (`app_stripprefix_middleware_name`'s
+    reason)."""
+    return traefik_name(
+        f"apg-{key}-control-stripprefix", context="traefik_middleware_control_strip"
+    )
+
+
 def app_buffering_middleware_name(key: str) -> str:
     """The application route's body-size middleware.
 
@@ -505,6 +535,9 @@ def project_router_names(key: str) -> tuple[str, ...]:
         app_docs_router_name(key),
         storage_router_name(key),
         mcp_router_name(key),
+        # Session 37 (ADR 0251). Enumerated for every project, like storage's:
+        # a router that never carries a request reads zero, which is a reading.
+        control_router_name(key),
     )
 
 
@@ -1041,6 +1074,19 @@ class ProjectIdentity:
     #: deployed branch's `routes.storage` status (D326).
     route_storage: str = ""
     route_storage_path: str = ""
+    #: Session 37's management API (ADR 0251). URL and path from one expression
+    #: for ADR 0061's reason, named for every project as `route_storage` is: a
+    #: rendered document names what a deployment would create, and whether
+    #: anything serves it is the deployed branch's `routes.control` (D326).
+    route_control: str = ""
+    route_control_path: str = ""
+    #: What the control router strips: the API base path ALONE, so the service
+    #: receives `/v1/...` -- the path its routes and its contract name. A member
+    #: rather than a slice of `route_control_path` at a call site, which would be
+    #: a second derivation of a value this module owns.
+    route_control_strip_path: str = ""
+    control_router: str = ""
+    control_stripprefix_middleware: str = ""
     #: Session 6 Run 10's routers and middlewares. Project-derived, so all five
     #: reach `compose.env`; a middleware name is host-wide in Traefik, which is
     #: what makes deriving them the thing that stops two projects sharing one.
@@ -1135,6 +1181,9 @@ def derive(
         route_app_path=f"{api_base_path}{APP_PATH_SUFFIX}",
         route_storage=(f"https://{domain}{api_base_path}{APP_PATH_SUFFIX}{STORAGE_PATH_SUFFIX}"),
         route_storage_path=f"{api_base_path}{APP_PATH_SUFFIX}{STORAGE_PATH_SUFFIX}",
+        route_control=f"https://{domain}{api_base_path}{CONTROL_PATH_SUFFIX}",
+        route_control_path=f"{api_base_path}{CONTROL_PATH_SUFFIX}",
+        route_control_strip_path=api_base_path,
         route_mcp=f"https://{domain}{mcp_base_path}",
         route_mcp_path=mcp_base_path,
         # The page, not the root above it (ADR 0061).
@@ -1161,6 +1210,8 @@ def derive(
         app_buffering_middleware=app_buffering_middleware_name(key),
         app_docs_router=app_docs_router_name(key),
         storage_router=storage_router_name(key),
+        control_router=control_router_name(key),
+        control_stripprefix_middleware=control_stripprefix_middleware_name(key),
         mcp_router=mcp_router_name(key),
         storage_stripprefix_middleware=storage_stripprefix_middleware_name(key),
         storage_buffering_middleware=storage_buffering_middleware_name(key),
