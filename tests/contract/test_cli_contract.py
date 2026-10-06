@@ -220,6 +220,7 @@ SHELL_COMMANDS = (
     # refused by beta's database as an agent and reads the edge's limits.
     "bin/session-35-check.sh",
     "bin/session-36-check.sh",
+    "bin/session-37-check.sh",
     "bin/smoke-test.sh",
     # Session 24 (ADR 0205). A loopback client of a deployment's own
     # surfaces, holding the human's token in one process and handing the

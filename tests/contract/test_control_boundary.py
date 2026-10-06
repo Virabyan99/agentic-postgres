@@ -119,3 +119,93 @@ def test_the_scan_sees_each_kind_of_offence() -> None:
     for source, expected in planted.items():
         assert expected in offences(source), source
     assert offences('"""We never read outputs.json or a pgpass, nor import httpx."""') == []
+
+
+# ---------------------------------------------------------------------------
+# D2058: the customer proofs reach only the public endpoint
+# ---------------------------------------------------------------------------
+
+CUSTOMER_PROOFS = REPO_ROOT / "tests" / "external" / "test_session37_public_control.py"
+
+#: The only environment the customer proofs may read: the control project's
+#: document (every URL is its `routes.control`), the probe owner's file, alpha's
+#: document (a key's REFUSAL is measured at alpha's routes), and PATH for the
+#: product's own commands.
+CUSTOMER_ENVIRONMENT = frozenset(
+    {"APG_CONTROL_OUTPUTS", "APG_CONTROL_PROBE_FILE", "APG_PROJECT_A_OUTPUTS", "PATH"}
+)
+
+
+def customer_offences(source: str) -> list[str]:
+    """What would let a customer proof reach past the public door: the SSH
+    destination or an `ssh`/`scp` word in code, a URL typed rather than read
+    from a document, or an environment variable outside the four."""
+    import re
+
+    tree = ast.parse(source)
+    skipped = _docstrings(tree)
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in skipped
+        ):
+            if "APG_SSH_DESTINATION" in node.value:
+                found.append("APG_SSH_DESTINATION")
+            if re.search(r"(?<![\w-])(ssh|scp)(?![\w-])", node.value, re.IGNORECASE):
+                found.append(f"ssh: {node.value[:40]!r}")
+            if re.search(r"https?://[A-Za-z0-9\[]", node.value):
+                found.append(f"a typed URL: {node.value[:40]!r}")
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "environ"
+            and isinstance(node.slice, ast.Constant)
+            and node.slice.value not in CUSTOMER_ENVIRONMENT
+        ):
+            found.append(f"environment {node.slice.value}")
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("get", "getenv")
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+            and node.args[0].value.startswith(("APG_", "PATH"))
+            and node.args[0].value not in CUSTOMER_ENVIRONMENT
+        ):
+            found.append(f"environment {node.args[0].value}")
+    return found
+
+
+def test_session37_customer_proofs_reach_only_the_public_endpoint() -> None:
+    """D2058. The gate's external mode REQUIRES `--ssh-destination` for Session
+    4's proofs, so the customer proofs cannot prove their door by an unset
+    variable; they prove it by what they are: no SSH destination, no `ssh` or
+    `scp`, no typed URL -- every address is read from a deployed document --
+    and no environment but the control project's document, the probe file,
+    alpha's document and PATH. The marker names exactly the three it needs.
+    The run-time half is the module's own: every request through a recorder
+    whose hosts each proof asserts."""
+    source = CUSTOMER_PROOFS.read_text(encoding="utf-8")
+    assert customer_offences(source) == [], customer_offences(source)
+    tree = ast.parse(source)
+    markers = [
+        sorted(arg.value for arg in node.args if isinstance(arg, ast.Constant))
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "requires_environment"
+    ]
+    assert markers == [sorted(CUSTOMER_ENVIRONMENT - {"PATH"})], markers
+    # The control: each kind, planted, is found; the words in a docstring are not.
+    planted = {
+        "host = os.environ['APG_SSH_DESTINATION']": "APG_SSH_DESTINATION",
+        "subprocess.run(['ssh', 'op@host', 'true'])": "ssh",
+        "url = 'https://control.example.test/api/v1'": "a typed URL",
+        "x = os.environ.get('APG_PROJECT_B_OUTPUTS')": "environment APG_PROJECT_B_OUTPUTS",
+    }
+    for planted_source, expected in planted.items():
+        assert any(expected in hit for hit in customer_offences(planted_source)), planted_source
+    assert customer_offences('"""Never ssh, never https://example.test."""') == []

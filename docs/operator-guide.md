@@ -19,17 +19,17 @@ plane, migrations — this page hands to it and does not repeat it.
 
 ## 1. The release you are operating, in one screen
 
-> **This page is part of release `1.14.0`.** It describes that release as it
+> **This page is part of release `1.15.0`.** It describes that release as it
 > runs on this deployment. A release that moves `VERSION` and does not move
 > this line, and the table below it, is a release documented by a page about a
 > different one (ADR 0209, D1388).
 
 | | |
 |---|---|
-| `template_version` / `CURRENT_SESSION` | **1.14.0** / **36** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
+| `template_version` / `CURRENT_SESSION` | **1.15.0** / **37** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
 | Released migrations | **39**, fix-forward; every down block raises `AP900` (D912). 0033 adds two prune functions granted to nobody and a size reading (ADR 0213) — nothing removes an agent record unless an operator asks. 0034 is the workflow substrate: four `app_private` tables nobody may read, eight functions granted to `auth_service` and the install granted to nobody (ADR 0227, §17). 0035 adds the approval and attempt tables nobody may read, a run status `compensating`, and the audit reader at nine arguments with a counter beside it (ADR 0230, 0233, 0234). 0036 is connectivity: four `app_private` connector tables nobody may read, `app.emit_event` granted to NOBODY and called only by a project's reviewed definer function, and the connector functions -- seven granted to `auth_service`, the install and the rehearsal's to nobody (ADR 0235-0238, §18). 0037 is `app.require_approval`, granted to nobody (ADR 0242). 0038 adds the approval status `withdrawn`, alone in its file; 0039 adds three prunes and a size reading granted to nobody and the withdrawal granted to `auth_service` (ADR 0248, §5) |
-| Deployed document | outputs schema **v19** (`connectors.enabled`); `document_kind: deployed` |
-| Project manifest | schema versions **1–8** accepted; 5 adds `migrations.set`, 6 adds `mcp.capabilities`, 7 adds `connectors` (the facility and the outbound endpoints), 8 adds `migrations.approvals_required` (§19) |
+| Deployed document | outputs schema **v20** (`routes.control`, `control.enabled`); `document_kind: deployed` |
+| Project manifest | schema versions **1–8** accepted; 5 adds `migrations.set`, 6 adds `mcp.capabilities`, 7 adds `connectors` (the facility and the outbound endpoints), 8 adds `migrations.approvals_required` (§19), 9 adds `control` (the control plane, `docs/control-plane.md`) |
 | Capability manifest / lock | schema **4** / **4** (vocabulary + `tools_sha256`) |
 | Verifiers | **four** — PostgREST, `auth`, `storage`, the agent plane — reading one published key set; only `auth` signs (ADR 0170) |
 | Migration sets | the release's, and a project's own under `projects/<slug>/`, each in its own directory and its own ledger table (ADR 0198, 0206). A project's lock is schema **3**: it records whether `follows_release_version` was computed or declared (ADR 0210) |
@@ -190,8 +190,10 @@ it.
         --operator-credential-file /root/<the control-plane credential>
    ```
    `--plan` contacts nothing (D334). `--apply` creates the Infisical project,
-   the runtime identity and every generated value, shreds the credential file,
-   and **does not invent an operator-supplied value**: paste the four R2
+   the runtime identity and every generated value -- **it does not shred the
+   credential file: you do, `sudo shred -u <file>`, and `ls` the directory for
+   an editor's `.save` copy** (D2061, `docs/provider-bootstrap.md`) -- and
+   **does not invent an operator-supplied value**: paste the four R2
    values into `/storage` (create the folder) and `/backup` afterwards
    (`docs/fleet-operations.md` §6 step 4, `docs/provider-bootstrap.md`). If
    `--apply` fails after the provider project exists, it prints what it
@@ -200,12 +202,12 @@ it.
    that is missing:
    ```bash
    sudo bin/materialize-secrets.sh --project project.alpha.yaml \
-        --requirements secrets.required.yaml --session 36
+        --requirements secrets.required.yaml --session 37
    ```
 6. **Deploy, unredirected, at the terminal:**
    ```bash
    sudo ./deploy.sh --host host.yaml --project project.alpha.yaml \
-        --capabilities capabilities.yaml --through-session 36
+        --capabilities capabilities.yaml --through-session 37
    ```
    The first pass of a new project records the two loopback ports and the
    app route `unavailable` — the documented first-deploy state, not a failure
@@ -249,6 +251,29 @@ it.
 `docs/session-02-operator-guide.md` §*Inputs you supply* is still the list of
 the four files an operator writes and where each comes from; the second
 project is the same steps from 4.
+
+**A project's unit is enabled by hand, once, after its second deploy** (D2060):
+`provision-host.sh` installs `agentic-postgres-project@.service` and enables
+no project's instance, and nothing else does. Without it the project does not
+come back after a reboot:
+
+```bash
+sudo systemctl enable agentic-postgres-project@<key>.service   # no --now: the deploy runs it
+systemctl is-enabled agentic-postgres-project@<key>.service    # enabled
+```
+
+**The control project** (1.15.0, ADR 0251) is a third manifest,
+`/home/op/control.yaml` -- outside the checkout, like every manifest the
+gitignore does not name (D971) -- brought up by the same steps from 4: its
+buckets (`apg-control-prod` and `apg-control-prod-backup`, though storage is
+off, because the secret contract still owes the storage pair, D2077), its B2
+mirror bucket, its grey-cloud record, `--plan`, the credential placed and
+**shredded by hand**, `--apply`, the values pasted, materialized, admitted
+(`sudo bin/admit.sh`), deployed, its administrator bootstrapped, ports, the
+second deploy, **the unit enabled**, its first full backup and its schedule.
+Then the people: `docs/control-plane.md` is the page for what the control
+plane holds and the commands that reach it, and `sudo bin/control.sh adopt`
+writes each project into its registry.
 
 ---
 
@@ -518,7 +543,7 @@ place.
 measured sequence and its traps for the three the API plane holds: capture
 the pre-rotation value to a root-only file first (a proof you cannot admit
 skips), replace it at the provider by hand and confirm it saved, **`project-runtime.sh
-… --through-session 36 down` for a credential a container mounts** (D253:
+… --through-session 37 down` for a credential a container mounts** (D253:
 `resume` runs `compose up` without `--force-recreate`, and PostgREST kept a
 generation two rotations stale and crash-looped), materialize, deploy,
 declare it to the gate with the matching `--rotated-*-from-file`. Performed
@@ -568,10 +593,11 @@ A release is closed by an evidence document, and an evidence document is three
 halves merged: **host** (root, on the deployment), **external** (from a
 network that is not the host), **offline** (a checkout with Docker, declared
 never inferred, ADR 0202). The newest shipped gate's `--help` is the
-authority for the flags -- `bin/session-36-check.sh` in this checkout, which
-accepts exactly the flags Sessions 34 and 35 did -- and this is the sequence
+authority for the flags -- `bin/session-37-check.sh` in this checkout, which
+accepts Session 36's flags and two more, `--control-outputs` (host and
+external) and `--control-probe-file` (external) -- and this is the sequence
 Session 34's third sweep ran (`s34-r10c-gate.sh`), with the gate and the files
-moved to 36.
+moved to 37.
 
 **Before the sweep**, as `op`: the renders of §4 (both host manifests and
 both example fixtures — the gate's fixture check compares the rendered
@@ -585,7 +611,7 @@ flag omitted is a claim that silently goes `not_run` fifteen minutes later:
 
 ```bash
 sudo -v      # first, in the foreground (D1376)
-sudo bin/session-36-check.sh --mode host --host host.yaml \
+sudo bin/session-37-check.sh --mode host --host host.yaml \
   --project-a-outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json \
   --project-b-outputs /etc/agentic-postgres/projects/beta-dev/outputs.json \
   --admin-password-file /root/alpha-dev-administrator \
@@ -604,7 +630,8 @@ print(root / 'generations' / gen / 'secret-check' / 'session2_sentinel')
   --rehearsal-evidence-dir /home/op/agentic-postgres/evidence \
   --removed-project-file /home/op/gamma-dev-retirement.json \
   --dx-record-file /home/op/session-25-dx-record.json \
-  --fresh-host-outputs /home/op/snippets-dev-outputs.json
+  --fresh-host-outputs /home/op/snippets-dev-outputs.json \
+  --control-outputs /home/op/control-prod-outputs.json
 ```
 
 - **The sentinel is derived, never typed**: the generation changes on every
@@ -620,7 +647,9 @@ print(root / 'generations' / gen / 'secret-check' / 'session2_sentinel')
   the four `--rotated-*` (no rotation), `--after-reboot` (no reboot),
   `--replacement-host-outputs` (D1028). Session 36's sweep passes the four
   and `--after-reboot`, after the rotations and the reboot it performs
-  (D1995); `--replacement-host-outputs` stays unpassed.
+  (D1995); `--replacement-host-outputs` stays unpassed. Session 37's sweep
+  passes the same declarations again after its reboot (D2072), plus
+  `--control-outputs`, the control project's op-readable document copy.
 - **Run it detached, ~15 minutes**, with the script writing its own exit code
   to a file (`/home/op/s34-r10c-gate.sh` is the working form: `setsid nohup … &`
   after `sudo -v`), because `echo $?` from the launching shell reads the
@@ -636,8 +665,9 @@ account and `apg-agent@` is refused), and **both** outputs files, or the merge
 refuses on `project_keys` (D757):
 
 ```bash
-bin/session-36-check.sh --mode external --public-ipv4 <address> \
+bin/session-37-check.sh --mode external --public-ipv4 <address> \
   --project-a-outputs ./alpha-dev-outputs.json --project-b-outputs ./beta-dev-outputs.json \
+  --control-outputs ./control-prod-outputs.json --control-probe-file ~/s37/probe.json \
   --ssh-destination op@<host>
 ```
 
@@ -650,11 +680,11 @@ mode stops being something a host is asked to run.
 **The merge**, from a checkout at the branch head:
 
 ```bash
-python bin/write-session-evidence.py --session 36 \
-  --host-input evidence/session-36-host.json \
-  --external-input evidence/session-36-external.json \
-  --offline-input evidence/session-36-offline.json \
-  --output evidence/session-36.json
+python bin/write-session-evidence.py --session 37 \
+  --host-input evidence/session-37-host.json \
+  --external-input evidence/session-37-external.json \
+  --offline-input evidence/session-37-offline.json \
+  --output evidence/session-37.json
 ```
 
 `--offline-input` is required for a session with an offline claim and refused
@@ -704,7 +734,7 @@ with the row that measured it.
 | `render-jwks`: *whether the key set CHANGED cannot be told from here* | there was no previous copy at that path — the normal case, because a deploy replaces the whole rendered directory first (D1374, D1427) | it is neither evidence of a rotation nor evidence against one; `sudo bin/rotate-signing-key.sh --outputs <outputs.json> acknowledge` reads what each verifier is holding |
 | a rotation proof: *the value declared as pre-rotation is the active one* | nothing was rotated: the provider did not take the edit, or materialization did not run | confirm at the provider, materialize, deploy again |
 | a rotation proof fails `401 PT401` | a bootstrap-minted token missing `credential_version`, `authz_version` or the scope array (D298, D675) | repair the identity, not the thing the proof names |
-| PostgREST crash-loops after a credential rotation, route 502 | a container holding a stale generation (D253) | `project-runtime.sh … --through-session 36 down`, then deploy |
+| PostgREST crash-loops after a credential rotation, route 502 | a container holding a stale generation (D253) | `project-runtime.sh … --through-session 37 down`, then deploy |
 | the edge answers 502 on a project route after a deploy | the deploy leaves the previous document until step 7; or the edge is not attached | `bin/edge-network.sh status --project-key <key>`; `reconcile` |
 | `edge.sh status` says `staging` after a promotion | before 1.0.1 it could never say `production` as `op` (D1050) | since: `unknown` when it cannot read; read as root |
 | `TimeoutError` reading Infisical | a transient (D976) | run the command again |
@@ -963,7 +993,7 @@ is irreversible and would print success.
 
    ```
    sudo bin/materialize-secrets.sh --project /home/op/project.<key>.yaml \
-     --requirements secrets.required.yaml --session 36
+     --requirements secrets.required.yaml --session 37
    ```
 
    then read the written file's **shape**, never its content:
@@ -1006,7 +1036,7 @@ is irreversible and would print success.
    value is wrong and this deploy has left the project half converged.
 3. **Down and up**, so every verifier is recreated:
    `sudo bin/project-runtime.sh --host host.yaml --project-key <key>
-   --through-session 36 down`, then redeploy. A restart is not enough, and after
+   --through-session 37 down`, then redeploy. A restart is not enough, and after
    the key set file has been replaced a restart is measured to leave the
    container unable to start at all.
    **Take `acknowledge` once before this, too.** On 2026-09-19 it came back

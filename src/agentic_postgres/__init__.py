@@ -889,7 +889,75 @@ from pathlib import Path
 #: the same session: `upgrade plan` on both projects, with the same
 #: declaration, before the first 1.14.0 deploy -- and a `major` there is a stop
 #: condition.
-CURRENT_SESSION = 36
+#:
+#: **Session 37 moves it to 37, all-or-nothing again** (D690): THIRTEEN
+#: requirements and thirteen claims -- `CLAIMS` 206 -> 219 and `OFFLINE_CLAIMS`
+#: 65 -> 74, counted from the tuples rather than by hand (D1628) -- nine
+#: declared offline, three EXTERNAL and one host, with every offline half
+#: written in the run that built its plane (Runs 2-7) and every live half here.
+#: Two families join the registry: `CTL` (the control plane) and `KEY`
+#: (management API keys). The three external claims are the first that are a
+#: CUSTOMER's, proved through the control project's public route alone (D2058).
+#:
+#: **The session's subject is the control plane** -- the one project that holds
+#: accounts, organisations and a registry of the others (ADR 0246's first
+#: hosted surface) -- and four ADRs are its shape. ADR 0251: a project manifest
+#: at schema 9 may enable the `control` facility; its `auth` container then runs
+#: `APP_MODE=control` (health, `/auth/me` and the management API `/v1`, nothing
+#: else), a control router publishes `{api}/v1`, and its migration set
+#: `projects/control` is its tables; it reads no other project's document,
+#: URL or credential, and the registry is written by root from the deployed
+#: documents (`bin/control.sh adopt|registry|totp-reset`). ADR 0252: accounts
+#: by invitation only -- an account invitation by the registry administrator,
+#: a membership invitation by an owner or admin -- with a TOTP second factor an
+#: owner or admin must enrol before anything else; tokens stored hashed, seeds
+#: the stated exception. ADR 0253: four roles, a role matrix over every route,
+#: and management keys whose scopes are their own intersected with their
+#: owner's current role, minted only by a person. ADR 0254: operations are a
+#: closed type table and none is accepted while its Ledger row is `planned`.
+#: The terminal reaches it through `bin/login.sh`, `logout.sh`, `context.sh`,
+#: `org.sh` and `project.sh` (a 0700 directory of 0600 files, https only).
+#:
+#: **No released migration** -- the control plane's three are its own set's,
+#: frozen in `projects/control/migrations/released.lock.json`. **Outputs move
+#: to v20** (`routes.control` and `control: {enabled}`, migrated from v19 as
+#: off with the route derived from the app route) and **the project manifest to
+#: schema 9** (`control: {enabled}`, optional); no capability, lock, secret or
+#: host schema moves. A second contract snapshot,
+#: `contracts/control-openapi.canonical.json`, is the `/v1` surface.
+#:
+#: **`VERSION` moves to `1.15.0`.** What moved: the control mode of
+#: `services/auth-api` (`control_routes`, `control_service`,
+#: `control_repository`, `control_roles`, `totp`, `operations`), so the image
+#: moves and a deploy recreates `auth`, `storage` and `mcp`; the control set;
+#: manifest 9 and outputs 20; the control router and the app rule's negation;
+#: the lint's one function-grant form for `{{auth_service}}`; `bin/control.sh`;
+#: the five CLI commands and `control_client.py`; `project.control.example.yaml`.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig as Sessions
+#: 34-36 ran it: a git worktree at `2538ac0`, the commit that IS deployed, and a
+#: `tar`-piped copy of this working tree, both rendering the INSTALLED tree's
+#: `project.example.yaml` (schema 8). With `--also document_schema_migratable
+#: --also api_operation_added`: `bump minor`, **`requires minor`**, verdict
+#: `ok`, `changes [api_operation_added, document_schema_migratable]`, `reasons
+#: []`, `operator_digests_moved []`. Without the declarations: `requires patch`
+#: -- the sixth release in a row whose price the command sees only by
+#: declaration. **Four leaves differ**: `template_version` 1.14.0 -> 1.15.0,
+#: `schema_version` 19 -> 20, `control.enabled` absent -> false, and
+#: `routes.control` absent -> the example's own domain with `/api/v1` (5,993 ->
+#: 6,090 bytes).
+#: **ADR 0162 prices it a MINOR, and `1.15.0` is that floor exactly**: the
+#: outputs move is MIGRATABLE, the manifest's schema 9 invalidates no older
+#: manifest, and no capability, lock, secret or host schema moves, so an
+#: operator supplies nothing new for alpha or beta. What an operator must KNOW
+#: the reading cannot show: the control project is a THIRD deployment with its
+#: own providers, certificate, backup and unit (Sheets P1-C5), and its first
+#: accounts cannot be deleted in 1.15.0 (D2065). **This session takes a host
+#: trip** (Runs 10 and 11), so the class is confirmed against a DEPLOYMENT in
+#: the same session: `upgrade plan` on both projects, with the same two
+#: declarations, before the first 1.15.0 deploy -- and a `major` there is a
+#: stop condition.
+CURRENT_SESSION = 37
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

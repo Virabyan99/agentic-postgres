@@ -67,7 +67,7 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Today.** A project's auth service holds people and their sessions for that one project. No account spans projects, and nothing outside a project's own auth service knows who a person is.
 
-**Stage 5.** An account in the control project, created when a person accepts an invitation an owner or admin minted and handed over (D1951).
+**Stage 5.** An account in the control project, created when a person accepts an invitation: an account invitation the registry administrator minted, or a membership invitation an owner or admin minted for a role at or below their own (D1951, ADR 0252). Built in Session 37; not yet offered.
 
 **Eventually (not promised).** Self-service signup with verified email.
 
@@ -95,7 +95,7 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Today.** No management key exists. An agent identity's secret opens that project's agent plane and nothing else.
 
-**Stage 5.** Keys shown once, stored as Argon2id hashes, scoped from a closed vocabulary, owned by a member and revoked with them (D1952).
+**Stage 5.** Keys shown once, stored as an id and a SHA-256 of 256 random bits, scoped from Session 37's four read scopes intersected with the owner's current role, minted only by a person, and refused on the next request once revoked or once the owner leaves (D1952, ADR 0253). Built in Session 37; not yet offered.
 
 **Eventually (not promised).** Keys with expiry, rotation reminders and per-key usage.
 
@@ -123,7 +123,7 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Today.** apg is a dispatcher over the checkout's bin/ commands, run on the host or against a local development cluster.
 
-**Stage 5.** New verbs (login, logout, context, org, project) that are clients of /api/v1; later sessions add branch, backup, compute, usage and plan.
+**Stage 5.** Five commands built in Session 37 as clients of /api/v1 -- login (password, key, accept, totp-enroll, totp-confirm), logout, context show, org (list, create, use, members, invite, set-role, remove, keys, key-create, key-revoke) and project (list, use, show); later sessions add branch, backup, compute, usage and plan. Not yet offered.
 
 **Eventually (not promised).** The same, plus completion and a published binary.
 

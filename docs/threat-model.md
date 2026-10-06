@@ -39,6 +39,11 @@ no-op.
 | `THR-WEBHOOK-REPLAY` | A party that captured one correctly signed request (a proxy log, a misconfigured sender) and sends it again, now or later, with or without a new delivery id | Exactly-once acceptance of each delivery | The delivery id is INSIDE the signed bytes, so a new id breaks the signature; the same id is refused 409 `delivery_replayed` by `connector_receipt`'s primary key `(connector_id, delivery_id)`, recorded in the same transaction that enqueues the run; a request older than 300 s fails the signature window whatever its id (ADR 0237) | One receipt per delivery id; the 409 in the auth service's request log | Receipts are never pruned in Stage 4 (the retention story is D1700's). A sender that re-uses one delivery id across distinct events loses the second, which `docs/connectors.md` says. | `CONN-IN-001`, `CONN-IN-002` | `tests/contract/test_connector_routes.py::test_a_replayed_delivery_is_refused`, `tests/deployment/test_session34_connectivity.py::test_a_replayed_delivery_is_refused_once`, `tests/deployment/test_session34_connectivity.py::test_a_stale_timestamp_is_refused` | 34 |
 | `THR-DELIVERY` | An outbound endpoint (or anyone who can read its logs) learning more than the event it was sent; a receiver redirecting the worker elsewhere; a flood of failing deliveries starving the worker | The project's credentials, other events, other connectors' keys, the worker's availability | A delivery carries the event's name, version, id, time and payload -- a payload the project's reviewed SQL chose (the example sends a note id, never the embedding) -- and a signature under THAT connector's derived key; no bearer, no cookie, no project credential is sent; the endpoint is read from a root-owned manifest, may carry no userinfo, query or fragment, and appears in no record, status or log; a redirect is never followed (rig 34b: the default `urllib` opener follows a 301/302/303 as a GET that still carries `X-Apg-Signature`, D1812); at most one delivery per loop iteration and only when due, so a failing endpoint costs `max + 1` attempts and a dead letter, never a hot loop (ADR 0238, the `delivery-retry-storm` rehearsal) | `apg connector status` (counts, the oldest pending age, the last error token, dead letters without payloads); the doctor's `workflow` line | The endpoint is whatever the operator declares: an internal service name would receive the signed body (rig 34d measured that a container on both networks reaches a sink on an `internal: true` network by alias). The payload is visible to the receiver by design; at-least-once means a receiver MUST de-duplicate on `X-Apg-Delivery`. | `CONN-OUT-001`, `CONN-OUT-002`, `CONN-STORM-001` | `tests/contract/test_connector_delivery.py::test_a_redirect_is_not_followed`, `tests/contract/test_connector_delivery.py::test_no_record_carries_the_url_the_payload_or_the_key`, `tests/deployment/test_session34_connectivity.py::test_an_owners_write_is_delivered_once_and_signed`, `tests/contract/test_rehearsal.py::test_the_storm_observes_three_attempts_and_a_dead_letter` | 34 |
 | `THR-CHANGE` | A contributor or operator -- or an accident -- applying a project migration set nobody reviewed, or one edited after it was reviewed, to a deployment | The project's data and its reviewed contract | A host applies a project set with a pending version only when a COMMITTED proposal names the set's digest (the sha256 of the set's lock, which binds every template and its canonical render), and, under `approvals_required: 1`, a committed approval names the proposal's bytes by a second declared name (ADR 0243); the proposal carries the lint, the destructive findings (named, never refused), a from-empty apply through `apg dev up`, the set's final `api` surface against the reviewed contract, and the approval-gate check (ADR 0242); nothing is written into a host checkout (D971, D1852) | `migrate.sh --runtime status`'s proposal line; deploy step 6's refusal sentence; the committed history of `projects/<slug>/proposals/` | **The names are declared, not authenticated**: one person can commit both records, and root can do anything (D1864). A from-empty apply says nothing about existing rows. A capability-contract change is reported, not refused (D1866). A set with nothing pending needs no proposal, so the record guards the act of applying, never a state. | `GOV-PROPOSE-001`, `GOV-APPROVE-001`, `GOV-APPLY-001`, `GOV-APPLY-002` | `tests/contract/test_change_proposal.py::test_the_digest_is_the_renders_lock_sha256`, `tests/contract/test_change_proposal.py::test_approve_names_the_proposal_by_its_bytes`, `tests/contract/test_proposal_gate.py::test_a_pending_set_without_a_proposal_is_refused`, `tests/contract/test_proposal_gate.py::test_an_unapproved_proposal_is_refused_when_approvals_are_required`, `tests/deployment/test_session35_governance.py::test_the_applied_set_is_the_proposed_one` | 35 |
+| `THR-CTL-INVITATION` | Anyone who can reach `/api/v1` and guesses, replays, races or reuses an invitation token, or reads from a refusal whether a token, username or organisation exists | Accounts on the control plane, and membership of every organisation | A token is 256 random bits shown once with `no-store` and stored only as its SHA-256 (ADR 0252); acceptance creates the account and the membership in one transaction under a row lock, so one of two concurrent acceptances succeeds and the other updates no row; a used, expired, revoked and unknown token get one byte-identical `401 invitation_invalid`; a taken username is answered only AFTER the token validated and leaves it unspent; an account invitation needs the registry administrator with an enabled factor, a membership invitation an owner or admin for a role at or below their own | The control set's invitation rows (who minted, when, accepted or revoked, never the token); the request line's route template and status | There is no rate limit on acceptance or on `/v1/sessions` -- Argon2id's cost is the only throttle (section 10 of the Session 37 plan; rate limits are Session 38's). Accounts are never deleted or pruned in 1.15.0 (D2065), so a probe or a mistaken acceptance leaves an account that reaches nothing but `/v1/me` once its membership is removed | `CTL-INV-001`, `CTL-INV-002` | `tests/contract/test_control_invitations.py::test_every_invalid_token_gets_the_same_answer`, `tests/contract/test_control_invitations.py::test_one_of_two_concurrent_acceptances_succeeds`, `tests/contract/test_control_invitations.py::test_a_token_is_shown_once_and_stored_hashed`, `tests/contract/test_control_invitations.py::test_a_taken_username_leaves_the_token_unspent`, `tests/external/test_session37_public_control.py::test_an_invitation_is_accepted_once` | 37 |
+| `THR-CTL-KEY` | Holds a leaked management key: after its owner was removed or the key revoked, against another organisation, or to mint its own successor | The organisation's projects and members as the control plane records them | A key is `apg_<16 hex>_<43>`, shown once and stored as its id and SHA-256 (ADR 0253); it is looked up on every request with its owner's CURRENT role and membership, so a revoked key and a departed owner's key are refused on the next request; its effective scopes are its own intersected with the owner's role; a key reaches only read routes and every write route refuses it as `human_session_required` before the body is read -- it mints no key, invitation or factor; a key of organisation A gets the same `404` as a missing id on B's resources | The key rows (name, scopes, created, last used, revoked), never the secret; the request line's route template | A key is a bearer: until it is revoked or its owner leaves, whoever holds it reads what its scopes and its owner's role allow. Keys carry no expiry in 1.15.0 | `KEY-MINT-001`, `KEY-USE-001` | `tests/contract/test_control_keys.py::test_a_revoked_key_and_a_departed_owners_key_are_refused`, `tests/contract/test_control_keys.py::test_a_key_mints_nothing`, `tests/contract/test_control_keys.py::test_a_key_reaches_no_other_organisation`, `tests/external/test_session37_public_control.py::test_a_departed_members_key_stops` | 37 |
+| `THR-CTL-ESCALATION` | A `member` or `viewer` of an organisation who wants `admin` or a scope they do not hold; an `admin` acting without the second factor | The organisation's roles, keys and invitations | Every `/v1` route checks the caller's role in the target organisation against one role matrix (ADR 0253); an admin cannot grant `owner`; the last owner cannot be removed or demoted; a key's scopes are bounded by the vocabulary and by the minter's role, and narrow when the owner is demoted; an `owner` or `admin` without an enabled TOTP factor reaches only `/v1/me`, `/v1/me/totp*` and `/v1/sessions*`, and a login with an enabled factor requires a current, unreplayed code (ADR 0252); FORCE RLS scopes every control table to the caller's organisations in the database itself | The membership rows and their changes; `bin/control.sh totp-reset` is a root act with a confirmation | An owner can do anything inside their own organisation, by design. TOTP seeds are plaintext at rest (ADR 0252): a copy of the control database, or a backup read with its cipher pass, discloses every seed | `CTL-ROLE-001`, `CTL-TOTP-001`, `CTL-TOTP-002` | `tests/contract/test_control_roles.py::test_every_route_and_role_answers_as_the_matrix_says`, `tests/contract/test_control_roles.py::test_an_admin_cannot_make_an_owner`, `tests/contract/test_control_roles.py::test_the_last_owner_stays`, `tests/contract/test_control_keys.py::test_scopes_are_bounded_by_the_vocabulary_and_the_role`, `tests/contract/test_control_sessions.py::test_an_owner_without_a_factor_reaches_only_enrolment`, `tests/external/test_session37_public_control.py::test_login_enforces_the_second_factor` | 37 |
+| `THR-CTL-ENUMERATION` | A caller with any control-plane credential who probes organisation, member or project ids it does not belong to | The existence of other organisations, their members and their projects | A foreign organisation's id and a missing one return the same `404` on every route (ADR 0253); the database's RLS returns no row of an organisation to a non-member, so the answer is decided below the route; a key sees its own organisation's projects only | None beyond the request line: a refused probe writes no row, by design | Timing is not equalised. The branch half of this threat is Session 40's and stays in the list below | `CTL-ROLE-001`, `CTL-SET-001` | `tests/contract/test_control_roles.py::test_a_foreign_id_and_a_missing_id_look_the_same`, `tests/contract/test_control_set.py::test_a_non_member_sees_nothing` | 37 |
+| `THR-CTL-PLANE-CONFUSION` | Holds a control-plane session or management key and presents it to a project's data or admin plane, or wants the control plane to open a project | Every project's data and admin plane | The control mode reads no other project's deployed document, URL or secret -- an AST scan over the control modules refuses each kind of read (ADR 0246, ADR 0251); the registry is written by root from the deployed documents (`bin/control.sh adopt`), never by the service; a management key is not a JWT of any project and alpha's application and REST routes refuse it; the control project's `auth` container serves no release login or admin route | The registry's `agrees`/`differs`/`could not determine` reading against every deployed document | The node's operator has root on every project, the control project included (ADR 0246's boundary sentence is about the SERVICE). The halves Sessions 38 and 39 add stay in the list below | `CTL-API-001`, `KEY-USE-001`, `CTL-REG-002` | `tests/contract/test_control_boundary.py::test_the_control_mode_reads_no_other_projects_credential`, `tests/external/test_session37_public_control.py::test_a_key_lists_projects_and_opens_no_project`, `tests/deployment/test_session37_control.py::test_the_control_mode_serves_no_release_admin_route` | 37 |
 
 ## Studio: a page in the operator's browser, on the operator's machine
 
@@ -173,101 +178,55 @@ is not here either: no support grant is built, and the Reality Ledger says why
 — *"the operator of this single node has root on it; support access is not
 technically bounded in this beta"* (D1971).
 
-1. **Invitation abuse and enumeration** (Session 37, ADR 0252). An attacker
-   guesses, replays or reuses an invitation token, or learns from the refusal
-   whether an address or organisation exists. Owed: a used, expired, revoked or
-   unknown token is refused with one byte-identical answer
-   (`test_control_invitations.py::test_every_invalid_token_gets_the_same_answer`);
-   a token is single-use under concurrency
-   (`::test_one_of_two_concurrent_acceptances_succeeds` -- rig 37b measured the
-   second of two concurrent acceptances wait for the first and update no row);
-   the token is stored only as its SHA-256
-   (`::test_a_token_is_shown_once_and_stored_hashed`); a taken username leaves
-   the token unspent (`::test_a_taken_username_leaves_the_token_unspent`); and
-   live, through the public endpoint only
-   (`tests/external/test_session37_control.py::test_an_invitation_is_accepted_once`).
-2. **API-key compromise and replay** (Session 37, ADR 0253). A leaked
-   management key is used after its owner is removed or the key revoked, used
-   against a project of another organisation, or used to mint its own
-   successor. Owed: a revoked key, and a key whose member left, are refused on
-   the next request
-   (`test_control_keys.py::test_a_revoked_key_and_a_departed_owners_key_are_refused`);
-   a key mints no key, invitation or factor (`::test_a_key_mints_nothing`); a
-   key of organisation A is refused on every resource of organisation B
-   (`::test_a_key_reaches_no_other_organisation`); and live
-   (`tests/external/test_session37_control.py::test_a_departed_members_key_stops`).
-3. **Organisation privilege escalation** (Session 37, ADR 0252). A `member` or
-   `viewer` grants itself `admin`, mints a key with a scope it does not hold, or
-   an `admin` acts without the second factor `owner` and `admin` require. Owed:
-   each role refused every operation above it
-   (`test_control_roles.py::test_every_route_and_role_answers_as_the_matrix_says`);
-   an admin cannot make an owner (`::test_an_admin_cannot_make_an_owner`); the
-   last owner stays (`::test_the_last_owner_stays`); a key's scopes never
-   exceed its minter's
-   (`test_control_keys.py::test_scopes_are_bounded_by_the_vocabulary_and_the_role`,
-   `::test_a_demotion_narrows_a_key`); an `owner` or `admin` without a factor
-   reaches only enrolment
-   (`test_control_sessions.py::test_an_owner_without_a_factor_reaches_only_enrolment`);
-   and live
-   (`tests/external/test_session37_control.py::test_login_enforces_the_second_factor`).
-4. **Project and branch enumeration** (Sessions 37, 40). A caller learns that a
-   project or branch of another organisation exists from a status code, a
-   timing or an error body. Owed: a foreign id and a missing id return the same
-   answer -- Session 37's half for organisations, members and projects
-   (`test_control_roles.py::test_a_foreign_id_and_a_missing_id_look_the_same`),
-   and a non-member reads no row of an organisation in the database itself
-   (`test_control_set.py::test_a_non_member_sees_nothing`). The branch half is
-   Session 40's.
-5. **Endpoint confusion and gateway attacks** (Session 39). A plaintext
+1. **Branch enumeration** (Session 40). A caller learns that a branch of
+   another organisation exists from a status code, a timing or an error body.
+   Owed: a foreign branch id and a missing one return the same answer. Session
+   37's half -- organisations, members and projects -- is `THR-CTL-ENUMERATION`
+   in the table.
+2. **Endpoint confusion and gateway attacks** (Session 39). A plaintext
    connection, a wrong or absent SNI, or one project's hostname used to reach
    another project's database through the shared Postgres port. Owed: plaintext
    refused; a wrong SNI refused; project A's credential refused at project B's
    endpoint (the isolation matrix extended to the listener).
-6. **Wake-on-connect abuse** (Session 39). Unauthenticated connections used to
+3. **Wake-on-connect abuse** (Session 39). Unauthenticated connections used to
    keep a sleeping project awake or to make the node wake many projects at once.
    Owed: the measured rule for what wakes a project, and a wake that admission
    would refuse is refused — or, if Session 39's rig refuses wake-on-connect,
    the Ledger says `planned` and the client sees `project_sleeping`.
-7. **Project-creation and branch-creation exhaustion** (Sessions 38, 40). A
+4. **Project-creation and branch-creation exhaustion** (Sessions 38, 40). A
    member creates projects or branches until the node or the slots run out.
    Owed: the entitlement refused as `plan_limit_reached` before an operation
    exists; capacity refused as `capacity_exhausted` with *"No resources were
    created"*; neither code produced by the other's reader.
-8. **Plan-limit bypass and usage tampering** (Session 41). A caller raises its
+5. **Plan-limit bypass and usage tampering** (Session 41). A caller raises its
    own limits, creates concurrently past a limit, or writes its own usage.
    Owed: a limit enforced under concurrency; no customer surface writes a usage
    sample or an entitlement.
-9. **Restore abuse** (Session 40). A restore aimed at another project's
+6. **Restore abuse** (Session 40). A restore aimed at another project's
    repository, at a recovery point outside the window, or at the parent's live
    volume. Owed: a foreign repository refused; the parent untouched; a branch
    refuses the parent's credentials after its re-key.
-10. **Control-plane / data-plane credential confusion** (Sessions 37, 38, 39).
-    A control-plane session or API key presented to a project's data or admin
-    plane, or a project credential presented to `/api/v1`. Owed: each refused
-    at the other plane; the control plane holds no credential that opens a
-    project (ADR 0246's boundary sentence). Session 37's half: the control mode
-    reads no other project's document, URL or secret
-    (`test_control_boundary.py::test_the_control_mode_reads_no_other_projects_credential`);
-    a member's key is refused by alpha's app and REST routes
-    (`tests/external/test_session37_control.py::test_a_key_lists_projects_and_opens_no_project`);
-    and the control project's `auth` container serves no release admin route
-    (`tests/deployment/test_session37_control.py::test_the_control_mode_serves_no_release_admin_route`).
-    Sessions 38 and 39 owe the halves their surfaces add.
-11. **Project-deletion races and slot reuse** (Session 38). A deletion that
+7. **Control-plane / data-plane credential confusion** (Sessions 38, 39).
+    A project credential presented to `/api/v1`, or a control-plane credential
+    presented to the surfaces Sessions 38 and 39 add. Owed: each refused at the
+    other plane. Session 37's half -- the control mode reads no other project,
+    a key is refused by a project's routes, and the control project serves no
+    release admin route -- is `THR-CTL-PLANE-CONFUSION` in the table.
+8. **Project-deletion races and slot reuse** (Session 38). A deletion that
     leaves a route, a role or a repository a later project inherits, or an
     operation that runs against a project mid-deletion. Owed: a deleted
     project's names derive nothing a new one is given; a slot is single-use.
-12. **Connector abuse by a customer** (Session 42). A customer-defined
+9. **Connector abuse by a customer** (Session 42). A customer-defined
     connector used to reach another project, an internal address, or the
     node's own services. Owed: the connector planes' existing refusals hold for
     a customer's definitions, and an endpoint stays the manifest's.
-13. **Observability poisoning and ClickStack exhaustion** (Session 41). A
+10. **Observability poisoning and ClickStack exhaustion** (Session 41). A
     customer writes log lines or query text that forge another project's
     telemetry, or floods the telemetry store until the node's own readings
     fail. Owed: every series and line names its project from the platform, not
     from the payload; ClickStack bounded in memory, processes and CPU and
     charged by admission.
-14. **Cross-project leakage through any new surface** (every session). Any
+11. **Cross-project leakage through any new surface** (every session). Any
     console page, `/api/v1` operation, snippet, notification, usage figure or
     diagnostics bundle that carries another project's data. Owed: each session
     extends the isolation matrix to the surface it adds. Session 37's: the
@@ -276,11 +235,11 @@ technically bounded in this beta"* (D1971).
     (`tests/deployment/test_session37_control.py::test_the_control_project_is_isolated_from_both`),
     and a caller sees only their own organisations' rows
     (`test_control_set.py::test_a_caller_sees_only_their_own_organisations`).
-15. **Storage exhaustion** (Session 38). One project fills the shared disk until
+12. **Storage exhaustion** (Session 38). One project fills the shared disk until
     its neighbours' databases or backups stop. Owed: the measured reading and
     the refusal admission makes; until a per-project disk quota exists, the
     Ledger says storage is `planned`, not limited.
-16. **TOTP seed disclosure** (Session 37, ADR 0252). A dump of the control
+13. **TOTP seed disclosure** (Session 37, ADR 0252). A dump of the control
     project's database, or a backup read with its cipher pass, reveals every
     enrolled second-factor seed, so the factor stops being a second factor for
     whoever holds the copy. Owed: seeds reachable only through definer

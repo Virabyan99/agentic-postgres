@@ -108,7 +108,10 @@ ID_PATTERN = re.compile(
     # record retention is `OPS-RETAIN`, the request log extends `OPS-LOG`
     # (whose `-001` is Session 11's request id), and the secret-age reading
     # is `OPS-ROTATE`.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV|LEDGER)-[A-Z0-9]+(-\d+)?$"
+    # Session 37 (ADR 0251-0254) adds `CTL` for the control plane -- the
+    # control project, its accounts, organisations, invitations, TOTP,
+    # registry, operations and CLI -- and `KEY` for management API keys.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV|LEDGER|CTL|KEY)-[A-Z0-9]+(-\d+)?$"
 )
 
 

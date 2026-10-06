@@ -61,12 +61,15 @@ every secret's NAME, provider path and origin, and never a value (ADR 0189).
 
 ```
 sudo bin/dr-kit.sh export --host host.yaml --capabilities capabilities.yaml \
-     --project project.alpha.yaml --project project.beta.yaml --output <dir>
+     --project project.alpha.yaml --project project.beta.yaml \
+     --project /home/op/control.yaml --output <dir>
 bin/dr-kit.sh verify <dir>
 ```
 
-Export it after every deploy that changed a manifest, copy it off the host,
-and verify the copy. A kit that holds a value is a second secret store with
+**From 1.15.0 the kit carries the control project; restore it like any
+project** (D2069) -- the order a node loss restores projects in is still to
+be written. Export it after every deploy that changed a manifest, copy it
+off the host, and verify the copy. A kit that holds a value is a second secret store with
 no rotation and no owner; `verify` refuses one.
 
 ## 3. The restore onto a replacement

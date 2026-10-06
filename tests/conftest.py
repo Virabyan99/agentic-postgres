@@ -186,6 +186,16 @@ ENVIRONMENT_VARIABLES = (
     # had otherwise measured everything.
     "APG_HOST_MANIFEST",
     "APG_CANDIDATE_MANIFEST",
+    # Session 37 (ADR 0251). `APG_CONTROL_OUTPUTS` is the op-readable copy of
+    # the CONTROL project's deployed document (`/home/op/control-prod-
+    # outputs.json`), read by the host proofs and by the external ones, which
+    # take every URL from its `routes.control` (D2058). `APG_CONTROL_PROBE_FILE`
+    # is the probe owner's 0600 credential file on the workstation (endpoint,
+    # username, password-file path, TOTP seed, organisation id), written by the
+    # trip's enrolment through the product's own commands (D2125) -- external
+    # only, and never a value on a command line.
+    "APG_CONTROL_OUTPUTS",
+    "APG_CONTROL_PROBE_FILE",
 )
 
 

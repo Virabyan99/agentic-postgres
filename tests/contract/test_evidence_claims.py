@@ -1198,6 +1198,21 @@ CLAIM_INTRODUCED_IN = {
     "record_retention_live": 36,
     "request_log_live": 36,
     "secret_age_live": 36,
+    # Session 37 (ADR 0251-0254). THIRTEEN, nine offline, three external and
+    # one host, landing with the constant (D690): the control plane.
+    "control_set": 37,
+    "control_totp": 37,
+    "control_invitations": 37,
+    "control_roles": 37,
+    "control_keys": 37,
+    "control_api_contract": 37,
+    "operation_types": 37,
+    "control_registry_command": 37,
+    "control_cli": 37,
+    "control_invitations_live": 37,
+    "control_totp_live": 37,
+    "control_keys_live": 37,
+    "control_plane_live": 37,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

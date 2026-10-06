@@ -322,6 +322,29 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "request_log",
         "reality_ledger",
         "secret_age",
+        # Session 37 (ADR 0251-0254). NINE, each a property of a CHECKOUT: the
+        # control set under a real cluster and the lint (`control_set`); the
+        # TOTP module and the session routes in process (`control_totp`);
+        # invitations, roles and keys against the control app over a cluster
+        # this workstation starts (`control_invitations`, `control_roles`,
+        # `control_keys`); the control mode's routes, snapshot and boundary
+        # scan (`control_api_contract`); the closed operation-type table
+        # (`operation_types`); `bin/control.sh` over a recorder
+        # (`control_registry_command`); and the CLI as subprocesses against the
+        # served app (`control_cli`).
+        #
+        # The session's other FOUR are deliberately not here: three are a
+        # customer's reach through the public endpoint (EXTERNAL), and one is
+        # the registry agreeing with three deployed documents on the host.
+        "control_set",
+        "control_totp",
+        "control_invitations",
+        "control_roles",
+        "control_keys",
+        "control_api_contract",
+        "operation_types",
+        "control_registry_command",
+        "control_cli",
     }
 )
 
@@ -672,6 +695,25 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "record_retention_live": ("OPS-RETAIN-003",),
     "request_log_live": ("OPS-LOG-003",),
     "secret_age_live": ("OPS-ROTATE-002",),
+    # Session 37 (ADR 0251-0254). THIRTEEN claims, landing with the constant
+    # (D690): nine offline, three external -- the first customer claims, proved
+    # through `routes.control` only (D2058) -- and one host. Each requirement
+    # is its own claim (ADR 0089). The session's subject is the control plane:
+    # accounts, organisations, invitations, a second factor, keys, a registry
+    # of projects, and the commands that reach them.
+    "control_set": ("CTL-SET-001",),
+    "control_totp": ("CTL-TOTP-001",),
+    "control_invitations": ("CTL-INV-001",),
+    "control_roles": ("CTL-ROLE-001",),
+    "control_keys": ("KEY-MINT-001",),
+    "control_api_contract": ("CTL-API-001",),
+    "operation_types": ("CTL-OPS-001",),
+    "control_registry_command": ("CTL-REG-001",),
+    "control_cli": ("CTL-CLI-001",),
+    "control_invitations_live": ("CTL-INV-002",),
+    "control_totp_live": ("CTL-TOTP-002",),
+    "control_keys_live": ("KEY-USE-001",),
+    "control_plane_live": ("CTL-REG-002",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

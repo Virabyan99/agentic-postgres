@@ -136,20 +136,22 @@ The order below is the one that produced the third project on 2026-09-04,
 with the four things that went wrong on the way and what each cost. Every
 `sudo` line is a human at a terminal; nothing here is a script.
 
-1. **The manifest lives outside the checkout.** `.gitignore` names the two
-   host manifests individually, on purpose (a glob would hide a future example
-   file that should be committed), so a third manifest inside the checkout is
-   an untracked file, the release is dirty, and every deploy refuses with
-   *"the checkout has uncommitted changes"* (D971). Keep it at
-   `/home/op/<project>.yaml` and pass that path.
+1. **The manifest lives outside the checkout.** `.gitignore` ignores
+   `/project.*.yaml` and re-includes the committed examples (since D1034), so
+   a third manifest there would at least not be untracked -- but the
+   checkout is the release, and an operator file inside it is one more thing
+   a deploy's dirtiness check, a bundle or a `git clean` can trip over (D971).
+   Keep it at `/home/op/<project>.yaml` and pass that path.
 2. **Buckets, tokens, DNS**, by hand: `apg-<key>` and `apg-<key>-backup` in
    the same location as the others; two Account API tokens, Object Read &
    Write, each scoped to one bucket; one grey-cloud A record.
 3. **The control-plane credential** on the host, two lines, then
    `bootstrap-providers.sh --plan`, then `--apply --operator-credential-file`.
    `--apply` creates the Infisical project, the runtime identity and every
-   generated value, and shreds the credential file afterwards. Create nothing
-   at Infisical by hand before it.
+   generated value. **It does not shred the credential file: you do**, with
+   `sudo shred -u <file>`, then `ls` the directory for an editor's `.save`
+   copy (D2061, `docs/provider-bootstrap.md`). Create nothing at Infisical by
+   hand before it.
 4. **Paste the four R2 values** into the new project: `/storage` (create the
    folder yourself) and `/backup` (exists after `--apply`).
 5. `materialize-secrets.sh --project <path> --requirements secrets.required.yaml
@@ -185,4 +187,7 @@ with the four things that went wrong on the way and what each cost. Every
    `available`.
 8. `fleet.sh` shows the new row. An ephemeral project shows its expiry and
    `unscheduled`; nothing more is owed to it. A permanent project continues
-   with the first full backup and `schedule enable`.
+   with **`sudo systemctl enable agentic-postgres-project@<key>.service`**
+   (no `--now`: the deploy runs it; nothing else enables a project's unit,
+   and without it the project does not come back after a reboot -- D2060),
+   then the first full backup and `schedule enable`.
