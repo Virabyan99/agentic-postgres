@@ -73,6 +73,14 @@ SHELL_COMMANDS = (
     # registry, totp-reset. Listed the run it landed (D1014) and `git add`ed
     # before this module runs (D1188).
     "bin/control.sh",
+    # Session 37 Run 7 (D2066): the management API from a terminal -- five thin
+    # shells over `bin/cloud.py`. Listed the run they landed (D1014) and `git
+    # add`ed before this module runs (D1188).
+    "bin/context.sh",
+    "bin/login.sh",
+    "bin/logout.sh",
+    "bin/org.sh",
+    "bin/project.sh",
     "bin/docker-firewall.sh",
     "bin/doctor.sh",
     "bin/edge.sh",
@@ -239,6 +247,9 @@ PYTHON_COMMANDS = (
     "bin/auth-admin.py",
     "bin/backup.py",
     "bin/bootstrap-providers.py",
+    # Session 37 Run 7 (D2066). The verbs of login/logout/context/org/project;
+    # everything a test holds still is `agentic_postgres.control_client`.
+    "bin/cloud.py",
     # Session 34. `init` and `validate` are pure reads, three verbs call the
     # admin connector routes, and `key` is root's.
     "bin/connector.py",
@@ -489,6 +500,12 @@ COMMANDS_WITH_VERBS = {
     "bin/connector.sh",
     # Session 37: three verbs, written verb-first from the day the command lands.
     "bin/control.sh",
+    # Session 37 Run 7: four of the five client shells carry verbs; `logout.sh`
+    # takes only `--json`, so the derivation finds none there, rightly.
+    "bin/context.sh",
+    "bin/login.sh",
+    "bin/org.sh",
+    "bin/project.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/dev.sh",

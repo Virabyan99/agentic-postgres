@@ -390,6 +390,52 @@ def _environment(cluster: ControlCluster, work: Any) -> dict[str, str]:
 
 
 @contextlib.contextmanager
+def served_app(cluster: ControlCluster, work: Any) -> Iterator[tuple[str, ControlDriver]]:
+    """`create_app("control")` served over a real socket, for a proof that runs a
+    command as a subprocess (Run 7): `uvicorn.Server` in a thread, on
+    `127.0.0.1:<free port>`, running the app's own lifespan in its own loop.
+
+    Yields the endpoint (`http://127.0.0.1:<port>/v1`, what `routes.control` is
+    to a deployment) and a driver whose account and organisation helpers write
+    the cluster directly; its `call` is not for use here -- the commands are the
+    client."""
+    import os
+    import socket
+    import threading
+
+    import uvicorn
+
+    from app import main as main_module
+
+    previous = dict(os.environ)
+    os.environ.update(_environment(cluster, work))
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    server = uvicorn.Server(
+        uvicorn.Config(
+            main_module.create_app("control"), lifespan="on", log_level="warning",
+            access_log=False,
+        )
+    )  # fmt: skip
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 30
+        while not server.started:
+            if not thread.is_alive() or time.monotonic() > deadline:
+                raise RuntimeError("the control app did not start serving")
+            time.sleep(0.05)
+        yield f"http://127.0.0.1:{port}/v1", ControlDriver(cluster, None, None)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=30)
+        listener.close()
+        os.environ.clear()
+        os.environ.update(previous)
+
+
+@contextlib.contextmanager
 def control_app(cluster: ControlCluster, work: Any) -> Iterator[ControlDriver]:
     """`create_app("control")` over `cluster`, started by its own lifespan."""
     import asyncio
