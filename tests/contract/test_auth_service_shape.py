@@ -924,6 +924,68 @@ def test_the_application_serves_exactly_the_declared_paths() -> None:
     )
 
 
+def test_the_control_mode_serves_exactly_the_declared_paths() -> None:
+    """Session 37 (D2043, D2079): the health routes, `/auth/me`, and `/v1/*`.
+
+    The equality above, for the control project's `auth` container: no
+    `/auth/login` (the login is `POST /v1/sessions`, which enforces the second
+    factor), no `/auth/jwks.json` (nothing requests it), no `/admin/*`, no
+    workflow or connector route -- and its OpenAPI document is the `/v1`
+    paths alone (D2057).
+    """
+    application = main_module.create_app("control")
+    served = set(main_module.route_paths(application))
+    declared = set(main_module.health_paths()) | set(main_module.public_paths("control"))
+    assert served == declared, (
+        f"unexpected: {sorted(served - declared)}; missing: {sorted(declared - served)}"
+    )
+    assert set(main_module.public_paths("control")) - set(main_module.control_paths()) == {
+        "/auth/me"
+    }
+    assert all(path.startswith("/v1/") for path in main_module.control_paths())
+    document = application.openapi()
+    assert sorted(document["paths"]) == sorted(main_module.control_paths())
+    assert document["info"]["title"] == "Agentic Postgres management API"
+
+
+def test_the_auth_mode_serves_no_management_path() -> None:
+    """The other direction: `/v1` exists in the control mode and nowhere else."""
+    for mode in ("auth", "storage"):
+        served = main_module.route_paths(main_module.create_app(mode))
+        assert not [path for path in served if path.startswith("/v1")], mode
+    assert not set(main_module.public_paths()) & set(main_module.control_paths())
+
+
+def test_the_control_mode_reads_exactly_what_auth_reads(tmp_path: Path) -> None:
+    """One environment, two modes (ADR 0251): `load(mode="control")` requires
+    every variable `auth` requires, refuses what `auth` refuses, and reads the
+    same settings from the same environment."""
+    environment = {name: "1" for name in settings_module.REQUIRED_VARIABLES}
+    environment.update(
+        {
+            "APG_SIGNING_KEY_FILE": str(tmp_path / "signing.pem"),
+            "APG_MCP_LOCK_FILE": str(tmp_path / "lock.json"),
+            "APG_CONNECTOR_KEY_FILE": str(tmp_path / "connector"),
+            "APG_DATABASE_PASSFILE": str(tmp_path / "pgpass"),
+            "APG_ROLE_NAMES": '{"anon":"apg_x_anon"}',
+        }
+    )
+    assert settings_module.load(environment, mode="control") == settings_module.load(
+        environment, mode="auth"
+    )
+    for name in settings_module.REQUIRED_VARIABLES:
+        reduced = {key: value for key, value in environment.items() if key != name}
+        for mode in ("auth", "control"):
+            with pytest.raises(settings_module.MissingSetting):
+                settings_module.load(reduced, mode=mode)
+    for name in settings_module.FORBIDDEN_VARIABLES["auth"]:
+        widened = {**environment, name: "/anything"}
+        for mode in ("auth", "control"):
+            with pytest.raises(settings_module.MissingSetting, match=name):
+                settings_module.load(widened, mode=mode)
+    assert "control" in settings_module.APP_MODES
+
+
 def test_no_health_path_is_in_the_public_list() -> None:
     """The two lists are disjoint, which is what makes their union meaningful.
 

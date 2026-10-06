@@ -12,7 +12,7 @@ from __future__ import annotations
 import secrets
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -181,7 +181,13 @@ class AuthService:
 
     # -- login -------------------------------------------------------------
 
-    async def login(self, username: str, password: str) -> tuple[IssuedToken, str]:
+    async def login(
+        self,
+        username: str,
+        password: str,
+        *,
+        second_factor: Callable[[UUID], Awaitable[None]] | None = None,
+    ) -> tuple[IssuedToken, str]:
         """Authenticate, then issue. Four failures, one outcome.
 
         **The order is the security property.** The password is verified before
@@ -190,6 +196,13 @@ class AuthService:
         disabled account all cost one Argon2 comparison at the frozen profile
         and return the same bytes. Reversing these two blocks would make a
         disabled account answer in microseconds.
+
+        **`second_factor` is the control mode's alone** (Session 37, ADR
+        0252). Called with the subject's id AFTER the password and the status
+        have both passed and BEFORE anything is issued, so a code is never
+        weighed for a caller who has not proved the password, and a refused
+        code leaves no token and no session behind. It raises to refuse.
+        `/auth/login` passes nothing and is unchanged.
         """
         credential = await self.repository.lookup(normalize(username))
 
@@ -207,6 +220,8 @@ class AuthService:
             raise AuthenticationFailed("password mismatch")
         if credential.status != "active":
             raise AuthenticationFailed(f"subject is {credential.status}")
+        if second_factor is not None:
+            await second_factor(credential.user_id)
 
         # (S106 matches on the argument name. "access" is a token_use
         # discriminator from the claim contract, published in every token.)

@@ -31,7 +31,14 @@ from pathlib import Path
 #: directory could not import `LocalKeySet`, the strict request parser or the
 #: error vocabulary -- and the fourth verifier getting a second key-set parser
 #: is how D381 happened to the third.
-APP_MODES: frozenset[str] = frozenset({"auth", "storage", "mcp"})
+#:
+#: `control` is Session 37's (ADR 0251): the control project's OWN `auth`
+#: container, serving the management API instead of the release's human and
+#: agent routes. It reads exactly what `auth` reads and is refused exactly what
+#: `auth` is refused -- one compose definition, one environment, the facility
+#: deciding only `APP_MODE` -- because it is the same issuer with a different
+#: surface, never a second holder of anything.
+APP_MODES: frozenset[str] = frozenset({"auth", "storage", "mcp", "control"})
 
 
 class MissingSetting(RuntimeError):
@@ -405,6 +412,9 @@ def load(environ: dict[str, str] | None = None, *, mode: str = "auth") -> Settin
             )
         connector_key_file: Path | None = None
     else:
+        # `auth` AND `control` (ADR 0251): one branch, so the control mode
+        # cannot come to read, or be spared, a variable `auth` is not --
+        # `test_the_control_mode_reads_exactly_what_auth_reads` holds it.
         signing_key_file = Path(_required("APG_SIGNING_KEY_FILE"))
         # Absent in auth mode, and refused rather than ignored, for the same
         # reason storage refuses a signing key: two sources for one key set is

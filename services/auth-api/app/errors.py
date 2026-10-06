@@ -202,6 +202,60 @@ def connector_refused(refusal: ConnectorRefused) -> JSONResponse:
     return JSONResponse(body, status_code=refusal.status, headers=headers)
 
 
+#: Session 37 (ADR 0251-0254). The management API's refusals, each a fixed word
+#: with its status. A definer function of the control set raises
+#: `APnnn: <word>` and the control mode reads that word and nothing else; no
+#: database message is ever relayed (D433).
+#:
+#: `second_factor_required` is the one word with two statuses: 401 at
+#: `POST /v1/sessions` (no session exists yet), 403 on every other route for a
+#: person who must enrol and has not (D2050). Run 5 raises the last two.
+NOT_FOUND: Final = "not_found"
+SECOND_FACTOR_REQUIRED: Final = "second_factor_required"
+SECOND_FACTOR_INVALID: Final = "second_factor_invalid"
+INVITATION_INVALID: Final = "invitation_invalid"
+USERNAME_TAKEN: Final = "username_taken"
+LAST_OWNER: Final = "last_owner"
+FACTOR_ENABLED: Final = "factor_enabled"
+HUMAN_SESSION_REQUIRED: Final = "human_session_required"
+NOT_AVAILABLE: Final = "not_available"
+
+CONTROL_STATUS: Final[dict[str, int]] = {
+    # A foreign organisation and a missing one are this one answer (D2053).
+    NOT_FOUND: 404,
+    SECOND_FACTOR_REQUIRED: 403,
+    SECOND_FACTOR_INVALID: 401,
+    # Used, expired, revoked and unknown: one answer, byte-identical (D2051).
+    INVITATION_INVALID: 401,
+    # Answered only AFTER the invitation validated, the token left unspent.
+    USERNAME_TAKEN: 409,
+    LAST_OWNER: 409,
+    FACTOR_ENABLED: 409,
+    HUMAN_SESSION_REQUIRED: 403,
+    NOT_AVAILABLE: 409,
+}
+
+
+class ControlRefused(Exception):
+    """One fixed refusal of the management API: a word, its status, and at most
+    the members `not_available` names. Never a value a caller sent."""
+
+    def __init__(self, word: str, *, status: int | None = None, **extra: str) -> None:
+        super().__init__(word)
+        self.word = word
+        self.status = CONTROL_STATUS[word] if status is None else status
+        self.extra = extra
+
+
+def control_refused(refusal: ControlRefused) -> JSONResponse:
+    """The refusal's document, `no-store`; a 401 carries `WWW-Authenticate`."""
+    headers = {"Cache-Control": "no-store"}
+    if refusal.status == 401:
+        headers["WWW-Authenticate"] = "Bearer"
+    body: dict[str, Any] = {"error": refusal.word, **refusal.extra}
+    return JSONResponse(body, status_code=refusal.status, headers=headers)
+
+
 class AuthenticationFailed(Exception):
     """Any of the four. Carries a reason for the log and never for the caller."""
 

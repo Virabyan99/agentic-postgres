@@ -501,3 +501,96 @@ class AgentNotNeededResponse(BaseModel):
     """An agent named for an OUTBOUND connector, which acts as nobody."""
 
     error: Literal["agent_not_needed"]
+
+
+# ---------------------------------------------------------------------------
+# Session 37 (ADR 0251-0253): the management API's bodies. Every one closed,
+# like every request model above; none carries a role or a scope the caller
+# could name for themselves -- an invitation's `role` is bounded by the
+# minter's own, in `control_roles.may_grant`.
+# ---------------------------------------------------------------------------
+
+#: The four organisation roles (D2053), as a type.
+ControlRole = Literal["owner", "admin", "member", "viewer"]
+
+#: A six-digit TOTP code (ADR 0252). Pattern-bound here so a code of another
+#: shape is a malformed request rather than a guess the verifier spends work on.
+TOTP_CODE_PATTERN = r"^[0-9]{6}$"
+
+
+class ControlLoginRequest(_Strict):
+    """`LoginRequest` plus the code, which is required once a factor is enabled.
+
+    Optional in the shape because a person with no factor logs in without one;
+    whether it is REQUIRED is the server's decision, read from the record.
+    """
+
+    username: str = Field(min_length=1, max_length=USERNAME_MAX)
+    password: str = Field(min_length=1, max_length=PASSWORD_MAX)
+    totp_code: str | None = Field(default=None, pattern=TOTP_CODE_PATTERN)
+
+
+class LogoutRequest(_Strict):
+    """The refresh token of the session to end, and nothing else."""
+
+    refresh_token: str = Field(min_length=1, max_length=512)
+
+
+class ConfirmFactorRequest(_Strict):
+    """A current code from the authenticator just enrolled."""
+
+    totp_code: str = Field(pattern=TOTP_CODE_PATTERN)
+
+
+class FactorEnrolmentResponse(BaseModel):
+    """The seed, shown ONCE: base32 and the enrolment URI that carries it."""
+
+    secret: str
+    otpauth_uri: str
+
+
+class CreateOrganizationRequest(_Strict):
+    name: str = Field(min_length=1, max_length=64)
+
+
+class SetMemberRoleRequest(_Strict):
+    role: ControlRole
+
+
+class MintInvitationRequest(_Strict):
+    """No organisation and no role: an ACCOUNT invitation. Both: a MEMBERSHIP
+    invitation. One without the other is refused (D2051)."""
+
+    organization_id: UUID | None = None
+    role: ControlRole | None = None
+    expires_in_hours: int | None = Field(default=None, ge=1, le=168)
+
+
+class InvitationResponse(BaseModel):
+    """The invitation, and its token -- in this response and no other."""
+
+    id: str
+    invitation_token: str
+    organization_id: str | None
+    role: ControlRole | None
+    expires_at: str
+
+
+class AcceptInvitationRequest(_Strict):
+    """The token, and -- for a caller without an account -- the account.
+
+    A signed-in caller sends the token alone; anybody else sends all four.
+    The password is the new account's, screened by the policy before the
+    token is spent.
+    """
+
+    invitation_token: str = Field(min_length=1, max_length=512)
+    username: str | None = Field(default=None, min_length=1, max_length=USERNAME_MAX)
+    display_name: str | None = Field(default=None, min_length=1, max_length=DISPLAY_NAME_MAX)
+    password: str | None = Field(default=None, min_length=1, max_length=PASSWORD_MAX)
+
+
+class ControlRefusedResponse(BaseModel):
+    """A management API refusal: one fixed word (ADR 0251)."""
+
+    error: str

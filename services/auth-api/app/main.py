@@ -39,6 +39,7 @@ from app import (
     connector_admin_routes,
     connector_routes,
     connector_signature,
+    control_routes,
     db,
     keys,
     openapi_docs,
@@ -52,6 +53,8 @@ from app import (
 from app import scopes as scope_map
 from app import settings as settings_module
 from app.connector_repository import ConnectorRepository
+from app.control_repository import ControlRepository
+from app.control_service import ControlService
 from app.hashing import BoundedHasher
 from app.log_setup import configure_logging
 from app.profile import HASH_CONCURRENCY
@@ -179,6 +182,15 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         )
         if mode == "storage":
             application.state.storage = _build_storage(pool)
+        # **Session 37 (ADR 0251): the control mode** is this branch's auth
+        # half and nothing more -- the same pool, the same `AuthService`, plus
+        # the control set's repository. No workflow or connector repository,
+        # no connector key read, and no worker below: the control plane runs
+        # no project's workflows.
+        if mode == "control":
+            application.state.control = ControlService(
+                auth=application.state.service, repository=ControlRepository(pool)
+            )
 
         # **Session 32 (ADR 0226): the workflow loop, in `auth` mode only.**
         #
@@ -275,7 +287,11 @@ def create_app(mode: str | None = None) -> Any:
         return create_mcp_app()
 
     application = FastAPI(
-        title="Agentic Postgres auth",
+        # The control mode's document is the management API's contract
+        # (D2057), so it carries the management API's name.
+        title="Agentic Postgres management API"
+        if resolved == "control"
+        else "Agentic Postgres auth",
         lifespan=lifespan,
         # No interactive documentation from this process. `/docs/app` is a
         # separate first-party surface built in Run 10 from a reviewed
@@ -308,12 +324,29 @@ def create_app(mode: str | None = None) -> Any:
             return JSONResponse({"status": "unready"}, status_code=503)
         return JSONResponse({"status": "ready"})
 
-    # Exactly one of the two, never both. Written as an if/else over the mode
-    # rather than as two conditional `include_router` calls, so that adding a
-    # third mode is a change here and cannot leave both mounted by accident.
+    # Exactly one surface per mode. Written as one chain over the mode rather
+    # than as conditional `include_router` calls, so that adding a mode is a
+    # change here and cannot leave two surfaces mounted by accident.
     application.state.mode = resolved
     if resolved == "storage":
         application.include_router(storage_routes.router)
+    elif resolved == "control":
+        # **Session 37 (ADR 0251, D2079): the management API and ONE probe.**
+        # `/auth/me` is what the deploy reads of an auth container
+        # (`observe_app`), so the control mode serves it -- the release's
+        # handler itself, added by name rather than copied, and left out of
+        # the management API's document, which is `/v1` alone (D2057). No
+        # `/auth/login` (the login is `POST /v1/sessions`, which enforces the
+        # second factor), no `/admin/*`, no workflow or connector route.
+        application.add_api_route(
+            "/auth/me",
+            routes.me,
+            methods=["GET"],
+            include_in_schema=False,
+            openapi_extra=routes.DOC_ME,
+            responses=routes.RESP_ME,
+        )
+        application.include_router(control_routes.router)
     else:
         application.include_router(routes.router)
         # **Session 32 (ADR 0229): the three agent-token routes, in `auth` mode
@@ -442,14 +475,43 @@ def health_paths() -> tuple[str, ...]:
     return ("/health/live", "/health/ready")
 
 
-def public_paths() -> tuple[str, ...]:
+def control_paths() -> tuple[str, ...]:
+    """The management API's paths (Session 37, ADR 0251), as the control mode
+    serves them -- the control router strips `{api}`, so `/api/v1/me` arrives
+    as `/v1/me`. Run 5 adds the keys, projects and operations paths."""
+    return (
+        "/v1/invitations",
+        "/v1/invitations/accept",
+        "/v1/me",
+        "/v1/me/totp",
+        "/v1/me/totp/confirm",
+        "/v1/organizations",
+        "/v1/organizations/{organization}",
+        "/v1/organizations/{organization}/invitations",
+        "/v1/organizations/{organization}/invitations/{invitation}",
+        "/v1/organizations/{organization}/members",
+        "/v1/organizations/{organization}/members/{user}",
+        "/v1/sessions",
+        "/v1/sessions/current",
+        "/v1/sessions/refresh",
+    )
+
+
+def public_paths(mode: str = "auth") -> tuple[str, ...]:
     """Every path Run 10 will publish through the edge.
 
     Declared beside the health paths so the two lists are read together: what
     the router carries has to be exactly these plus those, and a route added
     without a decision about which side it falls on fails
     `test_the_application_serves_exactly_the_declared_paths`.
+
+    **The `control` arm** (Session 37, D2043, D2079): the one probe the deploy
+    reads, `/auth/me`, and the management API -- nothing of the `auth` list
+    below. `test_the_control_mode_serves_exactly_the_declared_paths` holds the
+    control application to it.
     """
+    if mode == "control":
+        return ("/auth/me", *control_paths())
     return (
         "/admin/agents",
         "/admin/agents/{agent_id}",
