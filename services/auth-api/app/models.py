@@ -594,3 +594,31 @@ class ControlRefusedResponse(BaseModel):
     """A management API refusal: one fixed word (ADR 0251)."""
 
     error: str
+
+
+class MintKeyRequest(_Strict):
+    """A name and the scopes, from the Session 37 vocabulary (D2052).
+
+    The scopes are free strings in the shape and checked against the
+    vocabulary and the minter's role in the service, so a scope outside either
+    is a refusal that says why rather than a schema error that does not.
+    """
+
+    name: str = Field(min_length=1, max_length=64)
+    scopes: list[str] = Field(min_length=1, max_length=8)
+
+
+class KeyResponse(BaseModel):
+    """The key, in this response and no other, with its id and scopes."""
+
+    key_id: str
+    key: str
+    name: str
+    scopes: list[str]
+
+
+class NotAvailableResponse(BaseModel):
+    """An operation whose concept is not offered yet, and which ledger row says so."""
+
+    error: Literal["not_available"]
+    ledger_row: str

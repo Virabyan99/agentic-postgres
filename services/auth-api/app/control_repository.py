@@ -197,6 +197,73 @@ class ControlRepository:
     async def remove_member(self, user: UUID, org: UUID, target: UUID) -> None:
         await self._rows(user, "SELECT app.control_remove_member(%s, %s, %s)", (user, org, target))
 
+    # -- keys (D2052) -----------------------------------------------------------
+
+    async def mint_key(
+        self, user: UUID, org: UUID, key_id: str, digest: str, name: str, scopes: list[str]
+    ) -> None:
+        await self._rows(
+            user,
+            "SELECT app.control_mint_key(%s, %s, %s, %s, %s, %s)",
+            (user, org, key_id, digest, name, scopes),
+        )
+
+    async def list_keys(self, user: UUID, org: UUID) -> list[dict[str, Any]]:
+        return await self._rows(
+            user,
+            "SELECT key_id, user_id, name, scopes, created_at, last_used_at, revoked_at "
+            "FROM app.control_list_keys(%s, %s)",
+            (user, org),
+        )
+
+    async def revoke_key(self, user: UUID, org: UUID, key_id: str) -> bool:
+        row = await self._one(
+            user, "SELECT app.control_revoke_key(%s, %s, %s) AS revoked", (user, org, key_id)
+        )
+        return bool(row and row["revoked"])
+
+    async def key_lookup(self, key_id: str) -> dict[str, Any] | None:
+        """One key by id with its owner's CURRENT role, or None. No caller yet:
+        nobody is known until the key has been checked."""
+        return await self._one(
+            None,
+            "SELECT secret_sha256, organization_id, user_id, scopes, revoked, member_role "
+            "FROM app.control_key_lookup(%s)",
+            (key_id,),
+        )
+
+    async def key_used(self, key_id: str) -> None:
+        await self._rows(None, "SELECT app.control_key_used(%s)", (key_id,))
+
+    # -- the registry and its operations ------------------------------------------
+
+    _PROJECT = (
+        "SELECT key, organization_id, slug, environment, domain, template_version, "
+        "source_commit, adopted_at FROM "
+    )
+    _OPERATION = (
+        "SELECT id, organization_id, project_key, type, status, progress, error_code, "
+        "created_at, started_at, finished_at FROM "
+    )
+
+    async def list_projects(self, user: UUID, org: UUID | None) -> list[dict[str, Any]]:
+        return await self._rows(
+            user, self._PROJECT + "app.control_list_projects(%s, %s)", (user, org)
+        )
+
+    async def get_project(self, user: UUID, key: str) -> dict[str, Any] | None:
+        return await self._one(user, self._PROJECT + "app.control_get_project(%s, %s)", (user, key))
+
+    async def list_operations(self, user: UUID, org: UUID) -> list[dict[str, Any]]:
+        return await self._rows(
+            user, self._OPERATION + "app.control_list_operations(%s, %s)", (user, org)
+        )
+
+    async def get_operation(self, user: UUID, operation: UUID) -> dict[str, Any] | None:
+        return await self._one(
+            user, self._OPERATION + "app.control_get_operation(%s, %s)", (user, operation)
+        )
+
     # -- invitations -----------------------------------------------------------
 
     async def mint_invitation(

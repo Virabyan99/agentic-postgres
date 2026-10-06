@@ -1,0 +1,1876 @@
+{
+  "components": {
+    "schemas": {
+      "AuthenticationFailedResponse": {
+        "description": "Returned when no usable credential was presented.\n\nThe same body for every cause: unknown subject, wrong password, disabled\nsubject. Do not branch on it -- there is nothing else to read.",
+        "properties": {
+          "error": {
+            "const": "authentication_failed",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "AuthenticationFailedResponse",
+        "type": "object"
+      },
+      "ControlRefusedResponse": {
+        "description": "A management API refusal: one fixed word (ADR 0251).",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ControlRefusedResponse",
+        "type": "object"
+      },
+      "FactorEnrolmentResponse": {
+        "description": "The seed, shown ONCE: base32 and the enrolment URI that carries it.",
+        "properties": {
+          "otpauth_uri": {
+            "title": "Otpauth Uri",
+            "type": "string"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret",
+          "otpauth_uri"
+        ],
+        "title": "FactorEnrolmentResponse",
+        "type": "object"
+      },
+      "InvalidRequestResponse": {
+        "description": "Returned when the request is well formed and jointly refused.\n\nA scope outside the role's ceiling, a username already taken. `message`\nsays which, because the caller is an authenticated administrator.",
+        "properties": {
+          "error": {
+            "const": "invalid_request",
+            "title": "Error",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "message"
+        ],
+        "title": "InvalidRequestResponse",
+        "type": "object"
+      },
+      "InvitationResponse": {
+        "description": "The invitation, and its token -- in this response and no other.",
+        "properties": {
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "invitation_token": {
+            "title": "Invitation Token",
+            "type": "string"
+          },
+          "organization_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organization Id"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "owner",
+                  "admin",
+                  "member",
+                  "viewer"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "required": [
+          "id",
+          "invitation_token",
+          "organization_id",
+          "role",
+          "expires_at"
+        ],
+        "title": "InvitationResponse",
+        "type": "object"
+      },
+      "KeyResponse": {
+        "description": "The key, in this response and no other, with its id and scopes.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key_id",
+          "key",
+          "name",
+          "scopes"
+        ],
+        "title": "KeyResponse",
+        "type": "object"
+      },
+      "MalformedRequestResponse": {
+        "description": "Returned when the request was refused before any domain logic ran.\n\nAn oversized body, a duplicate JSON member, a non-object root, an unknown\nfield, or a field outside its bounds. Which one is not reported.",
+        "properties": {
+          "error": {
+            "const": "malformed_request",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "MalformedRequestResponse",
+        "type": "object"
+      },
+      "NotAvailableResponse": {
+        "description": "An operation whose concept is not offered yet, and which ledger row says so.",
+        "properties": {
+          "error": {
+            "const": "not_available",
+            "title": "Error",
+            "type": "string"
+          },
+          "ledger_row": {
+            "title": "Ledger Row",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "ledger_row"
+        ],
+        "title": "NotAvailableResponse",
+        "type": "object"
+      },
+      "SessionTokenResponse": {
+        "description": "What `/auth/login` and `/auth/refresh` return.\n\nCarries the successor refresh token, because rotation is the point: the\npresented one is consumed by the exchange and is refused from that moment,\nso a client that did not keep this value has no session left.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "integer"
+          },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          },
+          "token_type": {
+            "const": "Bearer",
+            "default": "Bearer",
+            "title": "Token Type",
+            "type": "string"
+          },
+          "token_use": {
+            "title": "Token Use",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "expires_at",
+          "token_use",
+          "refresh_token"
+        ],
+        "title": "SessionTokenResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Agentic Postgres management API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/invitations": {
+      "post": {
+        "description": "With `organization_id` and `role`: a membership invitation, minted by an admin or owner of that organisation for a role at or below their own (only an owner invites an owner). With neither: an account invitation, minted by the registry administrator with an enabled second factor. Lives 72 hours unless `expires_in_hours` (1-168) says otherwise.",
+        "operationId": "mint_invitation_v1_invitations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "No organisation and no role: an ACCOUNT invitation. Both: a MEMBERSHIP\ninvitation. One without the other is refused (D2051).",
+                "properties": {
+                  "expires_in_hours": {
+                    "anyOf": [
+                      {
+                        "maximum": 168.0,
+                        "minimum": 1.0,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Expires In Hours"
+                  },
+                  "organization_id": {
+                    "anyOf": [
+                      {
+                        "format": "uuid",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Organization Id"
+                  },
+                  "role": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "owner",
+                          "admin",
+                          "member",
+                          "viewer"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Role"
+                  }
+                },
+                "title": "MintInvitationRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationResponse"
+                }
+              }
+            },
+            "description": "The invitation and its token, once."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Mint an invitation; its token is shown once"
+      }
+    },
+    "/v1/invitations/accept": {
+      "post": {
+        "description": "Signed in: the token alone, and the caller joins the organisation. Otherwise the token with a username, a display name and a password: the account and any membership are created in one transaction. A used, expired, revoked or unknown token is one answer, `invitation_invalid`; a taken username is `username_taken`, answered only after the token validated, and the token stays unspent.",
+        "operationId": "accept_invitation_v1_invitations_accept_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "The token, and -- for a caller without an account -- the account.\n\nA signed-in caller sends the token alone; anybody else sends all four.\nThe password is the new account's, screened by the policy before the\ntoken is spent.",
+                "properties": {
+                  "display_name": {
+                    "anyOf": [
+                      {
+                        "maxLength": 256,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Display Name"
+                  },
+                  "invitation_token": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "title": "Invitation Token",
+                    "type": "string"
+                  },
+                  "password": {
+                    "anyOf": [
+                      {
+                        "maxLength": 1024,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Password"
+                  },
+                  "username": {
+                    "anyOf": [
+                      {
+                        "maxLength": 128,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Username"
+                  }
+                },
+                "required": [
+                  "invitation_token"
+                ],
+                "title": "AcceptInvitationRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The account, and the organisation and role it joined."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`invitation_invalid` (or `authentication_failed` for a bad bearer)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`username_taken`."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Accept an invitation"
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "description": "Read inside this request. Reachable before a second factor is enrolled.",
+        "operationId": "me_v1_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The caller as they are now."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          }
+        },
+        "summary": "The caller, their organisations, and their second factor"
+      }
+    },
+    "/v1/me/totp": {
+      "post": {
+        "description": "Stores a new seed, not yet enabled, and returns it as base32 and as an `otpauth://` URI. Beginning again replaces an unconfirmed seed; an enabled factor is `factor_enabled` -- a lost device is the operator's to reset.",
+        "operationId": "begin_factor_v1_me_totp_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactorEnrolmentResponse"
+                }
+              }
+            },
+            "description": "The seed, in this response and no other."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`factor_enabled`."
+          }
+        },
+        "summary": "Begin enrolling a second factor; the seed is shown once"
+      }
+    },
+    "/v1/me/totp/confirm": {
+      "post": {
+        "description": "Enables the factor and ends every session the caller had, so no session opened without the code outlives enrolment. The caller logs in again, with a code.",
+        "operationId": "confirm_factor_v1_me_totp_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "A current code from the authenticator just enrolled.",
+                "properties": {
+                  "totp_code": {
+                    "pattern": "^[0-9]{6}$",
+                    "title": "Totp Code",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "totp_code"
+                ],
+                "title": "ConfirmFactorRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The factor is enabled; `sessions_ended` sessions ended."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`factor_enabled`."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`second_factor_invalid`: a wrong code, or nothing to confirm."
+          }
+        },
+        "summary": "Enable the second factor with a current code"
+      }
+    },
+    "/v1/operations": {
+      "get": {
+        "description": "`organization` is required. Empty while no operation type is accepted.",
+        "operationId": "list_operations_v1_operations_get",
+        "parameters": [
+          {
+            "description": "One of the caller's organisations. A foreign or missing one is `not_found`.",
+            "in": "query",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The operations."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "An organisation's operations, newest first"
+      }
+    },
+    "/v1/operations/{operation}": {
+      "get": {
+        "description": "A foreign operation and a missing one are one `not_found`.",
+        "operationId": "get_operation_v1_operations__operation__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation",
+            "required": true,
+            "schema": {
+              "title": "Operation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The operation."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          }
+        },
+        "summary": "One operation of the caller's organisations"
+      }
+    },
+    "/v1/organizations": {
+      "get": {
+        "description": "Only organisations the caller belongs to; there is no other listing.",
+        "operationId": "list_organizations_v1_organizations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The caller's organisations."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          }
+        },
+        "summary": "The caller's organisations and their role in each"
+      },
+      "post": {
+        "description": "An owner must enrol a second factor before using anything but enrolment.",
+        "operationId": "create_organization_v1_organizations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "title": "CreateOrganizationRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The organisation."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          }
+        },
+        "summary": "Create an organisation; the caller becomes its owner"
+      }
+    },
+    "/v1/organizations/{organization}": {
+      "get": {
+        "description": "Any member. A non-member and a missing organisation get one answer.",
+        "operationId": "get_organization_v1_organizations__organization__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "title": "Organization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The organisation and the caller's role."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          }
+        },
+        "summary": "One of the caller's organisations"
+      }
+    },
+    "/v1/organizations/{organization}/invitations": {
+      "get": {
+        "description": "Admin and above. Never a token, and never a token's hash.",
+        "operationId": "list_invitations_v1_organizations__organization__invitations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "title": "Organization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The invitations, spent and unspent."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          }
+        },
+        "summary": "An organisation's invitations"
+      }
+    },
+    "/v1/organizations/{organization}/invitations/{invitation}": {
+      "delete": {
+        "description": "Admin and above. 204 whether or not an unspent invitation had that id.",
+        "operationId": "revoke_invitation_v1_organizations__organization__invitations__invitation__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "title": "Organization",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "invitation",
+            "required": true,
+            "schema": {
+              "title": "Invitation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "That invitation cannot be accepted."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          }
+        },
+        "summary": "Revoke an unspent invitation"
+      }
+    },
+    "/v1/organizations/{organization}/keys": {
+      "get": {
+        "description": "A member sees their own keys; an admin or owner sees all. Never a secret.",
+        "operationId": "list_keys_v1_organizations__organization__keys_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "title": "Organization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The keys."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`human_session_required`: a management key cannot reach this route -- every route that mints a credential, and oneself, needs a person's session."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          }
+        },
+        "summary": "The organisation's keys the caller may see"
+      },
+      "post": {
+        "description": "`apg_<id>_<secret>`, stored as its id and the SHA-256 of its secret. Its scopes come from the vocabulary (`organizations:read`, `members:read`, `projects:read`, `operations:read`) and must be within the minter's role. On every request a key's authority is its scopes intersected with its owner's current role, in this organisation only; a revoked key, or one whose owner left, is refused.",
+        "operationId": "mint_key_v1_organizations__organization__keys_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "title": "Organization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "A name and the scopes, from the Session 37 vocabulary (D2052).\n\nThe scopes are free strings in the shape and checked against the\nvocabulary and the minter's role in the service, so a scope outside either\nis a refusal that says why rather than a schema error that does not.",
+                "properties": {
+                  "name": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "scopes": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 8,
+                    "minItems": 1,
+                    "title": "Scopes",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "name",
+                  "scopes"
+                ],
+                "title": "MintKeyRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyResponse"
+                }
+              }
+            },
+            "description": "The key, in this response and no other."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`human_session_required`: a management key cannot reach this route -- every route that mints a credential, and oneself, needs a person's session."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Mint a management key; it is shown once"
+      }
+    },
+    "/v1/organizations/{organization}/keys/{key_id}": {
+      "delete": {
+        "description": "The caller's own key, or -- for an admin or owner -- any of the organisation's. A key the caller may not revoke, a missing one and one already revoked are one `not_found`.",
+        "operationId": "revoke_key_v1_organizations__organization__keys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "title": "Organization",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The key is revoked; its next request is refused."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`human_session_required`: a management key cannot reach this route -- every route that mints a credential, and oneself, needs a person's session."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          }
+        },
+        "summary": "Revoke a key"
+      }
+    },
+    "/v1/organizations/{organization}/members": {
+      "get": {
+        "description": "Any member.",
+        "operationId": "list_members_v1_organizations__organization__members_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "title": "Organization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The members and their roles."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          }
+        },
+        "summary": "An organisation's members"
+      }
+    },
+    "/v1/organizations/{organization}/members/{user}": {
+      "delete": {
+        "description": "Admin and above. Only an owner removes an owner, and the last owner stays (`last_owner`). The account remains; the membership was its authority here.",
+        "operationId": "remove_member_v1_organizations__organization__members__user__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "title": "Organization",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "title": "User",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The member is removed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`last_owner`."
+          }
+        },
+        "summary": "Remove a member, revoking their keys in the organisation"
+      },
+      "patch": {
+        "description": "Admin and above. Only an owner touches or makes an owner, and the last owner cannot be demoted (`last_owner`).",
+        "operationId": "set_member_role_v1_organizations__organization__members__user__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "title": "Organization",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "title": "User",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "role": {
+                    "enum": [
+                      "owner",
+                      "admin",
+                      "member",
+                      "viewer"
+                    ],
+                    "title": "Role",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "role"
+                ],
+                "title": "SetMemberRoleRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The member's new role."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`last_owner`."
+          }
+        },
+        "summary": "Change a member's role"
+      }
+    },
+    "/v1/projects": {
+      "get": {
+        "description": "The registry: projects the operator adopted from their deployed documents. A key sees its own organisation's only.",
+        "operationId": "list_projects_v1_projects_get",
+        "parameters": [
+          {
+            "description": "One of the caller's organisations. A foreign or missing one is `not_found`.",
+            "in": "query",
+            "name": "organization",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The projects."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "The projects of the caller's organisations"
+      },
+      "post": {
+        "description": "Refused, and nothing is recorded: a project is created only when its ledger row, `projects_self_service`, is available or in beta. The answer names the row.",
+        "operationId": "create_project_v1_projects_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAvailableResponse"
+                }
+              }
+            },
+            "description": "`not_available`, with the ledger row that says why."
+          }
+        },
+        "summary": "Create a project -- not available yet"
+      }
+    },
+    "/v1/projects/{key}": {
+      "get": {
+        "description": "A foreign project and a missing one are one `not_found`.",
+        "operationId": "get_project_v1_projects__key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The project's registry record."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          }
+        },
+        "summary": "One project of the caller's organisations"
+      }
+    },
+    "/v1/sessions": {
+      "post": {
+        "description": "The password is verified first, an unknown username against a dummy hash, so every password failure is one answer that costs the same. Only then, if the person has an enabled second factor, is `totp_code` required: `second_factor_required` without one, `second_factor_invalid` with a wrong one or one already used.",
+        "operationId": "create_session_v1_sessions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "`LoginRequest` plus the code, which is required once a factor is enabled.\n\nOptional in the shape because a person with no factor logs in without one;\nwhether it is REQUIRED is the server's decision, read from the record.",
+                "properties": {
+                  "password": {
+                    "maxLength": 1024,
+                    "minLength": 1,
+                    "title": "Password",
+                    "type": "string"
+                  },
+                  "totp_code": {
+                    "anyOf": [
+                      {
+                        "pattern": "^[0-9]{6}$",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Totp Code"
+                  },
+                  "username": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "title": "Username",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "username",
+                  "password"
+                ],
+                "title": "ControlLoginRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTokenResponse"
+                }
+              }
+            },
+            "description": "An access token and the session's first refresh token."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authentication_failed`, `second_factor_required` or `second_factor_invalid`."
+          }
+        },
+        "summary": "Log in: a password, and the second factor once one is enabled"
+      }
+    },
+    "/v1/sessions/current": {
+      "delete": {
+        "description": "Takes the refresh token, not an access token: the command-line client keeps only the refresh token. Answers 204 whether or not the token named a live session.",
+        "operationId": "end_session_v1_sessions_current_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "The refresh token of the session to end, and nothing else.",
+                "properties": {
+                  "refresh_token": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "title": "Refresh Token",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "refresh_token"
+                ],
+                "title": "LogoutRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "That session is ended, or was already."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          }
+        },
+        "summary": "Log out: end the session a refresh token names"
+      }
+    },
+    "/v1/sessions/refresh": {
+      "post": {
+        "description": "Single use, and every refusal answers identically -- the release's session plane, unchanged. Confirming a second factor ends every session opened before it.",
+        "operationId": "refresh_session_v1_sessions_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "One field, and there is deliberately no second.\n\nA refresh token names a session; it is not a request for a role, a scope or\na lifetime, and a caller who could ask for any of those would be a caller\nwho could widen its own authority by refreshing. `login` has the same shape\nfor the same reason.",
+                "properties": {
+                  "refresh_token": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "title": "Refresh Token",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "refresh_token"
+                ],
+                "title": "RefreshRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTokenResponse"
+                }
+              }
+            },
+            "description": "A new access token and its successor."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          }
+        },
+        "summary": "Exchange a refresh token for an access token and its successor"
+      }
+    }
+  }
+}

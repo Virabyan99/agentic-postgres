@@ -38,8 +38,16 @@ its docstring says so; it had been applied to the auth router and not to this
 one. *When a decision is implemented, ask which of its callers got the
 implementation* (D333).
 
+**And since Session 37, a second snapshot** (D2057, ADR 0253): the
+management API the control project's `auth` container serves in
+`APP_MODE=control` -- `create_app("control").openapi()`, the `/v1` paths and the
+schemas they reference, frozen as `contracts/control-openapi.canonical.json`.
+One command and one allowlist entry for both (ADR 0093 permits exactly one
+checkout-only command), so `--check` compares BOTH and names the one that
+differs, and `--update` streams the one `--snapshot` names (`app` unless told).
+
 Exit codes (runbook section 2 convention):
-  0  the committed snapshot matches what this checkout generates
+  0  the committed snapshots match what this checkout generates
   2  invalid operator input
   3  missing local prerequisite
   5  no approved snapshot exists yet
@@ -64,6 +72,16 @@ sys.path.insert(0, str(REPO_ROOT / "services" / "auth-api"))
 #: into every project's rendered directory -- one authority for the path, so a
 #: capture and a deploy cannot name two files.
 SNAPSHOT_PATH = REPO_ROOT / "contracts" / "app-openapi.canonical.json"
+
+#: Session 37 (D2057). The management API's reviewed document. Read by nothing
+#: at deploy time -- the control project publishes no documentation page in 37
+#: -- and compared by `--check` and the gate like the application's.
+CONTROL_SNAPSHOT_PATH = REPO_ROOT / "contracts" / "control-openapi.canonical.json"
+
+#: The control mode's document carries the paths under this prefix and nothing
+#: else; `/auth/me`, the one probe the mode also serves, is left out of the
+#: document at `create_app` (D2107).
+CONTROL_PATH_PREFIX = "/v1"
 
 EXIT_INPUT = 2
 EXIT_PREREQUISITE = 3
@@ -160,6 +178,47 @@ def generate() -> bytes:
     return json.dumps(document, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
 
+def _referenced(document: dict) -> set[str]:
+    body = json.dumps(document.get("paths", {}))
+    names: set[str] = set()
+    schemas = (document.get("components") or {}).get("schemas") or {}
+    frontier = {name for name in schemas if f'"#/components/schemas/{name}"' in body}
+    while frontier:
+        names |= frontier
+        nested = json.dumps([schemas[name] for name in frontier])
+        frontier = {
+            name for name in schemas
+            if name not in names and f'"#/components/schemas/{name}"' in nested
+        }  # fmt: skip
+    return names
+
+
+def generate_control() -> bytes:
+    """The management API's document: the control mode's `/v1` paths, and the
+    schemas they reference (to a fixed point), serialized as `generate` does."""
+    from app.main import create_app
+
+    document = create_app("control").openapi()
+    document["paths"] = {
+        path: operations
+        for path, operations in (document.get("paths") or {}).items()
+        if path == CONTROL_PATH_PREFIX or path.startswith(CONTROL_PATH_PREFIX + "/")
+    }
+    keep = _referenced(document)
+    schemas = (document.get("components") or {}).get("schemas") or {}
+    document.setdefault("components", {})["schemas"] = {
+        name: schema for name, schema in schemas.items() if name in keep
+    }
+    return json.dumps(document, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+
+
+#: Each snapshot: its committed file and the function that generates it.
+SNAPSHOTS = {
+    "app": (SNAPSHOT_PATH, generate),
+    "control": (CONTROL_SNAPSHOT_PATH, generate_control),
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="app-contract",
@@ -177,10 +236,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Stream a candidate to standard output. Writes no file; redirect it yourself.",
     )
+    parser.add_argument(
+        "--snapshot",
+        choices=sorted(SNAPSHOTS),
+        default="app",
+        help="With --update: which document to stream (default: app). --check compares both.",
+    )
     arguments = parser.parse_args(argv)
 
     try:
-        candidate = generate()
+        candidates = {name: build() for name, (_, build) in SNAPSHOTS.items()}
     except ImportError as error:
         print(
             f"app-contract: cannot build the application: {error}. The service's own "
@@ -197,31 +262,37 @@ def main(argv: list[str] | None = None) -> int:
         # otherwise land a root-owned file in the checkout that the operator who
         # has to review and commit it cannot read -- the redirect happens in the
         # caller's own shell (ADR 0050's shape).
-        sys.stdout.buffer.write(candidate)
+        sys.stdout.buffer.write(candidates[arguments.snapshot])
         return 0
 
-    if not SNAPSHOT_PATH.is_file():
+    # Both, every time: a check that compared only the default would leave the
+    # management API's document unread by the gate (D2057).
+    outcome = 0
+    for name, (snapshot, _) in SNAPSHOTS.items():
+        candidate = candidates[name]
+        if not snapshot.is_file():
+            print(
+                f"app-contract: no approved snapshot at {snapshot}. Capture one with "
+                f"`bin/app-contract.sh --update --snapshot {name} > contracts/{snapshot.name}`, "
+                "read the diff, and commit it.",
+                file=sys.stderr,
+            )
+            outcome = max(outcome, EXIT_MISSING)
+            continue
+        committed = snapshot.read_bytes()
+        if committed == candidate:
+            print(f"app-contract: {snapshot.name} matches this checkout")
+            continue
         print(
-            f"app-contract: no approved snapshot at {SNAPSHOT_PATH}. Capture one with "
-            "`bin/app-contract.sh --update > contracts/app-openapi.canonical.json`, "
-            "read the diff, and commit it.",
+            f"app-contract: {snapshot.name} disagrees with what this checkout generates. "
+            "The published reference would describe a surface this release does not serve. "
+            f"Re-capture with `bin/app-contract.sh --update --snapshot {name}`, read the diff, "
+            "and commit it.",
             file=sys.stderr,
         )
-        return EXIT_MISSING
-
-    committed = SNAPSHOT_PATH.read_bytes()
-    if committed == candidate:
-        print(f"app-contract: {SNAPSHOT_PATH.name} matches this checkout")
-        return 0
-
-    print(
-        f"app-contract: {SNAPSHOT_PATH.name} disagrees with what this checkout generates. "
-        "The published reference would describe a surface this release does not serve. "
-        "Re-capture with `bin/app-contract.sh --update`, read the diff, and commit it.",
-        file=sys.stderr,
-    )
-    _report_difference(json.loads(committed), json.loads(candidate))
-    return EXIT_DISAGREES
+        _report_difference(json.loads(committed), json.loads(candidate))
+        outcome = EXIT_DISAGREES
+    return outcome
 
 
 def _report_difference(committed: dict, candidate: dict) -> None:

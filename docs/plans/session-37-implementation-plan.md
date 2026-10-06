@@ -1,6 +1,6 @@
 # Session 37 — The control plane
 
-**Status: EXECUTING. Runs 1–3 DONE 2026-10-04, Run 4 DONE 2026-10-06 (rows D2073–D2108; NEXT FREE D2109, ADR 0255).** The second session
+**Status: EXECUTING. Runs 1–3 DONE 2026-10-04, Runs 4–5 DONE 2026-10-06 (rows D2073–D2113; NEXT FREE D2114, ADR 0255).** The second session
 of Stage 5 (`docs/plans/stage-5-plan.md` §3). Twelve runs and **two sittings
 on two days** — the release deployed on alpha and beta and the control project
 brought up beside them (day 1), then a person invited, an organisation, a key,
@@ -518,6 +518,11 @@ order.
 | **D2106** | Run 4 battery: *"(M6) `auth_create_user` moved after the acceptance and its error swallowed"*; *"(M7) an admin allowed to invite an owner → the matrix FAILED"*. | M6's shape does not exist in the code (D2104's order is create, then spend). M7 in Python alone cannot be seen through the API: `control_mint_invitation` and `control_set_member_role` refuse an admin granting `owner` in the database as well. | **M6 is D2104's equivalent defect** (the user insert committing on its own) -- KILLED. **M7 is run twice**: M7a, Python only, expected and observed to SURVIVE (the set's own check answers 403); M7b, Python and both SQL checks, KILLED by `test_an_admin_cannot_make_an_owner`. | A survivor that is the second layer working is evidence of the layer (D493); the mutation that removes both is the one the test can see. | **0252** |
 | **D2107** | Run 4 item 1: `load(mode="control")` *"forbids what auth forbids"*; item 2: the probe routes *"mounted from `routes.router`'s handlers by NAME"*. | `settings.FORBIDDEN_VARIABLES` is iterated by `test_each_mode_is_denied_the_other_s_credential_settings` as COMPOSE SERVICE names, so a `control` key would look up a service that does not exist. FastAPI's `add_api_route` takes the handler object itself. | **`control` takes `load`'s auth branch** (one branch, so the two cannot drift) and `FORBIDDEN_VARIABLES` gains no key; `test_the_control_mode_reads_exactly_what_auth_reads` proves the parity: equal `Settings` from one environment, every required variable refused by both when absent, every auth-forbidden variable refused by both. **`/auth/me` is `add_api_route("/auth/me", routes.me, include_in_schema=False)`** -- the release's handler, out of the management API's document, which is `/v1` alone (D2057). | A parity proved by behaviour holds whichever list a later session edits. | **0251** |
 | **D2108** | D2051: a membership invitation *"creates the account if the caller has none"*; Run 4 item 6: the routes. | A person who already has an account needs to accept a membership invitation without creating a second one; and an invitation id in a revocation path is the same kind of oracle an organisation id is. | **`POST /v1/invitations/accept` has two shapes**: with a bearer, the token alone (`accept_as_existing`: the display row, then the spend; an account invitation accepted this way is spent to no effect); without, the token and the account (`accept_as_new`). **`DELETE …/invitations/{id}` answers 204 whether or not an unspent invitation had that id**, and a path id that is not a uuid is `404 not_found` like a missing one. | One route for the person with an account and the person without; no id in a path says whether it exists. | **0252** |
+| **D2109** | Run 5 item 1: *"effective scopes = key scopes ∩ the role's (`control_roles.ROLE_SCOPES`)"*; §2 `KEY-MINT-001`: `test_a_demotion_narrows_a_key`; battery M2 kills it. | D2053 gives viewer and member the same reads and admin and owner only human acts, so in Session 37 every role grants all four key scopes: the intersection narrows nothing a live call can observe, and a demotion through the API leaves a key's reach unchanged. | **`ROLE_SCOPES` grants every role the whole vocabulary (D2053, faithful), and `effective_scopes` intersects anyway, on every request.** `test_a_demotion_narrows_a_key` and the role half of `test_scopes_are_bounded_by_the_vocabulary_and_the_role` patch `ROLE_SCOPES` (viewer, then member, without `members:read`) and drive the real routes against the real cluster; the second test also ASSERTS today's table is uniform, so the day Session 38 differentiates it the module is read again. M2 KILLED. | The mechanism the plan names exists and is proved; inventing a role difference D2053 decided against would be a product change made to give a test something to see. | **0253** |
+| **D2110** | Run 5 item 3: *"`src/agentic_postgres/operations.py` … `control_routes` imports `operations`"*; the service *"imports the table, never the file"*. | The auth image is built from `services/auth-api` alone (`COPY app /app/app`); nothing in it can import `src/` (ADR 0084, `service_source.py`). And the image cannot read the ledger file to compute *accepted*. | **The table lives in `services/auth-api/app/operations.py`** (standard library only, with `ACCEPTED_TYPES`, empty) and **`src/agentic_postgres/operations.py` loads it through `service_source.load`**, adding `accepted(type, ledger)` and `row_status`. The guard requires `ACCEPTED_TYPES` to equal the ledger's answer for every type, so a row moved without the service, or the reverse, fails it (M4 KILLED). `test_auth_service_shape.SHARED_MODULES` gains `operations`, which puts it under the standard-library rule. Run 3's frozen comment naming `src/agentic_postgres/operations.py` stays (D912) and is still true -- that module carries the table. | ADR 0084's one file imported by both planes, rather than a copy or a service that reads a document to decide what exists. | **0254**, 0084 |
+| **D2111** | Run 5 item 2: the key routes; *"a foreign or missing … key … → the SAME 404"*; D2052: *"credential-minting routes are human-session only"*. | The control set's functions scope by the KEY OWNER's memberships, so a member of two organisations' key would read both through `control_list_organizations` and `control_list_projects`. Listing keys is not minting, but it is the keys surface. Run 4 answers an invitation revoke 204 either way (D2108). | **A key reaches only `control_roles.KEY_SCOPES`' seven read routes**; every other route -- listing keys included -- is `403 human_session_required`. **A key principal's roles are its ONE organisation**, and every list the database returns is filtered to the caller's organisations as the request computed them (`test_a_key_reaches_no_other_organisation`: a member of A and B, a key minted in A sees A alone; the member's session sees both). **`DELETE …/keys/{id}` answers 404** for a key the caller may not revoke, a missing one, an already revoked one and a malformed id, as the plan says -- unlike the invitation revoke's 204 (D2108), which stands; the asymmetry is recorded, not reconciled. | The database's scope is the owner; the key's scope is narrower, and only the service knows which organisation the key was minted in. | **0253** |
+| **D2112** | Run 5: *"The `LEDGER-001` node id renamed in this run is registered in Run 9 … if [`test_acceptance_registry`] refuses the missing node now, move `LEDGER-001`'s node ids IN THIS RUN"*; battery M4: *"in a COPY of the Ledger the test is pointed at"*. | `test_every_registered_node_id_is_collectible` refuses a registered node id pytest cannot collect. `reality_ledger.load()` takes a path but the guard reads the module default, and `load` does not validate, so a mutated status reaches the guard. | **`LEDGER-001`'s node `test_the_sets_the_guard_will_read_are_empty_today` is replaced by `test_no_console_exists_yet` in this run**, its description says the operation-type half is a guard of its own, and `docs/acceptance-matrix.md` and `docs/product-contract.md` are regenerated. The new guard's node is CTL-OPS-001's, registered in Run 9. **M4 mutates `docs/reality-ledger.yaml` itself**, snapshotted and restored by copy and `cmp`-checked like every other battery file. | The registry may not name a node that does not exist for four runs; and a restored mutation of the real file is the same evidence as a pointed-at copy. | **0254** |
+| **D2113** | Run 5 item 5: *"`--update` gains `--snapshot app/control` (default `app`); `--check` compares both"*. | `bin/app-contract.sh` is the wrapper every gate calls with `--check` alone. | **`--snapshot` is accepted with `--update` only** (the wrapper refuses it beside `--check`, exit 2); `--check` compares both, prints a line per snapshot, and on a difference names the snapshot and the `--update --snapshot NAME` that re-captures it; a missing snapshot is exit 5, a disagreement exit 6. The control document keeps the `/v1` paths and the schemas they reference, to a fixed point; it is ASCII. | Every existing caller is unchanged, and the gate reads the management API's document without learning a new flag. | **0253** |
 
 ---
 
@@ -1336,7 +1341,7 @@ with its TEMPLATE), `test_auth_strict_query`, `test_request_id_stamping`,
 `test_app_contract_aggregate` (unchanged: it builds `auth` and `storage`),
 `test_acceptance_registry`, `test_evidence_claims`.
 
-**Done.** 2026-10-06 (code; CI: see Run 5's commit). Scripts in WSL `~/s37/run4/`.
+**Done.** 2026-10-06 (code). **CI: `1348f13` GREEN** (run 37426842820: the Session 1 gate, the Session 2 offline contract and the P0 inventory all success). Scripts in WSL `~/s37/run4/`.
 
 - **Built**: `settings.APP_MODES` gains `control` (auth's branch, D2107); `create_app("control")` -- title *Agentic Postgres management API*, the health routes, `/auth/me` (the release's handler by name, out of the document) and `control_routes.router` (14 `/v1` paths); the lifespan's control branch builds `ControlService` over the same `AuthService` and pool, with no workflow or connector repository and no worker. `public_paths("control")` and `control_paths()`. New modules `totp.py`, `control_repository.py`, `control_service.py`, `control_routes.py`, `control_roles.py`; `AuthService.login(..., second_factor=None)` (one caller, `/auth/login`, unchanged); `errors.CONTROL_STATUS` + `ControlRefused` (D2105); the control request models in `models.py`. `control_cluster.py` gains `control_app` / `ControlDriver`.
 - **First execution**: all 15 Docker-backed proofs (`test_control_sessions` 4, `test_control_invitations` 7, `test_control_roles` 4) PASSED on the first run against the locked image -- which is why the battery below was run before anything else was believed. The first targeted run FAILED one guard: `app/totp.py` named `urllib` (D2102).
@@ -1436,7 +1441,45 @@ missing node now, move `LEDGER-001`'s node ids IN THIS RUN (an existing
 requirement's node ids are not gated by `CURRENT_SESSION`) and say so in the
 Done.
 
-**Done.** *(the executor writes it)*
+**Done.** 2026-10-06 (code; CI: see Run 6's commit). Scripts in WSL `~/s37/run5/`.
+
+- **Built**: key authentication in `control_service.py` (`apg_<16 hex>_<43>`, looked up by
+  id, SHA-256 + `compare_digest`, one `authentication_failed` for unknown, wrong, revoked and
+  departed; effective scopes = the key's ∩ `control_roles.ROLE_SCOPES[current role]`, inside
+  the key's one organisation; `control_key_used`); `ControlPrincipal` now a person OR a key.
+  Routes: `GET|POST /v1/organizations/{org}/keys`, `DELETE …/keys/{key_id}`, `GET /v1/projects`
+  (`?organization=`), `GET /v1/projects/{key}`, **`POST /v1/projects` → `409
+  {"error":"not_available","ledger_row":"projects_self_service"}`**, `GET /v1/operations`
+  (`?organization=` required), `GET /v1/operations/{id}` -- 20 `/v1` paths. A key reaches
+  only `KEY_SCOPES`' seven read routes; all else is `human_session_required` (D2111). The
+  operation types in `services/auth-api/app/operations.py` (`ACCEPTED_TYPES` empty), loaded by
+  `src/agentic_postgres/operations.py` (D2110). The Ledger guard
+  `test_every_operation_type_names_a_ledger_row_and_none_is_accepted_while_planned` and
+  `test_no_console_exists_yet` replace `test_the_sets_the_guard_will_read_are_empty_today`
+  (ADR 0254). `bin/app-contract.py` `generate_control()` + `--snapshot app|control`, `--check`
+  compares both (D2113); `contracts/control-openapi.canonical.json` written by
+  `bin/app-contract.sh --update --snapshot control` (20 paths, 9 schemas, ASCII).
+  `tests/contract/test_control_boundary.py` (AST scan + its control).
+- **First execution**: the six key proofs ERRORED at setup on the first run -- the fixture's
+  project keys (`a-prod`) failed the registry's key CHECK (a slug of three or more
+  characters); renamed `alpha-prod`/`beta-prod`, 6 passed. Operation types 2, roles 4 (now over
+  every `/v1` route and every kind of id), boundary 2 passed first time. The first fast run
+  FAILED one guard, `test_the_shared_modules_are_the_ones_the_repository_actually_loads`:
+  `operations` added to `SHARED_MODULES` (D2110).
+- **`LEDGER-001` moved in this run** (`test_every_registered_node_id_is_collectible` refuses a
+  node that no longer exists): node → `test_no_console_exists_yet`, description amended, the
+  matrix and the product contract regenerated (D2112).
+- **Battery** (`r5_battery.py`, M1 not run -- uninformative, as the plan says): M1′ the revoked
+  check dropped, M2 the intersection dropped, M3 a key allowed on `POST …/keys`, M4
+  `projects_self_service` → `beta` in the ledger, M5 a `/v1` path added without re-capturing,
+  M6 a foreign organisation answered 403 -- **6/6 KILLED**, each beside a control, restored
+  `cmp`-equal, no cluster leaked.
+- **Targeted once** (18 modules: the plan's twelve plus `test_control_sessions`,
+  `test_control_invitations`, `test_totp` (the principal refactor), `test_cli_contract`
+  (`bin/app-contract.sh`'s usage), `test_documentation_index` and
+  `test_session12_documented_path` (the regenerated product contract)): **938 passed**, 0 skipped; ruff,
+  shellcheck and `bin/app-contract.sh --check` clean.
+- **Rows D2109–D2113.** NEXT FREE: D2114, ADR 0255.
 
 ### Run 6 — `bin/control.sh adopt|registry|totp-reset`
 

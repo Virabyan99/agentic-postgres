@@ -6,10 +6,11 @@ the guard's halves that have a subject now (D2000): the file validates; every
 subject, and -- where the checkout holds an evidence document (D2021) -- each
 passed in the newest one, `today_evidence` included; a concept a customer
 cannot reach carries no control; no customer sentence uses a specification §59
-word; the rendered page is current. The halves without a subject -- every
-console control and every `/api/v1` operation type maps to a row -- are
-asserted empty, so the day either set appears this module fails and names the
-session that must write the real guard.
+word; the rendered page is current; and since Session 37 (ADR 0254) every
+`/api/v1` operation type names a row, accepted exactly when that row is
+`available` or `beta`. The half without a subject -- every console control
+maps to a row -- is asserted empty, so the day the console appears this module
+fails and names the session that must write the real guard.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, reality_ledger
+from agentic_postgres import REPO_ROOT, operations, reality_ledger
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -137,21 +138,51 @@ def test_the_page_is_current() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_the_sets_the_guard_will_read_are_empty_today() -> None:
-    """The halves of ADR 0247's guard with no subject yet (D2000).
+def test_every_operation_type_names_a_ledger_row_and_none_is_accepted_while_planned(
+    ledger: dict,
+) -> None:
+    """ADR 0247's guard for the operation types, real since Session 37 (ADR 0254).
 
-    Every `/api/v1` operation type and every console control must map to a
-    ledger row. Neither exists: Session 37 writes the operation types (in
-    `src/agentic_postgres/operations.py`) and Session 42 the console (under
-    `services/console/`). **Those sessions replace this test with the real
-    guard** -- every type and every control names a row whose status is
-    `available` or `beta`. Until then the sets are asserted empty, so the day
-    one appears this fails rather than passing over a set nobody reads.
+    Every type names a ledger row that exists; the types the control mode
+    accepts (`ACCEPTED_TYPES`, in the service) are EXACTLY those whose row is
+    `available` or `beta` -- a row moved without the service following, or a
+    type accepted while its row is planned, fails here; and the control set's
+    CHECK lists the same types, so the database holds no type the table lacks.
+    In Session 37 every row is `planned`, so nothing is accepted.
     """
-    assert not (REPO_ROOT / "src" / "agentic_postgres" / "operations.py").exists(), (
-        "operations.py exists: Session 37's guard (every operation type maps to a "
-        "ledger row) must replace this assertion"
+    rows = {row["id"] for row in ledger["rows"]}
+    missing = {t: r for t, r in operations.OPERATION_TYPES.items() if r not in rows}
+    assert not missing, f"operation types naming no ledger row: {missing}"
+
+    by_ledger = {t for t in operations.OPERATION_TYPES if operations.accepted(t, ledger)}
+    assert set(operations.ACCEPTED_TYPES) == by_ledger, (
+        f"the service accepts {sorted(operations.ACCEPTED_TYPES)} and the ledger permits "
+        f"{sorted(by_ledger)}: one moved without the other"
     )
+
+    template = (
+        REPO_ROOT
+        / "projects"
+        / "control"
+        / "migrations"
+        / "templates"
+        / "0003-control-registry.sql"
+    ).read_text(encoding="utf-8")
+    checked = template.split("CHECK (type IN (", 1)[1].split("))", 1)[0]
+    assert {name.strip().strip("'") for name in checked.split(",")} == set(
+        operations.OPERATION_TYPES
+    )
+
+
+def test_no_console_exists_yet() -> None:
+    """The console half of ADR 0247's guard, with no subject yet (D2000).
+
+    Every console control must map to a ledger row; no console exists until
+    Session 42 (under `services/console/`), which replaces this test with the
+    real guard. Until then the set is asserted empty, so the day it appears
+    this fails rather than passing over a set nobody reads. (The operation-type
+    half became a guard of its own in Session 37, above.)
+    """
     assert not (REPO_ROOT / "services" / "console").exists(), (
         "services/console exists: Session 42's guard (every console control maps "
         "to a ledger row) must replace this assertion"

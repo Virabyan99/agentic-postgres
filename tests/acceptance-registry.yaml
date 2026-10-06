@@ -6074,7 +6074,7 @@
     - tests/contract/test_reality_ledger.py::test_a_planned_row_has_no_control
     - tests/contract/test_reality_ledger.py::test_no_customer_text_uses_a_forbidden_word
     - tests/contract/test_reality_ledger.py::test_the_page_is_current
-    - tests/contract/test_reality_ledger.py::test_the_sets_the_guard_will_read_are_empty_today
+    - tests/contract/test_reality_ledger.py::test_no_console_exists_yet
   description: >-
     `docs/reality-ledger.yaml` validates against `schemas/reality-
     ledger.schema.json` with unique ids; every evidence name is a registered
@@ -6082,9 +6082,9 @@
     chosen by session number, and a claim `not_run` or `failed` in it is not
     evidence; a `planned` row has no control; no row's `customer_text` uses
     a specification §59 word, case folded; `docs/reality-ledger.md` is
-    `bin/render-reality-ledger.py`'s current output; the operation-type and
-    console-control sets the guard will read are empty today (ADR 0247,
-    D2021). That every `available` or `beta` row's claim is `passed` in the
+    `bin/render-reality-ledger.py`'s current output; the console-control set
+    the guard will read is empty today (ADR 0247, D2021) -- the operation-type
+    half became a guard of its own in Session 37 (ADR 0254). That every `available` or `beta` row's claim is `passed` in the
     newest evidence document needs a document a checkout does not carry, so
     its proof runs in every workstation suite and is no node id here
     (D2030).

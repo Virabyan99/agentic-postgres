@@ -1,13 +1,13 @@
-"""The management API's behaviour (Session 37, ADR 0251-0253).
+"""The management API's behaviour (Session 37, ADR 0251-0254).
 
 **Built on `AuthService`, never beside it.** The control mode is the control
 project's own `auth` process: the same issuer, the same key, the same pool and
 the same identity registry. A control account IS a registry user (role
 `api_documentation`, scopes `["meta:read"]`, D2049/D2078) -- so a login here is
 `AuthService.login` with one hook, a refresh is `AuthService.refresh`, and
-every bearer is verified by `AuthService.authenticate`, current-state
+every access token is verified by `AuthService.authenticate`, current-state
 comparison included. What this module adds is what the release does not have:
-the second factor, organisations and their roles, and invitations.
+the second factor, organisations and their roles, invitations, and keys.
 
 **The second factor** (D2050, ADR 0252): checked inside `login` after the
 password and the status, before anything is issued. Who must hold one is
@@ -15,24 +15,43 @@ password and the status, before anything is issued. Who must hold one is
 `control_roles.ENROLMENT_ROUTES` (`factor_gate`). Confirming a factor ends
 every session the person had (D2080).
 
+**Keys** (D2052, ADR 0253): a bearer of the form `apg_<16 hex>_<43>` is a
+management key, not an access token. It is found by its id, its secret
+compared as a SHA-256 with `hmac.compare_digest` -- never Argon2id, which
+would cost 64 MiB and ~230 ms per request (rig 37c) -- and it is refused, with
+the one `authentication_failed`, when unknown, wrong, revoked, or held by
+someone who has left the organisation. Its authority is computed on every
+request: its scopes intersected with its owner's CURRENT role, inside its own
+organisation only. A key reaches only `control_roles.KEY_SCOPES`' routes;
+everything else -- every route that mints a credential -- is
+`human_session_required`, so a leaked key cannot mint its successor.
+
 **Organisations**: every role check is `control_roles.MATRIX`, read by the
 routes' one guard through `require_role`; the definer functions check again.
+Every list the database returns is filtered to the caller's organisations as
+this request computed them -- for a key, its one organisation -- so a key held
+by a member of two organisations sees only the one it was minted in.
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
+import re
+import secrets
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from app import control_roles, errors, one_time_tokens, refresh_sessions, totp
+from app import control_roles, errors, one_time_tokens, operations, refresh_sessions, totp
 from app import scopes as scope_map
 from app.control_repository import ControlRepository
 from app.hashing import normalize
-from app.service import AuthService, IssuedToken, Principal
+from app.repository import SubjectState
+from app.service import AuthService, IssuedToken
 
 #: The role and scopes every control account is created with (D2049, D2078):
 #: the narrowest authority the identity registry can describe, reading no row
@@ -44,26 +63,64 @@ ACCOUNT_SCOPES = [scope_map.INTROSPECTION_SCOPE]
 INVITATION_DEFAULT_HOURS = 72
 INVITATION_MAX_HOURS = 168
 
+#: A management key (D2052): `apg_`, the 16-hex lookup id, `_`, and a 43-char
+#: `token_urlsafe(32)` secret. A bearer starting `apg_` that does not match is
+#: refused with the same `authentication_failed` as a wrong key.
+KEY_PREFIX = "apg_"
+KEY_PATTERN = re.compile(r"^apg_([0-9a-f]{16})_([A-Za-z0-9_-]{43})$")
+
+#: What an unknown key id is compared against, so an unknown id does the same
+#: work as a known one with a wrong secret. A constant, and not any key's.
+_NO_SUCH_KEY = "0" * 64
+
+
+def mint_key() -> tuple[str, str, str]:
+    """A new key: (the key, its id, the SHA-256 of its secret). **Shown once.**"""
+    key_id = secrets.token_hex(8)
+    secret = secrets.token_urlsafe(32)
+    return f"{KEY_PREFIX}{key_id}_{secret}", key_id, _digest(secret)
+
+
+def _digest(secret: str) -> str:
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
 
 @dataclass(frozen=True, slots=True)
 class ControlPrincipal:
-    """A person whose access token verified, with what the control plane knows
-    about them read inside this request: their organisations and their factor."""
+    """Who is asking, read inside this request.
 
-    principal: Principal
+    A PERSON (an access token): their registry scopes, every organisation they
+    belong to, their factor, and their registry state. A KEY: its owner's id,
+    its ONE organisation with the owner's current role there, its effective
+    scopes, no state and no factor -- a key never needs one, because it never
+    reaches a route that would (D2052).
+    """
+
+    user_id: UUID
     roles: dict[str, str]
+    scopes: list[str]
     factor_enabled: bool
+    state: SubjectState | None
+    key_id: str | None = None
 
     @property
-    def user_id(self) -> UUID:
-        return self.principal.user_id
+    def is_key(self) -> bool:
+        return self.key_id is not None
 
     @property
     def must_enrol(self) -> bool:
         return (
-            control_roles.factor_required(self.roles, self.principal.scopes)
+            not self.is_key
+            and control_roles.factor_required(self.roles, self.scopes)
             and not self.factor_enabled
         )
+
+    @property
+    def person(self) -> SubjectState:
+        """The registry state of a PERSON. Only human-session routes read it,
+        and a key never reaches one."""
+        assert self.state is not None, "a key reached a human-session route"
+        return self.state
 
 
 def invitation_deadline(hours: int | None) -> datetime:
@@ -126,7 +183,7 @@ class ControlService:
         consumes it -- the successor minted by that exchange is discarded with
         its family -- and presenting a token that was already consumed ends
         the family inside the exchange (reuse detection), which is the outcome
-        a logout wanted anyway.
+        a logout wanted anyway (D2103).
         """
         if not refresh_sessions.is_wellformed(presented):
             raise errors.MalformedRequest("malformed refresh token")
@@ -145,18 +202,57 @@ class ControlService:
     # -- who is asking ----------------------------------------------------------
 
     async def authenticate(self, authorization: str | None, route: str) -> ControlPrincipal:
-        """Verify the bearer, read the person's organisations and factor, and
-        apply the factor gate for `route`."""
+        """Verify the bearer -- an access token or a key -- and apply what
+        `route` requires of it: the factor gate for a person, the key scope
+        and the human-session rule for a key."""
+        token = authorization[len("Bearer ") :].strip() if authorization else ""
+        if authorization and authorization.startswith("Bearer ") and token.startswith(KEY_PREFIX):
+            return await self._authenticate_key(token, route)
         principal = await self.auth.authenticate(authorization)
         roles = await self.repository.caller_roles(principal.user_id)
         factor = await self.repository.totp_seed(principal.user_id)
         caller = ControlPrincipal(
-            principal=principal,
+            user_id=principal.user_id,
             roles=roles,
+            scopes=principal.scopes,
             factor_enabled=bool(factor and factor["enabled"]),
+            state=principal.state,
         )
         self.factor_gate(caller, route)
         return caller
+
+    async def _authenticate_key(self, presented: str, route: str) -> ControlPrincipal:
+        """A management key, checked on THIS request against the stored row and
+        its owner's current membership. One refusal for every failure."""
+        match = KEY_PATTERN.match(presented)
+        if match is None:
+            raise errors.AuthenticationFailed("malformed key")
+        key_id, secret = match.groups()
+        row = await self.repository.key_lookup(key_id)
+        stored = row["secret_sha256"] if row is not None else _NO_SUCH_KEY
+        matched = hmac.compare_digest(_digest(secret), stored)
+        if row is None or not matched:
+            raise errors.AuthenticationFailed("no such key, or the secret does not match")
+        if row["revoked"]:
+            raise errors.AuthenticationFailed("the key is revoked")
+        role = None if row["member_role"] is None else str(row["member_role"])
+        if role is None:
+            raise errors.AuthenticationFailed("the key's owner is no longer a member")
+        required = control_roles.KEY_SCOPES.get(route)
+        if required is None:
+            raise errors.ControlRefused(errors.HUMAN_SESSION_REQUIRED)
+        effective = control_roles.effective_scopes(list(row["scopes"]), role)
+        if required not in effective:
+            raise errors.AuthorizationFailed(required)
+        await self.repository.key_used(key_id)
+        return ControlPrincipal(
+            user_id=row["user_id"],
+            roles={str(row["organization_id"]): role},
+            scopes=sorted(effective),
+            factor_enabled=False,
+            state=None,
+            key_id=key_id,
+        )
 
     @staticmethod
     def factor_gate(caller: ControlPrincipal, route: str) -> None:
@@ -179,15 +275,19 @@ class ControlService:
             raise errors.AuthorizationFailed(f"{minimum} in the organisation")
         return role
 
+    @staticmethod
+    def _visible(caller: ControlPrincipal, organization: Any) -> bool:
+        return str(organization) in caller.roles
+
     async def me(self, caller: ControlPrincipal) -> dict[str, Any]:
-        state = caller.principal.state
+        state = caller.person
         return {
             "user_id": str(caller.user_id),
             "username": state.username,
             "display_name": state.display_name,
             "second_factor": {
                 "enabled": caller.factor_enabled,
-                "required": control_roles.factor_required(caller.roles, caller.principal.scopes),
+                "required": control_roles.factor_required(caller.roles, caller.scopes),
             },
             "organizations": [
                 {"id": org, "role": role} for org, role in sorted(caller.roles.items())
@@ -202,7 +302,7 @@ class ControlService:
         await self.repository.totp_begin(caller.user_id, seed)
         return {
             "secret": base64.b32encode(seed).decode("ascii").rstrip("="),
-            "otpauth_uri": totp.provisioning_uri(caller.principal.state.username, seed),
+            "otpauth_uri": totp.provisioning_uri(caller.person.username, seed),
         }
 
     async def confirm_factor(self, caller: ControlPrincipal, code: str) -> int:
@@ -253,7 +353,8 @@ class ControlService:
         if (organization is None) != (role is None):
             raise errors.InvalidRequest("organization_id and role are given together or not at all")
         if organization is None:
-            AuthService.require_scope(caller.principal, control_roles.ACCOUNT_INVITATION_SCOPE)
+            if control_roles.ACCOUNT_INVITATION_SCOPE not in caller.scopes:
+                raise errors.AuthorizationFailed(control_roles.ACCOUNT_INVITATION_SCOPE)
         else:
             assert role is not None
             mine = self.require_role(caller, organization, control_roles.MEMBERSHIP_INVITATION)
@@ -295,7 +396,7 @@ class ControlService:
         if caller is not None:
             if username is not None or display_name is not None or password is not None:
                 raise errors.InvalidRequest("a signed-in caller accepts with the token alone")
-            state = caller.principal.state
+            state = caller.person
             accepted = await self.repository.accept_as_existing(
                 digest, caller.user_id, state.username, state.display_name
             )
@@ -349,13 +450,12 @@ class ControlService:
         return {"id": str(org), "name": name, "role": "owner"}
 
     async def list_organizations(self, caller: ControlPrincipal) -> list[dict[str, Any]]:
-        return [
-            _organization(row) for row in await self.repository.list_organizations(caller.user_id)
-        ]
+        rows = await self.repository.list_organizations(caller.user_id)
+        return [_organization(row) for row in rows if self._visible(caller, row["id"])]
 
     async def get_organization(self, caller: ControlPrincipal, org: UUID) -> dict[str, Any]:
         row = await self.repository.get_organization(caller.user_id, org)
-        if row is None:
+        if row is None or not self._visible(caller, row["id"]):
             raise errors.ControlRefused(errors.NOT_FOUND)
         return _organization(row)
 
@@ -382,6 +482,99 @@ class ControlService:
     async def remove_member(self, caller: ControlPrincipal, org: UUID, target: UUID) -> None:
         await self.repository.remove_member(caller.user_id, org, target)
 
+    # -- keys (D2052, ADR 0253) -------------------------------------------------------
+
+    async def mint_key(
+        self, caller: ControlPrincipal, org: UUID, name: str, scopes: list[str]
+    ) -> dict[str, Any]:
+        """A key for the caller in `org`; the key is returned here and never again.
+
+        Its scopes must be in the Session 37 vocabulary AND within what the
+        minter's role grants now -- refused, never trimmed.
+        """
+        requested = sorted(set(scopes))
+        unknown = sorted(set(requested) - set(control_roles.KEY_VOCABULARY))
+        if unknown:
+            vocabulary = list(control_roles.KEY_VOCABULARY)
+            raise errors.InvalidRequest(
+                f"{unknown} are not key scopes; the vocabulary is {vocabulary}"
+            )
+        role = caller.roles[str(org)]
+        beyond = sorted(set(requested) - control_roles.ROLE_SCOPES[role])
+        if beyond:
+            raise errors.InvalidRequest(f"a {role} may not give a key {beyond}")
+        key, key_id, digest = mint_key()
+        await self.repository.mint_key(caller.user_id, org, key_id, digest, name, requested)
+        return {"key_id": key_id, "key": key, "name": name, "scopes": requested}
+
+    async def list_keys(self, caller: ControlPrincipal, org: UUID) -> list[dict[str, Any]]:
+        return [
+            {
+                "key_id": row["key_id"],
+                "user_id": str(row["user_id"]),
+                "name": row["name"],
+                "scopes": list(row["scopes"]),
+                "created_at": row["created_at"].isoformat(),
+                "last_used_at": _iso(row["last_used_at"]),
+                "revoked_at": _iso(row["revoked_at"]),
+            }
+            for row in await self.repository.list_keys(caller.user_id, org)
+        ]
+
+    async def revoke_key(self, caller: ControlPrincipal, org: UUID, key_id: str) -> None:
+        """Revoke one of the caller's keys, or -- for an admin -- any of the
+        organisation's. A key the caller may not revoke, a missing one and one
+        already revoked are the same `not_found`."""
+        if not re.fullmatch(r"[0-9a-f]{16}", key_id):
+            raise errors.ControlRefused(errors.NOT_FOUND)
+        if not await self.repository.revoke_key(caller.user_id, org, key_id):
+            raise errors.ControlRefused(errors.NOT_FOUND)
+
+    # -- the registry and its operations (ADR 0251, ADR 0254) --------------------------
+
+    async def list_projects(
+        self, caller: ControlPrincipal, organization: UUID | None
+    ) -> list[dict[str, Any]]:
+        if organization is not None:
+            self.require_role(caller, organization, "viewer")
+        rows = await self.repository.list_projects(caller.user_id, organization)
+        return [_project(row) for row in rows if self._visible(caller, row["organization_id"])]
+
+    async def get_project(self, caller: ControlPrincipal, key: str) -> dict[str, Any]:
+        row = await self.repository.get_project(caller.user_id, key)
+        if row is None or not self._visible(caller, row["organization_id"]):
+            raise errors.ControlRefused(errors.NOT_FOUND)
+        return _project(row)
+
+    @staticmethod
+    def create_project(caller: ControlPrincipal) -> None:
+        """`project.create` is refused while its ledger row is not offered (D2054).
+
+        No row is written: a request accepted into a row nothing will ever
+        execute would be a control acting on a `planned` concept, which is what
+        ADR 0247's guard forbids.
+        """
+        del caller
+        operation_type = "project.create"
+        if not operations.is_accepted(operation_type):
+            raise errors.ControlRefused(
+                errors.NOT_AVAILABLE, ledger_row=operations.OPERATION_TYPES[operation_type]
+            )
+        raise AssertionError("project.create is accepted, and Session 38 has not built it")
+
+    async def list_operations(
+        self, caller: ControlPrincipal, organization: UUID
+    ) -> list[dict[str, Any]]:
+        self.require_role(caller, organization, "viewer")
+        rows = await self.repository.list_operations(caller.user_id, organization)
+        return [_operation(row) for row in rows if self._visible(caller, row["organization_id"])]
+
+    async def get_operation(self, caller: ControlPrincipal, operation: UUID) -> dict[str, Any]:
+        row = await self.repository.get_operation(caller.user_id, operation)
+        if row is None or not self._visible(caller, row["organization_id"]):
+            raise errors.ControlRefused(errors.NOT_FOUND)
+        return _operation(row)
+
 
 def _iso(value: Any) -> str | None:
     return value.isoformat() if value is not None else None
@@ -393,4 +586,32 @@ def _organization(row: dict[str, Any]) -> dict[str, Any]:
         "name": row["name"],
         "role": str(row["role"]),
         "created_at": row["created_at"].isoformat(),
+    }
+
+
+def _project(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "key": row["key"],
+        "organization_id": str(row["organization_id"]),
+        "slug": row["slug"],
+        "environment": row["environment"],
+        "domain": row["domain"],
+        "template_version": row["template_version"],
+        "source_commit": row["source_commit"],
+        "adopted_at": row["adopted_at"].isoformat(),
+    }
+
+
+def _operation(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "organization_id": str(row["organization_id"]),
+        "project_key": row["project_key"],
+        "type": row["type"],
+        "status": row["status"],
+        "progress": row["progress"],
+        "error_code": row["error_code"],
+        "created_at": row["created_at"].isoformat(),
+        "started_at": _iso(row["started_at"]),
+        "finished_at": _iso(row["finished_at"]),
     }

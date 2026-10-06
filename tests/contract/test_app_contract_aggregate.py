@@ -294,3 +294,39 @@ def test_the_app_snapshot_is_ascii_which_is_the_premise_d1203_rests_on() -> None
         "ASCII. Two readers of this document now compute two digests. Unify them, or "
         "decide which one the snapshot is, before the next release."
     )
+
+
+# ---------------------------------------------------------------------------
+# Session 37 (D2057, ADR 0253): the management API's snapshot
+# ---------------------------------------------------------------------------
+
+
+def test_the_control_snapshot_is_what_this_checkout_generates(command: Any) -> None:
+    """The second snapshot `--check` compares: the control mode's `/v1` paths.
+
+    Compared byte for byte like the application's, and read for what it
+    holds: the management API's title, the `/v1` paths `main.control_paths`
+    declares and nothing else (no `/auth/me`, the one probe the mode also
+    serves), every schema referenced, and ASCII -- D1203's premise, held for
+    this file too.
+    """
+    from app import main as main_module
+
+    snapshot = command.CONTROL_SNAPSHOT_PATH
+    assert snapshot.name == "control-openapi.canonical.json"
+    assert snapshot.is_file(), f"no snapshot at {snapshot}"
+    generated = command.generate_control()
+    assert snapshot.read_bytes() == generated, (
+        "the committed management API reference disagrees with this checkout. Re-capture "
+        "with `bin/app-contract.sh --update --snapshot control`, read the diff, and commit it"
+    )
+    document = json.loads(generated)
+    assert document["info"]["title"] == "Agentic Postgres management API"
+    assert sorted(document["paths"]) == sorted(main_module.control_paths())
+    body = json.dumps(document)
+    for name in document["components"]["schemas"]:
+        assert body.count(f'"#/components/schemas/{name}"') >= 1, name
+    assert "ValidationError" not in body
+    assert all(byte < 128 for byte in generated)
+    # And `--check` reads it: a candidate that differs is named by the command.
+    assert set(command.SNAPSHOTS) == {"app", "control"}

@@ -12,7 +12,10 @@ names nothing but its own route, and `_caller` / `_member` read the table by
 the route's name. A non-member of an organisation gets the `404` a missing
 organisation gets, and so does an id that is not a uuid (D2053).
 
-Run 5 adds the keys, projects and operations routes.
+Run 5 added the keys, projects and operations routes: a management key
+(`apg_…`) reaches only `control_roles.KEY_SCOPES`' routes, and `POST
+/v1/projects` is refused as `not_available` while its ledger row is not
+offered (ADR 0254).
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from uuid import UUID
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
-from app import control_roles, errors, openapi_docs
+from app import control_roles, errors, openapi_docs, strict_query
 from app.control_service import ControlPrincipal, ControlService
 from app.models import (
     AcceptInvitationRequest,
@@ -33,8 +36,11 @@ from app.models import (
     CreateOrganizationRequest,
     FactorEnrolmentResponse,
     InvitationResponse,
+    KeyResponse,
     LogoutRequest,
     MintInvitationRequest,
+    MintKeyRequest,
+    NotAvailableResponse,
     RefreshRequest,
     SessionTokenResponse,
     SetMemberRoleRequest,
@@ -59,6 +65,10 @@ NOT_A_MEMBER = _refused(
     "`not_found`: the organisation does not exist, or the caller is not a member of it -- "
     "one answer for both, so an id says nothing about whether it exists."
 )
+KEY_REFUSED = _refused(
+    "`human_session_required`: a management key cannot reach this route -- every route that "
+    "mints a credential, and oneself, needs a person's session."
+)
 FACTOR_GATE = _refused(
     "`authorization_failed`: the caller's role is below what the route needs; or "
     "`second_factor_required`: the caller holds owner or admin somewhere, or the registry "
@@ -80,6 +90,14 @@ async def _caller(request: Request) -> ControlPrincipal:
     return await _service(request).authenticate(
         request.headers.get("authorization"), _route(request)
     )
+
+
+def _query(request: Request, allowed: tuple[str, ...]) -> dict[str, str]:
+    """The query string, each parameter at most once and every name allowed."""
+    try:
+        return strict_query.parse(request.query_params.multi_items(), allowed)
+    except strict_query.InvalidQuery as exc:
+        raise errors.InvalidRequest(str(exc)) from exc
 
 
 def _uuid(value: str) -> UUID:
@@ -539,5 +557,190 @@ async def revoke_invitation(request: Request, organization: str, invitation: str
         caller, org = await _member(request, organization)
         await _service(request).revoke_invitation(caller, org, _uuid(invitation))
         return Response(status_code=204)
+
+    return await _guard(run)
+
+
+# ---------------------------------------------------------------------------
+# Keys (D2052, ADR 0253) -- human sessions only
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/organizations/{organization}/keys",
+    openapi_extra=openapi_docs.described(
+        summary="The organisation's keys the caller may see",
+        description="A member sees their own keys; an admin or owner sees all. Never a secret.",
+    ),
+    responses={200: openapi_docs.ok("The keys."), 401: openapi_docs.UNAUTHENTICATED,
+               403: KEY_REFUSED, 404: NOT_A_MEMBER},
+)  # fmt: skip
+async def list_keys(request: Request, organization: str) -> Response:
+    async def run() -> Response:
+        caller, org = await _member(request, organization)
+        return JSONResponse({"keys": await _service(request).list_keys(caller, org)})
+
+    return await _guard(run)
+
+
+@router.post(
+    "/organizations/{organization}/keys",
+    status_code=201,
+    openapi_extra=openapi_docs.described(
+        summary="Mint a management key; it is shown once",
+        description=(
+            "`apg_<id>_<secret>`, stored as its id and the SHA-256 of its secret. Its scopes come "
+            "from the vocabulary (`organizations:read`, `members:read`, `projects:read`, "
+            "`operations:read`) and must be within the minter's role. On every request a key's "
+            "authority is its scopes intersected with its owner's current role, in this "
+            "organisation only; a revoked key, or one whose owner left, is refused."
+        ),
+        request_model=MintKeyRequest,
+    ),
+    responses={201: openapi_docs.created("The key, in this response and no other.", KeyResponse),
+               400: openapi_docs.MALFORMED, 401: openapi_docs.UNAUTHENTICATED,
+               403: KEY_REFUSED, 404: NOT_A_MEMBER, 422: openapi_docs.INVALID},
+)  # fmt: skip
+async def mint_key(request: Request, organization: str) -> Response:
+    async def run() -> Response:
+        caller, org = await _member(request, organization)
+        payload = await _body(request, MintKeyRequest)
+        assert isinstance(payload, MintKeyRequest)
+        minted = await _service(request).mint_key(caller, org, payload.name, payload.scopes)
+        return JSONResponse(minted, status_code=201)
+
+    return await _guard(run)
+
+
+@router.delete(
+    "/organizations/{organization}/keys/{key_id}",
+    status_code=204,
+    openapi_extra=openapi_docs.described(
+        summary="Revoke a key",
+        description=(
+            "The caller's own key, or -- for an admin or owner -- any of the organisation's. A key "
+            "the caller may not revoke, a missing one and one already revoked are one `not_found`."
+        ),
+    ),
+    responses={204: openapi_docs.no_content("The key is revoked; its next request is refused."),
+               401: openapi_docs.UNAUTHENTICATED, 403: KEY_REFUSED, 404: NOT_A_MEMBER},
+)  # fmt: skip
+async def revoke_key(request: Request, organization: str, key_id: str) -> Response:
+    async def run() -> Response:
+        caller, org = await _member(request, organization)
+        await _service(request).revoke_key(caller, org, key_id)
+        return Response(status_code=204)
+
+    return await _guard(run)
+
+
+# ---------------------------------------------------------------------------
+# The registry and its operations (ADR 0251, ADR 0254)
+# ---------------------------------------------------------------------------
+
+ORGANIZATION_QUERY = openapi_docs.query_parameter(
+    "organization",
+    schema={"type": "string", "format": "uuid"},
+    description="One of the caller's organisations. A foreign or missing one is `not_found`.",
+)
+
+
+@router.get(
+    "/projects",
+    openapi_extra=openapi_docs.described(
+        summary="The projects of the caller's organisations",
+        description=(
+            "The registry: projects the operator adopted from their deployed documents. A key "
+            "sees its own organisation's only."
+        ),
+        query_parameters=[ORGANIZATION_QUERY],
+    ),
+    responses={200: openapi_docs.ok("The projects."), 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_A_MEMBER, 422: openapi_docs.INVALID},
+)  # fmt: skip
+async def list_projects(request: Request) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        named = _query(request, ("organization",)).get("organization")
+        org = None if named is None else _uuid(named)
+        return JSONResponse({"projects": await _service(request).list_projects(caller, org)})
+
+    return await _guard(run)
+
+
+@router.post(
+    "/projects",
+    openapi_extra=openapi_docs.described(
+        summary="Create a project -- not available yet",
+        description=(
+            "Refused, and nothing is recorded: a project is created only when its ledger row, "
+            "`projects_self_service`, is available or in beta. The answer names the row."
+        ),
+    ),
+    responses={401: openapi_docs.UNAUTHENTICATED, 403: FACTOR_GATE,
+               409: {"model": NotAvailableResponse,
+                     "description": "`not_available`, with the ledger row that says why."}},
+)  # fmt: skip
+async def create_project(request: Request) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        ControlService.create_project(caller)
+        return Response(status_code=500)  # pragma: no cover -- create_project always raises
+
+    return await _guard(run)
+
+
+@router.get(
+    "/projects/{key}",
+    openapi_extra=openapi_docs.described(
+        summary="One project of the caller's organisations",
+        description="A foreign project and a missing one are one `not_found`.",
+    ),
+    responses={200: openapi_docs.ok("The project's registry record."),
+               401: openapi_docs.UNAUTHENTICATED, 403: FACTOR_GATE, 404: NOT_A_MEMBER},
+)  # fmt: skip
+async def get_project(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        return JSONResponse(await _service(request).get_project(caller, key))
+
+    return await _guard(run)
+
+
+@router.get(
+    "/operations",
+    openapi_extra=openapi_docs.described(
+        summary="An organisation's operations, newest first",
+        description="`organization` is required. Empty while no operation type is accepted.",
+        query_parameters=[{**ORGANIZATION_QUERY, "required": True}],
+    ),
+    responses={200: openapi_docs.ok("The operations."), 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_A_MEMBER, 422: openapi_docs.INVALID},
+)  # fmt: skip
+async def list_operations(request: Request) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        named = _query(request, ("organization",)).get("organization")
+        if named is None:
+            raise errors.InvalidRequest("organization is required")
+        rows = await _service(request).list_operations(caller, _uuid(named))
+        return JSONResponse({"operations": rows})
+
+    return await _guard(run)
+
+
+@router.get(
+    "/operations/{operation}",
+    openapi_extra=openapi_docs.described(
+        summary="One operation of the caller's organisations",
+        description="A foreign operation and a missing one are one `not_found`.",
+    ),
+    responses={200: openapi_docs.ok("The operation."), 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_A_MEMBER},
+)  # fmt: skip
+async def get_operation(request: Request, operation: str) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        return JSONResponse(await _service(request).get_operation(caller, _uuid(operation)))
 
     return await _guard(run)

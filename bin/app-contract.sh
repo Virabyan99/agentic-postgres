@@ -12,8 +12,13 @@
 #   --update  Stream a candidate to standard output. Writes no file: the
 #             redirect happens in the caller's own shell, so the artefact is
 #             owned by whoever has to review and commit it.
-#   --check   Compare the committed snapshot against what this checkout
+#   --check   Compare the committed snapshots against what this checkout
 #             generates. Never writes. The gate runs only this.
+#   --snapshot app|control
+#             With --update, which document to stream (default app). Since
+#             Session 37 there are two: the application API (auth + storage)
+#             and the management API the control mode serves (D2057). --check
+#             always compares both and names the one that differs.
 #
 # Exit codes (runbook §2 convention):
 #   0  the committed snapshot matches this checkout
@@ -31,10 +36,13 @@ usage() {
   cat <<'USAGE'
 Usage: bin/app-contract.sh --check
        bin/app-contract.sh --update > contracts/app-openapi.canonical.json
+       bin/app-contract.sh --update --snapshot control > contracts/control-openapi.canonical.json
 
-  --check    Compare. Never writes.
-  --update   Stream a candidate to standard output. Redirect it yourself.
-  --help     Show this message.
+  --check              Compare both snapshots. Never writes.
+  --update             Stream a candidate to standard output. Redirect it yourself.
+  --snapshot app|control
+                       With --update: which document (default: app).
+  --help               Show this message.
 
 The snapshot is a generated artifact. It cannot be written by hand and --check
 will refuse one that has been: re-capture it instead.
@@ -70,6 +78,7 @@ main() {
   fi
 
   local mode=""
+  local snapshot=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --help|-h)
@@ -81,6 +90,14 @@ main() {
         mode="$1"
         shift
         ;;
+      --snapshot)
+        [ "$#" -ge 2 ] || die 2 "--snapshot needs a value: app or control."
+        case "$2" in
+          app|control) snapshot="$2" ;;
+          *) die 2 "--snapshot must be app or control, not: $2" ;;
+        esac
+        shift 2
+        ;;
       *)
         usage >&2
         die 2 "unknown argument: $1"
@@ -89,7 +106,13 @@ main() {
   done
 
   [ -n "${mode}" ] || die 2 "one of --check or --update is required."
+  if [ -n "${snapshot}" ] && [ "${mode}" != "--update" ]; then
+    die 2 "--snapshot goes with --update; --check compares both."
+  fi
 
+  if [ -n "${snapshot}" ]; then
+    exec "$(python_bin)" "${ROOT_DIR}/bin/app-contract.py" "${mode}" --snapshot "${snapshot}"
+  fi
   exec "$(python_bin)" "${ROOT_DIR}/bin/app-contract.py" "${mode}"
 }
 
