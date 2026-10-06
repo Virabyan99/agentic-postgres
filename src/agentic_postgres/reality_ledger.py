@@ -25,7 +25,7 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 
-from agentic_postgres import REPO_ROOT, capacity
+from agentic_postgres import REPO_ROOT, capacity, operations
 from agentic_postgres.evidence_claims import CLAIMS
 
 LEDGER_PATH = REPO_ROOT / "docs" / "reality-ledger.yaml"
@@ -217,4 +217,22 @@ def render(document: dict[str, Any]) -> str:
         if row["controls"]:
             controls = ", ".join(f"`{control}`" for control in row["controls"])
             lines += [f"*Controls:* {controls}.", ""]
+        lines += _operation_lines(row["id"])
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _operation_lines(row_id: str) -> list[str]:
+    """The `/api/v1` operation types that act on this concept, and whether the
+    control plane accepts them today (ADR 0254, D2114) -- the service's own
+    `ACCEPTED_TYPES`, which the guard holds equal to what this ledger permits."""
+    types = sorted(t for t, row in operations.OPERATION_TYPES.items() if row == row_id)
+    if not types:
+        return []
+    named = ", ".join(f"`{t}`" for t in types)
+    if all(t in operations.ACCEPTED_TYPES for t in types):
+        return [f"*API operations:* {named} -- accepted.", ""]
+    return [
+        f"*API operations:* {named} -- refused (`409 not_available`) until this concept is "
+        "available or in beta.",
+        "",
+    ]

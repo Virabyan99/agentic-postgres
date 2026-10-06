@@ -155,6 +155,8 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Eventually (not promised).** Placement across a fleet of servers.
 
+*API operations:* `project.create` -- refused (`409 not_available`) until this concept is available or in beta.
+
 <a id="project_deletion"></a>
 
 ## Delete a project
@@ -169,6 +171,8 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Eventually (not promised).** The same, with a grace period and recovery.
 
+*API operations:* `project.delete` -- refused (`409 not_available`) until this concept is available or in beta.
+
 <a id="export"></a>
 
 ## Export a project
@@ -182,6 +186,8 @@ may not use. `not_offered` means cut by decision, not postponed;
 **Stage 5.** project.export as an operation producing an archive (D1972).
 
 **Eventually (not promised).** Scheduled exports to a customer's own storage.
+
+*API operations:* `project.export` -- refused (`409 not_available`) until this concept is available or in beta.
 
 <a id="region"></a>
 
@@ -211,6 +217,8 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Eventually (not promised).** Compute scheduled independently of storage.
 
+*API operations:* `project.resize` -- refused (`409 not_available`) until this concept is available or in beta.
+
 <a id="sleep"></a>
 
 ## Sleep and wake
@@ -224,6 +232,8 @@ may not use. `not_offered` means cut by decision, not postponed;
 **Stage 5.** project.sleep and project.wake stop and start the project's containers, volumes kept; what a caller sees while it sleeps is measured first (D1956).
 
 **Eventually (not promised).** Compute suspended and resumed independently of storage.
+
+*API operations:* `project.sleep`, `project.wake` -- refused (`409 not_available`) until this concept is available or in beta.
 
 <a id="pooled_endpoint"></a>
 
@@ -253,6 +263,8 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Eventually (not promised).** The same, behind a fleet-wide gateway.
 
+*API operations:* `credential.rotate` -- refused (`409 not_available`) until this concept is available or in beta.
+
 <a id="wake_on_connect"></a>
 
 ## Wake on connect
@@ -281,6 +293,8 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Eventually (not promised).** Storage-native copy-on-write branches.
 
+*API operations:* `branch.create`, `branch.delete`, `branch.reset` -- refused (`409 not_available`) until this concept is available or in beta.
+
 <a id="restore_to_branch"></a>
 
 ## Restore to a new branch
@@ -294,6 +308,8 @@ may not use. `not_offered` means cut by decision, not postponed;
 **Stage 5.** restore.create is branch.create with a target time (D1963).
 
 **Eventually (not promised).** The same, faster.
+
+*API operations:* `restore.create` -- refused (`409 not_available`) until this concept is available or in beta.
 
 <a id="in_place_restore"></a>
 

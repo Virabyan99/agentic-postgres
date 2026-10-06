@@ -1,6 +1,6 @@
 # Session 37 — The control plane
 
-**Status: EXECUTING. Runs 1–3 DONE 2026-10-04, Runs 4–5 DONE 2026-10-06 (rows D2073–D2113; NEXT FREE D2114, ADR 0255).** The second session
+**Status: EXECUTING. Runs 1–3 DONE 2026-10-04, Runs 4–5 DONE 2026-10-06 (rows D2073–D2114; NEXT FREE D2115, ADR 0255).** The second session
 of Stage 5 (`docs/plans/stage-5-plan.md` §3). Twelve runs and **two sittings
 on two days** — the release deployed on alpha and beta and the control project
 brought up beside them (day 1), then a person invited, an organisation, a key,
@@ -523,6 +523,7 @@ order.
 | **D2111** | Run 5 item 2: the key routes; *"a foreign or missing … key … → the SAME 404"*; D2052: *"credential-minting routes are human-session only"*. | The control set's functions scope by the KEY OWNER's memberships, so a member of two organisations' key would read both through `control_list_organizations` and `control_list_projects`. Listing keys is not minting, but it is the keys surface. Run 4 answers an invitation revoke 204 either way (D2108). | **A key reaches only `control_roles.KEY_SCOPES`' seven read routes**; every other route -- listing keys included -- is `403 human_session_required`. **A key principal's roles are its ONE organisation**, and every list the database returns is filtered to the caller's organisations as the request computed them (`test_a_key_reaches_no_other_organisation`: a member of A and B, a key minted in A sees A alone; the member's session sees both). **`DELETE …/keys/{id}` answers 404** for a key the caller may not revoke, a missing one, an already revoked one and a malformed id, as the plan says -- unlike the invitation revoke's 204 (D2108), which stands; the asymmetry is recorded, not reconciled. | The database's scope is the owner; the key's scope is narrower, and only the service knows which organisation the key was minted in. | **0253** |
 | **D2112** | Run 5: *"The `LEDGER-001` node id renamed in this run is registered in Run 9 … if [`test_acceptance_registry`] refuses the missing node now, move `LEDGER-001`'s node ids IN THIS RUN"*; battery M4: *"in a COPY of the Ledger the test is pointed at"*. | `test_every_registered_node_id_is_collectible` refuses a registered node id pytest cannot collect. `reality_ledger.load()` takes a path but the guard reads the module default, and `load` does not validate, so a mutated status reaches the guard. | **`LEDGER-001`'s node `test_the_sets_the_guard_will_read_are_empty_today` is replaced by `test_no_console_exists_yet` in this run**, its description says the operation-type half is a guard of its own, and `docs/acceptance-matrix.md` and `docs/product-contract.md` are regenerated. The new guard's node is CTL-OPS-001's, registered in Run 9. **M4 mutates `docs/reality-ledger.yaml` itself**, snapshotted and restored by copy and `cmp`-checked like every other battery file. | The registry may not name a node that does not exist for four runs; and a restored mutation of the real file is the same evidence as a pointed-at copy. | **0254** |
 | **D2113** | Run 5 item 5: *"`--update` gains `--snapshot app/control` (default `app`); `--check` compares both"*. | `bin/app-contract.sh` is the wrapper every gate calls with `--check` alone. | **`--snapshot` is accepted with `--update` only** (the wrapper refuses it beside `--check`, exit 2); `--check` compares both, prints a line per snapshot, and on a difference names the snapshot and the `--update --snapshot NAME` that re-captures it; a missing snapshot is exit 5, a disagreement exit 6. The control document keeps the `/v1` paths and the schemas they reference, to a fixed point; it is ASCII. | Every existing caller is unchanged, and the gate reads the management API's document without learning a new flag. | **0253** |
+| **D2114** | Run 5 item 3: `src/agentic_postgres/operations.py` with *"a loader that reads `docs/reality-ledger.yaml` for the TEST only"*. | **CI red on `47c65a0`** (run 37446073568; both jobs, 1 failed each of ~7,070): `test_repository_contract.py::test_no_module_is_imported_only_by_its_own_tests` -- *"['operations'] are imported by nothing outside their own tests. A module with no caller is a feature that does not exist"* (D204). The plan designed a test-only module, which the repository's own guard forbids; the targeted list did not include that module (the diff touched nothing it reads -- D1486's shape again). | **The module gains a real reader**: `reality_ledger.render` writes, under each concept, the `/api/v1` operation types that act on it and whether the control plane accepts them (`ACCEPTED_TYPES`) -- `docs/reality-ledger.md` regenerated, eight concepts now say *refused (`409 not_available`) until this concept is available or in beta*. The guard is not widened. Failing module re-run with its readers: 304 passed. **A run that adds a module under `src/agentic_postgres/` adds `test_repository_contract` to its targeted list.** | The page a reader opens to learn what a concept is now also says which API operations it gates -- a reader the table needed anyway; deleting the module would have left Run 3's frozen comment naming a file that does not exist. | **0254** |
 
 ---
 
@@ -1441,7 +1442,7 @@ missing node now, move `LEDGER-001`'s node ids IN THIS RUN (an existing
 requirement's node ids are not gated by `CURRENT_SESSION`) and say so in the
 Done.
 
-**Done.** 2026-10-06 (code; CI: see Run 6's commit). Scripts in WSL `~/s37/run5/`.
+**Done.** 2026-10-06 (code). **CI: `47c65a0` RED** (run 37446073568: a module imported only by tests, D2114) → repair commit, its verdict recorded in Run 6's commit. Scripts in WSL `~/s37/run5/`.
 
 - **Built**: key authentication in `control_service.py` (`apg_<16 hex>_<43>`, looked up by
   id, SHA-256 + `compare_digest`, one `authentication_failed` for unknown, wrong, revoked and
@@ -1479,7 +1480,7 @@ Done.
   (`bin/app-contract.sh`'s usage), `test_documentation_index` and
   `test_session12_documented_path` (the regenerated product contract)): **938 passed**, 0 skipped; ruff,
   shellcheck and `bin/app-contract.sh --check` clean.
-- **Rows D2109–D2113.** NEXT FREE: D2114, ADR 0255.
+- **Rows D2109–D2114.** NEXT FREE: D2115, ADR 0255.
 
 ### Run 6 — `bin/control.sh adopt|registry|totp-reset`
 
