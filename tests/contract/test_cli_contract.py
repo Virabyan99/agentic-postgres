@@ -69,6 +69,10 @@ SHELL_COMMANDS = (
     # compile, read and change a deployment's, and hand a sender its key as
     # root. Listed the run it landed (D1014), `git add`ed first (D1188).
     "bin/connector.sh",
+    # Session 37 (ADR 0251, D2068): the control plane's operator verbs -- adopt,
+    # registry, totp-reset. Listed the run it landed (D1014) and `git add`ed
+    # before this module runs (D1188).
+    "bin/control.sh",
     "bin/docker-firewall.sh",
     "bin/doctor.sh",
     "bin/edge.sh",
@@ -238,6 +242,9 @@ PYTHON_COMMANDS = (
     # Session 34. `init` and `validate` are pure reads, three verbs call the
     # admin connector routes, and `key` is root's.
     "bin/connector.py",
+    # Session 37 (D2068). Every call is a function the control set grants to
+    # nobody, reached as the superuser through `container_exec.run`.
+    "bin/control.py",
     "bin/database-access.py",
     "bin/database-ports.py",
     "bin/db-verify.py",
@@ -480,6 +487,8 @@ COMMANDS_WITH_VERBS = {
     "bin/connect.sh",
     # Session 34: six verbs, all documented from the day the command lands.
     "bin/connector.sh",
+    # Session 37: three verbs, written verb-first from the day the command lands.
+    "bin/control.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/dev.sh",
