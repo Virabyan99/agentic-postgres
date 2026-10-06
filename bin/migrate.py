@@ -804,14 +804,23 @@ def propose(project_path: str, by: str) -> int:
         )
 
     surface_path = api_surface.project_contract_path(REPO_ROOT / named)
-    if not surface_path.is_file():
+    final = sql_surface.final_surface(set_manifest, project_set.root)
+    if surface_path.is_file():
+        reviewed = api_surface.load_project_surface(surface_path)
+    elif not any(final.get(kind) for kind in ("functions", "views", "enums")):
+        # ADR 0251, D2048's second branch (Session 37 Run 10): a set that
+        # publishes NOTHING in `api` -- the control plane's, whose functions are
+        # all `app.control_*` -- has no surface to review, and a contract naming
+        # a decoy object only so it is not empty would be a reviewed surface
+        # describing nothing real. Its surface is recorded empty. A set with
+        # any `api` object and no contract is still refused below.
+        reviewed = {"rpcs": [], "relations": []}
+    else:
         raise Refusal(
             EXIT_CONTRACT,
             f"{surface_path.relative_to(REPO_ROOT)} does not exist, so the set's surface "
             "cannot be read against a reviewed one",
         )
-    reviewed = api_surface.load_project_surface(surface_path)
-    final = sql_surface.final_surface(set_manifest, project_set.root)
     surface = {
         "functions": [
             {"name": name, "reviewed": name in reviewed["rpcs"]}

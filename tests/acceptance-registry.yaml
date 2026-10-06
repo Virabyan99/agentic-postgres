@@ -6155,6 +6155,8 @@
     - tests/contract/test_output_migrations.py::test_v20_refuses_an_application_route_it_cannot_derive_from
     - tests/contract/test_output_migrations.py::test_v20_derives_the_control_route_from_the_app_route
     - tests/contract/test_output_migrations.py::test_v20_takes_no_argument_because_the_values_are_what_the_version_means
+    - tests/contract/test_change_proposal.py::test_a_set_with_no_api_object_is_proposed_without_a_contract
+    - tests/contract/test_change_proposal.py::test_a_set_with_an_api_object_and_no_contract_is_still_refused
   description: >-
     The control facility (ADR 0251): project manifest schema 9 admits
     `control: {enabled}` -- forbidden below 9, exactly one boolean, refused
@@ -6173,7 +6175,9 @@
     `api_documentation` or `PUBLIC`; `app.control_adopt_project` and
     `app.control_totp_reset` are executable by no role; a caller sees only
     their own organisations' rows and a non-member sees nothing; the committed
-    example renders as the control plane (D2046, D2075, D2086).
+    example renders as the control plane; `propose` records an empty surface
+    for a set that publishes nothing in `api` and still refuses a set that
+    publishes anything without its contract (D2046, D2075, D2086, D2136).
 
 - id: CTL-TOTP-001
   priority: P0

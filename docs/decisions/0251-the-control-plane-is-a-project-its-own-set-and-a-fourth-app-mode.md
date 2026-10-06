@@ -149,6 +149,12 @@ every project.
    `migrations.approvals_required`. If Run 10's deploy refuses for want of the
    contract, the reader that refuses is widened to accept a set that creates
    no `api` object, with a stricter test beside it — never a decoy contract.
+   **It did** (Session 37 Run 10, D2136): the deploy's proposal gate (ADR 0243)
+   refused the control set's three pending versions for want of a proposal,
+   and `propose` needed the contract. `propose` now records an EMPTY surface
+   for a set whose final `api` holds no function, view or enum, and still
+   refuses a set that publishes anything without its contract; the control
+   set's proposal is committed beside it like any project's.
 7. **Accounts are `api_documentation` users holding `["meta:read"]`** (D2049,
    D2078) — the narrowest authority the identity registry can describe, reading
    no row of the control project's own data plane. The control manifest sets

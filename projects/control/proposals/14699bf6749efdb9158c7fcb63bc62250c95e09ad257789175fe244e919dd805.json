@@ -1,0 +1,53 @@
+{
+  "approval_gate": [],
+  "capability_contract_sha256": {
+    "not_applicable": "the manifest declares no capabilities"
+  },
+  "declared_at": "2026-10-06T19:30:03Z",
+  "declared_by": "claude-opus-5-5 Session 37 executor",
+  "destructive": [],
+  "dev_apply": {
+    "applied_by": "psql as migration_user",
+    "existing_rows": "none",
+    "exit": 0,
+    "from_empty": true,
+    "migrations_applied": 42,
+    "seconds": 21.0
+  },
+  "harness": {
+    "not_applicable": "the manifest declares no capabilities"
+  },
+  "kind": "migration_set_proposal",
+  "lint": "passed",
+  "note": "The names in this record are declared, not authenticated (ADR 0243).",
+  "project_slug": "fixture-control",
+  "release": {
+    "release_lock_sha256": "11c762ed352a9dc869f64af68ff8623896710589840620217b06fed5873112ac",
+    "template_version": "1.15.0"
+  },
+  "schema_version": 1,
+  "set": {
+    "follows_release_version": "20261003120039",
+    "follows_release_version_source": "computed",
+    "root": "projects/control",
+    "versions": [
+      {
+        "name": "control_identity",
+        "version": "20261004120001"
+      },
+      {
+        "name": "control_keys",
+        "version": "20261004120002"
+      },
+      {
+        "name": "control_registry",
+        "version": "20261004120003"
+      }
+    ]
+  },
+  "set_digest": "14699bf6749efdb9158c7fcb63bc62250c95e09ad257789175fe244e919dd805",
+  "surface": {
+    "functions": [],
+    "views": []
+  }
+}

@@ -405,6 +405,61 @@ def test_propose_records_every_reading_and_its_limits(migrate) -> None:
     assert _calls(migrate.DEV_SH) == ["status", "up", "down"]
 
 
+CONTROL_MANIFEST = REPO_ROOT / "project.control.example.yaml"
+
+
+def test_a_set_with_no_api_object_is_proposed_without_a_contract(migrate) -> None:
+    """ADR 0251, D2048's second branch: the control set publishes nothing in
+    `api` (every function is `app.control_*`) and ships no PostgREST contract,
+    so its proposal records an EMPTY surface rather than demanding a contract
+    that would have to name a decoy. Measured on the trip: the deploy's gate
+    refused the control project with `no proposal for this set`."""
+    code = migrate.main(
+        ["--mode", "propose", "--project", str(CONTROL_MANIFEST), "--by", "Ada Lovelace"]
+    )
+    assert code == 0
+    control_set = migrations.MigrationSet(
+        label="project", root=REPO_ROOT / "projects" / "control" / "migrations"
+    )
+    digest = migrations.set_digest(control_set)
+    record = json.loads(
+        (
+            migrate.PROJECTS_ROOT
+            / "projects"
+            / "control"
+            / proposal.PROPOSALS_SUBDIR
+            / f"{digest}.json"
+        ).read_bytes()
+    )
+    assert record["set_digest"] == digest and record["set"]["root"] == "projects/control"
+    assert record["surface"] == {"functions": [], "views": []}
+    assert record["capability_contract_sha256"] == {
+        "not_applicable": "the manifest declares no capabilities"
+    }
+
+
+def test_a_set_with_an_api_object_and_no_contract_is_still_refused(
+    migrate, monkeypatch, tmp_path
+) -> None:
+    """The stricter half (D2048): the example set publishes `api.set_note_embedding`
+    and `api.note_embeddings`; with its contract absent, propose refuses and
+    writes nothing -- the widening is for a set with NO `api` object, never for
+    a set whose contract is missing."""
+    import types
+
+    from agentic_postgres import api_surface
+
+    # migrate.py's OWN reference only: the capability compiler reads the same
+    # contract earlier, through its own import, and must still find it.
+    shim = types.SimpleNamespace(**vars(api_surface))
+    shim.project_contract_path = lambda root: root / "contracts" / "absent.canonical.json"
+    monkeypatch.setattr(migrate, "api_surface", shim)
+    with pytest.raises(migrate.Refusal) as refused:
+        migrate.propose(str(MANIFEST), "Ada Lovelace")
+    assert "does not exist, so the set's surface" in str(refused.value)
+    assert not _records(migrate).exists() or not any(_records(migrate).iterdir())
+
+
 def test_propose_refuses_while_a_dev_environment_is_up(migrate, tmp_path: Path) -> None:
     """D1861: an environment that exists is somebody's, and propose never downs
     it -- it refuses, exit 3, before `up`, and the stub records no `down`."""
