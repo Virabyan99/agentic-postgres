@@ -200,10 +200,22 @@ def test_removing_one_project_leaves_the_other_whole(
     assert code == 0, f"the surviving project's database did not answer: {out}"
     assert out.strip().isdigit(), f"unexpected row count {out.strip()!r}"
 
+    # A route the survivor's own document says it does not serve is not
+    # "unready". Since 1.15.0 every document carries `routes.control`, and a
+    # project with the control facility off records it `unavailable` by design;
+    # so does `routes.storage` on a project with `storage.enabled: false`
+    # (control-prod, D2143). Read from the same document, and only for a flag
+    # that says `false`: a project that serves the route is still held to
+    # `ready`, and a document that does not say is held to it too.
+    not_served = {
+        name
+        for name in ("control", "storage")
+        if (project_a.get(name) or {}).get("enabled") is False
+    }
     unready = sorted(
         name
         for name, route in (project_a.get("routes") or {}).items()
-        if isinstance(route, dict) and route.get("status") != "ready"
+        if isinstance(route, dict) and name not in not_served and route.get("status") != "ready"
     )
     assert not unready, f"the surviving project has unready routes after the removal: {unready}"
 

@@ -244,6 +244,11 @@ NOT_AUTHORITY_PREFIXES = (
     # an identity -- `backup.mirror.enabled`'s reasoning. The first 1.12.0
     # sweep found it unclassified (D1853).
     "connectors.enabled",
+    # Version 20 (ADR 0251): whether the project runs the control facility.
+    # control-prod has it and alpha and beta do not; a facility, not an
+    # identity -- `connectors.enabled`'s reasoning, and the third time a
+    # facility flag reached a sweep unclassified (D1029, D1853, D2142).
+    "control.enabled",
     "backup_state.",
     "bootstrap.status",
     "routes.",
