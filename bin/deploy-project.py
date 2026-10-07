@@ -430,6 +430,24 @@ def _override_control(compose_env: Path) -> dict[str, Any]:
     }
 
 
+def _rest_enabled(compose_env: Path) -> bool:
+    """Whether the manifest publishes REST (`api.rest.enabled`, D2172).
+
+    Read from the rendered compose.env, the way `_override_control` reads
+    `AUTH_APP_MODE`, so the two decisions it drives -- PostgREST's router labels
+    in the runtime override, and whether step 6 observes the served document --
+    come from one value and cannot disagree. Anything but `true` or `false` is a
+    render this deploy does not understand, and it refuses rather than guess.
+    """
+    value = _env_value(compose_env, "API_REST_ENABLED")
+    if value not in ("true", "false"):
+        fail(
+            EXIT_VALIDATION,
+            f"API_REST_ENABLED is {value!r} in {compose_env}; expected true or false",
+        )
+    return value == "true"
+
+
 def _override_names(compose_env: Path) -> dict[str, str]:
     """The name arguments `render_override` takes, read from one compose.env.
 
@@ -2215,6 +2233,7 @@ def render_runtime_only(arguments: argparse.Namespace) -> int:
     payload = runtime_override.render_override(
         **_override_names(compose_env),
         **_override_control(compose_env),
+        rest_enabled=_rest_enabled(compose_env),
         https_entrypoint=host["edge"]["https_entrypoint"],
         rendered_directory=str(rendered_directory),
         project_migrations=_has_project_migrations(rendered_directory),
@@ -2400,6 +2419,7 @@ def main(argv: list[str] | None = None) -> int:
     override_payload = runtime_override.render_override(
         **_override_names(rendered_dir / "compose.env"),
         **_override_control(rendered_dir / "compose.env"),
+        rest_enabled=_rest_enabled(rendered_dir / "compose.env"),
         https_entrypoint=host["edge"]["https_entrypoint"],
         # The installed path, not the checkout's. The override is written into
         # the staging copy of the very directory it names, and the name has to
@@ -2770,6 +2790,9 @@ def main(argv: list[str] | None = None) -> int:
     # these with observations of a running PostgREST" -- which was the honest
     # record while nothing observed them, and is this run's work.
     rest_status = "unavailable"
+    # One reading of the flag for the whole step: the router the override was
+    # given and the observation below come from the same compose.env (D2172).
+    rest_enabled = _rest_enabled(deployed_output.rendered_path(key) / "compose.env")
     docs_status = "unavailable"
     # Version 9's two, and Run 10's. `unavailable` is the value for a deployment
     # through a session that does not start the auth service, and it is the
@@ -2824,48 +2847,56 @@ def main(argv: list[str] | None = None) -> int:
                 arguments.through_session,
             ),
         )
-        rest_url = rendered["routes"]["rest"]
-        # A route is `ready` when something answers on it, which the served
-        # document below is the evidence of. Claiming `ready` because a container
-        # is healthy would be a record about a process rather than about a route
-        # -- and D145 measured `--ready` returning 0 while every request 404'd.
-        # **D387: the two-stage convergence its neighbours in step 7 already
-        # have.** This read once, and a router that was not yet wired made the
-        # deployed document record `api.status: unavailable` for a route that
-        # answered seconds later -- which is the same race the block below
-        # describes for tls, health, docs, app and storage, in the one reading
-        # that did not wait. A terminal failure (no token) does not wait: it is
-        # `settled` immediately, so the window is spent only on the state that
-        # can change.
-        reading = observation.await_observation(
-            lambda: observe_served_document(
-                rest_url,
-                jwt_block,
-                {
-                    "project": {"key": key},
-                    "secrets": secrets,
-                    "database": {"roles": rendered["database"]["roles"]},
-                },
-            ),
-            lambda observed: observed.settled,
-        )
-        served = reading.digest
-        if served is not None:
-            rest_status = "ready"
+        # D2172: a manifest that does not publish REST has no PostgREST router
+        # (the runtime override withholds its labels), so there is no served
+        # document to wait for. Recorded unpublished WITHOUT a request and
+        # without the observation window -- the read Session 37's control-prod
+        # deploy spent on a route nothing was meant to answer.
+        if not rest_enabled:
+            print("  REST disabled by the manifest (api.rest.enabled: false): not observed")
         else:
-            # Which of the two, said once, because they send an operator to
-            # different places: a service that cannot serve its document, or an
-            # edge that had not finished attaching by the deadline.
-            if reading.outcome == "no_token":
-                print(f"  no served document: {reading.detail}")
+            rest_url = rendered["routes"]["rest"]
+            # A route is `ready` when something answers on it, which the served
+            # document below is the evidence of. Claiming `ready` because a container
+            # is healthy would be a record about a process rather than about a route
+            # -- and D145 measured `--ready` returning 0 while every request 404'd.
+            # **D387: the two-stage convergence its neighbours in step 7 already
+            # have.** This read once, and a router that was not yet wired made the
+            # deployed document record `api.status: unavailable` for a route that
+            # answered seconds later -- which is the same race the block below
+            # describes for tls, health, docs, app and storage, in the one reading
+            # that did not wait. A terminal failure (no token) does not wait: it is
+            # `settled` immediately, so the window is spent only on the state that
+            # can change.
+            reading = observation.await_observation(
+                lambda: observe_served_document(
+                    rest_url,
+                    jwt_block,
+                    {
+                        "project": {"key": key},
+                        "secrets": secrets,
+                        "database": {"roles": rendered["database"]["roles"]},
+                    },
+                ),
+                lambda observed: observed.settled,
+            )
+            served = reading.digest
+            if served is not None:
+                rest_status = "ready"
             else:
-                print(
-                    f"  no served document after the observation window: {reading.detail}\n"
-                    "  This is the route not answering, not the service refusing -- "
-                    "`api.status` records\n"
-                    "  `unavailable`, which is a reading and not a verdict."
-                )
-        api_block = observe_api(deployed_output.rendered_path(key), served)
+                # Which of the two, said once, because they send an operator to
+                # different places: a service that cannot serve its document, or an
+                # edge that had not finished attaching by the deadline.
+                if reading.outcome == "no_token":
+                    print(f"  no served document: {reading.detail}")
+                else:
+                    print(
+                        f"  no served document after the observation window: {reading.detail}\n"
+                        "  This is the route not answering, not the service refusing -- "
+                        "`api.status` records\n"
+                        "  `unavailable`, which is a reading and not a verdict."
+                    )
+            api_block = observe_api(deployed_output.rendered_path(key), served)
 
     step("7. Observe and publish")
     # Traefik's Docker provider polls, so the router for a container that has
@@ -3084,6 +3115,7 @@ def main(argv: list[str] | None = None) -> int:
         # There is deliberately no default for any of them: a default is how a
         # session-4 deployment would come to describe a session-5 shape.
         rest_status=rest_status,
+        rest_enabled=rest_enabled,
         # Observed, since Run 9a built the service D128 left open (ADR 0069).
         # `ready` means the route answered 401 with a Basic challenge -- a
         # refusal, not a page -- because a documentation route that serves

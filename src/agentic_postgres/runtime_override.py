@@ -581,6 +581,11 @@ def build_override(
     mcp_router_name: str,
     metrics_router_name: str,
     metrics_auth_middleware_name: str,
+    #: Does the manifest publish REST (`api.rest.enabled`, D2172)? REQUIRED and
+    #: never defaulted -- the D2087 rule for a status-like argument: a caller
+    #: that forgot it would otherwise get a router the manifest switched off,
+    #: which is exactly the defect this argument exists to end (D2137).
+    rest_enabled: bool,
     publications: dict[str, Any] | None = None,
     #: Is this project the control plane (ADR 0251)? Declared, from the
     #: rendered `AUTH_APP_MODE`, never sniffed: off, the `auth` container
@@ -741,11 +746,23 @@ def build_override(
                 }
             },
             REST_SERVICE: {
-                "labels": _rest_labels(
-                    https_entrypoint=https_entrypoint,
-                    rest_router_name=rest_router_name,
-                    buffering_middleware_name=buffering_middleware_name,
-                    stripprefix_middleware_name=stripprefix_middleware_name,
+                # The router exists only where the manifest publishes REST
+                # (D2172, ADR 0251 item 6). Off, the container still RUNS -- ADR
+                # 0062 keeps the service unconditional -- but carries no
+                # `traefik.*` label, so the edge, which exposes nothing by
+                # default, has no route to it. The base model's
+                # `apg.traefik.scope` alone does not make a router.
+                **(
+                    {
+                        "labels": _rest_labels(
+                            https_entrypoint=https_entrypoint,
+                            rest_router_name=rest_router_name,
+                            buffering_middleware_name=buffering_middleware_name,
+                            stripprefix_middleware_name=stripprefix_middleware_name,
+                        )
+                    }
+                    if rest_enabled
+                    else {}
                 ),
                 # The verification-only JWKS, derived from the bootstrap signing
                 # key by `bin/render-jwks.py` at deploy time (ADR 0051).
@@ -1660,6 +1677,11 @@ def render_override(
     mcp_router_name: str,
     metrics_router_name: str,
     metrics_auth_middleware_name: str,
+    #: Does the manifest publish REST (`api.rest.enabled`, D2172)? REQUIRED and
+    #: never defaulted -- the D2087 rule for a status-like argument: a caller
+    #: that forgot it would otherwise get a router the manifest switched off,
+    #: which is exactly the defect this argument exists to end (D2137).
+    rest_enabled: bool,
     publications: dict[str, Any] | None = None,
     #: Is this project the control plane (ADR 0251)? Declared, from the
     #: rendered `AUTH_APP_MODE`, never sniffed: off, the `auth` container
@@ -1692,6 +1714,7 @@ def render_override(
         mcp_router_name=mcp_router_name,
         metrics_router_name=metrics_router_name,
         metrics_auth_middleware_name=metrics_auth_middleware_name,
+        rest_enabled=rest_enabled,
         publications=publications,
         control=control,
         control_router_name=control_router_name,

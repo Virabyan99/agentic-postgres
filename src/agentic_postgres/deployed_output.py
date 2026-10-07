@@ -487,6 +487,9 @@ def build_deployed_document(
     runtime: dict[str, Any],
     health_status: str,
     rest_status: str,
+    #: Session 38 (D2172): whether the manifest publishes REST, read by the
+    #: deploy from the rendered compose.env. REQUIRED, like every status here.
+    rest_enabled: bool,
     docs_status: str,
     app_status: str,
     app_docs_status: str,
@@ -544,6 +547,14 @@ def build_deployed_document(
     if rendered.get("document_kind") != "rendered":
         raise ManifestError(
             f"expected a rendered document to build from, got {rendered.get('document_kind')!r}"
+        )
+    # D2172. A manifest that does not publish REST has no PostgREST router, so
+    # a `ready` REST route beside it is a reading of something that cannot
+    # exist -- a document that says so is refused rather than published.
+    if rest_status == "ready" and not rest_enabled:
+        raise ManifestError(
+            "routes.rest is ready but the manifest does not publish REST "
+            "(api.rest.enabled: false): nothing should answer on that route"
         )
 
     document = {

@@ -193,7 +193,7 @@ def test_the_runtime_reads_the_same_rendered_artefact_the_other_verifiers_read(
     from tests.contract.test_runtime_override import NAMES, RENDERED
 
     override = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     mounts = override["services"][runtime_override.MCP_SERVICE]["volumes"]
 

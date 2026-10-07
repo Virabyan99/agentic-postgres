@@ -37,7 +37,7 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 @pytest.fixture
 def labels() -> dict[str, str]:
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     return document["services"][runtime_override.MCP_SERVICE]["labels"]
 
@@ -94,7 +94,7 @@ def test_no_other_router_in_this_deployment_matches_the_agent_planes_path() -> N
     it currently does not.
     """
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     values = {
         "API_MCP_PATH": "/mcp",
@@ -190,7 +190,7 @@ def test_the_agent_plane_gets_no_cors_and_no_buffering_middleware(
 def test_no_router_publishes_the_health_routes() -> None:
     """Private by absence, across every router in the deployment (ADR 0128)."""
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     for entry in document["services"].values():
         for key, value in (entry.get("labels") or {}).items():

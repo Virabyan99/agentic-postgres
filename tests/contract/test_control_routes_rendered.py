@@ -67,7 +67,7 @@ CONTROL_NAMES = {
 
 def _auth_labels(**extra: Any) -> dict[str, str]:
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory="/r", **extra
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory="/r", **extra
     )
     return document["services"][runtime_override.AUTH_SERVICE]["labels"]
 

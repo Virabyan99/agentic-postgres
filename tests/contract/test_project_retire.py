@@ -54,6 +54,7 @@ def build(rendered: dict[str, Any], **overrides: Any) -> dict[str, Any]:
         "source_commit": COMMIT,
         "health_status": "ready",
         "rest_status": "unavailable",
+        "rest_enabled": True,
         "docs_status": "unavailable",
         "app_status": "unavailable",
         "app_docs_status": "unavailable",

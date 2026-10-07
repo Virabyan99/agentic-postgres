@@ -793,6 +793,13 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     # The path a router rule matches on, derived beside the URL it publishes so
     # that moving the base path cannot move one without moving the other.
     "API_REST_PATH",
+    # Session 38 (D2172, ADR 0251 item 6). Whether the manifest publishes REST,
+    # `true` or `false`. Read by the DEPLOY, from this file, for two decisions
+    # that must agree: whether the runtime override carries PostgREST's router
+    # labels, and whether the served document is observed at all. One value in
+    # one file, so the router and the observation cannot disagree (D2087's
+    # pattern for AUTH_APP_MODE). No compose.yaml line interpolates it.
+    "API_REST_ENABLED",
     "DOCS_PAGE_PATH",
     "DOCS_ROUTER_NAME",
     "DOCS_STRIPPREFIX_MIDDLEWARE_NAME",
@@ -1942,6 +1949,7 @@ def build_compose_env(
         # filesystem of a container that has no business holding it.
         "API_REQUEST_BODY_MEMORY_BYTES": str(rest["request_body_memory_bytes"]),
         "API_REST_PATH": identity.route_rest_path,
+        "API_REST_ENABLED": "true" if rest["enabled"] else "false",
         "DOCS_PAGE_PATH": identity.route_docs_path,
         "DOCS_ROUTER_NAME": identity.docs_router,
         "DOCS_STRIPPREFIX_MIDDLEWARE_NAME": identity.docs_stripprefix_middleware,
@@ -2328,6 +2336,24 @@ def restore_checkout_ownership(path: Path) -> None:
             # Per target, not per run. One unreachable path must not stop the
             # rest from being handed back -- which is what a single try around
             # the whole loop did.
+            continue
+
+
+def restore_lock_ownership() -> None:
+    """Give the operator back the render locks, and nothing else (D2189).
+
+    `restore_checkout_ownership` hands back the rendered directory AND the locks
+    after a successful render; a failed render has no new directory to hand back
+    but has opened `.generated/.locks/<key>.lock` as root all the same. Same
+    rules: a no-op without `SUDO_UID`, best-effort per target.
+    """
+    uid, gid = os.environ.get("SUDO_UID"), os.environ.get("SUDO_GID")
+    if not (uid and gid) or not LOCK_ROOT.is_dir():
+        return
+    for target in [LOCK_ROOT, *LOCK_ROOT.glob("*.lock")]:
+        try:
+            os.chown(target, int(uid), int(gid))
+        except OSError:
             continue
 
 
@@ -2813,6 +2839,12 @@ def render_project(
             restore_checkout_ownership(target)
         except Exception:
             shutil.rmtree(staging, ignore_errors=True)
+            # D2189 (rig 38a): a render that FAILED under sudo left its lock
+            # root-owned, because the hand-back above runs only on success --
+            # and the operator's next render of this project then dies on the
+            # lock (D65's class). The rendered directory is not touched: on a
+            # failure it is the previous valid render, unchanged.
+            restore_lock_ownership()
             raise
 
     return target

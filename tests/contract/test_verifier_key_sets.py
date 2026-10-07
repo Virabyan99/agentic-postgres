@@ -62,7 +62,7 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 @pytest.fixture
 def rendered_override() -> dict[str, Any]:
     return runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
 
 

@@ -54,7 +54,7 @@ MODEL = REPO_ROOT / "compose.yaml"
 @pytest.fixture
 def override() -> dict:
     return runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
 
 

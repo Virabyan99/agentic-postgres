@@ -574,6 +574,7 @@ def test_every_interpolation_the_runtime_override_needs_is_a_name_the_render_emi
         mcp_router_name=identity.mcp_router,
         metrics_router_name=identity.metrics_router,
         metrics_auth_middleware_name=identity.metrics_credential_middleware,
+        rest_enabled=True,
     ).decode("utf-8")
 
     supplied = set(rendering.COMPOSE_ENV_KEYS) | set(host_config.RUNTIME_COMPOSE_ENV_KEYS)

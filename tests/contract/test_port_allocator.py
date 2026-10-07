@@ -328,6 +328,7 @@ def test_an_override_without_an_allocation_publishes_nothing() -> None:
     """
     document = runtime_override.build_override(
         **OVERRIDE_NAMES,
+        rest_enabled=True,
         https_entrypoint="websecure",
         rendered_directory="/var/lib/agentic-postgres/rendered/alpha-dev",
     )
@@ -385,6 +386,7 @@ def test_the_override_carries_no_ports_entry_for_any_service() -> None:
     """
     payload = runtime_override.render_override(
         **OVERRIDE_NAMES,
+        rest_enabled=True,
         https_entrypoint="websecure",
         rendered_directory="/var/lib/agentic-postgres/rendered/alpha-dev",
     )

@@ -341,6 +341,53 @@ def test_a_render_under_sudo_hands_the_directory_and_the_lock_back(
     assert chowned == [], f"an unprivileged render chowned {chowned}"
 
 
+def test_a_failed_render_under_sudo_hands_the_lock_back(
+    sandbox: Path, manifest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D2189: rig 38a's first pass -- a root render that FAILED after taking the
+    lock left `.generated/.locks/<key>.lock` root-owned with `SUDO_UID` set.
+
+    The hand-back ran only on success, so the operator's next render of the
+    project died on the lock (D65's class). A reconciler deploy that fails is
+    exactly this render. The failure is injected AFTER staging (the staged
+    document refused by its schema), which is inside the lock.
+
+    The rendered directory is NOT handed back on a failure: it is the previous
+    valid render, unchanged, and a failure has nothing new to give back.
+    Control (D499): with `SUDO_UID` unset, the same failure chowns nothing.
+    """
+    directory = rendering.render_project(manifest, CAPABILITIES)
+
+    def reject(document: object, schema_name: str) -> None:
+        if schema_name == "outputs.schema.json":
+            raise config.ManifestError("injected staged-output failure")
+
+    chowned: list[Path] = []
+
+    def record(path: object, uid: int, gid: int) -> None:
+        chowned.append(Path(str(path)))
+
+    monkeypatch.setattr(config, "validate_against_schema", reject)
+    monkeypatch.setattr(rendering.os, "chown", record)
+    monkeypatch.setenv("SUDO_UID", "1234")
+    monkeypatch.setenv("SUDO_GID", "5678")
+
+    with pytest.raises(config.ManifestError, match="injected"):
+        rendering.render_project(manifest, CAPABILITIES)
+
+    assert any(path.suffix == ".lock" for path in chowned), (
+        "a failed render under sudo left its lock root-owned (D2189)"
+    )
+    assert directory not in chowned, "a failed render handed back the previous render"
+
+    chowned.clear()
+    monkeypatch.delenv("SUDO_UID")
+    monkeypatch.delenv("SUDO_GID")
+    with pytest.raises(config.ManifestError, match="injected"):
+        rendering.render_project(manifest, CAPABILITIES)
+    assert chowned == [], f"an unprivileged failed render chowned {chowned}"
+
+
 def test_the_directories_a_render_creates_name_the_owner_and_the_remedy(
     sandbox: Path, manifest: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -75,7 +75,7 @@ NAMES = {
 @pytest.fixture
 def labels() -> dict[str, str]:
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     return document["services"][runtime_override.ROUTED_SERVICE]["labels"]
 
@@ -123,7 +123,7 @@ def test_the_router_and_service_names_agree(labels: dict[str, str]) -> None:
 
 def test_the_rendered_document_is_parseable_yaml() -> None:
     payload = runtime_override.render_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     document = yaml.safe_load(payload.decode("utf-8"))
     assert runtime_override.ROUTED_SERVICE in document["services"]
@@ -150,6 +150,7 @@ def test_the_rendered_document_is_parseable_yaml() -> None:
 def test_an_empty_input_is_refused(field: str) -> None:
     arguments = {
         **NAMES,
+        "rest_enabled": True,
         "https_entrypoint": "websecure",
         "rendered_directory": RENDERED,
     }
@@ -167,7 +168,7 @@ def test_an_empty_input_is_refused(field: str) -> None:
 
 def test_the_migration_service_is_given_the_projects_own_rendered_set() -> None:
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     volumes = document["services"][runtime_override.MIGRATION_SERVICE]["volumes"]
     assert volumes == [f"{RENDERED}/migrations:{runtime_override.MIGRATIONS_MOUNT}:ro"]
@@ -176,7 +177,7 @@ def test_the_migration_service_is_given_the_projects_own_rendered_set() -> None:
 def test_the_migration_mount_is_read_only() -> None:
     """A writable mount would let a migration rewrite the set that produced it."""
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     for volume in document["services"][runtime_override.MIGRATION_SERVICE]["volumes"]:
         assert volume.endswith(":ro"), volume
@@ -190,7 +191,7 @@ def test_the_migration_mount_is_read_only() -> None:
 @pytest.fixture
 def rest_labels() -> dict[str, str]:
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     return document["services"][runtime_override.REST_SERVICE]["labels"]
 
@@ -291,7 +292,7 @@ def test_the_rest_route_is_not_attached_to_the_health_service() -> None:
     """Two routes, two services. A REST router pointing at the probe would
     answer 200 to every path under it and serve nothing of the API."""
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     probe = document["services"][runtime_override.ROUTED_SERVICE]["labels"]
     assert not [key for key in probe if REST_ROUTER in key]
@@ -303,7 +304,10 @@ def test_a_relative_rendered_directory_is_refused() -> None:
     the installed release -- not this project's rendered output."""
     with pytest.raises(ValueError):
         runtime_override.build_override(
-            **NAMES, https_entrypoint="websecure", rendered_directory="rendered/alpha"
+            **NAMES,
+            rest_enabled=True,
+            https_entrypoint="websecure",
+            rendered_directory="rendered/alpha",
         )
 
 
@@ -482,6 +486,7 @@ def test_the_mount_and_the_model_name_the_same_file() -> None:
 
     override = runtime_override.build_override(
         **NAMES,
+        rest_enabled=True,
         https_entrypoint="websecure",
         rendered_directory="/var/lib/agentic-postgres/rendered/example-dev",
     )
@@ -550,6 +555,7 @@ def test_every_routed_service_carries_the_label_the_edge_filters_on() -> None:
 
     override = runtime_override.build_override(
         **NAMES,
+        rest_enabled=True,
         https_entrypoint="websecure",
         rendered_directory="/var/lib/agentic-postgres/rendered/example-dev",
     )
@@ -623,7 +629,7 @@ def test_the_published_document_describes_the_published_address() -> None:
 @pytest.fixture
 def docs_labels() -> dict[str, str]:
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     return document["services"][runtime_override.DOCS_SERVICE]["labels"]
 
@@ -756,7 +762,7 @@ def test_the_snapshot_mount_and_the_model_name_the_same_file() -> None:
     parse rather than a missing file.
     """
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     mounts = document["services"][runtime_override.DOCS_SERVICE]["volumes"]
     assert mounts == [
@@ -789,7 +795,7 @@ def test_the_snapshot_mount_and_the_model_name_the_same_file() -> None:
 def test_the_snapshot_mount_is_read_only() -> None:
     """The page serves a reviewed document; it has no business rewriting one."""
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     for mount in document["services"][runtime_override.DOCS_SERVICE]["volumes"]:
         assert mount.endswith(":ro"), mount
@@ -803,7 +809,7 @@ def test_the_snapshot_mount_is_read_only() -> None:
 @pytest.fixture
 def app_labels() -> dict[str, str]:
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     return document["services"][runtime_override.AUTH_SERVICE]["labels"]
 
@@ -1364,7 +1370,7 @@ def test_the_deploy_proves_its_mounts_before_each_start(tmp_path: Path) -> None:
 @pytest.fixture
 def metrics_labels() -> dict[str, str]:
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     return document["services"][runtime_override.METRICS_SERVICE]["labels"]
 
@@ -1465,7 +1471,7 @@ def test_the_metrics_container_mounts_its_rendered_config(tmp_path: Path) -> Non
     supposedly deployed.
     """
     document = runtime_override.build_override(
-        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+        **NAMES, rest_enabled=True, https_entrypoint="websecure", rendered_directory=RENDERED
     )
     volumes = document["services"][runtime_override.METRICS_SERVICE]["volumes"]
     assert volumes == [
@@ -1502,6 +1508,7 @@ def test_a_project_with_a_migration_set_is_given_its_own_mount() -> None:
     """
     payload = runtime_override.render_override(
         **NAMES,
+        rest_enabled=True,
         https_entrypoint="websecure",
         rendered_directory=RENDERED,
         project_migrations=True,
@@ -1535,6 +1542,7 @@ def test_a_project_without_one_is_given_no_such_mount() -> None:
     """
     payload = runtime_override.render_override(
         **NAMES,
+        rest_enabled=True,
         https_entrypoint="websecure",
         rendered_directory=RENDERED,
     )

@@ -445,6 +445,8 @@ D2189.** Rows the runs add go in a second table below it, in execution order.
 | **D2192** | D2155 / Run 5 item 1: *"`compose start` has no `--wait` — measured in rig 38b: if it does not, `start` polls `docker inspect` health"*. | **Rig 38b**: Compose **v5.1.3** (the workstation's) lists `--wait` and `--wait-timeout` under `docker compose start --help`. Also measured: Traefik routes a container only once its healthcheck reads healthy (first 200 at +4.64 s with a 1 s healthcheck; `start` itself returned at 2.16 s), and a route read right after `up --wait` returned was still 404. | **Decided from E0**: the host runs **Docker Compose v5.4.0**, and `docker compose start --help` there lists `--wait` and `--wait-timeout` (read as `op` over SSH, 2026-10-07). **`project-runtime.sh start` runs `compose start --wait --wait-timeout 120`**; no poll is written. The wake window a customer sees is measured as the first 200 (D2171), never as `start` returning. | The tree's pinned minimum (`COMPOSE_MINIMUM_VERSION` 2.24.0) is not the host's version; the host's is what runs. | 0259 |
 | **D2193** | D2156: *"`small`'s charge (`unreclaimable_mb`) ≤ 200 and its sum of memory CAPS plus the three projects' resident leaves `available` ≥ 1,024"*. | **Sheet E0** (2026-10-07 20:28Z): 1,725 MiB available, 912 of 1,600 committed; a project's memory caps sum to **2,880 MiB** (`docker inspect`), more than is available, so no profile satisfies the caps rule; control-prod's resident set is **620–631 MiB** over three samples, ~50 of it the database — the rest is seven processes no profile member moves. | **The rule is read on RESIDENT memory and on the charge, never the caps** (D767): `small` charges 192 (≤ 200) and lowers no cap below today's; the predicted available after a creation is 1,725 − ~631 ≈ 1,094 (or 1,725 − 521 ≈ 1,204 by Session 37's arrival measurement) — above 1,024, read on the day by `s38-free.sh`. Rig 38c′ validated `small` (192), `standard` (304) and `large` (840) through the three validators and `load_project_manifest` (control: `memory_limit_mb` equal to the charge refused by both). | A rule over ceilings decides nothing resident memory does; ADR 0258 records the table. | 0258 |
 | **D2194** | §0 / D2149 / Sheet H1: *"both copies move on Sheet H1, diffed"*; H1's install line `-m 0644`; D2025: *"the HOST checkout's copy is schema 3"*. | **Sheet E0**: `/etc/agentic-postgres/host.yaml` is **schema 2**, `root:root 0600`, 3,579 bytes — it has no `capacity` block; the checkout's `host.yaml` is schema 3, `op:op 0600`, 5,618 bytes; the diff is exactly the schema line and the `capacity` block. Schema 2 is still accepted (`[2, 3]`), which is why nothing has refused it. | **Sheet H1 writes ONE schema-4 document and installs it at both paths**: `s38-hostyaml.py` writes the candidate from the CHECKOUT's copy (schema 3 → 4, + `region`, + `slots`), the diff against both current copies is read, and the `/etc` copy is installed **`root:root 0600`** (its current mode — the sheet's 0644 was a guess) so the two copies are byte-identical after H1. The class (two copies, D2020) stays in §10. | One document at two paths cannot drift on the day it is written; a schema-2 `/etc` copy beside a schema-4 checkout copy would be a third shape. | 0257 |
+| **D2195** | D2162 / Run 2 item 4: *"`src/agentic_postgres/isolation_matrix.py` holds `MUST_DIFFER`, `MUST_MATCH`, `RELEASE_STATE`, `NOT_AUTHORITY_PREFIXES`, `_matches`, `_classify` … the live module imports them"*. | `test_repository_contract.py::test_no_module_is_imported_only_by_its_own_tests` (D204) refuses a `src/agentic_postgres` module whose only importers are tests — Session 37 Run 5 went CI-red on exactly that (`operations.py`, D2110). Nothing in the product classifies isolation leaves; only proofs do. `tests/deployment/` already shares a plain helper module (`oversized_request.py`, imported by a live proof). | **The tables and the classifier move VERBATIM to `tests/deployment/isolation_matrix.py`** (public `matches`/`classify`; the live module keeps `_matches = matches`, `_classify = classify`), imported by the live module and by `tests/contract/test_isolation_leaves_offline.py`. The live module's five node ids are unchanged (`--collect-only`). | A product module whose only reader is a test is the class D204 guards; the helper is honest about who reads it. | — |
+| **D2196** | Run 2: *"Both fixtures' `.generated` renders must be byte-identical to before (REST enabled on both)"*; item 1: *"`rendering.build_compose_env` emits `API_REST_ENABLED`"*. | Re-rendered with `./deploy.sh --render-only` (Run 2): `diff -r` against the copy taken before the run shows **exactly one difference per fixture — `compose.env` gains `API_REST_ENABLED=true`** (line 81); `outputs.json`, `pgbackrest.conf` and every other rendered file are byte-identical. No `compose.yaml` line interpolates the key, and `compose.env` is not mounted, so no container's definition or mount digest moves with it (ADR 0155). | **The byte-identity holds for everything but the one line item 1 adds**, and that line is the reader the run exists to give the flag. The host's alpha and beta renders gain the same line (`true`), control-prod's `false`. | The plan's two sentences cannot both be literally true; the difference is the intended one and is measured, not assumed. | 0251 |
 
 ---
 
@@ -764,7 +766,43 @@ for each: the same module on the unmutated tree, green, in the same invocation.
 `.generated` renders must be byte-identical to before** (REST enabled on both) —
 `diff -r` against a copy taken before the run.
 
-**Done.** *(the executor writes it)*
+**Done.** 2026-10-08 (scripts and notes in WSL `~/s38/run2/`). **The flag's
+reader (D2172):** `build_override`/`render_override` take a REQUIRED
+`rest_enabled`; off, PostgREST's override entry carries no `labels` (its JWKS
+mount stays; the base model gives it only `apg.traefik.scope` and
+`traefik.docker.network`, and the edge exposes nothing by default).
+`compose.env` gains `API_REST_ENABLED` (`true`/`false` from the merged `rest`
+block — the default is `false`; all six manifests read: both fixtures, alpha and
+beta `true`, the control example and `/home/op/control.yaml` `false`). The
+deploy reads it once through `_rest_enabled` (anything but `true`/`false`
+refused), passes it to both override renders, and puts the served-document read
+and `observe_api` in the `else` of `if not rest_enabled:`, printing *"REST
+disabled by the manifest (api.rest.enabled: false): not observed"*.
+`build_deployed_document` takes a REQUIRED `rest_enabled` and refuses `ready`
+beside it false. 6 test builders and 29 of 29 test override calls pass
+`rest_enabled=True`. **D2189**: `render_project` hands the lock back on its
+failure path (`restore_lock_ownership`), with
+`test_render_atomicity.py::test_a_failed_render_under_sudo_hands_the_lock_back`.
+**The offline leaf classifier (D2162, D2195)**: the four tables and the
+classifier moved verbatim (201 + 21 lines) to `tests/deployment/isolation_matrix.py`
+— not `src/`, D204 — and the live module's five node ids are unchanged;
+`tests/contract/test_isolation_leaves_offline.py` classifies every leaf of a
+deployed document built from each of the three example renders (statuses from
+each project's own manifest) AND every one of the 189 leaves the deployed branch
+of `outputs.schema.json` declares (`control.enabled`, `connectors.enabled`,
+`migrations.project_set` among them); its first run reported
+`project.lifecycle`, a walker defect (an `allOf` `if/then/else` read as a
+scalar), fixed in the walker. **Re-render (D2196)**: the only difference per
+fixture is `compose.env` line 81, `API_REST_ENABLED=true`. **Targeted** (60
+modules, once): **2,490 passed**. **Battery 5/5 killed**, each control PASSED
+in the same invocation: M1 the label omission removed →
+`test_a_disabled_rest_service_has_no_router` FAILED; M2 the deploy's skip
+removed → `test_the_deploy_records_rest_unpublished_without_reading_it`
+FAILED; M3 the coherence rule removed →
+`test_a_ready_rest_route_with_the_flag_off_is_refused` FAILED; M4
+`control.enabled` dropped from the classifier → the offline leaf test FAILED; M5
+the failed render's lock hand-back removed → its test FAILED. Rows **D2195,
+D2196**. CI: recorded in Run 3's commit.
 
 ### Run 3 — the schemas: host 4 (region, slots), manifest 10 (compute), outputs 21, the profile table
 

@@ -368,6 +368,7 @@ def test_the_auth_service_mounts_the_same_lock_the_agent_plane_does() -> None:
         "mcp_router_name": "m",
         "metrics_router_name": "me",
         "metrics_auth_middleware_name": "ma",
+        "rest_enabled": True,
     }
     document = runtime_override.build_override(**names)
     payload = yaml.safe_dump(document).encode("utf-8")
