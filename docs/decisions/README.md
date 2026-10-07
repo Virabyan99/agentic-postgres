@@ -314,8 +314,14 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0248](0248-retention-extends-adr-0213-to-the-stage-4-record-by-aggregate-with-a-verb.md) | Retention extends ADR 0213 to the Stage 4 record, by aggregate, with a verb | 36 | Accepted |
 | [0249](0249-the-request-and-worker-lines-are-printed.md) | The request and worker lines are printed | 36 | Accepted |
 | [0250](0250-a-secrets-age-is-the-providers-update-time-read-never-acted-on.md) | A secret's age is the provider's update time, read, never acted on | 36 | Accepted |
-| [0251](0251-the-control-plane-is-a-project-its-own-set-and-a-fourth-app-mode.md) | The control plane is a project: `control-prod`, its own set, and a fourth app mode of its `auth` container | 37 | Accepted |
+| [0251](0251-the-control-plane-is-a-project-its-own-set-and-a-fourth-app-mode.md) | The control plane is a project: `control-prod`, its own set, and a fourth app mode of its `auth` container | 37 | Accepted, amended in Session 38 (D2172) |
 | [0252](0252-accounts-by-invitation-organisations-roles-and-totp.md) | Accounts by invitation, organisations, roles and TOTP | 37 | Accepted |
 | [0253](0253-management-api-keys-the-v1-contract-and-the-clis-state.md) | Management API keys, the `/v1` contract and the CLI's state | 37 | Accepted |
-| [0254](0254-an-operation-type-is-accepted-only-when-its-ledger-row-is-available-or-beta.md) | An operation type is accepted only when its Ledger row is `available` or `beta`; a row's status moves with its evidence | 37 | Accepted |
+| [0254](0254-an-operation-type-is-accepted-only-when-its-ledger-row-is-available-or-beta.md) | An operation type is accepted only when its Ledger row is `available` or `beta`; a row's status moves with its evidence | 37 | Accepted, amended by 0261 |
 | [0255](0255-a-providers-rate-limit-is-waited-out-within-a-budget.md) | A provider's rate limit is waited out, within a budget | 37 | Accepted |
+| [0256](0256-the-reconciler-and-the-operations-it-executes.md) | The reconciler, and the operations it executes | 38 | Accepted |
+| [0257](0257-slots-the-region-and-one-infisical-identity-per-project.md) | Slots, the region, and one Infisical identity per project | 38 | Accepted |
+| [0258](0258-compute-profiles-and-resize.md) | Compute profiles, and a resize that says what it has measured | 38 | Accepted |
+| [0259](0259-sleep-is-compose-stop-wake-is-compose-start-and-export-is-a-900-second-url.md) | Sleep is `compose stop`, wake is `compose start`, and an export is a 900-second URL | 38 | Accepted |
+| [0260](0260-the-first-administrator-is-handed-over-by-hash.md) | The first administrator is handed over by hash | 38 | Accepted |
+| [0261](0261-a-trial-ledger-status-bounded-to-the-session-that-introduced-its-claims.md) | A `trial` Ledger status, bounded to the session that introduced its claims | 38 | Accepted |

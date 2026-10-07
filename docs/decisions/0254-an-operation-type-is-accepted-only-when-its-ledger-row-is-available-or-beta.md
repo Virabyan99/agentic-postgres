@@ -1,6 +1,8 @@
 # 0254 — An operation type is accepted only when its Ledger row is `available` or `beta`; a row's status moves with its evidence
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by ADR 0261 (Session 38): a sixth status,
+  `trial`, accepts a type in the session that introduced its claims and is
+  resolved at that session's close
 - **Date:** 2026-10-04
 - **Session:** 37, Run 1 (D2054, D2055, D2067)
 - **Affects:** `CTL-OPS-001` (registered by Run 9), `LEDGER-001` (one node id

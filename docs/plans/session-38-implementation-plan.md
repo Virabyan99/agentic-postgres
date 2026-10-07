@@ -439,6 +439,12 @@ D2189.** Rows the runs add go in a second table below it, in execution order.
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
+| **D2189** | D2153: *"the reconciler's child environment carries `SUDO_UID`/`SUDO_GID` … a root render hands `.generated/<key>` back"*. | **Rig 38a, pass 1** (Run 1): a root render that FAILED (staged Compose validation, rc 5) with both variables set left `.generated/.locks/<key>.lock` **root:root** — `restore_checkout_ownership` runs only after a successful render (`rendering.py:2813`). The successful pass handed everything back (0 root-owned files); its control without the variables left 3. | **Run 2 hands the lock back on the failure path too**: `render_project` calls the hand-back for the lock in a `finally` (the rendered directory is untouched on failure — the previous valid render stands), with a test that a render failing after the lock is taken under `SUDO_UID` leaves the lock owned by that uid (control: without the variables it stays root's). The product, not the reconciler, gets the fix: an operator's failed `sudo` deploy has the same defect. | A reconciler deploy that fails would otherwise break `op`'s next render of that project (D65's class). | 0256 |
+| **D2190** | D2164: *"`app/export_upload.py` … puts it with the container's own `R2Adapter` and prints ONE line: a presigned GET valid 900 s"*; Run 7: *"`R2Adapter.presign_get` takes `expires_in` if rig 38e found it does not"*. | **Rig 38e** (offline): `presign_get(key)` takes NO expiry and signs `download_url_ttl_seconds` (X-Amz-Expires 300 at the default; the schema allows 60–3600). **The adapter has four public operations — `delete_object`, `head_object`, `presign_get`, `presign_put` — and no upload of bytes**; its boto client has `put_object`. Control: the adapter's client with `ExpiresIn=900` signs 900. | **Run 7: `presign_get(key, *, expires_in: int \| None = None)`** (absent → the configured TTL, as today; a value above 900 refused) and **one fifth adapter operation `put_object(key, body)`, first-write-only** (`IfNoneMatch: "*"`, `presign_put`'s rule); the adapter's docstring's *"four operations"* becomes five, still no list. `export_upload` uses only the adapter. ADR 0124's allowlist is not widened. | The export needs exactly one write and one bounded read; reaching past the adapter to its client would be a second provider path. | 0259 |
+| **D2191** | D2151 / Run 4 battery M2: *"`SKIP LOCKED` removed → `test_two_claimers_get_distinct_rows` FAILED (run 20×)"*. | **Rig 38f** (Run 1), deterministic overlap (A holds its claim 2.0 s, B starts +0.3 s), 10 rounds each: with `SKIP LOCKED` distinct 10/10, B 0.13–0.17 s; **without `SKIP LOCKED` distinct 10/10 too**, B 1.84–1.87 s (blocked); with neither the row lock nor the outer `status = 'pending'` recheck, **the same row 10/10**, 10 rows at attempt 2. | **M2 as written is an uninformative mutation (D493).** Run 4 writes two tests and two mutations: `test_two_claimers_get_distinct_rows`, killed by removing `FOR UPDATE` AND the outer recheck; and **`test_a_claimer_does_not_wait_for_an_open_claim`** (B returns in under 1 s while A holds its claim 2 s), killed by removing `SKIP LOCKED`. Run 10 registers the second node id under `OPN-CLAIM-001`. | A mutation is evidence only when it can turn its test red; the property `SKIP LOCKED` adds is not-waiting. | 0256 |
+| **D2192** | D2155 / Run 5 item 1: *"`compose start` has no `--wait` — measured in rig 38b: if it does not, `start` polls `docker inspect` health"*. | **Rig 38b**: Compose **v5.1.3** (the workstation's) lists `--wait` and `--wait-timeout` under `docker compose start --help`. Also measured: Traefik routes a container only once its healthcheck reads healthy (first 200 at +4.64 s with a 1 s healthcheck; `start` itself returned at 2.16 s), and a route read right after `up --wait` returned was still 404. | **Decided from E0**: the host runs **Docker Compose v5.4.0**, and `docker compose start --help` there lists `--wait` and `--wait-timeout` (read as `op` over SSH, 2026-10-07). **`project-runtime.sh start` runs `compose start --wait --wait-timeout 120`**; no poll is written. The wake window a customer sees is measured as the first 200 (D2171), never as `start` returning. | The tree's pinned minimum (`COMPOSE_MINIMUM_VERSION` 2.24.0) is not the host's version; the host's is what runs. | 0259 |
+| **D2193** | D2156: *"`small`'s charge (`unreclaimable_mb`) ≤ 200 and its sum of memory CAPS plus the three projects' resident leaves `available` ≥ 1,024"*. | **Sheet E0** (2026-10-07 20:28Z): 1,725 MiB available, 912 of 1,600 committed; a project's memory caps sum to **2,880 MiB** (`docker inspect`), more than is available, so no profile satisfies the caps rule; control-prod's resident set is **620–631 MiB** over three samples, ~50 of it the database — the rest is seven processes no profile member moves. | **The rule is read on RESIDENT memory and on the charge, never the caps** (D767): `small` charges 192 (≤ 200) and lowers no cap below today's; the predicted available after a creation is 1,725 − ~631 ≈ 1,094 (or 1,725 − 521 ≈ 1,204 by Session 37's arrival measurement) — above 1,024, read on the day by `s38-free.sh`. Rig 38c′ validated `small` (192), `standard` (304) and `large` (840) through the three validators and `load_project_manifest` (control: `memory_limit_mb` equal to the charge refused by both). | A rule over ceilings decides nothing resident memory does; ADR 0258 records the table. | 0258 |
+| **D2194** | §0 / D2149 / Sheet H1: *"both copies move on Sheet H1, diffed"*; H1's install line `-m 0644`; D2025: *"the HOST checkout's copy is schema 3"*. | **Sheet E0**: `/etc/agentic-postgres/host.yaml` is **schema 2**, `root:root 0600`, 3,579 bytes — it has no `capacity` block; the checkout's `host.yaml` is schema 3, `op:op 0600`, 5,618 bytes; the diff is exactly the schema line and the `capacity` block. Schema 2 is still accepted (`[2, 3]`), which is why nothing has refused it. | **Sheet H1 writes ONE schema-4 document and installs it at both paths**: `s38-hostyaml.py` writes the candidate from the CHECKOUT's copy (schema 3 → 4, + `region`, + `slots`), the diff against both current copies is read, and the `/etc` copy is installed **`root:root 0600`** (its current mode — the sheet's 0644 was a guess) so the two copies are byte-identical after H1. The class (two copies, D2020) stays in §10. | One document at two paths cannot drift on the day it is written; a schema-2 `/etc` copy beside a schema-4 checkout copy would be a third shape. | 0257 |
 
 ---
 
@@ -667,7 +673,47 @@ export (D2155, D2164, D2182); **0260** the first-admin handoff by hash (D2163);
 **0261** the `trial` status (D2170, amending 0254). **ADR 0251 §6 is amended**
 for D2172 (one paragraph: the REST flag's reader).
 
-**Done.** *(the executor writes it)*
+**Done.** 2026-10-07/08, documentation only, no CI read. Six rigs run with
+their controls, scripts and transcripts in WSL `~/s38/run1/` (`NOTES.md` the
+record) and the scratchpad's `s38/run1/`. **38a** (D2153): a root render (uid 0
+in a container over a copy of the checkout — WSL `sudo` asks for a password)
+WITH `SUDO_UID`/`SUDO_GID` left 0 root-owned files; the control without them
+left 3 (directory and lock `root:root`, `outputs.json` unreadable); **pass 1,
+a render that failed on Compose validation with both variables set, left the
+lock `root:root`** → D2189. **38b** (D2155): `compose stop` 0.71 s, route 200 →
+502 → timeout → Traefik's `404 page not found` (19 bytes), ids kept; `compose
+start` 2.16 s, first 200 at +4.64 s (Traefik routes only a HEALTHY container),
+ids unchanged; controls: `--force-recreate` moved the ids, `stop` + `up -d
+--wait` did not; Compose v5.1.3's `start` has `--wait` → D2192. **38c**
+(D2163): the handoff by hash end to end on the release set — `T` → 200, the
+chosen password logs in; a wrong `T`, `sha256(T)` presented as the token, `T`
+twice and the bootstrap password afterwards → 401 each. **38c′** (D2156): the
+profiles from E0 — `small` 192, `standard` 304, `large` 840 MiB charged,
+accepted by the three validators and by `load_project_manifest`, the control
+refused by both; the caps rule unsatisfiable → D2193, ADR 0258's table.
+**38d** (D2164): `-n app -n api` 45,391 bytes with no `app_private`; control
+without `-n` 318,442 bytes with it; the release seeds no rows. **38e**:
+`presign_get` takes no expiry (signs the project's 300 s TTL) and the adapter
+has no upload of bytes → D2190; control: `ExpiresIn=900` on its client signs
+900. **38f** (D2151–D2152): claims distinct with `SKIP LOCKED` (B 0.13–0.17 s)
+AND without it (B blocked 1.84–1.87 s); the same row 10/10 only with neither
+the row lock nor the status recheck → D2191 rewrites Run 4's M2; a claimer
+SIGKILLed mid-step was read back `running step=deploy-1`, finished `failed
+interrupted`, never reclaimed (control: `succeeded`, attempt 1). **Sheet E0**
+(2026-10-07 20:28Z, `/home/op/s38-e0.txt`): 1,725 MiB available, 912 of 1,600
+committed, doctor capacity 5 ok; control-prod resident 620–631 MiB; caps 2,880
+per project; four units enabled and active; the bootstrap directory empty;
+`dig` present, `slot1` resolves to the proxied wildcard (104.21.4.166,
+172.67.132.69 and two AAAA); 20 GiB free; flock, systemctl, dig, ss present;
+**Docker Compose v5.4.0** with `start --wait` (D2192 decided); **the `/etc`
+host.yaml is schema 2, `root:root 0600`** → D2194 corrects Sheet H1. The
+operator did not state the Infisical plan's status on the sheet (D2146) — owed
+before Sheet SL1, not blocking Runs 2–10. **The threat list**: items #4, #7,
+#8, #12 rewritten with their negative tests by node id, items #14 (the
+reconciler as a standing root actor) and #15 (slot confusion) added. **ADRs
+0256–0261** written and indexed; **0251** (item 6, the REST flag's reader) and
+**0254** (by 0261) amended. Rows **D2189–D2194** added. NEXT FREE: D2195, ADR
+0262.
 
 ### Run 2 — the debts: the REST flag's reader (D2172) and the offline leaf classifier (D2162)
 
@@ -855,7 +901,10 @@ the host move only `schema_version`, `template_version` later, `region`,
 `test_operation_types.py` and `test_control_keys.py` (D2165), and the
 contract. **Battery**: M1 the partial index dropped → `test_one_operation_at_a_time`
 FAILED; M2 `SKIP LOCKED` removed → `test_two_claimers_get_distinct_rows` FAILED
-(run 20× — a race test needs repetitions, recorded); M3 `control_take_result_secret`
+(run 20× — a race test needs repetitions, recorded) — **superseded by D2191**:
+M2a the row lock and the outer recheck removed → `test_two_claimers_get_distinct_rows`
+FAILED, M2b `SKIP LOCKED` removed → `test_a_claimer_does_not_wait_for_an_open_claim`
+FAILED; M3 `control_take_result_secret`
 not NULLing → `test_the_download_url_is_returned_once` FAILED; M4 a key allowed
 on create → FAILED; M5 `no_slot` checked after the insert → `test_no_ready_slot_refuses_before_a_row`
 FAILED; M6 an interrupted state read as `ready` → FAILED; M7 the claim granted
@@ -877,6 +926,9 @@ FAILED; controls green. **Targeted**: the control modules (Docker-backed, once),
    `up` uses (read `:295-297` for how `--wait` is passed; `compose start` has no
    `--wait` — measured in rig 38b: if it does not, `start` polls `docker
    inspect` health for every service with a healthcheck, 120 s) then `attach`.
+   **D2192 decided it: the host's Compose v5.4.0 has `start --wait`, so
+   `start` runs `compose start --wait --wait-timeout 120` and no poll is
+   written.**
    **Neither runs `materialize-secrets`, `render-secret-override` or
    `render-mount-digests`.**
 2. **`project-retire.sh --defer-provider`** (D2158) in `retirement.py` (a step
@@ -1298,8 +1350,9 @@ sudo bash /home/op/s38-e0.sh      # tees /home/op/s38-e0.txt; changes nothing
 ```
 sudo install -o op -g op -m 0600 /etc/agentic-postgres/host.yaml /home/op/etc-host.yaml
 #   the agent runs s38-hostyaml.py on both copies and prints the two diffs; read them, then:
-sudo install -o root -g root -m 0644 /home/op/etc-host.yaml.schema4 /etc/agentic-postgres/host.yaml
-#   (the mode and owner the current /etc copy has -- the agent reads them first and corrects this line)
+sudo install -o root -g root -m 0600 /home/op/etc-host.yaml.schema4 /etc/agentic-postgres/host.yaml
+#   (E0 read the /etc copy root:root 0600 at schema 2; the candidate is the CHECKOUT's schema-3
+#    copy moved to 4, so both paths hold one byte-identical document after this line -- D2194)
 ```
 
 ### Sheet R1 — the release priced (Run 11, day 1)

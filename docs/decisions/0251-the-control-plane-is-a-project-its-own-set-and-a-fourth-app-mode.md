@@ -1,6 +1,7 @@
 # 0251 — The control plane is a project: `control-prod`, its own set, and a fourth app mode of its `auth` container
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by Session 38 (D2172): item 6 gains the REST
+  flag's reader
 - **Date:** 2026-10-04
 - **Session:** 37, Run 1 (D2043–D2049, D2059, D2068, D2073–D2079)
 - **Affects:** `CTL-SET-001`, `CTL-API-001`, `CTL-REG-001`, `CTL-REG-002`
@@ -155,6 +156,20 @@ every project.
    for a set whose final `api` holds no function, view or enum, and still
    refuses a set that publishes anything without its contract; the control
    set's proposal is committed beside it like any project's.
+   **Amended by Session 38 (D2137, D2144, D2172): `api.rest.enabled: false`
+   gains its reader.** Until then its only reader was a validator, so
+   control-prod served PostgREST through a router although its manifest said
+   REST was off. From 1.16.0 `build_override` takes `rest_enabled` (required)
+   and emits no `traefik.*` label on the PostgREST service when it is false —
+   **the container still runs** (ADR 0062 stands; the service is not made
+   conditional); the render writes `API_REST_ENABLED` into `compose.env`, the
+   deploy reads it from there (so the labels and the observation cannot
+   disagree) and, with it false, records `routes.rest: unavailable` and `api`
+   unpublished without observing the route; the deployed document refuses
+   `routes.rest: ready` beside the flag off. To be measured on control-prod's
+   1.16.0 deploy (Sheet R2c): `/api/rest/` answers the edge's 404.
+   `storage.enabled: false` still emits storage's router — named, not repaired
+   here.
 7. **Accounts are `api_documentation` users holding `["meta:read"]`** (D2049,
    D2078) — the narrowest authority the identity registry can describe, reading
    no row of the control project's own data plane. The control manifest sets

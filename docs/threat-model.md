@@ -193,11 +193,23 @@ technically bounded in this beta"* (D1971).
    Owed: the measured rule for what wakes a project, and a wake that admission
    would refuse is refused — or, if Session 39's rig refuses wake-on-connect,
    the Ledger says `planned` and the client sees `project_sleeping`.
-4. **Project-creation and branch-creation exhaustion** (Sessions 38, 40). A
-   member creates projects or branches until the node or the slots run out.
-   Owed: the entitlement refused as `plan_limit_reached` before an operation
-   exists; capacity refused as `capacity_exhausted` with *"No resources were
-   created"*; neither code produced by the other's reader.
+4. **Project-creation and branch-creation exhaustion** (Sessions 38, 40, 41;
+   ADR 0256). A member creates projects or branches until the node or the slots
+   run out. **Session 38's half is capacity, from two readers under one code**:
+   admission's exit 12 is `capacity_exhausted {reason: admission}` with *"No
+   resources were created"*, checked before anything is rendered
+   (`tests/contract/test_reconciler_dispatch.py::test_admission_refusal_is_capacity_exhausted_and_creates_nothing`);
+   no `ready` slot is `capacity_exhausted {reason: no_slot}` before an operation
+   row exists (`tests/contract/test_control_projects.py::test_no_ready_slot_refuses_before_a_row`),
+   and so is a slot reading older than ten minutes
+   (`::test_a_stale_slot_reading_is_no_slot`); one non-terminal operation per
+   project and one creation per organisation (`::test_one_operation_at_a_time`).
+   The bound is the stock and the serialisation, not a time window: no rate
+   limit is built (D2166). **The entitlement half is Session 41's**
+   (`plan_limit_reached` before an operation exists), and nothing in 38 can
+   produce that code (`::test_nothing_produces_an_entitlement_refusal`); the
+   branch half is Session 40's. Moves into the table as
+   `THR-LIFE-EXHAUSTION` with Session 38's registry block.
 5. **Plan-limit bypass and usage tampering** (Session 41). A caller raises its
    own limits, creates concurrently past a limit, or writes its own usage.
    Owed: a limit enforced under concurrency; no customer surface writes a usage
@@ -211,11 +223,40 @@ technically bounded in this beta"* (D1971).
     presented to the surfaces Sessions 38 and 39 add. Owed: each refused at the
     other plane. Session 37's half -- the control mode reads no other project,
     a key is refused by a project's routes, and the control project serves no
-    release admin route -- is `THR-CTL-PLANE-CONFUSION` in the table.
-8. **Project-deletion races and slot reuse** (Session 38). A deletion that
-    leaves a route, a role or a repository a later project inherits, or an
-    operation that runs against a project mid-deletion. Owed: a deleted
-    project's names derive nothing a new one is given; a slot is single-use.
+    release admin route -- is `THR-CTL-PLANE-CONFUSION` in the table. **Session
+    38's half (ADR 0256, 0259, 0260)**: the first administrator is handed over
+    by hash, so the control plane holds `sha256(T)` and nothing that opens the
+    new project -- the hash presented as the reset token is refused (rig 38c)
+    and only the hash reaches the control database
+    (`tests/contract/test_admin_handoff.py::test_only_the_hash_reaches_the_control_plane`,
+    `::test_the_bootstrap_password_is_never_stored`); a management key may
+    sleep, wake and resize but never create, export or delete
+    (`tests/contract/test_control_projects.py::test_a_key_cannot_create_export_or_delete`);
+    the export URL is the one bounded exception -- at most 900 seconds, one
+    object, returned once and erased
+    (`tests/contract/test_export_upload.py::test_the_presigned_url_lives_at_most_900_seconds`,
+    `tests/contract/test_control_projects.py::test_the_download_url_is_returned_once`,
+    `::test_no_download_url_reaches_a_list_or_a_log`). Residual: the URL is in
+    the control database's WAL and backup until it expires (ADR 0259). Moves
+    into the table as `THR-LIFE-PLANE-CONFUSION`; Session 39's half stays here.
+8. **Project-deletion races and slot reuse** (Session 38, ADR 0256, 0257). A
+    deletion that leaves a route, a role or a repository a later project
+    inherits, or an operation that runs against a project mid-deletion. Owed:
+    an operation against a project with a non-terminal operation is `409
+    conflict` (`tests/contract/test_control_projects.py::test_one_operation_at_a_time`);
+    deletion retires every local resource but the provider's, keeps the
+    bootstrap state for the operator's revocation and writes the slot's
+    tombstone
+    (`tests/contract/test_project_retirement.py::test_defer_provider_keeps_the_state_for_revocation`,
+    `tests/contract/test_reconciler_dispatch.py::test_delete_consumes_the_slot`);
+    **a slot is single-use** -- a consumed slot is never `ready` and no command
+    removes a tombstone
+    (`tests/contract/test_slot_command.py::test_a_consumed_or_quarantined_slot_is_never_ready`,
+    `::test_nothing_removes_a_tombstone`), so a deleted project's names are
+    never derived for a new one. Residual: the slot's Infisical project,
+    buckets, DNS record and backup repository outlive it (ADR 0187); no
+    deletion-policy window exists (D2181). Moves into the table as
+    `THR-LIFE-DELETION`.
 9. **Connector abuse by a customer** (Session 42). A customer-defined
     connector used to reach another project, an internal address, or the
     node's own services. Owed: the connector planes' existing refusals hold for
@@ -236,9 +277,15 @@ technically bounded in this beta"* (D1971).
     and a caller sees only their own organisations' rows
     (`test_control_set.py::test_a_caller_sees_only_their_own_organisations`).
 12. **Storage exhaustion** (Session 38). One project fills the shared disk until
-    its neighbours' databases or backups stop. Owed: the measured reading and
-    the refusal admission makes; until a per-project disk quota exists, the
-    Ledger says storage is `planned`, not limited.
+    its neighbours' databases or backups stop. **Session 38's control is
+    admission's disk FLOOR** (D1596: free space at the Docker root against
+    `capacity.reserve_disk_gb`, read before a creation or a resize is rendered
+    -- `tests/contract/test_reconciler_dispatch.py::test_admission_refusal_is_capacity_exhausted_and_creates_nothing`
+    reads the refusal whichever floor refused) **and the Ledger's sentence that
+    no per-project disk quota exists**. Residual, stated rather than implied:
+    nothing bounds what one RUNNING project writes (no quota, no `blkio`), so a
+    project can still fill the disk after admission admitted it; storage stays
+    `planned` as a limit. Moves into the table as `THR-LIFE-STORAGE`.
 13. **TOTP seed disclosure** (Session 37, ADR 0252). A dump of the control
     project's database, or a backup read with its cipher pass, reveals every
     enrolled second-factor seed, so the factor stops being a second factor for
@@ -249,6 +296,37 @@ technically bounded in this beta"* (D1971).
     (`test_control_sessions.py::test_no_seed_reaches_a_log_line`). Residual:
     seeds are plaintext at rest, because computing the code needs the key;
     encrypting them is `planned`, and ADR 0252 says so.
+14. **The reconciler as a standing root actor** (Session 38, ADR 0256). A root
+    process that deploys, retires and executes into containers on the
+    control plane's say-so is a path from a customer's request to root. Owed:
+    it runs only a CLOSED set of typed operations whose arguments are validated
+    against one schema before dispatch, builds every command as an argv list
+    from validated members, opens no socket and listens on no port
+    (`tests/contract/test_reconciler_dispatch.py::test_every_accepted_type_has_one_handler`,
+    `::test_an_invalid_argument_runs_nothing`,
+    `::test_every_argv_is_built_from_validated_members`,
+    `::test_no_shell_and_no_string_command`,
+    `::test_the_reconciler_opens_no_socket`); its claim functions are
+    executable by no database role, and an operation interrupted by a crash is
+    failed with its step and never run twice
+    (`tests/contract/test_reconciler_claim.py::test_the_claim_functions_are_executable_by_no_role`,
+    `::test_an_interrupted_operation_fails_and_is_never_reclaimed`); on the
+    deployment it holds no listener and no provider-administering credential
+    (`tests/deployment/test_session38_reconciler.py::test_the_reconciler_is_enabled_and_listens_nowhere`).
+    Residual: it and an operator's sheet are serialised by a rule, not a lock
+    (D2178). Moves into the table as `THR-OPN-RECONCILER`.
+15. **Slot confusion** (Session 38, ADR 0257). A creation lands in a slot that
+    was used, half-made or prepared for something else, so a customer inherits
+    another project's names, data or provider resources. Owed: a slot's state
+    is derived from what exists, three outcomes each, and only `ready` is
+    allocated; an interrupted creation quarantines its slot; `prepare` refuses
+    a slot already prepared, consumed or undeclared
+    (`tests/contract/test_slot_command.py::test_prepare_writes_a_valid_manifest_once`,
+    `::test_every_state_is_derived_with_its_reason`,
+    `::test_a_consumed_or_quarantined_slot_is_never_ready`,
+    `tests/contract/test_reconciler_claim.py::test_an_interrupted_creation_quarantines_its_slot`).
+    Residual: `quarantined` has no command that clears it -- the operator
+    retires the slot by hand. Moves into the table as `THR-LIFE-SLOT`.
 
 ## Scope
 
