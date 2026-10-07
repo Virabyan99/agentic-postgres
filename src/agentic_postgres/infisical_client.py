@@ -52,6 +52,26 @@ RETRY_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = (1.0, 3.0)
 TRANSIENT_HTTP_STATUSES = frozenset({502, 503, 504})
 
+#: Infisical Cloud's free plan allows 120 secret operations a minute (its
+#: published limit) and answers 429 past it. Measured on 2026-10-07 (D2139): the
+#: first boot with THREE projects made ~180 reads in ~20 s -- each project's unit
+#: materializes twice before Compose starts -- and beta's unit failed on a 429
+#: this client raised at once. A 429 is a request REFUSED, not performed, so an
+#: idempotent call waits and repeats it: `Retry-After` in delta-seconds is
+#: honoured up to the cap; anything else (absent, an HTTP-date, garbage) waits
+#: the default, long enough for a one-minute window to move. Counted apart from
+#: the transient attempts above, so a 429 never spends a timeout's retry.
+RATE_LIMITED_STATUS = 429
+RATE_LIMIT_ATTEMPTS = 6
+RATE_LIMIT_DEFAULT_WAIT_SECONDS = 20.0
+RATE_LIMIT_MIN_WAIT_SECONDS = 1.0
+RATE_LIMIT_MAX_WAIT_SECONDS = 60.0
+#: The most ONE client sleeps on 429s over its whole life, whatever each wait
+#: is. A unit's start has 600 s (`TimeoutStartSec`) and runs the materializer
+#: twice before `up --wait`, so two budgets and a cold start fit inside it; a
+#: limit that does not lift within the budget is reported, never waited out.
+RATE_LIMIT_BUDGET_SECONDS = 180.0
+
 #: Sent so that a server-side log can attribute a call without identifying a
 #: project. It carries no project key and no host identity on purpose.
 USER_AGENT = "agentic-postgres/2"
@@ -125,6 +145,23 @@ def _read_credential(path: Path) -> str:
     return value
 
 
+def _rate_limit_wait(headers: Any) -> float:
+    """Seconds to wait after a 429: `Retry-After` in delta-seconds, bounded.
+
+    Only the delta-seconds form is read. An HTTP-date, a negative or non-finite
+    number, or no header at all is the default -- never zero, which would make
+    the repeat part of the burst that was refused.
+    """
+    value = headers.get("Retry-After") if headers is not None else None
+    try:
+        seconds = float(value) if value is not None else None
+    except (TypeError, ValueError):
+        seconds = None
+    if seconds is None or seconds != seconds or seconds < 0:
+        return RATE_LIMIT_DEFAULT_WAIT_SECONDS
+    return min(max(seconds, RATE_LIMIT_MIN_WAIT_SECONDS), RATE_LIMIT_MAX_WAIT_SECONDS)
+
+
 class InfisicalClient:
     """Universal Auth login plus raw secret reads. Nothing else.
 
@@ -153,6 +190,8 @@ class InfisicalClient:
         self._timeout = timeout
         self._sleep = sleep
         self._token: str | None = None
+        # Seconds slept on 429s so far, against RATE_LIMIT_BUDGET_SECONDS.
+        self._rate_limit_waited = 0.0
         # Default verification, always. A client that could be told not to
         # verify is one call away from sending a credential to whatever
         # answered.
@@ -192,7 +231,9 @@ class InfisicalClient:
             request.add_header("Authorization", f"Bearer {self._token}")
 
         attempts = RETRY_ATTEMPTS if idempotent else 1
-        for attempt in range(1, attempts + 1):
+        attempt = 1
+        rate_limited = 0
+        while True:
             try:
                 # S310: the scheme was asserted https in __init__ and the host is
                 # fixed for the client's lifetime; only the path varies here.
@@ -202,8 +243,25 @@ class InfisicalClient:
                     payload = response.read()
                 break
             except urllib.error.HTTPError as exc:
+                if idempotent and exc.code == RATE_LIMITED_STATUS:
+                    wait = _rate_limit_wait(exc.headers)
+                    if (
+                        rate_limited < RATE_LIMIT_ATTEMPTS - 1
+                        and self._rate_limit_waited + wait <= RATE_LIMIT_BUDGET_SECONDS
+                    ):
+                        rate_limited += 1
+                        self._rate_limit_waited += wait
+                        self._sleep(wait)
+                        continue
+                    raise InfisicalError(
+                        f"{method} {path} failed with HTTP 429 (rate limited) after "
+                        f"{rate_limited + 1} attempts; this client has waited "
+                        f"{self._rate_limit_waited:g}s of its {RATE_LIMIT_BUDGET_SECONDS:g}s",
+                        status=exc.code,
+                    ) from None
                 if attempt < attempts and exc.code in TRANSIENT_HTTP_STATUSES:
                     self._sleep(RETRY_BACKOFF_SECONDS[attempt - 1])
+                    attempt += 1
                     continue
                 # The body is deliberately not included. On a failed auth call it
                 # can echo request fields, and this message reaches logs.
@@ -215,6 +273,7 @@ class InfisicalClient:
             except urllib.error.URLError as exc:
                 if attempt < attempts and isinstance(exc.reason, TimeoutError):
                     self._sleep(RETRY_BACKOFF_SECONDS[attempt - 1])
+                    attempt += 1
                     continue
                 raise InfisicalError(
                     f"{method} {path} could not reach the API: {exc.reason}"
@@ -226,6 +285,7 @@ class InfisicalClient:
                 # caught. Converted so ``status`` is None -- never "absent".
                 if attempt < attempts:
                     self._sleep(RETRY_BACKOFF_SECONDS[attempt - 1])
+                    attempt += 1
                     continue
                 raise InfisicalError(
                     f"{method} {path} timed out after {self._timeout:g}s"

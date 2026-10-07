@@ -318,3 +318,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0252](0252-accounts-by-invitation-organisations-roles-and-totp.md) | Accounts by invitation, organisations, roles and TOTP | 37 | Accepted |
 | [0253](0253-management-api-keys-the-v1-contract-and-the-clis-state.md) | Management API keys, the `/v1` contract and the CLI's state | 37 | Accepted |
 | [0254](0254-an-operation-type-is-accepted-only-when-its-ledger-row-is-available-or-beta.md) | An operation type is accepted only when its Ledger row is `available` or `beta`; a row's status moves with its evidence | 37 | Accepted |
+| [0255](0255-a-providers-rate-limit-is-waited-out-within-a-budget.md) | A provider's rate limit is waited out, within a budget | 37 | Accepted |

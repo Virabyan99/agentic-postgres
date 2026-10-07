@@ -13,6 +13,7 @@ that reports it did not work.
 
 from __future__ import annotations
 
+import email.message
 import inspect
 import json
 import urllib.error
@@ -389,3 +390,138 @@ def test_login_is_retried_on_a_transient_failure(monkeypatch: pytest.MonkeyPatch
     client = InfisicalClient("https://infisical.example.invalid", sleep=sleeps.append)
     client.login(Credential(client_id="an-identity", client_secret=SENTINEL))
     assert client.authenticated and responder.calls == 2 and len(sleeps) == 1
+
+
+# ---------------------------------------------------------------------------
+# The provider's rate limit on idempotent calls (D2139, Session 37 Run 11)
+# ---------------------------------------------------------------------------
+#
+# Measured on the host on 2026-10-07: the first reboot with three projects made
+# ~180 secret reads in ~20 s against Infisical Cloud's published 120 a minute,
+# and beta's unit failed on `GET /api/v3/secrets/raw/... failed with HTTP 429`,
+# which this client raised on the first answer. These proofs pin the repair: a
+# 429 on a read or a login waits -- `Retry-After` honoured within bounds, the
+# default otherwise -- and repeats, a bounded number of times and within one
+# budget per client; a 429 that does not lift is still an error carrying its
+# status; a non-idempotent call is never repeated; a 404 is untouched (above).
+
+
+def _rate_limited(retry_after: str | None = None) -> urllib.error.HTTPError:
+    headers = email.message.Message()
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return urllib.error.HTTPError(
+        url="https://infisical.example.invalid/api/v3/secrets/raw/X",
+        code=429,
+        msg="Too Many Requests",
+        hdrs=headers,
+        fp=None,
+    )
+
+
+def test_a_rate_limited_read_waits_for_retry_after_then_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responder = _Responder([_rate_limited("7")], {"secret": {"secretValue": "v"}})
+    monkeypatch.setattr(urllib.request, "urlopen", responder)
+    sleeps: list[float] = []
+    assert _read(_authenticated_client(sleeps)) == "v"
+    assert responder.calls == 2 and sleeps == [7.0]
+
+
+@pytest.mark.parametrize(
+    ("retry_after", "expected"),
+    [
+        (None, infisical_client.RATE_LIMIT_DEFAULT_WAIT_SECONDS),
+        ("Wed, 07 Oct 2026 05:34:00 GMT", infisical_client.RATE_LIMIT_DEFAULT_WAIT_SECONDS),
+        ("-3", infisical_client.RATE_LIMIT_DEFAULT_WAIT_SECONDS),
+        ("nan", infisical_client.RATE_LIMIT_DEFAULT_WAIT_SECONDS),
+        ("0", infisical_client.RATE_LIMIT_MIN_WAIT_SECONDS),
+        ("3600", infisical_client.RATE_LIMIT_MAX_WAIT_SECONDS),
+    ],
+)
+def test_a_retry_after_the_client_cannot_use_as_given_is_bounded(
+    monkeypatch: pytest.MonkeyPatch, retry_after: str | None, expected: float
+) -> None:
+    """Absent, a date, or garbage waits the default; zero is raised to the
+    minimum (a zero wait repeats into the refused burst); an hour is capped."""
+    responder = _Responder([_rate_limited(retry_after)], {"secret": {"secretValue": "v"}})
+    monkeypatch.setattr(urllib.request, "urlopen", responder)
+    sleeps: list[float] = []
+    assert _read(_authenticated_client(sleeps)) == "v"
+    assert sleeps == [expected]
+
+
+def test_a_rate_limit_that_never_lifts_is_an_error_carrying_429(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bounded by attempts, and still an error with its status -- never None,
+    never 404: the materializer must fail the run, not read the secret absent."""
+    responder = _Responder([_rate_limited("1")] * infisical_client.RATE_LIMIT_ATTEMPTS, {})
+    monkeypatch.setattr(urllib.request, "urlopen", responder)
+    sleeps: list[float] = []
+    with pytest.raises(InfisicalError) as caught:
+        _read(_authenticated_client(sleeps))
+    assert caught.value.status == 429
+    assert "rate limited" in str(caught.value)
+    assert responder.calls == infisical_client.RATE_LIMIT_ATTEMPTS
+    assert sleeps == [1.0] * (infisical_client.RATE_LIMIT_ATTEMPTS - 1)
+
+
+def test_one_client_never_sleeps_past_its_rate_limit_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The budget spans the client's life, not one call: a unit's start runs the
+    materializer twice inside TimeoutStartSec, so the sum is what is bounded. A
+    second read on a client whose budget is spent is refused without a sleep."""
+    maximum = infisical_client.RATE_LIMIT_MAX_WAIT_SECONDS
+    fits = int(infisical_client.RATE_LIMIT_BUDGET_SECONDS // maximum)
+    assert 0 < fits < infisical_client.RATE_LIMIT_ATTEMPTS - 1, "the budget must bind first"
+    responder = _Responder([_rate_limited("3600")] * (fits + 2), {})
+    monkeypatch.setattr(urllib.request, "urlopen", responder)
+    sleeps: list[float] = []
+    client = _authenticated_client(sleeps)
+    with pytest.raises(InfisicalError) as first:
+        _read(client)
+    assert first.value.status == 429 and sleeps == [maximum] * fits
+    assert sum(sleeps) <= infisical_client.RATE_LIMIT_BUDGET_SECONDS
+    with pytest.raises(InfisicalError) as second:
+        _read(client)
+    assert second.value.status == 429 and len(sleeps) == fits
+    assert responder.calls == fits + 2
+
+
+def test_a_rate_limit_does_not_spend_a_transient_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 429 and the D976 timeouts are counted apart: two timeouts after a 429
+    still converge on the third ordinary attempt."""
+    responder = _Responder(
+        [_rate_limited("2"), TimeoutError("t"), TimeoutError("t")],
+        {"secret": {"secretValue": "v"}},
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", responder)
+    sleeps: list[float] = []
+    assert _read(_authenticated_client(sleeps)) == "v"
+    assert responder.calls == 4
+    assert sleeps == [2.0, *infisical_client.RETRY_BACKOFF_SECONDS]
+
+
+def test_a_non_idempotent_call_is_not_repeated_on_429(monkeypatch: pytest.MonkeyPatch) -> None:
+    responder = _Responder([_rate_limited("1")], {})
+    monkeypatch.setattr(urllib.request, "urlopen", responder)
+    sleeps: list[float] = []
+    client = _authenticated_client(sleeps)
+    with pytest.raises(InfisicalError) as caught:
+        client._request("DELETE", "/api/v1/identities/x")
+    assert caught.value.status == 429
+    assert responder.calls == 1 and sleeps == []
+
+
+def test_login_waits_out_a_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every materializer run logs in first; on a boot of three projects the
+    login is as likely as any read to meet the limit."""
+    responder = _Responder([_rate_limited("5")], {"accessToken": "tok"})
+    monkeypatch.setattr(urllib.request, "urlopen", responder)
+    sleeps: list[float] = []
+    client = InfisicalClient("https://infisical.example.invalid", sleep=sleeps.append)
+    client.login(Credential(client_id="an-identity", client_secret=SENTINEL))
+    assert client.authenticated and responder.calls == 2 and sleeps == [5.0]
