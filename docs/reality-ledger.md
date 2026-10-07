@@ -12,11 +12,11 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 | Concept | Status | Built in session |
 |---|---|---|
-| [Accounts](#accounts) | `planned` | 37 |
-| [Organizations](#organizations) | `planned` | 37 |
-| [Management API keys](#api_keys) | `planned` | 37 |
-| [Management API (/api/v1)](#management_api) | `planned` | 37 |
-| [CLI against the hosted service](#cli_remote) | `planned` | 37 |
+| [Accounts](#accounts) | `beta` | 37 |
+| [Organizations](#organizations) | `beta` | 37 |
+| [Management API keys](#api_keys) | `beta` | 37 |
+| [Management API (/api/v1)](#management_api) | `beta` | 37 |
+| [CLI against the hosted service](#cli_remote) | `beta` | 37 |
 | [Web console](#console) | `planned` | 42 |
 | [Create a project](#projects_self_service) | `planned` | 38 |
 | [Delete a project](#project_deletion) | `planned` | 38 |
@@ -61,13 +61,15 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 ## Accounts
 
-`accounts` · **planned** · since Session 36
+`accounts` · **beta** · since Session 36
 
-**What a customer reads.** Not open yet. Accounts will be created by invitation only; there is no public signup.
+**What a customer reads.** By invitation only. A person who receives an invitation creates an account with a password and signs in to the management API; there is no public signup.
 
-**Today.** A project's auth service holds people and their sessions for that one project. No account spans projects, and nothing outside a project's own auth service knows who a person is.
+**Today.** Accounts live in the control project (control.agenticpostgresql.com), created only by accepting an invitation, and span the projects their organizations hold. Each project's own auth service still holds that project's people.
 
-**Stage 5.** An account in the control project, created when a person accepts an invitation: an account invitation the registry administrator minted, or a membership invitation an owner or admin minted for a role at or below their own (D1951, ADR 0252). Built in Session 37; not yet offered.
+*Customer-facing evidence:* `control_invitations`, `control_invitations_live`.
+
+**Stage 5.** An account in the control project, created when a person accepts an invitation: an account invitation the registry administrator minted, or a membership invitation an owner or admin minted for a role at or below their own (D1951, ADR 0252). Built and walked in Session 37; offered by invitation.
 
 **Eventually (not promised).** Self-service signup with verified email.
 
@@ -75,11 +77,13 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 ## Organizations
 
-`organizations` · **planned** · since Session 36
+`organizations` · **beta** · since Session 36
 
-**What a customer reads.** Not open yet. An organization will group people and projects, with the roles owner, admin, member and viewer.
+**What a customer reads.** An organization groups people and projects, with the roles owner, admin, member and viewer. Owners and admins sign in with a second factor (an authenticator app's six-digit codes).
 
-**Today.** There is no organization. The operator holds every project.
+**Today.** Organizations and memberships live in the control project; the operator adopts each deployed project into one with bin/control.sh adopt, and a member reads the projects of their organizations.
+
+*Customer-facing evidence:* `control_roles`, `control_totp_live`.
 
 **Stage 5.** Organizations and memberships in the control project's own migration set; TOTP required for owners and admins.
 
@@ -89,13 +93,15 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 ## Management API keys
 
-`api_keys` · **planned** · since Session 36
+`api_keys` · **beta** · since Session 36
 
-**What a customer reads.** Not open yet. A key will authorise management operations only and will never open a database.
+**What a customer reads.** A key reads your organizations and projects through the management API. It is shown once, never opens a database, and stops working when it is revoked or its owner leaves the organization.
 
-**Today.** No management key exists. An agent identity's secret opens that project's agent plane and nothing else.
+**Today.** Keys are minted by a signed-in person with read scopes only; a key can create nothing (every write route refuses a key). An agent identity's secret still opens that project's agent plane and nothing else.
 
-**Stage 5.** Keys shown once, stored as an id and a SHA-256 of 256 random bits, scoped from Session 37's four read scopes intersected with the owner's current role, minted only by a person, and refused on the next request once revoked or once the owner leaves (D1952, ADR 0253). Built in Session 37; not yet offered.
+*Customer-facing evidence:* `control_keys`, `control_keys_live`.
+
+**Stage 5.** Keys shown once, stored as an id and a SHA-256 of 256 random bits, scoped from Session 37's four read scopes intersected with the owner's current role, minted only by a person, and refused on the next request once revoked or once the owner leaves (D1952, ADR 0253). Built and walked in Session 37; offered by invitation.
 
 **Eventually (not promised).** Keys with expiry, rotation reminders and per-key usage.
 
@@ -103,11 +109,13 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 ## Management API (/api/v1)
 
-`management_api` · **planned** · since Session 36
+`management_api` · **beta** · since Session 36
 
-**What a customer reads.** Not open yet.
+**What a customer reads.** https://control.agenticpostgresql.com/api/v1 manages accounts, organizations, members, invitations and keys, and lists your projects. Creating a project is not available yet and says so.
 
-**Today.** Each project serves its own routes; nothing manages projects over HTTP. The operator manages them with bin/ commands over SSH.
+**Today.** One management API in the control project's app mode, frozen as a contract (contracts/control-openapi.canonical.json). Project operations other than reading are refused as not available (ADR 0254).
+
+*Customer-facing evidence:* `control_api_contract`, `control_plane_live`.
 
 **Stage 5.** One management API in the control project's app mode, frozen as a contract and checked like the other four.
 
@@ -117,13 +125,15 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 ## CLI against the hosted service
 
-`cli_remote` · **planned** · since Session 36
+`cli_remote` · **beta** · since Session 36
 
-**What a customer reads.** Not open yet. The apg command will sign in and act through the management API only.
+**What a customer reads.** The login, logout, context, org and project commands sign in with a password and a second factor, or with a key, and act through the management API only.
 
-**Today.** apg is a dispatcher over the checkout's bin/ commands, run on the host or against a local development cluster.
+**Today.** Five commands in the checkout's bin/ (login.sh, logout.sh, context.sh, org.sh, project.sh) are clients of /api/v1; the rest of apg is still a dispatcher over bin/, run on the host or against a local cluster.
 
-**Stage 5.** Five commands built in Session 37 as clients of /api/v1 -- login (password, key, accept, totp-enroll, totp-confirm), logout, context show, org (list, create, use, members, invite, set-role, remove, keys, key-create, key-revoke) and project (list, use, show); later sessions add branch, backup, compute, usage and plan. Not yet offered.
+*Customer-facing evidence:* `control_cli`, `control_keys_live`.
+
+**Stage 5.** Five commands built in Session 37 as clients of /api/v1 -- login (password, key, accept, totp-enroll, totp-confirm), logout, context show, org (list, create, use, members, invite, set-role, remove, keys, key-create, key-revoke) and project (list, use, show); later sessions add branch, backup, compute, usage and plan. Offered by invitation.
 
 **Eventually (not promised).** The same, plus completion and a published binary.
 

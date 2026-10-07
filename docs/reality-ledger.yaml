@@ -8,8 +8,10 @@
 # The fields are ADR 0247's. `customer_text` is the sentence a customer would
 # read; `today` is what the appliance does now for its operator. `today_evidence`
 # proves `today`; `evidence` proves a customer-facing `available` or `beta`
-# status and is empty for every other status (D2009). A row moves in the run
-# that builds the thing, never at a session's close.
+# status and is empty for every other status (D2009). A customer-facing row
+# moves with its evidence: once every claim it names reads `passed` in the
+# newest merged evidence document, which a session writes after its trip --
+# so in practice at the session's close (ADR 0254, amending ADR 0247; D2021).
 #
 # Session 36 writes today's truth: no customer exists, so every concept a
 # customer would use is `planned` (or `not_offered`, cut by decision), and the
@@ -23,21 +25,24 @@ rows:
   # -------------------------------------------------------------------------
   - id: accounts
     concept: Accounts
-    status: planned
+    status: beta
     customer_text: >-
-      Not open yet. Accounts will be created by invitation only; there is no
-      public signup.
+      By invitation only. A person who receives an invitation creates an account
+      with a password and signs in to the management API; there is no public
+      signup.
     today: >-
-      A project's auth service holds people and their sessions for that one
-      project. No account spans projects, and nothing outside a project's own
-      auth service knows who a person is.
+      Accounts live in the control project (control.agenticpostgresql.com),
+      created only by accepting an invitation, and span the projects their
+      organizations hold. Each project's own auth service still holds that
+      project's people.
     today_evidence: null
-    evidence: []
+    evidence: [control_invitations, control_invitations_live]
     stage5_reality: >-
       An account in the control project, created when a person accepts an
       invitation: an account invitation the registry administrator minted, or
       a membership invitation an owner or admin minted for a role at or below
-      their own (D1951, ADR 0252). Built in Session 37; not yet offered.
+      their own (D1951, ADR 0252). Built and walked in Session 37; offered by
+      invitation.
     eventual: Self-service signup with verified email.
     controls: []
     since_session: 36
@@ -45,13 +50,17 @@ rows:
 
   - id: organizations
     concept: Organizations
-    status: planned
+    status: beta
     customer_text: >-
-      Not open yet. An organization will group people and projects, with the
-      roles owner, admin, member and viewer.
-    today: There is no organization. The operator holds every project.
+      An organization groups people and projects, with the roles owner, admin,
+      member and viewer. Owners and admins sign in with a second factor (an
+      authenticator app's six-digit codes).
+    today: >-
+      Organizations and memberships live in the control project; the operator
+      adopts each deployed project into one with bin/control.sh adopt, and a
+      member reads the projects of their organizations.
     today_evidence: null
-    evidence: []
+    evidence: [control_roles, control_totp_live]
     stage5_reality: >-
       Organizations and memberships in the control project's own migration set;
       TOTP required for owners and admins.
@@ -62,21 +71,23 @@ rows:
 
   - id: api_keys
     concept: Management API keys
-    status: planned
+    status: beta
     customer_text: >-
-      Not open yet. A key will authorise management operations only and will
-      never open a database.
+      A key reads your organizations and projects through the management API.
+      It is shown once, never opens a database, and stops working when it is
+      revoked or its owner leaves the organization.
     today: >-
-      No management key exists. An agent identity's secret opens that project's
-      agent plane and nothing else.
+      Keys are minted by a signed-in person with read scopes only; a key can
+      create nothing (every write route refuses a key). An agent identity's
+      secret still opens that project's agent plane and nothing else.
     today_evidence: null
-    evidence: []
+    evidence: [control_keys, control_keys_live]
     stage5_reality: >-
       Keys shown once, stored as an id and a SHA-256 of 256 random bits, scoped
       from Session 37's four read scopes intersected with the owner's current
       role, minted only by a person, and refused on the next request once
-      revoked or once the owner leaves (D1952, ADR 0253). Built in Session 37;
-      not yet offered.
+      revoked or once the owner leaves (D1952, ADR 0253). Built and walked in
+      Session 37; offered by invitation.
     eventual: Keys with expiry, rotation reminders and per-key usage.
     controls: []
     since_session: 36
@@ -84,13 +95,17 @@ rows:
 
   - id: management_api
     concept: Management API (/api/v1)
-    status: planned
-    customer_text: Not open yet.
+    status: beta
+    customer_text: >-
+      https://control.agenticpostgresql.com/api/v1 manages accounts,
+      organizations, members, invitations and keys, and lists your projects.
+      Creating a project is not available yet and says so.
     today: >-
-      Each project serves its own routes; nothing manages projects over HTTP.
-      The operator manages them with bin/ commands over SSH.
+      One management API in the control project's app mode, frozen as a
+      contract (contracts/control-openapi.canonical.json). Project operations
+      other than reading are refused as not available (ADR 0254).
     today_evidence: null
-    evidence: []
+    evidence: [control_api_contract, control_plane_live]
     stage5_reality: >-
       One management API in the control project's app mode, frozen as a
       contract and checked like the other four.
@@ -101,21 +116,23 @@ rows:
 
   - id: cli_remote
     concept: CLI against the hosted service
-    status: planned
+    status: beta
     customer_text: >-
-      Not open yet. The apg command will sign in and act through the management
-      API only.
+      The login, logout, context, org and project commands sign in with a
+      password and a second factor, or with a key, and act through the
+      management API only.
     today: >-
-      apg is a dispatcher over the checkout's bin/ commands, run on the host or
-      against a local development cluster.
+      Five commands in the checkout's bin/ (login.sh, logout.sh, context.sh,
+      org.sh, project.sh) are clients of /api/v1; the rest of apg is still a
+      dispatcher over bin/, run on the host or against a local cluster.
     today_evidence: null
-    evidence: []
+    evidence: [control_cli, control_keys_live]
     stage5_reality: >-
       Five commands built in Session 37 as clients of /api/v1 -- login
       (password, key, accept, totp-enroll, totp-confirm), logout, context
       show, org (list, create, use, members, invite, set-role, remove, keys,
       key-create, key-revoke) and project (list, use, show); later sessions
-      add branch, backup, compute, usage and plan. Not yet offered.
+      add branch, backup, compute, usage and plan. Offered by invitation.
     eventual: The same, plus completion and a published binary.
     controls: []
     since_session: 36

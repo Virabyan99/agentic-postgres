@@ -597,6 +597,64 @@ Sampled under:
 
 The window runs from `down` to the deploy's 6b, so it includes the operator's pace between the lines (materialize and the shape check were typed by hand). A root-plane credential needs no `down` and costs nothing (ADR 0086).
 
+### Three projects on the CX23: the memory the control project took, and what is left
+
+**available 2,145 MiB with alpha-dev and beta-dev (2026-10-06T12:14:37Z) -> 1,624 MiB with control-prod added (2026-10-06T20:24:42Z), used 1,669 -> 2,189 MiB; `doctor capacity`: 912 MiB committed of 1,600 claimable across 3 projects, 1,582 MiB available, ceilings 9,312 MiB of mem_limit across 4 compose projects**
+
+Sampled under:
+
+- the 3,814 MB deployment host (Hetzner CX23, NOT rescaled -- D2032), no swap, 2 vCPU
+- release 1.15.0; the before reading at 1.14.0 (Run 8's rehearsal), the after reading once C3's second control deploy ended
+- s37-free.sh as op (`free -m`; FITS at >= 1,024 MiB available, D2042); doctor capacity as root (Sheet C4)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Both readings FIT D2042's 1,024 MiB margin. 'committed' charges each project's declared budget (control-prod at the defaults: 912 of 1,600, D2042), never the caps (D767); the ceilings figure includes the edge's compose project and is a sum of caps, not a reservation.
+
+### The control project's bring-up on the host: its deploys and its first full backup
+
+**the first deploy 183 s (C1b; the attempt before it stopped at step 6 after 55 s, exit 5, D2136), the ports render 5 s, the second deploy 172 s; the first full backup 5 min 32 s (32.7MB database, 4.2MB backup set); alpha-dev and beta-dev 0 down windows throughout**
+
+Sampled under:
+
+- the 3,814 MB deployment host (Hetzner CX23, NOT rescaled -- D2032), no swap, 2 vCPU
+- release 1.15.0, 2026-10-06 (C1 19:20Z, C1b 20:00Z, C3 20:18-20:22Z, backup 20:25-20:31Z)
+- wall time from script(1)'s start and done lines; the backup from pgBackRest's own timestamps
+- s37-probe-start.sh from the host as op through the public edge (Session 35's s35-r10-probe.py): one unauthenticated GET per class and project every 1.25 s, 10 targets, 2 s timeout (alpha's and beta's five classes)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+C1b includes the production certificate's issue on the one attempt (D2064) and the release's 39 migrations plus the control set's 3. A full backup prints nothing until it ends (Run 10's operator asked whether it hung at ~5 min).
+
+### A deploy's downtime per class, through the edge, on the host: 1.14.0 -> 1.15.0
+
+**beta-dev (R2b, 90 s): auth 17.1 s (bound 19.6 s), mcp 13.8 s (bound 16.2 s), storage 17.1 s (bound 19.6 s), rest 0 s, docs 0 s; alpha-dev 0 s on every class during it; alpha-dev's own deploy (R2a, 76 s) was not probed**
+
+Sampled under:
+
+- the 3,814 MB deployment host (Hetzner CX23, NOT rescaled -- D2032), no swap, 2 vCPU
+- release 1.15.0 at f58b471 over 1.14.0, 2026-10-06 (R2a 20:06-20:07Z, R2b 20:08-20:10Z), three projects on the host
+- s37-probe-start.sh from the host as op through the public edge (Session 35's s35-r10-probe.py): one unauthenticated GET per class and project every 1.25 s, 10 targets, 2 s timeout
+- down = a transport error, a 502/503/504 or Traefik's 404; bound = observed + one interval either side
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The same three services D2034 found tied to a new commit (auth, mcp, storage); rest and docs kept their containers. Alpha's window is unmeasured because R2a ran before the probe started (D2138); beta's stands for the release.
+
+### A cold start with three projects: the four units after a reboot
+
+**before ADR 0255 (1.15.0 at f58b471): the edge active at boot+49 s, alpha-dev +109 s, control-prod +99 s, and beta-dev FAILED at +69 s (Infisical HTTP 429, D2139); after it (00a73f4, then c3eec1d): all four active three readings in a row 156 s and 156 s after boot, every unit started by the boot itself, NRestarts 0**
+
+Sampled under:
+
+- the 3,814 MB deployment host (Hetzner CX23, NOT rescaled -- D2032), no swap, 2 vCPU
+- 2026-10-07: boots 05:32:10Z (f58b471), 06:41:04Z (00a73f4), 08:40:02Z (c3eec1d)
+- s37-units.sh as op: `systemctl is-active` every 10 s on the three project units and the edge; done = all four active three readings in a row; 'started by the boot' = the unit left inactive before multi-user.target was reached (D2140)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Each unit materializes its secrets twice before Compose (~30 reads each), so a boot of three is ~180 provider reads in ~20 s against Infisical Cloud's free-plan 120 a minute. Session 36's two-project boot took 124 s; three take ~156 s. Whether the client waited on a 429 in the later boots is not measured (its waits print nothing).
+
 ---
 
 ## What was not measured, and why
@@ -605,6 +663,18 @@ Listed rather than omitted. An envelope missing the scenarios nobody could
 run reads as an envelope of the whole system — which is the dishonest
 reporting this claim is most exposed to, arriving as a document that looks
 complete rather than as a claim that is false.
+
+### Alpha-dev's 1.15.0 deploy window, per class (Session 37 R2a)
+
+R2a ran before the probe was started (D2138); beta's R2b window stands for the release, which recreated the same three services.
+
+*Unblocked by: the next release's deploy on alpha-dev with the probe running first.*
+
+### Whether a boot of three projects meets the provider's rate limit
+
+ADR 0255's client waits on a 429 silently; the two boots after it took ~30 s longer than the morning's, which a wait would explain and does not prove (D2139).
+
+*Unblocked by: a counted wait in the materializer's output, or the provider's log.*
 
 ### The rescaled host's capacity and its deploy windows (Session 36's D1991)
 

@@ -1346,3 +1346,68 @@ same 3,814 MB CX23 as Session 35's.
    reaches move into the threat table with their requirements.
 4. **The rescale** (D2032), whenever the operator takes it — before Session
    38's slots and profiles re-derive the reserve (D1992).
+
+## 30. What Session 37 closed, what it left, and what Session 38 inherits
+
+**Session 37 is the control plane.** Twelve runs over two host sittings,
+`D2042`–`D2144`: thirty-one rows written at planning and **seventy-two written
+by executing it**, ADRs 0251–0255. `1.15.0` is deployed on all three projects
+— alpha-dev, beta-dev and **control-prod at `control.agenticpostgresql.com`** —
+swept, merged and tagged at `c3eec1d`, the deploy, the sweep and the tag on one
+commit (D1425; the commit moved twice on day 2, from `f58b471` to `00a73f4` when
+the first reboot with three projects failed beta, D2139, and to `c3eec1d` when
+the first sweep found two proofs that had never read a 1.15.0 document,
+D2142–D2143). The merged evidence reads **219 claims: 217 passed, 1 not_run, 1
+failed** — §7's prediction exactly. All thirteen claims the session added
+passed, and five Reality Ledger rows moved to `beta` on them.
+
+**The sentence this session would most want carried forward: a host that
+cannot come back from its own reboot is the availability claim, and the sweep
+cannot see it.** The first reboot with three projects failed beta's unit on an
+Infisical 429 — each unit reads its secrets twice before Compose, ~180 reads in
+~20 s against a free plan's 120 a minute — and the operator's `systemctl start`
+would have satisfied every assertion of the sweep's reboot proof, because the
+sweep restarts alpha's and beta's units itself before that proof runs (D2140).
+ADR 0255 waits a 429 out within a budget; the evidence that every unit came back
+**by itself** is a systemd reading taken after the reboot and before the sweep
+(each unit left `inactive` before `multi-user.target`), and two boots in a row
+read it clean.
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **The control plane** (stage plan §5 *Session 37*, D1950–D1952) | **Built and walked on production.** A project the product deploys (`control-prod`, its own migration set, `APP_MODE=control`, ADR 0251); accounts by invitation, organisations with four roles, TOTP for owners and admins (ADR 0252); management API keys, `/v1` frozen as a fifth contract, five CLI commands as its clients (ADR 0253); the registry adopted from deployed documents by root (`bin/control.sh`); operation types accepted only when their Ledger row allows (ADR 0254). The operator walked it: `control-admin`, their own account and organisation, a member with a read-only key listing the three projects. |
+| **D1986** — the identity questions Session 36 parked | Accounts now live in the control project. A project's own humans are still that project's (never pruned, by decision). |
+| **D1978 / ADR 0246** — the threats Session 37's surface reaches | Five `THR-CTL` rows in the threat table with their requirements. |
+| **The Reality Ledger** (D2055) | `accounts`, `organizations`, `api_keys`, `management_api`, `cli_remote` → `beta`, each on claims that passed; `controls` empty (no operation type acts on them). |
+| **D2139** — a boot of three projects | ADR 0255; two clean boots after it. |
+| **D2142 / D2143** — two proofs that never read a 1.15.0 document | Repaired and executed offline against the real deployed documents before the second sweep. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **D2137 / D2144** — control-prod serves REST although its manifest disables it | **Deferred to Session 38 by the operator**: the repair reaches the deploy's served-document read, `api.status`, the doctor and the schema, and only a deploy measures it. Until then the control project's empty `api` schema answers behind PostgREST's grants. |
+| **D2140** — a sweep that destroys the state a later proof reads | The reboot proof is left as it is (a stricter one would be false inside the sweep); the post-reboot systemd reading is the evidence. The class is Session 38's plan's. |
+| **D2141** — the registry is a snapshot until re-adopted | A deploy does not refresh its own row; Session 38's `project.*` operations own the registry. |
+| **D2142's class** — a document field only a live sweep classifies | Third time (D1029, D1853); an offline check over a rendered document is owed. |
+| **Whether a boot meets the rate limit** | ADR 0255's waits print nothing; `capacity.UNMEASURED` names it. Alpha's 1.15.0 window too (D2138). |
+| **D2032 / D1991** — the rescale | Not taken; three projects now run on the CX23 with 1,624 MiB available. |
+| **Beta's three rotations, D1936 / D2005, D1547, D1985, D2020 / D2025, D2031, D1642, D1798, D1869, D1871, D1722 / D1806, D1784, D1792, ADR 0241's bound** | Unchanged from §29. |
+| `documented_path` | **`failed` by decision** (D1935): the person's walk is Session 42's. |
+| `replacement_host_restore` | **`not_run` by decision** (D1028). |
+
+### What Session 38 inherits, in order
+
+1. **Managed projects** (stage plan §5 *Session 38*): `project.create` and its
+   kin, on the operations table Session 37 left empty; **manifest schema 10 is
+   `compute`** (9 is `control`, D2044).
+2. **D2137 / D2144**, priced with its readers and measured with 38's deploy.
+3. **The registry's freshness** (D2141) and **the sweep's self-overwriting
+   state** (D2140) as plan rows; **an offline leaf-classification check**
+   (D2142).
+4. **The walk's friction**: the TOTP sheets owe the QR route
+   (`totp-enroll --output` + a QR), `--password-file`, and *do not paste the
+   QR* — the operator pasted one and a factor was reset.
+5. **The rescale** (D2032), before 38's slots re-derive the reserve (D1992).
