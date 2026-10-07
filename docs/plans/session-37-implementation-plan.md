@@ -1,6 +1,6 @@
 # Session 37 — The control plane
 
-**Status: EXECUTING. Runs 1–3 DONE 2026-10-04, Runs 4–10 DONE 2026-10-06, Run 11 IN PROGRESS 2026-10-07 (rows D2073–D2143, ADR 0255; NEXT FREE D2144, ADR 0256).** The second session
+**Status: EXECUTING. Runs 1–3 DONE 2026-10-04, Runs 4–10 DONE 2026-10-06, Run 11 DONE 2026-10-07, 1.15.0 tagged on c3eec1d (rows D2073–D2143, ADR 0255; NEXT FREE D2144, ADR 0256).** The second session
 of Stage 5 (`docs/plans/stage-5-plan.md` §3). Twelve runs and **two sittings
 on two days** — the release deployed on alpha and beta and the control project
 brought up beside them (day 1), then a person invited, an organisation, a key,
@@ -1979,8 +1979,15 @@ and in all three deployed documents.
     sha> -F <message file>`; `git push origin 1.15.0`; `git ls-remote origin
     refs/tags/1.15.0` read back.
 
-**Done.** *(the executor writes it: every claim's status from the merged
-document, the walk's transcript locations, rows)*
+**Done.** 2026-10-07 (the host's day 2). **1.15.0 TAGGED on `c3eec1d`** (tag object `b081aab`, pushed, read back) -- NOT f58b471: two repairs moved the deploy commit, and the deploy, the sweep and the tag stayed on one commit (D1425). **Merged `evidence/session-37.json`: 219 claims, 217 passed, `documented_path` failed (D1935), `replacement_host_restore` not_run (D1028), exit 5 -- exactly §7's expectation.** Host 1,096 passed / 1 failed / 1 skipped (the replacement-host proof); external 29 / 0 / 8; offline 74 / 74 (CI run 37591064970's artifact, `checkout_commit` c3eec1d). Scripts and transcripts: WSL `~/s37/run11/` (`NOTES.md` the day's log), host `/home/op/s37-*`.
+
+- **W1** (control-admin): logged in, TOTP enrolled and confirmed, invitation minted. It cost ~45 minutes of the operator's time: the sheet was first run in the SSH window; a setup key typed into Apple Passwords by hand did not match (`second_factor_invalid` ×2; host clock NTP-synced, no lockout); the route that worked is `totp-enroll --output FILE` + `qrencode -t ansiutf8` scanned with the phone's camera; a password pasted at the hidden prompt failed `401 authentication_failed`, and `--password-file` (the root file copied by `install -o op` + scp, the host copy shredded) worked. Owed to the sheets: the QR route, `--password-file`, and *do not paste the QR*.
+- **W2**: `andranik` (owner) and the organisation **Virabyan** `10234b92-…`. **The operator pasted the QR (the seed) into the conversation**; `bin/control.sh totp-reset` removed that factor and a new one was enrolled by QR (the reset leaves sessions; the re-enrol proves it ran).
+- **A1**: adopt × 3, `registry` agrees × 3. **W3**: `member-s37`, key `5505ad978d259996` (organizations:read, projects:read), `project.sh list` → the three. **PR1** + `s37-probe-enrol.py` exit 0 (`probe-owner-s37`, organisation `probe-s37`, `~/s37/probe.json` 0600); `s37-projects-read.py` exit 0: the member's key → 403 `human_session_required` (D2127), the probe owner's session → 409 `not_available` / `projects_self_service` (D2054).
+- **B1, the first reboot with three projects: beta FAILED at boot** (exit 8, Infisical HTTP 429) -- **D2139**, the stop condition; the operator started beta by hand and chose the repair: **ADR 0255** (a 429 waited out within a budget), `00a73f4`, battery 8/8, CI green (run 37578677343); shipped; redeployed × 3; **the second reboot: all four units back BY THEMSELVES** (each left `inactive` before `multi-user.target`, NRestarts 0, all active at boot+136 s) -- the systemd reading D2140 names, because the sweep's own proofs restart alpha's and beta's units before its reboot proof.
+- **The first sweep** (00a73f4, 06:45–07:22Z): 1,093 / 4 / 1 -- `documented_path` and three new: the registry `differs: source_commit` (A1 predated the redeploy, **D2141**), `control.enabled` unclassified (**D2142**, the third facility flag), the removal proof counting a by-design `unavailable` route (**D2143**). The two proofs repaired in `c3eec1d`, executed offline against the three REAL deployed documents (the originals reproduce the sweep, the repairs pass, two controls still fail), CI green (run 37591064970); shipped; redeployed × 3; **A1 re-run** (agrees × 3 on c3eec1d); the third reboot: all four back by themselves again (boot+136 s).
+- **The second sweep** (c3eec1d, 08:43–09:24Z): 1,096 / 1 / 1, only `documented_path` failed; `port_allocation`, `boot_convergence` and `control_plane_live` passed. External (`s37-external.sh`, detached, ephemeral agent) exit 0; the merge exit 5 as expected.
+- **Unmeasured**: whether the client actually waited on a 429 during the second and third boots (its waits print nothing; each boot took ~30 s longer than the morning's). The deploy windows of D1/D2 were not probed (D2034's figures stand). Rows D2139–D2143, ADR 0255. NEXT FREE: D2144, ADR 0256.
 
 ### Run 12 — the close
 
