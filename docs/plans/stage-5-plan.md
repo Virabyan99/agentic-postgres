@@ -46,8 +46,12 @@ STAGE 5 IS EXECUTING. SESSION 37 CLOSED 2026-10-07: 1.15.0 deployed on all
                 written 2026-10-03 at 42bf306.
 DIRECTION       HOSTED (D1946). Session 36 paid the preconditions; Session 37
                 built the control plane (ADRs 0251-0255).
-SESSIONS        36-42 (D1945). 36, 37 DONE; NEXT: 38, managed projects
-                (project.create on the operations table 37 left empty).
+SESSIONS        36-42 (D1945). 36, 37 DONE; 38, managed projects, PLANNED
+                2026-10-07 (docs/plans/session-38-implementation-plan.md,
+                D2145-D2188, ADRs 0256-0261): on the CX23 with ONE customer
+                slot; the rescale or a move owed before 41 (D2145); idle
+                sleep deferred to 41 (D2147). Next free after it: D2189,
+                ADR 0262.
 CURRENT_SESSION 37. Moves 38 -> 42, all-or-nothing per session (D690).
 template_version 1.15.0. host.yaml schema 3. Outputs v20, project manifest 9
                 (9 is `control`, so Session 38's `compute` is 10 -- D2044),
