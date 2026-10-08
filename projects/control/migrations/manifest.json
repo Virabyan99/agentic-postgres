@@ -42,6 +42,16 @@
         "auth_service"
       ],
       "description": "The project registry, adopted from deployed documents by root through control_adopt_project (invoker-rights, granted to nobody, D2068), and the operations table Session 38 fills -- no function inserts an operation, because no operation type is accepted while its Reality Ledger row is planned (ADR 0254, D2054). Members read their organisations' rows."
+    },
+    {
+      "version": "20261007120004",
+      "name": "control_operations",
+      "template": "templates/0004-control-operations.sql",
+      "placeholders": [
+        "object_owner",
+        "auth_service"
+      ],
+      "description": "Operations a member requests and the reconciler executes (Session 38; ADR 0256, ADR 0259): the operations table widened (claim, attempt, step, result, the one-time result secret) with two partial unique indexes -- one non-terminal operation per project, one non-terminal creation per organisation (D2166); the registry widened (display name, slot, region, profile, app route, deleted_at); app.control_slots, the reconciler's last reading of the host's slots (D2160); control_request_operation, control_cancel_operation, control_take_result_secret, control_ready_slot_count and control_project_operations granted to the identity service; the reconciler's claim, advance, finish, interrupted, record_slots and mark_deleted, and control_adopt_project re-created wider, SECURITY INVOKER and granted to nobody (D2093); the key vocabulary gains projects:write (D2165)."
     }
   ]
 }

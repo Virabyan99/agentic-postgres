@@ -39,6 +39,7 @@ TABLES = {
     "control_keys",
     "control_projects",
     "control_operations",
+    "control_slots",
 }
 #: Every function the identity service may execute, and no other (ADR 0251).
 GRANTED = {
@@ -67,11 +68,29 @@ GRANTED = {
     "control_get_project",
     "control_list_operations",
     "control_get_operation",
+    # Session 38 (ADR 0256): requesting, cancelling, the one-time secret, the
+    # slot reading and the history a state is derived from.
+    "control_request_operation",
+    "control_cancel_operation",
+    "control_take_result_secret",
+    "control_ready_slot_count",
+    "control_project_operations",
 }
-#: The operator's three, run by root through `bin/control.sh` (D2068).
-OPERATOR = {"control_adopt_project", "control_registry_rows", "control_totp_reset"}
+#: Root's, never granted: the operator's three through `bin/control.sh`
+#: (D2068) and the reconciler's (D2093, D2151).
+OPERATOR = {
+    "control_adopt_project",
+    "control_registry_rows",
+    "control_totp_reset",
+    "control_claim_operation",
+    "control_advance_operation",
+    "control_finish_operation",
+    "control_interrupted_operations",
+    "control_record_slots",
+    "control_mark_deleted",
+}
 #: The helpers that run only inside the functions above.
-HELPERS = {"control_enter", "control_require_role", "control_role_rank"}
+HELPERS = {"control_enter", "control_require_role", "control_role_rank", "control_result_members"}
 
 
 def _set() -> migrations.MigrationSet:
@@ -294,7 +313,7 @@ def test_the_control_example_renders_as_the_control_plane() -> None:
         assert outputs["control"] == {"enabled": True}
         assert outputs["routes"]["control"] == "https://fixture-control-dev.test/api/v1"
         assert outputs["migrations"]["project_set"]["root"] == "projects/control"
-        assert outputs["migrations"]["project_set"]["count"] == 3
+        assert outputs["migrations"]["project_set"]["count"] == 4
         assert outputs["storage"]["enabled"] is False
         values = dict(
             line.split("=", 1)
@@ -305,7 +324,7 @@ def test_the_control_example_renders_as_the_control_plane() -> None:
         assert values["CONTROL_ROUTE_PATH"] == "/api/v1"
         assert values["API_CONTROL_PATH"] == "/api"
         rendered_set = sorted(p.name for p in (directory / "migrations-project").glob("*.sql"))
-        assert len(rendered_set) == 3, rendered_set
+        assert len(rendered_set) == 4, rendered_set
     finally:
         # CLAUDE.md §1: a proof that renders deletes what it published.
         shutil.rmtree(directory, ignore_errors=True)

@@ -622,3 +622,58 @@ class NotAvailableResponse(BaseModel):
 
     error: Literal["not_available"]
     ledger_row: str
+
+
+# ---------------------------------------------------------------------------
+# Session 38: the project writes (ADR 0256, D2154)
+#
+# These mirror `schemas/operation-arguments.schema.json` -- the file the
+# reconciler validates every row against before dispatch -- and
+# `test_operation_types.py` holds the two equal on every example. The
+# patterns use `$`, which in pydantic's regex engine is the end of the input;
+# the schema writes the same end as `(?![\s\S])`, because Python's `re.search`
+# lets `$` match before a final newline (D2199).
+# ---------------------------------------------------------------------------
+
+ComputeProfile = Literal["small", "standard", "large"]
+
+
+class CreateProjectRequest(_Strict):
+    """`POST /v1/projects`: the organisation, the project's display name, its
+    compute profile, the first administrator's username, and the SHA-256 of
+    the handoff token the CLI keeps (ADR 0260) -- never the token."""
+
+    organization: UUID
+    name: str = Field(pattern=r"^[A-Za-z0-9 ._-]{1,48}$")
+    profile: ComputeProfile
+    admin_username: str = Field(pattern=r"^[a-z][a-z0-9_.-]{2,62}$")
+    handoff_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ResizeProjectRequest(_Strict):
+    """`PUT /v1/projects/{key}/compute`: the profile to move to (ADR 0258)."""
+
+    profile: ComputeProfile
+
+
+class OperationAcceptedResponse(BaseModel):
+    """`202`: the operation recorded, `pending`; follow it at `/v1/operations/{id}`."""
+
+    operation: dict[str, object]
+
+
+class CapacityExhaustedResponse(BaseModel):
+    """No room: `reason` is `no_slot` (the API's reading, before any row) or
+    `admission` (the reconciler's, as an operation's outcome) -- D2160."""
+
+    error: Literal["capacity_exhausted"]
+    reason: Literal["no_slot", "admission"]
+    message: str
+
+
+class ConflictResponse(BaseModel):
+    """A non-terminal operation already holds the project, or the
+    organisation's creation, and this is its id (D2166)."""
+
+    error: Literal["conflict"]
+    operation: str | None = None

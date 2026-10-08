@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/operation-arguments.schema.json",
+  "title": "Agentic Postgres operation arguments",
+  "description": "An operation as the reconciler reads it from the control plane: its type and its typed arguments (D2154, ADR 0256). One branch per type the reconciler executes, every object closed, every string a pattern -- no input accepts a command, a path or a shell fragment. The control mode validates a request against the mirror of this file in services/auth-api/app/models.py before the row is written; the reconciler validates the row against this file before dispatch, and a row that fails is finished failed invalid_request with nothing run. A project's key is the row's project_key, never an argument. Every pattern ends in (?![\\s\\S]) rather than $: Python's re.search lets $ match before a final newline, and an argument that reaches an argv must not carry one (D2199).",
+  "type": "object",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "arguments"],
+      "properties": {
+        "type": { "const": "project.create" },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "profile", "admin_username", "handoff_sha256"],
+          "properties": {
+            "name": { "type": "string", "pattern": "^[A-Za-z0-9 ._-]{1,48}(?![\\s\\S])", "description": "The project's display name (D2180): stored in control_projects.display_name and nowhere else -- never a key, a role or a host." },
+            "profile": { "$ref": "#/$defs/profile" },
+            "admin_username": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,62}(?![\\s\\S])", "description": "The project's first administrator (ADR 0260): the one argument besides the profile that reaches an argv." },
+            "handoff_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}(?![\\s\\S])", "description": "The SHA-256 of the handoff token the requester's CLI keeps; the token never reaches the control plane (ADR 0260)." }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "arguments"],
+      "properties": {
+        "type": { "const": "project.resize" },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["profile"],
+          "properties": { "profile": { "$ref": "#/$defs/profile" } }
+        }
+      }
+    },
+    { "$ref": "#/$defs/no_arguments", "properties": { "type": { "const": "project.sleep" } } },
+    { "$ref": "#/$defs/no_arguments", "properties": { "type": { "const": "project.wake" } } },
+    { "$ref": "#/$defs/no_arguments", "properties": { "type": { "const": "project.export" } } },
+    { "$ref": "#/$defs/no_arguments", "properties": { "type": { "const": "project.delete" } } }
+  ],
+  "$defs": {
+    "profile": {
+      "description": "A compute profile (ADR 0258): compute_profiles.PROFILE_NAMES.",
+      "enum": ["small", "standard", "large"]
+    },
+    "no_arguments": {
+      "description": "A type whose only subject is the row's project_key.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "arguments"],
+      "properties": {
+        "type": { "type": "string" },
+        "arguments": { "type": "object", "additionalProperties": false, "maxProperties": 0 }
+      }
+    }
+  }
+}

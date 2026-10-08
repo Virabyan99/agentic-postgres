@@ -478,7 +478,8 @@ def health_paths() -> tuple[str, ...]:
 def control_paths() -> tuple[str, ...]:
     """The management API's paths (Session 37, ADR 0251), as the control mode
     serves them -- the control router strips `{api}`, so `/api/v1/me` arrives
-    as `/v1/me`. Run 5 added the keys, projects and operations paths."""
+    as `/v1/me`. Run 5 added the keys, projects and operations paths; Session 38
+    the project writes and the cancel (ADR 0256)."""
     return (
         "/v1/invitations",
         "/v1/invitations/accept",
@@ -487,6 +488,7 @@ def control_paths() -> tuple[str, ...]:
         "/v1/me/totp/confirm",
         "/v1/operations",
         "/v1/operations/{operation}",
+        "/v1/operations/{operation}/cancel",
         "/v1/organizations",
         "/v1/organizations/{organization}",
         "/v1/organizations/{organization}/invitations",
@@ -497,6 +499,10 @@ def control_paths() -> tuple[str, ...]:
         "/v1/organizations/{organization}/members/{user}",
         "/v1/projects",
         "/v1/projects/{key}",
+        "/v1/projects/{key}/compute",
+        "/v1/projects/{key}/export",
+        "/v1/projects/{key}/sleep",
+        "/v1/projects/{key}/wake",
         "/v1/sessions",
         "/v1/sessions/current",
         "/v1/sessions/refresh",

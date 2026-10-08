@@ -16,6 +16,61 @@
         "title": "AuthenticationFailedResponse",
         "type": "object"
       },
+      "CapacityExhaustedResponse": {
+        "description": "No room: `reason` is `no_slot` (the API's reading, before any row) or\n`admission` (the reconciler's, as an operation's outcome) -- D2160.",
+        "properties": {
+          "error": {
+            "const": "capacity_exhausted",
+            "title": "Error",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "no_slot",
+              "admission"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "reason",
+          "message"
+        ],
+        "title": "CapacityExhaustedResponse",
+        "type": "object"
+      },
+      "ConflictResponse": {
+        "description": "A non-terminal operation already holds the project, or the\norganisation's creation, and this is its id (D2166).",
+        "properties": {
+          "error": {
+            "const": "conflict",
+            "title": "Error",
+            "type": "string"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ConflictResponse",
+        "type": "object"
+      },
       "ControlRefusedResponse": {
         "description": "A management API refusal: one fixed word (ADR 0251).",
         "properties": {
@@ -188,6 +243,21 @@
           "ledger_row"
         ],
         "title": "NotAvailableResponse",
+        "type": "object"
+      },
+      "OperationAcceptedResponse": {
+        "description": "`202`: the operation recorded, `pending`; follow it at `/v1/operations/{id}`.",
+        "properties": {
+          "operation": {
+            "additionalProperties": true,
+            "title": "Operation",
+            "type": "object"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "title": "OperationAcceptedResponse",
         "type": "object"
       },
       "SessionTokenResponse": {
@@ -752,6 +822,74 @@
         "summary": "One operation of the caller's organisations"
       }
     },
+    "/v1/operations/{operation}/cancel": {
+      "post": {
+        "description": "The person who requested it, or an admin or owner of its organisation. Only a `pending` operation is cancelled; one already running or finished is `conflict`.",
+        "operationId": "cancel_operation_v1_operations__operation__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation",
+            "required": true,
+            "schema": {
+              "title": "Operation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The operation, `cancelled`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictResponse"
+                }
+              }
+            },
+            "description": "`conflict`: not pending."
+          }
+        },
+        "summary": "Cancel a pending operation"
+      }
+    },
     "/v1/organizations": {
       "get": {
         "description": "Only organisations the caller belongs to; there is no other listing.",
@@ -1093,7 +1231,7 @@
         "summary": "The organisation's keys the caller may see"
       },
       "post": {
-        "description": "`apg_<id>_<secret>`, stored as its id and the SHA-256 of its secret. Its scopes come from the vocabulary (`organizations:read`, `members:read`, `projects:read`, `operations:read`) and must be within the minter's role. On every request a key's authority is its scopes intersected with its owner's current role, in this organisation only; a revoked key, or one whose owner left, is refused.",
+        "description": "`apg_<id>_<secret>`, stored as its id and the SHA-256 of its secret. Its scopes come from the vocabulary (`organizations:read`, `members:read`, `projects:read`, `operations:read`, `projects:write`) and must be within the minter's role -- a viewer's key cannot hold `projects:write`. On every request a key's authority is its scopes intersected with its owner's current role, in this organisation only; a revoked key, or one whose owner left, is refused.",
         "operationId": "mint_key_v1_organizations__organization__keys_post",
         "parameters": [
           {
@@ -1578,16 +1716,79 @@
         "summary": "The projects of the caller's organisations"
       },
       "post": {
-        "description": "Refused, and nothing is recorded: a project is created only when its ledger row, `projects_self_service`, is available or in beta. The answer names the row.",
+        "description": "Member and above, a person only. `name` is a display name; `profile` the compute profile; `admin_username` the project's first administrator, who claims the account with the token whose SHA-256 is `handoff_sha256` -- the token itself never reaches this plane. With no slot ready the answer is `capacity_exhausted` (`reason: no_slot`) and nothing is recorded; one creation per organisation is in flight at a time (`conflict`). Refused `not_available` while `projects_self_service` is not offered.",
         "operationId": "create_project_v1_projects_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "`POST /v1/projects`: the organisation, the project's display name, its\ncompute profile, the first administrator's username, and the SHA-256 of\nthe handoff token the CLI keeps (ADR 0260) -- never the token.",
+                "properties": {
+                  "admin_username": {
+                    "pattern": "^[a-z][a-z0-9_.-]{2,62}$",
+                    "title": "Admin Username",
+                    "type": "string"
+                  },
+                  "handoff_sha256": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "title": "Handoff Sha256",
+                    "type": "string"
+                  },
+                  "name": {
+                    "pattern": "^[A-Za-z0-9 ._-]{1,48}$",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "organization": {
+                    "format": "uuid",
+                    "title": "Organization",
+                    "type": "string"
+                  },
+                  "profile": {
+                    "enum": [
+                      "small",
+                      "standard",
+                      "large"
+                    ],
+                    "title": "Profile",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "organization",
+                  "name",
+                  "profile",
+                  "admin_username",
+                  "handoff_sha256"
+                ],
+                "title": "CreateProjectRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAcceptedResponse"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "Recorded, `pending`: the reconciler executes it; follow it at `/v1/operations/{id}`."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
           },
           "401": {
             "content": {
@@ -1609,6 +1810,86 @@
             },
             "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapacityExhaustedResponse"
+                }
+              }
+            },
+            "description": "`capacity_exhausted` with `reason: no_slot`; or `conflict` naming the creation in flight; or `not_available` naming the ledger row."
+          }
+        },
+        "summary": "Create a project in a prepared slot"
+      }
+    },
+    "/v1/projects/{key}": {
+      "delete": {
+        "description": "Admin and above, a person only. The project's containers and data are removed; its backups are kept by the operator. A deleted project is never reissued.",
+        "operationId": "delete_project_v1_projects__key__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAcceptedResponse"
+                }
+              }
+            },
+            "description": "Recorded, `pending`: the reconciler executes it; follow it at `/v1/operations/{id}`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
           "409": {
             "content": {
               "application/json": {
@@ -1617,13 +1898,11 @@
                 }
               }
             },
-            "description": "`not_available`, with the ledger row that says why."
+            "description": "`not_available`, with the ledger row that says why: the operation is not offered yet, and nothing is recorded. Or `conflict` (ConflictResponse), with the id of the operation already holding the project."
           }
         },
-        "summary": "Create a project -- not available yet"
-      }
-    },
-    "/v1/projects/{key}": {
+        "summary": "Delete a project"
+      },
       "get": {
         "description": "A foreign project and a missing one are one `not_found`.",
         "operationId": "get_project_v1_projects__key__get",
@@ -1679,6 +1958,323 @@
           }
         },
         "summary": "One project of the caller's organisations"
+      }
+    },
+    "/v1/projects/{key}/compute": {
+      "put": {
+        "description": "Member and above, or a key holding `projects:write`. Resizing restarts the database and the services that use it; `message` says how long that was measured to take, or that it has not been measured on this server yet. A profile the server has no room for fails the operation with `capacity_exhausted` (`reason: admission`), and the project stays as it was.",
+        "operationId": "resize_project_v1_projects__key__compute_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "`PUT /v1/projects/{key}/compute`: the profile to move to (ADR 0258).",
+                "properties": {
+                  "profile": {
+                    "enum": [
+                      "small",
+                      "standard",
+                      "large"
+                    ],
+                    "title": "Profile",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "profile"
+                ],
+                "title": "ResizeProjectRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAcceptedResponse"
+                }
+              }
+            },
+            "description": "Recorded, `pending`: the reconciler executes it; follow it at `/v1/operations/{id}`."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAvailableResponse"
+                }
+              }
+            },
+            "description": "`not_available`, with the ledger row that says why: the operation is not offered yet, and nothing is recorded. Or `conflict` (ConflictResponse), with the id of the operation already holding the project."
+          }
+        },
+        "summary": "Change a project's compute profile"
+      }
+    },
+    "/v1/projects/{key}/export": {
+      "post": {
+        "description": "Member and above, a person only. An archive of the project's own schemas; when the operation succeeds, `GET /v1/operations/{id}` returns its `download_url` -- valid at most 15 minutes -- ONCE, to the person who asked.",
+        "operationId": "export_project_v1_projects__key__export_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAcceptedResponse"
+                }
+              }
+            },
+            "description": "Recorded, `pending`: the reconciler executes it; follow it at `/v1/operations/{id}`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAvailableResponse"
+                }
+              }
+            },
+            "description": "`not_available`, with the ledger row that says why: the operation is not offered yet, and nothing is recorded. Or `conflict` (ConflictResponse), with the id of the operation already holding the project."
+          }
+        },
+        "summary": "Export a project's data"
+      }
+    },
+    "/v1/projects/{key}/sleep": {
+      "post": {
+        "description": "Member and above, or a key holding `projects:write`. Its containers are stopped and kept; while it sleeps a request to it is answered by the edge's 404, and its last restore point is the moment it went to sleep.",
+        "operationId": "sleep_project_v1_projects__key__sleep_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAcceptedResponse"
+                }
+              }
+            },
+            "description": "Recorded, `pending`: the reconciler executes it; follow it at `/v1/operations/{id}`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAvailableResponse"
+                }
+              }
+            },
+            "description": "`not_available`, with the ledger row that says why: the operation is not offered yet, and nothing is recorded. Or `conflict` (ConflictResponse), with the id of the operation already holding the project."
+          }
+        },
+        "summary": "Put a project to sleep"
+      }
+    },
+    "/v1/projects/{key}/wake": {
+      "post": {
+        "description": "Member and above, or a key holding `projects:write`.",
+        "operationId": "wake_project_v1_projects__key__wake_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAcceptedResponse"
+                }
+              }
+            },
+            "description": "Recorded, `pending`: the reconciler executes it; follow it at `/v1/operations/{id}`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAvailableResponse"
+                }
+              }
+            },
+            "description": "`not_available`, with the ledger row that says why: the operation is not offered yet, and nothing is recorded. Or `conflict` (ConflictResponse), with the id of the operation already holding the project."
+          }
+        },
+        "summary": "Wake a sleeping project"
       }
     },
     "/v1/sessions": {

@@ -1,0 +1,83 @@
+{
+  "approval_gate": [],
+  "capability_contract_sha256": {
+    "not_applicable": "the manifest declares no capabilities"
+  },
+  "declared_at": "2026-10-08T09:00:11Z",
+  "declared_by": "claude-opus-5-5 Session 38 executor",
+  "destructive": [
+    {
+      "kind": "drop_constraint",
+      "object": "app.control_projects.control_projects_adopted_from_check",
+      "version": "20261007120004"
+    },
+    {
+      "kind": "delete_without_where",
+      "object": "app.control_slots",
+      "version": "20261007120004"
+    },
+    {
+      "kind": "drop_function",
+      "object": "app.control_adopt_project",
+      "version": "20261007120004"
+    },
+    {
+      "kind": "drop_function",
+      "object": "app.control_registry_rows",
+      "version": "20261007120004"
+    },
+    {
+      "kind": "drop_constraint",
+      "object": "app.control_keys.control_keys_scopes_check",
+      "version": "20261007120004"
+    }
+  ],
+  "dev_apply": {
+    "applied_by": "psql as migration_user",
+    "existing_rows": "none",
+    "exit": 0,
+    "from_empty": true,
+    "migrations_applied": 43,
+    "seconds": 11.6
+  },
+  "harness": {
+    "not_applicable": "the manifest declares no capabilities"
+  },
+  "kind": "migration_set_proposal",
+  "lint": "passed",
+  "note": "The names in this record are declared, not authenticated (ADR 0243).",
+  "project_slug": "fixture-control",
+  "release": {
+    "release_lock_sha256": "11c762ed352a9dc869f64af68ff8623896710589840620217b06fed5873112ac",
+    "template_version": "1.15.0"
+  },
+  "schema_version": 1,
+  "set": {
+    "follows_release_version": "20261003120039",
+    "follows_release_version_source": "computed",
+    "root": "projects/control",
+    "versions": [
+      {
+        "name": "control_identity",
+        "version": "20261004120001"
+      },
+      {
+        "name": "control_keys",
+        "version": "20261004120002"
+      },
+      {
+        "name": "control_registry",
+        "version": "20261004120003"
+      },
+      {
+        "name": "control_operations",
+        "version": "20261007120004"
+      }
+    ]
+  },
+  "set_digest": "d82e283110d15668c0f336167a8ad646be193ce0a46354950db43ab580ca2d5a",
+  "surface": {
+    "functions": [],
+    "views": []
+  }
+}

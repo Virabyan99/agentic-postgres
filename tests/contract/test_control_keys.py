@@ -1,11 +1,15 @@
 """Management API keys, against a real cluster (KEY-MINT-001, ADR 0253, D2052).
 
 A key is `apg_<16 hex>_<43>`, shown once and stored as its id and the SHA-256
-of its secret. Its scopes are bounded by the Session 37 vocabulary and by the
-minter's role; it mints nothing (`human_session_required`); its authority on
-every request is its scopes intersected with its owner's CURRENT role, inside
-its own organisation; a revoked key and a departed owner's key are refused on
-the next request with the one answer an unknown key gets.
+of its secret. Its scopes are bounded by the vocabulary and by the minter's
+role; it mints nothing (`human_session_required`); its authority on every
+request is its scopes intersected with its owner's CURRENT role, inside its own
+organisation; a revoked key and a departed owner's key are refused on the next
+request with the one answer an unknown key gets.
+
+Since Session 38 (D2165) the roles differ: `viewer` reads, `member` and above
+also hold `projects:write`, so the intersection narrows something real and the
+proofs below read the product's own table rather than a substituted one (D2109).
 """
 
 from __future__ import annotations
@@ -103,30 +107,37 @@ def test_a_key_is_shown_once_and_stored_hashed(drive: Any, org: dict[str, Any]) 
     assert secret not in listed.text and stored not in listed.text
 
 
-def test_scopes_are_bounded_by_the_vocabulary_and_the_role(
-    drive: Any, org: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
+#: D2165's table, written out: a change to who may write is a change here.
+READS = {"organizations:read", "members:read", "projects:read", "operations:read"}
+EXPECTED_ROLE_SCOPES = {
+    "viewer": READS,
+    "member": READS | {"projects:write"},
+    "admin": READS | {"projects:write"},
+    "owner": READS | {"projects:write"},
+}
+
+
+def test_scopes_are_bounded_by_the_vocabulary_and_the_role(drive: Any, org: dict[str, Any]) -> None:
+    assert {role: set(s) for role, s in control_roles.ROLE_SCOPES.items()} == EXPECTED_ROLE_SCOPES
+    assert set(control_roles.KEY_VOCABULARY) == READS | {"projects:write"}
+
     member = org["tokens"]["member"]
-    for scopes in (["projects:write"], ["admin_users:write"], ["projects:read", "keys:write"]):
+    for scopes in (["admin_users:write"], ["projects:read", "keys:write"]):
         refused = _mint(drive, member, org["a"], scopes)
         assert refused.status_code == 422, (scopes, refused.text)
     empty = _mint(drive, member, org["a"], [])
     assert empty.status_code == 400, empty.text
 
-    # Session 37 grants every role every read scope (D2053), so the role half
-    # binds nothing in the product today -- asserted, so the day it does this
-    # module is read again -- and is proved with a role table that differs.
-    assert all(
-        scopes == frozenset(control_roles.KEY_VOCABULARY)
-        for scopes in control_roles.ROLE_SCOPES.values()
-    )
-    narrowed = dict(control_roles.ROLE_SCOPES)
-    narrowed["member"] = frozenset({"projects:read", "organizations:read"})
-    monkeypatch.setattr(control_roles, "ROLE_SCOPES", narrowed)
-    beyond = _mint(drive, member, org["a"], ["members:read"])
-    assert beyond.status_code == 422, beyond.text
-    # Control: within the narrowed role, the same member mints.
-    assert _mint(drive, member, org["a"], ["projects:read"]).status_code == 201
+    # The role half, with the product's own table: a viewer may not give a key
+    # `projects:write`; a member may.
+    viewer = drive.account(f"key-viewer-{uuid.uuid4().hex[:6]}")
+    drive.member(org["a"], viewer, "viewer")
+    viewer_token = drive.token(target_name(drive, viewer))
+    beyond = _mint(drive, viewer_token, org["a"], ["projects:write"])
+    assert (beyond.status_code, beyond.json()["error"]) == (422, "invalid_request"), beyond.text
+    assert _mint(drive, viewer_token, org["a"], ["projects:read"]).status_code == 201
+    # Control: the member mints the scope the viewer was refused.
+    assert _mint(drive, member, org["a"], ["projects:write"]).status_code == 201
 
 
 def test_a_key_mints_nothing(drive: Any, org: dict[str, Any]) -> None:
@@ -150,30 +161,28 @@ def test_a_key_mints_nothing(drive: Any, org: dict[str, Any]) -> None:
     assert drive.call("GET", "/v1/projects", token=key).status_code == 200
 
 
-def test_a_demotion_narrows_a_key(
-    drive: Any, org: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The intersection is computed per request from the owner's CURRENT role.
+def test_a_demotion_narrows_a_key(drive: Any, org: dict[str, Any]) -> None:
+    """The intersection is computed per request from the owner's CURRENT role
+    -- with the product's own table since Session 38 (D2109, D2165).
 
-    With D2053's table every role grants the same reads, so a demotion
-    narrows nothing in Session 37; the mechanism is proved with a table in
-    which `viewer` lacks `members:read` (D2109)."""
-    narrowed = dict(control_roles.ROLE_SCOPES)
-    narrowed["viewer"] = frozenset({"projects:read", "organizations:read", "operations:read"})
-    monkeypatch.setattr(control_roles, "ROLE_SCOPES", narrowed)
-
+    A member's key holding `projects:write` passes the scope check on sleep
+    (and is then refused `not_available`, because the type is planned, which
+    is the answer AFTER authorisation); once its owner is demoted to viewer
+    the same key is refused the scope itself."""
     target = drive.account(f"key-demoted-{uuid.uuid4().hex[:6]}")
     drive.member(org["a"], target, "member")
     token = drive.token(target_name(drive, target))
-    key = _key(drive, token, org["a"], ["members:read", "projects:read"])
-    members = f"/v1/organizations/{org['a']}/members"
-    assert drive.call("GET", members, token=key).status_code == 200
+    key = _key(drive, token, org["a"], ["projects:write", "projects:read"])
+    sleep = "/v1/projects/alpha-prod/sleep"
+    before = drive.call("POST", sleep, token=key)
+    assert (before.status_code, before.json()["error"]) == (409, "not_available"), before.text
 
+    members = f"/v1/organizations/{org['a']}/members"
     demoted = drive.call(
         "PATCH", f"{members}/{target}", token=org["tokens"]["owner"], body={"role": "viewer"}
     )
     assert demoted.status_code == 200, demoted.text
-    narrowed_answer = drive.call("GET", members, token=key)
+    narrowed_answer = drive.call("POST", sleep, token=key)
     assert (narrowed_answer.status_code, narrowed_answer.json()) == (
         403,
         {"error": "authorization_failed"},

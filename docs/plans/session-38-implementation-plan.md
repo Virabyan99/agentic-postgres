@@ -449,6 +449,12 @@ D2189.** Rows the runs add go in a second table below it, in execution order.
 | **D2196** | Run 2: *"Both fixtures' `.generated` renders must be byte-identical to before (REST enabled on both)"*; item 1: *"`rendering.build_compose_env` emits `API_REST_ENABLED`"*. | Re-rendered with `./deploy.sh --render-only` (Run 2): `diff -r` against the copy taken before the run shows **exactly one difference per fixture — `compose.env` gains `API_REST_ENABLED=true`** (line 81); `outputs.json`, `pgbackrest.conf` and every other rendered file are byte-identical. No `compose.yaml` line interpolates the key, and `compose.env` is not mounted, so no container's definition or mount digest moves with it (ADR 0155). | **The byte-identity holds for everything but the one line item 1 adds**, and that line is the reader the run exists to give the flag. The host's alpha and beta renders gain the same line (`true`), control-prod's `false`. | The plan's two sentences cannot both be literally true; the difference is the intended one and is measured, not assumed. | 0251 |
 | **D2197** | D2161 / Run 3 item 4: *"Outputs schema 21 carries `region` … in the rendered and deployed documents … the render takes the region from the host manifest (`render-config.py` already loads it, `:186`, `:211`)"*. | `bin/render-config.py`'s project render (`--render`) takes NO host manifest; `:186` and `:211` are `--edge-env` and `--edge-static`, the shared edge's paths. `./deploy.sh --render-only` must keep working with no host (CLAUDE.md §6). The deploy loads the host manifest at step 0. | **`region` is a DEPLOYED-document member only**: `build_deployed_document(region=…)` (REQUIRED, the deploy passes `host_config.region(host).as_document()` or `None` from a host manifest below 4); the rendered branch carries `compute` alone, and `migrate_v20_to_v21` (rendered documents) adds only `compute: {profile: standard}`. A deployed document is read by version, never migrated (ADR 0241), so no step writes a region into an archived one. | A render that needed a host to know where it will run would end the hostless render; the deploy is the one step that knows both the project and the machine. | 0257 |
 | **D2198** | D2156: *"`config.compute_profile(manifest)` … the merged budget used everywhere — `database_budget()`, the auth/storage memory and the pools — takes the profile's values when `compute` is present (grep every reader …)"*; *"a manifest with `compute: {profile: standard}` renders byte-identically to one with no `compute`"*. | The budget readers are many (`database_budget`, the three connection-budget functions, `build_compose_env`, the validators) and all read the LOADED manifest. Measured in Run 3: the example manifest itself sets `api.rest.pool_size` and `storage.pool_size`, and declares no `api.app` block; and `outputs.json` records `inputs.project_sha256`, the digest of the manifest's BYTES. | **The profile is applied in ONE place — `config.apply_compute_profile`, called by `load_project_manifest` after the schema and before every semantic rule** — so every reader sees the values as if written and the existing validators bound them; no reader changed. A profile writes only into blocks the manifest DECLARES (creating `api.app`/`storage` would change what is enabled; an absent block is charged at its defaults, as today; a slot manifest carries every block). The byte-identity holds for every rendered file and for `outputs.json` with `inputs.project_sha256` set aside — the one leaf that must differ, since the manifests' bytes differ (`test_standard_is_todays_defaults`). | One application point cannot miss a reader; a reader-by-reader merge is the D979 class. | 0258 |
+| **D2199** | D2154: *"`schemas/operation-arguments.schema.json` … every string a pattern … validated twice … with the same schema file"*; *"a test holds the two equal on every example"*. | `jsonschema` validates `pattern` with Python's `re.search`, where `$` also matches **before a final newline**: `^[a-z][a-z0-9_.-]{2,62}$` accepts `"shop.admin\n"` (the class `installed_release.py:51` and `compatibility.py:55` record). Pydantic's default engine (Rust `regex`) treats `$` as the end of input and refuses it. The two validators would disagree on exactly the input that matters, since `admin_username` reaches an argv. | **The schema ends every pattern in `(?![\s\S])`** — end of input in ECMA-262 and in Python alike — and says why in its `description`; the models keep `$` (correct in their engine). `test_operation_types.py::test_the_schema_and_the_models_agree` judges 24 examples by both, the trailing-newline cases among them. | Two validators of one input must agree on its hardest case, not only its easy ones. | 0256 |
+| **D2200** | Run 4 item 1: *"`control_adopt_project` re-created with the new members … `bin/control.py`'s `ADOPT_SQL` passes the new members as NULL for an operator adoption"*; D2167: *"extended in `0004` with `p_region`, `p_profile`, `p_slot`"*; Run 8: *"`control_projects` gains `app_route text` in `0004` — add it in Run 4 if this run finds it missing"*. | `ADOPT_SQL` passes seven positional members (`control.py:67-70`), and five tests call the seven-argument form; a 1.16.0 `control.py` adopting into a control project still at `0003` (before its deploy) must not fail on a signature that does not exist yet. | **The new parameters — `p_region`, `p_profile`, `p_slot`, `p_app_route`, `p_display_name` — default to NULL**, so `ADOPT_SQL` and every seven-argument caller are UNCHANGED and resolve to the new function (the old one is dropped in `0004`). `adopted_from` is derived (`reconciler` when `p_slot` is given, else `deployed_document`) and never rewritten on re-adoption; a re-adoption `coalesce`s the five (never erases what it does not name) and **refuses a deleted row** (`AP409: deleted`) — a consumed slot is never revived. `app_route` added now (Run 8's ask). `control_registry_rows` re-created returning the new members and `deleted_at` (D2167's reader is Run 6's). | One signature serving both writers, with no caller edited, cannot drift between them. | 0256, 0251 |
+| **D2201** | D2151: *"`control_advance_operation(p_id, p_step, p_progress)`, `control_finish_operation(p_id, p_status, p_error_code, p_result jsonb)` (refuses a terminal row …)"*; D2164: *"The URL goes into the operation's `result.download_url`"*. | A creation's row has no `project_key` until its slot is chosen (the request cannot know it); the result secret must never sit in `result` (a list answer returns `result`). | **`control_advance_operation` takes `p_project_key DEFAULT NULL`**, set once and never changed (a different key is `AP409`); **`control_finish_operation` takes `p_result_secret DEFAULT NULL`** into the `result_secret` column, and the table CHECKs that only a succeeded `project.export` holds one. Finish refuses any row not `running` — a terminal one and an unclaimed `pending` one alike — a failure without a code and a success with one (`AP422: invalid_outcome`), and a result member outside `app.control_result_members(type)` (`AP422: undeclared_result`), which a test holds equal to `operations.RESULT_MEMBERS`. `error_code` CHECKs the five operation outcomes (`errors.OPERATION_ERROR_CODES`). | The secret's one exit is the take; a key set later than the claim needs a writer, and only the reconciler knows it. | 0256, 0259 |
+| **D2202** | Run 4 item 1: *"`control_ready_slot_count()` → the API's `no_slot` reading with `observed_at`"*; *"SELECT policy to `object_owner` for any authenticated caller"*; D2159: the state *"from the project's operation history"*. | A DEFINER function bound by FORCE RLS needs a caller for the policy to name; and the four readers' `RETURNS TABLE` must widen (`display_name`, `region`, `profile`, `app_route`, `deleted_at`; `requested_by`, `step`, `result`), which a `CREATE OR REPLACE` cannot do. | **`control_ready_slot_count(p_user)`** (the policy reads `app.current_user_id() IS NOT NULL`), returning `(ready_slots, observed)`, `observed` NULL when nothing was recorded — which refuses as `no_slot`. **`control_project_operations(p_user, p_key DEFAULT NULL)`** (DEFINER, granted) returns the history `control_states` derives from. The four readers are **dropped and re-created** in `0004`, grants re-made; `test_control_set`'s GRANTED/OPERATOR/HELPERS sets move with them. | A function that answers "anyone" with no caller is the shape design G refuses; a state with no history to read would be a guess. | 0256, 0251 |
+| **D2203** | D2159: *"export running → `ready` … a project adopted with no operation → `ready (operator-managed)`"*; the failure codes listed are `capacity_exhausted`/`invalid_request` → before, `interrupted`/`could_not_determine` → `unknown`. | A sleeping project can be exported (the plan does not forbid it); `operation_failed` and `cancelled` are not ruled; a state word with a parenthesis is not a value a client can switch on. | **A running export leaves the state as it was** (`ready` in the plan's case, `sleeping` for a sleeping project); **`operation_failed` → `unknown`** (it may have stopped part way); **`cancelled` and `pending` → the state before** (nothing ran); an unreadable history → `unknown`. **`ready (operator-managed)` is two members**: `state: ready`, `managed_by: operator` (`reconciler` once any operation decided the state). | Each rule is the third outcome where a guess would be the only alternative. | 0256, 0195 |
+| **D2204** | Run 4 battery M1: *"the partial index dropped → `test_one_operation_at_a_time` FAILED"*; D2165: the writes' roles; ADR 0254: `not_available` before anything is recorded. | `control_request_operation` reads for a non-terminal row BEFORE inserting (so it can answer `conflict` with the id), so dropping the index leaves the sequential API answer unchanged — the index is what holds under a RACE. Session 37's `POST /v1/projects` authenticates before refusing (`test_project_creation_is_refused_as_not_available`'s control: an unauthenticated call is 401). | **`test_one_operation_at_a_time` also inserts a second non-terminal row as the superuser, bypassing the function**, and requires `duplicate key` — that half is what M1 kills. **Every write authenticates, THEN answers `not_available` while its type is not accepted, THEN reads its body** (Session 37's order, kept). The writes are `ACCOUNT` entries in `MATRIX` (the organisation comes from the body or the project row, as `get_project`'s does), with their role in `control_roles.PROJECT_WRITES` applied by the handler and again in SQL. `ACCEPTED_TYPES` stays empty; the proofs accept the six types for their own duration. | A mutation is evidence only when it can turn its test red (D493); the race the index exists for is reached directly. | 0256, 0254 |
 
 ---
 
@@ -998,7 +1004,71 @@ FAILED; controls green. **Targeted**: the control modules (Docker-backed, once),
 `test_control_set`, `test_auth_service_shape`, `test_acceptance_registry`,
 `test_evidence_claims`, `test_repository_contract`.
 
-**Done.** *(the executor writes it)*
+**Done.** 2026-10-08 (scripts and notes in WSL `~/s38/run4/`). **Run 3's CI:
+run 37743818180 (`contract`) completed `success` on `806008c`.**
+**`0004-control-operations.sql`** (manifest `20261007120004`; `0001`–`0003`
+untouched): `control_operations` widened (`claimed_by`, `attempt`, `step`,
+`result`, `result_secret`; `status DEFAULT 'pending'`; CHECKs: arguments an
+object, `error_code` the five outcomes, a failure carries a code, a secret only
+on a succeeded export), the two partial unique indexes (D2166), an INSERT and an
+UPDATE policy; `control_projects` widened (`display_name`, `slot`, `region_id`,
+`profile`, `app_route`, `deleted_at`; `adopted_from` CHECK widened);
+**`app.control_slots`** (FORCE RLS, read by any caller with a user, no write
+policy). Granted to `auth_service`: `control_request_operation` (D2165's ranks
+in SQL), `control_cancel_operation`, `control_take_result_secret`,
+`control_ready_slot_count`, `control_project_operations`, and the four readers
+dropped and re-created wider. **Granted to nobody, INVOKER**: claim, advance
+(with the creation's key, once), finish (refuses a row not running, an outcome
+without its code, an undeclared result member), interrupted, record_slots
+(replaced whole), mark_deleted, `control_adopt_project` (re-created, the five new
+members DEFAULT NULL, D2200) and `control_registry_rows`; `control_result_members`
+a helper. Keys CHECK widened to five scopes. **Frozen and proposed** (D2183):
+`freeze-lock --project project.control.example.yaml` (4 migrations, follows
+20261003120039 computed, the release lock untouched); `propose --by
+"claude-opus-5-5 Session 38 executor"` → `projects/control/proposals/d82e2831…json`:
+lint passed, 43 applied from empty as `migration_user` in 11.6 s, surface empty,
+**five destructive findings, each intended** (the two dropped CHECKs re-added
+wider, the two dropped functions re-created, the `DELETE` inside
+`control_record_slots`); the render removed after. **Service**: `operations.py`
+(`ACCEPTED_TYPES` still empty, `EXECUTED_TYPES`, `RESULT_MEMBERS`,
+`ARGUMENT_SCHEMA_PATH`; `src/agentic_postgres/operations.py` re-exports them);
+**`schemas/operation-arguments.schema.json`** (D2154, patterns ended
+`(?![\s\S])`, D2199) and `models.py`'s `CreateProjectRequest` /
+`ResizeProjectRequest`; `errors.py` (`capacity_exhausted`, `conflict`,
+`OPERATION_ERROR_CODES`); **`control_states.py`** (D2159, D2203);
+`control_roles.py` (`projects:write`, `ROLE_SCOPES` now differing,
+`KEY_SCOPES` + sleep/wake/resize, `PROJECT_WRITES`, `OPERATION_OF_ROUTE`);
+routes `POST /v1/projects` (202), `POST …/{key}/sleep|wake|export`, `PUT
+…/{key}/compute` (202 + the unmeasured resize sentence), `DELETE /v1/projects/{key}`,
+`POST /v1/operations/{id}/cancel`; `GET /v1/operations/{id}` hands the export
+URL once to the person who asked, never to a key; projects gain `state`,
+`managed_by`, `display_name`, `region`, `profile`, `app_route`, `deleted_at`;
+`main.control_paths()` gains the six paths; no `/v1/slots`. **Ledger**: the six
+rows' `today`/`stage5_reality` rewritten to what is built (all still
+`planned`), **`idle_sleep`** added (`planned`, 38 → 41); `reality-ledger.md`
+re-rendered. **Control snapshot** re-captured (+604/−8), `--check` both match.
+**Tests**: `test_control_states.py` (22), `test_reconciler_claim.py` (7),
+`test_control_projects.py` (10), `test_operation_types.py` (+27: every write
+`not_available` while planned, the schema's branches, the error codes, 24
+schema/model examples), `test_control_keys.py` (the exact table; the viewer
+refused `projects:write`; the demotion proof on the product's own table — two
+tests reworked under their names, D2109's monkeypatches gone),
+`test_control_set.py` (the new table and the three function sets, count 4).
+First pass of the seven: 86 passed. **Targeted** (29 modules, once): 1,384
+passed, 2 failed — `main.control_paths()` did not yet list the new paths (the
+declared-paths guard doing its job); fixed, the two modules re-run: 61 passed.
+**Battery 8/8 killed**, each control PASSED, the tree byte-identical after: M1
+the per-project index dropped → `test_one_operation_at_a_time` FAILED (its
+superuser insert half, D2204); M2a the row lock and the recheck removed →
+`test_two_claimers_get_distinct_rows` FAILED; M2b `SKIP LOCKED` removed →
+`test_a_claimer_does_not_wait_for_an_open_claim` FAILED (D2191's pair, 3 rounds
+each); M3 the take not NULLing → `test_the_download_url_is_returned_once`
+FAILED; M4 a key allowed on create → `test_the_roles_decide_who_writes` FAILED;
+M5 the slot read after the insert → `test_no_ready_slot_refuses_before_a_row`
+FAILED; M6 an interrupted operation read as the state before it → FAILED; M7
+the claim granted to `auth_service` →
+`test_the_claim_functions_are_executable_by_no_role` FAILED. Rows **D2199–D2204**.
+NEXT FREE D2205. CI: recorded in Run 5's commit.
 
 ### Run 5 — the host's half: `stop|start`, `--defer-provider`, `bin/slot.sh`
 

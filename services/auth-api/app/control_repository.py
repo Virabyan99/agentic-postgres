@@ -36,6 +36,7 @@ from uuid import UUID
 import psycopg
 from psycopg import errors as pg_errors
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from app import errors
@@ -53,6 +54,10 @@ def _refusal(exc: psycopg.Error) -> Exception | None:
     word = match.group(2)
     if word == "authorization_failed":
         return errors.AuthorizationFailed("an organisation role")
+    if word == "invalid_request":
+        # The set's own check of an operation's type and arguments, behind the
+        # route's (D2154): reached only if the two disagree.
+        return errors.InvalidRequest("the operation was refused by the control set")
     if word in errors.CONTROL_STATUS:
         return errors.ControlRefused(word)
     return None
@@ -239,11 +244,12 @@ class ControlRepository:
 
     _PROJECT = (
         "SELECT key, organization_id, slug, environment, domain, template_version, "
-        "source_commit, adopted_at FROM "
+        "source_commit, adopted_at, adopted_from, display_name, region_id, profile, "
+        "app_route, deleted_at FROM "
     )
     _OPERATION = (
         "SELECT id, organization_id, project_key, type, status, progress, error_code, "
-        "created_at, started_at, finished_at FROM "
+        "created_at, started_at, finished_at, requested_by, step, result FROM "
     )
 
     async def list_projects(self, user: UUID, org: UUID | None) -> list[dict[str, Any]]:
@@ -263,6 +269,59 @@ class ControlRepository:
         return await self._one(
             user, self._OPERATION + "app.control_get_operation(%s, %s)", (user, operation)
         )
+
+    # -- Session 38: requesting operations (ADR 0256) -------------------------------
+
+    async def project_operations(self, user: UUID, key: str | None) -> list[dict[str, Any]]:
+        """The operation history of the caller's organisations' projects (or of
+        one), oldest first -- what a project's state is derived from (D2159)."""
+        return await self._rows(
+            user,
+            "SELECT project_key, type, status, error_code, created_at "
+            "FROM app.control_project_operations(%s, %s)",
+            (user, key),
+        )
+
+    async def ready_slots(self, user: UUID) -> dict[str, Any]:
+        """How many slots the reconciler last observed `ready`, and when (D2160)."""
+        row = await self._one(
+            user, "SELECT ready_slots, observed FROM app.control_ready_slot_count(%s)", (user,)
+        )
+        assert row is not None
+        return row
+
+    async def request_operation(
+        self,
+        user: UUID,
+        org: UUID,
+        project: str | None,
+        operation_type: str,
+        arguments: dict[str, Any],
+    ) -> tuple[UUID, bool]:
+        """Record a pending operation: `(id, True)`; or the non-terminal one
+        already holding the project or the organisation's creation: `(id,
+        False)` (D2166)."""
+        row = await self._one(
+            user,
+            "SELECT operation_id, created FROM app.control_request_operation(%s, %s, %s, %s, %s)",
+            (user, org, project, operation_type, Jsonb(arguments)),
+        )
+        assert row is not None
+        return row["operation_id"], bool(row["created"])
+
+    async def cancel_operation(self, user: UUID, operation: UUID) -> None:
+        await self._rows(user, "SELECT app.control_cancel_operation(%s, %s)", (user, operation))
+
+    async def take_result_secret(self, user: UUID, operation: UUID) -> str | None:
+        """An export's download URL, once, for its requester (D2164). Read and
+        erased by one statement in the database; None for anyone else, and the
+        second time."""
+        row = await self._one(
+            user,
+            "SELECT app.control_take_result_secret(%s, %s) AS secret",
+            (user, operation),
+        )
+        return None if row is None else row["secret"]
 
     # -- invitations -----------------------------------------------------------
 

@@ -34,6 +34,17 @@
       "template": "templates/0003-control-registry.sql",
       "template_sha256": "1d447763a1e9807456200eb19b0c3783a9824d7a7a5a2b7a587d6144eaf86473",
       "version": "20261004120003"
+    },
+    {
+      "canonical_render_sha256": "4a56683ba4701235fb9d638b1aadb69d0b80f4c80449608f18c927e615320035",
+      "name": "control_operations",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0004-control-operations.sql",
+      "template_sha256": "f573abd35fa99a9ed5a1dc23ba92a5389652dd450eae0eb6ca7ea3336af1674d",
+      "version": "20261007120004"
     }
   ],
   "schema_version": 3

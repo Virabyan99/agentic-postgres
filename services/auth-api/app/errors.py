@@ -219,6 +219,27 @@ LAST_OWNER: Final = "last_owner"
 FACTOR_ENABLED: Final = "factor_enabled"
 HUMAN_SESSION_REQUIRED: Final = "human_session_required"
 NOT_AVAILABLE: Final = "not_available"
+#: Session 38 (ADR 0256). `capacity_exhausted` is one code with two readers
+#: (D2160): the API's `{reason: no_slot}`, answered before any row is written,
+#: and the reconciler's `{reason: admission}`, an operation's outcome. A
+#: `conflict` names the non-terminal operation already holding the project or
+#: the organisation's creation (D2166).
+CAPACITY_EXHAUSTED: Final = "capacity_exhausted"
+CONFLICT: Final = "conflict"
+
+#: How a FINISHED operation failed -- its `error_code`, never an HTTP refusal.
+#: The control set's `control_operations.error_code` CHECK lists exactly these
+#: (a test holds the two equal). `interrupted` and `could_not_determine` are
+#: the third outcome (ADR 0195): the state they leave is `unknown` (D2159).
+OPERATION_ERROR_CODES: Final[frozenset[str]] = frozenset(
+    {
+        CAPACITY_EXHAUSTED,
+        "invalid_request",
+        "operation_failed",
+        "interrupted",
+        "could_not_determine",
+    }
+)
 
 CONTROL_STATUS: Final[dict[str, int]] = {
     # A foreign organisation and a missing one are this one answer (D2053).
@@ -233,6 +254,8 @@ CONTROL_STATUS: Final[dict[str, int]] = {
     FACTOR_ENABLED: 409,
     HUMAN_SESSION_REQUIRED: 403,
     NOT_AVAILABLE: 409,
+    CAPACITY_EXHAUSTED: 409,
+    CONFLICT: 409,
 }
 
 

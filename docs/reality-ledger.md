@@ -24,6 +24,7 @@ may not use. `not_offered` means cut by decision, not postponed;
 | [Region](#region) | `planned` | 38 |
 | [Compute size](#compute_profiles) | `planned` | 38 |
 | [Sleep and wake](#sleep) | `planned` | 38 |
+| [Sleep when idle](#idle_sleep) | `planned` | 41 |
 | [Pooled connection string](#pooled_endpoint) | `planned` | 39 |
 | [Direct connection string](#direct_endpoint) | `planned` | 39 |
 | [Wake on connect](#wake_on_connect) | `planned` | 39 |
@@ -161,7 +162,7 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Today.** The operator creates a project by writing a manifest and running the deploy as root; admission refuses a project that does not fit the declared host (exit 12).
 
-**Stage 5.** project.create as an operation the reconciler executes into a prepared slot, through the same admission and deploy.
+**Stage 5.** POST /v1/projects records a project.create operation (member and above, a person only), refused "capacity exhausted" with no slot ready before anything is recorded; the reconciler (Session 38) executes it into a prepared slot through the same admission and deploy, and the first administrator claims the account with a token only its requester holds (ADR 0256, ADR 0260).
 
 **Eventually (not promised).** Placement across a fleet of servers.
 
@@ -177,7 +178,7 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Today.** The operator retires a project with bin/project-retire.sh, which removes only what the project's names derive.
 
-**Stage 5.** project.delete as an operation (D1972).
+**Stage 5.** DELETE /v1/projects/{key} records a project.delete operation (admin and above, a person only); the reconciler retires the project with its data, the slot is consumed and never reissued, and the backups are kept by the operator -- this beta has no automatic removal (D2158, D2181).
 
 **Eventually (not promised).** The same, with a grace period and recovery.
 
@@ -193,7 +194,7 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Today.** The operator can take a backup and run a restore drill; there is no export a customer downloads.
 
-**Stage 5.** project.export as an operation producing an archive (D1972).
+**Stage 5.** POST /v1/projects/{key}/export records a project.export operation (a person only); the archive holds the project's own schemas, and its download URL -- valid at most 15 minutes -- is shown once to the person who asked (D2164, ADR 0259).
 
 **Eventually (not promised).** Scheduled exports to a customer's own storage.
 
@@ -207,9 +208,9 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **What a customer reads.** Every project runs in one location, the one server this beta runs on.
 
-**Today.** One server in one Hetzner location. The host manifest does not name a region.
+**Today.** One server in one Hetzner location. Host manifest schema 4 declares the region and every deployed document carries it; the host still runs schema 3 until Session 38's first trip moves it.
 
-**Stage 5.** A host.yaml field read everywhere, with one value (D1957).
+**Stage 5.** The operator's declaration in host.yaml (schema 4), carried into every deployed document and the registry, with one value (D1957, D2161).
 
 **Eventually (not promised).** Placement across locations.
 
@@ -221,9 +222,9 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **What a customer reads.** Not open yet. Changing a project's size will restart it, and the message will say how long the restart was measured to take.
 
-**Today.** Memory, process and CPU limits per service come from release defaults a manifest can override for memory and pool size; there is no named size.
+**Today.** Three named profiles -- small, standard (the release defaults) and large -- selected by a manifest's compute block (schema 10) and applied where the manifest is loaded, so every existing limit check bounds them.
 
-**Stage 5.** Named profiles in a release file, selected in the manifest, changed by project.resize with the measured window (D1955).
+**Stage 5.** PUT /v1/projects/{key}/compute records a project.resize operation; admission refuses a profile the server has no room for with nothing changed, and the message says the restart has not been measured on this server until a measured window exists (D1955, D2157, ADR 0258).
 
 **Eventually (not promised).** Compute scheduled independently of storage.
 
@@ -239,11 +240,25 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Today.** Nothing sleeps. A project's containers run until the operator stops them.
 
-**Stage 5.** project.sleep and project.wake stop and start the project's containers, volumes kept; what a caller sees while it sleeps is measured first (D1956).
+**Stage 5.** project.sleep and project.wake, by request only, stop and start the project's containers with volumes kept; while it sleeps a caller gets the edge's 404, and its archiver is stopped, so its last restore point is the moment it went to sleep (D1956, D2155, ADR 0259). Idle sleep is its own row.
 
 **Eventually (not promised).** Compute suspended and resumed independently of storage.
 
 *API operations:* `project.sleep`, `project.wake` -- refused (`409 not_available`) until this concept is available or in beta.
+
+<a id="idle_sleep"></a>
+
+## Sleep when idle
+
+`idle_sleep` · **planned** · since Session 38
+
+**What a customer reads.** Not open yet. A project sleeps only when someone asks it to.
+
+**Today.** Nothing measures idleness: the request and connection counters a trigger would read are not sampled.
+
+**Stage 5.** A per-project setting the reconciler acts on, built with Session 41's sampler of the counters it reads (D2147).
+
+**Eventually (not promised).** Compute suspended automatically and resumed on demand.
 
 <a id="pooled_endpoint"></a>
 

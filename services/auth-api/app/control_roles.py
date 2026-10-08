@@ -19,7 +19,10 @@ What an entry means:
 * a role -- the caller must hold at least that role in the organisation the
   path names; a non-member gets the same `404` as a missing organisation.
 
-Run 5 adds the keys, projects and operations routes to this table.
+Session 37's Run 5 added the keys, projects and operations routes; Session 38
+adds the project writes and the cancel (D2165), each an `ACCOUNT` entry here
+because the organisation is read from the body or the project row, with the
+role it needs in `PROJECT_WRITES`, which the handler applies.
 """
 
 from __future__ import annotations
@@ -75,28 +78,73 @@ MATRIX: Final[dict[str, str]] = {
     "create_project": ACCOUNT,
     "list_operations": ACCOUNT,
     "get_operation": ACCOUNT,
+    # Session 38 (D2165): the writes. The role each needs is PROJECT_WRITES'.
+    "sleep_project": ACCOUNT,
+    "wake_project": ACCOUNT,
+    "resize_project": ACCOUNT,
+    "export_project": ACCOUNT,
+    "delete_project": ACCOUNT,
+    "cancel_operation": ACCOUNT,
 }
 
-#: Session 37's key vocabulary: exactly the scopes a Session 37 route checks
-#: (D2052) -- the control set's `control_keys.scopes` CHECK lists the same
-#: four. Each later session adds its own with its route (`projects:write`, 38).
+#: Session 38's writes (D2165, ADR 0256) -> the role they need in the
+#: organisation the body names (create) or the project belongs to. The control
+#: set's `control_request_operation` checks the same ranks again in SQL.
+#: Cancelling needs `viewer` plus being the requester, or `admin` (D2067) --
+#: the definer function decides which.
+PROJECT_WRITES: Final[dict[str, str]] = {
+    "create_project": "member",
+    "sleep_project": "member",
+    "wake_project": "member",
+    "resize_project": "member",
+    "export_project": "member",
+    "delete_project": "admin",
+    "cancel_operation": "viewer",
+}
+
+#: Each write route -> the operation type it requests.
+OPERATION_OF_ROUTE: Final[dict[str, str]] = {
+    "create_project": "project.create",
+    "sleep_project": "project.sleep",
+    "wake_project": "project.wake",
+    "resize_project": "project.resize",
+    "export_project": "project.export",
+    "delete_project": "project.delete",
+}
+
+#: The key vocabulary: exactly the scopes a route checks (D2052) -- the control
+#: set's `control_keys.scopes` CHECK lists the same five. Session 38 added
+#: `projects:write` with the routes that read it (D2165).
 KEY_VOCABULARY: Final[tuple[str, ...]] = (
     "members:read",
     "operations:read",
     "organizations:read",
     "projects:read",
+    "projects:write",
 )
 
-#: What each role grants a KEY its member holds. **Identical for every role in
-#: Session 37** -- D2053 gives viewer and member the same reads and admin and
-#: owner add only human acts -- so the intersection below narrows nothing yet;
-#: Session 38 gives `member` `projects:write` and it starts to (D2109).
-ROLE_SCOPES: Final[dict[str, frozenset[str]]] = {role: frozenset(KEY_VOCABULARY) for role in ROLES}
+#: The reads every role grants (D2053).
+_READS: Final[frozenset[str]] = frozenset(
+    {"members:read", "operations:read", "organizations:read", "projects:read"}
+)
+
+#: What each role grants a KEY its member holds: `viewer` reads, `member` and
+#: above also write (D2165). Since Session 38 the intersection below narrows:
+#: a viewer's key holding `projects:write` holds nothing it can use (D2109).
+ROLE_SCOPES: Final[dict[str, frozenset[str]]] = {
+    "viewer": _READS,
+    "member": _READS | {"projects:write"},
+    "admin": _READS | {"projects:write"},
+    "owner": _READS | {"projects:write"},
+}
 
 #: The routes a key may reach, and the scope each needs. **A route absent here
 #: is human-session only** (`403 human_session_required`): every credential-
 #: minting route -- keys, invitations, the second factor, role changes -- and
-#: oneself (D2052). So a leaked key cannot mint its own successor.
+#: oneself (D2052). So a leaked key cannot mint its own successor. Of Session
+#: 38's writes a key reaches only sleep, wake and resize: creating a project
+#: starts its administrator's handoff, an export yields a download URL, and a
+#: deletion destroys -- a person does each (D2165).
 KEY_SCOPES: Final[dict[str, str]] = {
     "list_organizations": "organizations:read",
     "get_organization": "organizations:read",
@@ -105,6 +153,9 @@ KEY_SCOPES: Final[dict[str, str]] = {
     "get_project": "projects:read",
     "list_operations": "operations:read",
     "get_operation": "operations:read",
+    "sleep_project": "projects:write",
+    "wake_project": "projects:write",
+    "resize_project": "projects:write",
 }
 
 

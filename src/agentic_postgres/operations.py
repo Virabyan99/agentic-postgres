@@ -21,11 +21,23 @@ _operations = service_source.load("operations")
 
 OPERATION_TYPES: dict[str, str] = _operations.OPERATION_TYPES
 ACCEPTED_TYPES: frozenset[str] = _operations.ACCEPTED_TYPES
+EXECUTED_TYPES: frozenset[str] = _operations.EXECUTED_TYPES
+RESULT_MEMBERS: dict[str, frozenset[str]] = _operations.RESULT_MEMBERS
+ARGUMENT_SCHEMA_PATH: str = _operations.ARGUMENT_SCHEMA_PATH
 
 #: The ledger statuses under which a concept may be acted on (ADR 0247).
 ACCEPTING_STATUSES: frozenset[str] = frozenset({"available", "beta"})
 
-__all__ = ["ACCEPTED_TYPES", "ACCEPTING_STATUSES", "OPERATION_TYPES", "accepted", "row_status"]
+__all__ = [
+    "ACCEPTED_TYPES",
+    "ACCEPTING_STATUSES",
+    "ARGUMENT_SCHEMA_PATH",
+    "EXECUTED_TYPES",
+    "OPERATION_TYPES",
+    "RESULT_MEMBERS",
+    "accepted",
+    "row_status",
+]
 
 
 def row_status(operation_type: str, ledger: dict[str, Any]) -> str | None:

@@ -16,6 +16,12 @@ Run 5 added the keys, projects and operations routes: a management key
 (`apg_…`) reaches only `control_roles.KEY_SCOPES`' routes, and `POST
 /v1/projects` is refused as `not_available` while its ledger row is not
 offered (ADR 0254).
+
+Session 38 added the project writes -- create, sleep, wake, resize, export,
+delete -- and the cancel (ADR 0256, D2165). Each answers `202` with the
+operation it recorded; the work is the reconciler's, followed at
+`GET /v1/operations/{id}`. Each is `not_available` while its type is not
+accepted, before its body is read.
 """
 
 from __future__ import annotations
@@ -30,10 +36,13 @@ from app import control_roles, errors, openapi_docs, strict_query
 from app.control_service import ControlPrincipal, ControlService
 from app.models import (
     AcceptInvitationRequest,
+    CapacityExhaustedResponse,
     ConfirmFactorRequest,
+    ConflictResponse,
     ControlLoginRequest,
     ControlRefusedResponse,
     CreateOrganizationRequest,
+    CreateProjectRequest,
     FactorEnrolmentResponse,
     InvitationResponse,
     KeyResponse,
@@ -41,7 +50,9 @@ from app.models import (
     MintInvitationRequest,
     MintKeyRequest,
     NotAvailableResponse,
+    OperationAcceptedResponse,
     RefreshRequest,
+    ResizeProjectRequest,
     SessionTokenResponse,
     SetMemberRoleRequest,
 )
@@ -591,7 +602,8 @@ async def list_keys(request: Request, organization: str) -> Response:
         description=(
             "`apg_<id>_<secret>`, stored as its id and the SHA-256 of its secret. Its scopes come "
             "from the vocabulary (`organizations:read`, `members:read`, `projects:read`, "
-            "`operations:read`) and must be within the minter's role. On every request a key's "
+            "`operations:read`, `projects:write`) and must be within the minter's role -- a "
+            "viewer's key cannot hold `projects:write`. On every request a key's "
             "authority is its scopes intersected with its owner's current role, in this "
             "organisation only; a revoked key, or one whose owner left, is refused."
         ),
@@ -668,24 +680,198 @@ async def list_projects(request: Request) -> Response:
     return await _guard(run)
 
 
+NOT_OFFERED = {
+    "model": NotAvailableResponse,
+    "description": (
+        "`not_available`, with the ledger row that says why: the operation is not offered yet, "
+        "and nothing is recorded. Or `conflict` (ConflictResponse), with the id of the "
+        "operation already holding the project."
+    ),
+}
+ACCEPTED = openapi_docs.ok(
+    "Recorded, `pending`: the reconciler executes it; follow it at `/v1/operations/{id}`.",
+    OperationAcceptedResponse,
+)
+NOT_YOURS = _refused(
+    "`not_found`: the project is not one of the caller's organisations', does not exist, or "
+    "was deleted -- one answer for each."
+)
+
+
+def _accepted(operation: dict[str, Any], **extra: str) -> JSONResponse:
+    return JSONResponse({"operation": operation, **extra}, status_code=202)
+
+
+async def _offered(request: Request) -> ControlPrincipal:
+    """The caller, then -- before any body is read -- `not_available` while
+    the route's operation type is not accepted (ADR 0254)."""
+    caller = await _caller(request)
+    ControlService.require_accepted(_route(request))
+    return caller
+
+
+async def _write(
+    request: Request,
+    caller: ControlPrincipal,
+    key: str,
+    arguments: dict[str, Any] | None = None,
+    **extra: str,
+) -> Response:
+    """One of the five writes on an existing project: the project, the role
+    and the row."""
+    operation = await _service(request).write_project(caller, _route(request), key, arguments or {})
+    return _accepted(operation, **extra)
+
+
 @router.post(
     "/projects",
+    status_code=202,
     openapi_extra=openapi_docs.described(
-        summary="Create a project -- not available yet",
+        summary="Create a project in a prepared slot",
         description=(
-            "Refused, and nothing is recorded: a project is created only when its ledger row, "
-            "`projects_self_service`, is available or in beta. The answer names the row."
+            "Member and above, a person only. `name` is a display name; `profile` the compute "
+            "profile; `admin_username` the project's first administrator, who claims the account "
+            "with the token whose SHA-256 is `handoff_sha256` -- the token itself never reaches "
+            "this plane. With no slot ready the answer is `capacity_exhausted` (`reason: "
+            "no_slot`) and nothing is recorded; one creation per organisation is in flight at a "
+            "time (`conflict`). Refused `not_available` while `projects_self_service` is not "
+            "offered."
         ),
+        request_model=CreateProjectRequest,
     ),
-    responses={401: openapi_docs.UNAUTHENTICATED, 403: FACTOR_GATE,
-               409: {"model": NotAvailableResponse,
-                     "description": "`not_available`, with the ledger row that says why."}},
+    responses={202: ACCEPTED, 400: openapi_docs.MALFORMED, 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_A_MEMBER,
+               409: {"model": CapacityExhaustedResponse,
+                     "description": "`capacity_exhausted` with `reason: no_slot`; or "
+                                    "`conflict` naming the creation in flight; or "
+                                    "`not_available` naming the ledger row."}},
 )  # fmt: skip
 async def create_project(request: Request) -> Response:
     async def run() -> Response:
-        caller = await _caller(request)
-        ControlService.create_project(caller)
-        return Response(status_code=500)  # pragma: no cover -- create_project always raises
+        caller = await _offered(request)
+        payload = await _body(request, CreateProjectRequest)
+        assert isinstance(payload, CreateProjectRequest)
+        operation = await _service(request).create_project(
+            caller,
+            organization=payload.organization,
+            name=payload.name,
+            profile=payload.profile,
+            admin_username=payload.admin_username,
+            handoff_sha256=payload.handoff_sha256,
+        )
+        return _accepted(operation)
+
+    return await _guard(run)
+
+
+@router.post(
+    "/projects/{key}/sleep",
+    status_code=202,
+    openapi_extra=openapi_docs.described(
+        summary="Put a project to sleep",
+        description=(
+            "Member and above, or a key holding `projects:write`. Its containers are stopped and "
+            "kept; while it sleeps a request to it is answered by the edge's 404, and its last "
+            "restore point is the moment it went to sleep."
+        ),
+    ),
+    responses={202: ACCEPTED, 401: openapi_docs.UNAUTHENTICATED, 403: FACTOR_GATE,
+               404: NOT_YOURS, 409: NOT_OFFERED},
+)  # fmt: skip
+async def sleep_project(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        return await _write(request, await _offered(request), key)
+
+    return await _guard(run)
+
+
+@router.post(
+    "/projects/{key}/wake",
+    status_code=202,
+    openapi_extra=openapi_docs.described(
+        summary="Wake a sleeping project",
+        description="Member and above, or a key holding `projects:write`.",
+    ),
+    responses={202: ACCEPTED, 401: openapi_docs.UNAUTHENTICATED, 403: FACTOR_GATE,
+               404: NOT_YOURS, 409: NOT_OFFERED},
+)  # fmt: skip
+async def wake_project(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        return await _write(request, await _offered(request), key)
+
+    return await _guard(run)
+
+
+@router.put(
+    "/projects/{key}/compute",
+    status_code=202,
+    openapi_extra=openapi_docs.described(
+        summary="Change a project's compute profile",
+        description=(
+            "Member and above, or a key holding `projects:write`. Resizing restarts the database "
+            "and the services that use it; `message` says how long that was measured to take, or "
+            "that it has not been measured on this server yet. A profile the server has no room "
+            "for fails the operation with `capacity_exhausted` (`reason: admission`), and the "
+            "project stays as it was."
+        ),
+        request_model=ResizeProjectRequest,
+    ),
+    responses={202: ACCEPTED, 400: openapi_docs.MALFORMED, 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_YOURS, 409: NOT_OFFERED},
+)  # fmt: skip
+async def resize_project(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        caller = await _offered(request)
+        payload = await _body(request, ResizeProjectRequest)
+        assert isinstance(payload, ResizeProjectRequest)
+        return await _write(
+            request,
+            caller,
+            key,
+            {"profile": payload.profile},
+            message=ControlService.resize_message(),
+        )
+
+    return await _guard(run)
+
+
+@router.post(
+    "/projects/{key}/export",
+    status_code=202,
+    openapi_extra=openapi_docs.described(
+        summary="Export a project's data",
+        description=(
+            "Member and above, a person only. An archive of the project's own schemas; when the "
+            "operation succeeds, `GET /v1/operations/{id}` returns its `download_url` -- valid at "
+            "most 15 minutes -- ONCE, to the person who asked."
+        ),
+    ),
+    responses={202: ACCEPTED, 401: openapi_docs.UNAUTHENTICATED, 403: FACTOR_GATE,
+               404: NOT_YOURS, 409: NOT_OFFERED},
+)  # fmt: skip
+async def export_project(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        return await _write(request, await _offered(request), key)
+
+    return await _guard(run)
+
+
+@router.delete(
+    "/projects/{key}",
+    status_code=202,
+    openapi_extra=openapi_docs.described(
+        summary="Delete a project",
+        description=(
+            "Admin and above, a person only. The project's containers and data are removed; its "
+            "backups are kept by the operator. A deleted project is never reissued."
+        ),
+    ),
+    responses={202: ACCEPTED, 401: openapi_docs.UNAUTHENTICATED, 403: FACTOR_GATE,
+               404: NOT_YOURS, 409: NOT_OFFERED},
+)  # fmt: skip
+async def delete_project(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        return await _write(request, await _offered(request), key)
 
     return await _guard(run)
 
@@ -742,5 +928,27 @@ async def get_operation(request: Request, operation: str) -> Response:
     async def run() -> Response:
         caller = await _caller(request)
         return JSONResponse(await _service(request).get_operation(caller, _uuid(operation)))
+
+    return await _guard(run)
+
+
+@router.post(
+    "/operations/{operation}/cancel",
+    openapi_extra=openapi_docs.described(
+        summary="Cancel a pending operation",
+        description=(
+            "The person who requested it, or an admin or owner of its organisation. Only a "
+            "`pending` operation is cancelled; one already running or finished is `conflict`."
+        ),
+    ),
+    responses={200: openapi_docs.ok("The operation, `cancelled`."),
+               401: openapi_docs.UNAUTHENTICATED, 403: FACTOR_GATE, 404: NOT_A_MEMBER,
+               409: {"model": ConflictResponse, "description": "`conflict`: not pending."}},
+)  # fmt: skip
+async def cancel_operation(request: Request, operation: str) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        cancelled = await _service(request).cancel_operation(caller, _uuid(operation))
+        return JSONResponse({"operation": cancelled})
 
     return await _guard(run)

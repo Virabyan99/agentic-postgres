@@ -31,6 +31,17 @@ routes' one guard through `require_role`; the definer functions check again.
 Every list the database returns is filtered to the caller's organisations as
 this request computed them -- for a key, its one organisation -- so a key held
 by a member of two organisations sees only the one it was minted in.
+
+**Operations** (Session 38, ADR 0256): a write is refused `not_available`
+while its type is not accepted (ADR 0254) -- before its body is read; then the
+body, the role (`control_roles.PROJECT_WRITES`, checked again in SQL), for a
+creation the slot reading (`capacity_exhausted {reason: no_slot}` BEFORE any
+row, D2160), and only then the row: `202` with the operation, or `409
+conflict` naming the operation already holding the project or the
+organisation's creation (D2166). A project's `state` is derived from its
+operation history alone (`control_states`, D2159). An export's download URL is
+handed to the person who requested it, once, by `GET /v1/operations/{id}`, and
+erased in the same statement (D2164); a key never receives it.
 """
 
 from __future__ import annotations
@@ -46,7 +57,16 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from app import control_roles, errors, one_time_tokens, operations, refresh_sessions, totp
+from app import (
+    compute_profiles,
+    control_roles,
+    control_states,
+    errors,
+    one_time_tokens,
+    operations,
+    refresh_sessions,
+    totp,
+)
 from app import scopes as scope_map
 from app.control_repository import ControlRepository
 from app.hashing import normalize
@@ -72,6 +92,18 @@ KEY_PATTERN = re.compile(r"^apg_([0-9a-f]{16})_([A-Za-z0-9_-]{43})$")
 #: What an unknown key id is compared against, so an unknown id does the same
 #: work as a known one with a wrong secret. A constant, and not any key's.
 _NO_SUCH_KEY = "0" * 64
+
+#: A slot reading older than this is not a reading (D2160): the reconciler
+#: records one at its start and after every operation, so a stale one means it
+#: is not running and no creation would be executed.
+SLOT_READING_MAX_AGE = timedelta(minutes=10)
+
+#: What `capacity_exhausted {reason: no_slot}` says. Never a value the caller sent.
+NO_SLOT_MESSAGE = "No slot is ready on this server. No resources were created."
+STALE_SLOT_MESSAGE = (
+    "This server's slots were last observed more than ten minutes ago, so none is known "
+    "to be ready. No resources were created."
+)
 
 
 def mint_key() -> tuple[str, str, str]:
@@ -538,29 +570,135 @@ class ControlService:
         if organization is not None:
             self.require_role(caller, organization, "viewer")
         rows = await self.repository.list_projects(caller.user_id, organization)
-        return [_project(row) for row in rows if self._visible(caller, row["organization_id"])]
+        history = await self.repository.project_operations(caller.user_id, None)
+        return [
+            _project(row, [o for o in history if o["project_key"] == row["key"]])
+            for row in rows
+            if self._visible(caller, row["organization_id"])
+        ]
 
     async def get_project(self, caller: ControlPrincipal, key: str) -> dict[str, Any]:
         row = await self.repository.get_project(caller.user_id, key)
         if row is None or not self._visible(caller, row["organization_id"]):
             raise errors.ControlRefused(errors.NOT_FOUND)
-        return _project(row)
+        return _project(row, await self.repository.project_operations(caller.user_id, key))
 
     @staticmethod
-    def create_project(caller: ControlPrincipal) -> None:
-        """`project.create` is refused while its ledger row is not offered (D2054).
+    def require_accepted(route: str) -> None:
+        """`not_available`, naming the ledger row, while the route's operation
+        type is not accepted (ADR 0254, D2054) -- before the body is read, so
+        nothing about a request to a concept that is not offered is examined.
 
         No row is written: a request accepted into a row nothing will ever
         execute would be a control acting on a `planned` concept, which is what
         ADR 0247's guard forbids.
         """
-        del caller
-        operation_type = "project.create"
+        operation_type = control_roles.OPERATION_OF_ROUTE[route]
         if not operations.is_accepted(operation_type):
             raise errors.ControlRefused(
                 errors.NOT_AVAILABLE, ledger_row=operations.OPERATION_TYPES[operation_type]
             )
-        raise AssertionError("project.create is accepted, and Session 38 has not built it")
+
+    async def create_project(
+        self,
+        caller: ControlPrincipal,
+        *,
+        organization: UUID,
+        name: str,
+        profile: str,
+        admin_username: str,
+        handoff_sha256: str,
+    ) -> dict[str, Any]:
+        """Request `project.create` (D2165: member and above, a person only).
+
+        The slot reading is taken BEFORE the row: with no `ready` slot, or a
+        reading older than ten minutes, the answer is `capacity_exhausted
+        {reason: no_slot}` and nothing is written (D2160). The handoff token
+        itself never arrives -- only its SHA-256 (ADR 0260).
+        """
+        self.require_role(caller, organization, control_roles.PROJECT_WRITES["create_project"])
+        reading = await self.repository.ready_slots(caller.user_id)
+        observed = reading["observed"]
+        if observed is None or reading["ready_slots"] < 1:
+            raise errors.ControlRefused(
+                errors.CAPACITY_EXHAUSTED, reason="no_slot", message=NO_SLOT_MESSAGE
+            )
+        if datetime.now(UTC) - observed > SLOT_READING_MAX_AGE:
+            raise errors.ControlRefused(
+                errors.CAPACITY_EXHAUSTED, reason="no_slot", message=STALE_SLOT_MESSAGE
+            )
+        arguments = {
+            "name": name,
+            "profile": profile,
+            "admin_username": admin_username,
+            "handoff_sha256": handoff_sha256,
+        }
+        return await self._request(caller, organization, None, "project.create", arguments)
+
+    async def write_project(
+        self, caller: ControlPrincipal, route: str, key: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Request sleep, wake, resize, export or delete of one project.
+
+        The project must be one of the caller's organisations' and not deleted
+        -- a foreign, missing or deleted project is the one `not_found` -- and
+        the caller must hold `PROJECT_WRITES[route]` there.
+        """
+        row = await self.repository.get_project(caller.user_id, key)
+        if row is None or not self._visible(caller, row["organization_id"]):
+            raise errors.ControlRefused(errors.NOT_FOUND)
+        if row["deleted_at"] is not None:
+            raise errors.ControlRefused(errors.NOT_FOUND)
+        organization = row["organization_id"]
+        self.require_role(caller, organization, control_roles.PROJECT_WRITES[route])
+        operation_type = control_roles.OPERATION_OF_ROUTE[route]
+        return await self._request(caller, organization, key, operation_type, arguments)
+
+    async def _request(
+        self,
+        caller: ControlPrincipal,
+        organization: UUID,
+        key: str | None,
+        operation_type: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        operation, created = await self.repository.request_operation(
+            caller.user_id, organization, key, operation_type, arguments
+        )
+        if not created:
+            raise errors.ControlRefused(errors.CONFLICT, operation=str(operation))
+        row = await self.repository.get_operation(caller.user_id, operation)
+        assert row is not None, "the operation just recorded is not readable by its requester"
+        return _operation(row)
+
+    @staticmethod
+    def resize_message() -> str:
+        """The sentence a resize's `202` carries (D2157): the measured window,
+        or that none has been measured on this server yet."""
+        return compute_profiles.resize_message()
+
+    async def cancel_operation(self, caller: ControlPrincipal, operation: UUID) -> dict[str, Any]:
+        """Cancel a PENDING operation: its requester, or an admin or owner of
+        its organisation (D2067). A running or finished one is `conflict`."""
+        row = await self.repository.get_operation(caller.user_id, operation)
+        if row is None or not self._visible(caller, row["organization_id"]):
+            raise errors.ControlRefused(errors.NOT_FOUND)
+        role = self.require_role(
+            caller, row["organization_id"], control_roles.PROJECT_WRITES["cancel_operation"]
+        )
+        if row["requested_by"] != caller.user_id and control_roles.rank(role) < control_roles.rank(
+            "admin"
+        ):
+            raise errors.AuthorizationFailed("the requester, or admin in the organisation")
+        try:
+            await self.repository.cancel_operation(caller.user_id, operation)
+        except errors.ControlRefused as refused:
+            if refused.word != errors.CONFLICT:
+                raise
+            raise errors.ControlRefused(errors.CONFLICT, operation=str(operation)) from refused
+        cancelled = await self.repository.get_operation(caller.user_id, operation)
+        assert cancelled is not None
+        return _operation(cancelled)
 
     async def list_operations(
         self, caller: ControlPrincipal, organization: UUID
@@ -570,10 +708,25 @@ class ControlService:
         return [_operation(row) for row in rows if self._visible(caller, row["organization_id"])]
 
     async def get_operation(self, caller: ControlPrincipal, operation: UUID) -> dict[str, Any]:
+        """One operation; for the PERSON who requested a succeeded export, its
+        download URL, once (D2164). The URL is read and erased by one statement
+        in the database, so a second read -- by anyone -- answers without it. A
+        key never takes it: an export is a person's request (D2165), and a read
+        key that could collect its URL would be a door to the data."""
         row = await self.repository.get_operation(caller.user_id, operation)
         if row is None or not self._visible(caller, row["organization_id"]):
             raise errors.ControlRefused(errors.NOT_FOUND)
-        return _operation(row)
+        answer = _operation(row)
+        if (
+            not caller.is_key
+            and row["requested_by"] == caller.user_id
+            and row["type"] == "project.export"
+            and row["status"] == "succeeded"
+        ):
+            secret = await self.repository.take_result_secret(caller.user_id, operation)
+            if secret is not None:
+                answer["download_url"] = secret
+        return answer
 
 
 def _iso(value: Any) -> str | None:
@@ -589,16 +742,24 @@ def _organization(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _project(row: dict[str, Any]) -> dict[str, Any]:
+def _project(row: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
+    state, managed_by = control_states.project_state(history)
     return {
         "key": row["key"],
         "organization_id": str(row["organization_id"]),
+        "display_name": row["display_name"],
         "slug": row["slug"],
         "environment": row["environment"],
         "domain": row["domain"],
+        "region": row["region_id"],
+        "profile": row["profile"],
+        "state": state,
+        "managed_by": managed_by,
+        "app_route": row["app_route"],
         "template_version": row["template_version"],
         "source_commit": row["source_commit"],
         "adopted_at": row["adopted_at"].isoformat(),
+        "deleted_at": _iso(row["deleted_at"]),
     }
 
 
@@ -611,6 +772,9 @@ def _operation(row: dict[str, Any]) -> dict[str, Any]:
         "status": row["status"],
         "progress": row["progress"],
         "error_code": row["error_code"],
+        "step": row["step"],
+        "result": row["result"],
+        "requested_by": str(row["requested_by"]),
         "created_at": row["created_at"].isoformat(),
         "started_at": _iso(row["started_at"]),
         "finished_at": _iso(row["finished_at"]),
