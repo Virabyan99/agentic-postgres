@@ -34,6 +34,7 @@ from typing import Any
 from agentic_postgres import (
     REPO_ROOT,
     auth_limits,
+    compute_profiles,
     config,
     deployed_output,
     diagnosis,
@@ -549,6 +550,10 @@ def build_outputs(
         # rendered or deployed document, and the control project is found by
         # this boolean -- never by its name.
         "control": {"enabled": config.control_enabled(project)},
+        # Version 21 (ADR 0258). Which profile's values the budgets above are --
+        # `standard` for a manifest that names none. `region` is NOT here: a
+        # render has no host, and the deploy writes it (D2197).
+        "compute": {"profile": config.compute_profile(project)},
     }
 
 
@@ -1780,6 +1785,10 @@ def build_compose_env(
     backup: dict[str, Any] | None = None,
     *,
     control: bool = False,
+    #: Session 38 (ADR 0258). The manifest's profile, for the per-service pids
+    #: and cpus a profile may move. REQUIRED: a caller that forgot it would
+    #: render `standard`'s CPUs for a `small` project without a word.
+    compute_profile: str,
 ) -> bytes:
     """Exactly :data:`COMPOSE_ENV_KEYS`, in that order, and nothing else.
 
@@ -1818,6 +1827,11 @@ def build_compose_env(
     # and `compose config` would resolve differently depending on which project
     # produced the file.
     api = api or {}
+    overrides = compute_profiles.resource_overrides(compute_profile)
+    resources = {
+        service: {**defaults, **overrides.get(service, {})}
+        for service, defaults in config.SERVICE_RESOURCE_DEFAULTS.items()
+    }
     rest = {**config.API_REST_DEFAULTS, **(api.get("rest") or {})}
     # Defaults merged in for the same reason `rest` merges them: a project that
     # declares no `api.app` section still has to render, and every variable
@@ -1859,14 +1873,16 @@ def build_compose_env(
         # that produced them. `cpus` is a STRING -- rig 31a measured that
         # Compose accepts a quoted value and normalises it, so no
         # `deploy.resources.limits` fallback is needed.
+        #
+        # Session 38 (ADR 0258): the profile's overrides merged over the
+        # defaults, member by member -- `small` moves postgres's cpus and
+        # nothing else; `standard` and `large` move none.
         **{
-            f"{service}_PIDS_LIMIT": str(
-                config.SERVICE_RESOURCE_DEFAULTS[service.lower()]["pids_limit"]
-            )
+            f"{service}_PIDS_LIMIT": str(resources[service.lower()]["pids_limit"])
             for service in SERVICE_RESOURCE_ORDER
         },
         **{
-            f"{service}_CPUS": str(config.SERVICE_RESOURCE_DEFAULTS[service.lower()]["cpus"])
+            f"{service}_CPUS": str(resources[service.lower()]["cpus"])
             for service in SERVICE_RESOURCE_ORDER
         },
         # Session 35 (ADR 0244). Lowercase `m`, Docker's byte suffix, as
@@ -2716,6 +2732,7 @@ def render_project(
                     project.get("storage"),
                     project.get("backup"),
                     control=config.control_enabled(project),
+                    compute_profile=config.compute_profile(project),
                 ),
             )
             # The archiver's configuration, rendered beside `compose.env` and

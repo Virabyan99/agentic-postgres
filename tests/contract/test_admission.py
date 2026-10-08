@@ -98,6 +98,7 @@ def write_deployed(root: Path, key: str, unreclaimable: int) -> Path:
         health_status="ready",
         rest_status="unavailable",
         rest_enabled=True,
+        region=None,
         docs_status="unavailable",
         app_status="unavailable",
         app_docs_status="unavailable",
@@ -170,9 +171,9 @@ def write_deployed(root: Path, key: str, unreclaimable: int) -> Path:
 
 @pytest.fixture
 def host_manifest(tmp_path: Path) -> Path:
-    """A schema 3 host, from the committed example rather than hand-built."""
+    """A schema 4 host (Session 38), from the committed example rather than hand-built."""
     document = yaml.safe_load((REPO_ROOT / "host.example.yaml").read_text(encoding="utf-8"))
-    assert document["schema_version"] == 3
+    assert document["schema_version"] == 4
     assert document["capacity"]["memory_mb"] == 3814
     path = tmp_path / "host.yaml"
     path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
@@ -184,6 +185,9 @@ def schema_two_host(tmp_path: Path) -> Path:
     document = yaml.safe_load((REPO_ROOT / "host.example.yaml").read_text(encoding="utf-8"))
     document["schema_version"] = 2
     del document["capacity"]
+    # Session 38: nor the schema 4 blocks, which no schema 2 document carried.
+    del document["region"]
+    del document["slots"]
     path = tmp_path / "host-v2.yaml"
     path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
     return path

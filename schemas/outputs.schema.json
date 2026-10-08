@@ -32,13 +32,14 @@
         "template_version",
         "migrations",
         "connectors",
-        "control"
+        "control",
+        "compute"
       ],
       "properties": {
         "schema_version": {
           "type": "integer",
           "enum": [
-            20
+            21
           ]
         },
         "document_kind": {
@@ -305,6 +306,9 @@
         },
         "control": {
           "$ref": "#/$defs/controlFacility"
+        },
+        "compute": {
+          "$ref": "#/$defs/computeProfile"
         }
       }
     },
@@ -335,14 +339,16 @@
         "backup_state",
         "migrations",
         "connectors",
-        "control"
+        "control",
+        "compute",
+        "region"
       ],
       "description": "Root-owned, mode 0600, written under /etc/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
       "properties": {
         "schema_version": {
           "type": "integer",
           "enum": [
-            20
+            21
           ]
         },
         "document_kind": {
@@ -708,6 +714,19 @@
         },
         "control": {
           "$ref": "#/$defs/controlFacility"
+        },
+        "compute": {
+          "$ref": "#/$defs/computeProfile"
+        },
+        "region": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/region"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -2400,6 +2419,53 @@
         }
       },
       "description": "Version 20 (ADR 0251). Whether the project is the control plane, read from the manifest's `control.enabled` by `config.control_enabled` -- the one reader, which reads a manifest and a document at the same place. Carried whole to the deployed document, because the lint, the deploy's observer and `bin/control.sh` decide from a rendered or deployed document, and the control project is found by this boolean, never by its name (D2068). A facility flag is not a project-scoped identity and joins no isolation pointer."
+    },
+    "computeProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile"
+      ],
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": [
+            "small",
+            "standard",
+            "large"
+          ]
+        }
+      },
+      "description": "Version 21 (ADR 0258). The project's compute profile, read from the manifest by `config.compute_profile` -- `standard` when the manifest names none. Carried whole to the deployed document. The values the profile sets are already in the document's budget blocks; this names which set they are. Not an identity: two projects may share a profile."
+    },
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "display_name",
+        "provider",
+        "location"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{2,31}$"
+        },
+        "display_name": {
+          "type": "string",
+          "pattern": "^[ -~]{1,64}$"
+        },
+        "provider": {
+          "type": "string",
+          "pattern": "^[ -~]{1,32}$"
+        },
+        "location": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]{2,16}$"
+        }
+      },
+      "description": "Version 21 (ADR 0257, D2161). Where the machine is, copied by the DEPLOY from the host manifest's `region` (schema 4) -- deployed documents only, because a render has no host (D2197). Null when the host manifest predates schema 4: an unknown, which every reader that needs a region refuses rather than defaults. One host, one region: the substrate, not an identity."
     }
   }
 }

@@ -73,8 +73,8 @@ def test_schema_seven_admits_connectors_and_six_forbids_them(
     tmp_path: Path, base: dict[str, Any]
 ) -> None:
     """ADR 0177's rule a sixth time, `backup.mirror`'s shape: optional at 7."""
-    # The base is version 9 since Session 37 (ADR 0251); connectors arrived at 7.
-    assert base["schema_version"] == 9 and config.PROJECT_CONNECTORS_FROM == 7
+    # The base is version 10 since Session 38 (ADR 0258); connectors arrived at 7.
+    assert base["schema_version"] == 10 and config.PROJECT_CONNECTORS_FROM == 7
     assert "connectors" not in base
     assert config.connectors_enabled(_load(tmp_path, base)) is False
 
@@ -128,8 +128,8 @@ def test_one_reader_decides_the_facility(tmp_path: Path, base: dict[str, Any]) -
     assert secrets_contract.FACILITY_CONNECTORS not in secrets_contract.enabled_facilities(base)
 
     document = _rendered(RENDERED[0])
-    # Outputs 20 since Session 37 (ADR 0251); the block arrived at 19.
-    assert document["schema_version"] == 20
+    # Outputs 21 since Session 38 (ADR 0258); the block arrived at 19.
+    assert document["schema_version"] == 21
     assert document["connectors"] == {"enabled": False}
     assert secrets_contract.FACILITY_CONNECTORS not in secrets_contract.enabled_facilities(document)
     on = copy.deepcopy(document)

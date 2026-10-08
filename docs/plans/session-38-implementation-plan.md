@@ -447,6 +447,8 @@ D2189.** Rows the runs add go in a second table below it, in execution order.
 | **D2194** | §0 / D2149 / Sheet H1: *"both copies move on Sheet H1, diffed"*; H1's install line `-m 0644`; D2025: *"the HOST checkout's copy is schema 3"*. | **Sheet E0**: `/etc/agentic-postgres/host.yaml` is **schema 2**, `root:root 0600`, 3,579 bytes — it has no `capacity` block; the checkout's `host.yaml` is schema 3, `op:op 0600`, 5,618 bytes; the diff is exactly the schema line and the `capacity` block. Schema 2 is still accepted (`[2, 3]`), which is why nothing has refused it. | **Sheet H1 writes ONE schema-4 document and installs it at both paths**: `s38-hostyaml.py` writes the candidate from the CHECKOUT's copy (schema 3 → 4, + `region`, + `slots`), the diff against both current copies is read, and the `/etc` copy is installed **`root:root 0600`** (its current mode — the sheet's 0644 was a guess) so the two copies are byte-identical after H1. The class (two copies, D2020) stays in §10. | One document at two paths cannot drift on the day it is written; a schema-2 `/etc` copy beside a schema-4 checkout copy would be a third shape. | 0257 |
 | **D2195** | D2162 / Run 2 item 4: *"`src/agentic_postgres/isolation_matrix.py` holds `MUST_DIFFER`, `MUST_MATCH`, `RELEASE_STATE`, `NOT_AUTHORITY_PREFIXES`, `_matches`, `_classify` … the live module imports them"*. | `test_repository_contract.py::test_no_module_is_imported_only_by_its_own_tests` (D204) refuses a `src/agentic_postgres` module whose only importers are tests — Session 37 Run 5 went CI-red on exactly that (`operations.py`, D2110). Nothing in the product classifies isolation leaves; only proofs do. `tests/deployment/` already shares a plain helper module (`oversized_request.py`, imported by a live proof). | **The tables and the classifier move VERBATIM to `tests/deployment/isolation_matrix.py`** (public `matches`/`classify`; the live module keeps `_matches = matches`, `_classify = classify`), imported by the live module and by `tests/contract/test_isolation_leaves_offline.py`. The live module's five node ids are unchanged (`--collect-only`). | A product module whose only reader is a test is the class D204 guards; the helper is honest about who reads it. | — |
 | **D2196** | Run 2: *"Both fixtures' `.generated` renders must be byte-identical to before (REST enabled on both)"*; item 1: *"`rendering.build_compose_env` emits `API_REST_ENABLED`"*. | Re-rendered with `./deploy.sh --render-only` (Run 2): `diff -r` against the copy taken before the run shows **exactly one difference per fixture — `compose.env` gains `API_REST_ENABLED=true`** (line 81); `outputs.json`, `pgbackrest.conf` and every other rendered file are byte-identical. No `compose.yaml` line interpolates the key, and `compose.env` is not mounted, so no container's definition or mount digest moves with it (ADR 0155). | **The byte-identity holds for everything but the one line item 1 adds**, and that line is the reader the run exists to give the flag. The host's alpha and beta renders gain the same line (`true`), control-prod's `false`. | The plan's two sentences cannot both be literally true; the difference is the intended one and is measured, not assumed. | 0251 |
+| **D2197** | D2161 / Run 3 item 4: *"Outputs schema 21 carries `region` … in the rendered and deployed documents … the render takes the region from the host manifest (`render-config.py` already loads it, `:186`, `:211`)"*. | `bin/render-config.py`'s project render (`--render`) takes NO host manifest; `:186` and `:211` are `--edge-env` and `--edge-static`, the shared edge's paths. `./deploy.sh --render-only` must keep working with no host (CLAUDE.md §6). The deploy loads the host manifest at step 0. | **`region` is a DEPLOYED-document member only**: `build_deployed_document(region=…)` (REQUIRED, the deploy passes `host_config.region(host).as_document()` or `None` from a host manifest below 4); the rendered branch carries `compute` alone, and `migrate_v20_to_v21` (rendered documents) adds only `compute: {profile: standard}`. A deployed document is read by version, never migrated (ADR 0241), so no step writes a region into an archived one. | A render that needed a host to know where it will run would end the hostless render; the deploy is the one step that knows both the project and the machine. | 0257 |
+| **D2198** | D2156: *"`config.compute_profile(manifest)` … the merged budget used everywhere — `database_budget()`, the auth/storage memory and the pools — takes the profile's values when `compute` is present (grep every reader …)"*; *"a manifest with `compute: {profile: standard}` renders byte-identically to one with no `compute`"*. | The budget readers are many (`database_budget`, the three connection-budget functions, `build_compose_env`, the validators) and all read the LOADED manifest. Measured in Run 3: the example manifest itself sets `api.rest.pool_size` and `storage.pool_size`, and declares no `api.app` block; and `outputs.json` records `inputs.project_sha256`, the digest of the manifest's BYTES. | **The profile is applied in ONE place — `config.apply_compute_profile`, called by `load_project_manifest` after the schema and before every semantic rule** — so every reader sees the values as if written and the existing validators bound them; no reader changed. A profile writes only into blocks the manifest DECLARES (creating `api.app`/`storage` would change what is enabled; an absent block is charged at its defaults, as today; a slot manifest carries every block). The byte-identity holds for every rendered file and for `outputs.json` with `inputs.project_sha256` set aside — the one leaf that must differ, since the manifests' bytes differ (`test_standard_is_todays_defaults`). | One application point cannot miss a reader; a reader-by-reader merge is the D979 class. | 0258 |
 
 ---
 
@@ -871,7 +873,51 @@ the new modules, `test_project_manifest*`, `test_host_manifest`,
 the host move only `schema_version`, `template_version` later, `region`,
 `compute` — four leaves; recorded for R1).
 
-**Done.** *(the executor writes it)*
+**Done.** 2026-10-08/09 (paused overnight at the operator's request, resumed;
+scripts and notes in WSL `~/s38/run3/`). **Run 2's CI: run 37686087243
+(`contract`) completed `success` on `8f4fcf0`.** **Host schema 4** (D2149,
+D2161): enum `[2, 3, 4]`; at 4 `capacity` and `region` required, `region` and
+`slots` forbidden below 4; `slots.defaults` carries exactly the non-derived
+provider facts (`storage {account_id, jurisdiction}`, `backup {account_id,
+jurisdiction, mirror {endpoint, region}}`, patterns copied from the project
+schema) and `slots.declared[{key, domain, mirror_bucket?}]`; `host_config`
+gains `region()`, `declared_slots()`, `slot_defaults()` (each the sole reader)
+and a refusal of a repeated slot key or domain; `host.example.yaml` at 4 with
+`eu-example-1` and `slot1-dev`. **All eleven readers of `load_host_manifest`
+(nine in `bin/`, two in `src/`) were read: none branches on the version.**
+**Profiles** (D2156, ADR 0258's table): `services/auth-api/app/compute_profiles.py`
+(standard library; `RESIZE_WINDOW_SECONDS = None`) loaded by
+`src/agentic_postgres/compute_profiles.py`; `SHARED_MODULES` gains it.
+**Manifest 10**: `compute: {profile}` with the version-10 gate;
+`config.compute_profile()` and **`config.apply_compute_profile()`, called once
+in `load_project_manifest`** (D2198); `build_compose_env(compute_profile=…)`
+REQUIRED, merging the profile's resource overrides; the three examples at 10
+without `compute`, seven pins moved. **Outputs 21** (D2197): `compute` on both
+branches, `region` on the deployed branch only (`build_deployed_document(region=…)`
+REQUIRED, the deploy passes the host manifest's), `migrate_v20_to_v21` adds
+`compute: standard` only; `outputs_chain` step 20; `test_disaster_kit`'s
+previous-version helper at 21; `isolation_matrix`: `region`/`region.*`
+MUST_MATCH, `compute.` not authority; `PRINTABLE_BLOCKS` gains both. **Tests**:
+`test_compute_profiles.py` (8), `test_host_manifest.py` (4 made stricter under
+their names, 2 added), `test_output_migrations.py` (`v20` fixture; the chain
+test renamed `…_at_version_21_…` with its registry node id; two v21 tests),
+the offline leaf test now builds documents with a region. **Re-render**: each
+fixture's `outputs.json` gains `compute: standard`, `schema_version` 21 and a
+new `inputs.project_sha256` (the manifest's bytes moved 9 → 10);
+`compose.env` unchanged. First runs found two TEST defects, not product ones:
+the example sets two profile-owned members (refused by name, as designed) and
+declares no `api.app`. **Targeted** (127 modules, once): 4,544 passed, 3
+skipped; the 3 failures and 9 errors were version pins (`test_admission`'s host
+fixture, `test_connector_facility`'s outputs pin) and the not-yet-regenerated
+acceptance matrix — fixed, matrix regenerated, the four modules re-run: 107
+passed. **Battery 6/6 killed**, each control PASSED: M1 `standard`'s
+`shared_buffers_mb` 129 → `test_standard_is_todays_defaults` FAILED; M2 the
+owned-member refusal removed → FAILED; M3 resources from the defaults → 
+`test_pids_and_cpus_come_from_the_profile` FAILED; M4 `region.*` dropped from
+the classifier → the offline leaf test FAILED; M5 the v21 step leaving
+`compute` out → `test_v21_adds_region_and_profile` FAILED; M6 `region` not
+required at host 4 → `test_schema_four_requires_a_region` FAILED. Rows
+**D2197, D2198**. NEXT FREE D2199. CI: recorded in Run 4's commit.
 
 ### Run 4 — the control plane's half: `0004`, the routes, the roles, the states, the slot readings
 

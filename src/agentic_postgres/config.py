@@ -31,7 +31,7 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 
-from agentic_postgres import REPO_ROOT, auth_profile
+from agentic_postgres import REPO_ROOT, auth_profile, compute_profiles
 
 # ---------------------------------------------------------------------------
 # Constants owned by the decision log
@@ -61,7 +61,7 @@ MAX_MANIFEST_BYTES = 65_536
 #: `project.lifecycle`. Versions 1 and 2 still load and render as permanent
 #: projects, because both host manifests are version 1 and no commit can edit
 #: them.
-SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9})
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
 SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
 
 #: The project manifest version at which `mcp.capabilities` exists (ADR 0201):
@@ -86,6 +86,12 @@ PROJECT_APPROVALS_FROM = 8
 #: plane, and the deployed document records `control.enabled: false` for it
 #: (outputs version 20).
 PROJECT_CONTROL_FROM = 9
+
+#: The project manifest version at which `compute` exists (ADR 0258): optional
+#: at 10, forbidden below. A manifest below 10, or one at 10 naming no profile,
+#: is `standard` -- today's defaults exactly -- and the documents record
+#: `compute.profile: standard` for it (outputs version 21).
+PROJECT_COMPUTE_FROM = 10
 
 #: The project manifest version at which `backup.mirror` exists (ADR 0188):
 #: optional at 4, forbidden below. A manifest below 4 has no mirror, and the
@@ -1172,6 +1178,58 @@ def project_capabilities(document: dict[str, Any]) -> str | None:
     return document["mcp"].get("capabilities")
 
 
+def compute_profile(document: dict[str, Any]) -> str:
+    """The project's compute profile (ADR 0258, D2156): `compute.profile`, or
+    `standard` when the manifest names none -- every manifest below 10, and a
+    document migrated from 20. `control_enabled`'s shape: every reader asks
+    this, never the key directly."""
+    return str((document.get("compute") or {}).get("profile", compute_profiles.DEFAULT_PROFILE))
+
+
+def apply_compute_profile(document: dict[str, Any]) -> dict[str, Any]:
+    """The manifest with its profile's values written in, or the manifest itself
+    when it names no profile (ADR 0258).
+
+    **The one place a profile becomes manifest values**, called by
+    `load_project_manifest` after the schema and before every semantic rule, so
+    each budget, pool and memory reader sees the profile's numbers as if they had
+    been written and the validators that bound them are the existing ones.
+
+    A manifest naming `compute` may not ALSO set a member the profile owns:
+    refused by name, because two sources for one number is the shape ADR 0002
+    refuses for names. A profile sets a member only inside a block the manifest
+    declares -- creating an `api.app` or `storage` block would change what the
+    manifest says is enabled -- and an absent block is charged at its defaults
+    by the validators exactly as today; a slot manifest carries every block.
+    """
+    compute = document.get("compute")
+    if compute is None:
+        return document
+    profile = compute["profile"]
+    present = []
+    for member in compute_profiles.owned_members():
+        node: Any = document
+        for part in member.split("."):
+            node = node.get(part) if isinstance(node, dict) else None
+        if node is not None:
+            present.append(member)
+    if present:
+        raise ManifestError(
+            f"compute.profile is {profile!r}, which sets {', '.join(present)}; a manifest "
+            "naming a profile may not also set a member the profile owns (ADR 0258)"
+        )
+    import copy
+
+    merged = copy.deepcopy(document)
+    for path, value in compute_profiles.values(profile):
+        parent: Any = merged
+        for part in path[:-1]:
+            parent = parent.get(part) if isinstance(parent, dict) else None
+        if isinstance(parent, dict):
+            parent[path[-1]] = value
+    return merged
+
+
 def validate_project_semantics(
     document: dict[str, Any],
     *,
@@ -1817,6 +1875,9 @@ def load_project_manifest(path: Path, *, expiry: bool = True) -> dict[str, Any]:
     document = load_manifest(path)
     assert_no_sensitive_keys(document)
     validate_against_schema(document, "project.schema.json")
+    # ADR 0258: the profile's values written in before any semantic rule reads
+    # a budget, so the existing validators bound them.
+    document = apply_compute_profile(document)
     validate_project_semantics(document, expiry=expiry)
     return document
 

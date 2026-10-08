@@ -72,6 +72,11 @@ PRINTABLE_BLOCKS = {
     # Version 20 (ADR 0251). One boolean: whether the project is the control
     # plane -- the fact `bin/control.sh` finds it by. No credential or address.
     "control",
+    # Version 21 (ADR 0257, 0258). Where the machine is (four declared strings)
+    # and which compute profile the project runs. Neither is a credential, an
+    # address or a provider identifier.
+    "region",
+    "compute",
 }
 
 #: Blocks that must never appear in output, at any verbosity.

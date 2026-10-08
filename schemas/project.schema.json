@@ -24,9 +24,10 @@
         6,
         7,
         8,
-        9
+        9,
+        10
       ],
-      "description": "Manifest format version. 1 to 9. Version 5 (ADR 0198) adds `migrations`, optional at 5 and forbidden below it: the repository-relative directory of the project's OWN migration set, tracked in the release checkout under `projects/<slug>/`. Optional rather than required for `backup.mirror`'s reason -- a set is a facility a project may not have. It lives in the checkout and never beside this manifest on the host, because a release is exactly the commit it is named for and SQL applied from outside it would be a schema no commit determines (D1087). Version 4 (ADR 0188) adds `backup.mirror`, optional at 4 and forbidden below it. Version 4 (ADR 0188) adds `backup.mirror`, optional at 4 and forbidden below it: a copy of the backup repository at a second provider, made by a host unit and never known to the archiver. Version 2 (ADR 0183) replaces `mcp.max_result_rows` and `mcp.max_response_bytes` -- two fields nothing ever read (D929) -- with `mcp.profile`, which the lock compiler reads. A field is FORBIDDEN below the version that introduces it and REQUIRED at or above it (ADR 0177's rule, applied to this document), and the two replaced fields are the mirror image: required at 1, forbidden at 2. Version 3 (ADR 0186) adds `project.lifecycle`, required at 3 and forbidden below it; `permanent` is what every earlier version meant by omitting it. Versions 1 and 2 still load, because `project.alpha.yaml` and `project.beta.yaml` live only on the host and no commit can edit them. Version 6 (ADR 0201) adds the optional `mcp.capabilities`: the repository-relative directory holding this project's own capability manifest, forbidden below 6. Version 7 (ADR 0237) adds the optional `connectors`: whether this deployment enables the connectors facility, and where each outbound connector of the project's set sends. Forbidden below 7 and optional at 7, `backup.mirror`'s shape -- connectors are a facility a project may not have. Enabling it is what makes the project owe `connector_signing_key`; a project that leaves it off owes nothing new. Version 8 (ADR 0243) adds the optional `migrations.approvals_required` (0 or 1, absent meaning 0): whether a host applies this project's pending set only with a committed approval, by a second declared name, of the set's committed proposal. Forbidden below 8, and meaningful only beside `migrations.set`, which the `migrations` block already requires. Version 9 (ADR 0251) adds the optional `control`: whether this deployment is the control plane -- its `auth` container runs `APP_MODE=control` and serves `/v1`, its migration set may grant the identity service what the control tables need, and its deployed document says so. Forbidden below 9 and optional at 9, the connectors facility's shape; absent means off."
+      "description": "Manifest format version. 1 to 10. Version 10 (ADR 0258) adds the optional `compute: {profile}` -- a named set of values this manifest can already carry (the database budget, the app and storage memory limits, the three pool sizes, and postgres's cpus); absent means `standard`, which is today's defaults exactly. Forbidden below 10; a manifest naming `compute` may not also set a member the profile owns. Version 5 (ADR 0198) adds `migrations`, optional at 5 and forbidden below it: the repository-relative directory of the project's OWN migration set, tracked in the release checkout under `projects/<slug>/`. Optional rather than required for `backup.mirror`'s reason -- a set is a facility a project may not have. It lives in the checkout and never beside this manifest on the host, because a release is exactly the commit it is named for and SQL applied from outside it would be a schema no commit determines (D1087). Version 4 (ADR 0188) adds `backup.mirror`, optional at 4 and forbidden below it. Version 4 (ADR 0188) adds `backup.mirror`, optional at 4 and forbidden below it: a copy of the backup repository at a second provider, made by a host unit and never known to the archiver. Version 2 (ADR 0183) replaces `mcp.max_result_rows` and `mcp.max_response_bytes` -- two fields nothing ever read (D929) -- with `mcp.profile`, which the lock compiler reads. A field is FORBIDDEN below the version that introduces it and REQUIRED at or above it (ADR 0177's rule, applied to this document), and the two replaced fields are the mirror image: required at 1, forbidden at 2. Version 3 (ADR 0186) adds `project.lifecycle`, required at 3 and forbidden below it; `permanent` is what every earlier version meant by omitting it. Versions 1 and 2 still load, because `project.alpha.yaml` and `project.beta.yaml` live only on the host and no commit can edit them. Version 6 (ADR 0201) adds the optional `mcp.capabilities`: the repository-relative directory holding this project's own capability manifest, forbidden below 6. Version 7 (ADR 0237) adds the optional `connectors`: whether this deployment enables the connectors facility, and where each outbound connector of the project's set sends. Forbidden below 7 and optional at 7, `backup.mirror`'s shape -- connectors are a facility a project may not have. Enabling it is what makes the project owe `connector_signing_key`; a project that leaves it off owes nothing new. Version 8 (ADR 0243) adds the optional `migrations.approvals_required` (0 or 1, absent meaning 0): whether a host applies this project's pending set only with a committed approval, by a second declared name, of the set's committed proposal. Forbidden below 8, and meaningful only beside `migrations.set`, which the `migrations` block already requires. Version 9 (ADR 0251) adds the optional `control`: whether this deployment is the control plane -- its `auth` container runs `APP_MODE=control` and serves `/v1`, its migration set may grant the identity service what the control tables need, and its deployed document says so. Forbidden below 9 and optional at 9, the connectors facility's shape; absent means off."
     },
     "project": {
       "type": "object",
@@ -627,6 +628,25 @@
         }
       },
       "description": "Version 9 (ADR 0251). The control-plane facility. Absent means off; at most one project per host is assumed, and `bin/control.sh` refuses to choose between two."
+    },
+    "compute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile"
+      ],
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": [
+            "small",
+            "standard",
+            "large"
+          ],
+          "description": "The compute profile (ADR 0258). `standard` renders exactly what a manifest with no `compute` renders. The values each profile sets are in services/auth-api/app/compute_profiles.py and ADR 0258's table; a manifest naming a profile may not also set any of them."
+        }
+      },
+      "description": "Version 10 (ADR 0258). The compute profile. Absent means `standard`."
     }
   },
   "$defs": {
@@ -1027,6 +1047,26 @@
         }
       },
       "description": "The version 9 gate (ADR 0251): `control` is forbidden below 9 and OPTIONAL at 9 -- the connectors facility's shape, because being the control plane is a facility one project has. Below 9 a manifest says nothing and the deployed document records `control.enabled: false` for it (outputs version 20)."
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "maximum": 9
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "compute"
+          ]
+        }
+      },
+      "description": "The version 10 gate (ADR 0258): `compute` is forbidden below 10 and OPTIONAL at 10. Below 10 a manifest says nothing and is `standard`; the documents record `compute.profile: standard` for it (outputs version 21)."
     }
   ]
 }

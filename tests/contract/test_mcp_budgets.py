@@ -224,6 +224,7 @@ def _render_share(*, pool_size: int) -> int:
         config.database_budget(database),
         database,
         api={"max_rows": 1000, "rest": {"pool_size": pool_size}},
+        compute_profile="standard",
     )
     for line in raw.decode("utf-8").splitlines():
         name, _, value = line.partition("=")

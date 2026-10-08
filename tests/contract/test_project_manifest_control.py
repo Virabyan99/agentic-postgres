@@ -43,7 +43,8 @@ def test_schema_nine_admits_control_with_and_without_it(
 ) -> None:
     """Optional at 9: the base loads without the block and reads off; with it,
     either value loads and the reader returns exactly that value."""
-    assert base["schema_version"] == 9 == config.PROJECT_CONTROL_FROM
+    # The base is version 10 since Session 38 (ADR 0258); control arrived at 9.
+    assert base["schema_version"] == 10 and config.PROJECT_CONTROL_FROM == 9
     assert 9 in config.SUPPORTED_PROJECT_SCHEMA_VERSIONS
     assert "control" not in base
     assert config.control_enabled(_load(tmp_path, base)) is False
@@ -105,5 +106,5 @@ def test_neither_example_is_the_control_plane() -> None:
     render moves but the version (and the route every project names)."""
     for name in ("project.example.yaml", "project.second.example.yaml"):
         document = config.load_project_manifest(REPO_ROOT / name)
-        assert document["schema_version"] == 9, name
+        assert document["schema_version"] == 10, name
         assert config.control_enabled(document) is False, name

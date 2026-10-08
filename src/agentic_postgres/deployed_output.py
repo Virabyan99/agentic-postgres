@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import REPO_ROOT, access_policy, backup_report, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
@@ -510,6 +510,12 @@ def build_deployed_document(
     # constant with extra steps. The moment an observer exists it passes one.
     backup_state: dict[str, Any] | None = None,
     deployed_through_session: int,
+    #: Version 21 (ADR 0257, D2161, D2197): where the machine is, copied by the
+    #: deploy from the host manifest's `region` (schema 4), or None when the host
+    #: manifest predates it -- an unknown, never a default region. REQUIRED, like
+    #: every observed member: a default would let a deploy that read no host
+    #: manifest publish the same document as one that did.
+    region: dict[str, str] | None,
 ) -> dict[str, Any]:
     """Assemble a deployed document from a rendered one plus observed facts.
 
@@ -736,6 +742,12 @@ def build_deployed_document(
         # Version 20 (ADR 0251). Carried from the render for `connectors`' reason:
         # the facility the deployment was rendered with is the one it has.
         "control": dict(rendered["control"]),
+        # Version 21 (ADR 0258). Carried from the render: the profile the
+        # deployment was rendered with is the one whose values it runs.
+        "compute": dict(rendered["compute"]),
+        # Version 21 (ADR 0257). The deploy's, from the host manifest -- the one
+        # member here a render cannot know (D2197).
+        "region": dict(region) if region is not None else None,
         "observed_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }
     return validate_deployed_document(document)

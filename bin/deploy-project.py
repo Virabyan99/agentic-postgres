@@ -90,6 +90,9 @@ from agentic_postgres.host_config import (
     load_host_manifest,
     runtime_compose_env,
 )
+from agentic_postgres.host_config import (
+    region as declared_region,
+)
 from agentic_postgres.naming import project_key as derive_project_key
 
 EXIT_INPUT = 2
@@ -3165,6 +3168,9 @@ def main(argv: list[str] | None = None) -> int:
         database_observed=database_observed,
         backup_state=backup_state,
         deployed_through_session=arguments.through_session,
+        # Version 21 (ADR 0257, D2197): the operator's declaration from host.yaml
+        # schema 4, or None from an older one -- an unknown, never a default.
+        region=(declared_region(host).as_document() if declared_region(host) is not None else None),
     )
     destination = deployed_output.write_deployed_document(
         document, deployed_output.deployed_path(key)

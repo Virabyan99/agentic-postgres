@@ -165,6 +165,7 @@ def _render(storage: dict) -> dict[str, str]:
         budget,
         database,
         storage={**config.STORAGE_DEFAULTS, **storage},
+        compute_profile="standard",
     )
     values = {}
     for line in raw.decode("utf-8").splitlines():

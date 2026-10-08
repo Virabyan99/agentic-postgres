@@ -8,19 +8,23 @@
   "required": ["schema_version", "host", "ssh", "edge", "infisical", "database_access"],
   "allOf": [
     {
+      "if": { "required": ["schema_version"], "properties": { "schema_version": { "const": 4 } } },
+      "then": { "required": ["capacity", "region"] }
+    },
+    {
       "if": { "required": ["schema_version"], "properties": { "schema_version": { "const": 3 } } },
-      "then": { "required": ["capacity"] }
+      "then": { "required": ["capacity"], "not": { "anyOf": [{ "required": ["region"] }, { "required": ["slots"] }] } }
     },
     {
       "if": { "required": ["schema_version"], "properties": { "schema_version": { "const": 2 } } },
-      "then": { "not": { "required": ["capacity"] } }
+      "then": { "not": { "anyOf": [{ "required": ["capacity"] }, { "required": ["region"] }, { "required": ["slots"] }] } }
     }
   ],
   "properties": {
     "schema_version": {
       "type": "integer",
-      "enum": [2, 3],
-      "description": "Version 2 added `database_access` (Session 4). Version 3 added `capacity` (Session 31, ADR 0221) and is the first version this enum accepts alongside its predecessor, because unlike version 2 it adds a DECLARATION rather than a section a reader could misinterpret: a version 2 document is complete and correct, and reports its capacity as undeclared. Version 1 is still rejected outright -- a reader at version 2 or 3 would otherwise allocate ports inside a range nobody declared. There is no migrator, and that is deliberate: a default measured from the host at first read would be a reading standing in for a declaration (ADR 0195), so the four numbers are typed by the operator or they are absent, and absent is reported."
+      "enum": [2, 3, 4],
+      "description": "Version 4 (Session 38, ADR 0257) adds `region` (required) and `slots` (optional): where this machine is, declared by the operator from the provider's console, and the customer slots the operator has declared -- a declaration only; a slot's STATE is derived from what exists, never written here (D2149). Version 2 added `database_access` (Session 4). Version 3 added `capacity` (Session 31, ADR 0221) and is the first version this enum accepts alongside its predecessor, because unlike version 2 it adds a DECLARATION rather than a section a reader could misinterpret: a version 2 document is complete and correct, and reports its capacity as undeclared. Version 1 is still rejected outright -- a reader at version 2 or 3 would otherwise allocate ports inside a range nobody declared. There is no migrator, and that is deliberate: a default measured from the host at first read would be a reading standing in for a declaration (ADR 0195), so the four numbers are typed by the operator or they are absent, and absent is reported."
     },
 
     "capacity": {
@@ -48,6 +52,77 @@
           "type": "integer",
           "minimum": 1,
           "description": "GiB of free space at the Docker root that a new project may not eat into. Disk admission is a FLOOR and not a sum, because no per-project disk claim exists anywhere -- a candidate's PGDATA is unknowable before it runs, and inventing a number for it would be a value that looked measured and was not (D267, D1596)."
+        }
+      }
+    },
+
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "display_name", "provider", "location"],
+      "description": "Where this machine is (ADR 0257, D2161). DECLARED by the operator from the provider's console and never inferred; required at schema_version 4 and forbidden below it. Carried into every deployed document (outputs 21) and the control plane's registry rows. One host, one region: there is no regions table.",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,31}$", "description": "Stable identifier, e.g. eu-hel-1." },
+        "display_name": { "type": "string", "pattern": "^[ -~]{1,64}$", "description": "What a customer reads, e.g. \"Helsinki, Finland\"." },
+        "provider": { "type": "string", "pattern": "^[ -~]{1,32}$", "description": "The machine's provider, e.g. Hetzner." },
+        "location": { "type": "string", "pattern": "^[a-z0-9-]{2,16}$", "description": "The provider's own location code, e.g. hel1." }
+      }
+    },
+
+    "slots": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["defaults", "declared"],
+      "description": "Customer slots (ADR 0257, D2149): projects the operator prepares in advance so a creation consumes nothing at a provider. A DECLARATION only -- each slot's state (declared, prepared, ready, allocated, quarantined, consumed, undetermined) is derived by `slot.state()` from what exists on the host, never stored here. Optional at schema_version 4, forbidden below it. No member is a credential; the loader's sensitive-key check covers this block.",
+      "properties": {
+        "defaults": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["storage", "backup"],
+          "description": "The provider facts every slot manifest copies -- the non-secret members of the project schema's `storage` and `backup` blocks that are not derived from the slot's key.",
+          "properties": {
+            "storage": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["account_id"],
+              "properties": {
+                "account_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+                "jurisdiction": { "type": "string", "enum": ["default", "eu", "fedramp"] }
+              }
+            },
+            "backup": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["account_id", "mirror"],
+              "properties": {
+                "account_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+                "jurisdiction": { "type": "string", "enum": ["default", "eu", "fedramp"] },
+                "mirror": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["endpoint", "region"],
+                  "properties": {
+                    "endpoint": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?)+$" },
+                    "region": { "type": "string", "pattern": "^[a-z0-9-]{2,32}$" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "declared": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "domain"],
+            "properties": {
+              "key": { "type": "string", "pattern": "^slot[1-9][0-9]{0,2}-[a-z][a-z0-9-]{1,15}$", "description": "slot<n>-<environment> (D2180): an ordinary project key, never a customer's name." },
+              "domain": { "type": "string", "format": "hostname", "minLength": 4, "maxLength": 253, "description": "The slot's public DNS name -- the project schema's `project.domain` rule." },
+              "mirror_bucket": { "type": "string", "minLength": 3, "maxLength": 63, "description": "The B2 mirror bucket when the operator named it otherwise than apg-<key>-backup-mirror (D2124)." }
+            }
+          }
         }
       }
     },

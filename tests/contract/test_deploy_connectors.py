@@ -387,7 +387,7 @@ def test_dev_up_installs_connectors_only_with_the_facility(
     assert reached == []
 
     manifest = yaml.safe_load(example.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == 9  # 9 since Session 37 (ADR 0251)
+    assert manifest["schema_version"] == 10  # 10 since Session 38 (ADR 0258)
     manifest["connectors"] = {"enabled": True, "endpoints": {"note-embedded": ENDPOINT}}
     enabled = tmp_path / "project.enabled.yaml"
     enabled.write_text(yaml.safe_dump(manifest), encoding="utf-8")

@@ -152,6 +152,7 @@ def build(rendered: dict, **overrides):
         # tests that pass it explicitly.
         "rest_status": "unavailable",
         "rest_enabled": True,
+        "region": None,
         "docs_status": "unavailable",
         # Version 9. Unpublished by default like the two above: a session-3
         # deployment serves no application route and no second documentation

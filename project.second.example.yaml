@@ -27,7 +27,7 @@
 # has neither. A version 6 manifest omitting both keys applies exactly the
 # release's migrations and serves exactly the release's agent surface -- which
 # is what every manifest below version 5 also does.
-schema_version: 9
+schema_version: 10
 
 project:
   slug: fixture-alpine

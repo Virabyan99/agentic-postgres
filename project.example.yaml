@@ -53,7 +53,7 @@
 # read (D929), with `mcp.profile`. Versions 1 to 4 still load -- both host
 # manifests are version 1 -- and render as permanent, unmirrored projects with
 # no set of their own, which is what they always were.
-schema_version: 9
+schema_version: 10
 
 # This project's own migrations, and the whole of what an adopter adds. The
 # directory is tracked in this checkout: a release is exactly the commit it is

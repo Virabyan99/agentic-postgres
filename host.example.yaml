@@ -15,14 +15,14 @@
 # host address; provision-host.sh --check proves the configured address is
 # genuinely assigned to the host before any mutation.
 
-schema_version: 3
+schema_version: 4
 
 # Session 31, ADR 0221. What this node HAS, and how much of it projects may not
 # claim. Declared, never measured into this file: `apg doctor capacity` reports
 # what the host says it has, and this block says what the operator promises it
 # has. The two are printed side by side so a disagreement is visible.
 #
-# Required at schema_version 3 and forbidden at 2. A version 2 manifest is
+# Required at schema_version 3 and 4, and forbidden at 2. A version 2 manifest is
 # still valid and reports its capacity as undeclared -- which is why upgrading
 # to this release needs no operator edit first. With nothing declared,
 # admission refuses a project that has never been deployed here and admits a
@@ -50,6 +50,36 @@ capacity:
   # admission is a floor, not a sum: no per-project disk claim exists, and a
   # candidate's PGDATA is unknowable before it runs (D1596).
   reserve_disk_gb: 8
+
+# Session 38, ADR 0257 (D2161). Where this machine is, DECLARED by the operator
+# from the provider's console -- never inferred. Required at schema_version 4.
+# Carried into every deployed document (outputs 21) and the control plane's
+# registry rows; one host, one region.
+region:
+  id: eu-example-1
+  display_name: "Example City, Example Country"
+  provider: ExampleCloud
+  location: exa1
+
+# Session 38, ADR 0257 (D2149, D2180). Customer slots: projects the operator
+# prepares in advance (`sudo bin/slot.sh prepare`) so that a creation consumes
+# nothing at a provider. Optional at schema_version 4. A DECLARATION only -- a
+# slot's state is derived from what exists on the host, never written here.
+# `defaults` are the provider facts every slot manifest copies; the buckets,
+# stanza and Infisical project derive from the slot's key. No member is a
+# credential.
+slots:
+  defaults:
+    storage:
+      account_id: 0123456789abcdef0123456789abcdef
+    backup:
+      account_id: 0123456789abcdef0123456789abcdef
+      mirror:
+        endpoint: s3.example-region-001.example.test
+        region: example-region-001
+  declared:
+    - key: slot1-dev
+      domain: slot1.example.test
 
 host:
   id: apg-vps-01

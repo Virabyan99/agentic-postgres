@@ -101,7 +101,7 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 20
+CURRENT_VERSION = 21
 
 #: What a project with no capability manifest of its own records at version 18
 #: (ADR 0201), on both branches: `capabilities.project` rendered and
@@ -333,7 +333,10 @@ def migrate_rendered(
     if detect_version(document) == 18:
         document = migrate_v18_to_v19(document)
 
-    return migrate_v19_to_v20(document)
+    if detect_version(document) == 19:
+        document = migrate_v19_to_v20(document)
+
+    return migrate_v20_to_v21(document)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -1463,6 +1466,40 @@ def migrate_v19_to_v20(document: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+#: What an archived document's profile was: every manifest below schema 10 is
+#: `standard`, today's defaults exactly (ADR 0258).
+STANDARD_COMPUTE: dict[str, str] = {"profile": "standard"}
+
+
+def migrate_v20_to_v21(document: dict[str, Any]) -> dict[str, Any]:
+    """Return a version 21 ``rendered`` document derived from a version 20 one.
+
+    Version 21 adds `compute` (ADR 0258): `{"profile": "standard"}` for every
+    archived document, because no manifest below schema 10 could name another,
+    and `standard` is the defaults the document's budgets already record. The
+    deployed branch's `region` is NOT added here -- a rendered document never
+    carries it (D2197), and a deployed document is read by version, never
+    migrated (ADR 0241). Everything else is left exactly as it was found.
+    """
+    version = detect_version(document)
+    if version == 21:
+        raise MigrationError("document is already version 21; migration would be a no-op")
+    if version != 20:
+        raise MigrationError(f"only version 20 can be migrated to 21, got {version}")
+
+    require_kind(document, "rendered")
+
+    if "compute" in document:
+        raise MigrationError(
+            "the document already carries `compute`; this is not a version 20 document"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["compute"] = dict(STANDARD_COMPUTE)
+    migrated["schema_version"] = 21
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -1485,6 +1522,7 @@ __all__ = [
     "NO_PROJECT_CAPABILITIES",
     "NO_PROJECT_SET",
     "PERMANENT_LIFECYCLE",
+    "STANDARD_COMPUTE",
     "MigrationError",
     "detect_version",
     "document_kind",
@@ -1508,5 +1546,6 @@ __all__ = [
     "migrate_v17_to_v18",
     "migrate_v18_to_v19",
     "migrate_v19_to_v20",
+    "migrate_v20_to_v21",
     "require_kind",
 ]

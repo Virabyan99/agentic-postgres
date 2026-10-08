@@ -703,7 +703,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 20"):
+    with pytest.raises(MigrationError, match="already version 21"):
         output_migrations.migrate_rendered(
             chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -2360,18 +2360,20 @@ def v14(v15: dict[str, Any]) -> dict[str, Any]:
     return document
 
 
-def test_the_chain_ends_at_version_20_with_nothing_of_a_projects_own(
+def test_the_chain_ends_at_version_21_with_nothing_of_a_projects_own(
     chained: dict[str, Any],
 ) -> None:
     """The premise of the `v14` to `v19` fixtures, as a test rather than
     inside a fixture (D386): a mutation that made the chain end elsewhere must
     FAIL an assertion, not ERROR every test that shares the fixture.
 
-    Renamed from `..._at_version_18_...` in Session 34 and from
-    `..._at_version_19_...` in Session 37, each time the chain moved: a name that
-    said one version over an assertion of the next would be a proof that reads
-    as measuring one thing and measures another."""
-    assert chained["schema_version"] == 20
+    Renamed from `..._at_version_18_...` in Session 34, from
+    `..._at_version_19_...` in Session 37 and from `..._at_version_20_...` in
+    Session 38, each time the chain moved: a name that said one version over an
+    assertion of the next would be a proof that reads as measuring one thing and
+    measures another."""
+    assert chained["schema_version"] == 21
+    assert chained["compute"] == output_migrations.STANDARD_COMPUTE
     assert chained["project"]["lifecycle"] == output_migrations.PERMANENT_LIFECYCLE
     assert chained["backup"]["mirror"] == output_migrations.NO_MIRROR
     # Version 17, ADR 0198. A migrated document has no project set -- no
@@ -2444,12 +2446,21 @@ def test_v15_refuses_a_document_already_at_15(v14: dict[str, Any]) -> None:
 
 
 @pytest.fixture
-def v19(chained: dict[str, Any]) -> dict[str, Any]:
-    """A version 19 document, derived from the chain's current one by removing
-    what version 20 added (ADR 0251). Its premise is asserted by
-    `test_the_chain_ends_at_version_20_with_nothing_of_a_projects_own`
-    (D386)."""
+def v20(chained: dict[str, Any]) -> dict[str, Any]:
+    """A version 20 document, derived from the chain's current one by removing
+    what version 21 added (ADR 0258: `compute`). Session 38."""
     document = json.loads(json.dumps(chained))
+    document.pop("compute", None)
+    document["schema_version"] = 20
+    return document
+
+
+@pytest.fixture
+def v19(v20: dict[str, Any]) -> dict[str, Any]:
+    """A version 19 document, derived from the version 20 one by removing
+    what version 20 added (ADR 0251) -- chained through `v20` since Session 38,
+    so the subtractions cannot disagree about what each version carries."""
+    document = json.loads(json.dumps(v20))
     document.pop("control", None)
     document["routes"].pop("control", None)
     document["schema_version"] = 19
@@ -2600,7 +2611,8 @@ def test_v18_to_v19_adds_connectors_disabled(v18: dict[str, Any]) -> None:
     # The schema admits the current version only (20 since Session 37), so the
     # document is carried the last step before it is validated.
     config.validate_against_schema(
-        output_migrations.migrate_v19_to_v20(migrated), "outputs.schema.json"
+        output_migrations.migrate_v20_to_v21(output_migrations.migrate_v19_to_v20(migrated)),
+        "outputs.schema.json",
     )
 
 
@@ -2622,10 +2634,11 @@ def test_v19_takes_no_argument_because_the_value_is_what_the_version_means() -> 
 # ---------------------------------------------------------------------------
 
 
-def test_v20_refuses_a_current_document(chained: dict[str, Any]) -> None:
-    """The same property for the step Session 37 adds."""
+def test_v20_refuses_a_current_document(v20: dict[str, Any]) -> None:
+    """The same property for the step Session 37 adds. Takes `v20` rather than
+    `chained`, which is version 21 since ADR 0258."""
     with pytest.raises(MigrationError, match="already version 20"):
-        output_migrations.migrate_v19_to_v20(chained)
+        output_migrations.migrate_v19_to_v20(v20)
 
 
 def test_v19_to_v20_adds_control_off_and_the_route_and_nothing_else(
@@ -2649,7 +2662,10 @@ def test_v19_to_v20_adds_control_off_and_the_route_and_nothing_else(
     del stripped["routes"]["control"]
     stripped["schema_version"] = 19
     assert stripped == v19, "the step changed something other than what version 20 adds"
-    config.validate_against_schema(migrated, "outputs.schema.json")
+    # The schema admits the current version only (21 since Session 38).
+    config.validate_against_schema(
+        output_migrations.migrate_v20_to_v21(migrated), "outputs.schema.json"
+    )
 
 
 def test_v20_refuses_a_document_that_already_carries_control(v19: dict[str, Any]) -> None:
@@ -2708,9 +2724,11 @@ def test_v17_to_v18_adds_the_project_capabilities_block_and_nothing_else(
     assert stripped == v17, "the step changed something other than what version 18 adds"
 
     # And the result is the current schema's once the chain's last steps have
-    # run: the chain's end validates (Session 37: the current schema is 20's).
+    # run: the chain's end validates (Session 38: the current schema is 21's).
     config.validate_against_schema(
-        output_migrations.migrate_v19_to_v20(output_migrations.migrate_v18_to_v19(migrated)),
+        output_migrations.migrate_v20_to_v21(
+            output_migrations.migrate_v19_to_v20(output_migrations.migrate_v18_to_v19(migrated))
+        ),
         "outputs.schema.json",
     )
 
@@ -2824,3 +2842,39 @@ def test_the_renderer_and_the_migrator_agree_on_the_lifecycle(v14: dict[str, Any
         == config.project_lifecycle({"project": {}})
         == output_migrations.PERMANENT_LIFECYCLE
     )
+
+
+# ---------------------------------------------------------------------------
+# Version 21: the compute profile (ADR 0258, Session 38 Run 3)
+# ---------------------------------------------------------------------------
+
+
+def test_v21_refuses_a_current_document(chained: dict[str, Any]) -> None:
+    """The same property for the step Session 38 adds."""
+    with pytest.raises(MigrationError, match="already version 21"):
+        output_migrations.migrate_v20_to_v21(chained)
+
+
+def test_v21_adds_region_and_profile(v20: dict[str, Any]) -> None:
+    """ADR 0258, 0257 (D2161, D2197). A rendered version 20 document gains
+    `compute: {"profile": "standard"}` -- no manifest below 10 could name another --
+    and NOTHING else: in particular no `region`, which the rendered branch never
+    carries (a render has no host); the deployed branch's region is written by the
+    deploy and a deployed document is read by version, never migrated (ADR 0241).
+    The result validates against the current schema. Control: the step refuses a
+    document that already carries `compute`."""
+    migrated = output_migrations.migrate_v20_to_v21(v20)
+    assert migrated["schema_version"] == 21
+    assert migrated["compute"] == output_migrations.STANDARD_COMPUTE == {"profile": "standard"}
+    assert migrated["compute"] is not output_migrations.STANDARD_COMPUTE
+    assert "region" not in migrated
+
+    stripped = json.loads(json.dumps(migrated))
+    del stripped["compute"]
+    stripped["schema_version"] = 20
+    assert stripped == v20, "the step changed something other than what version 21 adds"
+    config.validate_against_schema(migrated, "outputs.schema.json")
+
+    v20["compute"] = {"profile": "small"}
+    with pytest.raises(MigrationError, match="already carries `compute`"):
+        output_migrations.migrate_v20_to_v21(v20)

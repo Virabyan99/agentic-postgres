@@ -243,7 +243,9 @@ def test_the_four_new_memory_limits_are_rendered_from_config(model: dict) -> Non
         storage_enabled=False,
     )
     database = {"max_client_connections": 100, "pool_size": 20}
-    raw = rendering.build_compose_env(identity, config.database_budget(database), database)
+    raw = rendering.build_compose_env(
+        identity, config.database_budget(database), database, compute_profile="standard"
+    )
     rendered = dict(line.split("=", 1) for line in raw.decode("utf-8").splitlines() if "=" in line)
     for name, megabytes in config.SERVICE_MEMORY_LIMITS_MB.items():
         key = f"{name.upper().replace('-', '_')}_MEMORY_LIMIT"

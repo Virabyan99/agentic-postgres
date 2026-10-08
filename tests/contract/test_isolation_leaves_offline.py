@@ -70,6 +70,14 @@ def built_documents(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[
                 api=PUBLISHED_API if rest_enabled else deployed_output.API_NOT_PUBLISHED,
                 jwt=PUBLISHED_JWT,
                 deployed_through_session=38,
+                # Outputs 21: a declared region, so its four leaves are read off a
+                # built document as well as off the schema.
+                region={
+                    "id": "eu-example-1",
+                    "display_name": "Example City",
+                    "provider": "ExampleCloud",
+                    "location": "exa1",
+                },
             )
         return documents
     finally:

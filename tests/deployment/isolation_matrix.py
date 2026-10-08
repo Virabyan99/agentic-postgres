@@ -108,6 +108,12 @@ MUST_MATCH = (
     # Classified here rather than at the first host gate, because that is where
     # D1029 found the mirror's four leaves unclassified and it cost a repair.
     "migrations.release_lock_sha256",
+    # Version 21 (ADR 0257, D2161). Where the machine is: one host, one region,
+    # so two projects on it carry the same four members -- or both a null region
+    # when the host manifest predates schema 4. The bare leaf for that null,
+    # and the members (D1029's lesson: classify the null and the object).
+    "region",
+    "region.*",
 )
 
 #: **Release state is deliberately NOT in MUST_MATCH**, and the first draft had
@@ -205,6 +211,9 @@ NOT_AUTHORITY_PREFIXES = (
     # identity -- `connectors.enabled`'s reasoning, and the third time a
     # facility flag reached a sweep unclassified (D1029, D1853, D2142).
     "control.enabled",
+    # Version 21 (ADR 0258): which compute profile the project runs. Two projects
+    # may share one and a project's size is not its authority.
+    "compute.",
     "backup_state.",
     "bootstrap.status",
     "routes.",

@@ -127,8 +127,8 @@ def declared_capacity(document: dict[str, Any]) -> Declared | None:
 
     The schema guarantees that when the block is present all four members are
     present and each is a positive integer, and that the block is present if
-    and only if the version is 3 -- so this function does no validation and
-    has no failure mode of its own.
+    and only if the version is 3 or 4 -- so this function does no validation
+    and has no failure mode of its own.
     """
     capacity = document.get("capacity")
     if capacity is None:
@@ -139,6 +139,101 @@ def declared_capacity(document: dict[str, Any]) -> Declared | None:
         disk_gb=capacity["disk_gb"],
         reserve_disk_gb=capacity["reserve_disk_gb"],
     )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Region:
+    """Where this machine is, as the operator declared it (ADR 0257, D2161)."""
+
+    id: str
+    display_name: str
+    provider: str
+    location: str
+
+    def as_document(self) -> dict[str, str]:
+        """The four members, in the shape outputs 21's `region` block carries."""
+        return {
+            "id": self.id,
+            "display_name": self.display_name,
+            "provider": self.provider,
+            "location": self.location,
+        }
+
+
+def region(document: dict[str, Any]) -> Region | None:
+    """The declared region, or ``None`` when the manifest predates schema 4.
+
+    **The only reader of the `region` block** (D816). ``None`` is an *unknown*,
+    never a default region: a reader that needs a region refuses on it rather
+    than inventing one, because a region is real exactly when it is the
+    operator's declaration of where the machine is.
+    """
+    block = document.get("region")
+    if block is None:
+        return None
+    return Region(
+        id=block["id"],
+        display_name=block["display_name"],
+        provider=block["provider"],
+        location=block["location"],
+    )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class DeclaredSlot:
+    """One slot the operator declared (ADR 0257, D2149). A declaration only:
+    its STATE is derived from what exists on the host (`slot.state()`), never
+    stored in `host.yaml`."""
+
+    key: str
+    domain: str
+    mirror_bucket: str | None
+
+
+def declared_slots(document: dict[str, Any]) -> tuple[DeclaredSlot, ...]:
+    """Every declared slot, in declaration order; empty when none is declared.
+
+    **The only reader of `slots.declared`**. An absent block is the ordinary
+    case -- a host with no customer slots -- and reads as no slots, which is
+    true by construction: nothing can be allocated that was never declared.
+    """
+    block = document.get("slots")
+    if block is None:
+        return ()
+    return tuple(
+        DeclaredSlot(
+            key=entry["key"],
+            domain=entry["domain"],
+            mirror_bucket=entry.get("mirror_bucket"),
+        )
+        for entry in block["declared"]
+    )
+
+
+def slot_defaults(document: dict[str, Any]) -> dict[str, Any] | None:
+    """The provider facts a slot manifest copies (`slots.defaults`), or ``None``.
+
+    **The only reader of `slots.defaults`**; a copy, so a caller building a
+    manifest from it cannot mutate the loaded document.
+    """
+    block = document.get("slots")
+    if block is None:
+        return None
+    import copy
+
+    return copy.deepcopy(block["defaults"])
+
+
+def _validate_slots(document: dict[str, Any]) -> None:
+    """Two declared slots may not share a key or a domain. The schema cannot say
+    it -- `uniqueItems` compares whole objects -- and two slots with one key
+    would be one project's identities derived twice (ADR 0002)."""
+    slots = declared_slots(document)
+    for member in ("key", "domain"):
+        values = [getattr(slot, member) for slot in slots]
+        repeated = sorted({value for value in values if values.count(value) > 1})
+        if repeated:
+            raise ManifestError(f"slots.declared repeats a {member}: {', '.join(repeated)}")
 
 
 def unrestricted_ssh_sources(document: dict[str, Any]) -> list[str]:
@@ -320,6 +415,7 @@ def _validate_semantics(document: dict[str, Any]) -> None:
     _validate_cidrs(ssh["allowed_source_cidrs"])
     _validate_networks(edge)
     _validate_database_access(document["database_access"], ssh_port=ssh["port"])
+    _validate_slots(document)
 
 
 def _validate_database_access(access: dict[str, Any], *, ssh_port: int) -> None:

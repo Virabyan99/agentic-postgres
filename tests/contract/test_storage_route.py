@@ -113,6 +113,7 @@ def _compose_env(project: str = "project.example.yaml") -> dict[str, str]:
         database,
         api=manifest.get("api"),
         storage={**config.STORAGE_DEFAULTS, **(manifest.get("storage") or {})},
+        compute_profile="standard",
     )
     values: dict[str, str] = {}
     for line in raw.decode("utf-8").splitlines():

@@ -87,7 +87,7 @@ def test_the_frozen_profile_module_needs_only_the_standard_library() -> None:
 #: one number rather than two that happen to agree.
 # Session 37 adds `operations` (ADR 0254): the type table the control mode refuses by
 # and the ledger guard reads, so it must import nothing but the standard library.
-SHARED_MODULES = ("profile", "claims", "scopes", "strict_json", "operations")
+SHARED_MODULES = ("profile", "claims", "scopes", "strict_json", "operations", "compute_profiles")
 
 
 @pytest.mark.parametrize("module", SHARED_MODULES)

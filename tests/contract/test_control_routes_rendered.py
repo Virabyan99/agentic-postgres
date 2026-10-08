@@ -99,6 +99,7 @@ def _compose_env(document: dict[str, Any]) -> dict[str, str]:
         document.get("storage"),
         document.get("backup"),
         control=config.control_enabled(document),
+        compute_profile=config.compute_profile(document),
     )
     return dict(line.split("=", 1) for line in raw.decode("utf-8").splitlines() if "=" in line)
 

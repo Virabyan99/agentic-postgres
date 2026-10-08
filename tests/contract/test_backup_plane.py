@@ -969,6 +969,7 @@ def _compose_env(**backup: Any) -> dict[str, str]:
         document["api"],
         document.get("storage"),
         document["backup"],
+        compute_profile=config.compute_profile(document),
     ).decode("utf-8")
     values = {}
     for line in raw.splitlines():

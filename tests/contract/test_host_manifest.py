@@ -507,12 +507,16 @@ def test_the_manifest_is_version_three_and_two_is_still_accepted(
     Both halves are asserted here. An enum widened without the example moving
     would leave the committed example teaching the old shape; an example moved
     without the enum widening would refuse every host.yaml in the field.
+
+    Session 38 moved the example to 4 (ADR 0257: `region`, `slots`) and the
+    enum to `[2, 3, 4]` -- the function keeps its name so its registry node id
+    does not move; what it asserts is the current version, exactly.
     """
-    assert example["schema_version"] == 3
+    assert example["schema_version"] == 4
 
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     accepted = schema["properties"]["schema_version"]["enum"]
-    assert accepted == [2, 3], f"the accepted versions moved to {accepted} without this test"
+    assert accepted == [2, 3, 4], f"the accepted versions moved to {accepted} without this test"
 
 
 def test_a_version_one_manifest_is_refused(tmp_path: Path, example: dict[str, Any]) -> None:
@@ -654,17 +658,23 @@ def test_schema_three_requires_the_four_capacity_members(example: dict[str, Any]
     only the first member would pass a single-mutation test and ship three
     optional fields nobody declared.
     """
-    for member in ("memory_mb", "reserve_memory_mb", "disk_gb", "reserve_disk_gb"):
-        document = copy.deepcopy(example)
-        assert document["schema_version"] == 3, (
-            "the example must be schema 3 for this to mean anything"
-        )
-        del document["capacity"][member]
-        with pytest.raises(ManifestError) as raised:
-            host_config.load_host_manifest(write(tmp_path, document))
-        assert member in str(raised.value), (
-            f"removing capacity.{member} was refused without naming it: {raised.value}"
-        )
+    for version in (3, 4):
+        for member in ("memory_mb", "reserve_memory_mb", "disk_gb", "reserve_disk_gb"):
+            document = copy.deepcopy(example)
+            assert document["schema_version"] == 4, (
+                "the example must be schema 4 for this to mean anything"
+            )
+            document["schema_version"] = version
+            if version == 3:
+                document.pop("region")
+                document.pop("slots")
+            del document["capacity"][member]
+            with pytest.raises(ManifestError) as raised:
+                host_config.load_host_manifest(write(tmp_path, document))
+            assert member in str(raised.value), (
+                f"removing capacity.{member} at {version} was refused without naming it: "
+                f"{raised.value}"
+            )
 
 
 def test_a_schema_two_manifest_still_loads_and_declares_nothing(
@@ -680,10 +690,15 @@ def test_a_schema_two_manifest_still_loads_and_declares_nothing(
     document = copy.deepcopy(example)
     document["schema_version"] = 2
     del document["capacity"]
+    # Session 38: nor `region`/`slots`, which no schema 2 document ever carried.
+    del document["region"]
+    del document["slots"]
 
     loaded = host_config.load_host_manifest(write(tmp_path, document))
     assert loaded["schema_version"] == 2
     assert host_config.declared_capacity(loaded) is None
+    assert host_config.region(loaded) is None
+    assert host_config.declared_slots(loaded) == ()
 
 
 def test_a_schema_two_manifest_may_not_carry_a_capacity_block(
@@ -698,6 +713,10 @@ def test_a_schema_two_manifest_may_not_carry_a_capacity_block(
     """
     document = copy.deepcopy(example)
     document["schema_version"] = 2
+    # Only `capacity` is the subject: the schema 4 blocks are removed so the
+    # refusal cannot be about them.
+    del document["region"]
+    del document["slots"]
 
     with pytest.raises(ManifestError) as raised:
         host_config.load_host_manifest(write(tmp_path, document))
@@ -781,3 +800,80 @@ def test_declared_capacity_is_the_only_reader_of_the_four_fields() -> None:
         f"{offenders}. Four declared numbers with several readers are four "
         "numbers nobody can change safely (D816)."
     )
+
+
+# ---------------------------------------------------------------------------
+# Session 38 -- the region and the slots (LIFE-REGION-001, LIFE-SLOT-001, ADR 0257)
+# ---------------------------------------------------------------------------
+
+
+def test_schema_four_requires_a_region(example: dict[str, Any], tmp_path: Path) -> None:
+    """`region` is required at 4 and forbidden below it, and `region()` is its one reader.
+
+    At 4 without it: refused, naming it. At 3 with it: refused (a declaration nothing
+    reads). At 3 without it: loads, and the reader says None -- an unknown, never a
+    default region. Control: the example at 4 reads back exactly what it declares.
+    """
+    assert host_config.region(example) is not None
+    loaded = host_config.load_host_manifest(EXAMPLE)
+    assert host_config.region(loaded).as_document() == example["region"]
+
+    missing = copy.deepcopy(example)
+    del missing["region"]
+    with pytest.raises(ManifestError) as raised:
+        host_config.load_host_manifest(write(tmp_path, missing))
+    assert "region" in str(raised.value)
+
+    early = copy.deepcopy(example)
+    early["schema_version"] = 3
+    early.pop("slots")
+    with pytest.raises(ManifestError):
+        host_config.load_host_manifest(write(tmp_path, early))
+
+    del early["region"]
+    assert host_config.region(host_config.load_host_manifest(write(tmp_path, early))) is None
+
+
+def test_the_slots_are_declarations_with_one_reader(
+    example: dict[str, Any], tmp_path: Path
+) -> None:
+    """`slots` is optional at 4 and forbidden below; `declared_slots()` reads it, in order;
+    two slots sharing a key or a domain are refused by name; no member is a credential.
+
+    Control: the example's one slot reads back as declared, and an absent block reads as
+    no slots rather than as an error.
+    """
+    loaded = host_config.load_host_manifest(EXAMPLE)
+    slots = host_config.declared_slots(loaded)
+    assert [(slot.key, slot.domain) for slot in slots] == [
+        (entry["key"], entry["domain"]) for entry in example["slots"]["declared"]
+    ]
+    assert host_config.slot_defaults(loaded) == example["slots"]["defaults"]
+
+    none = copy.deepcopy(example)
+    del none["slots"]
+    assert host_config.declared_slots(host_config.load_host_manifest(write(tmp_path, none))) == ()
+
+    for member, value in (("key", None), ("domain", None)):
+        twice = copy.deepcopy(example)
+        first = twice["slots"]["declared"][0]
+        second = dict(first)
+        other = "slot2-dev" if member == "domain" else first["key"]
+        second["key"] = other
+        second["domain"] = first["domain"] if member == "domain" else "slot2.example.test"
+        twice["slots"]["declared"].append(second)
+        with pytest.raises(ManifestError) as raised:
+            host_config.load_host_manifest(write(tmp_path, twice))
+        assert f"repeats a {member}" in str(raised.value), raised.value
+        del value
+
+    early = copy.deepcopy(example)
+    early["schema_version"] = 3
+    del early["region"]
+    with pytest.raises(ManifestError):
+        host_config.load_host_manifest(write(tmp_path, early))
+
+    leaky = copy.deepcopy(example)
+    leaky["slots"]["defaults"]["storage"]["secret_access_key"] = "x"  # noqa: S105 -- a key name is the subject
+    with pytest.raises(ManifestError):
+        host_config.load_host_manifest(write(tmp_path, leaky))
