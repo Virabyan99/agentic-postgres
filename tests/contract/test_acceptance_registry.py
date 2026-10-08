@@ -111,7 +111,11 @@ ID_PATTERN = re.compile(
     # Session 37 (ADR 0251-0254) adds `CTL` for the control plane -- the
     # control project, its accounts, organisations, invitations, TOTP,
     # registry, operations and CLI -- and `KEY` for management API keys.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV|LEDGER|CTL|KEY)-[A-Z0-9]+(-\d+)?$"
+    # Session 38 (ADR 0256-0261) adds `OPN` for the reconciler and the
+    # operations it executes, and `LIFE` for a managed project's lifecycle --
+    # slots, profiles, region, sleep, export, deletion and the first-admin
+    # handoff.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV|LEDGER|CTL|KEY|OPN|LIFE)-[A-Z0-9]+(-\d+)?$"
 )
 
 

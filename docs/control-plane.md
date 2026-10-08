@@ -55,7 +55,7 @@ and stored only as its SHA-256. It lives 72 hours unless `--expires-hours`
 **Accepting with `--username` creates the account and logs you in**; without
 it, a logged-in person joins the organisation the invitation names.
 
-**Accounts are never deleted or pruned in 1.15.0** (D2065). Removing a
+**Accounts are never deleted or pruned in 1.15.0 or 1.16.0** (D2065). Removing a
 membership removes the authority: an account in no organisation reaches
 nothing but `/v1/me`.
 
@@ -90,9 +90,11 @@ encrypting them is `planned` (ADR 0252).
 `apg_<16 hex>_<43>`, shown once, stored as its id and SHA-256. **Only a person
 mints one** (`bin/org.sh key-create`; a key cannot mint a key, an invitation or
 a factor). Its scopes come from `organizations:read`, `members:read`,
-`projects:read`, `operations:read`, and are always intersected with its
-owner's CURRENT role: demote the owner and the key narrows; remove them and it
-is refused on its next request. A key reaches read routes only. Use one with
+`projects:read`, `operations:read` and -- since 1.16.0 -- `projects:write`, and
+are always intersected with its owner's CURRENT role: demote the owner and the
+key narrows; remove them and it is refused on its next request. A key reaches
+the read routes and, with `projects:write`, sleep, wake and resize -- never a
+creation, an export or a deletion. Use one with
 `bin/login.sh key --endpoint URL --key-file FILE` -- the context records the
 file's path, never the key.
 
@@ -144,6 +146,19 @@ bin/org.sh key-revoke --key-id ID [--organization ID]
 bin/project.sh list [--organization ID] [--json]
 bin/project.sh use --project-key KEY
 bin/project.sh show [--project-key KEY] [--json]
+bin/project.sh status [--project-key KEY] [--json]
+bin/project.sh create --name NAME --profile small|standard|large --admin-username USER [--organization ID] [--json]
+bin/project.sh claim [--project-key KEY] [--password-file FILE]
+bin/project.sh sleep [--project-key KEY] [--json]
+bin/project.sh wake [--project-key KEY] [--json]
+bin/project.sh export [--project-key KEY] --output FILE [--timeout S] [--interval S] [--json]
+bin/project.sh delete --project-key KEY --confirm KEY [--json]
+bin/compute.sh get [--project-key KEY] [--json]
+bin/compute.sh set [--project-key KEY] --profile small|standard|large [--json]
+bin/operation.sh show --operation ID [--json]
+bin/operation.sh list [--organization ID] [--json]
+bin/operation.sh wait --operation ID [--timeout S] [--interval S] [--json]
+bin/operation.sh cancel --operation ID [--json]
 sudo bin/control.sh adopt --project KEY --organization ORG_ID --confirm CONTROL_KEY
 sudo bin/control.sh registry [--json]
 sudo bin/control.sh totp-reset --username NAME --confirm CONTROL_KEY
@@ -151,14 +166,63 @@ sudo bin/control.sh totp-reset --username NAME --confirm CONTROL_KEY
 
 Each command's `--help` is the authority. Exit codes: 0 ok; 2 usage; 3 no
 context, no credential, an unusable local file, or not https; 5 refused by the
-server; 6 the server could not be reached or read.
+server (for `operation wait`, the operation failed); 6 the server could not be
+reached or read; 7 `operation wait` reached its own `--timeout` with the
+operation still running -- never read as an outcome.
+
+## Project operations (1.16.0)
+
+Since `1.16.0` (Session 38, ADR 0256-0261) the control plane accepts six
+operation types on a **managed project** -- one the control plane created
+into a slot the operator prepared, as `docs/managed-projects.md` describes for
+the customer. Each route records an operation and answers `202 {operation}`;
+a root unit on the host, the **reconciler**, executes it; `GET
+/v1/operations/{id}` reads it.
+
+| Route | Operation | Who |
+|---|---|---|
+| `POST /v1/projects` | `project.create` | member and above, a person's session only |
+| `POST /v1/projects/{key}/sleep` | `project.sleep` | member and above; a key with `projects:write` |
+| `POST /v1/projects/{key}/wake` | `project.wake` | member and above; a key with `projects:write` |
+| `PUT /v1/projects/{key}/compute` | `project.resize` | member and above; a key with `projects:write` |
+| `POST /v1/projects/{key}/export` | `project.export` | member and above, a person's session only |
+| `DELETE /v1/projects/{key}` | `project.delete` | admin and above, a person's session only |
+| `POST /v1/operations/{id}/cancel` | -- | its requester, or an admin or owner, while it is `pending` |
+
+**One operation at a time**: a second write on a project, or a second creation
+in an organisation, is `409 conflict` naming the one in flight. **A creation
+with no ready slot** -- or a slot reading older than ten minutes -- is `409
+capacity_exhausted {reason: no_slot}` before anything is recorded; one the
+server has no room for fails `capacity_exhausted {reason: admission}` before
+anything is rendered. No code in 1.16.0 produces `plan_limit_reached`.
+
+**The six types are `trial` in the Reality Ledger** (ADR 0261): reachable while
+the evidence that would make them `beta` is collected, and saying so to the
+customer. A type whose row is not reachable answers `409 not_available` naming
+the row -- today the branch, restore and credential types.
+
+**Only the alpha, beta and control projects are the operator's**: the
+reconciler acts on declared slots alone, and a write naming an adopted project
+fails `invalid_request` with nothing run. A project's `state` (`creating`,
+`ready`, `sleeping`, `updating`, `deleting`, `deleted`, ...) is computed from
+its operation history; an interrupted or undetermined latest operation reads
+`unknown`, never `ready`, and an adopted project reads `ready` as
+operator-managed.
+
+**The first administrator is handed over by hash** (ADR 0260): `bin/project.sh
+create` keeps a random token 0600 on the creator's disk and sends only its
+SHA-256; `claim` presents the token to the new project's own reset route. The
+control plane never holds anything that opens the project.
+
+**The export URL is the one exception** (ADR 0259): the requester's first read
+of a succeeded export carries `download_url`, valid at most 900 seconds; no
+later read, other reader or list carries it. `bin/project.sh export` fetches it
+once and never prints it.
 
 ## What is not here
 
-- **No operation is accepted.** `POST /v1/projects` answers `409
-  not_available` naming the Ledger row `projects_self_service`, and writes
-  nothing (ADR 0254). Creating, resizing or deleting a project is still the
-  operator's, with `bin/` commands.
+- **Branches, restores and credential rotation are not accepted**: each answers
+  `409 not_available` naming its Ledger row (ADR 0254).
 - No account deletion, no email, no passkeys, no web console, no rate limit on
   `/v1/sessions` or on accepting an invitation (Argon2id's cost is the only
   throttle), no key expiry, no `apg project status` and no `/v1/ledger` --

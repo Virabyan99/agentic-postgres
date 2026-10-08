@@ -7,7 +7,10 @@ What each product concept is **today** (ADR 0247). A program reads the YAML
 this page is rendered from: a concept is `available` or `beta` only when a
 claim that proves it passed on a sweep, a concept a customer cannot reach
 carries no control, and no customer sentence below uses a word the release
-may not use. `not_offered` means cut by decision, not postponed;
+may not use. `trial` means built in the current session and reachable
+while the evidence that would make it `beta` is collected -- it says so to
+the customer, and the session's close moves it to `beta` or back to
+`planned` (ADR 0261). `not_offered` means cut by decision, not postponed;
 `not_metered` means nothing reads it.
 
 | Concept | Status | Built in session |
@@ -18,12 +21,12 @@ may not use. `not_offered` means cut by decision, not postponed;
 | [Management API (/api/v1)](#management_api) | `beta` | 37 |
 | [CLI against the hosted service](#cli_remote) | `beta` | 37 |
 | [Web console](#console) | `planned` | 42 |
-| [Create a project](#projects_self_service) | `planned` | 38 |
-| [Delete a project](#project_deletion) | `planned` | 38 |
-| [Export a project](#export) | `planned` | 38 |
-| [Region](#region) | `planned` | 38 |
-| [Compute size](#compute_profiles) | `planned` | 38 |
-| [Sleep and wake](#sleep) | `planned` | 38 |
+| [Create a project](#projects_self_service) | `trial` | 38 |
+| [Delete a project](#project_deletion) | `trial` | 38 |
+| [Export a project](#export) | `trial` | 38 |
+| [Region](#region) | `trial` | 38 |
+| [Compute size](#compute_profiles) | `trial` | 38 |
+| [Sleep and wake](#sleep) | `trial` | 38 |
 | [Sleep when idle](#idle_sleep) | `planned` | 41 |
 | [Pooled connection string](#pooled_endpoint) | `planned` | 39 |
 | [Direct connection string](#direct_endpoint) | `planned` | 39 |
@@ -112,9 +115,9 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 `management_api` · **beta** · since Session 36
 
-**What a customer reads.** https://control.agenticpostgresql.com/api/v1 manages accounts, organizations, members, invitations and keys, and lists your projects. Creating a project is not available yet and says so.
+**What a customer reads.** https://control.agenticpostgresql.com/api/v1 manages accounts, organizations, members, invitations and keys, and lists your projects. Creating, sleeping, waking, resizing, exporting and deleting a project are being verified, and each concept's own entry says so.
 
-**Today.** One management API in the control project's app mode, frozen as a contract (contracts/control-openapi.canonical.json). Project operations other than reading are refused as not available (ADR 0254).
+**Today.** One management API in the control project's app mode, frozen as a contract (contracts/control-openapi.canonical.json). A project operation is accepted only while its concept's ledger row is available, beta or trial, and refused as not available otherwise (ADR 0254, ADR 0261).
 
 *Customer-facing evidence:* `control_api_contract`, `control_plane_live`.
 
@@ -156,95 +159,119 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 ## Create a project
 
-`projects_self_service` · **planned** · since Session 36
+`projects_self_service` · **trial** · since Session 38
 
-**What a customer reads.** Not open yet. Creating a project will be refused with "capacity exhausted" when this server has no room, and nothing will be created.
+**What a customer reads.** Being verified. A member of an organization creates a project on a slot the operator prepared, and claims its first administrator with a one-time token only they hold. When no slot is ready, or the server has no room, the request is refused with "capacity exhausted" and nothing is created.
 
-**Today.** The operator creates a project by writing a manifest and running the deploy as root; admission refuses a project that does not fit the declared host (exit 12).
+**Today.** POST /v1/projects (bin/project.sh create) records a project.create operation; the reconciler, a root unit on the host, executes it into a prepared slot through admission and the deploy, and bin/project.sh claim sets the first administrator's password through the project's own reset route. The operator still creates every other project by hand.
+
+*Customer-facing evidence:* `control_project_operations`, `reconciler_dispatch`, `admin_handoff`, `capacity_refusals`, `lifecycle_operations_live`, `lifecycle_project_door_live`.
 
 **Stage 5.** POST /v1/projects records a project.create operation (member and above, a person only), refused "capacity exhausted" with no slot ready before anything is recorded; the reconciler (Session 38) executes it into a prepared slot through the same admission and deploy, and the first administrator claims the account with a token only its requester holds (ADR 0256, ADR 0260).
 
 **Eventually (not promised).** Placement across a fleet of servers.
 
-*API operations:* `project.create` -- refused (`409 not_available`) until this concept is available or in beta.
+*Controls:* `project.create`, `bin/project.sh create`, `bin/project.sh claim`.
+
+*API operations:* `project.create` -- accepted.
 
 <a id="project_deletion"></a>
 
 ## Delete a project
 
-`project_deletion` · **planned** · since Session 36
+`project_deletion` · **trial** · since Session 38
 
-**What a customer reads.** Not open yet.
+**What a customer reads.** Being verified. An admin or owner deletes a project with its data. The project's name is never given to another project, and its backups are kept by the operator: nothing removes them automatically.
 
-**Today.** The operator retires a project with bin/project-retire.sh, which removes only what the project's names derive.
+**Today.** DELETE /v1/projects/{key} (bin/project.sh delete --confirm KEY) records a project.delete operation; the reconciler retires the slot's project with its data, leaves the provider's resources for the operator to revoke (bin/slot.sh revoke), and marks the slot consumed. The operator retires every other project with bin/project-retire.sh.
+
+*Customer-facing evidence:* `deletion`, `slots`, `registry_after_operations`, `lifecycle_operations_live`, `reconciler_live`.
 
 **Stage 5.** DELETE /v1/projects/{key} records a project.delete operation (admin and above, a person only); the reconciler retires the project with its data, the slot is consumed and never reissued, and the backups are kept by the operator -- this beta has no automatic removal (D2158, D2181).
 
 **Eventually (not promised).** The same, with a grace period and recovery.
 
-*API operations:* `project.delete` -- refused (`409 not_available`) until this concept is available or in beta.
+*Controls:* `project.delete`, `bin/project.sh delete`.
+
+*API operations:* `project.delete` -- accepted.
 
 <a id="export"></a>
 
 ## Export a project
 
-`export` · **planned** · since Session 36
+`export` · **trial** · since Session 38
 
-**What a customer reads.** Not open yet.
+**What a customer reads.** Being verified. A person exports a project's own schemas as one archive. The download link is shown once, to the person who asked, and works for at most 15 minutes.
 
-**Today.** The operator can take a backup and run a restore drill; there is no export a customer downloads.
+**Today.** POST /v1/projects/{key}/export (bin/project.sh export) records a project.export operation; the reconciler dumps the app and api schemas, uploads the archive through the project's own storage container, and hands its one-time URL to the requester's first read of the operation. The CLI downloads it once and checks its SHA-256.
+
+*Customer-facing evidence:* `export`, `lifecycle_operations_live`, `lifecycle_project_door_live`.
 
 **Stage 5.** POST /v1/projects/{key}/export records a project.export operation (a person only); the archive holds the project's own schemas, and its download URL -- valid at most 15 minutes -- is shown once to the person who asked (D2164, ADR 0259).
 
 **Eventually (not promised).** Scheduled exports to a customer's own storage.
 
-*API operations:* `project.export` -- refused (`409 not_available`) until this concept is available or in beta.
+*Controls:* `project.export`, `bin/project.sh export`.
+
+*API operations:* `project.export` -- accepted.
 
 <a id="region"></a>
 
 ## Region
 
-`region` · **planned** · since Session 36
+`region` · **trial** · since Session 38
 
-**What a customer reads.** Every project runs in one location, the one server this beta runs on.
+**What a customer reads.** Being verified. Every project runs in one location, the one server this beta runs on, and each project's record names it.
 
-**Today.** One server in one Hetzner location. Host manifest schema 4 declares the region and every deployed document carries it; the host still runs schema 3 until Session 38's first trip moves it.
+**Today.** One server in one location. Host manifest schema 4 declares the region; every deployed document, the registry row and a creation's result carry it. No operation chooses a region: a creation is placed where the server is.
+
+*Customer-facing evidence:* `region_and_document`, `reconciler_live`.
 
 **Stage 5.** The operator's declaration in host.yaml (schema 4), carried into every deployed document and the registry, with one value (D1957, D2161).
 
 **Eventually (not promised).** Placement across locations.
 
+*Controls:* `project.create`.
+
 <a id="compute_profiles"></a>
 
 ## Compute size
 
-`compute_profiles` · **planned** · since Session 36
+`compute_profiles` · **trial** · since Session 38
 
-**What a customer reads.** Not open yet. Changing a project's size will restart it, and the message will say how long the restart was measured to take.
+**What a customer reads.** Being verified. A project runs at one of three sizes: small, standard or large. Changing the size restarts the project; when the server has no room for the new size the change is refused and nothing changes.
 
-**Today.** Three named profiles -- small, standard (the release defaults) and large -- selected by a manifest's compute block (schema 10) and applied where the manifest is loaded, so every existing limit check bounds them.
+**Today.** Three named profiles -- small, standard (the release defaults) and large -- selected by a manifest's compute block (schema 10) and applied where the manifest is loaded, so every existing limit check bounds them. PUT /v1/projects/{key}/compute (bin/compute.sh set) records a project.resize operation the reconciler admits before it changes anything.
+
+*Customer-facing evidence:* `compute_profiles`, `resize_message`, `lifecycle_operations_live`.
 
 **Stage 5.** PUT /v1/projects/{key}/compute records a project.resize operation; admission refuses a profile the server has no room for with nothing changed, and the message says the restart has not been measured on this server until a measured window exists (D1955, D2157, ADR 0258).
 
 **Eventually (not promised).** Compute scheduled independently of storage.
 
-*API operations:* `project.resize` -- refused (`409 not_available`) until this concept is available or in beta.
+*Controls:* `project.resize`, `bin/compute.sh set`, `bin/compute.sh get`.
+
+*API operations:* `project.resize` -- accepted.
 
 <a id="sleep"></a>
 
 ## Sleep and wake
 
-`sleep` · **planned** · since Session 36
+`sleep` · **trial** · since Session 38
 
-**What a customer reads.** Not open yet.
+**What a customer reads.** Being verified. A project sleeps and wakes when someone asks. While it sleeps its addresses answer "not found" and no new restore point is taken; its data and its last restore point are kept.
 
-**Today.** Nothing sleeps. A project's containers run until the operator stops them.
+**Today.** POST /v1/projects/{key}/sleep and /wake (bin/project.sh sleep, wake) record project.sleep and project.wake operations; the reconciler stops and starts the slot's containers with their volumes kept, and the project's boot unit and backup timers with them.
+
+*Customer-facing evidence:* `sleep_wake`, `lifecycle_operations_live`, `lifecycle_project_door_live`.
 
 **Stage 5.** project.sleep and project.wake, by request only, stop and start the project's containers with volumes kept; while it sleeps a caller gets the edge's 404, and its archiver is stopped, so its last restore point is the moment it went to sleep (D1956, D2155, ADR 0259). Idle sleep is its own row.
 
 **Eventually (not promised).** Compute suspended and resumed independently of storage.
 
-*API operations:* `project.sleep`, `project.wake` -- refused (`409 not_available`) until this concept is available or in beta.
+*Controls:* `project.sleep`, `project.wake`, `bin/project.sh sleep`, `bin/project.sh wake`.
+
+*API operations:* `project.sleep`, `project.wake` -- accepted.
 
 <a id="idle_sleep"></a>
 
@@ -288,7 +315,7 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Eventually (not promised).** The same, behind a fleet-wide gateway.
 
-*API operations:* `credential.rotate` -- refused (`409 not_available`) until this concept is available or in beta.
+*API operations:* `credential.rotate` -- refused (`409 not_available`) until this concept is available, in beta or on trial.
 
 <a id="wake_on_connect"></a>
 
@@ -318,7 +345,7 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Eventually (not promised).** Storage-native copy-on-write branches.
 
-*API operations:* `branch.create`, `branch.delete`, `branch.reset` -- refused (`409 not_available`) until this concept is available or in beta.
+*API operations:* `branch.create`, `branch.delete`, `branch.reset` -- refused (`409 not_available`) until this concept is available, in beta or on trial.
 
 <a id="restore_to_branch"></a>
 
@@ -334,7 +361,7 @@ may not use. `not_offered` means cut by decision, not postponed;
 
 **Eventually (not promised).** The same, faster.
 
-*API operations:* `restore.create` -- refused (`409 not_available`) until this concept is available or in beta.
+*API operations:* `restore.create` -- refused (`409 not_available`) until this concept is available, in beta or on trial.
 
 <a id="in_place_restore"></a>
 

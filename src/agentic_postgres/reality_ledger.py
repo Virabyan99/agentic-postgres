@@ -13,6 +13,15 @@ every checkout, a name must be a claim `evidence_claims.CLAIMS` names or a
 `passed` in the NEWEST `evidence/session-NN.json` by session number. A claim
 that did not pass is not evidence, and a half that could not be read is
 reported as unread, never as held (ADR 0195).
+
+**A `trial` row is the one exception to the passed half, and it is bounded**
+(ADR 0261, D2170): built in the current session and reachable while its
+evidence is collected -- its claims cannot have passed in an evidence document
+written before the trip that measures them. `trial_problems` holds it to the
+session: every claim it names was introduced in `CURRENT_SESSION`, its target
+session IS the current one, and its customer text says *being verified* -- so a
+`trial` row the session's close did not resolve fails the next session's guard.
+`beta` is not loosened.
 """
 
 from __future__ import annotations
@@ -33,11 +42,15 @@ SCHEMA_PATH = REPO_ROOT / "schemas" / "reality-ledger.schema.json"
 PAGE_PATH = REPO_ROOT / "docs" / "reality-ledger.md"
 EVIDENCE_DIR = REPO_ROOT / "evidence"
 
-STATUSES = ("available", "beta", "planned", "not_metered", "not_offered")
+STATUSES = ("available", "beta", "trial", "planned", "not_metered", "not_offered")
 
 #: The statuses a customer can reach. Only these may carry `evidence` and
-#: `controls`; every other status carries neither (ADR 0247, D2009).
-REACHABLE = frozenset({"available", "beta"})
+#: `controls`; every other status carries neither (ADR 0247, D2009). `trial`
+#: since Session 38 (ADR 0261).
+REACHABLE = frozenset({"available", "beta", "trial"})
+
+#: ADR 0261: the words a `trial` row's customer text must contain.
+TRIAL_WORDS = "being verified"
 
 #: The specification's §59 list, lower-cased. A release may not say these
 #: about itself; the guard reads every row's `customer_text` for them
@@ -123,7 +136,11 @@ def evidence_problems(document: dict[str, Any], evidence: dict[str, Any] | None)
 
     With `evidence=None` (no document in this checkout) the status rules and the
     names are checked and the PASSED half is not -- the caller reports that it
-    was not read, never that it held (ADR 0195)."""
+    was not read, never that it held (ADR 0195).
+
+    A `trial` row's `evidence` is the one list the passed half does not read:
+    those claims are being collected (ADR 0261), and `trial_problems` is what
+    bounds them instead. Its `today_evidence`, a claim about today, is read."""
     problems: list[str] = []
     for row in document["rows"]:
         names = list(row["evidence"])
@@ -135,12 +152,45 @@ def evidence_problems(document: dict[str, Any], evidence: dict[str, Any] | None)
         if row["today_evidence"] is not None:
             labelled.append(("today_evidence", row["today_evidence"]))
         for field, name in labelled:
+            collected = row["status"] == "trial" and field == "evidence"
             if not known(name):
                 problems.append(
                     f"{row['id']}: {field} {name!r} is no claim and no envelope subject"
                 )
-            elif evidence is not None and not resolves(name, evidence):
+            elif evidence is not None and not collected and not resolves(name, evidence):
                 problems.append(f"{row['id']}: {field} {name!r} did not pass")
+    return problems
+
+
+def trial_problems(
+    document: dict[str, Any], introduced_in: dict[str, int], session: int
+) -> list[str]:
+    """ADR 0261's three rules for a `trial` row, each a refusal naming the row.
+
+    `introduced_in` is the claim -> session table (`CLAIM_INTRODUCED_IN`, which
+    the evidence tests own) and `session` is `CURRENT_SESSION`. A `trial` row
+    names ONLY claims this session introduced -- never an envelope subject,
+    never an older claim, which would let a reachable concept lean on evidence
+    that was never about it; its `target_session` is this session, so a row
+    left at `trial` by an earlier session fails here; and its customer text
+    says the concept is being verified."""
+    problems: list[str] = []
+    for row in document["rows"]:
+        if row["status"] != "trial":
+            continue
+        for name in row["evidence"]:
+            if introduced_in.get(name) != session:
+                problems.append(
+                    f"{row['id']}: trial evidence {name!r} was not introduced in Session "
+                    f"{session} (introduced: {introduced_in.get(name)})"
+                )
+        if row["target_session"] != session:
+            problems.append(
+                f"{row['id']}: trial with target_session {row['target_session']}, not the "
+                f"current session {session} -- a session's close resolves its trial rows"
+            )
+        if TRIAL_WORDS not in row["customer_text"].lower():
+            problems.append(f"{row['id']}: trial whose customer_text does not say {TRIAL_WORDS!r}")
     return problems
 
 
@@ -180,7 +230,10 @@ def render(document: dict[str, Any]) -> str:
         "this page is rendered from: a concept is `available` or `beta` only when a",
         "claim that proves it passed on a sweep, a concept a customer cannot reach",
         "carries no control, and no customer sentence below uses a word the release",
-        "may not use. `not_offered` means cut by decision, not postponed;",
+        "may not use. `trial` means built in the current session and reachable",
+        "while the evidence that would make it `beta` is collected -- it says so to",
+        "the customer, and the session's close moves it to `beta` or back to",
+        "`planned` (ADR 0261). `not_offered` means cut by decision, not postponed;",
         "`not_metered` means nothing reads it.",
         "",
         "| Concept | Status | Built in session |",
@@ -233,6 +286,6 @@ def _operation_lines(row_id: str) -> list[str]:
         return [f"*API operations:* {named} -- accepted.", ""]
     return [
         f"*API operations:* {named} -- refused (`409 not_available`) until this concept is "
-        "available or in beta.",
+        "available, in beta or on trial.",
         "",
     ]

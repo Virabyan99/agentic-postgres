@@ -60,11 +60,12 @@
           "enum": [
             "available",
             "beta",
+            "trial",
             "planned",
             "not_metered",
             "not_offered"
           ],
-          "description": "`not_offered` is ADR 0247's addition: a concept cut by decision, which `planned` would promise."
+          "description": "`not_offered` is ADR 0247's addition: a concept cut by decision, which `planned` would promise. `trial` is ADR 0261's: built in the current session and reachable while its evidence is collected -- bounded to that session by the guard, and resolved to `beta` or back to `planned` at its close."
         },
         "customer_text": {
           "type": "string",
@@ -91,7 +92,7 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "For an `available` or `beta` row, the claims or envelope subjects proving the customer-facing status; empty for every other status (D2009)."
+          "description": "For an `available`, `beta` or `trial` row, the claims or envelope subjects proving the customer-facing status; empty for every other status (D2009). A `trial` row names only claims its own session introduced (ADR 0261)."
         },
         "stage5_reality": {
           "type": "string",

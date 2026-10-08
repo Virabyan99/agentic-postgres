@@ -2,13 +2,14 @@
 
 CTL-OPS-001 (ADR 0254, D2054): the type table is closed -- exactly the eleven
 types stage plan D1953 names, each mapped to a Reality Ledger row, and exactly
-the list the control set's `control_operations.type` CHECK carries -- and
-`POST /v1/projects` answers `409 not_available` naming `projects_self_service`
-and writes no row. The ledger half (accepted iff available or beta) is the
-guard in `test_reality_ledger.py`.
+the list the control set's `control_operations.type` CHECK carries. The ledger
+half (accepted iff available, beta or trial) is the guard in
+`test_reality_ledger.py`.
 
-Session 38 (ADR 0256, D2154): every write route is refused the same way while
-its row is planned; the argument schema the reconciler reads has one branch
+Session 38 (ADR 0256, ADR 0261, D2154): exactly the six executed types are
+accepted -- their rows `trial` -- and the five others stay refused; a type not
+accepted is refused `409 not_available` naming its row before its body is read,
+on every write route; the argument schema the reconciler reads has one branch
 per executed type and agrees with the control mode's models on every example.
 """
 
@@ -26,6 +27,7 @@ from jsonschema import Draft202012Validator
 
 from agentic_postgres import REPO_ROOT, operations
 from app import compute_profiles, errors, models
+from app import operations as service_operations
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -77,27 +79,42 @@ def drive(tmp_path_factory: pytest.TempPathFactory) -> Any:
         pytest.skip(str(exc))
 
 
-@pytest.mark.database
-def test_project_creation_is_refused_as_not_available(drive: Any) -> None:
-    owner = drive.account("ops-owner")
-    org = drive.organization(owner)
-    token = drive.token("ops-owner", drive.enable_factor(owner))
-    before = drive.cluster.query("SELECT count(*) FROM app.control_operations;")
-    refused = drive.call(
-        "POST", "/v1/projects", token=token, body={"organization_id": org, "name": "new"}
-    )
-    assert refused.status_code == 409, refused.text
-    assert refused.json() == {"error": "not_available", "ledger_row": "projects_self_service"}
-    assert refused.headers["cache-control"] == "no-store"
-    assert drive.cluster.query("SELECT count(*) FROM app.control_operations;") == before
-    listed = drive.call("GET", f"/v1/operations?organization={org}", token=token)
-    assert (listed.status_code, listed.json()) == (200, {"operations": []})
-    # Control: an unauthenticated caller is refused before the type is read.
-    assert drive.call("POST", "/v1/projects", body={}).status_code == 401
+#: The six types Session 38 accepts, their rows `trial` since its Run 10 (ADR
+#: 0261, D2170) -- written out, never derived from `EXECUTED_TYPES`: building a
+#: type is not the decision to accept it.
+THE_ACCEPTED_SIX = {
+    "project.create",
+    "project.delete",
+    "project.sleep",
+    "project.wake",
+    "project.resize",
+    "project.export",
+}
+
+
+def test_exactly_the_six_executed_types_are_accepted() -> None:
+    """The exact-set form of Session 37's `test_project_creation_is_refused_as_not_available`
+    (ADR 0261 authorises the replacement): the service accepts exactly the six
+    types the reconciler executes, the FIVE others stay refused -- their rows
+    stay `planned` -- and a type outside the table is never accepted. The
+    ledger half (accepted iff the row is reachable) is `test_reality_ledger`'s."""
+    assert operations.ACCEPTED_TYPES == THE_ACCEPTED_SIX
+    assert operations.EXECUTED_TYPES == THE_ACCEPTED_SIX
+    refused = THE_ELEVEN - THE_ACCEPTED_SIX
+    assert refused == {
+        "branch.create",
+        "branch.reset",
+        "branch.delete",
+        "restore.create",
+        "credential.rotate",
+    }
+    assert all(service_operations.is_accepted(t) for t in THE_ACCEPTED_SIX)
+    assert not any(service_operations.is_accepted(t) for t in refused)
+    assert not service_operations.is_accepted("project.rename")
 
 
 # ---------------------------------------------------------------------------
-# Session 38: every write is refused while planned, and the argument schema
+# Session 38: a type not accepted is refused, and the argument schema
 # ---------------------------------------------------------------------------
 
 OPERATIONS_TEMPLATE = (
@@ -106,6 +123,7 @@ OPERATIONS_TEMPLATE = (
 
 #: Each write route -> (method, path) with `{key}` for the project.
 WRITES = {
+    "project.create": ("POST", "/v1/projects"),
     "project.sleep": ("POST", "/v1/projects/{key}/sleep"),
     "project.wake": ("POST", "/v1/projects/{key}/wake"),
     "project.resize": ("PUT", "/v1/projects/{key}/compute"),
@@ -115,26 +133,42 @@ WRITES = {
 
 
 @pytest.mark.database
-def test_every_write_is_refused_as_not_available_while_planned(drive: Any) -> None:
-    """While every row is planned (ADR 0254) each write answers `not_available`
-    naming its ledger row, before its body is read, and writes no row --
-    whoever asks, a member or the owner."""
-    assert operations.ACCEPTED_TYPES == frozenset()
-    owner = drive.account("ops-writes-owner")
-    org = drive.organization(owner, "writes")
-    token = drive.token("ops-writes-owner", drive.enable_factor(owner))
-    drive.cluster.query(
-        f"SELECT app.control_adopt_project('writes-prod', '{org}', 'writes', 'prod', "
-        "'writes.test', '1.16.0', 'abc')"
-    )
+def test_a_type_not_accepted_is_refused_not_available_before_its_body(
+    drive: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal path, kept executable now that the six are accepted: each
+    write route with ITS type withdrawn from the accepted set (the five others
+    left in) answers `409 not_available` naming its ledger row, `no-store`,
+    before the project or the body is read, and writes no row -- the owner
+    asking. The control, in the same invocation: with the set as committed the
+    same request reaches past the gate -- a malformed creation or resize is the
+    body's `400`, a write on a project that does not exist is `404` -- so the
+    409 was the gate's and nothing else's. And an unauthenticated caller is
+    refused before the type is read."""
+    owner = drive.account("ops-gate-owner")
+    org = drive.organization(owner, "gate")
+    token = drive.token("ops-gate-owner", drive.enable_factor(owner))
     before = drive.cluster.query("SELECT count(*) FROM app.control_operations;")
     for operation_type, (method, path) in WRITES.items():
-        refused = drive.call(method, path.format(key="writes-prod"), token=token, body={"x": 1})
+        url = path.format(key="nosuch-prod")
+        body = {"organization_id": org, "x": 1}
+        monkeypatch.setattr(
+            service_operations, "ACCEPTED_TYPES", THE_ACCEPTED_SIX - {operation_type}
+        )
+        refused = drive.call(method, url, token=token, body=body)
         assert (refused.status_code, refused.json()) == (
             409,
             {"error": "not_available", "ledger_row": operations.OPERATION_TYPES[operation_type]},
         ), operation_type
+        assert refused.headers["cache-control"] == "no-store"
+        monkeypatch.undo()
+        passed = drive.call(method, url, token=token, body=body)
+        expected = 400 if operation_type in ("project.create", "project.resize") else 404
+        assert passed.status_code == expected, (operation_type, passed.text)
     assert drive.cluster.query("SELECT count(*) FROM app.control_operations;") == before
+    listed = drive.call("GET", f"/v1/operations?organization={org}", token=token)
+    assert (listed.status_code, listed.json()) == (200, {"operations": []})
+    assert drive.call("POST", "/v1/projects", body={}).status_code == 401
 
 
 def _schema() -> dict[str, Any]:

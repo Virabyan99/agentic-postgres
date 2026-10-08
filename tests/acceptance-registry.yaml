@@ -6072,6 +6072,8 @@
     - tests/contract/test_reality_ledger.py::test_a_claim_that_did_not_pass_is_not_evidence
     - tests/contract/test_reality_ledger.py::test_the_newest_evidence_is_chosen_by_session_number
     - tests/contract/test_reality_ledger.py::test_a_planned_row_has_no_control
+    - tests/contract/test_reality_ledger.py::test_a_trial_row_is_bounded_to_the_session_that_introduced_its_claims
+    - tests/contract/test_reality_ledger.py::test_the_trial_rules_refuse_each_way_a_row_could_outlive_its_session
     - tests/contract/test_reality_ledger.py::test_no_customer_text_uses_a_forbidden_word
     - tests/contract/test_reality_ledger.py::test_the_page_is_current
     - tests/contract/test_reality_ledger.py::test_no_console_exists_yet
@@ -6080,7 +6082,11 @@
     ledger.schema.json` with unique ids; every evidence name is a registered
     claim or a `capacity.ENVELOPE` subject; the newest evidence document is
     chosen by session number, and a claim `not_run` or `failed` in it is not
-    evidence; a `planned` row has no control; no row's `customer_text` uses
+    evidence; a `planned` row has no control; the statuses are six since ADR
+    0261 added `trial`, and a `trial` row names only claims its session
+    introduced, targets that session and says "being verified" -- so a row a
+    session's close did not resolve fails the next session's guard, while
+    `beta` keeps its passed rule; no row's `customer_text` uses
     a specification §59 word, case folded; `docs/reality-ledger.md` is
     `bin/render-reality-ledger.py`'s current output; the console-control set
     the guard will read is empty today (ADR 0247, D2021) -- the operation-type
@@ -6285,15 +6291,18 @@
   priority: P0
   target_session: 37
   test_nodeids:
-    - tests/contract/test_reality_ledger.py::test_every_operation_type_names_a_ledger_row_and_none_is_accepted_while_planned
+    - tests/contract/test_reality_ledger.py::test_every_operation_type_names_a_ledger_row_and_is_accepted_iff_its_row_is_reachable
     - tests/contract/test_operation_types.py::test_the_type_table_is_closed
-    - tests/contract/test_operation_types.py::test_project_creation_is_refused_as_not_available
+    - tests/contract/test_operation_types.py::test_exactly_the_six_executed_types_are_accepted
+    - tests/contract/test_operation_types.py::test_a_type_not_accepted_is_refused_not_available_before_its_body
   description: >-
     `operations.py`'s type table is closed and every type names an
-    existing Ledger row; a type is accepted iff its row is `available` or
-    `beta`; no type is accepted at Session 37; `POST /v1/projects` answers
-    `409 not_available` naming `projects_self_service` and writes no row (ADR
-    0254, D2054).
+    existing Ledger row; a type is accepted iff its row is `available`,
+    `beta` or -- since Session 38 (ADR 0261) -- `trial`. Session 37 accepted
+    none; since Session 38 exactly the six executed types are accepted and
+    the five others stay refused; a write route whose type is not accepted
+    answers `409 not_available` naming its row before the project or the body
+    is read, and writes no row (ADR 0254, D2054, D2170).
 
 - id: CTL-REG-001
   priority: P0
@@ -6383,3 +6392,379 @@
     serves no `/auth/login` and no `/admin/users` while `/v1` answers; its
     project unit is enabled and every one of its containers started after the
     last boot (D2060).
+
+# Session 38 (ADR 0256-0261)
+- id: OPN-CLAIM-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_reconciler_claim.py::test_the_claim_functions_are_executable_by_no_role
+    - tests/contract/test_reconciler_claim.py::test_two_claimers_get_distinct_rows
+    - tests/contract/test_reconciler_claim.py::test_a_claimer_does_not_wait_for_an_open_claim
+    - tests/contract/test_reconciler_claim.py::test_nothing_is_claimed_when_nothing_is_pending
+    - tests/contract/test_reconciler_claim.py::test_an_interrupted_operation_is_finished_once_and_never_rewritten
+    - tests/contract/test_reconciler_claim.py::test_a_result_member_the_type_does_not_declare_is_refused
+    - tests/contract/test_reconciler_claim.py::test_the_slot_reading_is_replaced_whole
+    - tests/contract/test_reconciler_claim.py::test_an_interrupted_creation_fails_and_quarantines_its_slot_never_resumed
+    - tests/contract/test_reconciler_claim.py::test_a_result_reaches_the_control_database_unaltered
+    - tests/contract/test_reconciler_dispatch.py::test_an_interrupted_creation_is_finished_and_its_slot_quarantined
+  description: >-
+    The reconciler's functions in the control set (ADR 0256): the claim,
+    advance, finish, interrupted, slot-reading, adopt and mark-deleted
+    functions are executable by no role -- not the identity service, not a
+    request role, not PUBLIC; overlapping claimers get distinct rows, a
+    claimer does not wait for a row another holds, and nothing is claimed when
+    nothing is pending; a row left `running` is finished `failed interrupted`
+    naming its step, once, and a finished row refuses a second finish; a
+    result member the type does not declare is refused and only a succeeded
+    export carries a secret; the slot reading is replaced whole and refuses
+    an element with any other member; an interrupted creation quarantines its
+    slot by the id its allocation marker carries and is never resumed; every
+    value reaches the control database through psql's stdin unaltered (D2151,
+    D2152, D2154, D2191).
+
+- id: OPN-DISPATCH-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_reconciler_dispatch.py::test_the_closed_table_is_the_executed_types
+    - tests/contract/test_reconciler_dispatch.py::test_invalid_arguments_run_nothing
+    - tests/contract/test_reconciler_dispatch.py::test_every_argv_is_built_from_validated_members
+    - tests/contract/test_reconciler_dispatch.py::test_the_reconciler_builds_no_shell_command
+    - tests/contract/test_reconciler_dispatch.py::test_children_act_for_the_checkout_owner_with_stdin_closed
+    - tests/contract/test_reconciler_dispatch.py::test_a_root_owned_checkout_is_refused
+    - tests/contract/test_reconciler_dispatch.py::test_a_moved_or_dirty_checkout_refuses_every_operation
+    - tests/contract/test_reconciler_dispatch.py::test_two_control_projects_stop_the_reconciler
+    - tests/contract/test_reconciler_dispatch.py::test_the_unit_is_a_root_service_with_no_listener
+    - tests/contract/test_reconciler_dispatch.py::test_install_writes_the_unit_its_environment_and_its_directories
+    - tests/contract/test_reconciler_dispatch.py::test_status_reads_idle_working_and_stopped
+    - tests/contract/test_reconciler_dispatch.py::test_a_result_carries_only_declared_members
+    - tests/contract/test_reconciler_dispatch.py::test_a_creation_runs_every_step_in_order
+    - tests/contract/test_reconciler_dispatch.py::test_a_failed_deploy_fails_the_operation_and_keeps_the_slot
+    - tests/contract/test_reconciler_dispatch.py::test_an_operator_managed_project_is_refused
+    - tests/contract/test_operation_types.py::test_the_argument_schema_has_one_branch_per_executed_type
+    - tests/contract/test_operation_types.py::test_the_error_codes_are_one_closed_list
+    - tests/contract/test_operation_types.py::test_the_schema_and_the_models_agree
+    - tests/contract/test_render_atomicity.py::test_a_failed_render_under_sudo_hands_the_lock_back
+  description: >-
+    The reconciler executes a closed table (ADR 0256): one handler per
+    executed type and one bound per command an operation may run; arguments
+    are validated against `schemas/operation-arguments.schema.json` before
+    anything runs, the reason never echoing the value, and the schema has one
+    branch per executed type and agrees with the control mode's models on
+    every example; of the arguments only the administrator's username reaches
+    an argv, and `verify` is built from the volume's identity read from the
+    database, never the printed line; no `shell=True`, `os.system`, `os.popen`
+    or string command; every child carries SUDO_UID/SUDO_GID of the checkout's
+    owner with stdin closed and a 0600 log, and a root-owned, moved or dirty
+    checkout refuses every operation; two control projects stop it at start;
+    the unit is a root service with no socket and no port, restarted on
+    failure, installed with 0700 directories, and `status` reads idle, working
+    or stopped; a creation runs allocate, admit, deploy, the administrator, the
+    ports, deploy, the unit, three backup commands and the registry in order,
+    and a failure after the first deploy keeps the slot; a project that is not
+    a declared slot is refused with nothing run; a failed root render hands its
+    lock back (D2153, D2154, D2168, D2173, D2178, D2179, D2189, D2218).
+
+- id: OPN-API-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_control_projects.py::test_one_operation_at_a_time
+    - tests/contract/test_control_projects.py::test_the_roles_decide_who_writes
+    - tests/contract/test_control_projects.py::test_every_write_route_has_a_role_and_a_type
+    - tests/contract/test_control_projects.py::test_a_pending_operation_is_cancelled_by_its_requester_or_an_admin
+    - tests/contract/test_control_projects.py::test_a_deleted_project_takes_no_more_writes
+    - tests/contract/test_control_cli.py::test_compute_sleep_wake_and_delete_answer_with_an_operation
+    - tests/contract/test_control_cli.py::test_operation_wait_reads_each_outcome
+    - tests/contract/test_control_boundary.py::test_session38_customer_proofs_reach_only_the_public_endpoint
+  description: >-
+    The project operation routes of `/v1` (ADR 0256, D2165): a second
+    creation in an organisation, or a second write on a project, answers
+    `409 conflict` naming the one in flight, and the database refuses a second
+    non-terminal row; a viewer reads only, a member and above write, delete is
+    admin and above, and a key with `projects:write` reaches sleep, wake and
+    resize and nothing else -- create, export and delete are a person's; every
+    write route is a served account route with a role and an executed type; a
+    pending operation is cancelled by its requester or an admin; a deleted
+    project takes no more writes. `bin/project.sh`, `bin/compute.sh` and
+    `bin/operation.sh` answer each write with an operation of its own type,
+    and `operation wait` reads succeeded 0, failed 5, its own timeout 7 and a
+    5xx as 6, never as an outcome. The lifecycle's customer proofs reach only
+    `routes.control` and the slot's recorded `routes.app`: no SSH word, no
+    typed URL, no environment but their three declarations and PATH (D2174).
+
+- id: OPN-STATE-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_control_states.py::test_each_operation_moves_the_state_it_names
+    - tests/contract/test_control_states.py::test_an_interrupted_operation_leaves_the_state_unknown
+    - tests/contract/test_control_states.py::test_a_failure_that_ran_nothing_leaves_the_state_before_it
+    - tests/contract/test_control_states.py::test_pending_and_cancelled_leave_the_state_before_them
+    - tests/contract/test_control_states.py::test_an_adopted_project_with_no_operation_is_operator_managed
+    - tests/contract/test_control_states.py::test_a_history_it_cannot_read_is_unknown
+    - tests/contract/test_control_states.py::test_every_state_answered_is_in_the_closed_list
+    - tests/contract/test_control_projects.py::test_a_project_reads_its_state_from_its_history
+  description: >-
+    A project's state is a pure function of its operation history (D2159):
+    each succeeded operation moves the state it names; an interrupted or
+    undetermined latest operation, and a failure after something ran, read
+    `unknown`, never `ready`; a failure that ran nothing, a pending and a
+    cancelled operation leave the state before them; an adopted project with
+    no operation is `ready` and operator-managed; a history the reader cannot
+    read is `unknown`; every state answered is in the closed list, and the
+    route answers what the reader computes.
+
+- id: OPN-REG-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_control_command.py::test_a_deleted_project_agrees_only_with_its_tombstone
+    - tests/contract/test_reconciler_dispatch.py::test_a_creation_runs_every_step_in_order
+  description: >-
+    The registry after the reconciler's operations (D2167, D2215): a creation
+    refreshes its project's registry row as its last step, after the last
+    deploy; `bin/control.sh registry` reads a row marked deleted as `agrees
+    (deleted)` only when no document is deployed under its key AND the slot's
+    tombstone is present -- no tombstone is `differs: tombstone`, a document
+    still deployed is `differs: deleted`, both exit 5.
+
+- id: LIFE-PROFILE-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_compute_profiles.py::test_standard_is_todays_defaults
+    - tests/contract/test_compute_profiles.py::test_every_profile_passes_the_budget_validators
+    - tests/contract/test_compute_profiles.py::test_a_profile_and_an_owned_member_are_refused_together
+    - tests/contract/test_compute_profiles.py::test_compute_is_refused_below_schema_ten
+    - tests/contract/test_compute_profiles.py::test_pids_and_cpus_come_from_the_profile
+  description: >-
+    Three compute profiles (ADR 0258): `standard` renders byte-identically to
+    a manifest with no `compute`; every profile passes the budget validators; a
+    manifest naming `compute` and a member the profile owns is refused; project
+    manifest 10 is required for `compute`; `pids_limit` and `cpus` come from
+    the profile (D2156, D2193).
+
+- id: LIFE-RESIZE-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_compute_profiles.py::test_the_resize_message_names_only_a_measured_window
+    - tests/contract/test_control_projects.py::test_a_resize_says_the_restart_has_not_been_measured
+    - tests/contract/test_reconciler_dispatch.py::test_resize_admits_a_candidate_before_anything_changes
+    - tests/contract/test_reconciler_dispatch.py::test_a_sleeping_project_is_neither_exported_nor_resized
+  description: >-
+    A resize (ADR 0258, D2157, D2220): admission reads a candidate manifest
+    beside the slot's, its own key excluded; refused at exit 12 the operation
+    is `capacity_exhausted {reason: admission}` with the manifest byte for
+    byte as it was, no candidate left and nothing deployed; admitted, the
+    manifest carries the new profile, one deploy, and the registry row is
+    refreshed without touching the display name; a sleeping project is not
+    resized; the `202` carries the unmeasured sentence, with no number, while
+    `RESIZE_WINDOW_SECONDS` is `None`, and the envelope row's window otherwise.
+
+- id: LIFE-REGION-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_host_manifest.py::test_schema_four_requires_a_region
+    - tests/contract/test_output_migrations.py::test_v21_adds_region_and_profile
+    - tests/contract/test_output_migrations.py::test_v21_refuses_a_current_document
+    - tests/contract/test_isolation_leaves_offline.py::test_every_leaf_of_a_built_deployed_document_is_classified
+    - tests/contract/test_isolation_leaves_offline.py::test_a_planted_unclassified_leaf_is_reported
+  description: >-
+    Region and the document (ADR 0257, D2161, D2162): host manifest schema 4
+    requires `region` and forbids it below 4, and `region()` is its one
+    reader, reading an absent region as unknown, never a default; outputs 21
+    carries `region` and `compute.profile`, and `migrate_v20_to_v21` adds them
+    and refuses a document that already carries them; every leaf of a deployed
+    document built from each fixture render is classified in the isolation
+    matrix offline, and a planted unclassified leaf is reported.
+
+- id: LIFE-REST-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_rest_flag.py::test_a_disabled_rest_service_has_no_router
+    - tests/contract/test_rest_flag.py::test_the_deploy_records_rest_unpublished_without_reading_it
+    - tests/contract/test_rest_flag.py::test_a_ready_rest_route_with_the_flag_off_is_refused
+  description: >-
+    The REST flag has a reader (D2137, D2144, D2172): `api.rest.enabled:
+    false` renders no PostgREST router, and the deploy records the REST route
+    unpublished without observing a served document; enabled renders it; a
+    deployed document with a `ready` REST route and the flag off is refused.
+
+- id: LIFE-SLOT-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_slot_command.py::test_prepare_writes_a_manifest_the_loader_accepts
+    - tests/contract/test_slot_command.py::test_status_derives_each_state_from_what_exists
+    - tests/contract/test_slot_command.py::test_an_unreadable_dns_reading_is_undetermined_never_ready
+    - tests/contract/test_slot_command.py::test_nothing_removes_a_tombstone
+    - tests/contract/test_slot_command.py::test_revoke_restores_the_kept_state_and_runs_the_products_destroy
+    - tests/contract/test_slot_command.py::test_the_slot_vocabulary_is_one_list_everywhere
+    - tests/contract/test_host_manifest.py::test_the_slots_are_declarations_with_one_reader
+  description: >-
+    Slots (ADR 0257, D2149): `host.yaml` schema 4 declares them and
+    `declared_slots()` is their one reader, refusing two slots sharing a key
+    or a domain; `bin/slot.sh prepare` writes a 0600 manifest the product's
+    loader accepts, at `small`, with every provider fact from `slots.defaults`
+    -- once, and never for an undeclared or consumed slot; `status` derives
+    declared, prepared, ready, allocated, quarantined and consumed from files
+    alone and reads a DNS answer it could not get as `undetermined`, exit 6,
+    never `ready`; no code removes a tombstone; `revoke` needs a consumed slot
+    with a kept state, runs the product's `--destroy` with the operator's
+    credential and keeps the copy; the slot key and state vocabularies are one
+    list in the module, the host schema and the control set.
+
+- id: LIFE-CAP-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_reconciler_dispatch.py::test_admission_refusal_is_capacity_exhausted_and_creates_nothing
+    - tests/contract/test_reconciler_dispatch.py::test_no_ready_slot_is_capacity_exhausted_no_slot
+    - tests/contract/test_control_projects.py::test_no_ready_slot_refuses_before_a_row
+    - tests/contract/test_control_projects.py::test_no_string_produces_plan_limit_reached
+  description: >-
+    Capacity refusals, from two readers under one code (D2160): admission's
+    exit 12, read after the slot is taken and BEFORE anything is rendered, is
+    `capacity_exhausted {reason: admission}` with the slot returned to `ready`
+    byte for byte; a slot whose DNS record does not name the host is not
+    ready, and the reconciler refuses `no_slot` with nothing taken; the API
+    answers `capacity_exhausted {reason: no_slot}` before a row is written
+    when there is no reading, no ready slot, or a reading older than ten
+    minutes; nothing in Session 38 produces `plan_limit_reached`.
+
+- id: LIFE-SLEEP-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_project_runtime_stop_start.py::test_stop_detaches_first_then_stops_and_keeps_the_containers
+    - tests/contract/test_project_runtime_stop_start.py::test_start_waits_then_attaches_and_materializes_nothing
+    - tests/contract/test_project_runtime_stop_start.py::test_a_start_that_never_becomes_healthy_attaches_nothing
+    - tests/contract/test_project_runtime_stop_start.py::test_stop_and_start_need_root_and_the_session
+    - tests/contract/test_reconciler_dispatch.py::test_sleep_disables_the_timers_and_the_unit_then_stops
+    - tests/contract/test_reconciler_dispatch.py::test_wake_starts_the_same_containers_then_the_unit_and_the_timers
+  description: >-
+    Sleep and wake (ADR 0259, D2155, D2192): `project-runtime.sh stop`
+    detaches the project from the edge first, then stops its containers and
+    keeps them; `start` waits for them healthy, then attaches, and
+    materialises, renders and builds nothing; a start that never becomes
+    healthy attaches nothing (exit 9); both need root and the session; sleep
+    disables the backup timers and the boot unit before it stops, and wake
+    starts the same containers, then the unit and the timers.
+
+- id: LIFE-EXPORT-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_reconciler_dispatch.py::test_the_export_names_only_the_customer_schemas
+    - tests/contract/test_reconciler_dispatch.py::test_the_export_url_is_the_operations_secret_and_the_archive_is_removed
+    - tests/contract/test_export_upload.py::test_the_export_is_written_once_and_signed_for_900_seconds
+    - tests/contract/test_export_upload.py::test_a_named_expiry_is_bounded_at_900_seconds
+    - tests/contract/test_export_upload.py::test_a_second_write_is_refused_and_signs_nothing
+    - tests/contract/test_export_upload.py::test_it_runs_only_as_the_storage_mode_and_only_on_an_archive
+    - tests/contract/test_export_upload.py::test_the_reconciler_and_the_container_agree_on_the_url_life
+    - tests/contract/test_control_projects.py::test_the_download_url_is_returned_once
+    - tests/contract/test_control_cli.py::test_export_downloads_once_without_following_a_redirect
+  description: >-
+    Export (ADR 0259, D2164, D2190): the dump is `pg_dump -Fc -n app -n api
+    --no-owner --no-privileges`, never `app_private`; the archive is written
+    root 0600, streamed into the project's storage container and removed --
+    after a failed upload too; the container writes the object once
+    (`If-None-Match`) and prints one presigned GET of at most 900 seconds, runs
+    only in the storage mode and only on an archive, and the reconciler and the
+    container agree on that bound; the URL is finished into the operation's
+    secret, never its result, a log or the command's output; the requester's
+    first read carries `download_url` and no later read, other reader or list
+    does; `bin/project.sh export` downloads it once without following a
+    redirect, checks its SHA-256 and writes it 0600.
+
+- id: LIFE-HANDOFF-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_admin_handoff.py::test_the_administrator_is_handed_over_by_the_hash_of_a_token
+    - tests/contract/test_control_cli.py::test_only_the_hash_reaches_the_control_plane
+    - tests/contract/test_reconciler_dispatch.py::test_the_bootstrap_password_is_never_stored
+    - tests/contract/test_control_cli.py::test_the_handoff_token_is_private_and_removed_after_claim
+  description: >-
+    The first administrator handed over by hash (ADR 0260, D2163, D2226): on
+    a release cluster, `auth_open_password_reset` with `sha256(T)` opens the
+    reset once for `T`, and the bootstrap password stops working; `bin/project.sh
+    create` keeps `T` in a 0600 file written before the request and sends
+    only its SHA-256, which is all the control plane's row carries; the
+    reconciler's bootstrap password is random, handed through an inherited
+    pipe and written nowhere; `claim` presents `T` to the project's own reset
+    route over https and removes the file only once the project accepted it.
+
+- id: LIFE-DELETE-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_project_retire.py::test_defer_provider_keeps_the_state_for_revocation
+    - tests/contract/test_project_retire.py::test_defer_provider_is_refused_where_it_cannot_be_honoured
+    - tests/contract/test_reconciler_dispatch.py::test_delete_consumes_the_slot
+  description: >-
+    Deletion (ADR 0256, 0257, D2158, D2222): `project-retire.sh
+    --defer-provider` runs every step but the provider's destroy, moves the
+    bootstrap state into the slot's directory unchanged before the state
+    directory goes, removes the local credentials and contacts no provider --
+    and is refused for a key that is not a slot's, beside the credential file,
+    with no state to keep or over a kept state; the reconciler retires with
+    the data destroyed, writes the tombstone, then marks the registry row
+    deleted, and the slot reads `consumed`.
+
+- id: LIFE-LIVE-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/external/test_session38_public_lifecycle.py::test_the_operations_read_as_the_lifecycle_ran
+    - tests/external/test_session38_public_lifecycle.py::test_the_refused_resize_changed_nothing
+    - tests/external/test_session38_public_lifecycle.py::test_the_second_creation_was_refused_without_a_row
+  description: >-
+    On the deployment, through `routes.control` only, as the probe owner: the
+    operations the lifecycle record names read back through `/v1` as it ran
+    -- create, sleep, wake and resize `standard` succeeded; resize `large`
+    failed `capacity_exhausted` (admission) and the profile stayed `standard`;
+    both exports succeeded and neither hands its URL a second time; delete
+    succeeded -- on the commit the control project is deployed at; a creation
+    now is refused `capacity_exhausted` (`no_slot`) and the organisation's
+    creations stay one.
+
+- id: LIFE-LIVE-002
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/external/test_session38_public_lifecycle.py::test_the_creator_claimed_the_project
+    - tests/external/test_session38_public_lifecycle.py::test_a_sleeping_and_a_deleted_project_answer_the_edges_404
+    - tests/external/test_session38_public_lifecycle.py::test_the_export_holds_only_the_customer_schemas
+  description: >-
+    On the deployment, through the slot's own door: the claimed administrator
+    signed in and `/auth/me` answered 200 during the lifecycle; while asleep
+    every sample of the slot's address was the edge's 404, and the deleted
+    slot answers the edge's 404 now; the archive the customer downloaded holds
+    the schemas `api` and `app` and no `app_private`, its SHA-256 is the
+    operation's, and the second export's URL answered 200 at once and 403
+    after its expiry.
+
+- id: OPN-LIVE-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/deployment/test_session38_reconciler.py::test_the_reconciler_is_enabled_and_listens_nowhere
+    - tests/deployment/test_session38_reconciler.py::test_the_slot_was_consumed_and_its_volumes_removed
+    - tests/deployment/test_session38_reconciler.py::test_the_registry_agrees_including_the_deletion
+    - tests/deployment/test_session38_reconciler.py::test_the_slot_was_isolated_from_every_project
+    - tests/deployment/test_session38_reconciler.py::test_the_control_projects_rest_route_is_withheld
+  description: >-
+    On the deployment: the reconciler's unit is enabled and active, reads
+    idle, and no process of it holds a listening socket; the slot the
+    lifecycle created is `consumed` with its tombstone and none of its volumes
+    remains; `bin/control.sh registry` reads `agrees` for alpha, beta and the
+    control project and `agrees (deleted)` for the slot, exit 0; the slot's
+    document shared no `ISOLATED_FIELDS` value or role with A, B or the
+    control project, and named the same region; the control project's REST
+    route is recorded unpublished and the edge answers it 404.

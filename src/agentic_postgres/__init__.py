@@ -957,7 +957,72 @@ from pathlib import Path
 #: the same session: `upgrade plan` on both projects, with the same two
 #: declarations, before the first 1.15.0 deploy -- and a `major` there is a
 #: stop condition.
-CURRENT_SESSION = 37
+#:
+#: **Session 38 moves it to 38, all-or-nothing again** (D690): EIGHTEEN
+#: requirements and eighteen claims -- `CLAIMS` 219 -> 237 and `OFFLINE_CLAIMS`
+#: 74 -> 89, counted from the tuples rather than by hand (D1628) -- fifteen
+#: declared offline, two EXTERNAL and one host, with every offline half written
+#: in the run that built its piece (Runs 2-8) and every live half here. Two
+#: families join the registry: `OPN` (the reconciler and the operations it
+#: executes) and `LIFE` (a managed project's lifecycle). The two external
+#: claims are the lifecycle a customer drove, read back through the control
+#: project's route and the slot's own (D2174).
+#:
+#: **The session's subject is a managed project** -- one a customer creates,
+#: sleeps, wakes, resizes, exports and deletes through `/v1` -- and six ADRs
+#: are its shape. ADR 0256: a root unit on the host, the reconciler, claims each
+#: operation from the control database through the control project's
+#: container, executes it from a closed table with argv lists built from
+#: validated members, opens no socket, never resumes an interrupted operation,
+#: and acts only on declared slots. ADR 0257: slots -- keys, domains and provider
+#: resources the operator prepares in advance, declared in `host.yaml` schema 4
+#: with the host's `region`, their state derived from what exists, single-use.
+#: ADR 0258: three compute profiles, `standard` the release defaults, and a
+#: resize admitted before anything changes. ADR 0259: sleep and wake by request,
+#: and an export whose one URL lives at most 900 seconds. ADR 0260: the first
+#: administrator handed over by the hash of a token only the customer holds.
+#: ADR 0261: a sixth Ledger status, `trial`, bounded to the session that
+#: introduced its claims -- the six rows move to it here, and the session's
+#: close resolves them.
+#:
+#: **No released migration** -- the reconciler's tables and functions are the
+#: control set's `0004`. **Outputs move to v21** (`region` and
+#: `compute.profile`, migrated from v20), **the project manifest to schema 10**
+#: (`compute`, optional) and **the host manifest to schema 4** (`region`
+#: required, `slots` optional; 2 and 3 still load); no capability, lock or
+#: secret schema moves.
+#:
+#: **`VERSION` moves to `1.16.0`.** What moved: the control mode's project
+#: routes, states and refusals, `operations.ACCEPTED_TYPES` (the six), the
+#: export upload and the bounded presign in `services/auth-api`, so the image
+#: moves and a deploy recreates `auth`, `storage` and `mcp`; the control set's
+#: `0004`; manifest 10, outputs 21 and host 4; the REST flag's reader (D2172);
+#: `project-runtime.sh stop|start`, `project-retire.sh --defer-provider`;
+#: `bin/reconciler.sh`, `bin/slot.sh`, `bin/compute.sh`, `bin/operation.sh` and
+#: the new verbs of `bin/project.sh`.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig as Sessions
+#: 34-37 ran it: a git worktree at `c3eec1d`, the commit that IS deployed, and
+#: a `tar`-piped copy of this working tree, both rendering the INSTALLED tree's
+#: `project.example.yaml` (schema 9). With `--also document_schema_migratable
+#: --also api_operation_added`: `bump minor`, **`requires minor`**, verdict
+#: `ok`, `changes [api_operation_added, document_schema_migratable]`, `reasons
+#: []`, `operator_digests_moved []`. Without the declarations: `requires patch`
+#: -- the seventh release in a row whose price the command sees only by
+#: declaration. **Three leaves differ**: `template_version` 1.15.0 -> 1.16.0,
+#: `schema_version` 20 -> 21 and `compute.profile` absent -> `standard` (6,090 ->
+#: 6,136 bytes); `region` is absent from both, because a render reads no host.
+#: **ADR 0162 prices it a MINOR, and `1.16.0` is that floor exactly**: the
+#: outputs move is MIGRATABLE, manifest 10 and host 4 invalidate no older
+#: manifest, and no capability, lock or secret schema moves. What an operator
+#: must KNOW the reading cannot show: `host.yaml` must move to schema 4 for a
+#: deployed document to carry its region, a slot is provider resources made by
+#: hand before a customer can create anything, and the reconciler is a new
+#: root unit an operator installs (operator guide §20). **The trip** confirms
+#: the class against a DEPLOYMENT: `upgrade plan` on every project, with the
+#: same two declarations, before the first 1.16.0 deploy -- and a `major`
+#: there is a stop condition.
+CURRENT_SESSION = 38
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

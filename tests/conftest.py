@@ -196,6 +196,15 @@ ENVIRONMENT_VARIABLES = (
     # only, and never a value on a command line.
     "APG_CONTROL_OUTPUTS",
     "APG_CONTROL_PROBE_FILE",
+    # Session 38 (ADR 0256-0261). `APG_LIFECYCLE_RECORD_FILE` is the 0600 record
+    # `s38-lifecycle.py` wrote while a customer's project was created, slept,
+    # woken, resized, exported and deleted through `/v1` (D2175): operation
+    # ids, status codes and the slot's routes -- never a password, token or
+    # URL that authorises anything. Host and external. `APG_SLOT_OUTPUTS` is the
+    # deleted slot's deployed document, copied op-readable on Sheet K2 BEFORE
+    # the deletion, so the host proofs can compare it with its neighbours.
+    "APG_LIFECYCLE_RECORD_FILE",
+    "APG_SLOT_OUTPUTS",
 )
 
 

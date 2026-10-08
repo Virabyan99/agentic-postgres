@@ -8,7 +8,9 @@ passed in the newest one, `today_evidence` included; a concept a customer
 cannot reach carries no control; no customer sentence uses a specification §59
 word; the rendered page is current; and since Session 37 (ADR 0254) every
 `/api/v1` operation type names a row, accepted exactly when that row is
-`available` or `beta`. The half without a subject -- every console control
+`available` or `beta` -- or, since Session 38 (ADR 0261), `trial`: reachable
+while its evidence is collected, and held by three rules to the session that
+introduced its claims. The half without a subject -- every console control
 maps to a row -- is asserted empty, so the day the console appears this module
 fails and names the session that must write the real guard.
 """
@@ -22,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, operations, reality_ledger
+from agentic_postgres import CURRENT_SESSION, REPO_ROOT, operations, reality_ledger
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -48,11 +50,21 @@ def ledger() -> dict:
 
 def test_the_ledger_validates(ledger: dict) -> None:
     """The schema, the unique ids, and the module's statuses ARE the schema's,
-    so a status added in one place and not the other is refused here."""
+    so a status added in one place and not the other is refused here -- six
+    since ADR 0261 added `trial`, written out so a seventh is added on purpose."""
     reality_ledger.validate(ledger)
     schema = json.loads(reality_ledger.SCHEMA_PATH.read_text(encoding="utf-8"))
     enum = schema["$defs"]["row"]["properties"]["status"]["enum"]
     assert tuple(enum) == reality_ledger.STATUSES
+    assert reality_ledger.STATUSES == (
+        "available",
+        "beta",
+        "trial",
+        "planned",
+        "not_metered",
+        "not_offered",
+    )
+    assert reality_ledger.REACHABLE == operations.ACCEPTING_STATUSES
 
 
 def test_every_evidence_name_is_a_claim_or_an_envelope_subject(ledger: dict) -> None:
@@ -119,6 +131,66 @@ def test_a_planned_row_has_no_control(ledger: dict) -> None:
     assert reality_ledger.unreachable_rows_with_controls(ledger) == []
 
 
+def test_a_trial_row_is_bounded_to_the_session_that_introduced_its_claims(ledger: dict) -> None:
+    """ADR 0261's three rules on the committed ledger: every `trial` row names
+    only claims `CLAIM_INTRODUCED_IN` dates to `CURRENT_SESSION`, targets the
+    current session, and tells the customer the concept is being verified. A
+    row Session 38's close leaves at `trial` fails this the moment the constant
+    moves to 39 -- which is how a session cannot leave one behind."""
+    from tests.contract.test_evidence_claims import CLAIM_INTRODUCED_IN
+
+    problems = reality_ledger.trial_problems(ledger, CLAIM_INTRODUCED_IN, CURRENT_SESSION)
+    assert problems == [], problems
+
+
+def _trial_row(**changes: object) -> dict:
+    row = {
+        "id": "planted",
+        "concept": "Planted",
+        "status": "trial",
+        "customer_text": "Open while it is being verified.",
+        "today": "Planted.",
+        "today_evidence": None,
+        "evidence": ["new_claim"],
+        "stage5_reality": "Planted.",
+        "eventual": "Planted.",
+        "controls": [],
+        "since_session": 38,
+        "target_session": 38,
+    }
+    row.update(changes)
+    return row
+
+
+def test_the_trial_rules_refuse_each_way_a_row_could_outlive_its_session() -> None:
+    """Each rule, broken alone, is refused naming the row; the control -- the
+    same row unbroken -- is not. The read at Session 39 is the close that
+    forgot: the row did not change, the session did. And the passed half skips
+    ONLY a trial row's own `evidence`: the same unpassed claim under `beta` is
+    still refused, so `beta` was not loosened (ADR 0261 item 4)."""
+    introduced = {"new_claim": 38, "old_claim": 37}
+
+    def problems(row: dict, session: int = 38) -> list[str]:
+        return reality_ledger.trial_problems({"rows": [row]}, introduced, session)
+
+    assert problems(_trial_row()) == []
+    assert "old_claim" in " ".join(problems(_trial_row(evidence=["new_claim", "old_claim"])))
+    assert "not introduced" in " ".join(problems(_trial_row(evidence=["an_envelope_subject"])))
+    assert "target_session" in " ".join(problems(_trial_row(target_session=39)))
+    assert "target_session" in " ".join(problems(_trial_row(), session=39))
+    assert "being verified" in " ".join(problems(_trial_row(customer_text="Open.")))
+    # Not a trial row: none of the three rules is its business.
+    assert problems(_trial_row(status="beta", evidence=["old_claim"], target_session=30)) == []
+
+    unpassed = {"claims": {"control_set": {"status": "not_run"}}}
+    trial = {"rows": [_trial_row(evidence=["control_set"])]}
+    beta = {"rows": [_trial_row(status="beta", evidence=["control_set"])]}
+    assert reality_ledger.evidence_problems(trial, unpassed) == []
+    assert reality_ledger.evidence_problems(beta, unpassed) == [
+        "planted: evidence 'control_set' did not pass"
+    ]
+
+
 def test_no_customer_text_uses_a_forbidden_word(ledger: dict) -> None:
     """The §59 words, in the only text written for a customer today. The
     `autoscaling`, `high_availability` and `multi_region` rows say what is not
@@ -138,17 +210,19 @@ def test_the_page_is_current() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_every_operation_type_names_a_ledger_row_and_none_is_accepted_while_planned(
+def test_every_operation_type_names_a_ledger_row_and_is_accepted_iff_its_row_is_reachable(
     ledger: dict,
 ) -> None:
     """ADR 0247's guard for the operation types, real since Session 37 (ADR 0254).
 
     Every type names a ledger row that exists; the types the control mode
     accepts (`ACCEPTED_TYPES`, in the service) are EXACTLY those whose row is
-    `available` or `beta` -- a row moved without the service following, or a
-    type accepted while its row is planned, fails here; and the control set's
-    CHECK lists the same types, so the database holds no type the table lacks.
-    In Session 37 every row is `planned`, so nothing is accepted.
+    `available`, `beta` or -- since ADR 0261 -- `trial`: a row moved without the
+    service following, or a type accepted while its row is planned, fails here;
+    and the control set's CHECK lists the same types, so the database holds no
+    type the table lacks. Session 37 accepted nothing; Session 38's Run 10 moved
+    the six executed types' rows to `trial` (D2170), and the five others stay
+    refused because their rows stay `planned`.
     """
     rows = {row["id"] for row in ledger["rows"]}
     missing = {t: r for t, r in operations.OPERATION_TYPES.items() if r not in rows}

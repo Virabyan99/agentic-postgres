@@ -1213,6 +1213,27 @@ CLAIM_INTRODUCED_IN = {
     "control_totp_live": 37,
     "control_keys_live": 37,
     "control_plane_live": 37,
+    # Session 38 (ADR 0256-0261). EIGHTEEN, fifteen offline, two external and
+    # one host, landing with the constant (D690): managed projects. A `trial`
+    # Ledger row may name only these (ADR 0261).
+    "reconciler_claim": 38,
+    "reconciler_dispatch": 38,
+    "control_project_operations": 38,
+    "project_states": 38,
+    "registry_after_operations": 38,
+    "compute_profiles": 38,
+    "resize_message": 38,
+    "region_and_document": 38,
+    "rest_flag": 38,
+    "slots": 38,
+    "capacity_refusals": 38,
+    "sleep_wake": 38,
+    "export": 38,
+    "admin_handoff": 38,
+    "deletion": 38,
+    "lifecycle_operations_live": 38,
+    "lifecycle_project_door_live": 38,
+    "reconciler_live": 38,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

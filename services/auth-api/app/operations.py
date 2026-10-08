@@ -6,14 +6,17 @@ D2054). A type outside this table does not exist; the control set's
 `app.control_operations.type` CHECK lists exactly these keys, and a test holds
 the two equal.
 
-**`ACCEPTED_TYPES` is empty until the rows move, and that is the decision.** A
-type is accepted exactly when its ledger row is `available` or `beta` (and,
-once Session 38's Run 10 adds the status, `trial`, ADR 0261); every row is
-`planned` today, so nothing is accepted and every write route answers
-`409 not_available` naming the row. This image cannot read the ledger file --
-it is not in the build context, and a running service deciding what exists from
-a document would make a document its authority -- so the set is written here
-and `test_every_operation_type_names_a_ledger_row_and_none_is_accepted_while_planned`
+**`ACCEPTED_TYPES` follows the rows, and that is the decision.** A type is
+accepted exactly when its ledger row is `available`, `beta` or `trial` (ADR
+0254, ADR 0261). Session 38's Run 10 moved the six rows the executed types act
+on to `trial`, so the six are accepted on the commit the trip deploys; the five
+others (`branch.*`, `restore.create`, `credential.rotate`) stay `planned` and
+would answer `409 not_available` naming the row. Run 13 resolves each `trial`
+row to `beta`, or back to `planned` with its types removed from this set. This
+image cannot read the ledger file -- it is not in the build context, and a
+running service deciding what exists from a document would make a document its
+authority -- so the set is written here and
+`test_every_operation_type_names_a_ledger_row_and_is_accepted_iff_its_row_is_reachable`
 requires it to equal what the ledger says: a row moved without this set
 following, or a type added here while its row is `planned`, fails that guard.
 That is the fake-complete guard ADR 0247 wrote, read in both directions.
@@ -65,8 +68,19 @@ EXECUTED_TYPES: Final[frozenset[str]] = frozenset(
 )
 
 #: The types the control mode accepts. Equal, by the guard, to the types whose
-#: ledger row accepts -- none until Run 10 moves the six rows to `trial` (D2170).
-ACCEPTED_TYPES: Final[frozenset[str]] = frozenset()
+#: ledger row accepts: the six executed types, whose rows are `trial` since
+#: Session 38's Run 10 (D2170). Written out, never derived from
+#: `EXECUTED_TYPES` -- building a type is not the decision to accept it.
+ACCEPTED_TYPES: Final[frozenset[str]] = frozenset(
+    {
+        "project.create",
+        "project.delete",
+        "project.sleep",
+        "project.wake",
+        "project.resize",
+        "project.export",
+    }
+)
 
 #: The JSON Schema every operation's `{type, arguments}` validates against,
 #: relative to the repository: read by the reconciler before dispatch, and

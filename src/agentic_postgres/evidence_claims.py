@@ -345,6 +345,36 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "operation_types",
         "control_registry_command",
         "control_cli",
+        # Session 38 (ADR 0256-0261). FIFTEEN, each a property of a CHECKOUT:
+        # the reconciler's claim functions under a real control cluster
+        # (`reconciler_claim`); the reconciler's table, its argv and its unit
+        # over a recording host (`reconciler_dispatch`, `registry_after_operations`,
+        # `capacity_refusals`, `sleep_wake`, `export`, `deletion`); the control
+        # mode's project routes and the state reader in process
+        # (`control_project_operations`, `project_states`); the profiles, the
+        # resize sentence, region and the document, the REST flag and the slot
+        # command over files (`compute_profiles`, `resize_message`,
+        # `region_and_document`, `rest_flag`, `slots`); and the handoff by hash
+        # against a release cluster and the CLI (`admin_handoff`).
+        #
+        # The session's other THREE are deliberately not here: two are the
+        # lifecycle as a customer drove it through the public door (EXTERNAL),
+        # and one is the reconciler, the slot and the registry on the host.
+        "reconciler_claim",
+        "reconciler_dispatch",
+        "control_project_operations",
+        "project_states",
+        "registry_after_operations",
+        "compute_profiles",
+        "resize_message",
+        "region_and_document",
+        "rest_flag",
+        "slots",
+        "capacity_refusals",
+        "sleep_wake",
+        "export",
+        "admin_handoff",
+        "deletion",
     }
 )
 
@@ -714,6 +744,31 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "control_totp_live": ("CTL-TOTP-002",),
     "control_keys_live": ("KEY-USE-001",),
     "control_plane_live": ("CTL-REG-002",),
+    # Session 38 (ADR 0256-0261). EIGHTEEN claims, landing with the constant
+    # (D690): fifteen offline, two external -- the lifecycle a customer drove,
+    # read back through `routes.control` and the slot's own door (D2174) -- and
+    # one host. Each requirement is its own claim (ADR 0089). The session's
+    # subject is a managed project: created into a prepared slot by a root
+    # reconciler, slept, woken, resized, exported and deleted on request, with
+    # its first administrator handed over by the hash of a token.
+    "reconciler_claim": ("OPN-CLAIM-001",),
+    "reconciler_dispatch": ("OPN-DISPATCH-001",),
+    "control_project_operations": ("OPN-API-001",),
+    "project_states": ("OPN-STATE-001",),
+    "registry_after_operations": ("OPN-REG-001",),
+    "compute_profiles": ("LIFE-PROFILE-001",),
+    "resize_message": ("LIFE-RESIZE-001",),
+    "region_and_document": ("LIFE-REGION-001",),
+    "rest_flag": ("LIFE-REST-001",),
+    "slots": ("LIFE-SLOT-001",),
+    "capacity_refusals": ("LIFE-CAP-001",),
+    "sleep_wake": ("LIFE-SLEEP-001",),
+    "export": ("LIFE-EXPORT-001",),
+    "admin_handoff": ("LIFE-HANDOFF-001",),
+    "deletion": ("LIFE-DELETE-001",),
+    "lifecycle_operations_live": ("LIFE-LIVE-001",),
+    "lifecycle_project_door_live": ("LIFE-LIVE-002",),
+    "reconciler_live": ("OPN-LIVE-001",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

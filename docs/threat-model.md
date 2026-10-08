@@ -44,6 +44,12 @@ no-op.
 | `THR-CTL-ESCALATION` | A `member` or `viewer` of an organisation who wants `admin` or a scope they do not hold; an `admin` acting without the second factor | The organisation's roles, keys and invitations | Every `/v1` route checks the caller's role in the target organisation against one role matrix (ADR 0253); an admin cannot grant `owner`; the last owner cannot be removed or demoted; a key's scopes are bounded by the vocabulary and by the minter's role, and narrow when the owner is demoted; an `owner` or `admin` without an enabled TOTP factor reaches only `/v1/me`, `/v1/me/totp*` and `/v1/sessions*`, and a login with an enabled factor requires a current, unreplayed code (ADR 0252); FORCE RLS scopes every control table to the caller's organisations in the database itself | The membership rows and their changes; `bin/control.sh totp-reset` is a root act with a confirmation | An owner can do anything inside their own organisation, by design. TOTP seeds are plaintext at rest (ADR 0252): a copy of the control database, or a backup read with its cipher pass, discloses every seed | `CTL-ROLE-001`, `CTL-TOTP-001`, `CTL-TOTP-002` | `tests/contract/test_control_roles.py::test_every_route_and_role_answers_as_the_matrix_says`, `tests/contract/test_control_roles.py::test_an_admin_cannot_make_an_owner`, `tests/contract/test_control_roles.py::test_the_last_owner_stays`, `tests/contract/test_control_keys.py::test_scopes_are_bounded_by_the_vocabulary_and_the_role`, `tests/contract/test_control_sessions.py::test_an_owner_without_a_factor_reaches_only_enrolment`, `tests/external/test_session37_public_control.py::test_login_enforces_the_second_factor` | 37 |
 | `THR-CTL-ENUMERATION` | A caller with any control-plane credential who probes organisation, member or project ids it does not belong to | The existence of other organisations, their members and their projects | A foreign organisation's id and a missing one return the same `404` on every route (ADR 0253); the database's RLS returns no row of an organisation to a non-member, so the answer is decided below the route; a key sees its own organisation's projects only | None beyond the request line: a refused probe writes no row, by design | Timing is not equalised. The branch half of this threat is Session 40's and stays in the list below | `CTL-ROLE-001`, `CTL-SET-001` | `tests/contract/test_control_roles.py::test_a_foreign_id_and_a_missing_id_look_the_same`, `tests/contract/test_control_set.py::test_a_non_member_sees_nothing` | 37 |
 | `THR-CTL-PLANE-CONFUSION` | Holds a control-plane session or management key and presents it to a project's data or admin plane, or wants the control plane to open a project | Every project's data and admin plane | The control mode reads no other project's deployed document, URL or secret -- an AST scan over the control modules refuses each kind of read (ADR 0246, ADR 0251); the registry is written by root from the deployed documents (`bin/control.sh adopt`), never by the service; a management key is not a JWT of any project and alpha's application and REST routes refuse it; the control project's `auth` container serves no release login or admin route | The registry's `agrees`/`differs`/`could not determine` reading against every deployed document | The node's operator has root on every project, the control project included (ADR 0246's boundary sentence is about the SERVICE). The halves Sessions 38 and 39 add stay in the list below | `CTL-API-001`, `KEY-USE-001`, `CTL-REG-002` | `tests/contract/test_control_boundary.py::test_the_control_mode_reads_no_other_projects_credential`, `tests/external/test_session37_public_control.py::test_a_key_lists_projects_and_opens_no_project`, `tests/deployment/test_session37_control.py::test_the_control_mode_serves_no_release_admin_route` | 37 |
+| `THR-LIFE-EXHAUSTION` | A member of an organisation who creates projects, or retries a creation, until the node or its slots run out | The node's capacity, and its neighbours' availability | Two readers under one code (D2160): no `ready` slot -- or a slot reading older than ten minutes -- is `capacity_exhausted {reason: no_slot}` BEFORE an operation row is written; admission's exit 12 is `capacity_exhausted {reason: admission}` after the slot is taken and BEFORE anything is rendered, the slot returned byte for byte; the database holds one non-terminal operation per project and one creation per organisation; a creation is a person's, never a key's (ADR 0256) | The operation rows (type, status, error code, reason, steps); `bin/slot.sh status`; `doctor capacity` | No rate limit is built (D2166): the bound is the stock -- one slot on this host -- and the serialisation, not a time window. The entitlement half (`plan_limit_reached`, Session 41) and the branch half (Session 40) stay in the list below, and nothing in Session 38 can produce `plan_limit_reached` | `LIFE-CAP-001`, `OPN-API-001`, `LIFE-LIVE-001` | `tests/contract/test_reconciler_dispatch.py::test_admission_refusal_is_capacity_exhausted_and_creates_nothing`, `tests/contract/test_control_projects.py::test_no_ready_slot_refuses_before_a_row`, `tests/contract/test_control_projects.py::test_one_operation_at_a_time`, `tests/contract/test_control_projects.py::test_no_string_produces_plan_limit_reached`, `tests/external/test_session38_public_lifecycle.py::test_the_second_creation_was_refused_without_a_row` | 38 |
+| `THR-LIFE-PLANE-CONFUSION` | Holds a control-plane session, a management key or a copy of the control database, and wants a managed project's administrator or data | Each managed project's first administrator, its admin plane and its data | The first administrator is handed over by hash (ADR 0260): the control plane stores only `sha256(T)`, the reconciler registers it with `auth_open_password_reset` after bootstrapping with a random password it writes nowhere, and only `T` -- held 0600 on the customer's disk -- opens the reset, once; the hash presented as the token is refused (rig 38c). A key with `projects:write` may sleep, wake and resize, never create, export or delete (D2165). The export URL is the one bounded exception: at most 900 seconds, one object, returned once to the requester and erased (ADR 0259) | The operation rows; the project's own reset record; the CLI's handoff file, removed only when the project accepted it | The URL is in the control database's WAL and backups until it expires (ADR 0259). `T` lives on the customer's disk until the claim. Session 39's half -- the public endpoints and customer roles -- stays in the list below | `LIFE-HANDOFF-001`, `LIFE-EXPORT-001`, `OPN-API-001`, `LIFE-LIVE-002` | `tests/contract/test_admin_handoff.py::test_the_administrator_is_handed_over_by_the_hash_of_a_token`, `tests/contract/test_control_cli.py::test_only_the_hash_reaches_the_control_plane`, `tests/contract/test_reconciler_dispatch.py::test_the_bootstrap_password_is_never_stored`, `tests/contract/test_control_projects.py::test_the_roles_decide_who_writes`, `tests/contract/test_export_upload.py::test_the_export_is_written_once_and_signed_for_900_seconds`, `tests/contract/test_control_projects.py::test_the_download_url_is_returned_once`, `tests/external/test_session38_public_lifecycle.py::test_the_creator_claimed_the_project` | 38 |
+| `THR-LIFE-DELETION` | A member who races an operation against a deletion, or a later project that would inherit a deleted one's names, routes, roles or repository | The deleted project's data and names, and the next customer's isolation | The database holds one non-terminal operation per project, and a deleted project takes no more writes; a deletion is `project-retire.sh --permanent --destroy-data --defer-provider` -- every local resource the key derives removed, the credential files removed, the bootstrap state KEPT under the slot for the operator's revocation -- then the slot's tombstone, then the registry row marked deleted (ADR 0256, 0257, D2158); a slot is single-use and no code removes a tombstone | `bin/control.sh registry` reads `agrees (deleted)` only with the tombstone present and no document deployed; `bin/slot.sh status` reads `consumed`; the retirement record names what was kept | The slot's Infisical project, buckets, DNS record and backup repository outlive it (ADR 0187, D2181) and no deletion-policy window exists; revoking its identity is the operator's act (`bin/slot.sh revoke`) | `LIFE-DELETE-001`, `LIFE-SLOT-001`, `OPN-REG-001`, `OPN-LIVE-001` | `tests/contract/test_project_retire.py::test_defer_provider_keeps_the_state_for_revocation`, `tests/contract/test_reconciler_dispatch.py::test_delete_consumes_the_slot`, `tests/contract/test_control_projects.py::test_a_deleted_project_takes_no_more_writes`, `tests/contract/test_slot_command.py::test_nothing_removes_a_tombstone`, `tests/contract/test_control_command.py::test_a_deleted_project_agrees_only_with_its_tombstone`, `tests/deployment/test_session38_reconciler.py::test_the_slot_was_consumed_and_its_volumes_removed` | 38 |
+| `THR-LIFE-STORAGE` | One project's own workload writes until the shared disk is full | The neighbouring projects' databases, WAL and backups | Admission's disk FLOOR (D1596): free space at the Docker root against `capacity.reserve_disk_gb`, read before a creation or a resize is rendered, refused at exit 12 as `capacity_exhausted {reason: admission}`; and the Reality Ledger's sentence that no per-project disk quota exists | `doctor capacity`; `df` at the path the reading names | Nothing bounds what one RUNNING project writes -- no quota, no `blkio` -- so a project can fill the disk after admission admitted it. Storage as a limit stays `planned` | `LIFE-CAP-001`, `NODE-ADMIT-001` | `tests/contract/test_reconciler_dispatch.py::test_admission_refusal_is_capacity_exhausted_and_creates_nothing`, `tests/contract/test_capacity_reading.py::test_disk_is_a_floor_and_the_reserve_is_what_it_protects` | 38 |
+| `THR-OPN-RECONCILER` | A customer, or anyone holding a control-plane credential, whose request a root process acts on; a superuser of the control database writing an operation row | The host: the reconciler runs as root and deploys, retires and executes into containers | A CLOSED table of typed operations (ADR 0256); arguments validated against one schema at the API and again by the reconciler before dispatch; every command an argv list from validated members -- of the arguments only the administrator's username reaches one; no shell and no string command (an AST guard); it acts only on declared slots; it opens no socket and listens on no port; its database functions are executable by no role; an operation interrupted by a crash is finished `failed interrupted` with its step and never resumed; its children act for the checkout's owner with stdin closed, and a moved or dirty checkout refuses every operation | Each operation's row with its steps and their seconds; a 0600 log per step; `bin/reconciler.sh status`; the unit's journal | A superuser of the control database can enqueue any operation the table admits -- as root on the host could anyway. The reconciler and an operator's sheet are serialised by a rule, not a lock (D2178) | `OPN-DISPATCH-001`, `OPN-CLAIM-001`, `OPN-LIVE-001` | `tests/contract/test_reconciler_dispatch.py::test_the_closed_table_is_the_executed_types`, `tests/contract/test_reconciler_dispatch.py::test_invalid_arguments_run_nothing`, `tests/contract/test_reconciler_dispatch.py::test_every_argv_is_built_from_validated_members`, `tests/contract/test_reconciler_dispatch.py::test_the_reconciler_builds_no_shell_command`, `tests/contract/test_reconciler_dispatch.py::test_the_unit_is_a_root_service_with_no_listener`, `tests/contract/test_reconciler_dispatch.py::test_an_operator_managed_project_is_refused`, `tests/contract/test_reconciler_claim.py::test_the_claim_functions_are_executable_by_no_role`, `tests/contract/test_reconciler_claim.py::test_an_interrupted_operation_is_finished_once_and_never_rewritten`, `tests/deployment/test_session38_reconciler.py::test_the_reconciler_is_enabled_and_listens_nowhere` | 38 |
+| `THR-LIFE-SLOT` | A creation that lands in a slot that was used, half-made or prepared for something else | The next customer's names, data and provider resources | A slot's state is derived from what exists, three outcomes each -- a DNS answer that could not be read is `undetermined`, exit 6, never `ready` -- and only `ready` is allocated (ADR 0257); an interrupted creation quarantines its slot; `prepare` refuses a slot already prepared, consumed or undeclared; no code removes a tombstone | `bin/slot.sh status`; the slot reading the reconciler records in the control database | `quarantined` has no command that clears it: the operator retires the slot by hand | `LIFE-SLOT-001`, `OPN-CLAIM-001` | `tests/contract/test_slot_command.py::test_prepare_writes_a_manifest_the_loader_accepts`, `tests/contract/test_slot_command.py::test_status_derives_each_state_from_what_exists`, `tests/contract/test_slot_command.py::test_an_unreadable_dns_reading_is_undetermined_never_ready`, `tests/contract/test_slot_command.py::test_nothing_removes_a_tombstone`, `tests/contract/test_reconciler_claim.py::test_an_interrupted_creation_fails_and_quarantines_its_slot_never_resumed` | 38 |
 
 ## Studio: a page in the operator's browser, on the operator's machine
 
@@ -193,23 +199,12 @@ technically bounded in this beta"* (D1971).
    Owed: the measured rule for what wakes a project, and a wake that admission
    would refuse is refused — or, if Session 39's rig refuses wake-on-connect,
    the Ledger says `planned` and the client sees `project_sleeping`.
-4. **Project-creation and branch-creation exhaustion** (Sessions 38, 40, 41;
-   ADR 0256). A member creates projects or branches until the node or the slots
-   run out. **Session 38's half is capacity, from two readers under one code**:
-   admission's exit 12 is `capacity_exhausted {reason: admission}` with *"No
-   resources were created"*, checked before anything is rendered
-   (`tests/contract/test_reconciler_dispatch.py::test_admission_refusal_is_capacity_exhausted_and_creates_nothing`);
-   no `ready` slot is `capacity_exhausted {reason: no_slot}` before an operation
-   row exists (`tests/contract/test_control_projects.py::test_no_ready_slot_refuses_before_a_row`),
-   and so is a slot reading older than ten minutes
-   (`::test_a_stale_slot_reading_is_no_slot`); one non-terminal operation per
-   project and one creation per organisation (`::test_one_operation_at_a_time`).
-   The bound is the stock and the serialisation, not a time window: no rate
-   limit is built (D2166). **The entitlement half is Session 41's**
-   (`plan_limit_reached` before an operation exists), and nothing in 38 can
-   produce that code (`::test_nothing_produces_an_entitlement_refusal`); the
-   branch half is Session 40's. Moves into the table as
-   `THR-LIFE-EXHAUSTION` with Session 38's registry block.
+4. **Project-creation and branch-creation exhaustion** (Sessions 40, 41). A
+   member creates projects or branches until the node or the slots run out.
+   Session 38's half -- capacity, from two readers under one code, and the
+   serialisation -- is `THR-LIFE-EXHAUSTION` in the table. Owed: the
+   entitlement half (`plan_limit_reached` before an operation exists, a limit
+   enforced under concurrency, Session 41) and the branch half (Session 40).
 5. **Plan-limit bypass and usage tampering** (Session 41). A caller raises its
    own limits, creates concurrently past a limit, or writes its own usage.
    Owed: a limit enforced under concurrency; no customer surface writes a usage
@@ -218,56 +213,24 @@ technically bounded in this beta"* (D1971).
    repository, at a recovery point outside the window, or at the parent's live
    volume. Owed: a foreign repository refused; the parent untouched; a branch
    refuses the parent's credentials after its re-key.
-7. **Control-plane / data-plane credential confusion** (Sessions 38, 39).
+7. **Control-plane / data-plane credential confusion** (Session 39).
     A project credential presented to `/api/v1`, or a control-plane credential
-    presented to the surfaces Sessions 38 and 39 add. Owed: each refused at the
-    other plane. Session 37's half -- the control mode reads no other project,
-    a key is refused by a project's routes, and the control project serves no
-    release admin route -- is `THR-CTL-PLANE-CONFUSION` in the table. **Session
-    38's half (ADR 0256, 0259, 0260)**: the first administrator is handed over
-    by hash, so the control plane holds `sha256(T)` and nothing that opens the
-    new project -- the hash presented as the reset token is refused (rig 38c)
-    and only the hash reaches the control database
-    (`tests/contract/test_admin_handoff.py::test_only_the_hash_reaches_the_control_plane`,
-    `::test_the_bootstrap_password_is_never_stored`); a management key may
-    sleep, wake and resize but never create, export or delete
-    (`tests/contract/test_control_projects.py::test_a_key_cannot_create_export_or_delete`);
-    the export URL is the one bounded exception -- at most 900 seconds, one
-    object, returned once and erased
-    (`tests/contract/test_export_upload.py::test_the_presigned_url_lives_at_most_900_seconds`,
-    `tests/contract/test_control_projects.py::test_the_download_url_is_returned_once`,
-    `::test_no_download_url_reaches_a_list_or_a_log`). Residual: the URL is in
-    the control database's WAL and backup until it expires (ADR 0259). Moves
-    into the table as `THR-LIFE-PLANE-CONFUSION`; Session 39's half stays here.
-8. **Project-deletion races and slot reuse** (Session 38, ADR 0256, 0257). A
-    deletion that leaves a route, a role or a repository a later project
-    inherits, or an operation that runs against a project mid-deletion. Owed:
-    an operation against a project with a non-terminal operation is `409
-    conflict` (`tests/contract/test_control_projects.py::test_one_operation_at_a_time`);
-    deletion retires every local resource but the provider's, keeps the
-    bootstrap state for the operator's revocation and writes the slot's
-    tombstone
-    (`tests/contract/test_project_retirement.py::test_defer_provider_keeps_the_state_for_revocation`,
-    `tests/contract/test_reconciler_dispatch.py::test_delete_consumes_the_slot`);
-    **a slot is single-use** -- a consumed slot is never `ready` and no command
-    removes a tombstone
-    (`tests/contract/test_slot_command.py::test_a_consumed_or_quarantined_slot_is_never_ready`,
-    `::test_nothing_removes_a_tombstone`), so a deleted project's names are
-    never derived for a new one. Residual: the slot's Infisical project,
-    buckets, DNS record and backup repository outlive it (ADR 0187); no
-    deletion-policy window exists (D2181). Moves into the table as
-    `THR-LIFE-DELETION`.
-9. **Connector abuse by a customer** (Session 42). A customer-defined
+    presented to the surfaces Session 39 adds. Owed: each refused at the other
+    plane. Session 37's half is `THR-CTL-PLANE-CONFUSION` in the table, and
+    Session 38's -- the first administrator handed over by hash, a key that
+    cannot create, export or delete, and the bounded export URL -- is
+    `THR-LIFE-PLANE-CONFUSION`.
+8. **Connector abuse by a customer** (Session 42). A customer-defined
     connector used to reach another project, an internal address, or the
     node's own services. Owed: the connector planes' existing refusals hold for
     a customer's definitions, and an endpoint stays the manifest's.
-10. **Observability poisoning and ClickStack exhaustion** (Session 41). A
+9. **Observability poisoning and ClickStack exhaustion** (Session 41). A
     customer writes log lines or query text that forge another project's
     telemetry, or floods the telemetry store until the node's own readings
     fail. Owed: every series and line names its project from the platform, not
     from the payload; ClickStack bounded in memory, processes and CPU and
     charged by admission.
-11. **Cross-project leakage through any new surface** (every session). Any
+10. **Cross-project leakage through any new surface** (every session). Any
     console page, `/api/v1` operation, snippet, notification, usage figure or
     diagnostics bundle that carries another project's data. Owed: each session
     extends the isolation matrix to the surface it adds. Session 37's: the
@@ -276,17 +239,12 @@ technically bounded in this beta"* (D1971).
     (`tests/deployment/test_session37_control.py::test_the_control_project_is_isolated_from_both`),
     and a caller sees only their own organisations' rows
     (`test_control_set.py::test_a_caller_sees_only_their_own_organisations`).
-12. **Storage exhaustion** (Session 38). One project fills the shared disk until
-    its neighbours' databases or backups stop. **Session 38's control is
-    admission's disk FLOOR** (D1596: free space at the Docker root against
-    `capacity.reserve_disk_gb`, read before a creation or a resize is rendered
-    -- `tests/contract/test_reconciler_dispatch.py::test_admission_refusal_is_capacity_exhausted_and_creates_nothing`
-    reads the refusal whichever floor refused) **and the Ledger's sentence that
-    no per-project disk quota exists**. Residual, stated rather than implied:
-    nothing bounds what one RUNNING project writes (no quota, no `blkio`), so a
-    project can still fill the disk after admission admitted it; storage stays
-    `planned` as a limit. Moves into the table as `THR-LIFE-STORAGE`.
-13. **TOTP seed disclosure** (Session 37, ADR 0252). A dump of the control
+    Session 38's: the deleted slot's deployed document shared no isolated
+    value with A's, B's or the control project's
+    (`tests/deployment/test_session38_reconciler.py::test_the_slot_was_isolated_from_every_project`),
+    and every leaf of a built deployed document is classified offline
+    (`test_isolation_leaves_offline.py::test_every_leaf_of_a_built_deployed_document_is_classified`).
+11. **TOTP seed disclosure** (Session 37, ADR 0252). A dump of the control
     project's database, or a backup read with its cipher pass, reveals every
     enrolled second-factor seed, so the factor stops being a second factor for
     whoever holds the copy. Owed: seeds reachable only through definer
@@ -296,37 +254,6 @@ technically bounded in this beta"* (D1971).
     (`test_control_sessions.py::test_no_seed_reaches_a_log_line`). Residual:
     seeds are plaintext at rest, because computing the code needs the key;
     encrypting them is `planned`, and ADR 0252 says so.
-14. **The reconciler as a standing root actor** (Session 38, ADR 0256). A root
-    process that deploys, retires and executes into containers on the
-    control plane's say-so is a path from a customer's request to root. Owed:
-    it runs only a CLOSED set of typed operations whose arguments are validated
-    against one schema before dispatch, builds every command as an argv list
-    from validated members, opens no socket and listens on no port
-    (`tests/contract/test_reconciler_dispatch.py::test_every_accepted_type_has_one_handler`,
-    `::test_an_invalid_argument_runs_nothing`,
-    `::test_every_argv_is_built_from_validated_members`,
-    `::test_no_shell_and_no_string_command`,
-    `::test_the_reconciler_opens_no_socket`); its claim functions are
-    executable by no database role, and an operation interrupted by a crash is
-    failed with its step and never run twice
-    (`tests/contract/test_reconciler_claim.py::test_the_claim_functions_are_executable_by_no_role`,
-    `::test_an_interrupted_operation_fails_and_is_never_reclaimed`); on the
-    deployment it holds no listener and no provider-administering credential
-    (`tests/deployment/test_session38_reconciler.py::test_the_reconciler_is_enabled_and_listens_nowhere`).
-    Residual: it and an operator's sheet are serialised by a rule, not a lock
-    (D2178). Moves into the table as `THR-OPN-RECONCILER`.
-15. **Slot confusion** (Session 38, ADR 0257). A creation lands in a slot that
-    was used, half-made or prepared for something else, so a customer inherits
-    another project's names, data or provider resources. Owed: a slot's state
-    is derived from what exists, three outcomes each, and only `ready` is
-    allocated; an interrupted creation quarantines its slot; `prepare` refuses
-    a slot already prepared, consumed or undeclared
-    (`tests/contract/test_slot_command.py::test_prepare_writes_a_valid_manifest_once`,
-    `::test_every_state_is_derived_with_its_reason`,
-    `::test_a_consumed_or_quarantined_slot_is_never_ready`,
-    `tests/contract/test_reconciler_claim.py::test_an_interrupted_creation_quarantines_its_slot`).
-    Residual: `quarantined` has no command that clears it -- the operator
-    retires the slot by hand. Moves into the table as `THR-LIFE-SLOT`.
 
 ## Scope
 

@@ -46,7 +46,10 @@ def drive(tmp_path_factory: pytest.TempPathFactory) -> Any:
 
 @pytest.fixture
 def accepting(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The six types accepted, for this proof only."""
+    """The six types accepted, for this proof only. Since Run 10 the module
+    accepts them itself (their rows are `trial`, ADR 0261); the pin stays so
+    these proofs of the routes do not move when Run 13 resolves a row back to
+    `planned` -- the gate's own proof is `test_operation_types`'."""
     monkeypatch.setattr(operations, "ACCEPTED_TYPES", operations.EXECUTED_TYPES)
 
 

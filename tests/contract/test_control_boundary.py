@@ -136,10 +136,19 @@ CUSTOMER_ENVIRONMENT = frozenset(
 )
 
 
-def customer_offences(source: str) -> list[str]:
+#: Session 38's customer proofs (D2174): the control project's document, the
+#: probe owner's file, the lifecycle's record (the slot's `routes.app` is read
+#: from it) and PATH -- alpha's document is not theirs.
+LIFECYCLE_PROOFS = REPO_ROOT / "tests" / "external" / "test_session38_public_lifecycle.py"
+LIFECYCLE_ENVIRONMENT = frozenset(
+    {"APG_CONTROL_OUTPUTS", "APG_CONTROL_PROBE_FILE", "APG_LIFECYCLE_RECORD_FILE", "PATH"}
+)
+
+
+def customer_offences(source: str, allowed: frozenset[str] = CUSTOMER_ENVIRONMENT) -> list[str]:
     """What would let a customer proof reach past the public door: the SSH
     destination or an `ssh`/`scp` word in code, a URL typed rather than read
-    from a document, or an environment variable outside the four."""
+    from a document, or an environment variable outside `allowed`."""
     import re
 
     tree = ast.parse(source)
@@ -162,7 +171,7 @@ def customer_offences(source: str) -> list[str]:
             and isinstance(node.value, ast.Attribute)
             and node.value.attr == "environ"
             and isinstance(node.slice, ast.Constant)
-            and node.slice.value not in CUSTOMER_ENVIRONMENT
+            and node.slice.value not in allowed
         ):
             found.append(f"environment {node.slice.value}")
         if (
@@ -173,7 +182,7 @@ def customer_offences(source: str) -> list[str]:
             and isinstance(node.args[0], ast.Constant)
             and isinstance(node.args[0].value, str)
             and node.args[0].value.startswith(("APG_", "PATH"))
-            and node.args[0].value not in CUSTOMER_ENVIRONMENT
+            and node.args[0].value not in allowed
         ):
             found.append(f"environment {node.args[0].value}")
     return found
@@ -209,3 +218,34 @@ def test_session37_customer_proofs_reach_only_the_public_endpoint() -> None:
     for planted_source, expected in planted.items():
         assert any(expected in hit for hit in customer_offences(planted_source)), planted_source
     assert customer_offences('"""Never ssh, never https://example.test."""') == []
+
+
+def test_session38_customer_proofs_reach_only_the_public_endpoint() -> None:
+    """D2174, D2058's scan extended to Session 38's lifecycle proofs: no SSH
+    destination, no `ssh` or `scp`, no typed URL -- every address is the
+    control project's `routes.control` or the slot's `routes.app` the
+    lifecycle recorded -- and no environment but the control project's
+    document, the probe file, the lifecycle record and PATH; the marker names
+    exactly the three it needs. The run-time half is the module's own
+    recorder. The control: alpha's document, which the Session 37 proofs may
+    read, is an offence here -- the allowance is per module, not shared."""
+    source = LIFECYCLE_PROOFS.read_text(encoding="utf-8")
+    offences = customer_offences(source, LIFECYCLE_ENVIRONMENT)
+    assert offences == [], offences
+    tree = ast.parse(source)
+    markers = [
+        sorted(arg.value for arg in node.args if isinstance(arg, ast.Constant))
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "requires_environment"
+    ]
+    assert markers == [sorted(LIFECYCLE_ENVIRONMENT - {"PATH"})], markers
+    planted = "x = os.environ['APG_PROJECT_A_OUTPUTS']"
+    assert customer_offences(planted) == []
+    assert customer_offences(planted, LIFECYCLE_ENVIRONMENT) == [
+        "environment APG_PROJECT_A_OUTPUTS"
+    ]
+    assert customer_offences("x = os.environ['APG_SLOT_OUTPUTS']", LIFECYCLE_ENVIRONMENT) == [
+        "environment APG_SLOT_OUTPUTS"
+    ]

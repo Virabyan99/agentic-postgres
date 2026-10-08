@@ -19,17 +19,18 @@ plane, migrations — this page hands to it and does not repeat it.
 
 ## 1. The release you are operating, in one screen
 
-> **This page is part of release `1.15.0`.** It describes that release as it
+> **This page is part of release `1.16.0`.** It describes that release as it
 > runs on this deployment. A release that moves `VERSION` and does not move
 > this line, and the table below it, is a release documented by a page about a
 > different one (ADR 0209, D1388).
 
 | | |
 |---|---|
-| `template_version` / `CURRENT_SESSION` | **1.15.0** / **37** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
+| `template_version` / `CURRENT_SESSION` | **1.16.0** / **38** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
 | Released migrations | **39**, fix-forward; every down block raises `AP900` (D912). 0033 adds two prune functions granted to nobody and a size reading (ADR 0213) — nothing removes an agent record unless an operator asks. 0034 is the workflow substrate: four `app_private` tables nobody may read, eight functions granted to `auth_service` and the install granted to nobody (ADR 0227, §17). 0035 adds the approval and attempt tables nobody may read, a run status `compensating`, and the audit reader at nine arguments with a counter beside it (ADR 0230, 0233, 0234). 0036 is connectivity: four `app_private` connector tables nobody may read, `app.emit_event` granted to NOBODY and called only by a project's reviewed definer function, and the connector functions -- seven granted to `auth_service`, the install and the rehearsal's to nobody (ADR 0235-0238, §18). 0037 is `app.require_approval`, granted to nobody (ADR 0242). 0038 adds the approval status `withdrawn`, alone in its file; 0039 adds three prunes and a size reading granted to nobody and the withdrawal granted to `auth_service` (ADR 0248, §5) |
-| Deployed document | outputs schema **v20** (`routes.control`, `control.enabled`); `document_kind: deployed` |
-| Project manifest | schema versions **1–8** accepted; 5 adds `migrations.set`, 6 adds `mcp.capabilities`, 7 adds `connectors` (the facility and the outbound endpoints), 8 adds `migrations.approvals_required` (§19), 9 adds `control` (the control plane, `docs/control-plane.md`) |
+| Deployed document | outputs schema **v21** (`region`, `compute.profile`; v20 added `routes.control`, `control.enabled`); `document_kind: deployed` |
+| Project manifest | schema versions **1–10** accepted; 5 adds `migrations.set`, 6 adds `mcp.capabilities`, 7 adds `connectors` (the facility and the outbound endpoints), 8 adds `migrations.approvals_required` (§19), 9 adds `control` (the control plane, `docs/control-plane.md`), 10 adds `compute` (a named profile, §20) |
+| Host manifest | schema **2–4** accepted; 3 adds `capacity` (§16), 4 requires `region` and admits `slots` (§20). Two copies -- the checkout's and `/etc/agentic-postgres/host.yaml` -- move together, by hand (D2020) |
 | Capability manifest / lock | schema **4** / **4** (vocabulary + `tools_sha256`) |
 | Verifiers | **four** — PostgREST, `auth`, `storage`, the agent plane — reading one published key set; only `auth` signs (ADR 0170) |
 | Migration sets | the release's, and a project's own under `projects/<slug>/`, each in its own directory and its own ledger table (ADR 0198, 0206). A project's lock is schema **3**: it records whether `follows_release_version` was computed or declared (ADR 0210) |
@@ -202,12 +203,12 @@ it.
    that is missing:
    ```bash
    sudo bin/materialize-secrets.sh --project project.alpha.yaml \
-        --requirements secrets.required.yaml --session 37
+        --requirements secrets.required.yaml --session 38
    ```
 6. **Deploy, unredirected, at the terminal:**
    ```bash
    sudo ./deploy.sh --host host.yaml --project project.alpha.yaml \
-        --capabilities capabilities.yaml --through-session 37
+        --capabilities capabilities.yaml --through-session 38
    ```
    The first pass of a new project records the two loopback ports and the
    app route `unavailable` — the documented first-deploy state, not a failure
@@ -543,7 +544,7 @@ place.
 measured sequence and its traps for the three the API plane holds: capture
 the pre-rotation value to a root-only file first (a proof you cannot admit
 skips), replace it at the provider by hand and confirm it saved, **`project-runtime.sh
-… --through-session 37 down` for a credential a container mounts** (D253:
+… --through-session 38 down` for a credential a container mounts** (D253:
 `resume` runs `compose up` without `--force-recreate`, and PostgREST kept a
 generation two rotations stale and crash-looped), materialize, deploy,
 declare it to the gate with the matching `--rotated-*-from-file`. Performed
@@ -680,7 +681,7 @@ mode stops being something a host is asked to run.
 **The merge**, from a checkout at the branch head:
 
 ```bash
-python bin/write-session-evidence.py --session 37 \
+python bin/write-session-evidence.py --session 38 \
   --host-input evidence/session-37-host.json \
   --external-input evidence/session-37-external.json \
   --offline-input evidence/session-37-offline.json \
@@ -734,7 +735,7 @@ with the row that measured it.
 | `render-jwks`: *whether the key set CHANGED cannot be told from here* | there was no previous copy at that path — the normal case, because a deploy replaces the whole rendered directory first (D1374, D1427) | it is neither evidence of a rotation nor evidence against one; `sudo bin/rotate-signing-key.sh --outputs <outputs.json> acknowledge` reads what each verifier is holding |
 | a rotation proof: *the value declared as pre-rotation is the active one* | nothing was rotated: the provider did not take the edit, or materialization did not run | confirm at the provider, materialize, deploy again |
 | a rotation proof fails `401 PT401` | a bootstrap-minted token missing `credential_version`, `authz_version` or the scope array (D298, D675) | repair the identity, not the thing the proof names |
-| PostgREST crash-loops after a credential rotation, route 502 | a container holding a stale generation (D253) | `project-runtime.sh … --through-session 37 down`, then deploy |
+| PostgREST crash-loops after a credential rotation, route 502 | a container holding a stale generation (D253) | `project-runtime.sh … --through-session 38 down`, then deploy |
 | the edge answers 502 on a project route after a deploy | the deploy leaves the previous document until step 7; or the edge is not attached | `bin/edge-network.sh status --project-key <key>`; `reconcile` |
 | `edge.sh status` says `staging` after a promotion | before 1.0.1 it could never say `production` as `op` (D1050) | since: `unknown` when it cannot read; read as root |
 | `TimeoutError` reading Infisical | a transient (D976) | run the command again |
@@ -993,7 +994,7 @@ is irreversible and would print success.
 
    ```
    sudo bin/materialize-secrets.sh --project /home/op/project.<key>.yaml \
-     --requirements secrets.required.yaml --session 37
+     --requirements secrets.required.yaml --session 38
    ```
 
    then read the written file's **shape**, never its content:
@@ -1036,7 +1037,7 @@ is irreversible and would print success.
    value is wrong and this deploy has left the project half converged.
 3. **Down and up**, so every verifier is recreated:
    `sudo bin/project-runtime.sh --host host.yaml --project-key <key>
-   --through-session 37 down`, then redeploy. A restart is not enough, and after
+   --through-session 38 down`, then redeploy. A restart is not enough, and after
    the key set file has been replaced a restart is measured to leave the
    container unable to start at all.
    **Take `acknowledge` once before this, too.** On 2026-09-19 it came back
@@ -1923,3 +1924,133 @@ file name under `proposals/` is the set that was proposed. Propose again.
 project's own: set it to `0` (or remove it) in the installed manifest and
 deploy, or have a second name approve. The example project sets `1` to
 demonstrate the rule.
+
+---
+
+## 20. Managed projects: slots and the reconciler
+
+Since `1.16.0` (ADR 0256-0261) a customer creates, sleeps, wakes, resizes,
+exports and deletes a project through `/v1` (`docs/managed-projects.md`), and a
+root unit on the host, **the reconciler**, executes each operation with the
+same `bin/` commands this guide names. Two things stay the operator's: the
+**slots** a creation lands in, and every provider act -- nothing the
+reconciler holds can create or destroy anything at a provider.
+
+### A slot, prepared
+
+A slot is a project key, a domain and a set of provider resources made BEFORE a
+customer asks (ADR 0257). `host.yaml` at **schema 4** declares them -- both
+copies, the checkout's and `/etc/agentic-postgres/host.yaml` (D2020):
+
+```yaml
+schema_version: 4
+region: {id: eu-example-1, display_name: "Example City, Example Country", provider: ExampleCloud, location: exa1}
+slots:
+  defaults: {...}          # the provider facts a slot's manifest copies -- never a credential
+  declared:
+    - {key: slot1-prod, domain: slot1.example.test}
+```
+
+Then, per slot, in this order -- one sheet, one outcome, each read before the
+next (D1510):
+
+1. `sudo bin/slot.sh prepare --host /etc/agentic-postgres/host.yaml --slot KEY`
+   writes `/etc/agentic-postgres/slots/KEY/manifest.yaml` (0600, `small`) and
+   refuses a slot already prepared, consumed or undeclared.
+2. **The provider half, by hand, as for any project (§3):** the slot's two R2
+   buckets and their scoped tokens, its B2 mirror bucket and key, and
+   `sudo bin/bootstrap-providers.sh --host host.yaml --project
+   /etc/agentic-postgres/slots/KEY/manifest.yaml --plan`, read, then
+   `--apply` -- an Infisical project and a machine identity of its own -- with
+   the operator's credential placed and **shredded by hand** after (D2061).
+3. **A grey-cloud A record for the slot's domain naming this host's address,
+   and NO AAAA record** (D2148). A wildcard or a proxied record is not
+   accepted.
+4. `sudo bin/slot.sh status --host /etc/agentic-postgres/host.yaml` reads the slot `ready` -- the manifest, the
+   bootstrap state and the A record are there -- exit 0. `prepared` names what
+   is missing; `undetermined` (exit 6) is a DNS answer that could not be read,
+   never `ready`. Only a `ready` slot is ever given to a creation.
+
+### The reconciler
+
+```bash
+sudo bin/reconciler.sh install    # the unit, /etc/agentic-postgres/reconciler.env, 0700 log and export directories, enable --now
+sudo bin/reconciler.sh status     # idle | working on <id> (<type>, step <step>) | stopped (...)
+```
+
+It opens no socket and listens on no port; it reads the control project's
+database through its container, runs one operation at a time, and logs each
+step to `/var/log/agentic-postgres/reconciler/<operation>-<step>.log` (0600).
+**It refuses to run an operation on a checkout whose HEAD moved or whose tree
+is dirty** (D2179) -- move the checkout only with the unit stopped. An
+operation a crash interrupted is finished `failed interrupted` when the unit
+starts again, **never resumed**; an interrupted creation quarantines its slot.
+
+**The rule that keeps an operator and the reconciler apart is a rule, not a
+lock** (D2178). Before any sheet that deploys, retires, restores or reboots:
+
+```bash
+sudo bin/reconciler.sh status                                  # must read idle
+sudo systemctl stop agentic-postgres-reconciler.service
+# ... the sheet ...
+sudo systemctl start agentic-postgres-reconciler.service
+sudo bin/reconciler.sh status                                  # idle
+```
+
+If `status` reads `working`, wait for that operation to finish -- never stop the
+unit under it -- and read it again. A sweep is started only while it reads
+`idle`.
+
+### After a deletion: revoking the slot's identity
+
+A deletion retires the project with its data and **keeps the slot's bootstrap
+state** under `/etc/agentic-postgres/slots/KEY/` so the operator can revoke the
+slot's Infisical identity, which the reconciler deliberately cannot (D2158):
+
+```bash
+sudo bin/slot.sh revoke --host /etc/agentic-postgres/host.yaml --slot KEY \
+     --operator-credential-file FILE --confirm KEY
+```
+
+`FILE` is the operator's provider credential, placed for this command and
+**shredded after**. The slot stays `consumed`: no command removes a tombstone,
+and a consumed slot is never prepared again. Its buckets, its DNS record and
+its backup repository are the operator's console acts, when the operator
+decides the backups may go (ADR 0187, D2181).
+
+### A quarantined slot
+
+An interrupted creation leaves its slot `quarantined`, and **no command clears
+it** -- the creation may have deployed part of a project. Retire it by hand and
+mark the slot used:
+
+```bash
+sudo bin/project-retire.sh --host /etc/agentic-postgres/host.yaml --project KEY \
+     --confirm KEY --record /etc/agentic-postgres/slots/KEY/retirement.json --plan
+sudo bin/project-retire.sh --host /etc/agentic-postgres/host.yaml --project KEY \
+     --confirm KEY --record /etc/agentic-postgres/slots/KEY/retirement.json \
+     --permanent --destroy-data --defer-provider
+printf 'retired by hand %s\n' "$(date -u +%FT%TZ)" \
+  | sudo install -m 0600 /dev/stdin /etc/agentic-postgres/slots/KEY/consumed
+sudo bin/slot.sh status --host /etc/agentic-postgres/host.yaml   # KEY consumed
+```
+
+then revoke its identity as above. A new slot is a new key.
+
+### A second factor, enrolled by QR
+
+An owner or admin of an organisation enrols TOTP before anything else (ADR
+0252). **Never type or paste the `otpauth://` URI and never paste the QR** --
+write it to a 0600 file and render it in the terminal, then scan it:
+
+```bash
+bin/login.sh password --endpoint URL --username NAME --password-file FILE
+bin/login.sh totp-enroll --output ~/totp-uri          # 0600; refused to a pipe
+head -1 ~/totp-uri | qrencode -t ansiutf8             # scan it, then shred the file
+shred -u ~/totp-uri
+bin/login.sh totp-confirm                             # a current code; every session ends
+```
+
+**What 1.16.0 has not measured**: a resize's restart window (the message says
+so), a reboot with a project asleep, and a host-wide deploy lock (D2178) -- see
+`docs/reality-ledger.md` and the Session 38 plan's §10.
