@@ -221,6 +221,9 @@ SHELL_COMMANDS = (
     "bin/session-35-check.sh",
     "bin/session-36-check.sh",
     "bin/session-37-check.sh",
+    # Session 38 (ADR 0257, D2150): customer slots -- prepare, status, revoke.
+    # Listed the run it landed (D1014), `git add`ed first (D1188).
+    "bin/slot.sh",
     "bin/smoke-test.sh",
     # Session 24 (ADR 0205). A loopback client of a deployment's own
     # surfaces, holding the human's token in one process and handing the
@@ -301,6 +304,8 @@ PYTHON_COMMANDS = (
     "bin/restore-test.py",
     "bin/rotate-secret.py",
     "bin/rotate-signing-key.py",
+    # Session 38: the slots' three verbs; `agentic_postgres.slot` holds the rest.
+    "bin/slot.py",
     "bin/storage-admin.py",
     "bin/studio.py",
     "bin/upgrade.py",
@@ -520,6 +525,8 @@ COMMANDS_WITH_VERBS = {
     # reads them (the plan's `--project KEY size` would derive none).
     "bin/record.sh",
     "bin/rehearse.sh",
+    # Session 38: prepare, status, revoke, written verb-first.
+    "bin/slot.sh",
     "bin/upgrade.sh",
     # Session 32: six verbs, all six documented from the day the command lands.
     # Four of them refuse with exit 3 in this checkout and their `--help` still

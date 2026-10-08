@@ -9,6 +9,8 @@
 #
 #   up:    materialize secrets -> compose up -> attach the edge
 #   down:  detach the edge     -> compose down
+#   start: compose start --wait -> attach the edge       (Session 38, wake)
+#   stop:  detach the edge     -> compose stop           (Session 38, sleep)
 #
 # Attaching last means a route never points at a container that is not yet
 # serving. Detaching first means the edge network has no endpoint when Compose
@@ -53,19 +55,25 @@ HELD_BACK=""
 usage() {
   cat <<'USAGE'
 Usage: bin/project-runtime.sh --host FILE --project-key KEY \
-         --through-session N [--defer SERVICE,...] <up|down|status|resume>
+         --through-session N [--defer SERVICE,...] <up|down|start|stop|status|resume>
 
   up      Materialize secrets, start the project, then attach the edge.
   resume  Start whatever `up --defer` held back, then attach. Materializes
           nothing.
   down    Detach the edge, then stop the project. Volumes are preserved.
+  stop    Detach the edge, then stop the containers and KEEP them (sleep,
+          ADR 0259): no container, network or volume is removed.
+  start   Start the kept containers, wait for them to be healthy, then attach
+          the edge (wake). Materializes nothing, renders nothing, builds and
+          recreates nothing -- the containers that slept are the ones that wake.
   status  Report container state. Changes nothing, needs no root.
 
   --host FILE           The host manifest.
   --project-key KEY     The project key. Validated before use as a path component.
   --through-session N   The session this project is deployed through. Required
-                        for up, resume and down; it selects the secret set and
-                        the Compose profiles, which must be the same N.
+                        for up, resume, down, start and stop; it selects the
+                        secret set and the Compose profiles, which must be the
+                        same N.
   --defer SERVICE,...   Start everything except these, and do not attach the
                         edge. `resume` completes it.
 
@@ -138,7 +146,7 @@ parse_arguments() {
         DEFERRED="$2"
         shift 2
         ;;
-      up|down|status|resume)
+      up|down|start|stop|status|resume)
         [ -z "${ACTION}" ] || die 2 "only one action may be given."
         ACTION="$1"
         shift
@@ -213,7 +221,7 @@ main() {
   # root reports the wrong problem: the operator fixes the state, re-runs, and
   # hits the refusal they could have been told about immediately.
   case "${ACTION}" in
-    up|down|resume) [ "$(id -u)" -eq 0 ] || die 3 "${ACTION} requires root." ;;
+    up|down|start|stop|resume) [ "$(id -u)" -eq 0 ] || die 3 "${ACTION} requires root." ;;
   esac
 
   local state rendered
@@ -371,6 +379,48 @@ main() {
         || die 9 "the project did not stop cleanly."
 
       printf 'project-runtime: %s is down. Volumes are preserved.\n' "${PROJECT_KEY}"
+      ;;
+
+    stop)
+      # Sleep (D2155, ADR 0259). `down`'s order -- the edge first, so a route
+      # never points at a container that is going away -- with `stop` in place
+      # of `down`: the containers are KEPT, so `start` brings back the very
+      # containers that slept, with the secret generation and the mounts they
+      # had. A caller meanwhile gets the edge's 404.
+      rendered="$(resolved_directory "${PROJECT_RENDERED_ROOT}/${PROJECT_KEY}" "rendered output")"
+
+      "${ROOT_DIR}/bin/edge-network.sh" detach --project-key "${PROJECT_KEY}" \
+        || die 9 "could not detach the edge; refusing to stop underneath it."
+
+      local -a profiles=()
+      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}")
+
+      "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" stop \
+        || die 9 "the project did not stop cleanly."
+
+      printf 'project-runtime: %s is stopped. Containers and volumes are kept.\n' "${PROJECT_KEY}"
+      ;;
+
+    start)
+      # Wake (D2155, D2192). NOTHING is materialized, rendered or built: a new
+      # secret generation would make wake depend on the provider's rate limit
+      # (D2139) and would mount a generation the database's roles were not set
+      # from, which is ADR 0063's failure. `--wait` is the health reading `up`
+      # uses -- the host's Compose (v5.4.0) has `start --wait`, read on E0 --
+      # and the edge is attached only once it returns, as `up` attaches.
+      rendered="$(resolved_directory "${PROJECT_RENDERED_ROOT}/${PROJECT_KEY}" "rendered output")"
+
+      local -a profiles=()
+      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}")
+
+      "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" \
+        start --wait --wait-timeout 120 \
+        || die 9 "the project did not become healthy."
+
+      "${ROOT_DIR}/bin/edge-network.sh" attach --project-key "${PROJECT_KEY}" \
+        || die 9 "the project is running but has no ingress."
+
+      printf 'project-runtime: %s is started and attached.\n' "${PROJECT_KEY}"
       ;;
   esac
 }

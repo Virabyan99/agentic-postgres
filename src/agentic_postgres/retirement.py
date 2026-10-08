@@ -20,6 +20,15 @@ state out of the state directory, so it comes before that directory is
 removed; and the record is written before anything at all, because a record
 captured afterwards is a list of things that no longer exist.
 
+**The provider half may be deferred** (D2158, ADR 0257). With
+`--defer-provider` the `provider-destroy` step is replaced by
+`keep-bootstrap-state` (`DEFERRED_STEP_ORDER`): the bootstrap state is MOVED to
+`/etc/agentic-postgres/slots/<key>/retired-bootstrap-state.json` (0600) and the
+project's local credential directory is removed, so the runtime identity can be
+revoked later by `bin/slot.sh revoke`, by the operator who holds the
+organisation's credential -- the reconciler never does. Same position, same
+reason: before the state directory is removed.
+
 **Expiry is read, never acted on** (ADR 0186). `refusal` decides whether a
 retirement may proceed from the lifecycle the document carries and the flags
 a human typed; nothing here reads a clock except to compare against a value
@@ -35,10 +44,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agentic_postgres import fleet, naming
+from agentic_postgres import bootstrap_state, fleet, naming
 from agentic_postgres.edge_credentials import middleware_file_name, retired_users_file_name
 
 __all__ = [
+    "DEFERRED_STEP_ORDER",
     "PROJECT_KEY",
     "STEP_ORDER",
     "Resources",
@@ -68,6 +78,13 @@ STEP_ORDER = (
     "remove-volumes",
 )
 
+#: `--defer-provider`'s order (D2158): `provider-destroy` replaced, in place, by
+#: `keep-bootstrap-state` -- still before the state directory is removed, since
+#: the state it keeps lives there.
+DEFERRED_STEP_ORDER = tuple(
+    "keep-bootstrap-state" if name == "provider-destroy" else name for name in STEP_ORDER
+)
+
 
 @dataclass(frozen=True)
 class Resources:
@@ -84,6 +101,7 @@ class Resources:
     timers: tuple[str, ...]
     state_directory: Path
     secrets_directory: Path
+    credential_directory: Path
     rendered_directory: Path
     installed_manifest: Path
     edge_files: tuple[Path, ...]
@@ -106,6 +124,8 @@ class Step:
     commands: tuple[tuple[str, ...], ...] = ()
     #: Paths the step removes. Empty for command steps.
     paths: tuple[Path, ...] = ()
+    #: Files the step moves, (from, to), each before its `paths` are removed.
+    moves: tuple[tuple[Path, Path], ...] = ()
 
 
 def resources_of(
@@ -116,6 +136,7 @@ def resources_of(
     secret_root: Path,
     rendered_root: Path,
     edge_dynamic_dir: Path,
+    credential_root: Path = bootstrap_state.CREDENTIAL_ROOT,
 ) -> Resources:
     """Every name, from the key through `naming` or off the deployed document.
 
@@ -149,6 +170,7 @@ def resources_of(
         timers=tuple(fleet.timer_unit(kind, key) for kind in fleet.timer_kinds(document)),
         state_directory=state_root / key,
         secrets_directory=secret_root / key,
+        credential_directory=credential_root / key,
         rendered_directory=rendered_root / key,
         installed_manifest=state_root / key / "manifest.yaml",
         edge_files=(
@@ -203,8 +225,14 @@ def steps(
     root_dir: Path,
     destroy_data: bool,
     operator_credential_file: Path | None,
+    retired_state: Path | None,
 ) -> tuple[Step, ...]:
-    """The steps in `STEP_ORDER`, each with the commands or paths it performs.
+    """The steps in `STEP_ORDER` -- or, with `retired_state` (`--defer-provider`,
+    D2158), in `DEFERRED_STEP_ORDER` -- each with what it performs.
+
+    `retired_state` is REQUIRED (None for a retirement that destroys at the
+    provider): whether the identity is revoked now or kept for later is the
+    one choice here whose default would be silently wrong either way.
 
     `root_dir` is the checkout whose commands are composed: the retirement
     runs the operator surface that exists (`project-runtime.sh down`,
@@ -282,6 +310,20 @@ def steps(
             "revoke the runtime identity and unlink the credential files; every secret stays",
             commands=(tuple(destroy),),
         ),
+        "keep-bootstrap-state": Step(
+            "keep-bootstrap-state",
+            (
+                f"keep the bootstrap state at {retired_state} for bin/slot.sh revoke and remove "
+                f"the local credentials; the runtime identity {r.runtime_identity_id} is NOT "
+                "revoked yet"
+            ),
+            paths=(r.credential_directory,),
+            moves=(
+                ((r.state_directory / "bootstrap-state.json", retired_state),)
+                if retired_state is not None
+                else ()
+            ),
+        ),
         "remove-directories": Step(
             "remove-directories",
             "remove the state, secrets and rendered directories",
@@ -297,11 +339,17 @@ def steps(
             commands=tuple(("docker", "volume", "rm", name) for name in volumes),
         ),
     }
-    return tuple(by_name[name] for name in STEP_ORDER)
+    order = STEP_ORDER if retired_state is None else DEFERRED_STEP_ORDER
+    return tuple(by_name[name] for name in order)
 
 
 def record(
-    resources: Resources, *, captured_at: datetime, destroy_data: bool, record_path: Path
+    resources: Resources,
+    *,
+    captured_at: datetime,
+    destroy_data: bool,
+    record_path: Path,
+    retired_state: Path | None,
 ) -> dict[str, object]:
     """What the operator declared before removing anything -- the shape
     `APG_REMOVED_PROJECT_FILE` reads (`DEP-REMOVE-001`), plus what still holds
@@ -338,6 +386,18 @@ def record(
             "runtime_identity_id": r.runtime_identity_id,
         },
         "backups_still_held": held,
+        "provider": (
+            {
+                "deferred": True,
+                "kept_bootstrap_state": str(retired_state),
+                "note": (
+                    f"provider resources deferred to `bin/slot.sh revoke`: the runtime identity "
+                    f"{r.runtime_identity_id} is not revoked until the operator runs it"
+                ),
+            }
+            if retired_state is not None
+            else {"deferred": False, "kept_bootstrap_state": None, "note": None}
+        ),
         "record_path": str(record_path),
     }
 
@@ -360,6 +420,8 @@ def render_plan(
         lines.append(f"{index}. {step.name}: {step.what}")
         for command in step.commands:
             lines.append("     $ " + " ".join(command))
+        for source, target in step.moves:
+            lines.append(f"     > {source} -> {target}")
         for path in step.paths:
             lines.append(f"     - {path}")
     lines.append("")

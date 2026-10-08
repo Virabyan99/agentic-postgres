@@ -12,6 +12,14 @@ directories, and with `--destroy-data` the two volumes. **What it never
 touches**: the backup repository, the bucket, the cipher pass, the Infisical
 project's secrets, the DNS record, the certificate (D957). The plan says so.
 
+**`--defer-provider`** (D2158, ADR 0257): every step but the provider
+destroy, which becomes `keep-bootstrap-state` -- the bootstrap state moved to
+the slot's directory for `bin/slot.sh revoke`, the local credentials removed.
+Only a slot's key may defer (a non-slot project would keep a state no command
+revokes), only with the state present, never beside `--operator-credential-file`.
+It exists so that the reconciler, which never holds the organisation's
+credential, can delete a customer's project.
+
 **Refusals come before anything changes** (ADR 0186): a permanent project
 needs `--permanent`, an unexpired ephemeral one needs `--before-expiry`, the
 key must be said back with `--confirm`, and the record path must not exist.
@@ -39,7 +47,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from agentic_postgres import REPO_ROOT, bootstrap_state, deployed_output, retirement
+from agentic_postgres import REPO_ROOT, bootstrap_state, deployed_output, retirement, slot
 from agentic_postgres.config import ManifestError
 from agentic_postgres.edge_state import EDGE_DYNAMIC_DIR
 from agentic_postgres.secret_generation import SECRET_ROOT
@@ -48,6 +56,11 @@ EXIT_INPUT = 2
 EXIT_PREREQUISITE = 3
 EXIT_STATE = 4
 EXIT_STEP = 6
+
+#: Where `--defer-provider` keeps the bootstrap state, and the credential
+#: directory it removes; module constants a proof may move.
+SLOT_ROOT = slot.SLOT_ROOT
+CREDENTIAL_ROOT = bootstrap_state.CREDENTIAL_ROOT
 
 #: A `down` waits for containers; everything else is quick.
 STEP_TIMEOUT_SECONDS = 600
@@ -73,6 +86,26 @@ def remove_path(path: Path) -> None:
         shutil.rmtree(path)
     elif path.exists():
         path.unlink()
+
+
+def keep(source: Path, target: Path) -> str | None:
+    """Move one file to where it is kept: written new (never over an existing
+    one, never through a symlink), 0600 in a 0700 directory, then the source
+    removed. A copy and an unlink rather than a rename, so the two may be on
+    different filesystems."""
+    if source.is_symlink() or not source.is_file():
+        return f"{source} is not a file; there is no bootstrap state to keep"
+    try:
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(source.read_bytes())
+            handle.flush()
+            os.fsync(handle.fileno())
+        source.unlink()
+    except OSError as problem:
+        return f"could not keep {source} at {target}: {problem}"
+    return None
 
 
 def fail(code: int, message: str) -> int:
@@ -143,6 +176,11 @@ def execute(step: retirement.Step) -> str | None:
             reason = f": {said[-1].strip()}" if said else ""
             return f"{Path(command[0]).name} exited {result.returncode}{reason}"
         print(f"  ran {Path(command[0]).name}")
+    for source, target in step.moves:
+        problem = keep(source, target)
+        if problem is not None:
+            return problem
+        print(f"  {source} -> {target} (0600)")
     for path in step.paths:
         if not path.exists() and not path.is_symlink():
             print(f"  {path}: already absent")
@@ -166,6 +204,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--before-expiry", action="store_true", dest="before_expiry")
     parser.add_argument("--destroy-data", action="store_true", dest="destroy_data")
     parser.add_argument("--operator-credential-file", type=Path, dest="credential")
+    parser.add_argument("--defer-provider", action="store_true", dest="defer_provider")
     parser.add_argument("--root", type=Path, default=deployed_output.PROJECT_STATE_ROOT)
     arguments = parser.parse_args(argv)
 
@@ -182,6 +221,20 @@ def main(argv: list[str] | None = None) -> int:
             f"--confirm said {arguments.confirm!r} but this project is {key!r}. "
             "Nothing was changed.",
         )
+    if arguments.defer_provider and arguments.credential is not None:
+        return fail(
+            EXIT_INPUT,
+            "--defer-provider and --operator-credential-file are mutually exclusive: the "
+            "identity is revoked now or kept for bin/slot.sh revoke, not both. "
+            "Nothing was changed.",
+        )
+    if arguments.defer_provider and not slot.SLOT_KEY.fullmatch(key):
+        return fail(
+            EXIT_INPUT,
+            f"--defer-provider is for a slot's project, and {key!r} is not a slot key: its kept "
+            "state would be revoked by no command. Nothing was changed.",
+        )
+    retired_state = SLOT_ROOT / key / slot.RETIRED_STATE if arguments.defer_provider else None
     if not arguments.host.is_file():
         return fail(EXIT_PREREQUISITE, f"host manifest not found: {arguments.host}")
 
@@ -204,6 +257,7 @@ def main(argv: list[str] | None = None) -> int:
             secret_root=SECRET_ROOT,
             rendered_root=deployed_output.RENDERED_ROOT,
             edge_dynamic_dir=EDGE_DYNAMIC_DIR,
+            credential_root=CREDENTIAL_ROOT,
         )
     except ValueError as problem:
         return fail(EXIT_STATE, str(problem))
@@ -216,11 +270,25 @@ def main(argv: list[str] | None = None) -> int:
             if arguments.root == deployed_output.PROJECT_STATE_ROOT
             else arguments.root / key / "bootstrap-state.json"
         )
-        if state_file.exists() and arguments.credential is None:
+        if retired_state is not None:
+            if not state_file.is_file():
+                return fail(
+                    EXIT_PREREQUISITE,
+                    f"--defer-provider keeps the bootstrap state, and {state_file} does not "
+                    "exist: there is nothing to defer. Nothing was changed.",
+                )
+            if retired_state.exists() or retired_state.is_symlink():
+                return fail(
+                    EXIT_INPUT,
+                    f"{retired_state} exists; a kept state is never overwritten. "
+                    "Nothing was changed.",
+                )
+        elif state_file.exists() and arguments.credential is None:
             return fail(
                 EXIT_PREREQUISITE,
                 "the project's bootstrap state exists, so --destroy needs "
-                "--operator-credential-file. Nothing was changed.",
+                "--operator-credential-file (or, for a slot, --defer-provider). "
+                "Nothing was changed.",
             )
         if arguments.credential is not None and not arguments.credential.is_file():
             return fail(EXIT_PREREQUISITE, f"credential file not found: {arguments.credential}")
@@ -231,6 +299,7 @@ def main(argv: list[str] | None = None) -> int:
         root_dir=REPO_ROOT,
         destroy_data=arguments.destroy_data,
         operator_credential_file=arguments.credential,
+        retired_state=retired_state,
     )
     print(
         retirement.render_plan(
@@ -249,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
                 captured_at=now,
                 destroy_data=arguments.destroy_data,
                 record_path=arguments.record,
+                retired_state=retired_state,
             )
             descriptor = os.open(arguments.record, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
@@ -272,8 +342,14 @@ def main(argv: list[str] | None = None) -> int:
             captured_at=now,
             destroy_data=arguments.destroy_data,
             record_path=arguments.record,
+            retired_state=retired_state,
         )["backups_still_held"]
     )
+    if retired_state is not None:
+        print(
+            f"The runtime identity is NOT revoked: its bootstrap state is kept at {retired_state} "
+            "for `sudo bin/slot.sh revoke`."
+        )
     return 0
 
 

@@ -4,7 +4,7 @@
 #
 #   sudo bin/project-retire.sh --host FILE --project KEY --confirm KEY \
 #        --record PATH [--plan] [--permanent | --before-expiry] [--destroy-data] \
-#        [--operator-credential-file FILE]
+#        [--operator-credential-file FILE | --defer-provider]
 #
 # Removes what the key derives and the state records, on this host, in one
 # fixed order, and never a backup: the repository, the bucket, the cipher pass
@@ -28,7 +28,7 @@ usage() {
   cat <<'USAGE'
 Usage: sudo bin/project-retire.sh --host FILE --project KEY --confirm KEY --record PATH
             [--plan] [--permanent | --before-expiry] [--destroy-data]
-            [--operator-credential-file FILE] [--help]
+            [--operator-credential-file FILE | --defer-provider] [--help]
 
 Retires one project from this host, in this order and no other:
 
@@ -40,6 +40,11 @@ Retires one project from this host, in this order and no other:
   6. provider-destroy   bootstrap-providers.sh --destroy: the runtime identity
   7. remove-directories the state, secrets and rendered directories
   8. remove-volumes     the two volumes -- only with --destroy-data
+
+  With --defer-provider, step 6 is keep-bootstrap-state instead: the bootstrap
+  state is moved to /etc/agentic-postgres/slots/KEY/retired-bootstrap-state.json
+  and the local credentials removed; the runtime identity is revoked later,
+  by the operator, with bin/slot.sh revoke (D2158).
 
   --host FILE                      The host manifest.
   --project KEY                    The project key. Validated before use as a path.
@@ -54,6 +59,9 @@ Retires one project from this host, in this order and no other:
                                    of the same key (ADR 0030).
   --operator-credential-file FILE  The control-plane credential bootstrap-providers.sh
                                    --destroy needs to revoke the runtime identity.
+  --defer-provider                 A slot's project only: keep the bootstrap state
+                                   for bin/slot.sh revoke instead of revoking now.
+                                   Not with --operator-credential-file.
 
 Never touched: the backup repository, its bucket, the cipher pass, the
 Infisical project's secrets, the DNS record, the certificate. The record says
@@ -77,7 +85,8 @@ main() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --help) usage; return 0 ;;
-      --plan|--permanent|--before-expiry|--destroy-data) passthrough+=("$1"); shift ;;
+      --plan|--permanent|--before-expiry|--destroy-data|--defer-provider)
+        passthrough+=("$1"); shift ;;
       --host|--project|--confirm|--record|--operator-credential-file|--root)
         [ "$#" -ge 2 ] || { printf 'retire: %s requires a value.\n' "$1" >&2; exit 2; }
         passthrough+=("$1" "$2"); shift 2 ;;

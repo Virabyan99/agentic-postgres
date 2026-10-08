@@ -244,7 +244,12 @@ def test_a_permanent_project_needs_the_flag_and_an_ephemeral_one_its_expiry() ->
 def test_the_steps_come_in_the_only_order_they_may_run(deployed: dict[str, Any]) -> None:
     r = retirement.resources_of(KEY, deployed, **ROOTS)
     plan = retirement.steps(
-        r, host_manifest=HOST, root_dir=REPO_ROOT, destroy_data=True, operator_credential_file=None
+        r,
+        host_manifest=HOST,
+        root_dir=REPO_ROOT,
+        destroy_data=True,
+        operator_credential_file=None,
+        retired_state=None,
     )
     names = [step.name for step in plan]
     assert tuple(names) == retirement.STEP_ORDER
@@ -269,7 +274,12 @@ def test_the_steps_come_in_the_only_order_they_may_run(deployed: dict[str, Any])
     )
 
     kept = retirement.steps(
-        r, host_manifest=HOST, root_dir=REPO_ROOT, destroy_data=False, operator_credential_file=None
+        r,
+        host_manifest=HOST,
+        root_dir=REPO_ROOT,
+        destroy_data=False,
+        operator_credential_file=None,
+        retired_state=None,
     )
     assert kept[-1].commands == (), "without --destroy-data no volume command exists at all"
     assert "keep volumes" in kept[-1].what
@@ -280,7 +290,12 @@ def test_nothing_off_the_host_is_a_step(deployed: dict[str, Any], tmp_path: Path
     secret; the record names them as what still holds the backups."""
     r = retirement.resources_of(KEY, deployed, **ROOTS)
     plan = retirement.steps(
-        r, host_manifest=HOST, root_dir=REPO_ROOT, destroy_data=True, operator_credential_file=None
+        r,
+        host_manifest=HOST,
+        root_dir=REPO_ROOT,
+        destroy_data=True,
+        operator_credential_file=None,
+        retired_state=None,
     )
     arguments = [argument for step in plan for c in step.commands for argument in c]
     # The bucket by exact argument. The stanza is not asserted: `naming`
@@ -295,7 +310,11 @@ def test_nothing_off_the_host_is_a_step(deployed: dict[str, Any], tmp_path: Path
             assert KEY in str(path)
 
     document = retirement.record(
-        r, captured_at=NOW, destroy_data=True, record_path=tmp_path / "record.json"
+        r,
+        captured_at=NOW,
+        destroy_data=True,
+        record_path=tmp_path / "record.json",
+        retired_state=None,
     )
     assert document["project_key"] == KEY
     assert document["captured_at"] == "2026-09-04T12:00:00Z"
@@ -850,3 +869,192 @@ def test_the_provider_destroy_accepts_the_expired_manifest_a_retirement_hands_it
     plan_through_wrapper = wrapper("--plan")
     assert plan_through_wrapper.returncode == 2, plan_through_wrapper.stderr
     assert "could not derive the project key" in plan_through_wrapper.stderr
+
+
+# ---------------------------------------------------------------------------
+# --defer-provider (Session 38, D2158): a slot's project, deleted by the
+# reconciler, which never holds the organisation's credential
+# ---------------------------------------------------------------------------
+
+SLOT = "slot1-dev"
+
+
+@pytest.fixture(scope="module")
+def slot_deployed(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    """A deployed document for the example host's slot, built in memory from
+    the manifest `bin/slot.sh prepare` would write -- no render on disk."""
+    import yaml
+
+    from agentic_postgres import config, host_config, rendering, slot
+
+    host = host_config.load_host_manifest(HOST)
+    entry = host_config.declared_slots(host)[0]
+    assert entry.key == SLOT
+    path = tmp_path_factory.mktemp("slot") / "manifest.yaml"
+    path.write_text(yaml.safe_dump(slot.slot_manifest(host, entry)), encoding="utf-8")
+    manifest = config.load_project_manifest(path)
+    identity = naming.derive(
+        slug=manifest["project"]["slug"],
+        environment=manifest["project"]["environment"],
+        domain=manifest["project"]["domain"],
+        api_base_path=manifest["api"]["public_base_path"],
+        mcp_base_path=manifest["mcp"]["public_base_path"],
+        database_name=manifest["database"]["name"],
+    )
+    rendered = rendering.build_outputs(
+        manifest,
+        config.load_capabilities_manifest(REPO_ROOT / "capabilities.example.yaml"),
+        identity,
+        {},
+    )
+    return build(
+        rendered,
+        bootstrap={
+            "status": "complete",
+            "state_path": f"/etc/agentic-postgres/projects/{SLOT}/bootstrap-state.json",
+            "infisical_project_id": "5fffcd38-9af6-4f9d-bef9-c6eefc5e696f",
+            "runtime_identity_id": "3302b5a4-7288-424f-bcd3-6cd158617827",
+        },
+        secrets={
+            "status": "ready",
+            "generation_id": "k7f2p9qd",
+            "generation_manifest": (
+                f"/var/lib/agentic-postgres/secrets/{SLOT}/generations/k7f2p9qd/manifest.json"
+            ),
+            "required_names": ["session2_sentinel"],
+            "fresh": True,
+            "materialized_at": "2026-08-05T18:00:00Z",
+        },
+        runtime={
+            "release_path": f"/opt/agentic-postgres/releases/{COMMIT}",
+            "state_directory": f"/etc/agentic-postgres/projects/{SLOT}",
+            "compose_model_sha256": "d" * 64,
+        },
+    )
+
+
+@pytest.fixture
+def slot_layout(
+    tmp_path: Path, slot_deployed: dict[str, Any], monkeypatch: pytest.MonkeyPatch, command: Any
+) -> dict[str, Path]:
+    """One slot's host directories under tmp, its bootstrap state and its
+    credential files among them, and the command pointed at them."""
+    roots = {
+        name: tmp_path / name
+        for name in ("projects", "secrets", "rendered", "edge", "credentials", "slots")
+    }
+    (roots["projects"] / SLOT).mkdir(parents=True)
+    (roots["secrets"] / SLOT / "generations" / "g1").mkdir(parents=True)
+    (roots["rendered"] / SLOT).mkdir(parents=True)
+    roots["edge"].mkdir()
+    (roots["credentials"] / SLOT).mkdir(parents=True)
+    (roots["projects"] / SLOT / "outputs.json").write_text(
+        json.dumps(slot_deployed), encoding="utf-8"
+    )
+    (roots["projects"] / SLOT / "manifest.yaml").write_text("schema_version: 10\n", "utf-8")
+    (roots["projects"] / SLOT / "bootstrap-state.json").write_text(
+        '{"runtime_identity_id": "3302b5a4-7288-424f-bcd3-6cd158617827"}\n', "utf-8"
+    )
+    for name in ("infisical-client-id", "infisical-client-secret"):
+        (roots["credentials"] / SLOT / name).write_text("not-a-real-value\n", "utf-8")
+    monkeypatch.setattr(command, "SECRET_ROOT", roots["secrets"])
+    monkeypatch.setattr(command, "EDGE_DYNAMIC_DIR", roots["edge"])
+    monkeypatch.setattr(command, "SLOT_ROOT", roots["slots"])
+    monkeypatch.setattr(command, "CREDENTIAL_ROOT", roots["credentials"])
+    monkeypatch.setattr(command.deployed_output, "RENDERED_ROOT", roots["rendered"])
+    return roots
+
+
+def _retire_slot(command: Any, layout: dict[str, Path], record: Path, *extra: str) -> int:
+    return command.main(
+        [
+            "--host", str(HOST), "--project", SLOT, "--confirm", SLOT,
+            "--record", str(record), "--permanent", "--destroy-data",
+            "--root", str(layout["projects"]), *extra,
+        ]
+    )  # fmt: skip
+
+
+def test_defer_provider_keeps_the_state_for_revocation(
+    slot_layout: dict[str, Path], command: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """D2158: every step but the provider destroy runs; the bootstrap state is
+    MOVED to the slot's directory (0600, its bytes unchanged) before the state
+    directory goes, the local credentials are removed, nothing contacts the
+    provider, and the record says the identity waits for `bin/slot.sh revoke`."""
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(*argv: str, timeout: int = 0) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        stdout = "enabled\n" if argv[:2] == ("systemctl", "is-enabled") else ""
+        return subprocess.CompletedProcess(args=list(argv), returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(command, "run", fake_run)
+    state = slot_layout["projects"] / SLOT / "bootstrap-state.json"
+    original = state.read_bytes()
+    record = tmp_path / "record.json"
+
+    code = _retire_slot(command, slot_layout, record, "--defer-provider")
+    assert code == 0
+    kept = slot_layout["slots"] / SLOT / "retired-bootstrap-state.json"
+    assert kept.read_bytes() == original
+    assert oct(kept.stat().st_mode & 0o777) == "0o600"
+    assert oct(kept.parent.stat().st_mode & 0o777) == "0o700"
+    assert not (slot_layout["projects"] / SLOT).exists()
+    assert not (slot_layout["credentials"] / SLOT).exists()
+    assert not any(Path(c[0]).name == "bootstrap-providers.sh" for c in calls)
+    assert any(Path(c[0]).name == "project-runtime.sh" for c in calls)
+    written = json.loads(record.read_text(encoding="utf-8"))
+    assert written["provider"]["deferred"] is True
+    assert written["provider"]["kept_bootstrap_state"] == str(kept)
+    assert "bin/slot.sh revoke" in written["provider"]["note"]
+
+
+def test_defer_provider_is_refused_where_it_cannot_be_honoured(
+    slot_layout: dict[str, Path], command: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Before anything changes: beside the credential file; for a key that is
+    not a slot's; with no bootstrap state to keep; over a kept state."""
+    monkeypatch.setattr(command, "run", lambda *a, **k: pytest.fail("a step ran"))
+    record = tmp_path / "record.json"
+    credential = tmp_path / "token"
+    credential.write_text("x", encoding="utf-8")
+    both = _retire_slot(
+        command, slot_layout, record, "--defer-provider", "--operator-credential-file",
+        str(credential),
+    )  # fmt: skip
+    assert both == 2
+    not_a_slot = command.main(
+        ["--host", str(HOST), "--project", KEY, "--confirm", KEY, "--record", str(record),
+         "--permanent", "--defer-provider", "--root", str(slot_layout["projects"])]
+    )  # fmt: skip
+    assert not_a_slot == 2
+    kept = slot_layout["slots"] / SLOT / "retired-bootstrap-state.json"
+    kept.parent.mkdir(parents=True)
+    kept.write_text("{}", encoding="utf-8")
+    assert _retire_slot(command, slot_layout, record, "--defer-provider") == 2
+    kept.unlink()
+    state = slot_layout["projects"] / SLOT / "bootstrap-state.json"
+    moved = state.read_bytes()
+    state.unlink()
+    assert _retire_slot(command, slot_layout, record, "--defer-provider") == 3
+    assert not record.exists()
+    # Control: with the state back, the plan of the same retirement is printed.
+    state.write_bytes(moved)
+    assert _retire_slot(command, slot_layout, record, "--defer-provider", "--plan") == 0
+    plan = retirement.steps(
+        retirement.resources_of(
+            SLOT,
+            json.loads((slot_layout["projects"] / SLOT / "outputs.json").read_text("utf-8")),
+            **ROOTS,
+        ),
+        host_manifest=HOST,
+        root_dir=REPO_ROOT,
+        destroy_data=True,
+        operator_credential_file=None,
+        retired_state=kept,
+    )
+    assert tuple(step.name for step in plan) == retirement.DEFERRED_STEP_ORDER
+    names = list(retirement.DEFERRED_STEP_ORDER)
+    assert names.index("keep-bootstrap-state") < names.index("remove-directories")
+    assert "provider-destroy" not in names
