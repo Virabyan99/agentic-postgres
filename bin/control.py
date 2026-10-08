@@ -13,14 +13,20 @@ the container and database read from the control project's deployed document
 (D1184) and every value passed as a ``psql`` variable, never interpolated.
 
 **The control project is found, never named**: the one deployed document under
-the state root whose ``control.enabled`` is true (outputs 20, D2068). A version
-19 document predates the facility and so does not enable it. Two enabling
-documents is exit 5. A document that cannot be read might be the control
+the state root whose ``control.enabled`` is true (outputs 20, D2068) --
+``agentic_postgres.control_registry.find_control``, which ``bin/reconciler.sh``
+uses too (D2168). A version 19 document predates the facility and so does not
+enable it. Two enabling documents is exit 5. A document that cannot be read might be the control
 project: ``adopt`` and ``totp-reset`` are decisions, and refuse (exit 6) rather
 than act on a search they could not finish; ``registry`` is a report, and
 reports the unreadable document as undetermined (ADR 0195: a decision may fail
 closed, a report may not). ``--confirm`` must equal the control project's key,
 exactly.
+
+**A deleted project** (Session 38, D2167): the reconciler marks its row
+``deleted_at``. ``registry`` reads such a row as ``agrees (deleted)`` when no
+document is deployed under the key and the slot's tombstone is present, and as
+``differs: deleted`` when a document is still deployed there.
 
 Exit codes: 0 adopted, reset, or all agree; 2 invalid input; 3 not root, no
 deployed document, no control project, or no docker; 5 the database refused,
@@ -37,12 +43,24 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from agentic_postgres import container_exec, deployed_output  # noqa: E402
+from agentic_postgres import container_exec, deployed_output, slot  # noqa: E402
+from agentic_postgres.control_registry import (  # noqa: E402
+    CONTROL_SINCE_VERSION,
+    FIELDS,
+    OperatorError,
+    Reading,
+    document_fields,
+    enables_control,
+    find_control,
+    target,
+)
+from agentic_postgres.control_registry import read_all as control_registry_read_all  # noqa: E402
+from agentic_postgres.control_registry import read_one as control_registry_read_one  # noqa: E402
 
 EXIT_OK = 0
 EXIT_INPUT = 2
@@ -50,16 +68,24 @@ EXIT_PREREQUISITE = 3
 EXIT_REFUSED = 5
 EXIT_UNKNOWN = 6
 
-#: Where the deployed documents live; a proof points it at a directory it owns.
+#: Where the deployed documents and the slots' files live; a proof points them
+#: at directories it owns.
 STATE_ROOT = deployed_output.PROJECT_STATE_ROOT
+SLOT_ROOT = slot.SLOT_ROOT
 
-#: The outputs version that first records the facility. An older document was
-#: written by a release that had no control plane, so it enables none.
-CONTROL_SINCE_VERSION = 20
-
-#: What `adopt` copies and `registry` compares, in the order printed. The first
-#: three are `project.*` members, the last two top-level members.
-FIELDS = ("slug", "environment", "domain", "template_version", "source_commit")
+#: `control_registry` holds the rule and the five pointers (D2168); named here
+#: so this command's readers keep finding them where they always were.
+__all__ = [
+    "CONTROL_SINCE_VERSION",
+    "FIELDS",
+    "OperatorError",
+    "Reading",
+    "document_fields",
+    "enables_control",
+    "find_control",
+    "main",
+    "target",
+]
 
 #: A project key as `naming` derives one: what may be joined onto STATE_ROOT.
 _KEY = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
@@ -83,22 +109,8 @@ OUTCOME_TEXT = {
     "not_in_registry": "not in the registry",
     "no_deployed_document": "no deployed document",
     "undetermined": "could not determine",
+    "deleted": "agrees (deleted)",
 }
-
-
-class OperatorError(Exception):
-    def __init__(self, code: int, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-
-
-class Reading(NamedTuple):
-    """One directory under the state root: its document, or why there is none."""
-
-    key: str
-    document: dict[str, Any] | None
-    reason: str | None = None
-    missing: bool = False
 
 
 def require_root() -> None:
@@ -111,99 +123,28 @@ def require_root() -> None:
 
 
 def read_one(key: str) -> Reading:
-    path = deployed_output.deployed_path(key, root=STATE_ROOT)
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return Reading(key, None, "no deployed document", missing=True)
-    except OSError:
-        return Reading(key, None, "the deployed document could not be read")
-    except ValueError:
-        return Reading(key, None, "the deployed document is not valid JSON")
-    try:
-        return Reading(key, deployed_output.read_deployed_document(raw))
-    except ValueError as error:
-        return Reading(key, None, str(error))
+    return control_registry_read_one(key, root=STATE_ROOT)
 
 
 def read_all() -> list[Reading]:
-    """Every directory under the state root, sorted -- a directory is a project the
-    deploy established, and one without a document is reported, never skipped."""
+    """Every directory under the state root (``control_registry.read_all``)."""
+    return control_registry_read_all(root=STATE_ROOT)
+
+
+def tombstone(key: str) -> bool | None:
+    """Whether the slot `key` was consumed by a deletion: True, False, or None
+    when it could not be read. A key that is not a slot's has no tombstone."""
     try:
-        keys = sorted(path.name for path in STATE_ROOT.iterdir() if path.is_dir())
-    except FileNotFoundError as error:
-        raise OperatorError(
-            EXIT_PREREQUISITE,
-            f"no deployed project enables the control facility ({STATE_ROOT} does not exist)",
-        ) from error
-    except OSError as error:
-        raise OperatorError(EXIT_UNKNOWN, f"{STATE_ROOT} could not be listed: {error}") from error
-    return [read_one(key) for key in keys]
-
-
-def enables_control(document: dict[str, Any]) -> bool | None:
-    """True or false from the document; None when it says something unreadable."""
-    control = document.get("control")
-    if control is None and document.get("schema_version", 0) < CONTROL_SINCE_VERSION:
+        path = slot.slot_directory(key, root=SLOT_ROOT) / slot.CONSUMED
+    except ValueError:
         return False
-    if not isinstance(control, dict) or not isinstance(control.get("enabled"), bool):
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return False
+    except OSError:
         return None
-    return control["enabled"]
-
-
-def find_control(readings: list[Reading], *, decision: bool) -> Reading:
-    """The one reading whose document enables the facility, or an OperatorError."""
-    enabling = [r for r in readings if r.document is not None and enables_control(r.document)]
-    unread = [f"{r.key}: {r.reason}" for r in readings if r.document is None and not r.missing] + [
-        f"{r.key}: the document's control member is not readable"
-        for r in readings
-        if r.document is not None and enables_control(r.document) is None
-    ]
-    if len(enabling) > 1:
-        raise OperatorError(
-            EXIT_REFUSED,
-            "two deployed projects enable the control facility: "
-            + ", ".join(r.key for r in enabling),
-        )
-    if unread and (decision or not enabling):
-        raise OperatorError(
-            EXIT_UNKNOWN,
-            "which deployed project enables the control facility could not be determined; "
-            + "; ".join(unread),
-        )
-    if not enabling:
-        raise OperatorError(EXIT_PREREQUISITE, "no deployed project enables the control facility")
-    return enabling[0]
-
-
-def document_fields(key: str, document: dict[str, Any]) -> tuple[dict[str, str] | None, str | None]:
-    """The five pointers, or the reason they cannot be read from this document."""
-    project = document.get("project")
-    if not isinstance(project, dict):
-        return None, "the document names no project"
-    if project.get("key") != key:
-        return None, f"the document under {key}/ names project {project.get('key')!r}"
-    values = {
-        "slug": project.get("slug"),
-        "environment": project.get("environment"),
-        "domain": project.get("domain"),
-        "template_version": document.get("template_version"),
-        "source_commit": document.get("source_commit"),
-    }
-    absent = [name for name in FIELDS if not isinstance(values[name], str) or not values[name]]
-    if absent:
-        return None, "the document carries no " + ", ".join(absent)
-    return {name: str(values[name]) for name in FIELDS}, None
-
-
-def target(document: dict[str, Any]) -> tuple[str, str]:
-    database = document.get("database") or {}
-    container, name = database.get("container"), database.get("name")
-    if not container or not name:
-        raise OperatorError(
-            EXIT_PREREQUISITE, "the control project's deployed document names no database container"
-        )
-    return str(container), str(name)
+    return True
 
 
 def psql(container: str, database: str, sql: str, *variables: str):
@@ -291,7 +232,9 @@ def read_registry(control: Reading) -> list[dict[str, Any]]:
     except ValueError:
         rows = None
     if not isinstance(rows, list) or not all(
-        isinstance(row, dict) and all(isinstance(row.get(n), str) for n in ("key", *FIELDS))
+        isinstance(row, dict)
+        and all(isinstance(row.get(n), str) for n in ("key", *FIELDS))
+        and isinstance(row.get("deleted_at"), (str, type(None)))
         for row in rows
     ):
         raise OperatorError(
@@ -309,7 +252,21 @@ def compare(rows: list[dict[str, Any]], readings: list[Reading]) -> list[dict[st
     for key in sorted(set(by_row) | set(by_key)):
         row, reading = by_row.get(key), by_key.get(key)
         outcome: dict[str, Any] = {"project": key, "fields": [], "reason": None}
-        if reading is None or reading.missing:
+        if row is not None and row.get("deleted_at"):
+            # D2167: the reconciler deleted it. Agreement is no document AND
+            # the slot's tombstone; a document still deployed is a difference.
+            consumed = tombstone(key) if reading is None or reading.missing else True
+            if reading is not None and not reading.missing:
+                outcome.update(outcome="differs", fields=["deleted"])
+            elif consumed is None:
+                outcome.update(
+                    outcome="undetermined", reason="the slot's tombstone could not be read"
+                )
+            elif consumed:
+                outcome["outcome"] = "deleted"
+            else:
+                outcome.update(outcome="differs", fields=["tombstone"])
+        elif reading is None or reading.missing:
             outcome["outcome"] = "no_deployed_document"
         elif reading.document is None:
             outcome.update(outcome="undetermined", reason=reading.reason)
@@ -346,7 +303,7 @@ def registry(*, as_json: bool) -> int:
     kinds = {o["outcome"] for o in outcomes}
     if "undetermined" in kinds:
         return EXIT_UNKNOWN
-    return EXIT_OK if kinds == {"agrees"} else EXIT_REFUSED
+    return EXIT_OK if kinds and kinds <= {"agrees", "deleted"} else EXIT_REFUSED
 
 
 def totp_reset(username: str, *, confirm: str) -> int:

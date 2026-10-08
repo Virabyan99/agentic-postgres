@@ -1,0 +1,33 @@
+[Unit]
+Description=Agentic Postgres reconciler (the control plane's operations, ADR 0256)
+Documentation=file:/opt/agentic-postgres/releases/current/docs/decisions/0256-the-reconciler-and-the-operations-it-executes.md
+
+# Docker, because every operation reaches a container. The control project's
+# own unit is not named: the control project is FOUND, never named (D2168), so
+# a reconciler that starts before its database answers exits and is restarted
+# 30 s later by Restart= below -- the same path as any unanswered call.
+After=network-online.target docker.service agentic-postgres-edge.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+
+# Written by `bin/reconciler.sh install`: APG_CHECKOUT, the operator's checkout
+# this unit executes. The unit file itself is installed verbatim, so
+# provision-host's glob (which installs every systemd/*.service) installs a
+# file that does nothing until `install` has named the checkout.
+EnvironmentFile=/etc/agentic-postgres/reconciler.env
+Environment=HOME=/root
+ExecStart=/bin/bash ${APG_CHECKOUT}/bin/reconciler.sh run
+
+# No product child reads the terminal (ADR 0218): there is none to read.
+StandardInput=null
+
+# A crash, an exit 5 (two control projects, D2168) or 6 (the control database
+# stopped answering) is retried every 30 s; the restart's recovery finishes an
+# interrupted operation `failed interrupted` and never resumes it (D2152).
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

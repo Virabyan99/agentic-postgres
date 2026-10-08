@@ -356,3 +356,43 @@ def test_every_exec_goes_through_container_exec() -> None:
     assert "container_exec.run(" in source
     for forbidden in ("subprocess.run(", "subprocess.Popen(", "os.system(", '"docker"', "execvp"):
         assert forbidden not in source, forbidden
+
+
+def test_a_deleted_project_agrees_only_with_its_tombstone(
+    host: Host,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """D2167: a row the reconciler marked deleted agrees -- `agrees (deleted)`,
+    exit 0 -- only when no document is deployed under its key AND the slot's
+    tombstone is present. No tombstone is `differs: tombstone`; a document
+    still deployed is `differs: deleted`; both exit 5."""
+    slots = tmp_path / "slots"
+    monkeypatch.setattr(host.module, "SLOT_ROOT", slots)
+    deleted = _row("slot1-prod") | {"deleted_at": "2026-10-08T10:00:00+00:00"}
+    rows = (_row(CONTROL), _row("alpha-dev"), _row("beta-dev"), deleted)
+
+    host.answer(_registry_answer(*rows))
+    assert host.main("registry") == 5
+    assert _lines(capsys.readouterr().out)["slot1-prod"] == "differs: tombstone"
+
+    (slots / "slot1-prod").mkdir(parents=True)
+    (slots / "slot1-prod" / "consumed").write_text("", "utf-8")
+    host.answer(_registry_answer(*rows))
+    assert host.main("registry") == 0
+    assert _lines(capsys.readouterr().out)["slot1-prod"] == "agrees (deleted)"
+    host.answer(_registry_answer(*rows))
+    assert host.main("registry", "--json") == 0
+    projects = json.loads(capsys.readouterr().out)["projects"]
+    assert [o["outcome"] for o in projects if o["project"] == "slot1-prod"] == ["deleted"]
+
+    host.write("slot1-prod", _document("slot1-prod", version=19, control=None))
+    host.answer(_registry_answer(*rows))
+    assert host.main("registry") == 5
+    assert _lines(capsys.readouterr().out)["slot1-prod"] == "differs: deleted"
+
+    # Control: the same row without `deleted_at`, beside the same document, agrees.
+    host.answer(_registry_answer(*rows[:3], _row("slot1-prod")))
+    assert host.main("registry") == 0
+    assert _lines(capsys.readouterr().out)["slot1-prod"] == "agrees"

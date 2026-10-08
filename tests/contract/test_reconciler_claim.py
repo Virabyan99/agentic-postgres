@@ -10,6 +10,13 @@ transactions overlap take DISTINCT rows (the row lock and the outer recheck),
 and the second does not WAIT for the first (SKIP LOCKED). Each overlap is made
 deterministic the way rig 38f made it: claimer A claims and holds its
 transaction open 2 s; claimer B starts 0.3 s after A.
+
+**The Python half** (Run 6): `bin/reconciler.py` itself against the cluster --
+its `Control` reaching the database through the real `container_exec.run`, its
+`bin/` commands replaced by a recorder (`test_reconciler_dispatch.py`'s). A
+creation killed mid-step leaves its row `running`; the next start finishes it
+`failed interrupted` naming the step, quarantines its slot, and runs nothing for
+it again (D2152).
 """
 
 # ruff: noqa: S608 -- every interpolated value is a uuid, a key or a word this
@@ -17,16 +24,21 @@ transaction open 2 s; claimer B starts 0.3 s after A.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import threading
 import time
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
 import control_cluster as cc
 import pytest
+import yaml
 
+from agentic_postgres import REPO_ROOT, host_config, slot
 from app import operations
 
 pytestmark = [pytest.mark.contract, pytest.mark.database, pytest.mark.security, pytest.mark.p0]
@@ -276,3 +288,155 @@ def test_the_slot_reading_is_replaced_whole(cluster: cc.ControlCluster) -> None:
         refused = cluster.run(f"SELECT app.control_record_slots('{json.dumps(bad)}'::jsonb)")
         assert refused.returncode != 0, bad
     assert cluster.query("SELECT key, state FROM app.control_slots") == ["slot2-prod|consumed"]
+
+
+# ---------------------------------------------------------------------------
+# The Python half: bin/reconciler.py against the cluster (Run 6)
+# ---------------------------------------------------------------------------
+
+HOST = REPO_ROOT / "host.example.yaml"
+SLOT = "slot1-dev"
+CREATE_ARGUMENTS = {
+    "name": "Interrupted",
+    "profile": "small",
+    "admin_username": "ada.admin",
+    "handoff_sha256": "0" * 64,
+}
+
+
+class Killed(BaseException):
+    """What a SIGKILL looks like from inside: nothing after it runs."""
+
+
+#: The real one: `docker exec` -- the reconciler's path to this cluster through
+#: `container_exec.run` -- passes through the stand-in below untouched.
+_RUN = subprocess.run
+
+
+class Commands:
+    """`subprocess.run`'s stand-in for the `bin/` commands: records each one;
+    raises `Killed` at `kill_at` (a command's file name), exit 0 otherwise."""
+
+    def __init__(self, kill_at: str | None = None) -> None:
+        self.calls: list[list[str]] = []
+        self.kill_at = kill_at
+
+    def __call__(self, argv: list[str], **kwargs: Any) -> Any:
+        if argv[0] == "docker":
+            return _RUN(argv, **kwargs)
+        self.calls.append(list(argv))
+        if Path(argv[0]).name == self.kill_at:
+            raise Killed(argv[0])
+        out = "{}" if kwargs.get("capture_output") else None
+        return subprocess.CompletedProcess(argv, 0, out, "" if out is not None else None)
+
+
+@pytest.fixture
+def reconciler(cluster: cc.ControlCluster, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """`bin/reconciler.py` pointed at this cluster and at a prepared slot the
+    proof owns; its commands replaced (`reconciler.commands`)."""
+    spec = importlib.util.spec_from_file_location(
+        "apg_reconciler_claim", REPO_ROOT / "bin" / "reconciler.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for name in ("STATE_ROOT", "SLOT_ROOT", "SECRET_ROOT", "LOG_ROOT", "RUN_ROOT"):
+        monkeypatch.setattr(module, name, tmp_path / name.lower())
+    monkeypatch.setattr(module, "HOST_MANIFEST", HOST)
+    monkeypatch.setattr(module, "require_root", lambda: None)
+    monkeypatch.setattr(module, "checkout_owner", lambda checkout=None: (1000, 1000))
+    monkeypatch.setattr(module, "checkout_reading", lambda owner, checkout=None: ("a" * 40, ""))
+    monkeypatch.setattr(module, "dns_reading", lambda domain, expected: (True, "recorded"))
+    monkeypatch.setattr(
+        module, "control_target", lambda: module.Control(cluster.name, cluster.database)
+    )
+
+    host = host_config.load_host_manifest(HOST)
+    (entry,) = [e for e in host_config.declared_slots(host) if e.key == SLOT]
+    directory = module.SLOT_ROOT / SLOT
+    directory.mkdir(mode=0o700, parents=True)
+    (directory / slot.MANIFEST).write_text(
+        yaml.safe_dump(slot.slot_manifest(host, entry), sort_keys=False), "utf-8"
+    )
+    state = module.STATE_ROOT / SLOT
+    state.mkdir(parents=True)
+    (state / "bootstrap-state.json").write_text("{}", "utf-8")
+    generation = module.SECRET_ROOT / SLOT / "generations" / "g1"
+    generation.mkdir(parents=True)
+    (generation / "manifest.json").write_text("{}", "utf-8")
+    (module.SECRET_ROOT / SLOT / "active-secret-generation.json").write_text(
+        '{"generation_id": "g1"}', "utf-8"
+    )
+
+    def commands(recorder: Commands) -> Commands:
+        monkeypatch.setattr(module.subprocess, "run", recorder)
+        return recorder
+
+    module.commands = commands
+    return module
+
+
+def _create(cluster: cc.ControlCluster, org: tuple[str, str]) -> str:
+    """One pending `project.create`, after closing every open row."""
+    _pending(cluster, org, 0)
+    user, organization = org
+    return cluster.query(
+        "INSERT INTO app.control_operations (organization_id, type, requested_by, arguments) "
+        f"VALUES ('{organization}', 'project.create', '{user}', "
+        f"'{json.dumps(CREATE_ARGUMENTS)}'::jsonb) RETURNING id"
+    )[0]
+
+
+def test_an_interrupted_creation_fails_and_quarantines_its_slot_never_resumed(
+    cluster: cc.ControlCluster, org: tuple[str, str], reconciler: Any
+) -> None:
+    """D2152 against the real functions: killed in its first deploy, the
+    creation's row stays `running` at `deploy-1` with its slot's key; the next
+    start finishes it `failed interrupted {"step": "deploy-1"}`, attempt 1,
+    quarantines the slot by the id its allocation marker carries, records the
+    slot `quarantined` -- and runs nothing for it again."""
+    created = _create(cluster, org)
+    killed = reconciler.commands(Commands(kill_at="deploy.sh"))
+    with pytest.raises(Killed):
+        reconciler.main(["once"])
+    assert [Path(argv[0]).name for argv in killed.calls] == ["admit.sh", "deploy.sh"]
+    assert cluster.query(
+        "SELECT status, step, project_key, attempt FROM app.control_operations "
+        f"WHERE id = '{created}'"
+    ) == [f"running|deploy-1|{SLOT}|1"]
+    marker = reconciler.SLOT_ROOT / SLOT / slot.ALLOCATED
+    assert marker.read_text("utf-8").strip() == created
+
+    restarted = reconciler.commands(Commands())
+    assert reconciler.main(["once"]) == 0
+    assert restarted.calls == [], "nothing was run again for the interrupted creation"
+    assert cluster.query(
+        "SELECT status, error_code, result::text, attempt FROM app.control_operations "
+        f"WHERE id = '{created}'"
+    ) == ['failed|interrupted|{"step": "deploy-1"}|1']
+    quarantined = reconciler.SLOT_ROOT / SLOT / slot.QUARANTINED
+    assert quarantined.read_text("utf-8").strip() == created
+    assert cluster.query(f"SELECT state FROM app.control_slots WHERE key = '{SLOT}'") == [
+        "quarantined"
+    ]
+
+
+def test_a_result_reaches_the_control_database_unaltered(
+    cluster: cc.ControlCluster, org: tuple[str, str], reconciler: Any
+) -> None:
+    """Every value the reconciler sends is set on psql's stdin (D2154); a
+    quote, a backslash, a colon and a newline arrive as they were sent."""
+    _pending(cluster, org, 1)
+    reconciler.commands(Commands())
+    control = reconciler.Control(cluster.name, cluster.database)
+    owner = reconciler.Reconciler(control, {}, (1000, 1000), ("a" * 40, ""))
+    claimed = owner.claim()
+    assert claimed is not None and claimed["type"] == "project.sleep"
+    reason = "it's a \\ back:slash :'quoted' and\na second line"
+    owner.finish(claimed["id"], "failed", "operation_failed", {"reason": reason})
+    assert cluster.query(
+        "SELECT status, error_code, result ->> 'reason' = $r$" + reason + "$r$ "
+        f"FROM app.control_operations WHERE id = '{claimed['id']}'"
+    ) == ["failed|operation_failed|t"]
+    assert owner.claim() is None

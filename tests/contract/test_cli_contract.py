@@ -117,6 +117,9 @@ SHELL_COMMANDS = (
     # Session 36 (ADR 0248): the record's size and an operator's prune -- ADR
     # 0213's TTY act made a command. Listed the run it landed (D1014) and
     # `git add`ed before this module runs (D1188).
+    # Session 38 (ADR 0256, D2151): the reconciler -- root, no listener, the
+    # control plane's operations. Listed the run it landed (D1014).
+    "bin/reconciler.sh",
     "bin/record.sh",
     "bin/rehearse.sh",
     # Session 28 (ADR 0214): the reading taken before a tag is cut. Listed here
@@ -289,6 +292,9 @@ PYTHON_COMMANDS = (
     "bin/render-jwks.py",
     "bin/render-mount-digests.py",
     "bin/render-secret-override.py",
+    # Session 38 (ADR 0256): the loop and the steps; the closed table is
+    # `agentic_postgres.reconciler_dispatch`.
+    "bin/reconciler.py",
     "bin/record.py",
     "bin/rehearse.py",
     # Session 20, ADR 0199. The one place a rendered document's path is
@@ -523,6 +529,8 @@ COMMANDS_WITH_VERBS = {
     "bin/mcp-contract.sh",
     # Session 36: `size` and `prune`, written verb-first so the derivation
     # reads them (the plan's `--project KEY size` would derive none).
+    # Session 38 (ADR 0256): run, once, status, install -- written verb-first.
+    "bin/reconciler.sh",
     "bin/record.sh",
     "bin/rehearse.sh",
     # Session 38: prepare, status, revoke, written verb-first.

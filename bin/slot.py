@@ -38,8 +38,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -73,13 +71,11 @@ SLOT_ROOT = slot.SLOT_ROOT
 STATE_ROOT = bootstrap_state.STATE_ROOT
 SECRET_ROOT = DEFAULT_SECRET_ROOT
 
-#: The resolver asked, and how long it may take (D2148: the C1 gate's check).
-RESOLVER = "1.1.1.1"
-DIG_TIMEOUT_SECONDS = 20
+#: The DNS reading (D2148) -- `slot.dns_reading`, named here so a proof can
+#: replace it on this command alone.
+dns_reading = slot.dns_reading
 #: `bootstrap-providers --destroy` contacts Infisical; bounded.
 REVOKE_TIMEOUT_SECONDS = 300
-
-_IPV4 = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
 
 
 class OperatorError(Exception):
@@ -118,39 +114,6 @@ def declared(host: dict[str, Any], key: str) -> host_config.DeclaredSlot:
         if entry.key == key:
             return entry
     raise OperatorError(EXIT_REFUSED, f"{key} is not declared in the host manifest's slots.")
-
-
-def dns_reading(domain: str, expected_ipv4: str | None) -> tuple[bool | None, str]:
-    """`(True, …)` the A record is exactly this host and there is no AAAA;
-    `(False, …)` it is not; `(None, …)` it could not be read."""
-    dig = shutil.which("dig")
-    if dig is None:
-        return None, "dig is not installed"
-    if expected_ipv4 is None:
-        return None, "the host manifest declares no host.expected_public_ipv4 to compare with"
-    answers: dict[str, list[str]] = {}
-    for record in ("A", "AAAA"):
-        try:
-            done = subprocess.run(
-                [dig, f"@{RESOLVER}", "+short", "+time=5", "+tries=2", record, domain],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=DIG_TIMEOUT_SECONDS,
-                stdin=subprocess.DEVNULL,
-            )
-        except (OSError, subprocess.TimeoutExpired) as problem:
-            return None, f"dig {record} {domain} did not answer ({type(problem).__name__})"
-        if done.returncode != 0:
-            return None, f"dig {record} {domain} exited {done.returncode}"
-        answers[record] = [line.strip() for line in done.stdout.splitlines() if line.strip()]
-    addresses = [line for line in answers["A"] if _IPV4.match(line)]
-    if answers["AAAA"]:
-        return False, f"{domain} has an AAAA record ({', '.join(answers['AAAA'])}); none is wanted"
-    if addresses != [expected_ipv4]:
-        shown = ", ".join(answers["A"]) or "no A record"
-        return False, f"{domain} resolves to {shown}, not {expected_ipv4} alone"
-    return True, f"{domain} A {expected_ipv4}, no AAAA"
 
 
 # ---------------------------------------------------------------------------
@@ -229,26 +192,9 @@ def prepare(host_path: Path, key: str) -> int:
 def status(host_path: Path, *, as_json: bool) -> int:
     require_root()
     host = load_host(host_path)
-    region = host_config.region(host)
-    expected = host["host"].get("expected_public_ipv4")
-    rows = []
-    for entry in host_config.declared_slots(host):
-        dns, dns_reason = dns_reading(entry.domain, expected)
-        readings = slot.read(
-            entry.key, dns=dns, slot_root=SLOT_ROOT, state_root=STATE_ROOT, secret_root=SECRET_ROOT
-        )
-        state, reason = slot.state(readings)
-        if state in ("prepared", "undetermined") and dns is not True and "DNS" in reason:
-            reason = f"{reason}: {dns_reason}"
-        rows.append(
-            {
-                "key": entry.key,
-                "domain": entry.domain,
-                "region_id": None if region is None else region.id,
-                "state": state,
-                "reason": reason,
-            }
-        )
+    rows = slot.observe(
+        host, dns=dns_reading, slot_root=SLOT_ROOT, state_root=STATE_ROOT, secret_root=SECRET_ROOT
+    )
     if as_json:
         print(json.dumps({"slots": rows}, indent=2))
     elif not rows:
