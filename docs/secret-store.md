@@ -30,9 +30,17 @@ and the edge runs on the host network, where ufw applies (D2250):
 | 80/tcp | anywhere: Let's Encrypt's HTTP-01 challenge and a redirect |
 | 443/tcp | the hosts that read secrets only — today `15.204.231.45` |
 
-The console is reached through SSH: `ssh -L 8443:127.0.0.1:443
-op@15.204.66.146` with `127.0.0.1 secrets.agenticpostgresql.com` in the
-workstation's hosts file, then `https://secrets.agenticpostgresql.com:8443`.
+The console is reached for a sitting and closed after it: a ufw rule for the
+operator's own address, removed on the same sheet (the way Run M1 reached it):
+
+```bash
+sudo ufw allow from <your address> to any port 443 proto tcp comment 'operator console, temporary'
+# ... the console at https://secrets.agenticpostgresql.com ...
+sudo ufw delete allow from <your address> to any port 443 proto tcp
+```
+
+(An SSH tunnel to `127.0.0.1:443` with the name pinned in the workstation's hosts file is
+the alternative that opens nothing.)
 
 ## 2. The keys, and where they live
 
@@ -73,6 +81,13 @@ The order is the migration plan's Sheets E1, D1 and I1
    *operator credential* `bootstrap-providers.sh` reads
    (`docs/provider-bootstrap.md`), kept in the password manager and placed on a
    host only for a sheet, then shredded.
+6. **Server Admin Console → sign-ups disabled.** The organisation's *invite only*
+   decides who joins the organisation; the instance's own setting decides who may
+   create an account at all, and it is open until this step (D2267). Read it:
+   `super_admin.allowSignUp` is `false`.
+
+Creating the organisation also creates three of Infisical's own projects
+(`cert-manager`, `pam`, `agent-vault`, D2268); they are left alone.
 
 ## 4. The backup
 

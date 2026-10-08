@@ -178,6 +178,8 @@ between two Infisical instances by value (M3, ADR 0263), and the secret store's 
 | **D2264** | Sheet E1: the key put in at the OVH console; the host key pinned against the console's fingerprint. | **Done 2026-10-08/09 by the operator with `ssh-copy-id`**: OVH mails a one-time password that is EXPIRED at first login (`Password change required but no TTY available` under `ssh-copy-id`), so one interactive login changed it first. Fingerprints recorded at first connection and read back on the hosts: main `SHA256:eyJyvNfVC7okGz57f7nfirmqjsB72ZO+B2AgU3QALAo`, store `SHA256:pRl0fEeVUYkA1okZePYU2CiAOQ3gejDGD1a9wNuIPwE` (trust on first use; not compared with the console). **Readings**: main Ubuntu 26.04 x86_64, 4 vCPU (Haswell), 7,746 MiB, no swap, 72 GB, `ens3`, IPv4 `15.204.231.45/32` **and public IPv6 `2604:2dc0:101:200::5466/128`**; store Ubuntu 26.04 x86_64, 2 vCPU, 3,814 MiB, no swap, 38 GB, `ens3`, IPv4 only. Both NTP-synchronised, Docker absent, ufw inactive, only sshd listening publicly. | E1's key half is done; `public_interface: ens3` for the main host; **no AAAA record for any name on the main host** (it has an address one would point at). | -- | -- |
 | **D2265** | ADR 0262 / D2261: the store's files. | Infisical's own `docker-compose.prod.yml` (read 2026-10-09): one `.env` handed to EVERY container (the database and Redis see `ENCRYPTION_KEY`), floating tags (`infisical:latest`, `redis`, `postgres:14-alpine`), the backend published on `80:8080`. Infisical v0.165.16 reports `inviteOnlySignup: true` on a fresh instance (`/api/status`). | **Three env files, one reader each** (`infisical.env` the backend, `db.env` the database, `backup.env` the backup's rclone), the non-secret settings in `environment`; tags pinned by digest (`infisical v0.165.16`, `postgres 16.15-alpine`, `redis 7.4.11-alpine`, `caddy 2.11.4-alpine`, `rclone 1.75.1` -- the newest at least two weeks old on 2026-10-09, each digest read from the registry with linux/amd64); `127.0.0.1:8080` only. **Whether the first account can sign up under `inviteOnlySignup` is Sheet I2's reading.** | Upstream's file is a demo; the store holds the cipher pass. | 0262 |
 | **D2266** | -- | Caddy's ACME account here has no e-mail (`cert_issuer acme`, no `email`), so no expiry notice reaches anyone; Caddy renews on its own, and nothing in the product reads the store's certificate. | **Accepted for now; read by hand** in M6 (`openssl s_client` from the main host: issuer, `notAfter`) and named in §10 -- a host's `materialize-secrets` failing with a TLS error is the symptom, `docs/secret-store.md` §7. | An e-mail in a committed file would be the operator's address in the repository. | 0262 |
+| **D2267** | Sheet I2: *"Sign up: the first account is the instance administrator"*; D2265: `inviteOnlySignup: true` on a fresh instance. | After the first account, `/api/status` read `inviteOnlySignup: false`: the organisation's *Invite only* (asked at its creation, chosen) governs who joins the ORGANISATION; the instance itself still let anyone who reached the page create an account. The firewall stopped anyone reaching it. | **Server-wide sign-up disabled** in the Server Admin Console (a temporary ufw rule for the operator's address, removed on the same sheet); read in the store's database: `super_admin.allowSignUp = false`, `allowedSignUpDomain` null. `docs/secret-store.md` §3 step 6 says so. | Two doors, each closed by its own setting; the firewall is a third. | 0262 |
+| **D2268** | ADR 0262: no project is created by hand; the bootstrap creates one per project, named and slugged by the key (`bootstrap-providers.py:419-428`). | Creating the organisation created **three projects** nobody asked for -- Infisical's own products, each with a generated slug: `cert-manager-b-pyo` (type `cert-manager`), `pam-xs-hd` (`pam`), `agent-vault-r-sb-l` (`agent-vault`), all 2026-10-08 21:18:03. | **Left as they are**: none is the `secret-manager` type the bootstrap creates, and none can take a project key's slug. The restore drill's comparison counts them (`projects live=3 drill=3`). | A count that includes defaults is still a count; naming them stops the next reader wondering. | 0262 |
 
 ---
 
@@ -285,7 +287,52 @@ skipped (the module's own). **Battery 6/6 killed**, each control PASSED, the tre
 after: M1 a tag without its digest, M2 `0.0.0.0:8080`, M3 the dump written unencrypted, M4
 the edge off the host network, M5 the newest gate not linting the store, M6 the database
 reading the backend's env file. Rows **D2263–D2266**. CI: *(recorded in the sheets' Done)*.
-**The sittings' Done** *(the executor writes it after Sheets E1, D1, I1–I4)*.
+CI: **run 37839496770, `contract` success** on `c82e7ff`.
+
+**Done (the sittings, 2026-10-08/09 UTC).** **E1** (D2263, D2264): `op` on both servers
+(0700/0600, `/etc/sudoers.d/90-op` 0440, passwordless sudo read back); on the store, the
+product's `00-agentic-postgres-ssh.conf` (port 22) — `sshd -T` `passwordauthentication no`,
+`permitrootlogin no`, a no-key client offered `publickey` only; `ubuntu` locked on both
+(`passwd -S` `L`, empty `authorized_keys`, `90-cloud-init-users` removed, *not allowed to run
+sudo*, its login refused). The store's sshd log showed password guessing from two addresses
+before E1b. The operator first ran the `op` login from a Windows shell, where
+`~/.ssh/agentic_postgres_ed25519` is not the key and ssh asked for a password; from the
+Ubuntu app it worked. **D1**: `secrets.agenticpostgresql.com` A `15.204.66.146` at 1.1.1.1
+and 8.8.8.8 (grey: the origin's address answers), AAAA empty. **I1**: Docker 29.8.2,
+Compose v5.6.0, `age` 1.2.1 (`op` not in the docker group); ufw 22 and 80 from anywhere, 443
+from `15.204.231.45` and `62.238.99.122` only. **The keys were written by one `sudo sh -c`
+that generates all three on the host and refuses to run twice** (the sheet's editor step
+replaced: nothing typed, nothing pasted), then shown once on the operator's screen for the
+password manager and the offline copy; lengths read back 32/44/87/48, both files root 0600.
+`up -d`: four containers running, `/api/status` 200 32 s after start; **Caddy obtained the
+Let's Encrypt certificate at its first attempt, zero error lines** (issuer `YE1`, notAfter
+2027-01-06); from the main host `https://…/api/status` 200, verify 0, 0.28 s; from the
+workstation 80 → 308 to https, 443 times out. **Memory**: the backend 1.26 GiB of its 1.5 GiB
+cap a minute after start, **946 MiB settled** and 871 MiB later, no restart, no OOM;
+database 99–120 MiB, Redis 9, Caddy 23–34; the host 2,215–2,220 MiB available — the caps
+stand. **I2**: the console reached by D2250's alternative (a temporary ufw rule for the
+operator's address `217.113.25.22`, deleted on the same sheet, read back) rather than the
+tunnel; administrator, organisation `agentic-postgres` (**id
+`5573621e-e34c-427b-be4f-75db12f884be`, slug `agentic-postgres-c-k7t`**, invite only), the
+`control-plane` identity (organisation Admin, Universal Auth, access token TTL 900, max
+3600, one client secret — in the operator's password manager only); D2267 (sign-up) and
+D2268 (three built-in projects). **I3**: the B2 bucket `apg-secret-store-backup` (private,
+lifecycle: hidden at 30 days, deleted a day later), a key restricted to it in
+`/etc/secret-store/backup.env` (written by a hidden prompt; lengths 25/31, root 0600); the
+`age` identity generated on the WORKSTATION (`~/.secret-store/backup-identity.txt`, 0600,
+and the operator's password manager), its recipient on the store (a test encryption read the
+`age-encryption.org/v1` header); the first pass: `infisical-20261008T214111Z.dump.age`
+**4,292,996 bytes, copied and read back**, exit 0; the timer enabled (next 05:15 UTC).
+**I4 — the restore, from B2**: the newest object fetched from the bucket (4,292,996 bytes),
+decrypted on the workstation with the operator's identity (4,291,756 bytes), restored into
+the throwaway project `secret-store-drill` (backend on `127.0.0.1:18080`, no edge, the same
+keys): `pg_restore` rc 0 with no log line, `/api/status` 200 after 59 s; **organisations,
+users, identities, Universal Auth configurations, client secrets, projects, secrets and the
+sign-up setting all equal** to the live store (1, 1, 1, 1, 1, 3, 0, 1); **the control-plane
+identity logged in to the restored copy, HTTP 200**; the drill removed (`down -v`: no
+container, volume or network left), the plain dump shredded on both machines, the encrypted
+copy removed. Scripts in WSL `~/s38/mig/` (`drill-fetch.sh`, `drill-restore.sh`,
+`i1c-check.sh`, …) and the scratchpad. Rows **D2263–D2268**. **NEXT FREE D2269.**
 
 ### Run M2 — the main host, provisioned at 1.15.0; the store measured by the product
 
