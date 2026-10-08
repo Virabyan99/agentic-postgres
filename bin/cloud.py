@@ -1,8 +1,9 @@
 #!/usr/bin/env python
-"""`apg login|logout|context|org|project`: the management API from a terminal (D2066, D2067).
+"""`apg login|logout|context|org|project|compute|operation`: the management API (D2066, D2169).
 
-Invoked by `bin/login.sh`, `bin/logout.sh`, `bin/context.sh`, `bin/org.sh` and
-`bin/project.sh`, each passing its family as the first argument. Everything a
+Invoked by `bin/login.sh`, `bin/logout.sh`, `bin/context.sh`, `bin/org.sh`,
+`bin/project.sh`, `bin/compute.sh` and `bin/operation.sh`, each passing its
+family as the first argument. Everything a
 test can hold still -- the private state directory, the checked secret files,
 the context, the refresh exchange, https -- is
 `agentic_postgres.control_client`; this file is the verbs.
@@ -18,16 +19,32 @@ A live session is ended by `logout`, never dropped: a login refuses while one
 is held. A key context is forgotten by `logout`, never revoked (`org
 key-revoke` does that).
 
+**A project's first administrator is handed over by hash** (ADR 0260, D2163):
+`project create` mints the token, keeps it in `handoffs/<operation-id>` (0600,
+in the 0700 state directory) and sends only its SHA-256; `project claim`
+presents it to the PROJECT's own `/auth/reset-password` -- never to the
+control plane -- and removes the file once the project accepted it. **An
+export's download URL is a one-time bearer credential** (ADR 0259): `project
+export` waits for the operation, downloads the archive without following a
+redirect, checks its SHA-256 against the operation's result, and writes it
+0600 to `--output`; the URL is printed nowhere.
+
 Exit codes: 0 ok; 2 usage; 3 no context, no credential, an unusable local file,
-or not https; 5 refused by the server; 6 the server unreachable or unreadable.
+or not https; 5 refused by the server, or the operation failed; 6 the server
+unreachable or unreadable, or an outcome that could not be determined; 7
+`wait` (and `export`) stopped at its own `--timeout`.
 """
 
 from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import json
+import os
+import secrets
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -39,6 +56,21 @@ from agentic_postgres import control_client as cc  # noqa: E402
 from agentic_postgres.control_client import ClientError  # noqa: E402
 
 ROLES = ("owner", "admin", "member", "viewer")
+
+#: The compute profiles a project may ask for (ADR 0258) -- the request's
+#: schema validates them too; listed here so `--help` names them.
+PROFILES = ("small", "standard", "large")
+
+#: `wait`'s own timeout, distinct from every server answer (D2169).
+EXIT_TIMEOUT = 7
+
+#: How often `wait` reads the operation, and how long it waits by default: a
+#: creation takes minutes (D2184).
+POLL_SECONDS = 5
+WAIT_SECONDS = 2400
+
+#: The terminal states, and the one that is a success.
+TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
 
 
 # ---------------------------------------------------------------------------
@@ -531,6 +563,267 @@ def project_show(arguments: argparse.Namespace) -> int:
     return cc.EXIT_OK
 
 
+def _operation_id(text: str) -> str:
+    try:
+        return str(uuid.UUID(text))
+    except ValueError as error:
+        raise ClientError(cc.EXIT_USAGE, f"not an operation id: {text!r}") from error
+
+
+def _accepted(answer: Any, as_json: bool, *, what: str) -> dict[str, Any]:
+    operation = answer["operation"]
+    lines = [
+        f"{what}: operation {operation['id']} recorded ({operation['status']})",
+        f"  follow it: bin/operation.sh wait --operation {operation['id']}",
+    ]
+    if answer.get("message"):
+        lines.append(f"  {answer['message']}")
+    emit(answer, as_json, lines)
+    return operation
+
+
+def project_create(arguments: argparse.Namespace) -> int:
+    """The handoff token is kept BEFORE anything is sent, so a request the
+    server recorded always has its token on this machine (ADR 0260)."""
+    current = person_session()
+    org = current_organization(current, arguments.organization)
+    handoffs = cc.handoff_directory(current.directory)
+    token = secrets.token_urlsafe(32)
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    pending = handoffs / f"pending-{digest[:16]}"
+    cc.write_new_private_file(pending, (token + "\n").encode("utf-8"))
+    body = {
+        "organization": org,
+        "name": arguments.name,
+        "profile": arguments.profile,
+        "admin_username": arguments.admin_username,
+        "handoff_sha256": digest,
+    }
+    try:
+        answer = current.call("POST", "/projects", body)
+    except ClientError as error:
+        if error.code == cc.EXIT_REFUSED:
+            pending.unlink(missing_ok=True)  # refused: nothing was recorded
+        else:
+            print(f"project: whether the creation was recorded is not known; its handoff token "
+                  f"is kept in {pending}", file=sys.stderr)  # fmt: skip
+        raise
+    operation = answer["operation"]
+    kept = handoffs / _operation_id(str(operation["id"]))
+    os.replace(pending, kept)
+    _accepted(answer, arguments.json, what="creating")
+    if not arguments.json:
+        print(f"  the administrator's handoff token is in {kept} (0600); once the operation has "
+              "succeeded: bin/project.sh claim --project-key KEY")  # fmt: skip
+    return cc.EXIT_OK
+
+
+def project_claim(arguments: argparse.Namespace) -> int:
+    """The token presented to the PROJECT (its `routes.app`, read from the
+    registry), never to the control plane; the file removed once accepted."""
+    current = person_session()
+    key = _project_key(current, arguments.project_key)
+    record = current.call("GET", f"/projects/{key}")
+    if not record.get("app_route"):
+        raise ClientError(cc.EXIT_PREREQUISITE, f"{key} has no application address yet")
+    app = cc.check_endpoint(str(record["app_route"]))
+    operations = current.call("GET", f"/operations?organization={record['organization_id']}")
+    created = [
+        row
+        for row in operations["operations"]
+        if row["type"] == "project.create"
+        and row["project_key"] == key
+        and row["status"] == "succeeded"
+    ]
+    if len(created) != 1:
+        raise ClientError(cc.EXIT_PREREQUISITE, f"no succeeded creation of {key} is visible")
+    path = cc.handoff_directory(current.directory) / _operation_id(str(created[0]["id"]))
+    token = cc.read_private_file(path).decode("utf-8").strip()
+    password = read_password(
+        arguments.password_file, f"new password for {key}'s administrator: ", confirm=True
+    )
+    status, body = cc.send(
+        "POST", f"{app}/auth/reset-password", {"reset_token": token, "password": password}
+    )
+    if status != 200:
+        raise cc.refusal(status, body)
+    path.unlink()
+    print(f"claimed: {key}'s administrator now has the password you chose; sign in at {app}")
+    return cc.EXIT_OK
+
+
+def project_status(arguments: argparse.Namespace) -> int:
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    record = current.call("GET", f"/projects/{key}")
+    shown = {name: record.get(name) for name in ("key", "state", "managed_by", "profile", "region")}
+    emit(shown, arguments.json, [f"  {name:<12}  {value or '-'}" for name, value in shown.items()])
+    return cc.EXIT_OK
+
+
+def project_sleep(arguments: argparse.Namespace) -> int:
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    _accepted(current.call("POST", f"/projects/{key}/sleep"), arguments.json, what="sleeping")
+    return cc.EXIT_OK
+
+
+def project_wake(arguments: argparse.Namespace) -> int:
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    _accepted(current.call("POST", f"/projects/{key}/wake"), arguments.json, what="waking")
+    return cc.EXIT_OK
+
+
+def project_delete(arguments: argparse.Namespace) -> int:
+    current = person_session()
+    key = _project_key(current, arguments.project_key)
+    if arguments.confirm != key:
+        raise ClientError(
+            cc.EXIT_USAGE, f"--confirm must be the project's key exactly ({key}); nothing was sent"
+        )
+    _accepted(current.call("DELETE", f"/projects/{key}"), arguments.json, what="deleting")
+    return cc.EXIT_OK
+
+
+def project_export(arguments: argparse.Namespace) -> int:
+    """Request, wait, download once, check, write 0600 -- the URL printed nowhere."""
+    output = Path(arguments.output)
+    cc.refuse_existing_output(output)
+    current = person_session()
+    key = _project_key(current, arguments.project_key)
+    operation = current.call("POST", f"/projects/{key}/export")["operation"]
+    print(f"exporting: operation {operation['id']} recorded; waiting for it", file=sys.stderr)
+    final = _wait(current, str(operation["id"]), arguments.timeout, arguments.interval)
+    if final["status"] != "succeeded":
+        raise _unsuccessful(final)
+    url = final.get("download_url")
+    if not isinstance(url, str):
+        raise ClientError(
+            cc.EXIT_UNREACHABLE,
+            "the export succeeded but its download URL was not handed to this command (it is "
+            "handed out once); export again",
+        )
+    archive = cc.download(url)
+    digest = hashlib.sha256(archive).hexdigest()
+    result = final.get("result") or {}
+    if digest != result.get("sha256") or len(archive) != result.get("size_bytes"):
+        raise ClientError(
+            cc.EXIT_UNREACHABLE,
+            "the downloaded archive is not the one the export recorded; nothing was written",
+        )
+    cc.write_new_private_file(output, archive)
+    emit(
+        {
+            "operation": final["id"],
+            "output": str(output),
+            "sha256": digest,
+            "size_bytes": len(archive),
+        },
+        arguments.json,
+        [f"exported {key} to {output} (0600): {len(archive)} bytes, sha256 {digest}"],
+    )
+    return cc.EXIT_OK
+
+
+# ---------------------------------------------------------------------------
+# compute
+# ---------------------------------------------------------------------------
+
+
+def compute_get(arguments: argparse.Namespace) -> int:
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    record = current.call("GET", f"/projects/{key}")
+    shown = {"key": key, "profile": record.get("profile")}
+    emit(shown, arguments.json, [f"  {key}  {record.get('profile') or '-'}"])
+    return cc.EXIT_OK
+
+
+def compute_set(arguments: argparse.Namespace) -> int:
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    answer = current.call("PUT", f"/projects/{key}/compute", {"profile": arguments.profile})
+    _accepted(answer, arguments.json, what=f"resizing to {arguments.profile}")
+    return cc.EXIT_OK
+
+
+# ---------------------------------------------------------------------------
+# operation
+# ---------------------------------------------------------------------------
+
+
+def _shown(row: dict[str, Any]) -> dict[str, Any]:
+    """An operation as printed: a download URL is never printed. If this read
+    was the one that received it, the URL is gone with this process."""
+    if "download_url" not in row:
+        return row
+    print(
+        "operation: this read received the export's one-time download URL and discards it; "
+        "bin/project.sh export fetches the archive itself",
+        file=sys.stderr,
+    )
+    return {name: value for name, value in row.items() if name != "download_url"}
+
+
+def _unsuccessful(row: dict[str, Any]) -> ClientError:
+    reason = (row.get("result") or {}).get("reason")
+    detail = f": {row.get('error_code')}" + (f" ({reason})" if reason else "")
+    return ClientError(cc.EXIT_REFUSED, f"operation {row['id']} {row['status']}{detail}")
+
+
+def _wait(current: cc.Session, operation: str, timeout: int, interval: int) -> dict[str, Any]:
+    """Read the operation every `interval` s until it is terminal; a reading
+    that fails is that failure (ADR 0195), never a guess; exit 7 at `timeout`."""
+    operation = _operation_id(operation)
+    deadline = time.monotonic() + timeout
+    while True:
+        row = current.call("GET", f"/operations/{operation}")
+        if not isinstance(row, dict) or not isinstance(row.get("status"), str):
+            raise ClientError(cc.EXIT_UNREACHABLE, "the operation answered in an unreadable shape")
+        if row["status"] in TERMINAL:
+            return row
+        if time.monotonic() + interval > deadline:
+            raise ClientError(
+                EXIT_TIMEOUT,
+                f"operation {operation} is still {row['status']} (step {row.get('step') or '-'}, "
+                f"{row.get('progress')}%) after {timeout} s; it continues on the server",
+            )
+        time.sleep(interval)
+
+
+def operation_show(arguments: argparse.Namespace) -> int:
+    current = session()
+    row = _shown(current.call("GET", f"/operations/{_operation_id(arguments.operation)}"))
+    emit(row, arguments.json, [f"  {name:<12}  {value}" for name, value in row.items()])
+    return cc.EXIT_OK
+
+
+def operation_list(arguments: argparse.Namespace) -> int:
+    current = session()
+    org = current_organization(current, arguments.organization)
+    rows = current.call("GET", f"/operations?organization={org}")["operations"]
+    emit(rows, arguments.json,
+         table(rows, ("id", "type", "project_key", "status", "step", "created_at")))  # fmt: skip
+    return cc.EXIT_OK
+
+
+def operation_wait(arguments: argparse.Namespace) -> int:
+    current = session()
+    row = _shown(_wait(current, arguments.operation, arguments.timeout, arguments.interval))
+    emit(row, arguments.json, [f"operation {row['id']} {row['status']}"])
+    if row["status"] != "succeeded":
+        raise _unsuccessful(row)
+    return cc.EXIT_OK
+
+
+def operation_cancel(arguments: argparse.Namespace) -> int:
+    current = session()
+    row = current.call("POST", f"/operations/{_operation_id(arguments.operation)}/cancel")
+    emit(row, arguments.json, [f"operation {row['operation']['id']} cancelled"])
+    return cc.EXIT_OK
+
+
 # ---------------------------------------------------------------------------
 # The parser
 # ---------------------------------------------------------------------------
@@ -631,7 +924,73 @@ def parser() -> argparse.ArgumentParser:
     verb.set_defaults(run=project_show)
     verb.add_argument("--project-key")
     verb.add_argument("--json", action="store_true")
+    verb = project.add_parser("create", add_help=False)
+    verb.set_defaults(run=project_create)
+    verb.add_argument("--name", required=True)
+    verb.add_argument("--profile", required=True, choices=PROFILES)
+    verb.add_argument("--admin-username", required=True)
+    verb.add_argument("--organization")
+    verb.add_argument("--json", action="store_true")
+    verb = project.add_parser("claim", add_help=False)
+    verb.set_defaults(run=project_claim)
+    verb.add_argument("--project-key")
+    verb.add_argument("--password-file")
+    for name, run in (("status", project_status), ("sleep", project_sleep),
+                      ("wake", project_wake)):  # fmt: skip
+        verb = project.add_parser(name, add_help=False)
+        verb.set_defaults(run=run)
+        verb.add_argument("--project-key")
+        verb.add_argument("--json", action="store_true")
+    verb = project.add_parser("delete", add_help=False)
+    verb.set_defaults(run=project_delete)
+    verb.add_argument("--project-key", required=True)
+    verb.add_argument("--confirm", required=True)
+    verb.add_argument("--json", action="store_true")
+    verb = project.add_parser("export", add_help=False)
+    verb.set_defaults(run=project_export)
+    verb.add_argument("--project-key")
+    verb.add_argument("--output", required=True)
+    _waiting(verb)
+
+    compute = _verbs(families.add_parser("compute", add_help=False))
+    verb = compute.add_parser("get", add_help=False)
+    verb.set_defaults(run=compute_get)
+    verb.add_argument("--project-key")
+    verb.add_argument("--json", action="store_true")
+    verb = compute.add_parser("set", add_help=False)
+    verb.set_defaults(run=compute_set)
+    verb.add_argument("--project-key")
+    verb.add_argument("--profile", required=True, choices=PROFILES)
+    verb.add_argument("--json", action="store_true")
+
+    operation = _verbs(families.add_parser("operation", add_help=False))
+    for name, run in (("show", operation_show), ("cancel", operation_cancel)):
+        verb = operation.add_parser(name, add_help=False)
+        verb.set_defaults(run=run)
+        verb.add_argument("--operation", required=True)
+        verb.add_argument("--json", action="store_true")
+    verb = operation.add_parser("list", add_help=False)
+    verb.set_defaults(run=operation_list)
+    verb.add_argument("--organization")
+    verb.add_argument("--json", action="store_true")
+    verb = operation.add_parser("wait", add_help=False)
+    verb.set_defaults(run=operation_wait)
+    verb.add_argument("--operation", required=True)
+    _waiting(verb)
     return top
+
+
+def _seconds(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("at least 1")
+    return value
+
+
+def _waiting(verb: argparse.ArgumentParser) -> None:
+    verb.add_argument("--timeout", type=_seconds, default=WAIT_SECONDS)
+    verb.add_argument("--interval", type=_seconds, default=POLL_SECONDS)
+    verb.add_argument("--json", action="store_true")
 
 
 def main(argv: list[str] | None = None) -> int:

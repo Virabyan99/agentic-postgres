@@ -1,4 +1,11 @@
-"""`apg login|logout|context|org|project` against the real control app (CTL-CLI-001, D2066).
+"""`apg login|logout|context|org|project|compute|operation` against the real control app.
+
+CTL-CLI-001 (D2066), and Session 38's verbs (D2169, D2163): `project create|
+claim|status|sleep|wake|export|delete`, `compute get|set`, `operation
+show|list|wait|cancel`. The reconciler does not run here: its half -- an
+operation claimed and finished -- is written as the superuser, the way the
+reconciler writes it; the project's own `/auth/reset-password` and a provider's
+download URL are a loopback stand-in that records what reached it (`Elsewhere`).
 
 The control app is served by `uvicorn.Server` on `127.0.0.1:<free port>` over
 `control_cluster`, and **every command runs as a subprocess against it** --
@@ -12,15 +19,21 @@ or a terminal, https except loopback, a logout the server hears, and the
 endpoint read from the context. What the routes do is the Run 4/5 modules'.
 """
 
+# ruff: noqa: S608 -- every interpolated value is an id, a key or a token this
+# module minted, against a throwaway cluster.
+
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +41,7 @@ import control_cluster as cc
 import pytest
 
 from agentic_postgres import REPO_ROOT
+from app import operations
 
 pytestmark = [pytest.mark.contract, pytest.mark.database, pytest.mark.security, pytest.mark.p0]
 
@@ -53,13 +67,17 @@ class Person:
         self.state = home / ".config" / "apg"
 
     def run(
-        self, command: str, *argv: str, stdin: str | None = None
+        self, command: str, *argv: str, stdin: str | None = None, trust: Path | None = None
     ) -> subprocess.CompletedProcess:
         environment = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": str(self.home),
             "LANG": "C.UTF-8",
         }
+        if trust is not None:
+            # The one certificate a TLS stand-in serves, trusted by OpenSSL's
+            # own variable -- the client's code path is the production one.
+            environment["SSL_CERT_FILE"] = str(trust)
         return subprocess.run(
             [str(BIN / f"{command}.sh"), *argv],
             input=stdin, stdin=None if stdin is not None else subprocess.DEVNULL,
@@ -367,3 +385,388 @@ def test_project_list_reads_the_endpoint_from_the_context(person: Person, served
     context_path.write_text(json.dumps(context))
     gone = person.run("project", "list")
     assert gone.returncode == 6 and "could not be reached" in gone.stderr, gone.stderr
+
+
+# ---------------------------------------------------------------------------
+# Session 38 Run 8: the operations' verbs (D2169, D2163)
+# ---------------------------------------------------------------------------
+
+
+class Elsewhere:
+    """Somewhere that is not the control plane -- a project's own address, a
+    provider's download URL: records every request, answers from `routes`."""
+
+    def __init__(self, tls_directory: Path | None = None) -> None:
+        self.requests: list[tuple[str, str, bytes]] = []
+        self.routes: dict[tuple[str, str], tuple[int, dict[str, str], bytes]] = {}
+        outer = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def _answer(self) -> None:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length) if length else b""
+                outer.requests.append((self.command, self.path, body))
+                status, headers, payload = outer.routes.get(
+                    (self.command, self.path.split("?")[0]), (404, {}, b"{}")
+                )
+                self.send_response(status)
+                for name, value in headers.items():
+                    self.send_header(name, value)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            do_GET = do_POST = _answer
+
+            def log_message(self, *_arguments: Any) -> None:
+                return None
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        scheme = "http"
+        self.certificate: Path | None = None
+        if tls_directory is not None:
+            import ssl
+
+            self.certificate = _self_signed(tls_directory)
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(self.certificate, tls_directory / "key.pem")
+            self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
+            scheme = "https"
+        self.base = f"{scheme}://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def answer(
+        self, method: str, path: str, status: int, payload: bytes = b"{}", **headers: str
+    ) -> None:
+        self.routes[(method, path)] = (status, headers, payload)
+
+
+def _self_signed(directory: Path) -> Path:
+    """A certificate for 127.0.0.1 (an IP SAN) and its key, written to `directory`."""
+    import datetime
+    import ipaddress
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")])
+    now = datetime.datetime.now(datetime.UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(minutes=5))
+        .not_valid_after(now + datetime.timedelta(hours=1))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
+            critical=False,
+        )
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    (directory / "key.pem").write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    path = directory / "certificate.pem"
+    path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    return path
+
+
+@pytest.fixture(scope="module")
+def elsewhere() -> Any:
+    place = Elsewhere()
+    yield place
+    place.server.shutdown()
+
+
+@pytest.fixture(scope="module")
+def project_address(tmp_path_factory: pytest.TempPathFactory) -> Any:
+    """A project's own address over TLS: the registry's `app_route` is https."""
+    place = Elsewhere(tmp_path_factory.mktemp("project-tls"))
+    yield place
+    place.server.shutdown()
+
+
+@pytest.fixture
+def accepting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The six types accepted, for this proof only: the served app runs in this
+    process, so the module the routes read is the one patched."""
+    monkeypatch.setattr(operations, "ACCEPTED_TYPES", operations.EXECUTED_TYPES)
+
+
+def _ready_slot(drive: Any) -> None:
+    reading = [{"key": "slot1-prod", "state": "ready", "region_id": "eu-hel-1"}]
+    drive.cluster.query(f"SELECT app.control_record_slots('{json.dumps(reading)}'::jsonb)")
+
+
+def _adopt(drive: Any, organization: str, key: str, app_route: str) -> None:
+    drive.cluster.query(
+        f"SELECT app.control_adopt_project('{key}', '{organization}', '{key.split('-')[0]}', "
+        f"'prod', '{key}.test', '1.16.0', 'abc', 'eu-hel-1', 'small', NULL, '{app_route}')"
+    )
+
+
+def _finish(drive: Any, operation: str, status: str, code: str | None = None,
+            result: dict[str, Any] | None = None, *, secret: str | None = None,
+            project_key: str | None = None) -> None:  # fmt: skip
+    """The reconciler's half, as the superuser: running, then finished."""
+    drive.cluster.query(
+        "UPDATE app.control_operations SET status = 'running', started_at = now(), "
+        f"attempt = attempt + 1 WHERE id = '{operation}'"
+    )
+    if project_key:
+        drive.cluster.query(
+            f"SELECT app.control_advance_operation('{operation}', 'registry', 90, '{project_key}')"
+        )
+
+    def literal(value: str | None) -> str:
+        return "NULL" if value is None else "'" + value.replace("'", "''") + "'"
+
+    document = json.dumps(result) if result is not None else None
+    drive.cluster.query(
+        f"SELECT app.control_finish_operation('{operation}', {literal(status)}, "
+        f"{literal(code)}, {literal(document)}::jsonb, {literal(secret)})"
+    )
+
+
+def _pending(drive: Any, where: str) -> str:
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        rows = drive.cluster.query(
+            f"SELECT id FROM app.control_operations WHERE status = 'pending' AND {where}"
+        )
+        if rows:
+            return rows[0]
+        time.sleep(0.2)
+    raise AssertionError(f"no pending operation where {where}")
+
+
+def _created(person: Person) -> tuple[dict[str, Any], str]:
+    """`project create`, its operation, and the handoff token it kept."""
+    made = person.run("project", "create", "--name", "Shop backend", "--profile", "small",
+                      "--admin-username", "shop.admin", "--json")  # fmt: skip
+    assert made.returncode == 0, made.stderr
+    operation = json.loads(made.stdout)["operation"]
+    token = (person.state / "handoffs" / operation["id"]).read_text().strip()
+    return operation, token
+
+
+def test_only_the_hash_reaches_the_control_plane(
+    person: Person, served: Any, accepting: None
+) -> None:
+    """ADR 0260: `create` mints the token, keeps it in `handoffs/<operation>`,
+    and sends its SHA-256 alone -- the control plane's row carries the hash and
+    nothing of the token, and no output prints it."""
+    _, drive = served
+    _member(served, "hash-member")
+    _ready_slot(drive)
+    assert person.login("hash-member").returncode == 0
+    operation, token = _created(person)
+    assert len(token) == 43
+    stored = drive.cluster.query(
+        "SELECT arguments ->> 'handoff_sha256', arguments::text FROM app.control_operations "
+        f"WHERE id = '{operation['id']}'"
+    )[0]
+    digest, arguments = stored.split("|", 1)
+    assert digest == hashlib.sha256(token.encode()).hexdigest()
+    assert token not in arguments
+    assert drive.cluster.query(
+        "SELECT count(*) FROM app.control_operations WHERE "
+        f"position('{token}' in arguments::text || coalesce(result::text, '')) > 0"
+    ) == ["0"]
+    # A refused creation keeps no token: a second one while the first is in flight.
+    again = person.run("project", "create", "--name", "Second", "--profile", "small",
+                       "--admin-username", "shop.admin")  # fmt: skip
+    assert again.returncode == 5 and "conflict" in again.stderr, again.stderr
+    assert sorted(p.name for p in (person.state / "handoffs").iterdir()) == [operation["id"]]
+
+
+def test_the_handoff_token_is_private_and_removed_after_claim(
+    person: Person, served: Any, accepting: None, project_address: Elsewhere
+) -> None:
+    """The token file is 0600 in a 0700 directory; `claim` presents it to the
+    PROJECT's own `/auth/reset-password` (its address read from the registry),
+    with the password from a 0600 file -- and removes it only once the project
+    accepted it. The control: a project that refuses leaves the file in place."""
+    _, drive = served
+    _, org = _member(served, "claim-member")
+    _ready_slot(drive)
+    assert person.login("claim-member").returncode == 0
+    operation, token = _created(person)
+    handoffs = person.state / "handoffs"
+    assert _mode(handoffs) == 0o700 and _mode(handoffs / operation["id"]) == 0o600
+    key = "slot1-prod"
+    elsewhere = project_address
+    _adopt(drive, org, key, f"{elsewhere.base}/{org}/api/app")
+    _finish(drive, operation["id"], "succeeded", result={"project_key": key}, project_key=key)
+    password = person.private("chosen.password", "the administrator's own choice")
+    reset = f"/{org}/api/app/auth/reset-password"
+
+    elsewhere.answer("POST", reset, 401, b'{"error": "authentication_failed"}')
+    refused = person.run(
+        "project", "claim", "--project-key", key, "--password-file", str(password),
+        trust=elsewhere.certificate,
+    )  # fmt: skip
+    assert refused.returncode == 5 and "authentication_failed" in refused.stderr, refused.stderr
+    assert (handoffs / operation["id"]).exists(), "a refused claim removed the token"
+
+    elsewhere.answer("POST", reset, 200, b'{"credential_version": 2}')
+    claimed = person.run(
+        "project", "claim", "--project-key", key, "--password-file", str(password),
+        trust=elsewhere.certificate,
+    )  # fmt: skip
+    assert claimed.returncode == 0, claimed.stderr
+    sent = [json.loads(body) for method, path, body in elsewhere.requests if path == reset]
+    assert sent[-1] == {"reset_token": token, "password": "the administrator's own choice"}
+    assert not (handoffs / operation["id"]).exists()
+    assert token not in claimed.stdout + claimed.stderr
+
+
+def test_export_downloads_once_without_following_a_redirect(
+    person: Person, served: Any, accepting: None, elsewhere: Elsewhere
+) -> None:
+    """`export` waits for its operation, fetches the one-time URL, checks the
+    archive's SHA-256 against the result and writes it 0600; the URL is printed
+    nowhere. A redirect is refused (exit 6) and nothing is written; so is an
+    archive that is not the one recorded."""
+    _, drive = served
+    _, org = _member(served, "export-member")
+    key = "slot2-prod"
+    _adopt(drive, org, key, "https://slot2.test/api/app")
+    assert person.login("export-member").returncode == 0
+    archive = b"PGDMP\x01 the customer's schemas"
+    elsewhere.answer("GET", "/exports/good.dump", 200, archive)
+    elsewhere.answer("GET", "/exports/moved.dump", 302, b"", Location="/exports/good.dump")
+    result = {
+        "sha256": hashlib.sha256(archive).hexdigest(),
+        "size_bytes": len(archive),
+        "expires_at": "2026-10-08T12:15:00+00:00",
+    }
+    for name, url, recorded, expected in (
+        ("good", f"{elsewhere.base}/exports/good.dump", result, 0),
+        ("moved", f"{elsewhere.base}/exports/moved.dump", result, 6),
+        ("altered", f"{elsewhere.base}/exports/good.dump", {**result, "sha256": "0" * 64}, 6),
+    ):
+        output = person.home / f"{name}.dump"
+        running = subprocess.Popen(
+            [str(BIN / "project.sh"), "export", "--project-key", key, "--output", str(output),
+             "--timeout", "60", "--interval", "1"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(person.home),
+                 "LANG": "C.UTF-8"},
+        )  # fmt: skip
+        operation = _pending(drive, f"project_key = '{key}' AND type = 'project.export'")
+        _finish(drive, operation, "succeeded", result=recorded, secret=url)
+        out, err = running.communicate(timeout=90)
+        assert running.returncode == expected, (name, err)
+        assert url not in out + err, name
+        if expected == 0:
+            assert output.read_bytes() == archive and _mode(output) == 0o600
+            assert drive.cluster.query(
+                f"SELECT count(*) FROM app.control_operations WHERE id = '{operation}' "
+                "AND result_secret IS NULL"
+            ) == ["1"], "the URL was taken once"
+        else:
+            assert not output.exists(), name
+
+
+def test_operation_wait_reads_each_outcome(
+    person: Person, served: Any, accepting: None, elsewhere: Elsewhere
+) -> None:
+    """`wait`: succeeded 0; failed 5 with its error code and reason; still
+    pending at its own timeout 7; a server that answers 5xx is 6 -- never read
+    as any outcome (ADR 0195)."""
+    _, drive = served
+    _, org = _member(served, "wait-member")
+    key = "slot3-prod"
+    _adopt(drive, org, key, "https://slot3.test/api/app")
+    assert person.login("wait-member").returncode == 0
+
+    def requested() -> str:
+        slept = person.run("project", "sleep", "--project-key", key, "--json")
+        assert slept.returncode == 0, slept.stderr
+        return json.loads(slept.stdout)["operation"]["id"]
+
+    first = requested()
+    _finish(drive, first, "succeeded", result={"steps": []})
+    done = person.run("operation", "wait", "--operation", first, "--interval", "1")
+    assert done.returncode == 0 and "succeeded" in done.stdout, done.stderr
+
+    second = requested()
+    _finish(
+        drive, second, "failed", "operation_failed", {"reason": "project-runtime stop exited 1"}
+    )
+    failed = person.run("operation", "wait", "--operation", second, "--interval", "1")
+    assert failed.returncode == 5, failed.stderr
+    assert "operation_failed" in failed.stderr and "project-runtime stop exited 1" in failed.stderr
+
+    third = requested()
+    pending = person.run("operation", "wait", "--operation", third, "--timeout", "2",
+                         "--interval", "1")  # fmt: skip
+    assert pending.returncode == 7 and "still pending" in pending.stderr, pending.stderr
+    cancelled = person.run("operation", "cancel", "--operation", third)
+    assert cancelled.returncode == 0, cancelled.stderr
+
+    key_path = person.home / "ops-key"
+    assert person.run("org", "key-create", "--name", "ops", "--scopes", "operations:read",
+                      "--output", str(key_path)).returncode == 0  # fmt: skip
+    assert person.run("logout").returncode == 0
+    assert person.run("login", "key", "--endpoint", person.endpoint,
+                      "--key-file", str(key_path)).returncode == 0  # fmt: skip
+    context_path = person.state / "context.json"
+    context = json.loads(context_path.read_text())
+    context["endpoint"] = f"{elsewhere.base}/v1"
+    context_path.write_text(json.dumps(context))
+    elsewhere.answer("GET", f"/v1/operations/{first}", 503, b'{"error": "unavailable"}')
+    broken = person.run("operation", "wait", "--operation", first, "--interval", "1")
+    assert broken.returncode == 6, broken.stderr
+
+
+def test_compute_sleep_wake_and_delete_answer_with_an_operation(
+    person: Person, served: Any, accepting: None
+) -> None:
+    """Each write answers 202 with an operation of its own type; a resize
+    carries the restart sentence; `delete` refuses a `--confirm` that is not the
+    key before anything is sent. `compute get` reads the profile."""
+    _, drive = served
+    _, org = _member(served, "writes-member")
+    key = "slot4-prod"
+    _adopt(drive, org, key, "https://slot4.test/api/app")
+    assert person.login("writes-member").returncode == 0
+    got = person.run("compute", "get", "--project-key", key, "--json")
+    assert got.returncode == 0 and json.loads(got.stdout)["profile"] == "small", got.stderr
+
+    resized = person.run("compute", "set", "--project-key", key, "--profile", "standard", "--json")
+    assert resized.returncode == 0, resized.stderr
+    answer = json.loads(resized.stdout)
+    assert answer["operation"]["type"] == "project.resize" and "restart" in answer["message"]
+    _finish(drive, answer["operation"]["id"], "succeeded", result={"profile": "standard"})
+    for verb, kind in (("wake", "project.wake"), ("sleep", "project.sleep")):
+        written = person.run("project", verb, "--project-key", key, "--json")
+        assert written.returncode == 0, written.stderr
+        operation = json.loads(written.stdout)["operation"]
+        assert operation["type"] == kind
+        _finish(drive, operation["id"], "succeeded", result={})
+
+    before = drive.cluster.query(
+        f"SELECT count(*) FROM app.control_operations WHERE project_key = '{key}'"
+    )
+    wrong = person.run("project", "delete", "--project-key", key, "--confirm", "slot4")
+    assert wrong.returncode == 2 and "nothing was sent" in wrong.stderr, wrong.stderr
+    assert (
+        drive.cluster.query(
+            f"SELECT count(*) FROM app.control_operations WHERE project_key = '{key}'"
+        )
+        == before
+    )
+    status = person.run("project", "status", "--project-key", key, "--json")
+    assert status.returncode == 0 and json.loads(status.stdout)["state"] == "sleeping"

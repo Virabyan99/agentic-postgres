@@ -368,6 +368,47 @@ def refusal(status: int, body: Any) -> ClientError:
     )
 
 
+def download(url: str) -> bytes:
+    """The body of one GET of a presigned URL -- an export's (ADR 0259) -- or a
+    ClientError. https only (http to a loopback host for the tests), no
+    redirect followed, nothing of the URL in any message: it is a bearer
+    credential to the object until it expires."""
+    parts = urllib.parse.urlsplit(url)
+    if not parts.hostname or not (
+        parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in LOOPBACK_HOSTS)
+    ):
+        raise ClientError(EXIT_UNREACHABLE, "the download URL is not https; nothing was fetched")
+    request = urllib.request.Request(url, method="GET")  # noqa: S310
+    try:
+        with _opener().open(request, timeout=TIMEOUT_SECONDS) as response:
+            status, body = response.status, response.read()
+    except urllib.error.HTTPError as error:
+        status, body = error.code, b""
+    except (urllib.error.URLError, TimeoutError, ssl.SSLError, OSError) as error:
+        raise ClientError(
+            EXIT_UNREACHABLE, f"the download could not be fetched ({type(error).__name__})"
+        ) from error
+    if status != 200:
+        raise ClientError(
+            EXIT_UNREACHABLE,
+            f"the download answered {status}"
+            + ("; a redirect is not followed" if 300 <= status < 400 else ""),
+        )
+    return body
+
+
+#: Where `project create` keeps each handoff token (ADR 0260), named by its
+#: creation's operation id, until `project claim` presents it: a 0700
+#: directory of 0600 files inside the state directory.
+HANDOFF_DIRECTORY = "handoffs"
+
+
+def handoff_directory(directory: Path) -> Path:
+    """The state directory's `handoffs/`, created 0700, refused when not private."""
+    ensure_state_directory(directory)
+    return ensure_state_directory(directory / HANDOFF_DIRECTORY)
+
+
 class Session:
     """The credential a context names, turned into a bearer for one process.
 

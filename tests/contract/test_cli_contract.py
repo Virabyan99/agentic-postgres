@@ -81,6 +81,10 @@ SHELL_COMMANDS = (
     "bin/logout.sh",
     "bin/org.sh",
     "bin/project.sh",
+    # Session 38 Run 8 (D2169): a project's compute profile, and the operations
+    # every write answers with -- two more shells over `bin/cloud.py`.
+    "bin/compute.sh",
+    "bin/operation.sh",
     "bin/docker-firewall.sh",
     "bin/doctor.sh",
     "bin/edge.sh",
@@ -518,6 +522,9 @@ COMMANDS_WITH_VERBS = {
     "bin/login.sh",
     "bin/org.sh",
     "bin/project.sh",
+    # Session 38 Run 8: get/set and show/list/wait/cancel, verb-first.
+    "bin/compute.sh",
+    "bin/operation.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/dev.sh",
