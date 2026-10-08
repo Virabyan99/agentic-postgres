@@ -477,6 +477,9 @@ D2189.** Rows the runs add go in a second table below it, in execution order.
 | **D2224** | D2169: *"`claim --project KEY`, … `delete --project KEY --confirm KEY`, `status --project KEY`; `bin/compute.sh get\|set --project KEY`"*. | Session 37's project verbs spell it `--project-key` (`cloud.py`'s `use`/`show`); `bin/apg.sh` APPENDS `--project "$APG_PROJECT"` to any verb whose `--help` documents `--project` (D1206's rule, `apg.sh:166-184`) -- a manifest path handed to a verb that takes a key. | **Every new verb takes `--project-key KEY`** (defaulting to the context's project, as `show` does; `delete` requires it); `apg` never appends a manifest to them. | One spelling per meaning, and the dispatcher's rule reads it. | 0253 |
 | **D2225** | D2164: *"`GET /v1/operations/{id}` returns it ONCE to the requesting member"*; D2169: *"`export --output` downloads the one-time URL"*. | The URL is handed to the FIRST read of a succeeded export by its requester -- `operation.sh show` or `wait` would consume it. `wait` polling every 5 s would make the proofs slow. | **`project export` requests, waits and downloads in one command** (no redirect followed, https or loopback http only, nothing of the URL in any message), and writes the archive 0600 only after its SHA-256 and size equal the operation's result -- else exit 6, nothing written. **`operation.sh show|wait` print a notice and DISCARD a URL they receive** (never printed). `wait` and `export` take `--interval S` (default 5) beside `--timeout S` (default 2400); exit 7 is their own timeout. | A bearer URL read by the wrong command is lost, never shown; an archive that is not the recorded one is not written. | 0259 |
 | **D2226** | D2163: *"`bin/project.sh create` generates `T` … writes it to `$XDG_CONFIG_HOME/apg/handoffs/<operation-id>` … `claim` presents `T` to the project's `{routes.app}/auth/reset-password`"*. | The operation id exists only after the `202`; a token written after it is lost if the process dies between the two, and a request whose outcome is unknown may have been recorded. `claim` knows a key, not an operation. | **The token is written BEFORE the request** (`handoffs/pending-<hash prefix>`, 0600, exclusive), renamed to the operation id on the `202`, removed on a refusal (nothing recorded), KEPT on an unknown outcome (exit 6, the path printed). **`claim` finds the creation** through `GET /v1/operations?organization=` (the one succeeded `project.create` of the key) and the address through `GET /v1/projects/{key}`'s `app_route` -- which the registry's CHECK holds to https, so a claim only ever posts over TLS (proved against a self-signed loopback stand-in the subprocess trusts by `SSL_CERT_FILE`). A refused claim keeps the file. | A token the server holds the hash of and this machine lost would make the project unclaimable. | 0260, 0195 |
+| **D2227** | Run 9: *"host copies in `/home/op` with sha256 printed"*; Session 37's instruments typed the host's address (`HOST=op@62.238.99.122` in `s37-external.sh` and `after-reboot.sh`, `ADDRESS=62.238.99.122` in `s37-dns.sh`). | D2223: the deployment moves to a new server before the trip, so an address typed today names the wrong host on the day, and a copy shipped today lands on a host the trip will not use. **The sweep's declarations are files on THIS host** (`/root/s36-prev-*` and `/root/s36-redeploy-before.json`, `/root/alpha-dev-administrator`, `/home/op/kit-2026-09-11`, `/home/op/replacement-bootstrap-state.json`, the restore, retirement, DX and fresh-host records, `/home/op/s31-third.yaml`, `/home/op/snippets-dev-outputs.json`, `/home/op/s30-retired-alpha-dev-jwk.json`). | **No child types an address** (the rehearsal greps them: 0): the workstation scripts read `~/s38/host-address` (refused when absent, exit 2), `s38-dns.sh` reads the checkout's `host.yaml` `host.expected_public_ipv4`, and `s38-hostyaml.py` takes the region as arguments from the provider's console. **Nothing is shipped in Run 9**; Run 11 ships to the host the trip uses. **The migration's plan owns the declarations**: each is carried to the new host or re-decided there (the rotation trio's previous values, the kit D1282 pins, the replacement bootstrap state, the records). | An instrument that names the old host is the stale-value class (D1239) waiting for the move. | — |
+| **D2228** | Run 12 step 1: *"the probe running on alpha, beta, control and -- after creation -- the slot"*; D2171: sleep *"time to the edge's first 404"*, wake *"time to the first 200"*. | Session 35's probe reads an op-owned copy of a DEPLOYED document (`/home/op/<key>-outputs.json`), and the slot's document is root's until a sheet copies it -- K2 does, only before the deletion. | **`s38-lifecycle.py` times the slot itself**, from the workstation, through the slot's `routes.app` read from the registry: while asleep, one sample a second for 60 s (expected the edge's 404); after `wake` is accepted, the seconds to the first answer that is not the edge's 404 (the slot's own `/auth/me`, 401 without a token). The probe runs on alpha, beta and control as planned; `s38-probe-start.sh` now ACCEPTS `control-prod` (Session 37 refused it) -- under its own label, with the classes it serves (`auth,mcp`; REST is unpublished there, D2172). | The caller's view of the slot is the slot's own address, read where a customer reads it; a sheet to copy a document mid-lifecycle would be a second K2. | 0259 |
+| **D2229** | D2164 / Run 12: *"export → download once (a second `GET /v1/operations/{id}` has no URL) → … → 900 s later the URL refused 403"*. | `bin/project.sh export` never exposes the URL (D2225), so the URL whose expiry is measured cannot come from the CLI. | **Two exports**: the first through the CLI (downloaded once, SHA-256 and size checked, written 0600; a second `operation show` hands no URL -- read from its stderr notice), the archive read with `pg_restore --list` in the pinned Postgres image (`SCHEMA` entries `app`, `api`; `app_private` nowhere); the second through the API itself with the probe owner's own session (a later TOTP step), its URL held IN MEMORY only -- fetched at once (expected 200) and again after `--expiry-seconds` + 30 (expected 403) -- and never written. The record names both operations. Rehearsed end to end on the workstation (`rehearse_lifecycle.py`: 8 operations, 81-88 s, the record 0600, no secret in it or its transcript). | The expiry is measured on a URL nothing stores; the archive is read through the command a customer runs. | 0259, 0195 |
 
 ---
 
@@ -1409,7 +1412,46 @@ with a fake reconciler finishing operations by hand through the superuser
 functions (the lifecycle instrument end to end in ~2 minutes), and against a
 copy of `host.example.yaml`.
 
-**Done.** *(the executor writes it)*
+**Done.** 2026-10-08 (no product code; scripts, transcripts and the derivation
+in WSL `~/s38/run9/` and the scratchpad's `s38/run9/`). **Run 8's CI: run
+37791472708 (`contract`) completed `success` on `ac740fb`.** **Derived by named
+substitution, every count asserted** (`s38-derive.py`, parents `~/s37/run11/`
+and `~/s37/run10/s37-v1.sh`): `s38-units.sh` (the reconciler's unit joins the
+default list, D2176), `s38-free.sh` (D2145's 1,024), `s38-probe-start.sh` /
+`-stop.sh` (control accepted, D2228), `s38-launch.sh` (refuses while
+`reconciler.sh status` reads `working` or cannot be read, D2178),
+`s38-sweep.sh` (every Session 37 flag kept, exactly two added:
+`--lifecycle-record-file`, `--slot-outputs`; the two files join the declared
+list), `s38-external.sh` (+ `--lifecycle-record-file`; 237 claims expected),
+`s38-dns.sh` (the slot's name; the AAAA reading added, D2148),
+`s38-after-reboot.sh` (five units), `s38-v1.sh` (Run 11 step 12's filter; no
+flag added). **New**: `s38-hostyaml.py` (the schema-4 candidate BY TEXT so the
+operator's comments survive; backup 0600; the product's loader on the result;
+the diff printed; the region as arguments) and `s38-lifecycle.py` (D2175,
+D2228, D2229). **Rehearsed offline** (`rehearse-offline.txt`): bash -n and
+shellcheck clean on all ten shells, py_compile and ruff clean on the four
+Pythons, every `--help` answers; the gate lines read against their parents
+(none removed, exactly the named flags added); no child types the host's
+address (D2227: 0); `s38-hostyaml.py` on 1.15.0's schema-3 example -- rc 0,
+loaded, backup byte-equal, no bucket name or credential copied, a second run
+refused (2), a schema-4 input refused (2) -- **found one defect**: the backup
+was written before the candidate check, so a second run within a second
+crashed on the backup's name instead of refusing (fixed: the check first);
+`s38-free.sh` FITS/STOP by threshold; `s38-units.sh` reads and gives up (1);
+`s38-dns.sh` refuses with no address (2) and reads undetermined without `dig`
+(6); launch, probe, external, after-reboot, V1 and the sweep refuse before
+anything runs. **The lifecycle end to end** (`rehearse_lifecycle.py`: the real
+control cluster and `served_app`, a fake reconciler finishing each operation
+through the superuser functions, a TLS stand-in for the slot and the download
+URL): exit 0 in 81-88 s, eight operations in order (the large resize
+`capacity_exhausted`/admission and the profile still `standard`), the archive's
+schemas `api`, `app` and no `app_private` (the first parse read type words as
+schemas -- fixed to `SCHEMA` entries), the URL 200 at once and 403 after its
+expiry, the second creation refused with no row, the record 0600 with no secret
+in it or its transcript. **Not rehearsable before Run 10**: the gate
+`bin/session-38-check.sh` does not exist yet, so the sweep, V1 and external
+halves rehearse to their gate line. **Nothing shipped** (D2227: the host moves
+first, D2223). Rows **D2227–D2229**. NEXT FREE D2230.
 
 ### Run 10 — the bump, the registry, the gate, the threat rows, the Ledger to `trial`, the documents
 
