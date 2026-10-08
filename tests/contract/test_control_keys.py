@@ -22,7 +22,7 @@ from typing import Any
 import control_cluster as cc
 import pytest
 
-from app import control_roles
+from app import control_roles, operations
 
 pytestmark = [pytest.mark.contract, pytest.mark.database, pytest.mark.security, pytest.mark.p0]
 
@@ -161,14 +161,20 @@ def test_a_key_mints_nothing(drive: Any, org: dict[str, Any]) -> None:
     assert drive.call("GET", "/v1/projects", token=key).status_code == 200
 
 
-def test_a_demotion_narrows_a_key(drive: Any, org: dict[str, Any]) -> None:
+def test_a_demotion_narrows_a_key(
+    drive: Any, org: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The intersection is computed per request from the owner's CURRENT role
     -- with the product's own table since Session 38 (D2109, D2165).
 
     A member's key holding `projects:write` passes the scope check on sleep
-    (and is then refused `not_available`, because the type is planned, which
-    is the answer AFTER authorisation); once its owner is demoted to viewer
-    the same key is refused the scope itself."""
+    (and is then refused `not_available`, which is the answer AFTER
+    authorisation); once its owner is demoted to viewer the same key is
+    refused the scope itself. Since Run 10 the six types are accepted (ADR
+    0261), so `project.sleep` is withdrawn from the set for this proof: the
+    gate's refusal is still the answer after authorisation, and no operation
+    row is written."""
+    monkeypatch.setattr(operations, "ACCEPTED_TYPES", operations.ACCEPTED_TYPES - {"project.sleep"})
     target = drive.account(f"key-demoted-{uuid.uuid4().hex[:6]}")
     drive.member(org["a"], target, "member")
     token = drive.token(target_name(drive, target))

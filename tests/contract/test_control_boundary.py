@@ -230,8 +230,8 @@ def test_session38_customer_proofs_reach_only_the_public_endpoint() -> None:
     recorder. The control: alpha's document, which the Session 37 proofs may
     read, is an offence here -- the allowance is per module, not shared."""
     source = LIFECYCLE_PROOFS.read_text(encoding="utf-8")
-    offences = customer_offences(source, LIFECYCLE_ENVIRONMENT)
-    assert offences == [], offences
+    found = customer_offences(source, LIFECYCLE_ENVIRONMENT)
+    assert found == [], found
     tree = ast.parse(source)
     markers = [
         sorted(arg.value for arg in node.args if isinstance(arg, ast.Constant))

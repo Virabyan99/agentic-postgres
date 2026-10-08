@@ -17,7 +17,7 @@ from typing import Any
 import control_cluster as cc
 import pytest
 
-from app import control_roles
+from app import control_roles, operations
 
 pytestmark = [pytest.mark.contract, pytest.mark.database, pytest.mark.security, pytest.mark.p0]
 
@@ -104,7 +104,9 @@ def _call(drive: Any, org: dict[str, Any], name: str, who: str) -> int:
     return drive.call(method, filled, token=org["tokens"][who], body=body).status_code
 
 
-def test_every_route_and_role_answers_as_the_matrix_says(drive: Any, org: dict[str, Any]) -> None:
+def test_every_route_and_role_answers_as_the_matrix_says(
+    drive: Any, org: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     # The table names every management route the application serves, and only those.
     served = {
         route.name for route in drive.application.routes
@@ -136,9 +138,17 @@ def test_every_route_and_role_answers_as_the_matrix_says(drive: Any, org: dict[s
         token = org["tokens"][who]
         assert drive.call("GET", "/v1/organizations", token=token).status_code == 200
         assert drive.call("GET", "/v1/projects", token=token).status_code == 200
-        # Nothing is accepted in Session 37, whoever asks (D2054).
-        refused = drive.call("POST", "/v1/projects", token=token, body={})
+        # A type that is not accepted is refused whoever asks (D2054). Since
+        # Session 38 the creation is accepted (ADR 0261), so it is withdrawn
+        # for this line; the control, with it accepted, is the body's 400.
+        with monkeypatch.context() as patched:
+            patched.setattr(
+                operations, "ACCEPTED_TYPES", operations.ACCEPTED_TYPES - {"project.create"}
+            )
+            refused = drive.call("POST", "/v1/projects", token=token, body={})
         assert refused.status_code == 409, (who, refused.text)
+        malformed = drive.call("POST", "/v1/projects", token=token, body={})
+        assert malformed.status_code == 400, (who, malformed.text)
         # An ACCOUNT route that names an organisation applies `viewer` to it.
         expected = 404 if who == "outsider" else 200
         for path in ("/v1/projects", "/v1/operations"):
