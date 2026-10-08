@@ -723,6 +723,20 @@ def test_no_unit_timer_or_command_names_the_retirement_verb() -> None:
     it is not a unit acting on expiry (D968)."""
     mention = re.compile(r"project-retire")
     offenders: list[str] = []
+    # ADR 0256's amendment (D2222): the reconciler retires a slot for a
+    # PERSON's `project.delete`, never for a date -- so it may name the verb,
+    # and only while it never reads expiry and never asks for `--before-expiry`.
+    reconciler = REPO_ROOT / "bin" / "reconciler.py"
+    reconciler_code = code_of(reconciler)
+    assert mention.search(reconciler_code), "the reconciler no longer retires: drop the exception"
+    # A READ of a project's expiry (the export's own result member is a write).
+    assert not re.search(r'\[\s*"expires_at"\s*\]|get\(\s*"expires_at"', reconciler_code)
+    assert "lifecycle" not in reconciler_code and "before-expiry" not in reconciler_code
+    dispatch = (REPO_ROOT / "src" / "agentic_postgres" / "reconciler_dispatch.py").read_text(
+        encoding="utf-8"
+    )
+    retire = dispatch[dispatch.index("def retire_argv") : dispatch.index("def running_argv")]
+    assert '"--permanent"' in retire and "before-expiry" not in retire
     for directory, patterns in (
         ("systemd", ("*",)),
         ("libexec", ("*",)),
@@ -731,7 +745,7 @@ def test_no_unit_timer_or_command_names_the_retirement_verb() -> None:
     ):
         for pattern in patterns:
             for path in sorted((REPO_ROOT / directory).glob(pattern)):
-                if not path.is_file() or path.stem in {"project-retire"}:
+                if not path.is_file() or path.stem in {"project-retire"} or path == reconciler:
                     continue
                 if mention.search(code_of(path)):
                     offenders.append(str(path.relative_to(REPO_ROOT)))

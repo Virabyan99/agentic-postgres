@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -66,7 +67,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -125,8 +126,16 @@ CHILD_SECONDS = {
     "database-ports.sh": 300,
     "systemctl": 60,
     "backup.sh": 1200,
+    "project-runtime.sh": 300,
+    "project-retire.sh": 900,
+    "docker": 60,
 }
 DATABASE_SECONDS = 120
+#: `pg_dump` of a slot's customer schemas, and its upload (D2164).
+EXPORT_SECONDS = 900
+#: The download URL's life: `app/export_upload.py`'s `EXPORT_URL_SECONDS`,
+#: which a test holds equal (the URL's own `X-Amz-Expires` is what binds).
+EXPORT_URL_SECONDS = 900
 
 #: `admit.sh`'s refusal (ADR 0221): the host cannot take the candidate.
 ADMISSION_REFUSED = 12
@@ -311,6 +320,9 @@ class Operation:
         #: The slot a creation took, and the manifest bytes it was prepared with.
         self.allocated: str | None = None
         self.original_manifest: bytes | None = None
+        #: An export's download URL (D2164): finished into `result_secret`,
+        #: never into `result`, never printed, never logged.
+        self.secret: str | None = None
 
     @contextlib.contextmanager
     def step(self, name: str) -> Iterator[None]:
@@ -453,13 +465,7 @@ def allocate(operation: Operation, profile: str) -> str:
     manifest = _slot_manifest(key)
     original = manifest.read_bytes()
     operation.original_manifest = original
-    document = yaml.safe_load(original)
-    document["compute"] = {"profile": dispatch.profile_name(profile)}
-    rewritten = (
-        f"# Slot {key}, taken by the reconciler for operation {operation.id} "
-        f"(ADR 0256): compute {profile}.\n" + yaml.safe_dump(document, sort_keys=False)
-    ).encode("utf-8")
-    _replace_private(manifest, rewritten)
+    _replace_private(manifest, _with_profile(original, key, operation.id, profile))
     try:
         config.load_project_manifest(manifest)
     except ManifestError as error:
@@ -470,6 +476,16 @@ def allocate(operation: Operation, profile: str) -> str:
     operation.advance(project_key=key)
     say(f"{operation.id} took slot {key} at profile {profile}")
     return key
+
+
+def _with_profile(original: bytes, key: str, operation_id: str, profile: str) -> bytes:
+    """A slot manifest's bytes with `compute.profile` set; nothing else moves."""
+    document = yaml.safe_load(original)
+    document["compute"] = {"profile": dispatch.profile_name(profile)}
+    return (
+        f"# Slot {key}, re-written by the reconciler for operation {operation_id} "
+        f"(ADR 0256): compute {profile}.\n" + yaml.safe_dump(document, sort_keys=False)
+    ).encode("utf-8")
 
 
 def release(operation: Operation) -> None:
@@ -605,8 +621,235 @@ def admission_reason(stdout: str) -> str:
     return reason if isinstance(reason, str) and reason else "admission refused (exit 12)"
 
 
+# ---------------------------------------------------------------------------
+# The other five types (Run 7): sleep, wake, resize, export, delete
+# ---------------------------------------------------------------------------
+
+
+def slot_project(operation: Operation) -> tuple[str, dict[str, Any]]:
+    """The operation's project, which must be a DECLARED slot with a deployed
+    document. Alpha, beta and the control project are operator-managed: a
+    request naming one is refused before anything runs -- the reconciler never
+    stops, resizes, exports or retires a project it did not create."""
+    key = operation.project_key or ""
+    declared = {entry.key for entry in host_config.declared_slots(operation.reconciler.host)}
+    if key not in declared:
+        raise Refused(
+            "invalid_request",
+            {"reason": "the reconciler acts on slot projects only; this one is operator-managed"},
+        )
+    return key, _deployed(key)
+
+
+def require_running(operation: Operation, document: dict[str, Any]) -> None:
+    """The database container runs, or Refused: a sleeping project is woken
+    first (`invalid_request`, its state unchanged); no answer is the third
+    outcome (`could_not_determine`)."""
+    container = str((document.get("database") or {}).get("container", ""))
+    done = operation.child(dispatch.running_argv(container), capture=True)
+    answer = (done.stdout or "").strip()
+    if done.returncode == 0 and answer == "true":
+        return
+    if done.returncode == 0 and answer == "false":
+        raise Refused("invalid_request", {"reason": "the project is sleeping; wake it first"})
+    raise Refused(
+        "could_not_determine",
+        {"reason": "whether the project's database runs could not be read"},
+    )
+
+
+def _through(document: dict[str, Any]) -> int:
+    """The session the project was deployed through: its unit's, its runtime's."""
+    session = document.get("deployed_through_session")
+    if not isinstance(session, int) or isinstance(session, bool):
+        raise Refused("could_not_determine", {"reason": "the deployed document names no session"})
+    return session
+
+
+def sleep(operation: Operation) -> dict[str, Any]:
+    """D2155: the timers disabled (a timer firing would start the project), the
+    boot unit disabled, the containers stopped and kept."""
+    key, document = slot_project(operation)
+    outputs = deployed_output.deployed_path(key, root=STATE_ROOT)
+    session = _through(document)
+    with operation.step("schedule"):
+        operation.require(
+            operation.child(dispatch.backup_argv(REPO_ROOT, outputs, ("schedule", "disable"))),
+            "backup schedule disable",
+        )
+    with operation.step("unit"):
+        operation.require(operation.child(dispatch.disable_argv(key)), "systemctl disable")
+    with operation.step("stop"):
+        operation.require(
+            operation.child(dispatch.runtime_argv(REPO_ROOT, key, session, "stop")),
+            "project-runtime stop",
+        )
+    return {}
+
+
+def wake(operation: Operation) -> dict[str, Any]:
+    """The same containers started (nothing materialized, D2155), the boot unit
+    enabled, the timers enabled."""
+    key, document = slot_project(operation)
+    outputs = deployed_output.deployed_path(key, root=STATE_ROOT)
+    session = _through(document)
+    with operation.step("start"):
+        operation.require(
+            operation.child(dispatch.runtime_argv(REPO_ROOT, key, session, "start")),
+            "project-runtime start",
+        )
+    with operation.step("unit"):
+        operation.require(operation.child(dispatch.enable_argv(key)), "systemctl enable")
+    with operation.step("schedule"):
+        operation.require(
+            operation.child(dispatch.backup_argv(REPO_ROOT, outputs, ("schedule", "enable"))),
+            "backup schedule enable",
+        )
+    return {}
+
+
+def resize(operation: Operation) -> dict[str, Any]:
+    """Admission on a CANDIDATE manifest -- the slot's own with the new profile,
+    beside it -- before anything changes (D2160): a refusal is
+    `capacity_exhausted {admission}` with the manifest untouched and nothing
+    rendered. Admitted, the candidate replaces the manifest, one deploy, the
+    registry row refreshed."""
+    key, document = slot_project(operation)
+    profile = operation.arguments["profile"]
+    manifest = _slot_manifest(key)
+    with operation.step("admit"):
+        require_running(operation, document)
+        candidate = manifest.with_name(f".candidate.{operation.id}.yaml")
+        _write_private(
+            candidate,
+            _with_profile(manifest.read_bytes(), key, operation.id, profile).decode("utf-8"),
+            exclusive=True,
+        )
+        try:
+            try:
+                config.load_project_manifest(candidate)
+            except ManifestError as error:
+                raise Refused(
+                    "could_not_determine",
+                    {"reason": "the resized manifest was refused by the loader"},
+                ) from error
+            done = operation.child(dispatch.admit_argv(REPO_ROOT, candidate), capture=True)
+            if done.returncode == ADMISSION_REFUSED:
+                raise Refused(
+                    "capacity_exhausted",
+                    {"reason": "admission", "refusal": admission_reason(done.stdout)},
+                )
+            if done.returncode != 0:
+                raise Refused("operation_failed", {"reason": f"admission exited {done.returncode}"})
+            os.replace(candidate, manifest)
+        finally:
+            candidate.unlink(missing_ok=True)
+    with operation.step("deploy"):
+        operation.require(
+            operation.child(
+                dispatch.deploy_argv(REPO_ROOT, manifest, through_session=THROUGH_SESSION)
+            ),
+            "the deploy",
+        )
+    with operation.step("registry"):
+        refresh_registry(operation, key, "")
+    return {"profile": profile}
+
+
+def export(operation: Operation) -> dict[str, Any]:
+    """D2164: `pg_dump` of the customer's schemas to a root 0600 file, streamed
+    into the project's storage container, which writes it to its own bucket and
+    prints one presigned GET valid 900 s; the local file removed whatever
+    happened. The URL is the operation's secret, never its result."""
+    key, document = slot_project(operation)
+    database = document.get("database") or {}
+    archive = EXPORT_ROOT / f"{operation.id}.dump"
+    try:
+        with operation.step("dump"):
+            require_running(operation, document)
+            done = container_exec.run(
+                str(database.get("container", "")),
+                *dispatch.dump_argv(str(database.get("name", ""))),
+                timeout=operation.remaining(EXPORT_SECONDS),
+                text=False,
+            )
+            if done.returncode != 0 or not done.stdout:
+                raise Refused("operation_failed", {"reason": f"pg_dump exited {done.returncode}"})
+            EXPORT_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+            os.chmod(EXPORT_ROOT, 0o700)
+            descriptor = os.open(archive, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                os.write(descriptor, done.stdout)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            say(f"{operation.id} step dump: {len(done.stdout)} bytes")
+        with operation.step("upload"):
+            found = operation.child(dispatch.storage_container_argv(key), capture=True)
+            names = (found.stdout or "").split()
+            if found.returncode != 0 or len(names) != 1:
+                raise Refused(
+                    "could_not_determine",
+                    {"reason": "the project's storage container could not be found"},
+                )
+            body = archive.read_bytes()
+            uploaded = container_exec.run(
+                names[0],
+                "python", "-m", "app.export_upload", "--operation", operation.id,
+                input=body,
+                timeout=operation.remaining(EXPORT_SECONDS),
+                text=False,
+            )  # fmt: skip
+            if uploaded.returncode != 0:
+                raise Refused(
+                    "operation_failed", {"reason": f"the upload exited {uploaded.returncode}"}
+                )
+            lines = uploaded.stdout.decode("utf-8", "replace").strip().splitlines()
+            if len(lines) != 1 or not lines[0].startswith("https://") or " " in lines[0]:
+                raise Refused(
+                    "could_not_determine",
+                    {"reason": "the upload answered in a shape nobody asked for"},
+                )
+            operation.secret = lines[0]
+            expires = datetime.now(UTC) + timedelta(seconds=EXPORT_URL_SECONDS)
+            say(f"{operation.id} step upload: uploaded; the URL is the operation's secret")
+    finally:
+        archive.unlink(missing_ok=True)
+    return {
+        "sha256": hashlib.sha256(body).hexdigest(),
+        "size_bytes": len(body),
+        "expires_at": expires.isoformat(timespec="seconds"),
+    }
+
+
+def delete(operation: Operation) -> dict[str, Any]:
+    """D2158: the retirement -- data destroyed, the provider deferred to the
+    operator's `slot.sh revoke` -- then the tombstone no command removes, then
+    the registry row marked deleted (D2167)."""
+    key, _document = slot_project(operation)
+    directory = slot.slot_directory(key, root=SLOT_ROOT)
+    with operation.step("retire"):
+        operation.require(
+            operation.child(dispatch.retire_argv(REPO_ROOT, key, directory / "retirement.json")),
+            "project-retire",
+        )
+    with operation.step("tombstone"):
+        with contextlib.suppress(FileExistsError):
+            _write_private(directory / slot.CONSUMED, operation.id + "\n", exclusive=True)
+    with operation.step("registry"):
+        operation.reconciler.control.call(dispatch.MARK_DELETED_SQL, key=key)
+    return {}
+
+
 #: The closed table's executing half: one handler per type of `dispatch.STEPS`.
-HANDLERS: dict[str, Callable[[Operation], dict[str, Any]]] = {"project.create": create}
+HANDLERS: dict[str, Callable[[Operation], dict[str, Any]]] = {
+    "project.create": create,
+    "project.sleep": sleep,
+    "project.wake": wake,
+    "project.resize": resize,
+    "project.export": export,
+    "project.delete": delete,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -668,13 +911,21 @@ class Reconciler:
 
     # -- the control plane ----------------------------------------------------
 
-    def finish(self, operation_id: str, status: str, code: str | None, result: dict) -> None:
+    def finish(
+        self,
+        operation_id: str,
+        status: str,
+        code: str | None,
+        result: dict,
+        secret: str | None = None,
+    ) -> None:
         self.control.call(
             dispatch.FINISH_SQL,
             id=operation_id,
             status=status,
             error_code=code or "",
             result=json.dumps(result, sort_keys=True),
+            secret=secret or "",
         )
         say(f"{operation_id} {status}" + (f" {code}" if code else ""))
 
@@ -782,7 +1033,7 @@ class Reconciler:
             # restarts, and recovery finishes this operation `interrupted`.
             members = {"reason": "the control database refused a call"}
             code = "could_not_determine"
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, subprocess.TimeoutExpired) as error:
             members = {"reason": f"{type(error).__name__} during the step"}
             code = "could_not_determine"
         if code is not None and operation.current is not None:
@@ -793,6 +1044,7 @@ class Reconciler:
             "failed" if code else "succeeded",
             code,
             dispatch.result(operation.type, members),
+            operation.secret if code is None else None,
         )
 
 

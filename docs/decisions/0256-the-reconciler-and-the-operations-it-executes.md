@@ -164,3 +164,22 @@ different row (control: an uninterrupted operation `succeeded`, attempt 1).
   unit first), not a lock — a host-wide deploy lock is owed (§10).
 - An interrupted creation leaves a quarantined slot that only the operator
   clears.
+
+## Amendment (Session 38, Run 7, D2222)
+
+ADR 0186 decided that nothing automatic retires a project: *"No unit, timer,
+cron or deploy step reads `expires_at` and acts"*, every removal path a human's
+(D951), and `test_no_unit_timer_or_command_names_the_retirement_verb` keeps
+`project-retire` out of every unit and command but the verb itself. Decision
+§6 above (D2158) makes the reconciler run `project-retire.sh` for
+`project.delete`, which that guard refuses.
+
+**The reconciler is the one command besides the verb that may name it**, and
+on three conditions the guard now reads with it: the retirement runs only for
+a `project.delete` -- a request a PERSON made, human-session only, `admin` or
+`owner` (D2165), never a key and never a date -- on a declared slot the
+reconciler created (D2218); its argv carries `--permanent` and never
+`--before-expiry` (a slot's lifecycle is `permanent`, ADR 0257); and
+`bin/reconciler.py` never reads `expires_at`. ADR 0186's sentence stands for
+what it was about: no timer acts on expiry. A deletion is still a human's
+decision; it reaches the host as a validated row instead of a terminal.

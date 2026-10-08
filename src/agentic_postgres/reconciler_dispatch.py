@@ -37,11 +37,14 @@ __all__ = [
     "ADOPT_SQL",
     "ARGV_MEMBERS",
     "BACKUP_SEQUENCE",
+    "BACKUP_VERBS",
     "CLAIM_SQL",
     "COMMANDS",
+    "EXPORT_SCHEMAS",
     "FINISH_SQL",
     "INSTANCE_UUID_SQL",
     "INTERRUPTED_SQL",
+    "MARK_DELETED_SQL",
     "OPEN_HANDOFF_SQL",
     "PROGRESS_SQL",
     "RECORD_SLOTS_SQL",
@@ -51,18 +54,24 @@ __all__ = [
     "backup_argv",
     "bootstrap_argv",
     "deploy_argv",
+    "disable_argv",
+    "dump_argv",
     "enable_argv",
     "invalid",
     "profile_name",
     "psql_input",
     "result",
+    "retire_argv",
+    "running_argv",
+    "runtime_argv",
     "runtime_render_argv",
+    "storage_container_argv",
     "verify_argv",
 ]
 
 #: Type -> its steps, in order, each with the progress recorded when it starts
-#: (ADR 0256 §8: 10/30/40/60/70/90, 100 at the finish). Run 7 adds the other
-#: five executed types; until then a claimed row of one of them is refused.
+#: (ADR 0256 §8: 10/30/40/60/70/90, 100 at the finish). The six executed types,
+#: no other -- `EXECUTED_TYPES`, a test holds the two equal.
 STEPS: dict[str, tuple[tuple[str, int], ...]] = {
     "project.create": (
         ("allocate", 10),
@@ -75,6 +84,17 @@ STEPS: dict[str, tuple[tuple[str, int], ...]] = {
         ("backup", 90),
         ("registry", 90),
     ),
+    # D2155: the timers first (a timer firing would start a stopped project),
+    # then the boot unit, then the containers stopped and kept.
+    "project.sleep": (("schedule", 10), ("unit", 30), ("stop", 60)),
+    # The reverse: the same containers started, then the unit, then the timers.
+    "project.wake": (("start", 10), ("unit", 60), ("schedule", 90)),
+    # D2157/D2160: admission on the candidate manifest before anything changes.
+    "project.resize": (("admit", 10), ("deploy", 30), ("registry", 90)),
+    # D2164: the archive, then the upload inside the storage container.
+    "project.export": (("dump", 10), ("upload", 60)),
+    # D2158: the retirement (provider deferred), the tombstone, the registry.
+    "project.delete": (("retire", 10), ("tombstone", 80), ("registry", 90)),
 }
 
 #: What a finished operation may record (D2151): the service's table, which
@@ -85,10 +105,30 @@ RESULT_MEMBERS: dict[str, frozenset[str]] = operations.RESULT_MEMBERS
 ARGV_MEMBERS = frozenset({"profile", "admin_username"})
 
 #: Every command an operation may run, by the name its argv starts with: the
-#: existing `bin/` commands and `systemctl` (ADR 0256 §6).
+#: existing `bin/` commands, `systemctl`, and two `docker` READS -- whether the
+#: database container runs, and which container is the project's storage
+#: (ADR 0256 §6). Every `docker exec` goes through `container_exec.run`.
 COMMANDS = frozenset(
-    {"admit.sh", "deploy.sh", "auth-admin.sh", "database-ports.sh", "systemctl", "backup.sh"}
+    {
+        "admit.sh",
+        "deploy.sh",
+        "auth-admin.sh",
+        "database-ports.sh",
+        "systemctl",
+        "backup.sh",
+        "project-runtime.sh",
+        "project-retire.sh",
+        "docker",
+    }
 )
+
+#: The schemas an export carries: the customer's, never `app_private` (D2164,
+#: rig 38d: `-n app -n api` lists no `app_private`; without `-n` it does).
+EXPORT_SCHEMAS = ("app", "api")
+
+#: A container name as Compose writes one, read from a deployed document or
+#: from `docker ps` -- never one a value chose.
+_CONTAINER = re.compile(r"[a-z0-9][a-z0-9_.-]{0,127}")
 
 #: The schema's patterns, fullmatched again where a member reaches an argv.
 _USERNAME = re.compile(r"[a-z][a-z0-9_.-]{2,62}")
@@ -113,8 +153,11 @@ PROGRESS_SQL = (
 )
 FINISH_SQL = (
     "SELECT app.control_finish_operation(:'id'::uuid, :'status', nullif(:'error_code', ''), "
-    ":'result'::jsonb);"
+    ":'result'::jsonb, nullif(:'secret', ''));"
 )
+#: D2167: the registry row of a deleted project kept, marked.
+MARK_DELETED_SQL = "SELECT app.control_mark_deleted(:'key');"
+
 INTERRUPTED_SQL = (
     "SELECT coalesce(json_agg(r ORDER BY r.started_at, r.id), '[]'::json) "
     "FROM app.control_interrupted_operations() r;"
@@ -123,7 +166,7 @@ RECORD_SLOTS_SQL = "SELECT app.control_record_slots(:'slots'::jsonb);"
 ADOPT_SQL = (
     "SELECT app.control_adopt_project(:'key', :'organization'::uuid, :'slug', :'environment', "
     ":'domain', :'template_version', :'source_commit', nullif(:'region', ''), :'profile', "
-    ":'slot', nullif(:'app_route', ''), :'display_name');"
+    "nullif(:'slot', ''), nullif(:'app_route', ''), nullif(:'display_name', ''));"
 )
 
 # ---------------------------------------------------------------------------
@@ -279,7 +322,86 @@ def enable_argv(key: str) -> list[str]:
     return ["systemctl", "enable", f"agentic-postgres-project@{key}.service"]
 
 
+#: Every backup command an operation runs: a creation's three, and sleep's
+#: (the timers disabled) -- wake's `schedule enable` is the creation's.
+BACKUP_VERBS: tuple[tuple[str, ...], ...] = (*BACKUP_SEQUENCE, ("schedule", "disable"))
+
+
 def backup_argv(checkout: Path, outputs: Path, verb: tuple[str, ...]) -> list[str]:
-    if verb not in BACKUP_SEQUENCE:
+    if verb not in BACKUP_VERBS:
         raise ValueError(f"not a backup step: {verb!r}")
     return [str(checkout / "bin" / "backup.sh"), "--outputs", str(outputs), *verb]
+
+
+def _key(key: str) -> str:
+    if not slot.SLOT_KEY.fullmatch(key):
+        raise ValueError(f"not a slot key: {key!r}")
+    return key
+
+
+def _container(name: str) -> str:
+    if not _CONTAINER.fullmatch(name):
+        raise ValueError("not a container name")
+    return name
+
+
+def disable_argv(key: str) -> list[str]:
+    """The boot unit disabled -- not stopped: `project-runtime.sh stop` stops the
+    containers and the unit stays active (D2155)."""
+    return ["systemctl", "disable", f"agentic-postgres-project@{_key(key)}.service"]
+
+
+def runtime_argv(checkout: Path, key: str, through_session: int, action: str) -> list[str]:
+    """`project-runtime.sh … stop|start` (D2155, D2192): the containers kept,
+    nothing materialized, rendered or built."""
+    if action not in ("stop", "start"):
+        raise ValueError(f"not a runtime action: {action!r}")
+    return [
+        str(checkout / "bin" / "project-runtime.sh"),
+        "--host", _host(checkout),
+        "--project-key", _key(key),
+        "--through-session", str(int(through_session)),
+        action,
+    ]  # fmt: skip
+
+
+def retire_argv(checkout: Path, key: str, record: Path) -> list[str]:
+    """D2158: every retirement step but the provider's, the data destroyed."""
+    return [
+        str(checkout / "bin" / "project-retire.sh"),
+        "--host", _host(checkout),
+        "--project", _key(key),
+        "--confirm", key,
+        "--record", str(record),
+        "--permanent",
+        "--destroy-data",
+        "--defer-provider",
+    ]  # fmt: skip
+
+
+def running_argv(container: str) -> list[str]:
+    """Whether the project's database container runs: `true`, `false`, or no answer."""
+    return ["docker", "inspect", "--format", "{{.State.Running}}", _container(container)]
+
+
+def storage_container_argv(key: str) -> list[str]:
+    """The project's storage container, found by its Compose labels the way
+    `auth-admin.py` finds `auth` (`apg.project.key`, D293)."""
+    return [
+        "docker", "ps",
+        "--filter", f"label=apg.project.key={_key(key)}",
+        "--filter", "label=com.docker.compose.service=storage",
+        "--format", "{{.Names}}",
+    ]  # fmt: skip
+
+
+def dump_argv(database: str) -> list[str]:
+    """`pg_dump` of the customer's schemas, for `container_exec.run` in the
+    database container (D2164): custom format, no owner, no privileges."""
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", database):
+        raise ValueError("not a database name")
+    schemas = [part for name in EXPORT_SCHEMAS for part in ("-n", name)]
+    return [
+        "pg_dump", "-U", "postgres", "-Fc", *schemas,
+        "--no-owner", "--no-privileges", "-d", database,
+    ]  # fmt: skip

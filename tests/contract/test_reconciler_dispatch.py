@@ -58,6 +58,10 @@ ARGUMENTS = {
     "handoff_sha256": HANDOFF,
 }
 ADMISSION_REASON = "the host has 412 MiB left and the candidate charges 840"
+#: What the fake storage container prints, and the archive the fake pg_dump writes.
+URL = "https://r2.example.test/bucket/apg/exports/x.dump?X-Amz-Expires=900&X-Amz-Signature=5ec"
+ARCHIVE = b"PGDMP\x01 the customer's schemas"
+STORAGE = "apg-slot1-dev-storage-1"
 
 
 def _load() -> Any:
@@ -114,8 +118,17 @@ class Database:
         self.calls: list[dict[str, Any]] = []
         self.claims = list(claims)
         self.interrupted: list[dict[str, Any]] = []
+        self.uploaded: bytes | None = None
+        self.upload_code = 0
 
     def __call__(self, container: str, *argv: str, **kwargs: Any) -> Any:
+        if argv and argv[0] == "pg_dump":
+            self.calls.append({"container": container, "argv": list(argv), "input": "", "vars": {}})
+            return subprocess.CompletedProcess(argv, 0, ARCHIVE, b"")
+        if "app.export_upload" in argv:
+            self.uploaded = kwargs.get("input")
+            self.calls.append({"container": container, "argv": list(argv), "input": "", "vars": {}})
+            return subprocess.CompletedProcess(argv, self.upload_code, (URL + "\n").encode(), b"")
         text = kwargs.get("input") or ""
         self.calls.append(
             {"container": container, "argv": list(argv), "input": text, "vars": _variables(text)}
@@ -128,6 +141,7 @@ class Database:
             ("control_interrupted_operations", lambda: json.dumps(self.interrupted)),
             ("control_record_slots", lambda: "1"),
             ("control_adopt_project", lambda: KEY),
+            ("control_mark_deleted", lambda: "t"),
             ("FROM app_private.users", lambda: ADMIN_ID),
             ("auth_open_password_reset", lambda: RESET_ID),
             ("project_identity", lambda: INSTANCE),
@@ -152,6 +166,7 @@ class Children:
         self.codes: dict[str, int] = {}
         self.password: str | None = None
         self.kill_at: str | None = None
+        self.running = "true"
 
     @staticmethod
     def label(argv: list[str]) -> str:
@@ -160,7 +175,11 @@ class Children:
             return "render-runtime" if "--render-runtime-only" in argv else "deploy"
         if name == "backup.sh":
             return "backup " + " ".join(argv[3:])
-        return name if name != "systemctl" else "systemctl " + argv[1]
+        if name == "project-runtime.sh":
+            return "runtime " + argv[-1]
+        if name in ("systemctl", "docker"):
+            return f"{name} {argv[1]}"
+        return name
 
     def __call__(self, argv: list[str], **kwargs: Any) -> Any:
         label = self.label(argv)
@@ -175,12 +194,16 @@ class Children:
             out = f"administrator created: {ADMIN_ID}\n"
         elif label == "deploy":
             manifest = yaml.safe_load(Path(argv[argv.index("--project") + 1]).read_text("utf-8"))
-            self._deployed(manifest["compute"]["profile"])
+            self.deployed(manifest["compute"]["profile"])
             out = "deployed\n"
         elif label == "render-runtime":
             out = (
                 f"  sudo bin/database-ports.sh verify --host host.yaml --instance-uuid {PRINTED}\n"
             )
+        elif label == "docker inspect":
+            out = self.running + "\n"
+        elif label == "docker ps":
+            out = STORAGE + "\n"
         code = self.codes.get(label, 0)
         if label == "admit.sh":
             out = json.dumps({"exit_code": code, "reason": ADMISSION_REASON if code else None})
@@ -191,7 +214,7 @@ class Children:
             handle.write(out)
         return subprocess.CompletedProcess(argv, code, None, None)
 
-    def _deployed(self, profile: str) -> None:
+    def deployed(self, profile: str) -> None:
         directory = self.state_root / KEY
         directory.mkdir(parents=True, exist_ok=True)
         document = {
@@ -205,6 +228,7 @@ class Children:
             },
             "template_version": "1.16.0",
             "source_commit": HEAD,
+            "deployed_through_session": 38,
             "database": {"container": "apg-slot1-dev-postgres-1", "name": "slot1_dev"},
             "region": {"id": "eu-test-1"},
             "compute": {"profile": profile},
@@ -514,16 +538,12 @@ def test_a_failed_deploy_fails_the_operation_and_keeps_the_slot(host: Host) -> N
     assert (host.slot_directory / slot.ALLOCATED).read_text("utf-8").strip() == OPERATION
 
 
-def test_an_unexecuted_type_runs_nothing(host: Host) -> None:
-    """The closed table: a type with no handler in this release is refused."""
-    host.database.claims = [_row(type="project.sleep", arguments={}, project_key=KEY)]
-    assert host.once() == 0
-    assert host.children.calls == []
-    finished = host.finished()
-    assert finished["error_code"] == "invalid_request"
+def test_the_closed_table_is_the_executed_types(host: Host) -> None:
+    """ADR 0256: one handler per executed type and no other; one bound per
+    command an operation may run."""
     assert set(host.module.HANDLERS) == set(reconciler_dispatch.STEPS)
+    assert set(reconciler_dispatch.STEPS) == operations.EXECUTED_TYPES
     assert set(host.module.CHILD_SECONDS) == set(reconciler_dispatch.COMMANDS)
-    assert set(reconciler_dispatch.STEPS) <= operations.EXECUTED_TYPES
 
 
 def test_an_interrupted_creation_is_finished_and_its_slot_quarantined(host: Host) -> None:
@@ -686,3 +706,201 @@ def test_a_result_carries_only_declared_members() -> None:
     }
     with pytest.raises(ValueError, match="download_url"):
         reconciler_dispatch.result("project.create", {"download_url": "https://x.invalid/"})
+
+
+# ---------------------------------------------------------------------------
+# Run 7: sleep, wake, resize, export, delete -- on a slot already created
+# ---------------------------------------------------------------------------
+
+
+def _deployed_slot(
+    host: Host, operation_type: str, arguments: dict[str, Any] | None = None
+) -> None:
+    """The slot created and running: allocated, its document deployed; one
+    operation of `operation_type` pending on it."""
+    (host.slot_directory / slot.ALLOCATED).write_text("an earlier creation\n", "utf-8")
+    host.children.deployed("small")
+    host.database.claims = [_row(type=operation_type, arguments=arguments or {}, project_key=KEY)]
+
+
+def test_sleep_disables_the_timers_and_the_unit_then_stops(host: Host) -> None:
+    """D2155: the timers first (a timer firing would start a stopped project),
+    the boot unit disabled (not stopped), then `project-runtime.sh stop` with
+    the session the project was deployed through."""
+    _deployed_slot(host, "project.sleep")
+    assert host.once() == 0
+    assert host.children.labels() == [
+        "backup schedule disable",
+        "systemctl disable",
+        "runtime stop",
+    ]
+    stop = host.children.calls[-1]["argv"]
+    assert stop[stop.index("--through-session") + 1] == "38"
+    assert stop[stop.index("--project-key") + 1] == KEY
+    assert host.children.calls[1]["argv"] == [
+        "systemctl",
+        "disable",
+        f"agentic-postgres-project@{KEY}.service",
+    ]
+    finished = host.finished()
+    assert (finished["status"], finished["secret"]) == ("succeeded", "")
+    assert [s["step"] for s in finished["result"]["steps"]] == ["schedule", "unit", "stop"]
+
+
+def test_wake_starts_the_same_containers_then_the_unit_and_the_timers(host: Host) -> None:
+    """D2155: `start` (nothing materialized, rendered or built), then the unit
+    enabled, then the timers."""
+    _deployed_slot(host, "project.wake")
+    assert host.once() == 0
+    assert host.children.labels() == ["runtime start", "systemctl enable", "backup schedule enable"]
+    assert host.finished()["status"] == "succeeded"
+
+
+def test_resize_admits_a_candidate_before_anything_changes(host: Host) -> None:
+    """D2160: admission reads a CANDIDATE manifest beside the slot's; refused
+    (12), the operation is `capacity_exhausted {admission}` with the manifest
+    byte for byte as it was, no candidate left and nothing deployed. Admitted,
+    the manifest carries the new profile, one deploy, the registry refreshed
+    without touching the display name."""
+    _deployed_slot(host, "project.resize", {"profile": "large"})
+    manifest = host.slot_directory / slot.MANIFEST
+    before = manifest.read_bytes()
+    host.children.codes["admit.sh"] = 12
+    assert host.once() == 0
+    assert host.children.labels() == ["docker inspect", "admit.sh"]
+    admitted = host.children.calls[1]["argv"]
+    candidate = Path(admitted[admitted.index("--project") + 1])
+    assert candidate.parent == host.slot_directory and candidate != manifest
+    finished = host.finished()
+    assert (finished["error_code"], finished["result"]["reason"]) == (
+        "capacity_exhausted",
+        "admission",
+    )
+    assert finished["result"]["refusal"] == ADMISSION_REASON
+    assert manifest.read_bytes() == before
+    assert sorted(p.name for p in host.slot_directory.iterdir()) == sorted(
+        [slot.MANIFEST, slot.ALLOCATED]
+    )
+
+    # Control: admitted.
+    host.database.calls.clear()
+    host.children.calls.clear()
+    host.children.codes.clear()
+    host.database.claims = [
+        _row(type="project.resize", arguments={"profile": "large"}, project_key=KEY)
+    ]
+    assert host.once() == 0
+    assert host.children.labels() == ["docker inspect", "admit.sh", "deploy"]
+    assert yaml.safe_load(manifest.read_text("utf-8"))["compute"] == {"profile": "large"}
+    assert host.finished()["result"]["profile"] == "large"
+    (adopted,) = host.database.named("control_adopt_project")
+    assert adopted["display_name"] == "" and adopted["profile"] == "large"
+
+
+def test_the_export_names_only_the_customer_schemas(host: Host) -> None:
+    """D2164 (rig 38d): `pg_dump -Fc -n app -n api --no-owner --no-privileges`
+    in the project's database container -- never `app_private`."""
+    _deployed_slot(host, "project.export")
+    assert host.once() == 0
+    (dump,) = [c for c in host.database.calls if c["argv"][:1] == ["pg_dump"]]
+    assert dump["container"] == "apg-slot1-dev-postgres-1"
+    assert dump["argv"] == [
+        "pg_dump", "-U", "postgres", "-Fc", "-n", "app", "-n", "api",
+        "--no-owner", "--no-privileges", "-d", "slot1_dev",
+    ]  # fmt: skip
+    assert not any("app_private" in part for call in host.database.calls for part in call["argv"])
+
+
+def test_the_export_url_is_the_operations_secret_and_the_archive_is_removed(
+    host: Host, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """D2164: the archive written root 0600, streamed into the project's
+    storage container (found by its labels), and REMOVED; the one URL the
+    container printed is finished into the secret -- not the result, not a
+    log, not this command's output. A failed upload removes the archive too."""
+    _deployed_slot(host, "project.export")
+    assert host.once() == 0
+    assert host.children.labels() == ["docker inspect", "docker ps"]
+    (upload,) = [c for c in host.database.calls if "app.export_upload" in c["argv"]]
+    assert upload["container"] == STORAGE
+    assert upload["argv"][-1] == OPERATION and host.database.uploaded == ARCHIVE
+    finished = host.finished()
+    assert (finished["status"], finished["secret"]) == ("succeeded", URL)
+    result = finished["result"]
+    assert result["size_bytes"] == len(ARCHIVE)
+    assert result["sha256"] == hashlib.sha256(ARCHIVE).hexdigest()
+    assert "expires_at" in result and URL not in json.dumps(result)
+    assert list(host.module.EXPORT_ROOT.iterdir()) == []
+    printed = capsys.readouterr()
+    assert URL not in printed.out + printed.err
+    assert all(URL not in p.read_text("utf-8") for p in host.module.LOG_ROOT.iterdir())
+
+    host.database.calls.clear()
+    host.database.upload_code = 5
+    host.database.claims = [_row(type="project.export", arguments={}, project_key=KEY)]
+    assert host.once() == 0
+    finished = host.finished()
+    assert (finished["error_code"], finished["secret"]) == ("operation_failed", "")
+    assert list(host.module.EXPORT_ROOT.iterdir()) == []
+
+
+def test_a_sleeping_project_is_neither_exported_nor_resized(host: Host) -> None:
+    """Its database is stopped: `invalid_request` (the state stays `sleeping`,
+    D2203) with nothing dumped or admitted; no answer from docker is the third
+    outcome."""
+    for operation_type, arguments in (
+        ("project.export", {}),
+        ("project.resize", {"profile": "large"}),
+    ):
+        host.children.calls.clear()
+        host.database.calls.clear()
+        _deployed_slot(host, operation_type, arguments)
+        host.children.running = "false"
+        assert host.once() == 0
+        assert host.children.labels() == ["docker inspect"], operation_type
+        finished = host.finished()
+        assert finished["error_code"] == "invalid_request"
+        assert finished["result"]["reason"] == "the project is sleeping; wake it first"
+    host.children.calls.clear()
+    host.database.calls.clear()
+    _deployed_slot(host, "project.export")
+    host.children.running = ""
+    assert host.once() == 0
+    assert host.finished()["error_code"] == "could_not_determine"
+
+
+def test_delete_consumes_the_slot(host: Host) -> None:
+    """D2158: the retirement with the provider deferred and the data destroyed,
+    its record in the slot's directory; then the tombstone (the operation's id),
+    then the registry row marked deleted; the slot reads `consumed`."""
+    _deployed_slot(host, "project.delete")
+    assert host.once() == 0
+    (retire,) = [c["argv"] for c in host.children.calls]
+    assert retire[1:] == [
+        "--host", str(REPO_ROOT / "host.yaml"),
+        "--project", KEY,
+        "--confirm", KEY,
+        "--record", str(host.slot_directory / "retirement.json"),
+        "--permanent", "--destroy-data", "--defer-provider",
+    ]  # fmt: skip
+    tombstone = host.slot_directory / slot.CONSUMED
+    assert tombstone.read_text("utf-8").strip() == OPERATION
+    assert oct(tombstone.stat().st_mode & 0o777) == "0o600"
+    assert host.database.named("control_mark_deleted") == [{"key": KEY}]
+    recorded = json.loads(host.database.named("control_record_slots")[-1]["slots"])
+    assert recorded[0]["state"] == "consumed"
+    assert host.finished()["status"] == "succeeded"
+
+
+def test_an_operator_managed_project_is_refused(host: Host) -> None:
+    """The reconciler stops, resizes, exports and retires only the slots it
+    creates: a request naming alpha, beta or the control project -- each in
+    the operator's organisation's registry -- runs nothing."""
+    for key in ("alpha-dev", "control-prod"):
+        host.database.calls.clear()
+        host.database.claims = [_row(type="project.sleep", arguments={}, project_key=key)]
+        assert host.once() == 0
+        assert host.children.calls == []
+        finished = host.finished()
+        assert finished["error_code"] == "invalid_request"
+        assert "operator-managed" in finished["result"]["reason"]

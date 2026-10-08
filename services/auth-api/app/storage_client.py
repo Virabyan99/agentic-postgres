@@ -1,4 +1,4 @@
-"""The R2 adapter: one frozen client, a bounded executor, and four operations.
+"""The R2 adapter: one frozen client, a bounded executor, and five operations.
 
 **Every constant here was measured against a real bucket before it was written**
 (Run 5, ADRs 0106 and 0107). The rig ran inside the locked ``python:3.12-slim``
@@ -108,6 +108,10 @@ PRECONDITION_FAILED = "PreconditionFailed"
 SIGNATURE_MISMATCH = "SignatureDoesNotMatch"
 EXPIRED = "ExpiredRequest"
 ACCESS_DENIED = "AccessDenied"
+
+#: The longest a download URL this adapter signs may live when a caller names
+#: one (D2190, ADR 0259): a project export's 900 s. Absent, the configured TTL.
+LONGEST_NAMED_EXPIRY_SECONDS = 900
 
 
 class StorageError(RuntimeError):
@@ -278,7 +282,11 @@ def _fail(operation: str, exc: ClientError) -> StorageError:
 
 
 class R2Adapter:
-    """The four provider operations the storage surface needs, and no others.
+    """The five provider operations the storage surface needs, and no others.
+
+    Four serve the storage API; the fifth, `put_object`, serves a project
+    export (Session 38, D2190) -- the one write of bytes this adapter makes,
+    first-write-only like every presigned PUT.
 
     There is no list operation and there will not be one here. §4's cleanup plan
     is metadata-driven and never lists the bucket, because a reconciler that
@@ -320,20 +328,41 @@ class R2Adapter:
             HttpMethod="PUT",
         )
 
-    def presign_get(self, key: str) -> str:
+    def presign_get(self, key: str, *, expires_in: int | None = None) -> str:
         """A short-lived URL that authorizes one GET.
 
         Issuing this is an authorization decision made at issue time. It is NOT
         revoked by a later tombstone, and the documentation says so plainly
         rather than implying otherwise; the residual is bounded by the TTL, which
         is why `download_url_ttl_seconds` defaults shorter than the upload's.
+
+        `expires_in` (D2190): a caller that names its own lifetime -- the export's
+        900 s -- may name one from 1 to `LONGEST_NAMED_EXPIRY_SECONDS`; anything
+        else is refused here, before anything is signed.
         """
+        if expires_in is None:
+            expires_in = self.config.download_url_ttl_seconds
+        elif (
+            isinstance(expires_in, bool)
+            or not isinstance(expires_in, int)
+            or not 1 <= expires_in <= LONGEST_NAMED_EXPIRY_SECONDS
+        ):
+            raise ValueError(f"a named expiry is 1 to {LONGEST_NAMED_EXPIRY_SECONDS} seconds")
         return self.client.generate_presigned_url(
             "get_object",
             Params={"Bucket": self.config.bucket, "Key": key},
-            ExpiresIn=self.config.download_url_ttl_seconds,
+            ExpiresIn=expires_in,
             HttpMethod="GET",
         )
+
+    def put_object(self, key: str, body: bytes) -> None:
+        """Write `body` at `key`, once: `IfNoneMatch="*"`, so a second write to
+        the key is the provider's 412 (`presign_put`'s rule, measured in Run 5).
+        The export's one write (D2190); the error names the operation and a code."""
+        try:
+            self.client.put_object(Bucket=self.config.bucket, Key=key, Body=body, IfNoneMatch="*")
+        except ClientError as exc:
+            raise _fail("put_object", exc) from exc
 
     def head_object(self, key: str) -> dict[str, Any]:
         """What the provider says about an uploaded object. Raises `ObjectAbsent`.

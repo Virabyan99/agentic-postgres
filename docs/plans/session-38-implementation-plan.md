@@ -468,6 +468,11 @@ D2189.** Rows the runs add go in a second table below it, in execution order.
 | **D2215** | D2167: *"`registry` gains one outcome: a row with `deleted_at` and no deployed document and a `consumed` tombstone **`agrees (deleted)`**; with a deployed document still present → `differs: deleted`"*. | A deleted row with no document and NO tombstone, and a tombstone that cannot be read, are not ruled. | **`differs: tombstone`** (exit 5) for no tombstone; **`could not determine`** (exit 6) for an unreadable one; a key that is not a slot's has no tombstone. `control.py` reads it under `SLOT_ROOT/<key>/consumed`; `test_a_deleted_project_agrees_only_with_its_tombstone` (control: the same row without `deleted_at` agrees). | Agreement is claimed only when both halves of a deletion are present. | 0256, 0195 |
 | **D2216** | D2160: an admission refusal returns the slot to `ready`; D2152: an interruption quarantines it. | A step that FAILS (an exit code, a timeout) is not ruled. | **Before the first deploy** (no ready slot, admission refused or failed, the manifest refused) **the slot is returned**: its prepared manifest restored byte for byte, its `allocated` marker removed. **From the first deploy on, a failure leaves the marker**: the slot reads `allocated` and is never reissued; the operation is `operation_failed` (or `could_not_determine` for a child that outlived its bound) naming the step, and the project's state reads `unknown` (D2203). Clearing such a slot is the operator's (§10). | Once something was rendered or deployed, returning the slot would reissue a half-made project. | 0256, 0195 |
 | **D2217** | ADR 0256: a closed table over the six executed types. | Run 6 builds `project.create`; Run 7 builds the other five. | **`reconciler_dispatch.STEPS` and `bin/reconciler.py`'s `HANDLERS` hold `project.create` only**, a test holding the two equal and within `EXECUTED_TYPES`; a claimed row of any other type is finished `failed invalid_request {"reason": "this release does not execute <type>"}` with nothing run. No such row can exist before Run 10 (`ACCEPTED_TYPES` is empty). Also: **`slot.dns_reading` and `slot.observe`** moved from `bin/slot.py` into `agentic_postgres.slot` -- one walk over the declared slots that `slot.sh status` prints and the reconciler records (a `bin/` command imports no other, ADR 0093). | The table is closed at every commit, not only at the session's end. | 0256, 0093 |
+| **D2218** | Run 7 item 1: the handlers act on *"the row's `project_key`"* (D2154); D2165: sleep, wake, resize, export and delete are `projects:write` (delete `admin`+) over the caller's organisation. | `control_service.write_project` accepts any registry project of the caller's organisation that is not deleted -- and alpha, beta and control-prod are adopted into the operator's organisation (Sheet A1, D2141). A member there could ask the reconciler to stop, resize, export or retire the control plane itself. | **The reconciler acts only on DECLARED SLOTS**: every operation but a creation is refused before anything runs -- `failed invalid_request {"reason": "the reconciler acts on slot projects only; this one is operator-managed"}` -- when its `project_key` is not one of `host.yaml`'s declared slots; a slot with no deployed document is `could_not_determine`. The control mode is unchanged (an `invalid_request` leaves the derived state as it was, D2203). `test_an_operator_managed_project_is_refused` (alpha-dev, control-prod). | The reconciler retires only what it created; an operator-managed project's lifecycle is the operator's sheets'. | 0256 |
+| **D2219** | D2203: *"A running export leaves the state as it was (`ready` in the plan's case, `sleeping` for a sleeping project)"*. | A sleeping project's database container is stopped: `pg_dump` through `docker exec` cannot run, and a resize's deploy would start the containers behind a disabled unit and disabled timers. | **Export and resize read whether the database container runs first** (`docker inspect --format {{.State.Running}}`, argv built by `reconciler_dispatch.running_argv`): `false` → `failed invalid_request {"reason": "the project is sleeping; wake it first"}` with nothing dumped, admitted or deployed (the state stays `sleeping`); no answer → `could_not_determine` (`unknown`). Two `docker` READS join `COMMANDS` (this and the storage container's lookup); every `docker exec` stays `container_exec.run`. `test_a_sleeping_project_is_neither_exported_nor_resized`. | A sleeping project woken as a side effect of another request is the surprise the derived state would then misreport. | 0259, 0195 |
+| **D2220** | Run 7 item 1: *"resize (admit with the own key excluded → `capacity_exhausted {admission}` with nothing rendered; else re-write the manifest's `compute`, one deploy, the registry refresh)"*. | `admit.sh` charges the profile of the manifest it is handed; admitting the slot's manifest BEFORE re-writing it would charge the profile being left. | **A candidate manifest**: the slot's with the new profile, written `.candidate.<operation>.yaml` (0600, exclusive) beside it, loaded by the product, then admitted (the key it derives is the slot's own, so admission's `already_deployed_here` excludes the project's current charge); **renamed over the manifest only when admitted**, removed in every other case. Then one deploy at `THROUGH_SESSION` and the registry row refreshed -- `ADOPT_SQL` now passes an empty display name or slot as NULL, so a refresh never erases them (the re-adoption `coalesce`s, D2200). `test_resize_admits_a_candidate_before_anything_changes` (refused: the manifest byte for byte, no candidate left, nothing deployed; control: admitted). | Admission reads what will be deployed, and nothing is changed before it says yes. | 0258, 0221 |
+| **D2221** | D2164: *"`python -m app.export_upload --key exports/<operation-id>.dump`, stdin = the archive … puts it with the container's own `R2Adapter`"*; D2190: `put_object` first-write-only, `presign_get(…, expires_in)` bounded at 900. | The storage container's objects live under the deployed prefix (`APG_STORAGE_PREFIX`, one authority, ADR 0102); a key the reconciler typed would be a second derivation of it. `container_exec.run` captures output and feeds input whole. | **`--operation <uuid>`**: the container builds `<prefix>exports/<uuid>.dump` itself; the reconciler passes no path. The adapter's `put_object` is NOT added to `BoundedR2` (the storage API's path), so the served API still writes no bytes; a named expiry outside 1–900 s is refused before anything is signed, absent = the configured TTL (the API's path unchanged). `export_upload` refuses outside `APP_MODE=storage` (3), an empty archive (2), and reports the provider's 412 as 5 with no URL. **The archive passes through the reconciler's memory** (`pg_dump`'s captured stdout, then the upload's input): bounded by a slot's database, which Session 38's profiles keep small; a streamed export is §10. `test_export_upload.py` (5, Stubber). | The prefix has one authority; the bounded URL is the only new exit. | 0259, 0124 |
+| **D2222** | D2158 / ADR 0256 §6: `project.delete` runs `project-retire.sh … --permanent --destroy-data --defer-provider`. | ADR 0186 (*"No unit, timer, cron or deploy step reads `expires_at` and acts"*; D951, every removal path a human's) is guarded by `test_project_retire.py::test_no_unit_timer_or_command_names_the_retirement_verb`, which refuses any unit or `bin/` command but the verb itself naming `project-retire` -- Run 7's targeted run found `bin/reconciler.py` (1 failed, 1,538 passed). The plan read ADR 0186 and did not price its guard. | **ADR 0256 amended** (§ *Amendment, Run 7*): the reconciler is the one command besides the verb that may name it -- for a `project.delete` a PERSON requested (human-session only, `admin`+, D2165) on a slot it created (D2218), with `--permanent` and never `--before-expiry`, never reading a project's `expires_at`. **The guard widens by exactly `bin/reconciler.py` and gains three assertions** that keep the exception honest: the reconciler still names the verb (drop the exception otherwise), it never READS `expires_at` (subscript or `.get`) nor names `lifecycle` or `--before-expiry`, and `retire_argv` carries `--permanent` and no `before-expiry`. Battery M8 (the reconciler reading `expires_at`) → the guard FAILED, control `test_volume_removal_lives_in_exactly_two_commands` PASSED. | Widening an allowlist to the measured set, with the property it protects asserted where the exception is, is not weakening it; no timer acts on expiry still holds. | 0256, 0186 |
 
 ---
 
@@ -1277,7 +1282,56 @@ without the tombstone → `test_delete_consumes_the_slot` FAILED; M5 sleep witho
 disabling the timers → FAILED; M6 resize rendering before admission → FAILED.
 **Targeted**: as Run 6 plus `test_storage_*` (grep) and `test_auth_service_shape`.
 
-**Done.** *(the executor writes it)*
+**Done.** 2026-10-08 (scripts and notes in WSL `~/s38/run7/`). **Run 6's CI:
+run 37765394786 (`contract`) completed `success` on `6f59524`.** **The closed
+table is whole**: `reconciler_dispatch.STEPS` and `bin/reconciler.py`'s
+`HANDLERS` equal `EXECUTED_TYPES` (a test). **sleep** (D2155): `backup.sh …
+schedule disable` → `systemctl disable agentic-postgres-project@KEY` (not
+`--now`) → `project-runtime.sh … --through-session <the document's
+deployed_through_session> stop`; **wake**: `start` → `systemctl enable` →
+`schedule enable`. **resize** (D2220): a candidate manifest admitted, renamed
+into place only when admitted, one deploy, the registry refreshed (empty name
+and slot passed as NULL). **export** (D2164, D2221): `pg_dump -U postgres -Fc
+-n app -n api --no-owner --no-privileges` through `container_exec.run` into
+`/var/lib/agentic-postgres/exports/<op>.dump` (0600, exclusive), the storage
+container found by its Compose labels (`docker ps --filter
+label=apg.project.key=KEY --filter label=com.docker.compose.service=storage`),
+the archive streamed to `python -m app.export_upload --operation <op>`, the one
+URL finished into `result_secret` (`FINISH_SQL` gains `nullif(:'secret', '')`)
+with `sha256`, `size_bytes`, `expires_at` in the result, the archive removed in
+every case. **delete** (D2158): `project-retire.sh --host host.yaml --project
+KEY --confirm KEY --record /etc/agentic-postgres/slots/KEY/retirement.json
+--permanent --destroy-data --defer-provider` → the `consumed` tombstone (0600,
+the operation's id) → `control_mark_deleted`; the slot reading after it reads
+`consumed`. Every handler but create acts only on a declared slot (D2218);
+export and resize refuse a sleeping project (D2219). **`services/auth-api/app/export_upload.py`**
+(storage mode only) and the adapter's **`put_object`** (first-write-only) and
+**`presign_get(…, expires_in)`** (1–900 s, D2190); `BoundedR2` unchanged. Botocore
+in the image is the venv's (1.43.72), so the Stubber's parameter check is the
+image's. **Tests**: `test_reconciler_dispatch.py` (+8, 26: sleep, wake, resize
+refused and admitted, the dump's argv, the URL as secret and the archive removed
+-- a failed upload too --, a sleeping project, delete, operator-managed refused;
+Run 6's `test_an_unexecuted_type_runs_nothing` replaced by
+`test_the_closed_table_is_the_executed_types`), `test_export_upload.py` (5,
+Stubber: one first-write-only PUT of the archive, one line signed 900 s, the
+expiry bound, the 412, the mode/empty/id refusals, the two constants equal).
+**Targeted** (30 modules, once): 1,538 passed, 1 failed, 2 skipped (the tests own skips) -- the failure ADR 0186's guard
+refusing `bin/reconciler.py` naming the retirement verb (D2222: ADR 0256 amended,
+the guard widened by exactly that file with three assertions keeping the
+exception honest); after the fix `test_project_retire.py` alone 18 passed, and
+`test_documentation_index` + `test_acceptance_registry` 71 passed. **Battery 8/8
+killed** (M8, below, run after the fix), each
+control PASSED, the tree unchanged after: M1 `-n app_private` added →
+`test_the_export_names_only_the_customer_schemas` FAILED; M2 the archive kept →
+`test_the_export_url_is_the_operations_secret_and_the_archive_is_removed` FAILED;
+M3 the URL signed 3600 s past the adapter → `test_the_export_is_written_once_and_signed_for_900_seconds`
+FAILED; M4 delete without the tombstone → `test_delete_consumes_the_slot` FAILED;
+M5 sleep without disabling the timers → `test_sleep_disables_the_timers_and_the_unit_then_stops`
+FAILED; M6 resize deploying before admission → `test_resize_admits_a_candidate_before_anything_changes`
+FAILED; M7 an operator-managed project not refused → `test_an_operator_managed_project_is_refused`
+FAILED; M8 the reconciler reading a project's `expires_at` →
+`test_no_unit_timer_or_command_names_the_retirement_verb` FAILED. Rows
+**D2218–D2222**. NEXT FREE D2223. CI: recorded in Run 8's commit.
 
 ### Run 8 — the CLI: `project.sh` verbs, `compute.sh`, `operation.sh`
 
