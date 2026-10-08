@@ -81,6 +81,7 @@ Before a deployment exists, and on a machine that is not one.
 | [Secret handling](secret-handling.md) | Generations, per-consumer materialization, what may never be logged |
 | [Provider bootstrap](provider-bootstrap.md) | What is created at a provider, by identifier rather than by name -- and adopted by id on a replacement host |
 | [Node-loss runbook](node-loss-runbook.md) | The host is gone: the kit, adoption, the restore from the mirror, the deploy, the cutover last |
+| [The secret store](secret-store.md) | The self-hosted Infisical every project's secrets live in: who reaches it, the keys the operator keeps, the encrypted nightly backup, a restore, upgrading, and what losing it means |
 | [Recovery operations](recovery-operations.md) | The ordinary days before it: the mirror, the kit, the restore's promises, the eight rehearsals and what each reads |
 | [Host baseline](host-baseline.md) | What `provision-host.sh` does to a machine |
 

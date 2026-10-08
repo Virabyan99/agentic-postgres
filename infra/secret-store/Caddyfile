@@ -1,0 +1,12 @@
+# The secret store's edge (ADR 0262, D2250). Caddy runs on the host network:
+# port 80 answers Let's Encrypt's HTTP-01 challenge and redirects everything
+# else; port 443 is reachable only from the addresses ufw admits. The backend is
+# reached on the loopback port compose.yaml publishes, and nowhere else.
+{
+	admin off
+	cert_issuer acme
+}
+
+secrets.agenticpostgresql.com {
+	reverse_proxy 127.0.0.1:8080
+}

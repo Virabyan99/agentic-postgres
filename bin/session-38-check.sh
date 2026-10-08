@@ -1403,7 +1403,7 @@ mode_offline() {
   # 1. `deploy.sh:27` has sourced `bin/lib/tty-guard.sh` since Session 30 Run 3;
   # that run added this glob to `bin/session-01-check.sh` and to no other caller
   # (D1564). A library nothing lints is a library whose refusal nobody checks.
-  shellcheck deploy.sh bin/*.sh bin/lib/*.sh libexec/*
+  shellcheck deploy.sh bin/*.sh bin/lib/*.sh libexec/* infra/secret-store/*.sh
   "$(python_bin)" -m ruff check src bin tests
   "$(python_bin)" -m ruff format --check src bin tests
   bin/lock-versions.sh --check

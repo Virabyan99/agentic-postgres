@@ -325,3 +325,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0259](0259-sleep-is-compose-stop-wake-is-compose-start-and-export-is-a-900-second-url.md) | Sleep is `compose stop`, wake is `compose start`, and an export is a 900-second URL | 38 | Accepted |
 | [0260](0260-the-first-administrator-is-handed-over-by-hash.md) | The first administrator is handed over by hash | 38 | Accepted |
 | [0261](0261-a-trial-ledger-status-bounded-to-the-session-that-introduced-its-claims.md) | A `trial` Ledger status, bounded to the session that introduced its claims | 38 | Accepted |
+| [0262](0262-the-secret-store-is-self-hosted-infisical-on-its-own-host.md) | The secret store is self-hosted Infisical on its own host | 38 | Accepted |

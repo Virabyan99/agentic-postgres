@@ -7,8 +7,8 @@ because of **D2223** (the operator, 2026-10-08): Infisical's paid plan is priced
 identity, so the secret store is self-hosted on its own small VPS, and the deployment moves
 from the Hetzner CX23 to an OVHcloud VPS **before** the trip, so that Runs 11–13 measure
 the host the product will keep. Seven runs: two change code (M1, M3), five are sittings or
-readings. The plan spends **D2239–D2262** and **ADR 0262–0263**. **NEXT FREE after this
-plan: D2263, ADR 0264.**
+readings. The plan spends **D2239–D2262** and **ADR 0262–0263**; its runs add rows from
+**D2263**.
 
 **Brief:** the operator's decisions of 2026-10-08 — D2223 (self-hosted Infisical, the move
 before the trip), D2222 confirmed, the two servers bought and **kept in the US** (D2251) —
@@ -174,6 +174,10 @@ between two Infisical instances by value (M3, ADR 0263), and the secret store's 
 | **D2260** | — | The rehome's new generation must equal the old one, or the move changed a secret. | **After the rehomes, `materialize-secrets` (at `c3eec1d`) writes a new generation per project and `~/s38/mig/gen-compare.py` (root) compares every consumer file of the new and the previous generation byte for byte, printing counts and names only**; then a same-commit redeploy per project with the probe running (`s37-probe-start.sh`), its windows read. | The product's reader is the proof; the probe says what the redeploy cost. | 0155 |
 | **D2261** | `infra/` holds the edge and the host baseline; `versions.env` pins every image. | The store is not a product host and runs nothing of the product. | **`infra/secret-store/`** (compose, Caddyfile, backup script and units, an env template with names only), its images pinned by digest in the compose file itself (not `versions.env`: no product build reads them), guarded by `tests/contract/test_secret_store_files.py`; `docs/secret-store.md` is its operator page, indexed. | Reproducible, reviewed, and outside the release's surface. | 0262 |
 | **D2262** | Session 38 plan Run 11: *"Before the day: … the Infisical plan upgraded (D2146)"*; Sheet P1's `A slot1… → 62.238.99.122`; D2161's Hetzner region values; Run 13's envelope rows *"each naming the CX23"*; CLAUDE.md §2's HOST block. | All describe the old host. | **M7 amends Session 38's plan** (a row per change, not a silent edit): Run 11's precondition becomes this plan's Done; the slot's A record → `15.204.231.45`; H1's region values read from the OVH console; the envelope rows name the OVH host; `~/s38/host-address` holds `15.204.231.45`; and CLAUDE.md §2 is rewritten (copied to the scratchpad first). | The trip reads the plan; the plan must describe the host the trip uses. | — |
+| **D2263** | Sheet E1: `ubuntu` locked; D2245. `docs/secret-store.md` §1: port 22 *key-only*. | Read 2026-10-09 on both servers: `/etc/ssh/sshd_config.d/50-cloud-init.conf` says `PasswordAuthentication yes` and is read BEFORE `60-cloudimg-settings.conf`'s `no` (sshd keeps the first value) -- **both servers accept passwords** (`sshd -T`: `passwordauthentication yes`). The main host gets `00-agentic-postgres-ssh.conf` from `provision-host.sh` pass 2 (`:935`), which sorts first; **the store host runs no `provision-host.sh`**. The only sudo grant is `/etc/sudoers.d/90-cloud-init-users` (`ubuntu ALL=(ALL) NOPASSWD:ALL`); groups `sudo` and `admin` are empty. | **Sheet E1 installs the product's own `infra/host/00-agentic-postgres-ssh.conf` on the store host** (`__SSH_PORT__` → 22, `sshd -t`, reload, a NEW session before anything else), and removes exactly `90-cloud-init-users` on both. Read after: `sshd -T` → `passwordauthentication no`, `permitrootlogin no`; `sudo -l -U ubuntu` → not allowed. | One hardening file, the one the product reviewed, on every host it reaches. | 0262 |
+| **D2264** | Sheet E1: the key put in at the OVH console; the host key pinned against the console's fingerprint. | **Done 2026-10-08/09 by the operator with `ssh-copy-id`**: OVH mails a one-time password that is EXPIRED at first login (`Password change required but no TTY available` under `ssh-copy-id`), so one interactive login changed it first. Fingerprints recorded at first connection and read back on the hosts: main `SHA256:eyJyvNfVC7okGz57f7nfirmqjsB72ZO+B2AgU3QALAo`, store `SHA256:pRl0fEeVUYkA1okZePYU2CiAOQ3gejDGD1a9wNuIPwE` (trust on first use; not compared with the console). **Readings**: main Ubuntu 26.04 x86_64, 4 vCPU (Haswell), 7,746 MiB, no swap, 72 GB, `ens3`, IPv4 `15.204.231.45/32` **and public IPv6 `2604:2dc0:101:200::5466/128`**; store Ubuntu 26.04 x86_64, 2 vCPU, 3,814 MiB, no swap, 38 GB, `ens3`, IPv4 only. Both NTP-synchronised, Docker absent, ufw inactive, only sshd listening publicly. | E1's key half is done; `public_interface: ens3` for the main host; **no AAAA record for any name on the main host** (it has an address one would point at). | -- | -- |
+| **D2265** | ADR 0262 / D2261: the store's files. | Infisical's own `docker-compose.prod.yml` (read 2026-10-09): one `.env` handed to EVERY container (the database and Redis see `ENCRYPTION_KEY`), floating tags (`infisical:latest`, `redis`, `postgres:14-alpine`), the backend published on `80:8080`. Infisical v0.165.16 reports `inviteOnlySignup: true` on a fresh instance (`/api/status`). | **Three env files, one reader each** (`infisical.env` the backend, `db.env` the database, `backup.env` the backup's rclone), the non-secret settings in `environment`; tags pinned by digest (`infisical v0.165.16`, `postgres 16.15-alpine`, `redis 7.4.11-alpine`, `caddy 2.11.4-alpine`, `rclone 1.75.1` -- the newest at least two weeks old on 2026-10-09, each digest read from the registry with linux/amd64); `127.0.0.1:8080` only. **Whether the first account can sign up under `inviteOnlySignup` is Sheet I2's reading.** | Upstream's file is a demo; the store holds the cipher pass. | 0262 |
+| **D2266** | -- | Caddy's ACME account here has no e-mail (`cert_issuer acme`, no `email`), so no expiry notice reaches anyone; Caddy renews on its own, and nothing in the product reads the store's certificate. | **Accepted for now; read by hand** in M6 (`openssl s_client` from the main host: issuer, `notAfter`) and named in §10 -- a host's `materialize-secrets` failing with a TLS error is the symptom, `docs/secret-store.md` §7. | An e-mail in a committed file would be the operator's address in the repository. | 0262 |
 
 ---
 
@@ -269,7 +273,19 @@ IPv6 (E1); the store's resident memory per container after a quiet hour (`docker
 the external port reading (D2250); the first backup's size and seconds; the restore
 rehearsal's seconds and its read-back verdict.
 
-**Done.** *(the executor writes it)*
+**Done (the code half, 2026-10-09).** ADR 0262 written and indexed; `infra/secret-store/`
+(compose, Caddyfile, three env examples, `backup.sh`, the service and timer);
+`docs/secret-store.md` indexed; both gates' shellcheck lines reach
+`infra/secret-store/*.sh`; `tests/contract/test_secret_store_files.py` (10 tests, its
+registry entry is M3's). **Rig** (the committed compose on the workstation, throwaway
+keys): `/api/status` 200 after 130 s, backend 766 MiB, database 133, Redis 5; `caddy
+validate` ok; `pg_dump | age` 4.3 MB with the `age-encryption.org/v1` header, decrypted and
+restored into a second database: 764 tables each. **Targeted** (9 modules): 1,216 passed, 2
+skipped (the module's own). **Battery 6/6 killed**, each control PASSED, the tree identical
+after: M1 a tag without its digest, M2 `0.0.0.0:8080`, M3 the dump written unencrypted, M4
+the edge off the host network, M5 the newest gate not linting the store, M6 the database
+reading the backend's env file. Rows **D2263–D2266**. CI: *(recorded in the sheets' Done)*.
+**The sittings' Done** *(the executor writes it after Sheets E1, D1, I1–I4)*.
 
 ### Run M2 — the main host, provisioned at 1.15.0; the store measured by the product
 
@@ -578,36 +594,49 @@ Every sheet: a human at a TTY on the named host, `sudo -v` first, each line run 
 the output read before the next sheet is issued. Paths in `<…>` are the agent's to fill
 from the previous sheet's reading before the sheet is handed over.
 
-### Sheet E1 — the operator's key, `op`, `ubuntu` locked, the readings (M1; both servers)
+### Sheet E1 — `op`, `ubuntu` locked, password login off (M1; both servers)
 
-At the OVH console, for each server: put the CONTENT of WSL `~/.ssh/agentic_postgres_ed25519.pub`
-into the `ubuntu` user's keys (the console's SSH-key field, or a rescue/password login and
-`~ubuntu/.ssh/authorized_keys`). The agent then confirms `ssh ubuntu@<ip> true` and pins the
-host key into WSL `~/.ssh/known_hosts` against the fingerprint the operator reads from the
-console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` in the OVH web console).
+**The key half is done** (D2264): `ubuntu@` on both servers takes WSL
+`~/.ssh/agentic_postgres_ed25519`, and both host keys are in WSL `~/.ssh/known_hosts`.
 
-Then, on each server, as `ubuntu`:
+**E1a — on EACH server, as `ubuntu`** (`ssh -i ~/.ssh/agentic_postgres_ed25519 ubuntu@<ip>`):
 
 ```bash
 sudo useradd -m -s /bin/bash op
 sudo install -d -m 0700 -o op -g op /home/op/.ssh
-sudo install -m 0600 -o op -g op ~ubuntu/.ssh/authorized_keys /home/op/.ssh/authorized_keys
-echo 'op ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/90-op >/dev/null && sudo chmod 0440 /etc/sudoers.d/90-op && sudo visudo -c
+sudo install -m 0600 -o op -g op /home/ubuntu/.ssh/authorized_keys /home/op/.ssh/authorized_keys
+echo 'op ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/90-op >/dev/null
+sudo chmod 0440 /etc/sudoers.d/90-op && sudo visudo -c
 ```
 
-From the workstation, a NEW session: `ssh -i ~/.ssh/agentic_postgres_ed25519 op@<ip> sudo -v`
-→ no prompt. Only then:
+The agent then opens a NEW session as `op` on each (`ssh … op@<ip> 'sudo -n true && echo ok'`)
+and reads `ok`. **E1b is handed over only after both read `ok`.**
+
+**E1b — the store server only (15.204.66.146), as `op`:** the product's SSH hardening
+(D2263). The agent first copies `infra/host/00-agentic-postgres-ssh.conf` to
+`/home/op/00-agentic-postgres-ssh.conf`; then:
+
+```bash
+sed 's/__SSH_PORT__/22/' /home/op/00-agentic-postgres-ssh.conf | sudo install -m 0644 /dev/stdin /etc/ssh/sshd_config.d/00-agentic-postgres-ssh.conf
+sudo sshd -t && sudo systemctl reload ssh
+```
+
+**Keep this session open**; from the workstation a NEW `ssh … op@15.204.66.146 true` must
+succeed. (On the main server the same file arrives with `provision-host.sh`'s pass 2, behind
+its rollback timer, in Sheet H0.)
+
+**E1c — on EACH server, as `op`, only after E1b's new session worked:**
 
 ```bash
 sudo truncate -s 0 /home/ubuntu/.ssh/authorized_keys
 sudo usermod -L ubuntu
-sudo rm -f /etc/sudoers.d/90-cloud-init-users && sudo visudo -c
+sudo rm /etc/sudoers.d/90-cloud-init-users && sudo visudo -c
 sudo -l -U ubuntu
 ```
 
-The agent reads, as `op`: `/etc/os-release`, `uname -m`, `nproc`, `free -m`, `df -BG /`,
-`ip -br a`, `ip route show default`, `timedatectl show -p NTPSynchronized`. (On the main
-host `apg-agent` comes in Sheet H0.)
+`sudo -l -U ubuntu` must say *not allowed to run sudo*. The agent reads after: `sshd -T`
+(store: `passwordauthentication no`, `permitrootlogin no`), `/etc/sudoers.d/` (`90-op`,
+`README`), and that `ubuntu@` is refused.
 
 ### Sheet D1 — the store's name (M1; Cloudflare console)
 
@@ -617,36 +646,51 @@ AAAA → empty.
 
 ### Sheet I1 — Docker, the firewall, `age`, the keys, the stack (M1; store host)
 
-The agent ships M1's SHA's `infra/secret-store/` to `/home/op/secret-store/` (`scp` of a
-`git archive`), and the operator:
+The agent ships `infra/secret-store/` at M1's SHA to `/home/op/secret-store/` (`git archive`
++ `scp`, sha256 per file printed). **I1a — packages and the firewall** (Docker's lines are
+`bin/provision-host.sh:731-770`'s):
 
 ```bash
+sudo apt-get update -qq && sudo apt-get install -y -qq ca-certificates curl
 sudo install -m 0755 -d /etc/apt/keyrings
-# Docker's apt source exactly as bin/provision-host.sh:720-778 writes it (the agent pastes the two lines from that file)
-sudo apt-get update && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin age ufw
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && sudo chmod a+r /etc/apt/keyrings/docker.asc
+printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu resolute stable\n' "$(dpkg --print-architecture)" | sudo tee /etc/apt/sources.list.d/docker.list
+sudo apt-get update -qq && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin age ufw
 sudo ufw default deny incoming && sudo ufw default allow outgoing
 sudo ufw allow 22/tcp && sudo ufw allow 80/tcp
 sudo ufw allow from 15.204.231.45 to any port 443 proto tcp
 sudo ufw allow from 62.238.99.122 to any port 443 proto tcp
-sudo ufw enable && sudo ufw status numbered
-sudo install -d -m 0700 /etc/secret-store /var/backups/secret-store
-sudo install -m 0600 /home/op/secret-store/infisical.env.example /etc/secret-store/infisical.env
+sudo ufw --force enable && sudo ufw status numbered
 ```
 
-Then the operator fills `/etc/secret-store/infisical.env` **at the TTY with an editor**:
-`ENCRYPTION_KEY` from `openssl rand -hex 16`, `AUTH_SECRET` from `openssl rand -base64 32`,
-the database password from `openssl rand -hex 24` (in `POSTGRES_PASSWORD` and
-`DB_CONNECTION_URI`) — **and writes the first two into the password manager and the offline
-copy BEFORE the next line**. Then:
+**I1b — the keys, at the TTY.** Two files from their examples, then each value generated
+on THIS host and typed into the file with an editor; **`ENCRYPTION_KEY` and `AUTH_SECRET`
+go into the password manager and the offline copy before I1c**:
+
+```bash
+sudo install -d -m 0700 /etc/secret-store /var/backups/secret-store
+sudo install -m 0600 /home/op/secret-store/infisical.env.example /etc/secret-store/infisical.env
+sudo install -m 0600 /home/op/secret-store/db.env.example /etc/secret-store/db.env
+openssl rand -hex 16       # -> ENCRYPTION_KEY
+openssl rand -base64 32    # -> AUTH_SECRET
+openssl rand -hex 24       # -> db.env's POSTGRES_PASSWORD, and inside DB_CONNECTION_URI:
+                           #    postgres://infisical:<that value>@db:5432/infisical
+sudo nano /etc/secret-store/infisical.env
+sudo nano /etc/secret-store/db.env
+sudo grep -c '=$' /etc/secret-store/infisical.env /etc/secret-store/db.env   # both :0 (no empty value left)
+```
+
+**I1c — the stack:**
 
 ```bash
 cd /home/op/secret-store && sudo docker compose -p secret-store up -d && sudo docker compose -p secret-store ps
-curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/api/status
 ```
 
-The agent reads from the main host (once H0 has `op` there, or with `curl` from WSL for the
-negative): `curl -sS https://secrets.agenticpostgresql.com/api/status` (200, issuer Let's
-Encrypt) — and from WSL, 443 must time out or be refused (D2250).
+The agent reads, as `op`: `/api/status` on `127.0.0.1:8080` → 200 (about two minutes on
+first start, D2265's rig: 130 s); `docker stats --no-stream`; from WSL `https://secrets.agenticpostgresql.com`
+must time out or be refused on 443 while port 80 answers (D2250); from the main host (after
+H0) `curl https://secrets.agenticpostgresql.com/api/status` → 200 with a Let's Encrypt
+issuer.
 
 ### Sheet I2 — the console: administrator, organisation, the control-plane identity (M1)
 

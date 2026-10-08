@@ -1,0 +1,93 @@
+# The self-hosted secret store (ADR 0262). Not a product host: nothing of the
+# release runs here, and nothing here is rendered. Started from the directory
+# this file was shipped to (docs/secret-store.md §3):
+#
+#   sudo docker compose -p secret-store up -d
+#
+# Every image is pinned by digest (the newest tag at least two weeks old on the
+# day it was chosen, D2261). The backend publishes 127.0.0.1:8080 and nothing
+# else; the database and Redis publish nothing. The edge (Caddy) runs on the
+# HOST network, so ufw -- not Docker's NAT, which bypasses it -- decides who
+# reaches 80 and 443 (D2250).
+#
+# Secret values live only in the two env files under SECRET_STORE_ETC (default
+# /etc/secret-store, root, 0600): the backend's `infisical.env` and the
+# database's `db.env`. Neither container reads the other's file. The variable
+# below interpolates a DIRECTORY, never a value.
+
+name: secret-store
+
+services:
+  backend:
+    image: docker.io/infisical/infisical:v0.165.16@sha256:6b911e3938ac2ff385a782df59ce9272799be7976d26dc5667266a2aecac4116
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - ${SECRET_STORE_ETC:-/etc/secret-store}/infisical.env
+    environment:
+      NODE_ENV: production
+      SITE_URL: https://secrets.agenticpostgresql.com
+      REDIS_URL: redis://redis:6379
+      TELEMETRY_ENABLED: "false"
+    ports:
+      - "127.0.0.1:8080:8080"
+    mem_limit: 1536m
+    pids_limit: 512
+    networks:
+      - store
+
+  db:
+    image: docker.io/library/postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    restart: unless-stopped
+    env_file:
+      - ${SECRET_STORE_ETC:-/etc/secret-store}/db.env
+    environment:
+      POSTGRES_USER: infisical
+      POSTGRES_DB: infisical
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=$$POSTGRES_USER --dbname=$$POSTGRES_DB"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    mem_limit: 768m
+    pids_limit: 256
+    networks:
+      - store
+
+  redis:
+    image: docker.io/library/redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    mem_limit: 256m
+    pids_limit: 64
+    networks:
+      - store
+
+  edge:
+    image: docker.io/library/caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - backend
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    mem_limit: 128m
+    pids_limit: 64
+
+volumes:
+  pg_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  store: {}
