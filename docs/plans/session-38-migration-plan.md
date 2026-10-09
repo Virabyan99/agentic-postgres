@@ -180,6 +180,12 @@ between two Infisical instances by value (M3, ADR 0263), and the secret store's 
 | **D2266** | -- | Caddy's ACME account here has no e-mail (`cert_issuer acme`, no `email`), so no expiry notice reaches anyone; Caddy renews on its own, and nothing in the product reads the store's certificate. | **Accepted for now; read by hand** in M6 (`openssl s_client` from the main host: issuer, `notAfter`) and named in §10 -- a host's `materialize-secrets` failing with a TLS error is the symptom, `docs/secret-store.md` §7. | An e-mail in a committed file would be the operator's address in the repository. | 0262 |
 | **D2267** | Sheet I2: *"Sign up: the first account is the instance administrator"*; D2265: `inviteOnlySignup: true` on a fresh instance. | After the first account, `/api/status` read `inviteOnlySignup: false`: the organisation's *Invite only* (asked at its creation, chosen) governs who joins the ORGANISATION; the instance itself still let anyone who reached the page create an account. The firewall stopped anyone reaching it. | **Server-wide sign-up disabled** in the Server Admin Console (a temporary ufw rule for the operator's address, removed on the same sheet); read in the store's database: `super_admin.allowSignUp = false`, `allowedSignUpDomain` null. `docs/secret-store.md` §3 step 6 says so. | Two doors, each closed by its own setting; the firewall is a third. | 0262 |
 | **D2268** | ADR 0262: no project is created by hand; the bootstrap creates one per project, named and slugged by the key (`bootstrap-providers.py:419-428`). | Creating the organisation created **three projects** nobody asked for -- Infisical's own products, each with a generated slug: `cert-manager-b-pyo` (type `cert-manager`), `pam-xs-hd` (`pam`), `agent-vault-r-sb-l` (`agent-vault`), all 2026-10-08 21:18:03. | **Left as they are**: none is the `secret-manager` type the bootstrap creates, and none can take a project key's slug. The restore drill's comparison counts them (`projects live=3 drill=3`). | A count that includes defaults is still a count; naming them stops the next reader wondering. | 0262 |
+| **D2269** | `bin/materialize-secrets.py:316-321`: *"except Exception: shutil.rmtree(staging, ignore_errors=True); raise"* -- a failed run leaves no partial generation. | `fail()` (`:59-61`) raises **`SystemExit`, which is not an `Exception`**: Sheet G1b's run (exit 8 at the absent `r2_access_key_id`, by design) left `generations/.9122780685b13ca3.staging/` holding **17 files of the values already read** (root 0700 directory, files 0400). The same lines are on HEAD. Every failure that goes through `fail()` -- an absent required value, a malformed value (ADR 0225) -- leaves one. | **Repaired in M3** (item 6): the cleanup catches `BaseException`; a proof that a 404 on a required value leaves no `.staging` directory, with its battery mutation (the clause narrowed back to `Exception`). The rig's directory was removed by Sheet G1c. Hosts get the repair with Session 38's release. | A cleanup clause that the commonest failure path does not reach is a property no failure ever exercised. | — |
+| **D2270** | Run M2 step 1: *"`uv` installed under `~op/.local/bin`, `uv sync`"*. | The tree has **no `uv.lock`**: `uv sync --frozen` refused (*"Unable to find lockfile"*) after creating `.venv` with CPython 3.12.13 (`.python-version`). The venv's documented source is the hash-locked `requirements-dev.txt` (`docs/new-team-member.md:69`, `docs/session-08-operator-guide.md:196`). | `uv` **0.12.1** (the Hetzner host's, read there) from `astral.sh/uv/0.12.1/install.sh` with `UV_NO_MODIFY_PATH=1`; the venv filled by **`uv pip sync --python .venv/bin/python --require-hashes requirements-dev.txt`** (exit 0; ruff 0.16.3, pytest 9.1.1, PyYAML 6.0.3; `PYTHONPATH=src` imports the package); `git status --short` empty after. | The lock the tree has is the one that is used. | — |
+| **D2271** | ADR 0262 / D2268: the operator administers the store at its console. | A project made by `bootstrap-providers --apply` has **one member, the `control-plane` identity** (`memberships`: one `project` row, `actorIdentityId` = control-plane, no user): the operator's *secret management* list does not show it, and Sheet G2 could not find `rig-dev` to delete it. The Cloud projects were made the same way. | **`rig-dev` is left in the store** (`eac2f178-7e83-4d00-a3ad-0d5b0d04557f`: 13 throwaway values, its only runtime identity revoked, readable by the control-plane identity alone) and deleted at the next console sitting, where the console's view of a project the user is not a member of is measured first (an organisation Admin's *all projects* view, or adding the user as a member). **The M4 restore drill counts it** (`projects` 5 with it, 4 after). No M4–M7 sheet may assume the operator can open a moved project in the console without that measurement. | What the console shows is a membership question, not an existence question. | 0262 |
+| **D2272** | `bin/bootstrap-providers.sh --help`: *"sudo bin/bootstrap-providers.sh --host FILE --project FILE --destroy --confirm PROJECT_KEY"*. | `destroy()` refuses without `--operator-credential-file` (`bootstrap-providers.py:1023-1024`): the usage line omits a required flag. Sheet G1c passed it (the plan's sheet already did). | **Repaired in M3** (item 6): the usage line names `--operator-credential-file FILE` for `--destroy`; `test_cli_contract` reads the help. | A usage line is a contract its reader runs. | — |
+| **D2273** | `docs/operator-guide.md` §3: the edge comes up with `edge.sh up` once per host; the reboot proofs read every unit boot-started (D2140). | `provision-host.sh --apply` prints *"edge and project units installed but not enabled; Run 6 starts them"* and nothing in `bin/` enables `agentic-postgres-edge.service`. On Hetzner it reads `enabled` (by hand, unrecorded); on OVH `disabled`. Project units are enabled by the operator guide's `:262` line. | **M5's first sheet on OVH** (beta's) adds `sudo systemctl enable agentic-postgres-edge.service` (no `--now`: the edge is already up), read back `enabled` before M6's reboot. The operator guide's §3 gaining the line is M7's documentation. | A unit that came back on one host because someone once typed a line is not a property of the product. | — |
+| **D2274** | D665: the arm command is copied from the tool's own output. | After H0b's hardening, H0c's `--apply` (firewall pass) printed again *"SKIPPED SSH hardening: no rollback timer is armed"* with a new arm command, while the snippet was installed and `--check` read it resolved. Arming that timer would restore a backup taken AFTER the hardening, so it is harmless; the message reads as if hardening had not happened. | **Recorded, not repaired**: the baseline's own `--check` block in the same output says `ok snippet installed`; a sheet tells the operator to ignore the repeated SKIPPED line after `--confirm-ssh-ok`. | Measured on the second host built from empty; cheap to word better, not urgent. | — |
 
 ---
 
@@ -366,7 +372,48 @@ copy removed. Scripts in WSL `~/s38/mig/` (`drill-fetch.sh`, `drill-restore.sh`,
 5. **Readings for M5** (agent, `apg-diag` and `op` reads): `docker info` (storage driver,
    cgroup v2), `free -m`, `df`, the edge's two containers' memory; nothing deployed.
 
-**Done.** *(the executor writes it)*
+**Done (2026-10-09 UTC).** Before it: the store's first timed backup ran at 05:15:00
+(`infisical-20261009T051500Z.dump.age`, 4,292,996 bytes, copied and read back); the main
+host had logged **3,705** failed password attempts since E1 (password login still on until
+H0b). **Transport** (D504): `git bundle --all` (23,748,484 bytes, verified) → `scp` →
+`git clone -b main` → detached at `c3eec1dc6c07…` (tag `1.15.0`), `git status` empty; uv and
+the venv per **D2270**. **`host.yaml`** by `~/s38/mig/ovh-hostyaml.py` from
+kit-2026-10-06-s37's: `apg-ovh-01`, `ens3`, `15.204.231.45` (IPv6 `2604:2dc0:101:200::5466`
+present, declared null), capacity **7746 / 2214 / 71 / 8** (`free -m`, D1992, `df -Pk`
+75,076,664 KiB floored, D1633), the store's block (org `5573621e-…`, slug
+`agentic-postgres-c-k7t`); every swap count-asserted, the diff read, `load_host_manifest`
+accepts it, 0600, sha256 `17868210…` equal on both ends. **H0**: `--check` 25 deviations →
+pass 1 (Docker **29.9.0**, Compose 5.6.0, launchers, units, release, port registry) 4 →
+SSH pass behind `apg-ssh-rollback` (`sshd -T`: `passwordauthentication no`,
+`permitrootlogin no` — the product's `00-` file wins over OVH's `50-cloud-init.conf`, as
+D2263 found on the store); a new key session from the workstation, a no-key client offered
+`publickey` only, `root@` and `ubuntu@` refused with the key; confirmed → firewall pass behind
+`apg-ufw-rollback`, *"the host meets the Session 2 baseline"*; a new session, ufw 22/80/443,
+DOCKER-USER on `ens3` admitting 80 and 443 only; from the workstation 80/443 refused at once
+(nothing listening), 5432/8080 filtered; confirmed. (D2274: the firewall pass re-printed the
+SSH SKIPPED message.) `apg-agent` with `/usr/local/bin/apg-diag` and its sudoers rule (`sudo
+-l`: `apg-diag` only, `sudo -n true` refused). **Edge** on staging: Traefik `v3.7@9c3b91d5…`,
+socket proxy `0.3.0@9e4b9e75…`, both healthy in 22 s; `http://15.204.231.45/` → 301;
+`agentic-postgres-edge.service` **disabled** (D2273). **G1 — the rig** (D2257): the eleven
+routes the product calls answered `401 Token missing` unauthenticated (a made-up route 404,
+the login 422 on an empty body) — none moved. `/home/op/rig-dev.yaml` from
+`project.example.yaml` (slug `rig`, all nine `fixture-alpha-dev` names); `--plan` 17 changes
+and the four operator-supplied names, contacting nothing; the control-plane credential written
+by a hidden prompt (2 lines), **`--apply` → `created 4 resource(s) for rig-dev`**: project
+`eac2f178-…` (type `secret-manager`), 13 secrets, folders `auth backup database root runtime`,
+identity `rig-dev-runtime`, credential files 0400; `--plan` again **no changes**.
+`materialize-secrets --session 37` read every generated value as the runtime identity,
+*"auth_jwt_prepared_key: absent at the provider, and optional"*, then **exit 8 at
+`r2_access_key_id` — `GET /api/v3/secrets/raw/APG_R2_ACCESS_KEY_ID failed with HTTP 404`**,
+as designed (and D2269). `rig-read.py` (its first version asked for the contract name, not
+`provider_key` — the reader's bug, fixed): `app_runtime_password
+(/database/APG_APP_RUNTIME_PASSWORD) length 64` as `51388690-…`. **`--destroy`** revoked the
+identity (the store's `identities`: `control-plane` alone), its files and state removed, the
+`.staging` directory removed, the credential shredded, the four directories read empty;
+`rig-dev` itself stays (D2271). **Readings for M5**: `overlayfs`, cgroup **2** (`systemd`
+driver), `/var/lib/docker`; 7,746 MiB total, **7,069 available** with the edge up (Traefik
+16.5 MiB, socket proxy 3.5 MiB); 68 G free of 72 G; `op` not in the docker group. Rows
+**D2269–D2274**. **NEXT FREE D2275.**
 
 ### Run M3 — `--rehome` and the carried ages (code)
 
@@ -429,6 +476,12 @@ copy removed. Scripts in WSL `~/s38/mig/` (`drill-fetch.sh`, `drill-restore.sh`,
    matrix and the product contract; commit; push; **CI by full SHA**. Then
    `bin/session-38-check.sh --mode offline` and `bin/session-01-check.sh` ONCE each,
    detached — this is a run before a host trip (M4).
+6. **Two repairs Run M2 found** (on HEAD; the hosts get them with Session 38's release):
+   D2269 — `bin/materialize-secrets.py`'s cleanup catches `BaseException`, so a `fail()`
+   leaves no `.staging` generation (a proof with a stub provider answering 404 on a required
+   value; battery: the clause narrowed back to `Exception`, FAILED, with a control);
+   D2272 — `bin/bootstrap-providers.sh --help` names `--operator-credential-file` for
+   `--destroy`. Targeted adds `test_materialize_*` (grep the module names first).
 
 **Done.** *(the executor writes it)*
 
