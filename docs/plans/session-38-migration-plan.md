@@ -199,6 +199,8 @@ between two Infisical instances by value (M3, ADR 0263), and the secret store's 
 | **D2285** | `versions.env:15`: `MC_IMAGE=quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349e…`, the base of the `backup-mirror` image, *"built rather than pulled"* (`services/backup-mirror/Dockerfile`). | **The image is no longer pullable anonymously** (measured 2026-10-09 from WSL): quay.io answers **401** for the digest and the tag, its API *"Requires authentication"*; Docker Hub's `minio/mc` 401 for both; a public quay image (`prometheus/busybox`) 200 as the control. OVH's first `backup.sh … mirror` failed at the build (`load metadata … 401 UNAUTHORIZED`, exit 5) while restore, deploy and backup did not touch it; Hetzner never noticed because its images were built 2026-09-06. **Every fresh host's mirror fails.** | **For M5: Hetzner's built image carried** (`docker save` → `scp -3` → `docker load`, sha256 `c3bd5bda…` equal both ends; its `mirror.sh` equal to the tree's `c8c1a3dc…`, unchanged since `b1e37ff`) and tagged `apg-{alpha-dev,beta-dev,control-prod}-backup-mirror:latest` on OVH; Compose's `run` builds only a missing image. **Owed: a product repair before any other fresh host** -- `MC_IMAGE` re-pinned to a source that answers (or the mirror moved to the store's pinned `rclone`), with a proof that every pinned base resolves anonymously; Session 38's Run 11 deploy keeps the tagged images. | The mirror is the backup's second copy; a host that cannot build it has one. | 0188 |
 | **D2286** | Run M5 step 3: *"`--render-runtime-only` → the printed `database-ports.sh verify`"*; the database-ports usage: *"Reuse is the default: a redeploy gets the same numbers back, because they are in somebody's saved tunnel."* | Ports are allocated from the HOST's registry (OVH's was empty): beta reads **pooled 15432 / direct 15433** on OVH against **15434 / 15435** on Hetzner. Reuse holds per host, not across a move. | **Recorded**; a saved tunnel to beta's ports is re-pointed by its owner. Alpha and control-prod will take the next free pairs in move order (their Hetzner pairs 15432/15433 and 15436/15437 are not reserved here). | The registry is the host's; a move is a new host. | — |
 | **D2287** | Run M5 step 2 / runbook §2: `--adopt`, then `--apply` *"adopts the existing secret values into this host's record"*. | After `--adopt`, `--plan` lists **every generated value as `create`** (14 on beta): the plan compares the contract with the adopted state, whose `managed_resources` are the identity's three only (`bootstrap-providers.py:1194-1199`); it contacts nothing. Whether `--apply` then overwrites rests on the store answering a duplicate create with 400/409 (`create_secret`), measured only against the Cloud. | **Measured on the self-hosted store first** (`/home/op/conflict-probe.py` against `rig-dev`, root, the control-plane credential): duplicate create **HTTP 400** *"Secret '…' already exists"*, version 1 before and after, value digest unchanged. Then beta's `--apply`: **14 × "already present at the provider; not overwritten"**, 0 created. | The cipher pass is the one value a wrong overwrite makes fatal; the answer was measured before it was relied on. | 0189 |
+| **D2288** | Run M5 step 2: every restore `--from mirror` (D2246 needs alpha's). | **Backblaze's free Daily Class B Transactions Cap (downloads) was reached during control-prod's restore** (the operator's e-mail, ~19:40Z): beta's and alpha's mirror restores read every backup file and WAL segment from B2 the same day. Control-prod's `restore.sh --from mirror` failed after 2 min 46 s, **pgBackRest exit 39**, `restore.sh` exit 6; nothing was damaged (the cap refuses reads, deletes nothing). | **Control-prod restored `--from primary` (R2)** -- the failed partial volume removed first (`docker volume rm apg-control-prod-postgres`, its users read empty, runbook §7): exit 0, timeline 2, instance equal, **RTO 469 s**. D2246 is unaffected (alpha's record is the mirror's). **The nightly mirror passes are unaffected on ordinary days** (Hetzner ran them daily under the cap; they upload and list); **a day with more than one mirror restore needs the cap raised first** -- named in §10 and owed to the runbook's § *A planned move* (M7). | A second provider's free tier is a rate limit on recovery; the primary is the same bytes. | 0188, 0192 |
+| **D2289** | `bin/restore.py:562`: *"detail = (result.stderr or result.stdout or '').strip()[:600]"*. | The FIRST 600 characters of pgBackRest's output are its `restore command begin` line (the option list); the error is at the END. D2288's failure printed the option list and no error, and the restore container runs `--rm`, so its log was gone: the cause was read from the provider's e-mail, not from the product. | **Owed: a product repair** -- the detail is the output's LAST lines (or every `ERROR:` line), with a proof that feeds a long begin line and a final `ERROR: [039]` and asserts the error is printed. | ADR 0159 keeps a third party's text when it is the only clue; this kept the wrong end of it. | 0159 |
 
 ---
 
@@ -679,7 +681,39 @@ at 19:00:32Z; doctor 12 ok, 0 warning.** Beta was down **17:45:53Z → ~18:42Z**
 deploy's observation). `/home/op/beta-dev-outputs.json` (op, 0600) on OVH. Hetzner keeps beta's
 volume and its `*.rehomed-*` history until M7.
 
-**Done -- alpha, control-prod.** *(the executor writes them)*
+**Done -- alpha (2026-10-09 UTC).** F (`m5-freeze.sh alpha-dev`): counts 19:03:04Z `app.notes
+1456`, `tasks 122`, instance `90db04ed-…`; incr 17 s; stopped 19:03:25–19:03:38Z; mirror 64 s,
+21,925 objects. C: `alpha-db` → `15.204.231.45` (read 19:07:11Z, four resolvers). N: adopt
+(`e96b88d8-…`, OVH identity `78c86daf-…`, Hetzner's `7b9ad42d-…` named) `&&` apply (13 adopted, 0
+created); materialize 29 files; **restore `--from mirror`: exit 0, timeline 2, instance equal,
+recovered to 19:03:23Z, RTO 554 s** -- **D2246's record `/home/op/restore-alpha-dev-
+202610091911abae.json`** (source `mirror`). P: first deploy issued the PRODUCTION certificate at
+the one attempt, every route `ready`; ports **15434/15435** (D2286); counts equal; doctor 11 ok +
+mirror WARN. B: incr; timers enabled; mirror 21,948 objects at 19:28:09Z (the carried image,
+D2285); **doctor 12 ok**. Down 19:03:25Z → ~19:22Z.
+
+**Done -- control-prod (2026-10-09 UTC).** F: counts 19:29:28Z (`control_accounts 8`,
+`invitations 7`, `keys 4`, `memberships 3`, `operations 0`, `organizations 2`, `projects 3`, `totp
+3`, `notes 0`, `tasks 0`), instance `838313ad-…`; incr 14 s; stopped 19:29:45–19:29:58Z; mirror
+15 s, 1,603 objects. C: `control` → `15.204.231.45` (read 19:32:45Z). N: adopt (`ec433e2b-…`,
+OVH identity `c9216fa8-…`, Hetzner's `19d0270a-…` named) `&&` apply (13 adopted, 0 created);
+materialize 29 files; **the mirror restore failed (D2288, D2289); restored `--from primary`:
+exit 0, timeline 2, instance equal, RTO 469 s.** P: production certificate at the one attempt;
+`control` `ready`, `storage` `unavailable` as on Hetzner (storage off); ports **15436/15437**
+(unchanged); counts equal; doctor 11 ok + mirror WARN. B: incr; timers enabled; mirror 1,623
+objects at 20:05:29Z. Down 19:29:45Z → ~20:00Z.
+
+**A-OVH.** `control.sh adopt` × 3 (1.15.0, `c3eec1d`) each exit 0; **`registry` agrees × 3, exit
+0**; `/home/op/{alpha-dev,beta-dev,control-prod}-outputs.json` (op, 0600) and the three restore
+records in `/home/op/`. Read from WSL: the three names' `healthz` **200 from `15.204.231.45`,
+certificates verifying**; on OVH the edge unit and the three project units `enabled`, nine backup
+timers scheduled (incr 03:30–03:38Z, mirror 04:38–04:48Z after B2's midnight reset, full Sunday).
+**Run M5 measured:** freezes 1 min 37 s–1 min 42 s (counts → mirror end); restores 564 / 554
+(mirror) and 469 s (primary) against 247 s; downtime per project ≈ 56 / 19 / 30 min, beta's
+including D2285 and the staging→production promotion. Hetzner: the three units disabled and
+stopped, their volumes and timers' state kept -- the way back until M7 is `systemctl enable --now`
++ `schedule enable` + the A records back to `62.238.99.122`. Rows **D2284–D2289**. **NEXT FREE
+D2290.**
 
 ### Run M6 — the declarations, a reboot, a verification, the capacity
 
@@ -788,6 +822,10 @@ Stop, write the row, and wait for the operator when:
 - **The node-loss order for the control project** (control first, D2253) is still Session
   42's.
 - **Ages read 0 days on any host below 1.16.0** after a rehome (D2242).
+- **The mirror's base image is not pullable** (D2285): OVH runs Hetzner's carried build; a
+  product repair is owed before any other fresh host.
+- **B2's free daily download cap** (D2288): more than one mirror restore a day needs it raised
+  first; `restore.py` reports the head of pgBackRest's output, not the error (D2289, owed).
 - Carried from Session 38 §10, unchanged: D2178 (no host-wide deploy lock), D2181 (a
   slot's providers outlive it — in the self-hosted store now), D2182, `process-max` 1.
 
