@@ -326,3 +326,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0260](0260-the-first-administrator-is-handed-over-by-hash.md) | The first administrator is handed over by hash | 38 | Accepted |
 | [0261](0261-a-trial-ledger-status-bounded-to-the-session-that-introduced-its-claims.md) | A `trial` Ledger status, bounded to the session that introduced its claims | 38 | Accepted |
 | [0262](0262-the-secret-store-is-self-hosted-infisical-on-its-own-host.md) | The secret store is self-hosted Infisical on its own host | 38 | Accepted |
+| [0263](0263-a-projects-provider-project-moves-between-stores-by-value.md) | A project's provider project moves between stores by value | 38 | Accepted |

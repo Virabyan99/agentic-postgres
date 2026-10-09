@@ -4623,6 +4623,7 @@
     - tests/contract/test_secret_contract.py::test_every_declared_kind_has_a_branch_in_the_check
     - tests/contract/test_optional_secrets.py::test_the_loop_checks_the_kind_before_it_writes
     - tests/contract/test_optional_secrets.py::test_a_refused_value_is_dropped_and_never_counted
+    - tests/contract/test_optional_secrets.py::test_a_failed_materialization_leaves_no_staging_generation
   description: >-
     **A secret's value is checked against its declared `value_kind` at
     materialization, before it is written** (ADR 0225). `value_kind` has been
@@ -6768,3 +6769,68 @@
     document shared no `ISOLATED_FIELDS` value or role with A, B or the
     control project, and named the same region; the control project's REST
     route is recorded unpublished and the edge answers it 404.
+
+# Session 38, the migration (ADR 0262-0263): the secret store moved to a
+# self-hosted instance, and the way a project's values move with it.
+
+- id: REC-REHOME-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_provider_rehome.py::test_the_check_reads_every_declared_value_as_the_runtime_identity_and_writes_nothing
+    - tests/contract/test_provider_rehome.py::test_a_required_value_absent_at_the_source_refuses_both_modes_before_any_write
+    - tests/contract/test_provider_rehome.py::test_a_host_still_naming_the_recorded_store_or_no_state_is_refused_before_any_read
+    - tests/contract/test_provider_rehome.py::test_a_destination_that_already_has_the_project_is_refused_before_any_value_is_written
+    - tests/contract/test_provider_rehome.py::test_the_move_writes_in_order_and_switches_only_after_every_value_reads_back
+    - tests/contract/test_provider_rehome.py::test_a_copy_that_reads_back_differently_exits_six_and_leaves_this_host_untouched
+    - tests/contract/test_provider_rehome.py::test_no_value_reaches_stdout_stderr_the_state_the_record_or_the_carried_file
+    - tests/contract/test_provider_rehome.py::test_the_carried_ages_are_the_sources_times_and_a_second_move_keeps_the_first
+    - tests/contract/test_provider_rehome.py::test_a_moved_secret_reads_its_carried_age_until_it_is_replaced
+    - tests/contract/test_provider_rehome.py::test_a_carried_file_that_is_not_one_the_rehome_wrote_is_refused
+    - tests/contract/test_provider_rehome.py::test_the_doctor_reads_the_carried_age_and_reports_an_unreadable_file_for_every_secret
+    - tests/contract/test_provider_rehome.py::test_the_kit_carries_the_ages_when_the_host_has_them_and_verifies_without_them
+    - tests/contract/test_provider_rehome.py::test_the_wrapper_admits_both_modes_with_root_and_the_new_stores_credential
+    - tests/contract/test_provider_rehome.py::test_the_usage_names_every_flag_each_mode_requires
+  description: >-
+    **A project's provider project moves to another secret store by value**
+    (ADR 0263). `bootstrap-providers --rehome-check` reads every value the
+    contract declares for the project from the store its STATE records, as the
+    project's own runtime identity (D2275), logs in at the store the HOST
+    MANIFEST names, and writes nothing anywhere. `--rehome` refuses a host
+    still naming the recorded store, a project with no state, a required value
+    absent at the source (before the destination is contacted) and a
+    destination that already has the project (before any value is written
+    there); it writes the READ values, mints the runtime identity, reads every
+    value back AS that identity and compares digests -- a difference is exit 6
+    with the pending credential removed, the identity revoked and this host
+    unchanged -- and only then switches the host, keeping the old state and
+    credential files beside the new ones. No value reaches stdout, stderr, the
+    state, the record or the carried file. The source's times are carried
+    (`secret-ages-carried.json`), `doctor secrets` reads them while the new
+    store's version is 1 and reports an unreadable file as unknown for every
+    secret, and a kit carries the file when the host has one and verifies
+    without it. The usage names every flag each mode requires (D2272).
+
+- id: REC-STORE-001
+  priority: P0
+  target_session: 38
+  test_nodeids:
+    - tests/contract/test_secret_store_files.py::test_every_image_is_a_tag_pinned_by_digest
+    - tests/contract/test_secret_store_files.py::test_only_the_backend_publishes_and_only_on_loopback
+    - tests/contract/test_secret_store_files.py::test_each_secret_lives_in_one_env_file_that_one_service_reads
+    - tests/contract/test_secret_store_files.py::test_the_env_examples_name_every_secret_and_hold_none
+    - tests/contract/test_secret_store_files.py::test_the_dump_is_encrypted_before_anything_writes_or_uploads_it
+    - tests/contract/test_secret_store_files.py::test_the_edge_serves_only_the_store_name_with_no_admin_endpoint
+    - tests/contract/test_secret_store_files.py::test_the_backup_runs_nightly_and_catches_up_after_downtime
+    - tests/contract/test_secret_store_files.py::test_both_gates_lint_the_store_script
+    - tests/contract/test_secret_store_files.py::test_no_store_file_holds_anything_shaped_like_a_key
+  description: >-
+    **The self-hosted secret store's files** (ADR 0262): every image a tag
+    pinned by digest; nothing published but the backend's `127.0.0.1:8080`;
+    the TLS edge on the host network, where the firewall applies, serving only
+    the store's name with its admin endpoint off; each secret in one env file
+    that one service reads, the committed examples naming every key and holding
+    no value; the nightly backup encrypting the dump to an `age` recipient
+    before anything writes or uploads it, on a timer that catches up after
+    downtime; both gates linting the backup script; and no file shaped like a
+    key.

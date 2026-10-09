@@ -186,6 +186,11 @@ between two Infisical instances by value (M3, ADR 0263), and the secret store's 
 | **D2272** | `bin/bootstrap-providers.sh --help`: *"sudo bin/bootstrap-providers.sh --host FILE --project FILE --destroy --confirm PROJECT_KEY"*. | `destroy()` refuses without `--operator-credential-file` (`bootstrap-providers.py:1023-1024`): the usage line omits a required flag. Sheet G1c passed it (the plan's sheet already did). | **Repaired in M3** (item 6): the usage line names `--operator-credential-file FILE` for `--destroy`; `test_cli_contract` reads the help. | A usage line is a contract its reader runs. | — |
 | **D2273** | `docs/operator-guide.md` §3: the edge comes up with `edge.sh up` once per host; the reboot proofs read every unit boot-started (D2140). | `provision-host.sh --apply` prints *"edge and project units installed but not enabled; Run 6 starts them"* and nothing in `bin/` enables `agentic-postgres-edge.service`. On Hetzner it reads `enabled` (by hand, unrecorded); on OVH `disabled`. Project units are enabled by the operator guide's `:262` line. | **M5's first sheet on OVH** (beta's) adds `sudo systemctl enable agentic-postgres-edge.service` (no `--now`: the edge is already up), read back `enabled` before M6's reboot. The operator guide's §3 gaining the line is M7's documentation. | A unit that came back on one host because someone once typed a line is not a property of the product. | — |
 | **D2274** | D665: the arm command is copied from the tool's own output. | After H0b's hardening, H0c's `--apply` (firewall pass) printed again *"SKIPPED SSH hardening: no rollback timer is armed"* with a new arm command, while the snippet was installed and `--check` read it resolved. Arming that timer would restore a backup taken AFTER the hardening, so it is harmless; the message reads as if hardening had not happened. | **Recorded, not repaired**: the baseline's own `--check` block in the same output says `ok snippet installed`; a sheet tells the operator to ignore the repeated SKIPPED line after `--confirm-ssh-ok`. | Measured on the second host built from empty; cheap to word better, not urgent. | — |
+| **D2275** | Run M3 item 2: *"a new `--source-credential-file F` (the OLD store's control-plane credential) ... `rehome-check`: logs into the source ... and reads every value"*; D2256: whether that identity may read values is unmeasured. | The project's own RUNTIME identity reads every one of these values on every start (`materialize-secrets`, `viewer` on its project): the tree already holds a proven reader of exactly this set, on the host, root-only. | **The source is read as the project's runtime identity**, from the credential files its state records; there is no `--source-credential-file`. D2256's risk disappears, and M4's sheets need ONE credential (the new store's control plane), not two -- the Cloud control-plane credential is not placed on Hetzner at all. | The read the move depends on is the read the product makes daily. | 0263 |
+| **D2276** | D2242 and Run M3 item 2: *"`secret_age` reads the carried file when present and reports the OLDER age per name"*. | The OLDER answer is wrong in the other direction once a value is rotated after the move: the rotation's `updatedAt` is newer, the carried time older, and the doctor would report a just-rotated credential overdue. The new store writes version 1 (measured on the store 2026-10-09: 13 bootstrap-created values, all version 1, `createdAt` = `updatedAt`); a replacement increments it. | **The carried time answers while the new store's version is 1; a later version answers with the provider's own time; no version is `unknown`** (cannot tell which is the age, ADR 0195). A carried file present and unreadable is `unknown` for every secret. A second move keeps the first's times. The doctor reads the file under its `--root` (default `/etc/agentic-postgres/projects`, the state's directory), so the existing proofs' temporary root is where it looks. | A report may not fold into either answer; the version is the fact that tells them apart. | 0263, 0250, 0195 |
+| **D2277** | Run M3 item 2: the rehome-check *"checks no project with the key's slug exists there (read by the call `--apply` would make)"*; the record at *"`evidence/rehome-<key>-<utc>.json`"*. | No call `--apply` makes READS a project by slug (`create_project` writes; `get_project` reads by id, D1013), and a slug lookup would be a by-name search the bootstrap refuses. `evidence/` is in `op`'s checkout and the rehome runs as root: a root-owned file there is the hand-back class D1110 names. | **The check mode logs in at the destination and calls nothing else**; `--rehome`'s first destination write is `create_project`, and a destination that already has the slug refuses THERE, before any value or identity exists (proved). **The record is `/etc/agentic-postgres/projects/<key>/rehome-<utc>.json`** (0600) beside the state, never in the checkout. | The refusal is the call the move would make anyway; root writes where root's files live. | 0263 |
+| **D2278** | §2: two requirements and two OFFLINE claims, counts 330/237/89 → 332/239/91. | Both are Session 38 claims (`CLAIM_INTRODUCED_IN` 38), so `test_session_thirty_eight_gate_modes.py`'s expectation table (guarded by equality with the claims introduced) and the gate's `--help` ("FIFTEEN", "eighty-nine") moved with them; the Session 38 plan's Run 11/12 text expects **237 claims** at the merge and `~/s38/run9/s38-external.sh` was derived against 237. | **Table and prose moved** (seventeen offline of twenty; the half carries ninety-one). **Run 11 must expect 239 claims and an offline half of 91** -- the external and host halves are unchanged; the trip's scripts are re-read for any literal 237 before the trip (M7 amends the Session 38 plan). | A count is moved everywhere it is asserted, or it is asserted wrong somewhere. | — |
+| **D2279** | ADR 0262 / M1: `test_secret_store_files.py` (`REC-STORE-001`, registered in Run M3). | The module carried `contract` and `security` but **not `p0`**: the sweep that reports an offline claim selects `-m 'p0 and ...'`, so `secret_store_files` would have read `not_run` with all ten proofs green. `test_every_offline_claims_proof_is_swept_by_the_gate_that_reports_it` (D1240/D1242) refused the registration. | **`p0` added to the module's marks** (a selection widened, no assertion touched). | D1242's guard did what it was written for, on its first chance. | 0262 |
 
 ---
 
@@ -483,7 +488,39 @@ driver), `/var/lib/docker`; 7,746 MiB total, **7,069 available** with the edge u
    D2272 — `bin/bootstrap-providers.sh --help` names `--operator-credential-file` for
    `--destroy`. Targeted adds `test_materialize_*` (grep the module names first).
 
-**Done.** *(the executor writes it)*
+**Done (2026-10-09).** **ADR 0263** written and indexed. `bin/bootstrap-providers.py`:
+modes `rehome-check` and `rehome` (`EXIT_MISMATCH` 6; `SecretReader`, `runtime_credential`,
+`read_source`, `read_back`, `move_file`, `remove_file`, `rehome`); the source read as the
+project's runtime identity (**D2275**), every declared value (facilities applied, the optional
+included) read before any write; the check logs in at the destination and writes nothing; the
+move: `create_project` first (the slug refusal, **D2277**), every READ value written, the
+identity, Universal Auth and client secret, the secret in `*.rehome-pending` (0400), `viewer`,
+every value read back as the new identity and compared by digest (a difference: exit 6, pending
+removed, identity revoked, ids printed, host untouched), then the switch -- old state and
+credentials `*.rehomed-<utc>`, new state (schema unchanged: `git diff 1.15.0 --
+schemas/bootstrap-state.schema.json` **empty**; the digest of the new block), carried ages,
+the record beside the state (**D2277**). `bin/bootstrap-providers.sh`: a second case arm
+(`--rehome-check|--rehome)`, the adopt test's arm string untouched), root and the new store's
+credential required, exit table 6/7, the usage naming `--operator-credential-file` for
+`--destroy` (**D2272**). `secret_age`: `CARRIED_AGES`, `carried_document`/`parse_carried`/
+`load_carried` (a list of entries -- names ending `_password` fail the sensitive-key guard as
+KEYS), `judge(carried=)` by version (**D2276**), `Age.source`; `doctor secrets` reads the file
+under `--root`. `dr_kit`: `CARRIED_AGES` an optional artefact. `materialize-secrets`: the
+cleanup catches `BaseException` (**D2269**). `docs/provider-bootstrap.md` § *Moving to another
+store* (and `--destroy`'s example with its credential). **Proofs**: `test_provider_rehome.py`
+(16 functions, 18 cases: two recorded stores, the filesystem recorded by the command's own three
+writers, a canary in every source value) and
+`test_optional_secrets.py::test_a_failed_materialization_leaves_no_staging_generation` (the run
+executed: two values written, a required one 404, exit 8, `generations/` empty) under
+SEC-KIND-001. **Registry** (§2): `REC-REHOME-001`, `REC-STORE-001`, claims `provider_rehome`
+and `secret_store_files` (offline, 38) -- requirements **332**, `CLAIMS` **239**,
+`OFFLINE_CLAIMS` **91**; the gate's table and prose moved (**D2278**); `test_secret_store_files`
+marked `p0` (**D2279**). **Battery 9/9 KILLED**, each control PASSED, every file `cmp`-identical
+after: the read-back's verdict ignored; the state written before the read-back; a source value
+printed; a required absence not refused; the carried age ignored; the check going on to write;
+the same store not refused; D2269's clause narrowed back to `Exception`; the kit dropping the
+file. **Targeted** 23 modules: 1,544 passed, 1 failed (D2279's guard) → re-run of
+`test_acceptance_registry` 24 passed. Rows **D2275–D2279**. NEXT FREE **D2280**.
 
 ### Run M4 — the store moved, on the old host (Hetzner)
 

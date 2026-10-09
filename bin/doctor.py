@@ -1202,6 +1202,7 @@ def probe_secret_ages(
     project_key: str,
     document: dict[str, Any],
     *,
+    root: Path = deployed_output.PROJECT_STATE_ROOT,
     client_factory: Callable[[str], Any] = infisical_client.InfisicalClient,
     now: datetime | None = None,
 ) -> tuple[secret_age.Age, ...]:
@@ -1238,6 +1239,16 @@ def probe_secret_ages(
         state = bootstrap_state.load_state(bootstrap_state.state_path(project_key))
     except (OSError, config.ManifestError):
         return every("this project has no bootstrap state on this host")
+    # A project whose secrets moved stores carries their ages (ADR 0263): read
+    # beside the state, absent for every project that never moved, and a file
+    # that is there but unreadable is the third outcome for all of them -- never
+    # a silent fall back to the move's date (ADR 0195).
+    try:
+        carried = secret_age.load_carried(
+            root / project_key / secret_age.CARRIED_AGES, project_key=project_key
+        )
+    except secret_age.CarriedAgesError:
+        return every(f"{secret_age.CARRIED_AGES} could not be read")
 
     moment = now or datetime.now(UTC)
     ages: list[secret_age.Age] = []
@@ -1266,7 +1277,15 @@ def probe_secret_ages(
                     secret_age.unreadable(secret["name"], secret["max_age_days"], problem.status)
                 )
                 continue
-            ages.append(secret_age.judge(secret["name"], secret["max_age_days"], times, now=moment))
+            ages.append(
+                secret_age.judge(
+                    secret["name"],
+                    secret["max_age_days"],
+                    times,
+                    now=moment,
+                    carried=(carried or {}).get(secret["name"]),
+                )
+            )
     finally:
         client.logout()
     return tuple(ages)
@@ -1351,7 +1370,9 @@ def main(argv: list[str] | None = None) -> int:
         if arguments.project is None:
             return _die(EXIT_INPUT, "--project is required with the secrets reading")
         document = load_document(arguments.project, arguments.root)
-        checks = diagnosis.secret_age_report(probe_secret_ages(arguments.project, document))
+        checks = diagnosis.secret_age_report(
+            probe_secret_ages(arguments.project, document, root=arguments.root)
+        )
         _render(checks, arguments, project_key=arguments.project)
         return diagnosis.exit_code(checks)
 

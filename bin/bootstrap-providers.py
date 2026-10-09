@@ -29,6 +29,7 @@ exercised against a real organisation in Run 6; nothing offline can prove them.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -44,7 +45,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentic_postgres import CURRENT_SESSION, REPO_ROOT, secrets_contract
+from agentic_postgres import CURRENT_SESSION, REPO_ROOT, secret_age, secrets_contract
 from agentic_postgres.bootstrap_state import (
     BootstrapStateError,
     credential_paths,
@@ -57,6 +58,12 @@ from agentic_postgres.bootstrap_state import (
 )
 from agentic_postgres.config import load_project_manifest
 from agentic_postgres.host_config import load_host_manifest
+from agentic_postgres.infisical_client import (
+    Credential,
+    InfisicalClient,
+    InfisicalError,
+    SecretTimes,
+)
 from agentic_postgres.naming import project_key as derive_project_key
 from agentic_postgres.secrets_contract import (
     active_secrets,
@@ -66,7 +73,16 @@ from agentic_postgres.secrets_contract import (
 
 EXIT_INVALID = 2
 EXIT_PREREQUISITE = 3
+#: `--rehome`: a value read back as the NEW runtime identity is not the value
+#: read from the source. Nothing on this host changed (ADR 0263).
+EXIT_MISMATCH = 6
 EXIT_PROVIDER = 7
+
+#: The reader both stores are read with during a rehome (ADR 0263): the runtime
+#: client -- Universal Auth login and raw reads, nothing else -- which is what
+#: `materialize-secrets` reads every project's values with. A module attribute
+#: so a proof can stand two recorded stores in its place.
+SecretReader = InfisicalClient
 
 TIMEOUT = 30.0
 
@@ -1217,11 +1233,443 @@ def adopt(
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Rehome: the project's provider project moved to another store (ADR 0263)
+# ---------------------------------------------------------------------------
+
+
+def move_file(source: Path, destination: Path) -> None:
+    """One rename on the same filesystem. A module function so a proof records it."""
+    os.replace(source, destination)
+
+
+def remove_file(path: Path) -> None:
+    """Remove a file this run wrote and no longer wants. Recorded by a proof."""
+    path.unlink(missing_ok=True)
+
+
+def runtime_credential(state: dict[str, Any]) -> Credential:
+    """The project's own runtime credential, from the files its state records.
+
+    **The source is read as the project's runtime identity** (D2275): it is the
+    identity `materialize-secrets` reads every one of these values with on
+    every start, so the read is the product's proven path -- not the source
+    store's control-plane identity, whose right to read values it did not
+    create was never measured (D2256).
+    """
+    files = state["credential_files"]
+    return Credential.from_files(Path(files["client_id_path"]), Path(files["client_secret_path"]))
+
+
+def value_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def read_source(
+    key: str, state: dict[str, Any], declared: list[dict[str, Any]]
+) -> tuple[dict[str, tuple[str, SecretTimes]], list[str], list[str]]:
+    """Every declared value at the store the STATE records, read as the runtime identity.
+
+    Returns the values found (in memory only, never written here), the names
+    absent and optional, and the names absent and REQUIRED. Only a 404 is
+    *absent*; any other failure ends the run (exit 7), because a value the
+    store holds and this run could not read is not a value it may skip.
+    """
+    reader = SecretReader(state["api_url"])
+    try:
+        reader.login(runtime_credential(state))
+    except InfisicalError as exc:
+        fail(EXIT_PROVIDER, f"the source store refused {key}'s runtime identity: {exc}")
+    found: dict[str, tuple[str, SecretTimes]] = {}
+    absent_optional: list[str] = []
+    absent_required: list[str] = []
+    coordinates = {
+        "project_id": state["infisical_project_id"],
+        "environment": state["environment_slug"],
+    }
+    try:
+        for secret in declared:
+            where = {"name": secret["provider_key"], "secret_path": secret["provider_path"]}
+            try:
+                value = reader.read_secret(**where, **coordinates)
+                times = reader.read_secret_times(**where, **coordinates)
+            except InfisicalError as exc:
+                if exc.status == 404:
+                    (absent_required if secret["required"] else absent_optional).append(
+                        secret["name"]
+                    )
+                    continue
+                fail(EXIT_PROVIDER, f"could not read {secret['name']} at the source: {exc}")
+            found[secret["name"]] = (value, times)
+    finally:
+        reader.logout()
+    return found, absent_optional, absent_required
+
+
+def read_back(
+    api_url: str,
+    credential: Credential,
+    project_id: str,
+    environment: str,
+    found: dict[str, tuple[str, SecretTimes]],
+    by_name: dict[str, dict[str, Any]],
+) -> list[str]:
+    """Every copied value read as the NEW runtime identity, compared by digest.
+
+    Returns what is wrong, by name; empty means every value the new identity
+    reads is the value the source held. No value leaves this function.
+    """
+    reader = SecretReader(api_url)
+    problems: list[str] = []
+    try:
+        reader.login(credential)
+    except InfisicalError as exc:
+        return [f"the new runtime identity could not log in: {exc}"]
+    try:
+        for name, (value, _times) in found.items():
+            secret = by_name[name]
+            try:
+                copied = reader.read_secret(
+                    name=secret["provider_key"],
+                    project_id=project_id,
+                    environment=environment,
+                    secret_path=secret["provider_path"],
+                )
+            except InfisicalError as exc:
+                problems.append(f"{name}: not readable as the new identity ({exc})")
+                continue
+            if value_digest(copied) != value_digest(value):
+                problems.append(f"{name}: the copy differs from the source")
+            del copied
+    finally:
+        reader.logout()
+    return problems
+
+
+def rehome(
+    key: str,
+    state: dict[str, Any] | None,
+    digest_now: str,
+    manifest_digest: str,
+    host: dict[str, Any],
+    credential_file: Path,
+    session: int,
+    facilities: frozenset[str],
+    *,
+    check_only: bool,
+) -> int:
+    """Move this project's provider project to the store `host.yaml` now names (ADR 0263).
+
+    **Read everything, then write everything, then prove it, then switch.**
+    The source is the store the STATE records, read as the project's own
+    runtime identity (D2275); the destination is the store the HOST MANIFEST
+    names, written with its control-plane credential. Every declared value is
+    read before anything is written anywhere, and a required one absent stops
+    the run there. The destination gets the project, every value read (the
+    READ value, never a generated one: a new cipher pass would make every
+    backup unreadable, D999), a runtime identity and its client secret -- which
+    is written to a PENDING file before anything else can fail, as `--apply`
+    writes it -- and then every value is read back AS that identity and
+    compared by digest. Only when all of them match is this host's state
+    switched: the old state and the old credential files are kept beside the
+    new ones (`*.rehomed-<utc>`), the source's times are kept in
+    `secret-ages-carried.json` (D2242), and a record of the move is written
+    beside the state. The source is never written to.
+
+    `check_only` (`--rehome-check`) does the reads and the destination's login
+    and writes nothing anywhere.
+    """
+    if state is None:
+        fail(
+            EXIT_PREREQUISITE,
+            f"no recorded state for {key}: there is no provider project to move. A host that "
+            "never bootstrapped this project uses --apply; a replacement host uses --adopt.",
+        )
+    infisical = host["infisical"]
+    if (
+        state["api_url"].rstrip("/") == infisical["api_url"].rstrip("/")
+        and state["organization_slug"] == infisical["organization_slug"]
+    ):
+        fail(
+            EXIT_PROVIDER,
+            f"nothing to move: the host manifest names the store {key}'s state records "
+            f"({state['api_url']}, {state['organization_slug']}). Point the host manifest's "
+            "infisical block at the NEW store first -- both copies, the checkout's and "
+            "/etc/agentic-postgres/host.yaml (D2259).",
+        )
+
+    carried_path = state_path(key).parent / secret_age.CARRIED_AGES
+    try:
+        previous = secret_age.load_carried(carried_path, project_key=key)
+        operator_id, operator_secret = read_operator_credential(credential_file)
+    except (secret_age.CarriedAgesError, BootstrapStateError) as exc:
+        fail(EXIT_PREREQUISITE, str(exc))
+
+    contract = load_secret_contract(REPO_ROOT / "secrets.required.yaml")
+    declared = active_secrets(contract, session, facilities=facilities)
+    by_name = {secret["name"]: secret for secret in declared}
+
+    found, absent_optional, absent_required = read_source(key, state, declared)
+    print(
+        f"bootstrap-providers: read {state['api_url']} project {state['infisical_project_id']} "
+        f"as {key}'s runtime identity"
+    )
+    for secret in declared:
+        name = secret["name"]
+        if name in found:
+            print(f"  {name:36s} present {value_digest(found[name][0])[:8]}")
+        elif name in absent_optional:
+            print(f"  {name:36s} absent (optional)")
+        else:
+            print(f"  {name:36s} ABSENT (required)")
+    print(
+        f"{len(found)} present, {len(absent_optional)} absent (optional), "
+        f"{len(absent_required)} ABSENT (required)"
+    )
+    if absent_required:
+        fail(
+            EXIT_PROVIDER,
+            f"required value(s) absent at the source: {', '.join(absent_required)}. "
+            "Nothing was written anywhere.",
+        )
+
+    try:
+        control = ControlPlane.login(infisical["api_url"], operator_id, operator_secret)
+    except BootstrapStateError as exc:
+        fail(EXIT_PROVIDER, f"the destination store refused the control-plane credential: {exc}")
+    print(f"bootstrap-providers: {infisical['api_url']} accepted the control-plane credential")
+
+    if check_only:
+        print("bootstrap-providers: --rehome-check wrote nothing anywhere.")
+        return 0
+
+    organization = infisical["organization_id"]
+    environment = infisical["environment_slug"]
+    created_so_far: list[tuple[str, str]] = []
+    conflicts: list[str] = []
+
+    def created_report() -> None:
+        # D1046's rule: say what now exists at the destination before leaving.
+        if created_so_far:
+            print("bootstrap-providers: this run created at the destination:", flush=True)
+            for kind, identifier in created_so_far:
+                print(f"  {kind}  {identifier}", flush=True)
+            print(
+                "  This host's state is unchanged and still names the source. Delete these "
+                "at the destination's console by the ids above before running --rehome again.",
+                flush=True,
+            )
+
+    try:
+        # The project first: a destination that already has a project with this
+        # slug refuses here, before any value or identity exists there.
+        project_id = control.create_project(key, key, organization)
+        created_so_far.append(("Infisical project", project_id))
+        for name, (value, _times) in found.items():
+            secret = by_name[name]
+            control.ensure_folder(project_id, environment, secret["provider_path"])
+            if not control.create_secret(
+                project_id, environment, secret["provider_path"], secret["provider_key"], value
+            ):
+                # Already present in a project this run just created: not
+                # trusted, not overwritten -- the read-back below compares it.
+                conflicts.append(name)
+        identity_id = control.create_identity(f"{key}-runtime", organization)
+        created_so_far.append(("machine identity", identity_id))
+        client_id = control.attach_universal_auth(identity_id)
+        secret_id, client_secret = control.create_client_secret(
+            identity_id, f"{key} runtime (rehomed)"
+        )
+    except (BootstrapStateError, KeyError, ValueError) as exc:
+        created_report()
+        fail(EXIT_PROVIDER, str(exc))
+
+    paths = credential_paths(key)
+    pending = {name: Path(f"{raw}.rehome-pending") for name, raw in paths.items()}
+    try:
+        write_private(pending["client_secret_path"], f"{client_secret}\n", mode=0o400)
+        write_private(pending["client_id_path"], f"{client_id}\n", mode=0o400)
+    except OSError as exc:
+        created_report()
+        fail(EXIT_PROVIDER, f"could not write the new credential ({exc}); nothing was switched.")
+
+    def abandon(code: int, message: str) -> None:
+        for path in pending.values():
+            remove_file(path)
+        try:
+            control.revoke_identity(identity_id)
+            created_so_far.append(("machine identity REVOKED", identity_id))
+        except BootstrapStateError:
+            pass
+        created_report()
+        fail(code, message)
+
+    try:
+        control.grant_project_access(project_id, identity_id, "viewer")
+    except BootstrapStateError as exc:
+        abandon(EXIT_PROVIDER, f"could not grant the new identity access: {exc}")
+
+    problems = read_back(
+        infisical["api_url"],
+        Credential(client_id=client_id, client_secret=client_secret),
+        project_id,
+        environment,
+        found,
+        by_name,
+    )
+    del client_secret
+    if problems:
+        abandon(
+            EXIT_MISMATCH,
+            "the copy did not read back as the source: " + "; ".join(problems) + ". This "
+            "host's state and credentials are unchanged.",
+        )
+    print(f"bootstrap-providers: {len(found)} value(s) read back as the new identity and equal")
+
+    stamp = now().replace("-", "").replace(":", "")
+    moved_at = now()
+    state_file = state_path(key)
+    kept_state = state_file.with_name(f"bootstrap-state.rehomed-{stamp}.json")
+    kept_credentials = {name: Path(f"{raw}.rehomed-{stamp}") for name, raw in paths.items()}
+    document = {
+        "schema_version": 1,
+        "project_key": key,
+        "project_manifest_sha256": manifest_digest,
+        "provider_inputs_sha256": digest_now,
+        "provider": "infisical",
+        "api_url": infisical["api_url"],
+        "organization_slug": infisical["organization_slug"],
+        "infisical_project_id": project_id,
+        "environment_slug": environment,
+        "runtime_folder": infisical["runtime_folder"],
+        "runtime_identity_id": identity_id,
+        "runtime_client_id": client_id,
+        "active_client_secret_id": secret_id,
+        "credential_files": paths,
+        # What THIS host created at the destination, as `--apply` records it:
+        # the project, the identity and its secret, and the generated values --
+        # never an operator-supplied one, which a third party issued (§8.2).
+        "managed_resources": sorted(
+            {
+                "project",
+                "runtime_identity",
+                "runtime_client_secret",
+                "runtime_folder",
+                *(
+                    secret["name"]
+                    for secret in generated_provider_secrets(session, facilities)
+                    if secret["name"] in found
+                ),
+            }
+        ),
+        "created_at": moved_at,
+        "updated_at": moved_at,
+    }
+    validate_state(document)
+    carried = secret_age.carried_document(
+        project_key=key,
+        rehomed_at=moved_at,
+        source_api_url=state["api_url"],
+        source_project_id=state["infisical_project_id"],
+        times={name: times for name, (_value, times) in found.items()},
+        previous=previous,
+    )
+    record = {
+        "kind": "secret_store_rehome",
+        "project_key": key,
+        "rehomed_at": moved_at,
+        "source": {
+            "api_url": state["api_url"],
+            "organization_slug": state["organization_slug"],
+            "project_id": state["infisical_project_id"],
+            "runtime_identity_id": state["runtime_identity_id"],
+        },
+        "destination": {
+            "api_url": infisical["api_url"],
+            "organization_slug": infisical["organization_slug"],
+            "project_id": project_id,
+            "runtime_identity_id": identity_id,
+        },
+        "copied": sorted(found),
+        "absent_optional": sorted(absent_optional),
+        "already_present": sorted(conflicts),
+        "kept": [str(kept_state), *(str(path) for path in kept_credentials.values())],
+    }
+    # The values are not needed past the read-back; drop them before the switch.
+    found.clear()
+
+    steps = [
+        ("the old state kept aside", lambda: move_file(state_file, kept_state)),
+        *(
+            (
+                f"the old {name} kept aside",
+                lambda n=name: move_file(Path(paths[n]), kept_credentials[n]),
+            )
+            for name in paths
+        ),
+        *(
+            (f"the new {name} put in place", lambda n=name: move_file(pending[n], Path(paths[n])))
+            for name in paths
+        ),
+        (
+            "the new state written",
+            lambda: write_private(
+                state_file, json.dumps(document, indent=2, sort_keys=True) + "\n", mode=0o600
+            ),
+        ),
+        (
+            "the carried ages written",
+            lambda: write_private(
+                carried_path, json.dumps(carried, indent=2, sort_keys=True) + "\n", mode=0o600
+            ),
+        ),
+        (
+            "the record written",
+            lambda: write_private(
+                state_file.with_name(f"rehome-{stamp}.json"),
+                json.dumps(record, indent=2, sort_keys=True) + "\n",
+                mode=0o600,
+            ),
+        ),
+    ]
+    done: list[str] = []
+    for label, step in steps:
+        try:
+            step()
+        except OSError as exc:
+            fail(
+                EXIT_PROVIDER,
+                f"the switch stopped at '{label}' ({exc}). Done before it: {done or 'nothing'}. "
+                f"The kept files are {record['kept']}; the new store's project is {project_id} "
+                f"and its identity {identity_id}.",
+            )
+        done.append(label)
+
+    print(f"bootstrap-providers: {key} moved to {infisical['api_url']} project {project_id}")
+    print(f"bootstrap-providers: runtime identity {identity_id} recorded in {state_file}")
+    print(f"bootstrap-providers: the previous state and credential files kept: {record['kept']}")
+    print(f"bootstrap-providers: the source's secret ages kept in {carried_path}")
+    if conflicts:
+        print(
+            f"bootstrap-providers: already present at the destination, compared equal: {conflicts}"
+        )
+    print(
+        f"bootstrap-providers: the source project {state['infisical_project_id']} and its "
+        f"identity {state['runtime_identity_id']} were NOT changed; retire them once the move "
+        "has held."
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=True, description="Provider bootstrap.")
     parser.add_argument("--host", type=Path, required=True)
     parser.add_argument("--project", type=Path, required=True)
-    parser.add_argument("--mode", choices=["plan", "apply", "destroy", "adopt"], required=True)
+    parser.add_argument(
+        "--mode",
+        choices=["plan", "apply", "destroy", "adopt", "rehome-check", "rehome"],
+        required=True,
+    )
     parser.add_argument("--operator-credential-file", type=Path)
     parser.add_argument("--state", type=Path, help="the kit's bootstrap-state.json, for --adopt")
     # Which secrets the contract requires is a function of the session, the same
@@ -1286,6 +1734,23 @@ def main(argv: list[str] | None = None) -> int:
             arguments.operator_credential_file,
             arguments.session,
             facilities,
+        )
+    if arguments.mode in ("rehome-check", "rehome"):
+        if arguments.operator_credential_file is None:
+            fail(
+                EXIT_INVALID,
+                f"--{arguments.mode} requires --operator-credential-file (the NEW store's)",
+            )
+        return rehome(
+            key,
+            state,
+            digest,
+            manifest_digest,
+            host,
+            arguments.operator_credential_file,
+            arguments.session,
+            facilities,
+            check_only=arguments.mode == "rehome-check",
         )
 
     if arguments.operator_credential_file is None:

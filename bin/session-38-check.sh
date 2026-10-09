@@ -41,14 +41,16 @@
 # (`region` required, `slots` optional); no capability, lock or secret schema
 # moves; `VERSION` moves to 1.16.0.
 #
-# **FIFTEEN of this session's eighteen claims are declared offline** (ADR
+# **SEVENTEEN of this session's twenty claims are declared offline** (ADR
 # 0202), each a property of a CHECKOUT -- with the seventy-four inherited,
-# eighty-nine. The reconciler's claim functions under a real control cluster;
+# ninety-one. The reconciler's claim functions under a real control cluster;
 # its table, argv, children and unit over a recording host; the control mode's
 # project routes and the state reader in process; the profiles, the resize
 # sentence, region and the document, the REST flag and the slot command over
-# files; the handoff by hash against a release cluster and the CLI. A
-# deployment would answer none of the fifteen differently.
+# files; the handoff by hash against a release cluster and the CLI; and the
+# migration's two (ADR 0262-0263, D2278) -- a project's values moved between
+# two recorded stores, and the self-hosted store's own files. A deployment
+# would answer none of the seventeen differently.
 #
 # **TWO claims are EXTERNAL, a customer's** (D2174): `lifecycle_operations_live`
 # and `lifecycle_project_door_live`, read back through the control project's
@@ -218,7 +220,7 @@ USAGE
             [--lifecycle-record-file FILE] [-k EXPRESSION]
 
   --mode offline   Contracts, schemas and models, plus Session 38's own
-                   FIFTEEN offline halves: the reconciler's claim functions
+                   SEVENTEEN offline halves: the reconciler's claim functions
                    under a real control cluster; its closed table, argv,
                    children and unit over a recording host; the control mode's
                    project routes and the state reader in process; the compute
@@ -226,21 +228,24 @@ USAGE
                    offline leaf classifier; the REST flag's reader; the slot
                    command; sleep and wake; export; the handoff by hash against
                    a release cluster and the CLI; deletion with the provider
-                   deferred. Step 3's sweep carries all fifteen by their marks.
+                   deferred; the rehome between two recorded stores and the
+                   secret store's files (the migration's two). Step 3's sweep
+                   carries all seventeen by their marks.
                    Step 6 also checks the committed example client is CURRENT
                    -- its template version moved (D1238); step 7 checks the
                    project's own tool catalog beside the registry's documents;
                    step 8b typechecks the client on the pinned toolchain with
                    no network; step 8c asserts Studio ships no third-party
                    code; step 9 WRITES A HALF -- evidence/session-38-offline.json.
-                   The FIFTEEN claims it reports are `reconciler_claim`,
+                   The SEVENTEEN claims it reports are `reconciler_claim`,
                    `reconciler_dispatch`, `control_project_operations`,
                    `project_states`, `registry_after_operations`,
                    `compute_profiles`, `resize_message`,
                    `region_and_document`, `rest_flag`, `slots`,
                    `capacity_refusals`, `sleep_wake`, `export`,
-                   `admin_handoff` and `deletion`; with the inherited
-                   seventy-four, the half carries eighty-nine.
+                   `admin_handoff`, `deletion`, `provider_rehome` and
+                   `secret_store_files`; with the inherited seventy-four, the
+                   half carries ninety-one.
                    Requires docker. No host, no root.
   --mode host      Session 37's sweep with TWO flags added,
                    `--lifecycle-record-file` and `--slot-outputs`, and every

@@ -33,9 +33,11 @@ bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml --plan
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml \
      --apply --operator-credential-file /root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential
 
-# Removes, by ID, exactly what the state file says we own.
+# Removes, by ID, exactly what the state file says we own. Logs in with the
+# control-plane credential to revoke the runtime identity (D2272).
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml \
-     --destroy --confirm alpha-dev
+     --destroy --confirm alpha-dev \
+     --operator-credential-file /root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential
 
 # On a REPLACEMENT host with no state: binds this host to the Infisical
 # project a kit's bootstrap-state.json records, BY ID (ADR 0189), mints a fresh
@@ -67,7 +69,8 @@ and exits `3` rather than treating unreadable state as an absent project (D67).
 
 ## The control-plane credential
 
-`--apply` is the only mode that needs it, and it is **not** the per-project
+Every mode but `--plan` needs it (the two rehome modes need the NEW store's),
+and it is **not** the per-project
 runtime credential under `/etc/agentic-postgres/credentials/<key>/`. That one
 belongs to a read-only identity, lives on the host permanently, and is read on
 every project start. This one can create projects, machine identities and secret
@@ -143,6 +146,74 @@ manifest. A digest over everything would force provider churn on every unrelated
 edit: change a comment in `project.yaml`, and the next `--apply` would decide
 the identity needs replacing.
 
+## Moving to another store
+
+A project's Infisical project moves to another Infisical instance -- Infisical
+Cloud to the self-hosted store, here (ADR 0262) -- **by value, on the host that
+already serves it**, with two more modes (ADR 0263). `--adopt` cannot do it: it
+binds by id within ONE store and refuses a different `api_url`. `--apply` cannot
+either: it GENERATES every generated value, and a new backup cipher pass would
+make every existing backup unreadable.
+
+```bash
+# 1. Point BOTH copies of the host manifest's infisical block at the new store
+#    (the checkout's host.yaml and /etc/agentic-postgres/host.yaml) -- then:
+CRED=/root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential   # the NEW store's
+sudo bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml \
+     --rehome-check --operator-credential-file "$CRED"
+sudo bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml \
+     --rehome --operator-credential-file "$CRED"
+```
+
+**The source is the store the project's STATE records, read as the project's
+own runtime identity** -- the identity `materialize-secrets` reads every one of
+these values with on every start -- so the old store's control-plane credential
+is not needed at all. The destination is the store the HOST MANIFEST names,
+written with its control-plane credential.
+
+`--rehome-check` reads every value the contract declares for the project
+(facilities applied, the optional ones included), logs in at the destination,
+prints one line per name -- `present <8 hex of the value's sha256>`, `absent
+(optional)` or `ABSENT (required)` -- and **writes nothing anywhere**. Exit `0`
+when every required value is present, `7` otherwise.
+
+`--rehome` does the same reads, then in this order: the project created at the
+destination (a destination that already has the key's slug refuses here, before
+anything exists there); every value written -- the value READ, never a
+generated one; a runtime identity `<key>-runtime` with Universal Auth and one
+client secret, written to `*.rehome-pending` files before anything else can
+fail; the `viewer` membership; and **every value read back AS the new identity
+and compared by digest**. A difference is exit `6`: the pending files are
+removed, the new identity revoked, the new project's id printed for the
+console, and this host's state and credentials are unchanged. Only when every
+value matches is the host switched:
+
+| Path | Mode | What |
+|---|---|---|
+| `projects/<key>/bootstrap-state.rehomed-<utc>.json` | `0600` | the previous state, kept |
+| `credentials/<key>/infisical-client-{id,secret}.rehomed-<utc>` | `0400` | the previous credential, kept |
+| `projects/<key>/bootstrap-state.json` | `0600` | the new state: the new store, project and identity |
+| `projects/<key>/secret-ages-carried.json` | `0600` | each secret's times AT THE SOURCE (no value) |
+| `projects/<key>/rehome-<utc>.json` | `0600` | the record: both stores' ids, the names copied |
+
+**The source is never written to.** Its project and its runtime identity keep
+working, so a rollback is the kept files moved back and the host manifest's
+block restored. Retiring them is a separate, later act.
+
+**The ages travel with the values** (D2242). The new store dates every value to
+the move, so `doctor secrets` reads `secret-ages-carried.json` and, while a
+value is still the one the move wrote (version 1 at the new store), reports the
+source's time -- marked `carried` -- instead of the move's. A value replaced
+since the move answers with its own time; a version the provider does not
+report is `unknown`. A kit exported after the move carries the file; a kit
+without it still verifies.
+
+**The window.** Materialization reads the store the host manifest names, with
+the project id the state records. Between the block changing and a project's
+rehome, that pair is wrong for that project -- so the rehomes of every project
+on the host run back to back, with no deploy, restart or materialization
+between them (D2259).
+
 ## Stop condition: partial state
 
 **A client secret was created but the local write failed, or the saved
@@ -170,3 +241,4 @@ reads a superseded generation — the active one is named by
 - [ADR 0010 — secrets are individual files in immutable generations](decisions/0010-secret-materialization.md)
 - [ADR 0011 — provider ownership is recorded by ID, and convergence is keyed narrowly](decisions/0011-provider-bootstrap-state.md)
 - [ADR 0017 — a stub that becomes real stops returning 10](decisions/0017-stub-lifecycle.md)
+- [ADR 0263 — a project's provider project moves between stores by value](decisions/0263-a-projects-provider-project-moves-between-stores-by-value.md)

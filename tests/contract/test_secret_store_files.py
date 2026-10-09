@@ -16,7 +16,9 @@ import yaml
 
 from agentic_postgres import REPO_ROOT
 
-pytestmark = [pytest.mark.contract, pytest.mark.security]
+# p0 since Run M3 registered REC-STORE-001 (P0): the sweep that reports an
+# offline claim selects by it (D1242).
+pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
 
 STORE = REPO_ROOT / "infra" / "secret-store"
 COMPOSE = STORE / "compose.yaml"

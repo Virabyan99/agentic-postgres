@@ -966,7 +966,10 @@ from pathlib import Path
 #: families join the registry: `OPN` (the reconciler and the operations it
 #: executes) and `LIFE` (a managed project's lifecycle). The two external
 #: claims are the lifecycle a customer drove, read back through the control
-#: project's route and the slot's own (D2174).
+#: project's route and the slot's own (D2174). **The migration's Run M3 adds
+#: two more** (ADR 0262-0263, D2278), both offline: `REC-REHOME-001` and
+#: `REC-STORE-001` -- requirements 330 -> 332, `CLAIMS` 237 -> 239,
+#: `OFFLINE_CLAIMS` 89 -> 91. No version moves for them.
 #:
 #: **The session's subject is a managed project** -- one a customer creates,
 #: sleeps, wakes, resizes, exports and deletes through `/v1` -- and six ADRs

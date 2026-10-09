@@ -1234,6 +1234,9 @@ CLAIM_INTRODUCED_IN = {
     "lifecycle_operations_live": 38,
     "lifecycle_project_door_live": 38,
     "reconciler_live": 38,
+    # Session 38's migration (ADR 0262-0263): two more, both offline.
+    "provider_rehome": 38,
+    "secret_store_files": 38,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

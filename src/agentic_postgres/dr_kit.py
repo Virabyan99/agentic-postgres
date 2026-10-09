@@ -27,18 +27,27 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agentic_postgres import bootstrap_state, config, deployed_output, host_config, naming
+from agentic_postgres import (
+    bootstrap_state,
+    config,
+    deployed_output,
+    host_config,
+    naming,
+    secret_age,
+)
 from agentic_postgres.config import ManifestError
 from agentic_postgres.secrets_contract import active_secrets, enabled_facilities
 
 __all__ = [
     "BOOTSTRAP_STATE",
     "CAPABILITIES_MANIFEST",
+    "CARRIED_AGES",
     "DEPLOYED_DOCUMENT",
     "HOST_MANIFEST",
     "KIT_FIRST_OUTPUTS_VERSION",
     "KIT_KIND",
     "KIT_MANIFEST",
+    "OPTIONAL_PROJECT_ARTIFACTS",
     "PROJECT_ARTIFACTS",
     "PROJECT_MANIFEST",
     "SECRETS_LISTING",
@@ -62,6 +71,12 @@ SECRETS_LISTING = "secrets.txt"
 #: What every project directory in a kit must hold, by name. The runbook names
 #: each one and `verify` refuses a kit missing any.
 PROJECT_ARTIFACTS = (PROJECT_MANIFEST, BOOTSTRAP_STATE, DEPLOYED_DOCUMENT, SECRETS_LISTING)
+#: What a project directory MAY hold: the ages a secret-store move carried
+#: (ADR 0263). Exported and hashed when the host has it, validated by `verify`
+#: when the kit has it, and never required -- every kit exported before a move,
+#: and every project that never moved, has none. Times and names, no value.
+CARRIED_AGES = secret_age.CARRIED_AGES
+OPTIONAL_PROJECT_ARTIFACTS = (CARRIED_AGES,)
 
 
 class KitError(ManifestError):
@@ -187,6 +202,15 @@ def plan_export(
                 secrets_listing(contract, session, enabled_facilities(manifest)).encode("utf-8"),
             ),
         ]
+        carried_path = state_root / key / CARRIED_AGES
+        try:
+            carried = secret_age.load_carried(carried_path, project_key=key)
+        except secret_age.CarriedAgesError as problem:
+            raise KitError(f"{key}: {problem}") from None
+        if carried is not None:
+            entries.append(
+                KitEntry(f"{prefix}/{CARRIED_AGES}", carried_path.read_bytes(), carried_path)
+            )
     return entries
 
 
@@ -409,6 +433,12 @@ def _verify_project(directory: Path, key: str) -> list[str]:
             problems.append(f"{key}: the deployed document is not readable as JSON: {problem}")
         else:
             problems += verify_deployed_document(document, key)
+    carried = directory / CARRIED_AGES
+    if carried.is_file():
+        try:
+            secret_age.load_carried(carried, project_key=key)
+        except secret_age.CarriedAgesError as problem:
+            problems.append(f"{key}: {problem}")
     listing = directory / SECRETS_LISTING
     if listing.is_file():
         lines = [

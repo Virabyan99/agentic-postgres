@@ -316,7 +316,13 @@ def materialize(
         staging.rename(target)
         fsync_directory(generations)
         activate(project_root, generation)
-    except Exception:
+    # `BaseException`, not `Exception` (D2269): `fail()` raises `SystemExit`,
+    # which `Exception` does not catch, so every failure that went through it --
+    # a required value absent at the provider, a value of the wrong kind -- left
+    # the staging directory behind holding every value read before it. Measured
+    # on Session 38's rig: 17 files of a throwaway project's values on disk
+    # after an exit 8 this clause was written to clean up.
+    except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
     finally:

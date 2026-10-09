@@ -21,8 +21,13 @@
 # Exit codes:
 #   0  success
 #   2  invalid operator input, or --destroy without matching confirmation
-#   3  missing prerequisite, or --apply/--destroy without root
-#   7  the provider rejected an operation, or state disagrees with the provider
+#   3  missing prerequisite, or --apply/--destroy/--rehome without root, or
+#      --rehome-check/--rehome for a project with no recorded state
+#   6  --rehome: a value read back as the NEW runtime identity differs from the
+#      source (nothing on this host changed; the new store's ids are printed)
+#   7  the provider rejected an operation, or state disagrees with the provider,
+#      or --rehome-check/--rehome found a required value absent, the host still
+#      naming the recorded store, or the project already at the new store
 
 # First executable line, deliberately. SHELLOPTS=xtrace is honoured from bash
 # startup, so anything above this point would be traced to stderr.
@@ -45,9 +50,13 @@ Usage: bin/bootstrap-providers.sh --host FILE --project FILE --plan
        sudo bin/bootstrap-providers.sh --host FILE --project FILE --apply \
             --operator-credential-file FILE
        sudo bin/bootstrap-providers.sh --host FILE --project FILE --destroy \
-            --confirm PROJECT_KEY
+            --confirm PROJECT_KEY --operator-credential-file FILE
        sudo bin/bootstrap-providers.sh --host FILE --project FILE --adopt \
             --state KIT/projects/<key>/bootstrap-state.json \
+            --operator-credential-file FILE
+       sudo bin/bootstrap-providers.sh --host FILE --project FILE --rehome-check \
+            --operator-credential-file FILE
+       sudo bin/bootstrap-providers.sh --host FILE --project FILE --rehome \
             --operator-credential-file FILE
 
   --plan     Report what would be created or changed, and name every secret an
@@ -69,12 +78,27 @@ Usage: bin/bootstrap-providers.sh --host FILE --project FILE --plan
              credential files and this host's state. Refuses a host that
              already records the project, a recorded id that does not exist,
              and any lookup by name.
+  --rehome-check
+             Before a move to another secret store (ADR 0263): read every value
+             this project declares from the store its STATE records, as the
+             project's own runtime identity, and log in at the store the HOST
+             MANIFEST now names. Prints each name as `present <8 hex of its
+             sha256>`, `absent (optional)` or `ABSENT (required)`. Writes
+             nothing anywhere.
+  --rehome   The move: the same reads, then the project created at the store
+             the host manifest names, every value written, a runtime identity
+             minted, every value read back AS that identity and compared -- and
+             only then this host's state switched, the old state and credential
+             files kept beside it (*.rehomed-<utc>) and the source's secret
+             ages kept in secret-ages-carried.json. Prints names only.
 
   --host FILE                      The host manifest.
   --project FILE                   The project manifest.
-  --operator-credential-file FILE  Path to the control-plane credential.
-                                   Required for --apply. Read from the file;
-                                   never accepted as a value.
+  --operator-credential-file FILE  Path to the control-plane credential (for
+                                   --rehome-check and --rehome, the NEW
+                                   store's). Required for every mode but
+                                   --plan. Read from the file; never accepted
+                                   as a value.
   --confirm PROJECT_KEY            Required for --destroy, and must match.
 
 Running --plan twice after an --apply reports no changes. That is the property
@@ -97,6 +121,11 @@ parse_arguments() {
       --help|-h) usage; exit 0 ;;
       --plan|--apply|--destroy|--adopt)
         [ -z "${MODE}" ] || die 2 "only one of --plan, --apply, --destroy or --adopt may be given."
+        MODE="${1#--}"
+        shift
+        ;;
+      --rehome-check|--rehome)
+        [ -z "${MODE}" ] || die 2 "only one of --plan, --apply, --destroy, --adopt, --rehome-check or --rehome may be given."
         MODE="${1#--}"
         shift
         ;;
@@ -211,6 +240,18 @@ main() {
         "--destroy requires --confirm ${key}. Nothing was changed."
       [ "${CONFIRM}" = "${key}" ] || die 2 \
         "--confirm said ${CONFIRM} but this project is ${key}. Nothing was changed."
+      ;;
+
+    rehome-check|rehome)
+      # Root for both: the check reads the project's runtime credential, which
+      # is root's (0400 under /etc/agentic-postgres/credentials/), and the move
+      # writes the new one there.
+      [ "$(id -u)" -eq 0 ] || die 3 \
+        "--${MODE} requires root: it reads the project's runtime credential under /etc/agentic-postgres/."
+      [ -n "${OPERATOR_CREDENTIAL}" ] || die 2 \
+        "--${MODE} requires --operator-credential-file (the NEW store's control-plane credential)."
+      [ -f "${OPERATOR_CREDENTIAL}" ] || die 2 \
+        "operator credential file not found: ${OPERATOR_CREDENTIAL}"
       ;;
   esac
 

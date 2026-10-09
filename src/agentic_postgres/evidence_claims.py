@@ -375,6 +375,12 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "export",
         "admin_handoff",
         "deletion",
+        # Session 38's migration (ADR 0262-0263). TWO more, each a property of
+        # a checkout: the rehome over two recorded stores (`provider_rehome`)
+        # and the secret store's own files (`secret_store_files`). The move's
+        # live proofs are Session 18's and the sweep's (D2246).
+        "provider_rehome",
+        "secret_store_files",
     }
 )
 
@@ -769,6 +775,10 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "lifecycle_operations_live": ("LIFE-LIVE-001",),
     "lifecycle_project_door_live": ("LIFE-LIVE-002",),
     "reconciler_live": ("OPN-LIVE-001",),
+    # Session 38's migration (ADR 0262-0263). Two claims, both offline: a
+    # project's values moved between stores by value, and the store's files.
+    "provider_rehome": ("REC-REHOME-001",),
+    "secret_store_files": ("REC-STORE-001",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

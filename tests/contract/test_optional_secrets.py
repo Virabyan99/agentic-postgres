@@ -363,3 +363,68 @@ def test_a_refused_value_is_dropped_and_never_counted() -> None:
         "no `del value` follows the kind check closely enough to be its own; the "
         "refused value stays resident while the message is built and raised"
     )
+
+
+def test_a_failed_materialization_leaves_no_staging_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """D2269. The run, executed: two values read and written, then a REQUIRED
+    one absent at the provider -- `fail()`, exit 8, and nothing left under
+    `generations/`. The cleanup clause caught `Exception` while `fail()` raises
+    `SystemExit`, so Session 38's rig left 17 files of real values behind after
+    exactly this exit; a scan of the source could not have seen it."""
+    import os
+
+    from agentic_postgres import CURRENT_SESSION
+
+    module = _materializer()
+    calls: list[str] = []
+
+    class Provider:
+        def __init__(self, api_url: str) -> None:
+            pass
+
+        def login(self, credential: Credential) -> None:
+            pass
+
+        def read_secret(self, *, name: str, **_: Any) -> str:
+            calls.append(name)
+            if len(calls) > 2:
+                raise InfisicalError(
+                    f"GET /api/v3/secrets/raw/{name} failed with HTTP 404", status=404
+                )
+            return "0" * 64
+
+        def logout(self) -> None:
+            pass
+
+    contract = secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")
+    active = secrets_contract.active_secrets(contract, CURRENT_SESSION, facilities=frozenset())
+    assert all(secret["required"] for secret in active[:3]), "the third read must be a required one"
+    assert all(secret["value_kind"] == "random_hex" for secret in active[:2])
+
+    monkeypatch.setattr(module, "SECRET_ROOT", str(tmp_path / "secrets"))
+    monkeypatch.setattr(module, "HOST_MANIFEST", REPO_ROOT / "host.example.yaml")
+    monkeypatch.setattr(module, "state_path", lambda key: tmp_path / "state.json")
+    monkeypatch.setattr(
+        module,
+        "load_state",
+        lambda path: {"infisical_project_id": "p", "environment_slug": "dev"},
+    )
+    monkeypatch.setattr(module, "load_credential", lambda key: Credential("id", DUMMY_SECRET))
+    monkeypatch.setattr(module, "InfisicalClient", Provider)
+    monkeypatch.setattr(os, "chown", lambda *_: None)
+    monkeypatch.setattr(os, "fchown", lambda *_: None)
+
+    with pytest.raises(SystemExit) as stop:
+        module.materialize("fixture-alpha-dev", contract, CURRENT_SESSION, frozenset())
+    assert stop.value.code == 8
+    assert len(calls) == 3, calls
+    assert "HTTP 404" in capsys.readouterr().err
+
+    generations = tmp_path / "secrets" / "fixture-alpha-dev" / "generations"
+    left = sorted(path.name for path in generations.iterdir())
+    assert left == [], (
+        f"a failed run left {left} under generations/ -- the values it read before failing, "
+        "on disk with nothing pointing at them (D2269)"
+    )

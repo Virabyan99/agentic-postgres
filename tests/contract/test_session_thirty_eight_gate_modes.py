@@ -100,6 +100,9 @@ SESSION_THIRTY_EIGHT_CLAIMS = {
         "export",
         "admin_handoff",
         "deletion",
+        # The migration's two (ADR 0262-0263, D2278).
+        "provider_rehome",
+        "secret_store_files",
     ),
     "external": (
         "lifecycle_operations_live",
