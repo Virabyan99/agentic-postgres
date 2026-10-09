@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.deployment.route_readiness import unready_routes
 
 from agentic_postgres import (
     REPO_ROOT,
@@ -351,7 +352,14 @@ def test_the_restored_project_publishes_the_originals_identity_and_every_route_r
     """`REC-NODE-002`. The replacement's deployed document carries the
     instance_uuid the kit's document carried -- the volume's identity survived
     the restore -- the restore record agrees, and every route the document
-    publishes is `ready`."""
+    publishes is `ready`.
+
+    "Publishes" excludes a route whose facility the SAME document declares
+    `enabled: false` (`route_readiness`, D2143's rule): since 1.15.0 every
+    non-control project records `routes.control` `unavailable` by design, and
+    this proof -- `not_run` by decision from Session 18 until Session 38's move
+    put a replacement host under it -- failed on exactly that on its first
+    execution (D2294). A route the project serves is still held to `ready`."""
     kit = _declared_dir("APG_KIT_DIR")
     replacement = _declared_json("APG_REPLACEMENT_HOST_OUTPUTS")
     record = _declared_json("APG_RESTORE_EVIDENCE_FILE")
@@ -366,6 +374,6 @@ def test_the_restored_project_publishes_the_originals_identity_and_every_route_r
     )
     assert (record.get("identity") or {}).get("observed_instance_uuid") == expected
     assert record.get("project_key") == key
-    routes = replacement.get("routes") or {}
-    not_ready = sorted(name for name, route in routes.items() if route.get("status") != "ready")
+    assert replacement.get("routes"), "the replacement's document publishes no routes at all"
+    not_ready = unready_routes(replacement)
     assert not not_ready, f"routes not ready on the replacement: {not_ready}"

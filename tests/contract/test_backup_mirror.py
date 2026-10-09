@@ -1,7 +1,8 @@
 """The backup mirror, offline (ADR 0188, Session 18 Run 2).
 
 A mirror is a copy of the repository's bucket at a second provider, made by a
-host unit that runs `mc mirror` in a container, under the primary's cipher
+host unit that runs a sync client in a container (`rclone sync`, ADR 0264;
+`mc mirror` until D2285), under the primary's cipher
 pass, with the archiver never involved (D994-D1000). What this module proves
 is every reader that had to move for that to be one thing rather than a
 container beside a system that does not know it exists:
@@ -71,22 +72,12 @@ SLUG = "mirrored"
 KEY = f"{SLUG}-dev"
 LAUNCHER = (REPO_ROOT / "libexec" / "project-launcher").read_text(encoding="utf-8")
 
-#: `mc ls --recursive --json`'s output, verbatim from the pinned image against
-#: a two-file directory (D1004): one object per line, `"type":"file"`, a prefix
-#: only inside a key. The non-recursive form lists the prefix as its own
-#: `"type":"folder"` line, which is the second sample.
-RECURSIVE_LISTING = (
-    '{"status":"success","type":"file","lastModified":"2026-09-05T19:01:27.736992517Z",'
-    '"size":1,"key":"one.txt","etag":"","url":"/data/","versionOrdinal":1}\n'
-    '{"status":"success","type":"file","lastModified":"2026-09-05T19:01:27.736992517Z",'
-    '"size":2,"key":"sub/two.txt","etag":"","url":"/data/","versionOrdinal":1}\n'
-)
-FLAT_LISTING = (
-    '{"status":"success","type":"file","lastModified":"2026-09-05T19:01:27.736992517Z",'
-    '"size":1,"key":"one.txt","etag":"","url":"/data/","versionOrdinal":1}\n'
-    '{"status":"success","type":"folder","lastModified":"2026-09-05T19:01:27.736992517Z",'
-    '"size":60,"key":"sub/","etag":"","url":"/data/","versionOrdinal":1}\n'
-)
+#: `rclone size --json`'s output, verbatim from the pinned image (ADR 0264,
+#: measured 2026-10-09) over a two-object tree with one prefix (`1`, `x/2`):
+#: `count` is objects, the prefix is not one (D1004's distinction).
+SIZE_OUTPUT = '{"count":2,"bytes":6,"sizeless":0}\n'
+#: And an empty bucket, which is a real answer the client prints.
+EMPTY_SIZE_OUTPUT = '{"count":0,"bytes":0,"sizeless":0}\n'
 
 
 def load_command(name: str) -> Any:
@@ -499,14 +490,25 @@ def test_the_reading_has_three_states_and_each_validates_against_the_schema() ->
 
 
 def test_the_listing_count_is_files_only_and_never_a_guess() -> None:
-    """D1004, measured on the pinned image: recursive listings are file lines;
-    the flat form adds folder lines, which are prefixes and not objects."""
-    assert backup_report.count_listing(RECURSIVE_LISTING) == 2
-    assert backup_report.count_listing(FLAT_LISTING) == 1
-    assert backup_report.count_listing("") == 0
-    assert backup_report.count_listing("\n\n") == 0
-    assert backup_report.count_listing(RECURSIVE_LISTING + "mc: <ERROR> boom\n") is None
-    assert backup_report.count_listing('["a"]\n') is None
+    """D1004's rule on ADR 0264's client: `rclone size --json` counts objects
+    and never prefixes (measured on the pinned image: two objects under one
+    prefix read `count` 2), an empty bucket is a real zero -- and every answer
+    the host cannot read is None, never zero. Unlike `mc`'s line listing, the
+    client ALWAYS prints the object on success, so an empty answer is not an
+    empty bucket."""
+    assert backup_report.count_objects(SIZE_OUTPUT) == 2
+    assert backup_report.count_objects(EMPTY_SIZE_OUTPUT) == 0
+    for unreadable in (
+        "",
+        "\n\n",
+        SIZE_OUTPUT + "ERROR : error listing: directory not found\n",
+        '["a"]\n',
+        '{"bytes":6}\n',
+        '{"count":-1,"bytes":0}\n',
+        '{"count":true,"bytes":0}\n',
+        '{"count":"2","bytes":6}\n',
+    ):
+        assert backup_report.count_objects(unreadable) is None, unreadable
 
 
 def test_with_mirror_folds_without_touching_the_repositorys_status() -> None:
@@ -726,7 +728,41 @@ def test_the_container_is_the_mirror_profile_on_the_backup_network_only() -> Non
     ):
         assert name in service["environment"], f"the container is not handed {name}"
         assert name in rendering.COMPOSE_ENV_KEYS, f"the render does not emit {name}"
-    assert "MC_IMAGE" in (REPO_ROOT / "versions.env").read_text(encoding="utf-8")
+    # ADR 0264: the image is built on rclone's, locked by digest. MinIO's `mc`
+    # is gone from the lock as well as the model (D2285: no longer served).
+    assert service["build"]["args"]["BASE_IMAGE"] == "${RCLONE_IMAGE:?required}"
+    lock = (REPO_ROOT / "versions.env").read_text(encoding="utf-8")
+    assert re.search(
+        r"^RCLONE_IMAGE=docker\.io/rclone/rclone:[^@\s]+@sha256:[0-9a-f]{64}$", lock, re.M
+    )
+    assert "MC_IMAGE" not in lock
+
+
+def test_the_client_syncs_by_checksum_with_its_credentials_in_the_environment_only() -> None:
+    """ADR 0264's choices, read off the script the image runs.
+
+    `sync` is copy-and-remove (D1000's retention-is-the-primary's), `--checksum`
+    compares size and MD5 rather than a modification time the two providers do
+    not share, `--retries 1` keeps one invocation ONE pass so ADR 0220's extra
+    pass stays the verb's, and nothing is a dry run. The four secrets reach the
+    client as `RCLONE_CONFIG_*` exports and never as an argument, and no config
+    file is read or written. Both remotes are told their bucket exists: each
+    key is restricted to its own bucket (ADR 0110)."""
+    script = (REPO_ROOT / "services" / "backup-mirror" / "mirror.sh").read_text(encoding="utf-8")
+    execs = [line.strip() for line in script.splitlines() if line.strip().startswith("exec ")]
+    copy_line = next(line for line in execs if "rclone sync" in line)
+    assert "--checksum" in copy_line and "--retries 1" in copy_line, copy_line
+    assert "--dry-run" not in script and " -n " not in copy_line
+    assert any(line.startswith("exec rclone size --json") for line in execs), execs
+    for line in execs:
+        assert "SECRET" not in line and "ACCESS_KEY" not in line and "read_secret" not in line, line
+    assert "RCLONE_CONFIG=/dev/null" in script
+    for remote in ("SOURCE", "MIRROR"):
+        for member in ("TYPE", "ENDPOINT", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "NO_CHECK_BUCKET"):
+            assert (
+                f"RCLONE_CONFIG_{remote}_{member}" in script.split("export RCLONE_CONFIG", 1)[1]
+            ), f"RCLONE_CONFIG_{remote}_{member} is not exported to the client"
+    assert "MC_HOST" not in script and "mc mirror" not in script.replace("`mc mirror", "")
 
 
 # ---------------------------------------------------------------------------
@@ -755,7 +791,7 @@ class Compose:
         *,
         copy_exit: int | None = None,
         copy_exits: tuple[int, ...] | None = None,
-        listing: str = RECURSIVE_LISTING,
+        listing: str = SIZE_OUTPUT,
         count_exit: int = 0,
     ):
         assert copy_exit is None or copy_exits is None, (
@@ -901,7 +937,14 @@ def test_a_pass_that_fails_twice_is_a_failure_and_writes_nothing(
     assert "both passes" in error
 
 
-@pytest.mark.parametrize("listing, count_exit", [("mc: <ERROR> nope\n", 0), ("", 3)])
+@pytest.mark.parametrize(
+    "listing, count_exit",
+    [
+        ("ERROR : error listing: directory not found\n", 0),
+        ("", 0),  # rclone prints its object on every success; nothing is not zero
+        ("", 3),
+    ],
+)
 def test_an_unreadable_listing_after_a_clean_copy_writes_no_record(
     backup: Any, monkeypatch: pytest.MonkeyPatch, listing: str, count_exit: int
 ) -> None:
@@ -934,17 +977,35 @@ def test_the_verb_refuses_a_project_with_no_rendered_output(
     assert compose.calls == []
 
 
-def test_the_verb_reaches_the_container_through_the_wrapper_with_the_profile() -> None:
-    """Through `bin/compose.sh --runtime --profile mirror run --rm`, so the
-    installed overrides and the `run` refusals apply, and no credential is in
-    this process's argv."""
+def test_the_verb_reaches_the_container_through_the_wrapper_with_the_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Through `bin/compose.sh --runtime --profile mirror run --build --rm`, so
+    the installed overrides and the `run` refusals apply, and no credential is
+    in this process's argv. `--build` since D2285: Compose builds only a MISSING
+    image, so without it a host keeps the first mirror image it ever built --
+    OVH's is `mc`, carried from Hetzner -- through every release after."""
     source = (REPO_ROOT / "bin" / "backup.py").read_text(encoding="utf-8")
     body = source.split("def compose_mirror(")[1].split("\ndef ")[0]
-    argv = body.split("command = [")[1].split("]")[0]
-    for token in ('"--runtime"', '"--profile"', '"mirror"', '"run"', '"--rm"', '"backup-mirror"'):
-        assert token in argv, f"compose_mirror does not pass {token}"
     assert "stdin=subprocess.DEVNULL" in body, "D673: a run that inherits stdin can hang"
-    assert "-e" not in argv.replace('"--rm"', "") and "--env" not in argv
+
+    # Driven, not read: the argv the function actually hands the wrapper.
+    module = load_command("backup")
+    seen: list[list[str]] = []
+
+    def record(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        seen.append(list(command))
+        assert kwargs.get("stdin") is subprocess.DEVNULL
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", record)
+    module.compose_mirror(Path("/rendered/x"), "copy", timeout=5)
+    (argv,) = seen
+    assert argv[0].endswith("bin/compose.sh") and argv[1] == "/rendered/x"
+    assert argv[2:] == [
+        "--runtime", "--profile", "mirror", "run", "--build", "--rm", "backup-mirror", "copy"
+    ], argv  # fmt: skip
+    assert not {"-e", "--env", "--env-file", "--entrypoint"} & set(argv), argv
 
 
 def test_schedule_status_on_a_mirrored_project_reads_three_units(

@@ -19,9 +19,12 @@ A project whose manifest enables `backup.mirror` (manifest schema 4) has its
 primary backup repository copied, object for object, to a bucket at a second
 provider by a nightly host unit. The archiver never knows the mirror exists:
 a lost mirror costs the primary nothing (ADR 0188). The mirror is written by
-`mc mirror --overwrite --remove`, so the primary's retention is the mirror's
-(D1000), and a copy that exits non-zero has left objects behind that the next
-pass completes (D1001).
+`rclone sync --checksum` (ADR 0264; MinIO's `mc mirror --overwrite --remove`
+until its images stopped being served, D2285), so the primary's retention is
+the mirror's (D1000), and a copy that exits non-zero has left objects behind
+that the next pass completes (D1001). The mirror image is rebuilt from the
+release on every pass (`run --build`), so a new client reaches a host that
+built an older one.
 
 ```yaml
 backup:

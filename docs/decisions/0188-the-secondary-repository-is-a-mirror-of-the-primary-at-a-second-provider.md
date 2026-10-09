@@ -1,6 +1,6 @@
 # 0188 — The secondary repository is a mirror of the primary, at a second provider, under the primary's key
 
-- **Status:** accepted
+- **Status:** accepted; its client superseded by ADR 0264 (Session 38, D2285): rclone
 - **Date:** 2026-09-05
 - **Session:** 18, Run 1 (`REC-REPO-001`, `REC-REPO-002`, `REC-REPO-003`, D715, D984, D985, D994–D1000)
 - **Related:** **ADR 0144** (pgBackRest lives in the database image), **ADR

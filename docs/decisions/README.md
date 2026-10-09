@@ -228,7 +228,7 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0162](0162-what-a-template-version-bump-permits-and-what-rollback-means.md) | What a `template_version` bump permits, and what rollback does not mean | 13 | Accepted |
 | [0163](0163-a-skipped-proof-is-not-a-failed-one.md) | A skipped proof is not a failed one | 13 | Accepted |
 | [0164](0164-the-project-metrics-surface-is-per-project-parameterless-and-not-public.md) | The project metrics surface is per project, parameterless, and not public | 14 | Accepted |
-| [0165](0165-a-telemetry-component-carries-an-explicit-memory-limit.md) | A telemetry component carries an explicit memory limit, because its default is a share of somebody else's machine | 14 | Accepted |
+| [0165](0165-a-telemetry-component-carries-an-explicit-memory-limit.md) | A telemetry component carries an explicit memory limit, because its default is a share of somebody else's machine | 14 | Accepted, its number amended by 0265 |
 | [0166](0166-the-trace-id-is-the-request-id-and-a-span-carries-only-what-it-was-given.md) | The trace id is the request id, and a span carries only what it was given | 14 | Accepted |
 | [0167](0167-a-metric-reads-from-the-decision-that-owns-its-value-and-its-scope-is-an-enumeration.md) | A metric reads from the decision that owns its value, and its scope is an enumeration | 14 | Accepted |
 | [0168](0168-a-rule-states-what-its-silence-means-and-each-hop-reports-its-own-failure.md) | A rule states what its silence means, and each hop reports its own failure | 14 | Accepted |
@@ -251,7 +251,7 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0185](0185-an-operators-read-over-the-hosts-own-documents-is-not-a-cross-project-catalog.md) | An operator's read over the host's own documents is not a cross-project catalog | 17 | Accepted, superseded in part by 0251 |
 | [0186](0186-permanent-is-what-every-earlier-manifest-meant-and-expiry-is-a-fact-an-operator-reads.md) | Permanent is what every earlier manifest meant, and expiry is a fact an operator reads | 17 | Accepted |
 | [0187](0187-a-retirement-removes-what-its-key-derives-and-never-a-backup.md) | A retirement removes what its key derives and its state records, on this host, and never a backup | 17 | Accepted |
-| [0188](0188-the-secondary-repository-is-a-mirror-of-the-primary-at-a-second-provider.md) | The secondary repository is a mirror of the primary, at a second provider, under the primary's key | 18 | Accepted |
+| [0188](0188-the-secondary-repository-is-a-mirror-of-the-primary-at-a-second-provider.md) | The secondary repository is a mirror of the primary, at a second provider, under the primary's key | 18 | Accepted, its client superseded by 0264 |
 | [0189](0189-a-replacement-host-is-built-from-a-kit-that-names-every-secret-and-holds-none.md) | A replacement host is built from a kit that names every secret and holds none, and the bootstrap adopts by recorded id | 18 | Accepted |
 | [0190](0190-a-rehearsal-is-bounded-reversible-and-reads-a-detection-that-exists.md) | A rehearsal is bounded, reversible, and reads a detection that exists; the disk is never filled | 18 | Accepted |
 | [0191](0191-a-facility-gated-secret-exists-exactly-when-the-facility-is-enabled.md) | A facility-gated secret exists for a project exactly when the facility is enabled, and is required whenever it exists | 18 | Accepted |
@@ -327,3 +327,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0261](0261-a-trial-ledger-status-bounded-to-the-session-that-introduced-its-claims.md) | A `trial` Ledger status, bounded to the session that introduced its claims | 38 | Accepted |
 | [0262](0262-the-secret-store-is-self-hosted-infisical-on-its-own-host.md) | The secret store is self-hosted Infisical on its own host | 38 | Accepted |
 | [0263](0263-a-projects-provider-project-moves-between-stores-by-value.md) | A project's provider project moves between stores by value | 38 | Accepted |
+| [0264](0264-the-mirror-client-is-rclone-over-s3-on-both-sides.md) | The mirror client is rclone, over S3 on both sides | 38 | Accepted |
+| [0265](0265-the-collectors-health-check-is-sized-for-a-cold-boot.md) | The collector's health check is sized for a cold boot | 38 | Accepted |

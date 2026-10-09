@@ -934,7 +934,7 @@ def drill(arguments: argparse.Namespace) -> int:
 
 def _restore_failure(result: subprocess.CompletedProcess) -> str:
     """pgBackRest's own words, plus what its two named exit codes mean."""
-    detail = (result.stderr or result.stdout or "").strip()[:600]
+    detail = restore_drill.failure_detail(result.stdout, result.stderr)
     if result.returncode == restore_drill.RESTORE_EXIT_NO_BACKUP_SET:
         return (
             f"no backup set precedes the requested target (pgBackRest exit "

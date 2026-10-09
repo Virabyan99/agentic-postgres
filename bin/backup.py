@@ -648,6 +648,13 @@ def compose_mirror(rendered: Path, action: str, *, timeout: int) -> subprocess.C
     are the ones the deploy installed, and the `run` refusals (no
     `--entrypoint`, no `-e`) apply here as they do everywhere. The container is
     the only thing that holds either credential; this process holds neither.
+
+    `--build`, for the reason `project-runtime.sh up` passes it: Compose builds
+    only an image that is MISSING, so a host that built the mirror once kept
+    that image through every release after it. D2285 is what that cost: OVH
+    runs an `mc` image carried from Hetzner, and the client change of ADR 0264
+    would never have reached it. Layer caching makes an unchanged build
+    near-free.
     """
     command = [
         str(REPO_ROOT / "bin" / "compose.sh"),
@@ -656,6 +663,7 @@ def compose_mirror(rendered: Path, action: str, *, timeout: int) -> subprocess.C
         "--profile",
         "mirror",
         "run",
+        "--build",
         "--rm",
         "backup-mirror",
         action,
@@ -686,10 +694,11 @@ def write_mirror_record(path: Path, record: dict) -> None:
 def verb_mirror(arguments: argparse.Namespace) -> int:
     """Copy the repository to the second provider, and record the copy.
 
-    What the timer runs. The copy is `mc mirror --overwrite --remove` inside
-    the `backup-mirror` container (measured, D1001: complete on a pass that
-    exits 0; a pass that exits non-zero has left objects behind and the next
-    pass completes it).
+    What the timer runs. The copy is `rclone sync --checksum` inside the
+    `backup-mirror` container (ADR 0264; `mc mirror --overwrite --remove` until
+    D2285), and its contract is D1001's: complete on a pass that exits 0; a
+    pass that exits non-zero has left objects behind and the next pass
+    completes it.
 
     **A pass has three outcomes and this verb reports three** (ADR 0220). On a
     non-zero exit the copy runs ONCE more, in this same invocation, before
@@ -738,8 +747,9 @@ def verb_mirror(arguments: argparse.Namespace) -> int:
         # **One extra pass, here, now** (ADR 0220). No backoff, no loop, no
         # schedule change: the question is whether a pass that left objects
         # behind is a flake or a failure, and one more pass answers it. A pass
-        # over an already-copied bucket is cheap because `--overwrite` compares
-        # first -- the measured passes are 7-21 s against a 3600 s timeout.
+        # over an already-copied bucket is cheap because the copy compares
+        # before it transfers -- the measured passes are 7-21 s (with `mc`)
+        # against a 3600 s timeout.
         print(
             f"backup: the mirror copy exited {copy.returncode}; running the pass once more "
             "before judging it (ADR 0220).",
@@ -757,7 +767,7 @@ def verb_mirror(arguments: argparse.Namespace) -> int:
         )
 
     listing = compose_mirror(rendered, "count", timeout=QUICK_TIMEOUT_SECONDS)
-    objects = backup_report.count_listing(listing.stdout) if listing.returncode == 0 else None
+    objects = backup_report.count_objects(listing.stdout) if listing.returncode == 0 else None
     if objects is None:
         raise OperatorError(
             EXIT_STATE,

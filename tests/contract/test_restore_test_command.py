@@ -515,6 +515,72 @@ def test_a_silent_restore_fails_the_drill_rather_than_publishing_nothing() -> No
         restore_drill.parse_backup_set("")
 
 
+# D2289. The shape of 2026-10-09's failure: at the info level the FIRST line is
+# `restore command begin` carrying the whole option list -- longer than the 600
+# characters both commands used to print -- and pgBackRest's error is the LAST.
+_BEGIN_LINE = "P00   INFO: restore command begin 2.56.0: " + " ".join(
+    f"--repo1-option-{index}=/var/lib/pgbackrest/value-{index}" for index in range(24)
+)
+_CAP_ERROR = "P00  ERROR: [039]: HTTP request failed with 403 (Forbidden): Transaction cap exceeded"
+
+
+def _bin_module(name: str) -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        f"apg_{name.replace('-', '_')}", REPO_ROOT / "bin" / f"{name}.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_a_failed_restore_reports_pgbackrests_error_and_not_its_option_list() -> None:
+    """D2289: the operator is shown the `ERROR: [nnn]` line, wherever it is."""
+    assert len(_BEGIN_LINE) > restore_drill.FAILURE_DETAIL_LIMIT, "the fixture lost its point"
+    stdout = f"{_BEGIN_LINE}\nP00   INFO: repo1: restore backup set 20261009-174534F\n"
+
+    detail = restore_drill.failure_detail(stdout, _CAP_ERROR + "\n")
+    assert "[039]" in detail and "Transaction cap exceeded" in detail, detail
+    assert "restore command begin" not in detail, detail
+
+    # Everything on ONE stream (stderr off) is the same answer.
+    assert restore_drill.failure_detail(f"{stdout}{_CAP_ERROR}\n", "") == _CAP_ERROR
+
+
+def test_a_failure_without_an_error_line_reports_the_end_of_the_output() -> None:
+    """No `ERROR: [nnn]` line: the tail, marked as truncated -- never the head."""
+    detail = restore_drill.failure_detail(f"{_BEGIN_LINE}\nthe last thing it said\n", None)
+    assert detail.endswith("the last thing it said"), detail
+    assert detail.startswith("...") and len(detail) == restore_drill.FAILURE_DETAIL_LIMIT + 3
+    assert restore_drill.failure_detail("short", None) == "short"
+    assert restore_drill.failure_detail(None, "") == ""
+
+
+@pytest.mark.parametrize("command", ["restore", "restore-test"])
+def test_both_restore_commands_print_pgbackrests_error(command: str) -> None:
+    """The replacement-host restore and the drill, each through its own failure
+    path, driven rather than read (the module header's D277)."""
+    module = _bin_module(command)
+    # Both shapes: the error on its own stream, and the WHOLE log on one stream
+    # (2026-10-09's, where the head of the output was all that was printed).
+    for stdout, stderr in (
+        (f"{_BEGIN_LINE}\n", f"{_CAP_ERROR}\n"),
+        (f"{_BEGIN_LINE}\n{_CAP_ERROR}\n", ""),
+    ):
+        failed = subprocess.CompletedProcess(
+            args=["pgbackrest"], returncode=39, stdout=stdout, stderr=stderr
+        )
+        if command == "restore":
+            message = str(module.restore_failure(failed))
+        else:
+            message = module._restore_failure(failed)
+        assert "exit 39" in message, message
+        assert _CAP_ERROR in message, message
+        assert "restore command begin" not in message, message
+
+
 def test_the_backup_type_comes_from_info_and_not_from_the_labels_last_letter() -> None:
     # The incremental label is the shape pgBackRest prints (D983): the fixture
     # used to say `20260825-110000I`, a shape that does not exist, and the parser

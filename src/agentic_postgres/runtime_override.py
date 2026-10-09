@@ -346,7 +346,12 @@ OTEL_SPIKE_LIMIT_MIB = 24
 #: exist. Above `OTEL_MEMORY_LIMIT_MIB` so the in-process limiter is what binds
 #: first: a process killed by its cgroup leaves no explanation, and one that
 #: refuses work says so in its own log.
-METRICS_MEMORY_LIMIT_MB = 128
+#:
+#: 192 since ADR 0265 (D2291): at 128 the binary's own page cache kept the
+#: container in permanent reclaim, and the health check -- an exec of that
+#: binary -- timed out after a cold boot. `compose.yaml`'s `mem_limit` for
+#: `metrics` is this number; `test_metrics_surface` holds the two equal.
+METRICS_MEMORY_LIMIT_MB = 192
 
 #: The Compose key that carries the container path into `serve.py`. Named
 #: here so the model and this module agree through one constant rather than

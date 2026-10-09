@@ -340,7 +340,8 @@ services:
     build:
       context: ./services/backup-mirror
       args:
-        BASE_IMAGE: ${MC_IMAGE:?required}
+        # ADR 0264: rclone, since MinIO's `mc` stopped being served (D2285).
+        BASE_IMAGE: ${RCLONE_IMAGE:?required}
     platform: ${TARGET_PLATFORM:?required}
     profiles: [mirror]
     restart: "no"
@@ -1042,10 +1043,14 @@ services:
     # sits BENEATH it so the collector refuses work before the kernel picks a
     # victim on a host with no swap.
     #
-    # 128 MiB against a measured 31.1 MB anon under exactly this cap. Re-measure
-    # before lowering it; `memory.current` will read close to the limit whatever
-    # the process is doing, because reclaimable cache expands to fill it.
-    mem_limit: 128m
+    # 192 MiB since ADR 0265 (128 until D2291), against 33-34 MiB anon measured
+    # on OVH. The rest is the binary's own page cache, and at 128 MiB it lived
+    # in permanent reclaim -- ~1.2 million `memory.events max` per collector in
+    # 40 minutes -- which is what made the health check below (an exec of that
+    # same binary) take up to 5.4 s after a cold start. At 192 MiB the same cold
+    # start read 0. `runtime_override.METRICS_MEMORY_LIMIT_MB` is this number,
+    # and a test holds the two equal. Re-measure before lowering it.
+    mem_limit: 192m
     # **No environment and no secrets.** This container holds no credential of
     # any kind. The password guarding its route is a Traefik concern -- a bcrypt
     # hash inline in the middleware document the file provider parses (ADR 0086)
@@ -1059,15 +1064,24 @@ services:
     # mount is in `runtime_override` rather than here, and this file stays
     # project-neutral.
     healthcheck:
-      # The exporter's own endpoint, which is the surface under test. There is
-      # no shell in this image, so this is the collector binary answering for
-      # itself -- and it probes the port the route points at rather than a
-      # liveness path that could be up while the exposition is not.
+      # There is no shell and no HTTP client in this image, so the check is the
+      # collector binary answering for itself: it says the image is intact and
+      # executable, not that the exposition is served (the route's probe and
+      # `doctor usage` read that).
+      #
+      # **Sized for a cold boot** (ADR 0265, D2291). At boot every project's
+      # containers start at once, and a unit's `up --wait` takes the WHOLE
+      # project down when this one container reads unhealthy. Measured after a
+      # cold start on OVH: 0.3-5.4 s per check, against the 5 s timeout and 10 s
+      # start period it had; three in a row failed at the real boot of
+      # 2026-10-09 and all three projects stayed down. 30 s and 60 s absorb
+      # every measured duration with margin; a binary that cannot print its
+      # version in 30 s is unhealthy by any reading.
       test: ["CMD", "/otelcol-contrib", "--version"]
       interval: 30s
-      timeout: 5s
+      timeout: 30s
       retries: 3
-      start_period: 10s
+      start_period: 60s
     # `edge` only, and the omission is the decision. It is on `edge` because the
     # router's backend has to be reachable from Traefik. It is NOT on `internal`
     # because it currently scrapes nothing -- Run 4 decides what it collects and

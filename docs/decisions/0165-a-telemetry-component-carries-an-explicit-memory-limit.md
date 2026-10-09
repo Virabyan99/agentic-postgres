@@ -1,6 +1,6 @@
 # 0165 — A telemetry component carries an explicit memory limit, because its default is a share of somebody else's machine
 
-- **Status:** accepted
+- **Status:** accepted; its number amended by ADR 0265 (Session 38, D2291): 192 MiB
 - **Date:** 2026-09-01
 - **Session:** 14, Run 2 (`CAP-ENV-001`, D770)
 - **Related:** **D770** (measured: a store sizes its caches from the machine it

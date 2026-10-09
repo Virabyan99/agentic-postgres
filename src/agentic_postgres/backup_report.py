@@ -454,30 +454,27 @@ def mirror_reading(*, enabled: bool, record: dict[str, Any] | None) -> dict[str,
     }
 
 
-def count_listing(text: str) -> int | None:
-    """How many objects `mc ls --recursive --json` listed.
+def count_objects(text: str) -> int | None:
+    """How many objects `rclone size --json` counted in the mirror bucket.
 
-    One JSON object per line -- measured on the pinned image (D1004): with
-    `--recursive` every line is `"type":"file"` and a prefix appears only as
-    part of a key; without it a prefix is its own `"type":"folder"` line. Only
-    files are counted, so the count is the same whichever form a caller
-    listed. The container image has no `wc`, so the host counts. None when a
-    line is not JSON: a listing this cannot read is not zero objects, and zero
-    is the count a restore would be planned against.
+    ADR 0264. One JSON object, measured on the pinned image:
+    `{"count":2,"bytes":6,"sizeless":0}` -- `count` is objects, never prefixes
+    (D1004's distinction, which `mc`'s listing made the host draw). The client
+    always prints that object on success, so an EMPTY answer is not zero
+    objects; nor is anything that does not parse, or a count that is not a
+    non-negative integer. None for all of those: a count this cannot read is
+    not zero, and zero is the number a restore would be planned against.
     """
-    objects = 0
-    for line in text.splitlines():
-        if not line.strip():
-            continue
-        try:
-            entry = json.loads(line)
-        except ValueError:
-            return None
-        if not isinstance(entry, dict):
-            return None
-        if entry.get("type") == "file":
-            objects += 1
-    return objects
+    try:
+        document = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(document, dict):
+        return None
+    count = document.get("count")
+    if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+        return None
+    return count
 
 
 def with_mirror(state: dict[str, Any], mirror: dict[str, Any] | None) -> dict[str, Any]:

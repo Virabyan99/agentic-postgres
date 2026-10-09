@@ -34,6 +34,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 from agentic_postgres import host_config, naming, rendering, runtime_override
 from app import mcp_metrics, mcp_telemetry
@@ -645,3 +646,41 @@ def test_configure_with_an_endpoint_creates_both_instruments(
         )
         assert mcp_metrics._CALLS is None
         assert mcp_metrics._DURATION is None
+
+
+#: The longest collector health check measured after a cold start (D2291, OVH,
+#: 2026-10-09: 0.3-5.4 s, two timed out at the 5 s timeout it then had).
+SLOWEST_MEASURED_CHECK_SECONDS = 5.4
+
+
+def _seconds(value: str) -> float:
+    match = re.fullmatch(r"(\d+)(ms|s|m)", str(value))
+    assert match, f"unparsed duration {value!r}"
+    number, unit = int(match.group(1)), match.group(2)
+    return {"ms": number / 1000, "s": float(number), "m": number * 60.0}[unit]
+
+
+def test_the_collector_survives_a_cold_boot_by_its_limit_and_its_check() -> None:
+    """ADR 0265 (D2291). At boot a unit's `up --wait` takes the WHOLE project
+    down when the collector reads unhealthy, and on 2026-10-09 all three
+    projects stayed down because its check -- an exec of its own binary inside
+    a 128 MiB container in permanent reclaim -- timed out three times running.
+
+    So: the container limit is `runtime_override.METRICS_MEMORY_LIMIT_MB` (the
+    two spellings had no reader holding them together), it stays above the
+    in-process limiter (ADR 0165), and the check's timeout clears the slowest
+    measured check by a wide margin with a start period beyond the first two
+    intervals of a boot."""
+    model = yaml.safe_load((REPO_ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    metrics = model["services"]["metrics"]
+    assert metrics["mem_limit"] == f"{runtime_override.METRICS_MEMORY_LIMIT_MB}m"
+    assert runtime_override.METRICS_MEMORY_LIMIT_MB >= 192, "re-measure before lowering it"
+    assert runtime_override.METRICS_MEMORY_LIMIT_MB > (
+        runtime_override.OTEL_MEMORY_LIMIT_MIB + runtime_override.OTEL_SPIKE_LIMIT_MIB
+    )
+
+    check = metrics["healthcheck"]
+    assert check["test"] == ["CMD", "/otelcol-contrib", "--version"]
+    assert _seconds(check["timeout"]) >= 5 * SLOWEST_MEASURED_CHECK_SECONDS, check
+    assert _seconds(check["start_period"]) >= 2 * _seconds(check["interval"]), check
+    assert int(check["retries"]) >= 3, check

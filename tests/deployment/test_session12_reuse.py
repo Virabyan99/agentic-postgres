@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.deployment.route_readiness import unready_routes
 
 from agentic_postgres import REPO_ROOT, deployed_output, dx_record
 
@@ -206,17 +207,9 @@ def test_removing_one_project_leaves_the_other_whole(
     # so does `routes.storage` on a project with `storage.enabled: false`
     # (control-prod, D2143). Read from the same document, and only for a flag
     # that says `false`: a project that serves the route is still held to
-    # `ready`, and a document that does not say is held to it too.
-    not_served = {
-        name
-        for name in ("control", "storage")
-        if (project_a.get(name) or {}).get("enabled") is False
-    }
-    unready = sorted(
-        name
-        for name, route in (project_a.get("routes") or {}).items()
-        if isinstance(route, dict) and name not in not_served and route.get("status") != "ready"
-    )
+    # `ready`, and a document that does not say is held to it too. The rule
+    # lives in `route_readiness` since D2294 found REC-NODE-002 needing it too.
+    unready = unready_routes(project_a)
     assert not unready, f"the surviving project has unready routes after the removal: {unready}"
 
     # And nothing of the removed project is still running. Read from the host

@@ -582,6 +582,38 @@ def parse_backup_set(output: str) -> str:
     return match.group("label")
 
 
+#: pgBackRest's own error line: `P00  ERROR: [039]: <message>` -- the process,
+#: the word, the three-digit code, then what went wrong.
+_ERROR_LINE = re.compile(r"\bERROR: \[[0-9]{3}\]")
+
+#: How much of a failed run an operator is shown.
+FAILURE_DETAIL_LIMIT = 600
+
+
+def failure_detail(*streams: str | None, limit: int = FAILURE_DETAIL_LIMIT) -> str:
+    """What a failed pgBackRest run said, for the operator (D2289).
+
+    **pgBackRest's error comes LAST.** At the info level this repository runs
+    restores at, the first line of the output is `restore command begin` with
+    the whole option list -- several hundred characters on its own -- and the
+    `ERROR: [nnn]` line is the final one. Both restore commands used to print
+    the first 600 characters of the output, which on 2026-10-09 was the option
+    list and nothing else: the restore container runs `--rm`, so its log was
+    gone, and the cause (B2's daily download cap, D2288) was read from the
+    provider's e-mail rather than from the product.
+
+    So: every `ERROR: [nnn]` line from every stream, in order; and when there
+    is none, the END of the output rather than its beginning. Truncation keeps
+    the tail and says that it did.
+    """
+    text = "\n".join(stream.strip() for stream in streams if stream and stream.strip())
+    errors = [line.strip() for line in text.splitlines() if _ERROR_LINE.search(line)]
+    detail = "\n".join(errors) if errors else text
+    if len(detail) > limit:
+        return "..." + detail[-limit:]
+    return detail
+
+
 def backup_set_type(summary_backups: list[dict[str, Any]], label: str) -> str:
     """The set's type, from `pgbackrest info` and NOT from the label's suffix.
 

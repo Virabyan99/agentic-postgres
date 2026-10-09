@@ -319,6 +319,21 @@ def run_restore(
     return result, time.monotonic() - started
 
 
+def restore_failure(result: subprocess.CompletedProcess) -> OperatorError:
+    """The refusal a failed `pgbackrest restore` becomes, with pgBackRest's own
+    error in it rather than the head of its output (D2289)."""
+    detail = restore_drill.failure_detail(result.stdout, result.stderr)
+    if result.returncode == restore_drill.RESTORE_EXIT_POPULATED_DIRECTORY:
+        return OperatorError(
+            EXIT_UNSAFE,
+            f"pgBackRest refused a populated data directory (exit {result.returncode}); "
+            f"the volume was not empty.\n{detail}",
+        )
+    return OperatorError(
+        EXIT_REFUSED, f"the restore failed (pgBackRest exit {result.returncode}).\n{detail}"
+    )
+
+
 def start_instance(plan: node_restore.RestorePlan) -> None:
     command = run_arguments(plan, plan.instance_container, detached=True)
     command += command_for(plan, *node_restore.instance_arguments())
@@ -559,16 +574,7 @@ def restore(arguments: argparse.Namespace) -> int:
     try:
         result, restore_seconds = run_restore(plan, restore_argv)
         if result.returncode != 0:
-            detail = (result.stderr or result.stdout or "").strip()[:600]
-            if result.returncode == restore_drill.RESTORE_EXIT_POPULATED_DIRECTORY:
-                raise OperatorError(
-                    EXIT_UNSAFE,
-                    f"pgBackRest refused a populated data directory (exit {result.returncode}); "
-                    f"the volume was not empty.\n{detail}",
-                )
-            raise OperatorError(
-                EXIT_REFUSED, f"the restore failed (pgBackRest exit {result.returncode}).\n{detail}"
-            )
+            raise restore_failure(result)
         label = restore_drill.parse_backup_set(result.stdout + result.stderr)
         backup_type = restore_drill.backup_set_type(backups, label)
         reported = _REPORTED_MS.search(result.stdout + result.stderr)
