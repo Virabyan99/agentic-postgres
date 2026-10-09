@@ -191,6 +191,10 @@ between two Infisical instances by value (M3, ADR 0263), and the secret store's 
 | **D2277** | Run M3 item 2: the rehome-check *"checks no project with the key's slug exists there (read by the call `--apply` would make)"*; the record at *"`evidence/rehome-<key>-<utc>.json`"*. | No call `--apply` makes READS a project by slug (`create_project` writes; `get_project` reads by id, D1013), and a slug lookup would be a by-name search the bootstrap refuses. `evidence/` is in `op`'s checkout and the rehome runs as root: a root-owned file there is the hand-back class D1110 names. | **The check mode logs in at the destination and calls nothing else**; `--rehome`'s first destination write is `create_project`, and a destination that already has the slug refuses THERE, before any value or identity exists (proved). **The record is `/etc/agentic-postgres/projects/<key>/rehome-<utc>.json`** (0600) beside the state, never in the checkout. | The refusal is the call the move would make anyway; root writes where root's files live. | 0263 |
 | **D2278** | §2: two requirements and two OFFLINE claims, counts 330/237/89 → 332/239/91. | Both are Session 38 claims (`CLAIM_INTRODUCED_IN` 38), so `test_session_thirty_eight_gate_modes.py`'s expectation table (guarded by equality with the claims introduced) and the gate's `--help` ("FIFTEEN", "eighty-nine") moved with them; the Session 38 plan's Run 11/12 text expects **237 claims** at the merge and `~/s38/run9/s38-external.sh` was derived against 237. | **Table and prose moved** (seventeen offline of twenty; the half carries ninety-one). **Run 11 must expect 239 claims and an offline half of 91** -- the external and host halves are unchanged; the trip's scripts are re-read for any literal 237 before the trip (M7 amends the Session 38 plan). | A count is moved everywhere it is asserted, or it is asserted wrong somewhere. | — |
 | **D2279** | ADR 0262 / M1: `test_secret_store_files.py` (`REC-STORE-001`, registered in Run M3). | The module carried `contract` and `security` but **not `p0`**: the sweep that reports an offline claim selects `-m 'p0 and ...'`, so `secret_store_files` would have read `not_run` with all ten proofs green. `test_every_offline_claims_proof_is_swept_by_the_gate_that_reports_it` (D1240/D1242) refused the registration. | **`p0` added to the module's marks** (a selection widened, no assertion touched). | D1242's guard did what it was written for, on its first chance. | 0262 |
+| **D2280** | Sheets RH0–RH2: RH0 installs ONE agent-written file over both copies of `host.yaml` and places TWO credentials (the Cloud's and the new store's); RH1 checks; RH2 moves. | The Cloud credential is not needed (D2275). `/etc/agentic-postgres/host.yaml` on Hetzner is its OWN document (**schema 2**, D2194), not the checkout's schema 3: one file over both would have rewritten the /etc copy wholesale. The checkout's copy is `op`'s (0600): no sudo moves it, and no root process reads it before a deploy. | **The agent edits the checkout's copy** (three values, count-asserted, `/home/op/host.yaml.pre-rehome` kept) and moves the checkout to M3's SHA; **RH1 = the new store's credential (hidden prompt) + the three checks** -- nothing live reads anything changed; **RH2 = `/home/op/rh-etc.py` (root: the same three values edited IN PLACE in /etc, schema 2 kept, `host.yaml.pre-rehome` kept, refuses a second run, `--undo` the rollback) `&&` the three rehomes back to back, then the credential shredded.** The window of D2259 shrank to the three rehomes: 1 min 46 s. | Production's file changes in the same sheet as the moves it serves, and only its three values. | 0263 |
+| **D2281** | Run M4 step 7: *"`sudo bin/doctor.sh --project <key> secrets` × 3"*. | `doctor.sh` takes the reading as its FIRST word: `sudo bin/doctor.sh secrets --project <key>`; the planned order printed the usage and *"unknown argument: secrets"* three times (Sheet RH5). | **Re-issued as RH5b in the tree's order.** Any later sheet naming a doctor reading writes the verb first. | The usage is the authority; the plan copied a shape that does not exist. | — |
+| **D2282** | Context of ADR 0263: *"63 values"*. | Measured by `--rehome-check`: beta **20** present (its `connector_signing_key` and the mirror pair), alpha **19**, control-prod **19** -- **58**; the optional `auth_jwt_prepared_key` absent on all three (no rotation in flight). | **58 is the number**; the ADR's figure was an estimate. | Counted by the command that copied them. | 0263 |
+| **D2283** | D2260: *"a same-commit redeploy per project with the probe running, its windows read"*; D2034: a NEW commit's deploy recreates auth/mcp/storage 8–14 s. | After the rehomes and RH3a's materialize, each project's active generation had a NEW id with identical bytes; each `deploy.sh` materialized AGAIN (the active generation moved a second time: beta `2b433af2…`, alpha `09247ad9…`, control-prod `b4a453ec…`) and **recreated no container** (every one *Up 2 days* after). The probe (alpha + beta, 10 targets, 1.25 s): **1,962 s, 15,700 samples, 0 down, 0 429, 0 other**. | **Recorded**: a secret-store move costs the running services nothing; what ties a container to a generation is its content's digest (ADR 0155), not the generation's id. The deploy's own materialize is a second proof that 1.15.0 reads every value from the new store as the new identity. | The cost was measured, not assumed, and it was zero. | 0155 |
 
 ---
 
@@ -521,6 +525,12 @@ printed; a required absence not refused; the carried age ignored; the check goin
 the same store not refused; D2269's clause narrowed back to `Exception`; the kit dropping the
 file. **Targeted** 23 modules: 1,544 passed, 1 failed (D2279's guard) → re-run of
 `test_acceptance_registry` 24 passed. Rows **D2275–D2279**. NEXT FREE **D2280**.
+CI: **run 37921300402 success** on `454fe41` (P0 inventory, the Session 1 gate, the offline
+contract suite). Gates, once each, detached, before M4's trip: **`bin/session-38-check.sh
+--mode offline` PASSED** (2,140 s; 7,433 passed, 3 skipped; the half `evidence/session-38-offline.json`
+**91/91 offline claims passed**, `provider_rehome` and `secret_store_files` among them) and
+**`bin/session-01-check.sh` PASSED** (1,269 s; 7,424 passed, 3 skipped; 0 identity collisions,
+0 floating image refs).
 
 ### Run M4 — the store moved, on the old host (Hetzner)
 
@@ -556,7 +566,33 @@ since Session 37).
 and `*.rehomed-*` files moved back over the new ones, the block restored, a materialize —
 the Cloud project was never modified.
 
-**Done.** *(the executor writes it)*
+**Done (2026-10-09 UTC, Hetzner).** M3's SHA by bundle (`c3eec1d..main`, 643,308 bytes,
+`FETCH_HEAD` `454fe41…`); Hetzner's venv unchanged (`requirements-dev.txt`, `.python-version`,
+`pyproject.toml` identical `c3eec1d`→`454fe41`); the store answered Hetzner 200. Sheets per
+**D2280**. **RH1**: `--rehome-check` × 3, each exit 0 and *"wrote nothing anywhere"* -- beta 20
+present, alpha 19, control-prod 19, `auth_jwt_prepared_key` absent (optional) on each, 0 ABSENT
+(required) (**D2282**: 58 values). **RH2** (16:33:17–16:35:03Z): `/etc` edited in place (diff:
+the three values; schema 2; 0600 root), then **`--rehome` × 3, each exit 0, every value read back
+as the new identity and equal** (20/19/19) -- the new projects beta `89807f3a-…` (identity
+`a9ae62e0-…`), alpha `e96b88d8-…` (`7b9ad42d-…`), control-prod `ec433e2b-…` (`19d0270a-…`); the
+Cloud projects (`b889b67e-…`, `2c146f6b-…`, `c324e959-…`) and their identities NOT changed; the
+credential shredded; the checkout back to `c3eec1d`, clean. **RH3a**: `gen-compare.py before` →
+`materialize-secrets --session 37` (1.15.0, the new store, the new identities) → `after`:
+**beta equal 30/30, alpha 29/29, control-prod 29/29**, only `generation_id` and
+`materialized_at` differing in the manifests (D2260). **RH3b**: three same-commit redeploys,
+each exit 0 (the operator's reading) -- **no container recreated and 0 of 15,700 probe samples
+down in 1,962 s** (**D2283**). **RH4**: `control.sh adopt` × 3 (1.15.0, `c3eec1d`), `registry`
+**agrees × 3, exit 0**; **`kit-2026-10-09-rehomed`** (14 artefacts, release `c3eec1d`, session 37)
+verifies on the host and in WSL `~/dr-kits/` (0700/0600) and names the new store and the new
+ids; the three `secret-ages-carried.json` in WSL `~/dr-kits/carried-2026-10-09-rehomed/` (each
+validated by `secret_age.parse_carried`: 19/20/19 names; alpha's rotated four dated to
+2026-10-04, beta's never-rotated passwords to 2026-08-07, control-prod 2026-10-06). **RH5b**
+(**D2281**): `doctor secrets` × 3 → `ok`, **0 days**, logged in as the NEW identities (no
+`unknown`) -- 1.15.0 reads the move's date; beta's trio is truly 63 days old, read by 1.16.0
+from the carried file after Run 11 (D2242). Rollback until M5 touches a project: its
+`*.rehomed-20261009T16…` files back, `sudo python3 /home/op/rh-etc.py --undo`, a materialize.
+Scripts WSL `~/s38/mig/` (`m4-ship.sh`, `m4-prep.sh`, `rh-etc.py`, `gen-compare.py`,
+`rh3-after.sh`, `rh4-kit.sh`, `rh5-carried.sh`). Rows **D2280–D2283**. **NEXT FREE D2284.**
 
 ### Run M5 — the three projects moved (both hosts; one project at a time)
 
