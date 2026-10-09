@@ -195,6 +195,10 @@ between two Infisical instances by value (M3, ADR 0263), and the secret store's 
 | **D2281** | Run M4 step 7: *"`sudo bin/doctor.sh --project <key> secrets` × 3"*. | `doctor.sh` takes the reading as its FIRST word: `sudo bin/doctor.sh secrets --project <key>`; the planned order printed the usage and *"unknown argument: secrets"* three times (Sheet RH5). | **Re-issued as RH5b in the tree's order.** Any later sheet naming a doctor reading writes the verb first. | The usage is the authority; the plan copied a shape that does not exist. | — |
 | **D2282** | Context of ADR 0263: *"63 values"*. | Measured by `--rehome-check`: beta **20** present (its `connector_signing_key` and the mirror pair), alpha **19**, control-prod **19** -- **58**; the optional `auth_jwt_prepared_key` absent on all three (no rotation in flight). | **58 is the number**; the ADR's figure was an estimate. | Counted by the command that copied them. | 0263 |
 | **D2283** | D2260: *"a same-commit redeploy per project with the probe running, its windows read"*; D2034: a NEW commit's deploy recreates auth/mcp/storage 8–14 s. | After the rehomes and RH3a's materialize, each project's active generation had a NEW id with identical bytes; each `deploy.sh` materialized AGAIN (the active generation moved a second time: beta `2b433af2…`, alpha `09247ad9…`, control-prod `b4a453ec…`) and **recreated no container** (every one *Up 2 days* after). The probe (alpha + beta, 10 targets, 1.25 s): **1,962 s, 15,700 samples, 0 down, 0 429, 0 other**. | **Recorded**: a secret-store move costs the running services nothing; what ties a container to a generation is its content's digest (ADR 0155), not the generation's id. The deploy's own materialize is a second proof that 1.15.0 reads every value from the new store as the new identity. | The cost was measured, not assumed, and it was zero. | 0155 |
+| **D2284** | Run M5: F → N → P (deploy, routes may read `unavailable`) → **C** (DNS moved, then *"one `curl` → staging certificate"*); D2249: *"Alpha and control-prod then issue production on their first request."* | Traefik asks ACME for a router's certificate **when the router appears** (the deploy), not on a request: Session 37's control-prod certificate was issued by its first deploy (D2064: *"One deploy attempt; a certificate failure is a stop"*), and no `curl` path in `edge.sh` triggers issuance. Deployed on OVH while its name still points at Hetzner, a project's HTTP-01 challenge is answered by Hetzner's edge: a FAILED validation -- staging for beta, **PRODUCTION for alpha and control-prod** (5/hour/hostname) -- and nothing re-asks once the name moves. | **The DNS sheet moves to second place: F → C → N → P → B.** The project is down from F's stop anyway, so the record moves at no cost; it is read from 1.1.1.1 and the zone's own name server before N. The first deploy is then the one issuance attempt (beta: staging, read in `staging.json`; then `promote-acme` → production at the edge's restart). D2248's *"routes may read `unavailable`"* applies only to beta's staging minutes. | One attempt per hostname, and it is the attempt that can succeed. | — |
+| **D2285** | `versions.env:15`: `MC_IMAGE=quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349e…`, the base of the `backup-mirror` image, *"built rather than pulled"* (`services/backup-mirror/Dockerfile`). | **The image is no longer pullable anonymously** (measured 2026-10-09 from WSL): quay.io answers **401** for the digest and the tag, its API *"Requires authentication"*; Docker Hub's `minio/mc` 401 for both; a public quay image (`prometheus/busybox`) 200 as the control. OVH's first `backup.sh … mirror` failed at the build (`load metadata … 401 UNAUTHORIZED`, exit 5) while restore, deploy and backup did not touch it; Hetzner never noticed because its images were built 2026-09-06. **Every fresh host's mirror fails.** | **For M5: Hetzner's built image carried** (`docker save` → `scp -3` → `docker load`, sha256 `c3bd5bda…` equal both ends; its `mirror.sh` equal to the tree's `c8c1a3dc…`, unchanged since `b1e37ff`) and tagged `apg-{alpha-dev,beta-dev,control-prod}-backup-mirror:latest` on OVH; Compose's `run` builds only a missing image. **Owed: a product repair before any other fresh host** -- `MC_IMAGE` re-pinned to a source that answers (or the mirror moved to the store's pinned `rclone`), with a proof that every pinned base resolves anonymously; Session 38's Run 11 deploy keeps the tagged images. | The mirror is the backup's second copy; a host that cannot build it has one. | 0188 |
+| **D2286** | Run M5 step 3: *"`--render-runtime-only` → the printed `database-ports.sh verify`"*; the database-ports usage: *"Reuse is the default: a redeploy gets the same numbers back, because they are in somebody's saved tunnel."* | Ports are allocated from the HOST's registry (OVH's was empty): beta reads **pooled 15432 / direct 15433** on OVH against **15434 / 15435** on Hetzner. Reuse holds per host, not across a move. | **Recorded**; a saved tunnel to beta's ports is re-pointed by its owner. Alpha and control-prod will take the next free pairs in move order (their Hetzner pairs 15432/15433 and 15436/15437 are not reserved here). | The registry is the host's; a move is a new host. | — |
+| **D2287** | Run M5 step 2 / runbook §2: `--adopt`, then `--apply` *"adopts the existing secret values into this host's record"*. | After `--adopt`, `--plan` lists **every generated value as `create`** (14 on beta): the plan compares the contract with the adopted state, whose `managed_resources` are the identity's three only (`bootstrap-providers.py:1194-1199`); it contacts nothing. Whether `--apply` then overwrites rests on the store answering a duplicate create with 400/409 (`create_secret`), measured only against the Cloud. | **Measured on the self-hosted store first** (`/home/op/conflict-probe.py` against `rig-dev`, root, the control-plane credential): duplicate create **HTTP 400** *"Secret '…' already exists"*, version 1 before and after, value digest unchanged. Then beta's `--apply`: **14 × "already present at the provider; not overwritten"**, 0 created. | The cipher pass is the one value a wrong overwrite makes fatal; the answer was measured before it was relied on. | 0189 |
 
 ---
 
@@ -647,7 +651,35 @@ seconds (restore + recovery, against 247 s, D2251's Atlantic), the first deploy'
 the cutover's DNS propagation as read, each certificate's issue time, the row counts equal;
 alpha's restore record path (D2246).
 
-**Done.** *(the executor writes it)*
+**Done -- beta (2026-10-09 UTC).** Order per **D2284** (F → C → N → P → B). Before: OVH's
+`infisical` block equal to `kit-2026-10-09-rehomed`'s member for member; the kit verifies on
+OVH (14 artefacts); `project.beta.yaml` and `capabilities.yaml` placed from the kit (sha256 equal
+to Hetzner's checkout copies); the carried ages in `/home/op/carried/`. **F-beta** (`/home/op/
+m5-freeze.sh`; its first run stopped at `schedule status`, whose exit 6 means *unscheduled*, and
+`info` needs the running cluster -- both script faults, re-run): counts at 17:45:31Z
+`app.notes 425`, `note_embeddings 0`, `tasks 0`, instance `b55f9932-…`; `backup --type incr`
+`…_20261009-174534I` 18 s; unit disabled + stopped 17:45:53–17:46:07Z, 0 containers left;
+**`mirror` with the project DOWN: exit 0, 58 s, 21,784 objects** (the plan's open measurement:
+it runs). **C-beta** at ~17:50Z: `beta-db` A → `15.204.231.45`, grey, no AAAA; read 17:51:37Z from
+1.1.1.1, 8.8.8.8 and both Cloudflare name servers (TTL 300). **N-beta**: edge unit enabled
+(D2273); `--adopt` exit 0 (project `89807f3a-…`, OVH identity `4098f0cc-…`, the Hetzner identity
+`a9ae62e0-…` named, not revoked); **D2287**; `--apply` 14 adopted, 0 created; credential shredded;
+carried ages installed; materialize 30 files (gen `948e33f1…`); **restore `--from mirror
+--latest`: exit 0, timeline 2, instance `b55f9932-…` equal, recovered to 17:45:52Z (the stop was
+17:45:53Z), RTO 564 s (restore 555, recovery 9) against 247 s** (D2251); record `/home/op/
+restore-beta-dev-202610091815e5ba.json`. **P-beta**: admitted (304 of 5,532 MiB); first deploy
+exit 0 -- **6c found the stanza and `check` passed on the shared bucket (D2243 measured)**; the
+staging certificate issued at the deploy (`(STAGING) Dastardly Durum YR1`); **`promote-acme`
+exit 0, production issued at the edge's restart** (`YR1`, to 2027-01-07), one attempt, no
+failure; ports **15432/15433** (D2286) verified; second deploy exit 0, every route `ready`;
+unit enabled; **counts equal to F's**; doctor 11 ok + the mirror WARN. **B-beta**: `incr` on
+timeline 2 ran; timers enabled (incr 03:48Z, mirror 04:43Z, full Sunday); OVH's first mirror
+**failed at the image build (D2285)**, Hetzner's image carried; **mirror exit 0, 21,835 objects
+at 19:00:32Z; doctor 12 ok, 0 warning.** Beta was down **17:45:53Z → ~18:42Z** (the second
+deploy's observation). `/home/op/beta-dev-outputs.json` (op, 0600) on OVH. Hetzner keeps beta's
+volume and its `*.rehomed-*` history until M7.
+
+**Done -- alpha, control-prod.** *(the executor writes them)*
 
 ### Run M6 — the declarations, a reboot, a verification, the capacity
 
