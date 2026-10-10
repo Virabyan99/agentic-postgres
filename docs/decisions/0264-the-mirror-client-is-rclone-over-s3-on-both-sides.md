@@ -1,6 +1,6 @@
 # 0264 — The mirror client is rclone, over S3 on both sides
 
-- **Status:** Accepted
+- **Status:** Accepted, its `run --build` amended by ADR 0266 (Session 38 Run 12, D2311): built, then run
 - **Date:** 2026-10-10
 - **Session:** 38, migration repairs before Run 11
   (`docs/plans/session-38-migration-plan.md`, D2285, D2295)

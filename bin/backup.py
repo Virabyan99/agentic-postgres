@@ -649,24 +649,33 @@ def compose_mirror(rendered: Path, action: str, *, timeout: int) -> subprocess.C
     `--entrypoint`, no `-e`) apply here as they do everywhere. The container is
     the only thing that holds either credential; this process holds neither.
 
-    `--build`, for the reason `project-runtime.sh up` passes it: Compose builds
-    only an image that is MISSING, so a host that built the mirror once kept
-    that image through every release after it. D2285 is what that cost: OVH
-    runs an `mc` image carried from Hetzner, and the client change of ADR 0264
-    would never have reached it. Layer caching makes an unchanged build
-    near-free.
+    **Built first, then run** (ADR 0266). The image is built on every call, for
+    the reason `project-runtime.sh up` passes `--build`: Compose builds only an
+    image that is MISSING, so a host that built the mirror once kept that image
+    through every release after it (D2285: OVH ran an `mc` image carried from
+    Hetzner). Layer caching makes an unchanged build near-free. But never as
+    `run --build`: with stdout a pipe, that writes BuildKit's progress to
+    STDOUT ahead of the container's, and `count`'s JSON stops parsing (D2311,
+    the slot's creation, measured). A build that fails is the answer; nothing
+    runs.
     """
+    built = _compose_mirror_step(rendered, ("build", "backup-mirror"), timeout=timeout)
+    if built.returncode != 0:
+        return built
+    return _compose_mirror_step(rendered, ("run", "--rm", "backup-mirror", action), timeout=timeout)
+
+
+def _compose_mirror_step(
+    rendered: Path, argv: tuple[str, ...], *, timeout: int
+) -> subprocess.CompletedProcess:
+    """One `bin/compose.sh --runtime --profile mirror <argv>`, stdin closed."""
     command = [
         str(REPO_ROOT / "bin" / "compose.sh"),
         str(rendered),
         "--runtime",
         "--profile",
         "mirror",
-        "run",
-        "--build",
-        "--rm",
-        "backup-mirror",
-        action,
+        *argv,
     ]
     return subprocess.run(
         command,

@@ -980,32 +980,69 @@ def test_the_verb_refuses_a_project_with_no_rendered_output(
 def test_the_verb_reaches_the_container_through_the_wrapper_with_the_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Through `bin/compose.sh --runtime --profile mirror run --build --rm`, so
-    the installed overrides and the `run` refusals apply, and no credential is
-    in this process's argv. `--build` since D2285: Compose builds only a MISSING
-    image, so without it a host keeps the first mirror image it ever built --
-    OVH's is `mc`, carried from Hetzner -- through every release after."""
-    source = (REPO_ROOT / "bin" / "backup.py").read_text(encoding="utf-8")
-    body = source.split("def compose_mirror(")[1].split("\ndef ")[0]
-    assert "stdin=subprocess.DEVNULL" in body, "D673: a run that inherits stdin can hang"
-
+    """Through `bin/compose.sh --runtime --profile mirror`, so the installed
+    overrides and the `run` refusals apply, and no credential is in this
+    process's argv: `build backup-mirror`, THEN `run --rm` without `--build`
+    (ADR 0266). The build since D2285: Compose builds only a MISSING image, so
+    without it a host keeps the first mirror image it ever built -- OVH's is
+    `mc`, carried from Hetzner -- through every release after. Apart from the
+    run since D2311: `run --build` writes BuildKit's progress to stdout ahead
+    of `count`'s JSON."""
     # Driven, not read: the argv the function actually hands the wrapper.
     module = load_command("backup")
     seen: list[list[str]] = []
 
     def record(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
         seen.append(list(command))
-        assert kwargs.get("stdin") is subprocess.DEVNULL
+        assert kwargs.get("stdin") is subprocess.DEVNULL, "D673: a run that inherits stdin can hang"
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(module.subprocess, "run", record)
     module.compose_mirror(Path("/rendered/x"), "copy", timeout=5)
-    (argv,) = seen
-    assert argv[0].endswith("bin/compose.sh") and argv[1] == "/rendered/x"
-    assert argv[2:] == [
-        "--runtime", "--profile", "mirror", "run", "--build", "--rm", "backup-mirror", "copy"
-    ], argv  # fmt: skip
-    assert not {"-e", "--env", "--env-file", "--entrypoint"} & set(argv), argv
+    built, ran = seen
+    for argv in (built, ran):
+        assert argv[0].endswith("bin/compose.sh") and argv[1] == "/rendered/x"
+        assert argv[2:5] == ["--runtime", "--profile", "mirror"], argv
+        assert not {"-e", "--env", "--env-file", "--entrypoint", "--build"} & set(argv), argv
+    assert built[5:] == ["build", "backup-mirror"], built
+    assert ran[5:] == ["run", "--rm", "backup-mirror", "copy"], ran
+
+
+def test_a_mirror_image_that_fails_to_build_runs_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0266: a failed build is the call's answer -- its exit and its output
+    -- and no container runs on whatever image the host had before."""
+    module = load_command("backup")
+    seen: list[list[str]] = []
+
+    def record(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        seen.append(list(command))
+        return subprocess.CompletedProcess(command, 17, stdout="", stderr="failed to solve")
+
+    monkeypatch.setattr(module.subprocess, "run", record)
+    answer = module.compose_mirror(Path("/rendered/x"), "count", timeout=5)
+    assert (answer.returncode, answer.stderr) == (17, "failed to solve")
+    assert [argv[5] for argv in seen] == ["build"], seen
+
+
+def test_the_count_parses_the_runs_stdout_never_the_builds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D2311: BuildKit's plain progress (what `run --build` put ahead of the
+    JSON on the slot's creation) is never part of the answer `count` parses."""
+    module = load_command("backup")
+    progress = "#1 [internal] load local bake definitions\n#1 DONE 0.0s\n"
+
+    def record(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        if "build" in command:
+            return subprocess.CompletedProcess(command, 0, stdout=progress, stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout=SIZE_OUTPUT, stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", record)
+    listing = module.compose_mirror(Path("/rendered/x"), "count", timeout=5)
+    assert backup_report.count_objects(listing.stdout) == 2
+    assert backup_report.count_objects(progress + SIZE_OUTPUT) is None, "the defect's shape"
 
 
 def test_schedule_status_on_a_mirrored_project_reads_three_units(

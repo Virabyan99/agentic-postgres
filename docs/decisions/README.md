@@ -327,5 +327,6 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0261](0261-a-trial-ledger-status-bounded-to-the-session-that-introduced-its-claims.md) | A `trial` Ledger status, bounded to the session that introduced its claims | 38 | Accepted |
 | [0262](0262-the-secret-store-is-self-hosted-infisical-on-its-own-host.md) | The secret store is self-hosted Infisical on its own host | 38 | Accepted |
 | [0263](0263-a-projects-provider-project-moves-between-stores-by-value.md) | A project's provider project moves between stores by value | 38 | Accepted |
-| [0264](0264-the-mirror-client-is-rclone-over-s3-on-both-sides.md) | The mirror client is rclone, over S3 on both sides | 38 | Accepted |
+| [0264](0264-the-mirror-client-is-rclone-over-s3-on-both-sides.md) | The mirror client is rclone, over S3 on both sides | 38 | Accepted, its `run --build` amended by ADR 0266 |
 | [0265](0265-the-collectors-health-check-is-sized-for-a-cold-boot.md) | The collector's health check is sized for a cold boot | 38 | Accepted |
+| [0266](0266-the-mirror-image-is-built-apart-from-its-run.md) | The mirror image is built apart from its run | 38 | Accepted |
