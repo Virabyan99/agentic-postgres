@@ -62,7 +62,13 @@ readonly FORBIDDEN="up run start create restart exec attach cp watch scale"
 # not be replaced from the command line, and no environment value may be
 # injected there. Without those, `run` is a way to execute anything as root
 # inside a project's network with its secrets mounted.
-readonly RUNTIME_ALLOWED="up down restart build ps config logs run"
+#
+# `stop` and `start` joined it in Session 38 (ADR 0267, D2314): sleep and wake
+# (ADR 0259) keep a project's containers and bring THE SAME ones back --
+# `start` creates nothing and takes no flag that changes a container; it runs
+# what `up` already created from the reviewed model, with the mounts it had.
+# Without them `project-runtime.sh stop|start` could never run.
+readonly RUNTIME_ALLOWED="up down restart build ps config logs run stop start"
 
 # Flags that turn `run` from "start this reviewed service" into "start
 # something else". --entrypoint replaces the command the model declares;
@@ -72,7 +78,7 @@ readonly RUN_FORBIDDEN_FLAGS="--entrypoint -e --env --env-file --volume -v --use
 
 # Subcommands that need a reachable daemon. `config` is rendered entirely by
 # the client, so it deliberately is not in this list.
-readonly NEEDS_DAEMON="ps top logs events port images kill down stop rm wait up restart build run"
+readonly NEEDS_DAEMON="ps top logs events port images kill down stop rm wait up restart build run start"
 
 # Compose global flags that consume the following token as their value, so
 # that token must never be mistaken for the subcommand. A flag written

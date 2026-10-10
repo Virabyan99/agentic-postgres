@@ -914,10 +914,12 @@ def test_the_runtime_allowlist_excludes_container_entry_verbs() -> None:
     --runtime does not grant them even to root. `run` was among them until
     Session 3, when the migration plane needed a one-shot container and said so
     in an ADR, which is the process the old comment on this list asked for
-    (ADR 0034). It is the only addition, and it arrives with two refusals that
-    the rest of the allowlist does not need -- asserted below, because `run`
-    without them is a way to execute anything as root inside a project's
-    network with its secrets mounted.
+    (ADR 0034). It arrives with two refusals that the rest of the allowlist
+    does not need -- asserted below, because `run` without them is a way to
+    execute anything as root inside a project's network with its secrets
+    mounted. `stop` and `start` joined in Session 38 (ADR 0267, D2314): sleep
+    and wake keep the containers `up` created and start the same ones again;
+    neither reaches inside a container, and `start` creates none.
 
     Asserted against the script's allowlist because proving it at runtime would
     need a root test process.
@@ -926,8 +928,10 @@ def test_the_runtime_allowlist_excludes_container_entry_verbs() -> None:
     allowed = re.search(r'RUNTIME_ALLOWED="([^"]*)"', text)
     assert allowed is not None
     permitted = set(allowed.group(1).split())
-    assert permitted == {"up", "down", "restart", "build", "ps", "config", "logs", "run"}
-    assert not permitted & {"exec", "attach", "cp", "start", "create", "watch", "scale"}
+    assert permitted == {
+        "up", "down", "restart", "build", "ps", "config", "logs", "run", "stop", "start",
+    }  # fmt: skip
+    assert not permitted & {"exec", "attach", "cp", "create", "watch", "scale"}
 
     refused = re.search(r'RUN_FORBIDDEN_FLAGS="([^"]*)"', text)
     assert refused is not None, "run is permitted with no flag refusals at all"
@@ -1080,6 +1084,18 @@ def test_watch_and_scale_are_refused_with_runtime_even_as_root(
     assert result.returncode == 10, result.stderr
     assert "not permitted in --runtime mode" in result.stderr
     assert f"'{subcommand}'" in result.stderr
+
+
+@pytest.mark.parametrize("subcommand", ["stop", "start"])
+@needs_rendered_fixtures
+def test_sleep_and_wake_pass_the_runtime_allowlist(subcommand: str, tmp_path: Path) -> None:
+    """ADR 0267, D2314: the real RUNTIME_ALLOWED conditional lets `stop` and
+    `start` through -- what `project-runtime.sh stop|start` sends for sleep and
+    wake, refused with exit 10 on the host until this ADR. The control is the
+    refusal above, run through the same harness."""
+    result = _runtime_allowed_result(tmp_path, subcommand)
+    assert result.returncode == 0, result.stderr
+    assert "not permitted" not in result.stderr
 
 
 # ---------------------------------------------------------------------------

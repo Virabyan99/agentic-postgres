@@ -330,3 +330,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0264](0264-the-mirror-client-is-rclone-over-s3-on-both-sides.md) | The mirror client is rclone, over S3 on both sides | 38 | Accepted, its `run --build` amended by ADR 0266 |
 | [0265](0265-the-collectors-health-check-is-sized-for-a-cold-boot.md) | The collector's health check is sized for a cold boot | 38 | Accepted |
 | [0266](0266-the-mirror-image-is-built-apart-from-its-run.md) | The mirror image is built apart from its run | 38 | Accepted |
+| [0267](0267-the-runtime-wrapper-permits-stop-and-start.md) | The runtime wrapper permits `stop` and `start` | 38 | Accepted |

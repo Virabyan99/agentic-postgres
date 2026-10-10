@@ -16,6 +16,7 @@ renders nothing, builds nothing.
 from __future__ import annotations
 
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -174,3 +175,24 @@ def test_stop_and_start_need_root_and_the_session(root: dict[str, Path]) -> None
             "--defer", "postgrest", action,
         )  # fmt: skip
         assert deferred[0] == 2 and "--defer applies to up" in deferred[2], action
+
+
+def test_every_runtime_subcommand_this_script_sends_is_one_compose_permits() -> None:
+    """D2314, ADR 0267: the RECORDER above stands in for `compose.sh`, so every
+    test in this module passes whatever `compose.sh` would refuse -- and it
+    refused `stop` and `start`, which made sleep and wake fail on the host
+    (Run 12) while this module was green. This reads the two files together:
+    each subcommand `project-runtime.sh` hands `compose.sh --runtime` is in
+    `compose.sh`'s RUNTIME_ALLOWED. The parse is asserted to find all five
+    subcommands, so a call site it cannot read is a failure, never a pass."""
+    script = (REPO_ROOT / "bin" / "project-runtime.sh").read_text(encoding="utf-8")
+    joined = re.sub(r"\\\n\s*", " ", script)
+    sent = re.findall(
+        r'bin/compose\.sh" "\$\{rendered\}" --runtime "\$\{profiles\[@\]\}" +([a-z]+)', joined
+    )
+    assert sorted(set(sent)) == ["config", "down", "start", "stop", "up"], sent
+    wrapper = (REPO_ROOT / "bin" / "compose.sh").read_text(encoding="utf-8")
+    allowed = re.search(r'RUNTIME_ALLOWED="([^"]*)"', wrapper)
+    assert allowed is not None
+    refused = sorted(set(sent) - set(allowed.group(1).split()))
+    assert refused == [], f"project-runtime.sh sends what compose.sh --runtime refuses: {refused}"
