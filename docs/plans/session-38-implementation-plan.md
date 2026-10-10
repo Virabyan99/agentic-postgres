@@ -1758,7 +1758,7 @@ session-scoped `fresh_totp_code` in `tests/conftest.py` -- read live: both exter
 modules in one `-k` run, the lifecycle module 7 passed and only D2310/D2316's three
 failed, no setup error). **Targeted once:** 270 passed (fifteen modules) and
 `app-contract --check` both contracts. **Battery 4/4 killed**, controls green, files
-restored by `cmp`. Rows **D2322-D2324**; §10 extended. **NEXT FREE: D2325, ADR 0268.**
+restored by `cmp`. Rows **D2322-D2324**; §10 extended. Code commit :  PASSED on it; CI run 38074704945 green (all three jobs). **NEXT FREE: D2325, ADR 0268.**
 
 ---
 
