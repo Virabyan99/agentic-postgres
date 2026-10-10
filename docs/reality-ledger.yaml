@@ -24,6 +24,12 @@
 # verified" to the customer. The session's close moves each to `beta` if every
 # claim it names passed, or back to `planned` with its operation types no longer
 # accepted.
+#
+# Session 38's close (Run 13, D2170 applied as written): all six named a claim
+# that failed on evidence/session-38.json -- lifecycle_operations_live (D2310),
+# lifecycle_project_door_live (D2321), reconciler_live (D2318), the last two
+# proof defects -- so all six are `planned` again, target Session 39, and no
+# operation type is accepted. Session 39 moves them back to `trial`.
 
 schema_version: 1
 rows:
@@ -102,26 +108,30 @@ rows:
 
   - id: management_api
     concept: Management API (/api/v1)
-    status: beta
+    status: planned
     customer_text: >-
       https://control.agenticpostgresql.com/api/v1 manages accounts,
       organizations, members, invitations and keys, and lists your projects.
-      Creating, sleeping, waking, resizing, exporting and deleting a project
-      are being verified, and each concept's own entry says so.
+      Creating a project is not available yet and says so.
     today: >-
       One management API in the control project's app mode, frozen as a
       contract (contracts/control-openapi.canonical.json). A project operation
       is accepted only while its concept's ledger row is available, beta or
-      trial, and refused as not available otherwise (ADR 0254, ADR 0261).
+      trial, and refused as not available otherwise (ADR 0254, ADR 0261). The
+      API serves on 1.16.0 as on 1.15.0; the row is planned since Session 38's
+      close because control_plane_live did not pass on evidence/session-38.json
+      -- the proof defect D2317, repaired in Run 13 -- and a beta row's claims
+      must pass on the newest evidence (ADR 0247). Session 39's first trip
+      measures it again and its close moves the row back to beta.
     today_evidence: null
-    evidence: [control_api_contract, control_plane_live]
+    evidence: []
     stage5_reality: >-
       One management API in the control project's app mode, frozen as a
       contract and checked like the other four.
     eventual: A versioned public API with published client libraries.
     controls: []
-    since_session: 36
-    target_session: 37
+    since_session: 38
+    target_session: 39
 
   - id: cli_remote
     concept: CLI against the hosted service
@@ -169,26 +179,23 @@ rows:
   # -------------------------------------------------------------------------
   - id: projects_self_service
     concept: Create a project
-    status: trial
+    status: planned
     customer_text: >-
-      Being verified. A member of an organization creates a project on a slot
-      the operator prepared, and claims its first administrator with a one-time
-      token only they hold. When no slot is ready, or the server has no room,
-      the request is refused with "capacity exhausted" and nothing is created.
+      Not open yet. Creating a project will be refused with "capacity
+      exhausted" when this server has no room, and nothing will be created.
     today: >-
       POST /v1/projects (bin/project.sh create) records a project.create
       operation; the reconciler, a root unit on the host, executes it into a
       prepared slot through admission and the deploy, and bin/project.sh claim
       sets the first administrator's password through the project's own reset
-      route. The operator still creates every other project by hand.
+      route. The operator still creates every other project by hand. Built in
+      Session 38 and run end to end on 1.16.0; refused as not available since
+      Session 38's close (D2170), because lifecycle_operations_live and
+      lifecycle_project_door_live did not pass on its evidence -- D2310 and the
+      proof defects D2317-D2321. Session 39 moves it back to trial and its first
+      trip measures it again.
     today_evidence: null
-    evidence:
-      - control_project_operations
-      - reconciler_dispatch
-      - admin_handoff
-      - capacity_refusals
-      - lifecycle_operations_live
-      - lifecycle_project_door_live
+    evidence: []
     stage5_reality: >-
       POST /v1/projects records a project.create operation (member and above,
       a person only), refused "capacity exhausted" with no slot ready before
@@ -197,134 +204,127 @@ rows:
       administrator claims the account with a token only its requester holds
       (ADR 0256, ADR 0260).
     eventual: Placement across a fleet of servers.
-    controls: [project.create, bin/project.sh create, bin/project.sh claim]
+    controls: []
     since_session: 38
-    target_session: 38
+    target_session: 39
 
   - id: project_deletion
     concept: Delete a project
-    status: trial
-    customer_text: >-
-      Being verified. An admin or owner deletes a project with its data. The
-      project's name is never given to another project, and its backups are
-      kept by the operator: nothing removes them automatically.
+    status: planned
+    customer_text: Not open yet.
     today: >-
       DELETE /v1/projects/{key} (bin/project.sh delete --confirm KEY) records a
       project.delete operation; the reconciler retires the slot's project with
       its data, leaves the provider's resources for the operator to revoke
       (bin/slot.sh revoke), and marks the slot consumed. The operator retires
-      every other project with bin/project-retire.sh.
+      every other project with bin/project-retire.sh. Built in Session 38 and
+      run end to end on 1.16.0; refused as not available since Session 38's
+      close (D2170), because lifecycle_operations_live and reconciler_live did
+      not pass on its evidence -- D2310 and the proof defects D2317-D2321.
+      Session 39 moves it back to trial and its first trip measures it again.
     today_evidence: null
-    evidence:
-      - deletion
-      - slots
-      - registry_after_operations
-      - lifecycle_operations_live
-      - reconciler_live
+    evidence: []
     stage5_reality: >-
       DELETE /v1/projects/{key} records a project.delete operation (admin and
       above, a person only); the reconciler retires the project with its data,
       the slot is consumed and never reissued, and the backups are kept by the
       operator -- this beta has no automatic removal (D2158, D2181).
     eventual: The same, with a grace period and recovery.
-    controls: [project.delete, bin/project.sh delete]
+    controls: []
     since_session: 38
-    target_session: 38
+    target_session: 39
 
   - id: export
     concept: Export a project
-    status: trial
-    customer_text: >-
-      Being verified. A person exports a project's own schemas as one archive.
-      The download link is shown once, to the person who asked, and works for
-      at most 15 minutes.
+    status: planned
+    customer_text: Not open yet.
     today: >-
       POST /v1/projects/{key}/export (bin/project.sh export) records a
       project.export operation; the reconciler dumps the app and api schemas,
-      uploads the archive through the project's own storage container, and
-      hands its one-time URL to the requester's first read of the operation.
-      The CLI downloads it once and checks its SHA-256.
+      uploads the archive through the project's own storage container, and hands
+      its one-time URL to the requester's first read of the operation. The CLI
+      downloads it once and checks its SHA-256. Built in Session 38 and run end
+      to end on 1.16.0; refused as not available since Session 38's close
+      (D2170), because lifecycle_operations_live and lifecycle_project_door_live
+      did not pass on its evidence -- D2310 and the proof defects D2317-D2321.
+      Session 39 moves it back to trial and its first trip measures it again.
     today_evidence: null
-    evidence:
-      - export
-      - lifecycle_operations_live
-      - lifecycle_project_door_live
+    evidence: []
     stage5_reality: >-
       POST /v1/projects/{key}/export records a project.export operation (a
       person only); the archive holds the project's own schemas, and its
       download URL -- valid at most 15 minutes -- is shown once to the person
       who asked (D2164, ADR 0259).
     eventual: Scheduled exports to a customer's own storage.
-    controls: [project.export, bin/project.sh export]
+    controls: []
     since_session: 38
-    target_session: 38
+    target_session: 39
 
   - id: region
     concept: Region
-    status: trial
+    status: planned
     customer_text: >-
-      Being verified. Every project runs in one location, the one server this
-      beta runs on, and each project's record names it.
+      Every project runs in one location, the one server this beta runs on.
     today: >-
       One server in one location. Host manifest schema 4 declares the region;
       every deployed document, the registry row and a creation's result carry
       it. No operation chooses a region: a creation is placed where the server
-      is.
+      is. planned since Session 38's close (D2170), because reconciler_live did
+      not pass on its evidence -- the proof defect D2318. Session 39 moves it
+      back to trial and its first trip measures it again.
     today_evidence: null
-    evidence: [region_and_document, reconciler_live]
+    evidence: []
     stage5_reality: >-
       The operator's declaration in host.yaml (schema 4), carried into every
       deployed document and the registry, with one value (D1957, D2161).
     eventual: Placement across locations.
-    controls: [project.create]
+    controls: []
     since_session: 38
-    target_session: 38
+    target_session: 39
 
   - id: compute_profiles
     concept: Compute size
-    status: trial
+    status: planned
     customer_text: >-
-      Being verified. A project runs at one of three sizes: small, standard or
-      large. Changing the size restarts the project; when the server has no room
-      for the new size the change is refused and nothing changes.
+      Not open yet. Changing a project's size will restart it, and the message
+      will say how long the restart was measured to take.
     today: >-
       Three named profiles -- small, standard (the release defaults) and large
       -- selected by a manifest's compute block (schema 10) and applied where
       the manifest is loaded, so every existing limit check bounds them. PUT
       /v1/projects/{key}/compute (bin/compute.sh set) records a project.resize
-      operation the reconciler admits before it changes anything.
+      operation the reconciler admits before it changes anything. Built in
+      Session 38 and run end to end on 1.16.0; refused as not available since
+      Session 38's close (D2170), because lifecycle_operations_live did not pass
+      on its evidence -- D2310 and the proof defects D2317-D2321. Session 39
+      moves it back to trial and its first trip measures it again.
     today_evidence: null
-    evidence:
-      - compute_profiles
-      - resize_message
-      - lifecycle_operations_live
+    evidence: []
     stage5_reality: >-
       PUT /v1/projects/{key}/compute records a project.resize operation;
       admission refuses a profile the server has no room for with nothing
       changed, and the message says the restart has not been measured on this
       server until a measured window exists (D1955, D2157, ADR 0258).
     eventual: Compute scheduled independently of storage.
-    controls: [project.resize, bin/compute.sh set, bin/compute.sh get]
+    controls: []
     since_session: 38
-    target_session: 38
+    target_session: 39
 
   - id: sleep
     concept: Sleep and wake
-    status: trial
-    customer_text: >-
-      Being verified. A project sleeps and wakes when someone asks. While it
-      sleeps its addresses answer "not found" and no new restore point is
-      taken; its data and its last restore point are kept.
+    status: planned
+    customer_text: Not open yet.
     today: >-
       POST /v1/projects/{key}/sleep and /wake (bin/project.sh sleep, wake)
-      record project.sleep and project.wake operations; the reconciler stops
-      and starts the slot's containers with their volumes kept, and the
-      project's boot unit and backup timers with them.
+      record project.sleep and project.wake operations; the reconciler stops and
+      starts the slot's containers with their volumes kept, and the project's
+      boot unit and backup timers with them. Built in Session 38 and run end to
+      end on 1.16.0; refused as not available since Session 38's close (D2170),
+      because lifecycle_operations_live and lifecycle_project_door_live did not
+      pass on its evidence -- D2310 and the proof defects D2317-D2321. Session
+      39 moves it back to trial and its first trip measures it again.
     today_evidence: null
-    evidence:
-      - sleep_wake
-      - lifecycle_operations_live
-      - lifecycle_project_door_live
+    evidence: []
     stage5_reality: >-
       project.sleep and project.wake, by request only, stop and start the
       project's containers with volumes kept; while it sleeps a caller gets the
@@ -332,9 +332,9 @@ rows:
       moment it went to sleep (D1956, D2155, ADR 0259). Idle sleep is its own
       row.
     eventual: Compute suspended and resumed independently of storage.
-    controls: [project.sleep, project.wake, bin/project.sh sleep, bin/project.sh wake]
+    controls: []
     since_session: 38
-    target_session: 38
+    target_session: 39
 
   - id: idle_sleep
     concept: Sleep when idle

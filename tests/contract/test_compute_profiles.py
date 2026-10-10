@@ -213,7 +213,13 @@ def test_the_resize_message_names_only_a_measured_window() -> None:
         assert not any(character.isdigit() for character in message)
     else:
         assert compute_profiles.RESIZE_WINDOW_SECONDS is not None
-        assert str(compute_profiles.RESIZE_WINDOW_SECONDS) in rows[0].value
+        # The row's value LEADS with the window (D2157): a substring check passed a
+        # wrong constant whose digits appear elsewhere in the row (70 in "70.5 s").
+        assert len(rows) == 1, [m.subject for m in rows]
+        assert rows[0].value.startswith(f"{compute_profiles.RESIZE_WINDOW_SECONDS} s:"), (
+            compute_profiles.RESIZE_WINDOW_SECONDS,
+            rows[0].value,
+        )
     # Control: given a window, the message carries it.
     assert "42 seconds" in compute_profiles.resize_message(42)
     assert copy.deepcopy(compute_profiles.PROFILE_NAMES) == ("small", "standard", "large")

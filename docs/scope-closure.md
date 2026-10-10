@@ -1411,3 +1411,61 @@ read it clean.
    (`totp-enroll --output` + a QR), `--password-file`, and *do not paste the
    QR* — the operator pasted one and a factor was reset.
 5. **The rescale** (D2032), before 38's slots re-derive the reserve (D1992).
+
+## 31. What Session 38 closed, what it left, and what Session 39 inherits
+
+**Session 38 is managed projects.** Thirteen runs and a move between two hosts,
+`D2145`–`D2324`: forty-four rows written at planning, sixty-six written by the
+move (`docs/plans/session-38-migration-plan.md`, D2239–D2304) and seventy written
+by executing it; ADRs 0256–0267. The three projects moved from the Hetzner CX23
+to an OVH VPS in Virginia (`15.204.231.45`) with a self-hosted secret store, and
+**`1.16.0` is deployed, swept, merged and tagged on `efaef09`** — the deploy, the
+sweep and the tag on one commit (D1425), after the commit moved twice when the
+trip's own path met two defects no offline test could see (the mirror's
+`run --build`, ADR 0266; the runtime wrapper refusing `stop`/`start`, ADR 0267).
+The merged evidence reads **239 claims: 232 passed, 7 failed** — three expected
+(`documented_path`, `admission_live`, `lifecycle_operations_live`) and four
+proof defects, each a divergence row and repaired at the close.
+
+**The sentence this session would most want carried forward: a customer
+operation is only as proven as the slowest thing it touches on the real host.**
+A create ran end to end four times on the day: it stopped at the mirror
+(BuildKit on stdout), at the sleep (an allowlist), at the mirror again (a
+provider's daily transaction cap), and then succeeded — and the neighbours did
+not lose one probe sample through any of it.
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **Managed projects** (stage plan §5 *Session 38*, D1953) | **Built and run on production once, end to end, through the product's own CLI:** the reconciler (ADR 0256), slots and the region (ADR 0257), compute profiles (ADR 0258), sleep/wake/export (ADR 0259), the administrator's handoff by hash (ADR 0260), the `trial` Ledger status (ADR 0261). |
+| **The move** (D2223, D2251) | OVH, a self-hosted Infisical (ADR 0262), provider projects rehomed by value (ADR 0263), the mirror on rclone (ADR 0264). |
+| **D2291** — every project unit failed at boot on OVH | ADR 0265; Run 12's reboot: all five units started by the boot, 100 s. |
+| **D2137 / D2144** — control-prod served REST | Withheld (Run 2); its address answers the edge's 404. |
+| **D2141 / D2140** | The reconciler re-adopts after its own deploys; the post-reboot systemd reading stays the evidence. |
+| **D2307** | Cleared by the lifecycle: the registry reads `agrees (deleted)` for the consumed slot, exit 0. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **Seven Ledger rows `planned`, no operation type accepted in `main`** (D2170, D2322) | D2170 applied as written: each row named a live claim that failed. Session 39 re-trials them; the deployed 1.16.0 still accepts the six, with no slot free. |
+| **Four proof defects** (D2317–D2319, D2321) | Repaired at the close; re-earned only on the next sweep. |
+| **D2310 / D2292** — two refusal proofs this host cannot force | `large` is admitted on 7,745 MiB; a skip-when-unmeasurable ADR is owed. |
+| **D2305, D2307, D2312** — a prepared slot vs the state-root readers | Any deploy while a slot is prepared exits 12. |
+| **D2315, D2316, D2320, D2324** | B2's transaction calls; the claim's choice on a reused key; the access policy outside the DR kit; the slot's own windows unprobed. |
+| **Hetzner** (M7 X1/X2) | Not before 2026-10-12 ~21:30Z. |
+| `documented_path` | **`failed` by decision** (D1935). |
+
+### What Session 39 inherits, in order
+
+1. **Public TLS endpoints and customer roles** (stage plan §5 *Session 39*), on a
+   host with **no free slot**: prepare the next, with the OVH plan upgrade
+   deferred to it.
+2. **The re-trial**: the six rows to `trial` at the bump, the four repaired proofs
+   and the slot's probe target in the first trip, the close moving them on.
+3. **The refusal proofs** (D2310, D2292) decided before that trip.
+4. **The readers of a prepared slot** (D2305, D2307, D2312), before any deploy
+   meets one.
+5. **§10's smaller rows** (D2315, D2316, D2320; the reconciler's restart at boot).
+

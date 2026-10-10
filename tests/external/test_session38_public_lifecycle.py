@@ -33,7 +33,6 @@ import json
 import os
 import ssl
 import stat
-import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -167,30 +166,13 @@ def recorder() -> Recorder:
     return Recorder()
 
 
-_LAST_STEP = [0]
-
-
-def _fresh_code(seed_text: str) -> str:
-    """A TOTP code for a step after the last one this module used."""
-    import base64
-
-    from app import totp
-
-    seed = base64.b32decode(seed_text + "=" * (-len(seed_text) % 8))
-    while totp.step_of(int(time.time())) <= _LAST_STEP[0]:
-        time.sleep(0.5)
-    now = int(time.time())
-    _LAST_STEP[0] = totp.step_of(now)
-    return totp.totp(seed, now)
-
-
 @pytest.fixture(scope="module")
-def owner(endpoint: str, probe: dict[str, Any]) -> Iterator[str]:
+def owner(endpoint: str, probe: dict[str, Any], fresh_totp_code: Any) -> Iterator[str]:
     """The probe owner's access token for the module; the session ended after."""
     own = Recorder()
     status, body = own.json("POST", f"{endpoint}/sessions", {
         "username": probe["username"], "password": probe["password"],
-        "totp_code": _fresh_code(probe["totp_seed"]),
+        "totp_code": fresh_totp_code(probe["totp_seed"]),
     })  # fmt: skip
     assert status == 200, (status, body.get("error"))
     yield body["access_token"]

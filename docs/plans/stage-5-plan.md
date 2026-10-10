@@ -38,34 +38,33 @@ shape those take.
 ## Status — read this first
 
 ```
-STAGE 5 IS EXECUTING. SESSION 37 CLOSED 2026-10-07: 1.15.0 deployed on all
-                three projects, swept, merged and TAGGED on c3eec1d (the deploy,
-                the sweep and the tag on one commit, D1425). docs/plans/session-
-                37-implementation-plan.md is its record; docs/scope-closure.md
-                §30 what it closed, left and hands Session 38. This plan was
-                written 2026-10-03 at 42bf306.
+STAGE 5 IS EXECUTING. SESSION 38 CLOSED 2026-10-10: 1.16.0 deployed on all
+                three projects on OVH, the customer lifecycle run once end to
+                end, swept, merged and TAGGED on efaef09 (D1425).
+                docs/plans/session-38-implementation-plan.md (and its
+                migration plan) is its record; docs/scope-closure.md §31 what
+                it closed, left and hands Session 39. This plan was written
+                2026-10-03 at 42bf306.
 DIRECTION       HOSTED (D1946). Session 36 paid the preconditions; Session 37
-                built the control plane (ADRs 0251-0255).
-SESSIONS        36-42 (D1945). 36, 37 DONE; 38, managed projects, PLANNED
-                2026-10-07 (docs/plans/session-38-implementation-plan.md,
-                D2145-D2188, ADRs 0256-0261): on the CX23 with ONE customer
-                slot; the rescale or a move owed before 41 (D2145); idle
-                sleep deferred to 41 (D2147). Next free after it: D2189,
-                ADR 0262.
-CURRENT_SESSION 37. Moves 38 -> 42, all-or-nothing per session (D690).
-template_version 1.15.0. host.yaml schema 3. Outputs v20, project manifest 9
-                (9 is `control`, so Session 38's `compute` is 10 -- D2044),
+                built the control plane (ADRs 0251-0255); Session 38 managed
+                projects (ADRs 0256-0261) and the move (ADRs 0262-0267).
+SESSIONS        36-42 (D1945). 36, 37, 38 DONE; 39 (public TLS endpoints and
+                customer roles) NEXT, unplanned. Idle sleep deferred to 41
+                (D2147). Next free: D2325, ADR 0268.
+CURRENT_SESSION 38. Moves 39 -> 42, all-or-nothing per session (D690).
+template_version 1.16.0. host.yaml schema 4. Outputs v21, project manifest 10,
                 capability manifest 4, lock 4, project lock 3, api-surface 2.
 POSTGRESQL      18.4 STAYS -- the operator, 2026-10-03 (D1947). Measured that
                 day on Docker Hub: postgres 19beta4 is the newest 19 tag; no
                 19rc, no 19 GA, no pgvector pg19 image.
-HOST            THE SAME HETZNER SERVER, NOT YET RESCALED (D2032): CX23,
-                3,814 MiB, 2 vCPU, 62.238.99.122. THREE PROJECTS on it since
-                2026-10-06: alpha-dev, beta-dev and control-prod
-                (control.agenticpostgresql.com); 912 of 1,600 MiB committed,
-                1,624 MiB available after the control project (FITS D2042's
-                1,024). A reboot brings all four units back by themselves in
-                ~156 s since ADR 0255 (before it, beta failed on a 429, D2139).
+HOST            OVH VPS US-East (Reston VA), apg-ovh-01, 15.204.231.45 -- the
+                move of 2026-10-08..10 (D2223, D2251): 4 vCPU, 7,745 MiB, no
+                swap. alpha-dev, beta-dev, control-prod at 1.16.0; ONE customer
+                slot, slot1-prod, CONSUMED by the lifecycle (no slot free). A
+                reboot brings all five units back by themselves in ~100 s (ADR
+                0265). The Hetzner CX23 holds the stopped copies until M7's
+                X1/X2 (not before 2026-10-12 ~21:30Z). Secrets: a self-hosted
+                Infisical (ADR 0262).
 CONTROL PLANE   PYTHON, DOGFOODED -- the operator, 2026-10-03 (D1950): the
                 control plane is a project the product itself deploys, with
                 its own migration set and the existing auth service. No
@@ -74,18 +73,23 @@ ACCOUNTS        INVITE-ONLY -- the operator, 2026-10-03 (D1951). No public signu
 OBSERVABILITY   ClickStack ADDED, bounded, on-host -- the operator, 2026-10-03,
                 reversing D1519 for Stage 5 (D1964). The per-project collector
                 and Prometheus stay; one source per customer-visible metric.
-EVIDENCE        evidence/session-37.json: 219 claims, 217 passed, 1 not_run
-                (replacement_host_restore, D1028), 1 failed (documented_path,
-                by decision, D1935). Five Ledger rows `beta` (accounts,
-                organizations, api_keys, management_api, cli_remote).
-ADRs            255, next free 0256.   migrations 39.   requirements 312.
-                claims 219, 74 declared offline.
+EVIDENCE        evidence/session-38.json: 239 claims, 232 passed, 7 failed --
+                documented_path (D1935), admission_live (D2292),
+                lifecycle_operations_live (D2310) and four proof defects
+                repaired at the close (D2317-D2319, D2321).
+                replacement_host_restore PASSED. Ledger: accounts,
+                organizations, api_keys, cli_remote `beta`; management_api and
+                the six managed-project rows `planned`, target 39 (D2170,
+                D2322); no operation type accepted in main.
+ADRs            267, next free 0268.   migrations 39.   requirements 332.
+                claims 239, 91 declared offline.
 divergences     D1-D1944 in earlier plans; D1945-D1984 here; D1985-D2041 in
-                Session 36's; D2042-D2144 in Session 37's. **Next free: D2145.**
+                Session 36's; D2042-D2144 in Session 37's; D2145-D2324 in
+                Session 38's and its migration plan's. **Next free: D2325.**
 ```
 
 **Every number in §0 onward was measured on 2026-10-03 at `42bf306`**, or says
-whose it is. **The Status block above is re-read at each session's close.** (Re-read and rewritten at Session 37's close, 2026-10-07.)
+whose it is. **The Status block above is re-read at each session's close.** (Re-read and rewritten at Session 38's close, 2026-10-10.)
 
 ---
 

@@ -218,8 +218,15 @@ def test_the_control_projects_rest_route_is_withheld(
     route = (control_project.get("routes") or {}).get("rest") or {}
     assert route.get("status") != "ready", route
     assert control_project["api"] == deployed_output.API_NOT_PUBLISHED, control_project["api"]
-    assert route.get("url"), f"the REST route records no address to ask: {route}"
-    withheld = api_call(f"{str(route['url']).rstrip('/')}/")
+    # The document records no address for a route the manifest withholds
+    # (D2172), so the address to ask is derived the way the deploy derives a
+    # published one: the served app route's base path and naming's REST suffix
+    # (D2318). A recorded address, if a later release records one, must agree.
+    app_url = str(control_project["routes"]["app"]["url"]).rstrip("/")
+    assert app_url.endswith(naming.APP_PATH_SUFFIX), app_url
+    rest_url = app_url[: -len(naming.APP_PATH_SUFFIX)] + naming.REST_PATH_SUFFIX
+    assert route.get("url") in (None, rest_url), (route, rest_url)
+    withheld = api_call(f"{rest_url}/")
     assert withheld.status == 404, (withheld.status, withheld.body[:200])
     served = api_call(f"{control_project['routes']['control']['url'].rstrip('/')}/me")
     assert served.status == 401, (served.status, served.body[:200])

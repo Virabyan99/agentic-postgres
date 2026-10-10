@@ -328,3 +328,32 @@ def code_only():
         return "\n".join(line for line in text.splitlines() if not is_comment(line))
 
     return strip
+
+
+@pytest.fixture(scope="session")
+def fresh_totp_code():
+    """A TOTP code for a step after the last one ANY module of this run used.
+
+    The control plane accepts a step once and refuses a step at or below the
+    last it accepted for the account (ADR 0252). Session 37's and Session 38's
+    external modules sign in the SAME probe owner, one after the other; each
+    kept its own memory of the last step, so the second reused a step the first
+    had spent and was refused `second_factor_invalid` (D2321, Run 12's external
+    half, twice). One memory, for the whole run, is the fact the server keeps.
+    """
+    import base64
+    import time
+
+    from app import totp
+
+    last = [0]
+
+    def code(seed_text: str) -> str:
+        seed = base64.b32decode(seed_text + "=" * (-len(seed_text) % 8))
+        while totp.step_of(int(time.time())) <= last[0]:
+            time.sleep(0.5)
+        now = int(time.time())
+        last[0] = totp.step_of(now)
+        return totp.totp(seed, now)
+
+    return code

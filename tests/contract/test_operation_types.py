@@ -92,24 +92,18 @@ THE_ACCEPTED_SIX = {
 }
 
 
-def test_exactly_the_six_executed_types_are_accepted() -> None:
-    """The exact-set form of Session 37's `test_project_creation_is_refused_as_not_available`
-    (ADR 0261 authorises the replacement): the service accepts exactly the six
-    types the reconciler executes, the FIVE others stay refused -- their rows
-    stay `planned` -- and a type outside the table is never accepted. The
-    ledger half (accepted iff the row is reachable) is `test_reality_ledger`'s."""
-    assert operations.ACCEPTED_TYPES == THE_ACCEPTED_SIX
+def test_no_type_is_accepted_and_the_six_stay_executed() -> None:
+    """The exact-set form at Session 38's close (ADR 0261 authorises it; D2170
+    applied): the six types the reconciler executes are built and NOT accepted
+    -- their rows went back to `planned` because live claims they name failed on
+    Session 38's evidence -- so the service accepts no type at all, as Session
+    37's did, and a type outside the table is never accepted. Session 39 moves
+    the six back to `trial` and this test with them. The ledger half (accepted
+    iff the row is reachable) is `test_reality_ledger`'s."""
+    assert operations.ACCEPTED_TYPES == frozenset()
     assert operations.EXECUTED_TYPES == THE_ACCEPTED_SIX
-    refused = THE_ELEVEN - THE_ACCEPTED_SIX
-    assert refused == {
-        "branch.create",
-        "branch.reset",
-        "branch.delete",
-        "restore.create",
-        "credential.rotate",
-    }
-    assert all(service_operations.is_accepted(t) for t in THE_ACCEPTED_SIX)
-    assert not any(service_operations.is_accepted(t) for t in refused)
+    assert THE_ACCEPTED_SIX < THE_ELEVEN
+    assert not any(service_operations.is_accepted(t) for t in THE_ELEVEN)
     assert not service_operations.is_accepted("project.rename")
 
 
@@ -140,8 +134,9 @@ def test_a_type_not_accepted_is_refused_not_available_before_its_body(
     write route with ITS type withdrawn from the accepted set (the five others
     left in) answers `409 not_available` naming its ledger row, `no-store`,
     before the project or the body is read, and writes no row -- the owner
-    asking. The control, in the same invocation: with the set as committed the
-    same request reaches past the gate -- a malformed creation or resize is the
+    asking. The control, in the same invocation: with the six accepted (for
+    the control only -- since Session 38's close the committed set is empty,
+    D2170) the same request reaches past the gate -- a malformed creation or resize is the
     body's `400`, a write on a project that does not exist is `404` -- so the
     409 was the gate's and nothing else's. And an unauthenticated caller is
     refused before the type is read."""
@@ -162,7 +157,9 @@ def test_a_type_not_accepted_is_refused_not_available_before_its_body(
         ), operation_type
         assert refused.headers["cache-control"] == "no-store"
         monkeypatch.undo()
+        monkeypatch.setattr(service_operations, "ACCEPTED_TYPES", THE_ACCEPTED_SIX)
         passed = drive.call(method, url, token=token, body=body)
+        monkeypatch.undo()
         expected = 400 if operation_type in ("project.create", "project.resize") else 404
         assert passed.status_code == expected, (operation_type, passed.text)
     assert drive.cluster.query("SELECT count(*) FROM app.control_operations;") == before

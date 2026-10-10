@@ -1,10 +1,13 @@
 # Session 38 — Managed projects
 
-**Status: PLANNED 2026-10-07 at `87b80bf`. NOT STARTED: the next chat executes it from Run 1.**
-**Runs 1-10 DONE (`da03eb8`). The move to OVH and the self-hosted secret store run
-next, from `docs/plans/session-38-migration-plan.md` (Runs M1-M7), then Run 11.**
+**Status: COMPLETE 2026-10-10.** Planned 2026-10-07 at `87b80bf`; Runs 1-10 (code,
+`da03eb8`); the move to OVH (`docs/plans/session-38-migration-plan.md`, M1-M6b, its M7
+X1/X2 not before 2026-10-12 ~21:30Z); Runs 11-12, the trip, **1.16.0 deployed, swept,
+merged and TAGGED on `efaef09`**; Run 13 the close. Evidence 239 claims, 232 passed,
+7 failed (§5 Run 12's Done). Rows D2145-D2188 at planning; **D2189-D2324 by executing
+it** (D2239-D2304 in the migration plan). ADRs 0256-0267. **NEXT FREE: D2325, ADR 0268.**
 **Amended 2026-10-10 by the migration's M7 (D2299-D2304): the deployment is on OVH
-`15.204.231.45`; M1-M6b are Done; the trip runs there.**
+`15.204.231.45`.**
 The third session of Stage 5 (`docs/plans/stage-5-plan.md` §3). Thirteen runs
 and **two sittings on two days**: the release on the three projects, the
 reconciler installed and one customer slot prepared (day 1); then, from the
@@ -517,6 +520,9 @@ D2189.** Rows the runs add go in a second table below it, in execution order.
 | **D2319** | `test_restore_never_touches_the_active_volume` (`restore_isolation`): the live cluster's timeline is `1` before and after the drill. | Sheet S1, beta's drill: volume, instance and postmaster start unchanged, timeline **2 -> 2** -- unchanged, but not `1`: beta has run on timeline 2 since the MOVE restored it onto OVH (M5, 2026-10-09; a promoted restore advances the timeline). The assertion `== "1"` encoded the cluster's history, not the drill's isolation; the later `notes` assertion was not reached. | **Recorded, the claim `failed`; repaired in Run 13:** before == after, the literal dropped. | A premise true until the deployment moved (question 2). | — |
 | **D2320** | Session 4's `connection_tooling` (`test_the_connection_helper_opens_and_cleans_a_verified_tunnel`, `test_the_access_broker_returns_nothing_to_an_unauthorized_caller`): the host's published database access policy grants `op` `runtime_direct` on alpha. | Run 12's first external half: both **failed** *"database-access: /etc/agentic-postgres/database-access-policy.json does not exist"* (exit 3) -- the trampoline and the sudo rule answered; the POLICY was never carried to OVH. It is not in a DR kit, and no M-sheet published it (M2 provisioned the host, M5 moved the projects by restore). On OVH `bin/connect.sh tunnel` worked for nobody since the move. | **Repaired on the host, no code** (Sheets P1/P2): Hetzner's policy read by `database-access.sh show` (`op`: alpha-dev and beta-dev, `runtime_direct,runtime_pooled`), the same document `check`ed on the workstation, published on OVH with `--plan` first. The external half re-run: **30 passed, 0 failed**; `connection_tooling` passed. **§10, Run 13's:** the policy belongs in the DR kit (a replacement host built from a kit has no delegated access), or the move's checklist names it. | A host file outside every kit and every sheet (question 5: what the move did not read). | 0043 |
 | **D2321** | `tests/external/test_session38_public_lifecycle.py`'s `owner` fixture: `_fresh_code` waits for a TOTP step after *the last one this module used* (`_LAST_STEP`). | Both external runs: all five `lifecycle_project_door_live` proofs **errored at setup** `(401, 'second_factor_invalid')`. Session 37's `test_session37_public_control.py` signs the SAME probe owner in with its own `_LAST_STEP`, immediately before this module; the second module reused a step the first had spent and the control plane refused the replay -- correctly. Two module-local memories of one server-side fact. The Run 9 rehearsal ran this module alone. | **Recorded, the claim `failed` (the operator's choice: finish today).** **Run 13's repair:** one step memory shared by every external module that signs the probe owner in (`tests/conftest.py`), or each login waits for a step strictly after the wall clock's current one. | A never-executed combination: each module was green alone (question 2). | 0252 |
+| **D2322** | D2055/ADR 0247: a `beta` row's evidence passes on the newest evidence document (`test_available_and_beta_rows_name_evidence_that_resolves`); `management_api` `beta` since Session 37 on `control_api_contract` and `control_plane_live`. | Run 13, against `evidence/session-38.json`: *"management_api: evidence 'control_plane_live' did not pass"* -- failed only by the proof defect D2317 (the registry proof read `deleted` as a difference); the API served throughout. The guard fails closed, correctly, and runs in the gate. | **The operator's choice (2026-10-10): demoted to `planned` until re-earned** -- evidence and controls emptied, target 39, `today` naming why; no code reads this row's status (it maps to no operation type), so nothing is switched off. Session 39's first trip re-earns `control_plane_live` with the repaired proof and its close moves the row back to `beta`. The battery's M4 (the row left `beta`) is killed by the guard. | A proof defect costs a Ledger row as well as a claim: the guard cannot tell a wrong proof from a wrong product, and should not. | 0247 |
+| **D2323** | D2157: `test_the_resize_message_names_only_a_measured_window` holds `RESIZE_WINDOW_SECONDS` equal to the envelope's resize row. | Its check was `str(RESIZE_WINDOW_SECONDS) in rows[0].value` -- a substring: with the row reading *"71 s: small -> standard, the operation's deploy step 70.5 s"*, a wrong constant of 70 passed. Found in Run 13 before the battery; the battery's M3 is that mutation. | **Tightened** (a stricter test, no ADR): exactly one resize row, and its value LEADS with `"{window} s:"`. M3 killed. | A guard whose value it compares can contain the wrong answer (question 1). | 0258 |
+| **D2324** | D2171: the resize window per class, read by the probe across the resize. | The probe ran on the three projects, not on the slot (its document is root's until Sheet K2); the instrument timed each operation. The only measured figure for the restart is the resize's own `deploy` step: 70.5 s small -> standard, 66.5 s standard -> large. | **`RESIZE_WINDOW_SECONDS = 71`** from the envelope's resize row, which says the figure is an UPPER bound on the restart; `capacity.UNMEASURED` names the probed window, unblocked by a probe target for the slot before the first resize (Session 39's trip). The customer reads *"about 71 seconds"* from Session 39's release; 1.16.0 prints the unmeasured sentence. | A number a customer is told, with the condition that makes it honest written beside it. | 0258, 0244 |
 
 ---
 
@@ -1725,7 +1731,34 @@ skip-when-unmeasurable ADR for the refusal proofs. **NEXT FREE: D2322, ADR 0268.
   rewritten for Session 39's planner (copy it to the scratchpad first); this
   plan's `Status:` COMPLETE with the rows each run added.
 
-**Done.** *(the executor writes it)*
+**Done.** 2026-10-10, on the workstation; no host. **The operator's two choices:** the
+close plus the four proof repairs (the six product follow-ups to §10 for Session 39),
+and **D2170 applied as written**. **The Ledger:** every `trial` row named a claim that
+failed on `evidence/session-38.json` -- `lifecycle_operations_live` (all but `region`),
+`lifecycle_project_door_live`, `reconciler_live` -- so all six are `planned`, target
+39, evidence and controls emptied, customer text as before Run 10, `today` saying what
+is built and why it is refused; `ACCEPTED_TYPES` (the service's) is EMPTY;
+`management_api` back to *"Creating a project is not available yet"* and itself
+`planned` (D2322, the operator's second choice); the page rendered. Tests that pinned
+the six: `test_exactly_the_six_...` replaced by `test_no_type_is_accepted_and_the_six_stay_executed`
+(ADR 0261's exact-set form; the registry renamed), the gate proof's and the role
+matrix's controls pinned to the executed six. **The envelope (D2171, D2304):** ten rows
+by `~/s38/run13/s38-envelope.py` (s37-envelope.py the model), every figure read from
+the trip's files -- provisioning 1,227 s (the backup 1,100.9 of it), deletion 17.1 s,
+sleep 16.5 s (40/40 asleep 404), wake 21.8 s (first answer 19.3 s), resize **71 s**
+(the deploy step, an upper bound, D2324), export 39,900 bytes 2.5 s, memory 5,046 /
+5,634 MiB available, R4's windows, the neighbours' zero windows through the lifecycle,
+the OVH cold start (100 s, all five by the boot) -- and one `UNMEASURED` (the slot's
+own windows). **`RESIZE_WINDOW_SECONDS = 71`**, its guard tightened (D2323); the
+resize test renamed `test_a_resize_says_the_measured_restart`. **The four proofs:**
+D2317 (`deleted` agrees for a key with no document), D2318 (the withheld REST address
+derived from the served app route and naming's suffixes -- asked live: `/api/rest/`
+404, `/api/v1/me` 401), D2319 (the live timeline unchanged, no literal), D2321 (ONE
+session-scoped `fresh_totp_code` in `tests/conftest.py` -- read live: both external
+modules in one `-k` run, the lifecycle module 7 passed and only D2310/D2316's three
+failed, no setup error). **Targeted once:** 270 passed (fifteen modules) and
+`app-contract --check` both contracts. **Battery 4/4 killed**, controls green, files
+restored by `cmp`. Rows **D2322-D2324**; §10 extended. **NEXT FREE: D2325, ADR 0268.**
 
 ---
 
@@ -1842,6 +1875,32 @@ seeds plaintext (ADR 0252); `/v1/sessions` unthrottled (D2166).
 - **A sweep that destroys the state a later proof reads** (D2140, D2176) — the
   instrument stands.
 - **Idle sleep** — Session 41 (D2147).
+
+**Created by the trip and the close (Runs 12-13), for Session 39's plan:**
+
+- **The seven Ledger rows to re-earn** (D2170, D2322): the six managed-project rows
+  and `management_api` are `planned`, target 39, and no operation type is accepted
+  in `main`. Session 39's bump moves the six to `trial`; its first trip measures
+  them with the four repaired proofs (D2317-D2319, D2321 -- each read offline or
+  live in Run 13, none yet in a sweep); its close resolves them. **The deployed
+  1.16.0 still accepts the six** (its tag carries `trial`), with no slot left.
+- **`lifecycle_operations_live` cannot pass on this host as written** (D2310: `large`
+  is admitted) and **`admission_live`'s refusal half cannot be forced** (D2292): the
+  skip-when-unmeasurable ADR, or a refusal proof that measures what it can.
+- **A prepared slot and the state-root readers** (D2305, D2307, D2312): admission
+  and the registry must know a prepared slot, or any deploy while one is prepared
+  exits 12 and the registry exits 5.
+- **The claim** (D2316): say *two* when there are two, and choose the creation whose
+  handoff token this CLI holds.
+- **The mirror's Class B calls** (D2315): `--s3-no-head` (the `count` listing already
+  reads what landed), and a 403 named as a provider refusal.
+- **The database access policy in the DR kit** (D2320).
+- **The resize and sleep windows as the slot's routes see them** (D2324): a probe
+  target for the slot.
+- **The reconciler restarted once during the boot** (Run 12 B1, NRestarts 1): read,
+  not explained.
+- **No slot is free** (`slot1-prod` consumed): Session 39 prepares the next, with
+  the OVH plan upgrade (12 GB) deferred to it.
 
 ---
 

@@ -15,7 +15,8 @@ hosts each proof asserts).
 The probe owner (`APG_CONTROL_PROBE_FILE`, 0600) was enrolled through the
 product's own commands by the trip (D2125): a password file and a TOTP seed,
 an organisation it owns. **A TOTP step is accepted once**, so every code here
-comes from `_fresh_code`, which waits for a step after the last one used.
+comes from `fresh_totp_code` (tests/conftest.py), which waits for a step
+after the last one ANY module of the run used (D2321).
 
 **Each proof creates its own `probe-s37-<8 hex>` accounts and removes their
 memberships at the end** (D2065): accounts are never deleted in Session 37,
@@ -31,7 +32,6 @@ import secrets
 import ssl
 import stat
 import subprocess
-import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -132,24 +132,6 @@ def probe(endpoint: str) -> dict[str, Any]:
     return {**document, "password": password_file.read_text(encoding="utf-8").strip("\n")}
 
 
-_LAST_STEP = [0]
-
-
-def _fresh_code(seed_text: str) -> str:
-    """A code for a step after the last one this module used (a step is
-    accepted once; the server refuses a step at or below the last accepted)."""
-    import base64
-
-    from app import totp
-
-    seed = base64.b32decode(seed_text + "=" * (-len(seed_text) % 8))
-    while totp.step_of(int(time.time())) <= _LAST_STEP[0]:
-        time.sleep(0.5)
-    now = int(time.time())
-    _LAST_STEP[0] = totp.step_of(now)
-    return totp.totp(seed, now)
-
-
 @pytest.fixture
 def recorder() -> Recorder:
     """One per proof, so each proof's hosts are its own."""
@@ -157,13 +139,13 @@ def recorder() -> Recorder:
 
 
 @pytest.fixture(scope="module")
-def owner(endpoint: str, probe: dict[str, Any]) -> Iterator[str]:
+def owner(endpoint: str, probe: dict[str, Any], fresh_totp_code: Any) -> Iterator[str]:
     """The probe owner's access token for the module; the session ended after.
     Its own recorder, held to the control host like every proof's."""
     own = Recorder()
     status, body = own.json("POST", f"{endpoint}/sessions", {
         "username": probe["username"], "password": probe["password"],
-        "totp_code": _fresh_code(probe["totp_seed"]),
+        "totp_code": fresh_totp_code(probe["totp_seed"]),
     })  # fmt: skip
     assert status == 200, (status, body.get("error"))
     yield body["access_token"]
@@ -254,7 +236,7 @@ def test_an_invitation_is_accepted_once(
 
 
 def test_login_enforces_the_second_factor(
-    recorder: Recorder, endpoint: str, probe: dict[str, Any]
+    recorder: Recorder, endpoint: str, probe: dict[str, Any], fresh_totp_code: Any
 ) -> None:
     """CTL-TOTP-002: without the code, a wrong code, and a replayed code are
     refused; the current code is served (its session ended at once)."""
@@ -263,7 +245,7 @@ def test_login_enforces_the_second_factor(
     status, body = recorder.json("POST", url, credentials)
     assert (status, body.get("error")) == (401, "second_factor_required"), (status, body)
 
-    code = _fresh_code(probe["totp_seed"])
+    code = fresh_totp_code(probe["totp_seed"])
     wrong = f"{(int(code) + 500_000) % 1_000_000:06d}"
     status, body = recorder.json("POST", url, {**credentials, "totp_code": wrong})
     assert (status, body.get("error")) == (401, "second_factor_invalid"), (status, body)

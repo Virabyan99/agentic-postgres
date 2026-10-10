@@ -138,16 +138,19 @@ def test_every_route_and_role_answers_as_the_matrix_says(
         token = org["tokens"][who]
         assert drive.call("GET", "/v1/organizations", token=token).status_code == 200
         assert drive.call("GET", "/v1/projects", token=token).status_code == 200
-        # A type that is not accepted is refused whoever asks (D2054). Since
-        # Session 38 the creation is accepted (ADR 0261), so it is withdrawn
-        # for this line; the control, with it accepted, is the body's 400.
+        # A type that is not accepted is refused whoever asks (D2054). Both
+        # lines pin the set, so they do not move with the Ledger (D2170): the
+        # creation withdrawn is refused 409; the control, with it accepted, is
+        # the body's 400.
         with monkeypatch.context() as patched:
             patched.setattr(
-                operations, "ACCEPTED_TYPES", operations.ACCEPTED_TYPES - {"project.create"}
+                operations, "ACCEPTED_TYPES", operations.EXECUTED_TYPES - {"project.create"}
             )
             refused = drive.call("POST", "/v1/projects", token=token, body={})
         assert refused.status_code == 409, (who, refused.text)
-        malformed = drive.call("POST", "/v1/projects", token=token, body={})
+        with monkeypatch.context() as patched:
+            patched.setattr(operations, "ACCEPTED_TYPES", operations.EXECUTED_TYPES)
+            malformed = drive.call("POST", "/v1/projects", token=token, body={})
         assert malformed.status_code == 400, (who, malformed.text)
         # An ACCOUNT route that names an organisation applies `viewer` to it.
         expected = 404 if who == "outsider" else 200

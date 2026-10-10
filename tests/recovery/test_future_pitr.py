@@ -288,7 +288,11 @@ def test_restore_never_touches_the_active_volume(drill: dict[str, Any]) -> None:
         "the live postmaster restarted during the drill. Nothing here should have "
         "touched it, and a restart is how a silent recreation begins."
     )
-    assert after["timeline_id"] == before["timeline_id"] == "1", (
+    # Unchanged, not `1`: a cluster restored before -- beta, moved onto OVH by a
+    # restore (M5) -- runs on a later timeline, and the drill's isolation is
+    # that it did not move it (D2319).
+    assert before["timeline_id"], "the live cluster reports no timeline to compare"
+    assert after["timeline_id"] == before["timeline_id"], (
         f"the live cluster's timeline moved ({before['timeline_id']} -> "
         f"{after['timeline_id']}). A promoted restore advances the timeline; the "
         "live cluster must not have been the thing that promoted."

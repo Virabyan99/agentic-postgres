@@ -245,18 +245,22 @@ def test_the_roles_decide_who_writes(drive: Any, accepting: None) -> None:
     _finish_all(drive)
 
 
-def test_a_resize_says_the_restart_has_not_been_measured(drive: Any, accepting: None) -> None:
-    """D2157: the `202` carries the resize sentence, and while no window is
-    measured it prints no number."""
+def test_a_resize_says_the_measured_restart(drive: Any, accepting: None) -> None:
+    """D2157: the `202` carries the resize sentence -- the measured window since
+    Session 38's close set it from the envelope's resize row, and with no window
+    no number at all (`test_compute_profiles` holds the constant to the row)."""
     org = _org(drive, "resize")
     path = f"/v1/projects/{org['project']}/compute"
     malformed = drive.call("PUT", path, token=org["tokens"]["member"], body={"profile": "huge"})
     assert malformed.status_code == 400, malformed.text
     answered = drive.call("PUT", path, token=org["tokens"]["member"], body={"profile": "large"})
     assert answered.status_code == 202, answered.text
-    assert compute_profiles.RESIZE_WINDOW_SECONDS is None
-    assert answered.json()["message"] == compute_profiles.UNMEASURED_RESIZE_MESSAGE
-    assert not any(ch.isdigit() for ch in answered.json()["message"])
+    window = compute_profiles.RESIZE_WINDOW_SECONDS
+    assert answered.json()["message"] == compute_profiles.resize_message(window)
+    if window is None:
+        assert not any(ch.isdigit() for ch in answered.json()["message"])
+    else:
+        assert f"about {window} seconds" in answered.json()["message"]
     stored = drive.cluster.query(
         "SELECT arguments::text FROM app.control_operations "
         f"WHERE id = '{answered.json()['operation']['id']}'"

@@ -1257,6 +1257,290 @@ ENVELOPE: tuple[Measurement, ...] = (
             "print nothing)."
         ),
     ),
+    Measurement(
+        subject=(
+            "Provisioning a managed project (project.create into the prepared slot, end to end)"
+        ),
+        value=(
+            "1227 s from the reconciler's claim to succeeded (queued 1.9 s before it); the "
+            "CLI's wait read 1234 s; steps: allocate 0.3, admit 0.7, deploy-1 71.6, admin 2.2, "
+            "ports 1.8, deploy-2 46.5, unit 0.8, backup 1100.9, registry 0.2 s"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            "1.16.0 at efaef09, 2026-10-10, operation 31d7eb2a, profile small",
+            (
+                "~/s38/run9/s38-lifecycle.py from the workstation as the probe owner, through "
+                "the product's own CLI; each operation's created/started/finished read back "
+                "through /v1, its steps from result.steps (D2171)"
+            ),
+        ),
+        note=(
+            "The first full backup is ~90% of it (pgBackRest process-max 1, D593, then the B2 "
+            "mirror's first pass). Attempts 1-3 of the same day stopped at the mirror (D2311, "
+            "D2315) and the sleep (D2314); their steps before the stop read within a few "
+            "seconds of these."
+        ),
+    ),
+    Measurement(
+        subject="Deleting a managed project (project.delete, the slot consumed)",
+        value=(
+            "17.1 s from claim to succeeded (queued 1.5 s); steps: retire 16.0, tombstone 0.0, "
+            "registry 0.2 s; the address answered the edge's 404 at once (4 of 4 samples)"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            "1.16.0 at efaef09, 2026-10-10, operation abce2385",
+            (
+                "~/s38/run9/s38-lifecycle.py from the workstation as the probe owner, through "
+                "the product's own CLI; each operation's created/started/finished read back "
+                "through /v1, its steps from result.steps (D2171)"
+            ),
+        ),
+        note=(
+            "retire = project-retire.sh --permanent --destroy-data --defer-provider: the data "
+            "and the volumes go, the provider's resources stay for slot.sh revoke (ADR 0257)."
+        ),
+    ),
+    Measurement(
+        subject="Sleep (project.sleep): the time to stop, and what a caller sees while asleep",
+        value=(
+            "16.5 s from claim to succeeded (queued 4.2 s); steps: schedule 3.2, unit 0.9, "
+            "stop 11.4 s; asleep, 40 of 40 samples of the app route answered the edge's 404"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            "1.16.0 at efaef09, 2026-10-10, operation a2123d67, profile small",
+            (
+                "~/s38/run9/s38-lifecycle.py from the workstation as the probe owner, through "
+                "the product's own CLI; each operation's created/started/finished read back "
+                "through /v1, its steps from result.steps (D2171)"
+            ),
+            (
+                "the asleep samples: GET <routes.app>/auth/me from the workstation, 1 s apart, "
+                "after succeeded"
+            ),
+        ),
+        note=(
+            "The time to the edge's FIRST 404 was not read (the instrument samples after the "
+            "operation ends); the edge is detached before the stop, so it falls inside the "
+            "'schedule' and 'stop' steps."
+        ),
+    ),
+    Measurement(
+        subject="Wake (project.wake): the cold start a caller sees",
+        value=(
+            "the first answer that was not the edge's 404 (401, /auth/me without a token) 19.3 "
+            "s after the request; the operation 21.8 s from claim to succeeded (queued 2.0 s); "
+            "steps: start 15.5, unit 0.8, schedule 4.6 s"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            "1.16.0 at efaef09, 2026-10-10, operation b66b779e, profile small",
+            (
+                "~/s38/run9/s38-lifecycle.py from the workstation as the probe owner, through "
+                "the product's own CLI; each operation's created/started/finished read back "
+                "through /v1, its steps from result.steps (D2171)"
+            ),
+            (
+                "the first answer: GET <routes.app>/auth/me from the workstation every 0.5 s "
+                "from the request"
+            ),
+        ),
+        note=(
+            "ADR 0267's first proof of the same path on the rehearsal slot (profile large, the "
+            "same day): sleep 21.6 s, wake 22.1 s, first answer 16.5 s."
+        ),
+    ),
+    Measurement(
+        subject="Resize: the restart a profile change causes (RESIZE_WINDOW_SECONDS, D2157)",
+        value=(
+            "71 s: small -> standard, the operation's deploy step 70.5 s (operation f0087702); "
+            "standard -> large 66.5 s (16077edb)"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            "1.16.0 at efaef09, 2026-10-10",
+            (
+                "~/s38/run9/s38-lifecycle.py from the workstation as the probe owner, through "
+                "the product's own CLI; each operation's created/started/finished read back "
+                "through /v1, its steps from result.steps (D2171)"
+            ),
+            (
+                "the window is the resize's own deploy step (postgres and its dependents "
+                "recreated with the new limits) -- an UPPER bound on the restart: the slot's "
+                "routes were not probed"
+            ),
+        ),
+        note=(
+            "D2310: on this host large is ADMITTED (840 MiB against ~4,600 safe available), so "
+            "the lifecycle measured the refused resize as a success. The CLI's end-to-end "
+            "resize on the rehearsal slot (7b2ff75) read 76.9 s and 76.5 s."
+        ),
+    ),
+    Measurement(
+        subject="Export (project.export): the archive and its time",
+        value=(
+            "39,900 bytes (the claimed, empty project's app and api schemas); 2.5 s from claim "
+            "to succeeded (queued 2.3 s); steps: dump 0.3, upload 1.3 s; the one-time URL "
+            "answered 200 at once and 403 after 930 s"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            "1.16.0 at efaef09, 2026-10-10, operation f49b5f8e",
+            (
+                "~/s38/run9/s38-lifecycle.py from the workstation as the probe owner, through "
+                "the product's own CLI; each operation's created/started/finished read back "
+                "through /v1, its steps from result.steps (D2171)"
+            ),
+        ),
+        note=(
+            "An empty project: the time is the floor of the path, not a customer's; size and "
+            "time scale with the customer's data, unmeasured. The rehearsal's CLI end to end "
+            "(download and SHA-256 included) read 8.3 s."
+        ),
+    ),
+    Measurement(
+        subject="Memory with the customer slot (free -m `available`)",
+        value=(
+            "5,046 MiB available with the slot created (small, 2026-10-10T14:17:56Z); 5,634 "
+            "MiB with it deleted (2026-10-10T17:37:23Z, after a reboot)"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            "three projects (alpha-dev, beta-dev, control-prod) plus the slot, then without it",
+            (
+                "s38-free.sh as op (free -m only; docker stats is root's, D1375); FITS needs "
+                ">= 1,024 MiB (D2145)"
+            ),
+        ),
+        note=(
+            "The difference (~590 MiB) is not the slot's cost: the two readings straddle a "
+            "reboot and the page cache differs. Admission charges budgets, never this figure "
+            "(D767)."
+        ),
+    ),
+    Measurement(
+        subject=(
+            "A new commit's deploy on OVH: each class's window, per project (Run 12 R4, efaef09)"
+        ),
+        value=(
+            "alpha-dev auth 9.6 s (bound 12.1 s), storage 14.5 s (bound 17.0 s), mcp 13.8 s "
+            "(bound 16.2 s), rest 0 s, docs 0 s; beta-dev auth 9.5 s (bound 12.0 s), storage "
+            "7.1 s (bound 9.6 s), mcp 13.7 s (bound 16.2 s), rest 0 s, docs 0 s; control-prod "
+            "mcp 12.4 s (bound 13.6 s)"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            (
+                "2026-10-10 ~12:39-12:45Z: alpha, beta, control-prod redeployed 7b2ff75 -> "
+                "efaef09, one after the other, the reconciler stopped (D2178)"
+            ),
+            (
+                "s38-probe-start.sh from the host as op through the public edge (Session 35's "
+                "s35-r10-probe.py): one unauthenticated GET per class and project every 1.25 s "
+                "(alpha, beta: 10 targets) and every 0.625 s (control-prod's mcp), 2 s timeout"
+            ),
+            (
+                "down = a transport error, a 502/503/504 or Traefik's 404; bound = observed + "
+                "one interval either side"
+            ),
+        ),
+        note=(
+            "The same three services D2034 found tied to a new commit (auth, mcp, storage); "
+            "rest and docs kept their containers. The diff between the commits was compose.sh "
+            "alone."
+        ),
+    ),
+    Measurement(
+        subject="The neighbours while a customer's project lives and dies beside them",
+        value=(
+            "no window on any of the 11 targets: 23,273 + 4,652 samples all up, through the "
+            "creation, claim, sleep, wake, two resizes, export and deletion"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            "1.16.0 at efaef09, 2026-10-10, 13:52-14:40Z (lifecycle attempt 4)",
+            (
+                "s38-probe-start.sh from the host as op through the public edge (Session 35's "
+                "s35-r10-probe.py): one unauthenticated GET per class and project every 1.25 s "
+                "(alpha, beta: 10 targets) and every 0.625 s (control-prod's mcp), 2 s timeout"
+            ),
+            (
+                "down = a transport error, a 502/503/504 or Traefik's 404; bound = observed + "
+                "one interval either side"
+            ),
+        ),
+        note=(
+            "Read from the neighbours' side only: no sample of theirs went down. What the "
+            "slot's operations did to the shared edge was not read separately."
+        ),
+    ),
+    Measurement(
+        subject=(
+            "A cold start with three projects on OVH: the five units after a reboot (ADR "
+            "0265's proof)"
+        ),
+        value=(
+            "all five active three readings in a row 100 s after boot, every unit started by "
+            "the boot itself (left inactive before multi-user.target); NRestarts: edge 0, "
+            "project@alpha-dev 0, project@beta-dev 0, project@control-prod 0, reconciler 1"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            "booted 2026-10-10 14:42:21 UTC at efaef09 (Sheet B1, D2303)",
+            (
+                "s38-units.sh as op: `systemctl is-active` every 10 s on the three project "
+                "units, the edge and the reconciler; 'started by the boot' as D2140 reads it"
+            ),
+        ),
+        note=(
+            "At 1.15.0 on this host every project unit FAILED at boot (D2291: the collector's "
+            "healthcheck sized for a warm start); 1.16.0 carries ADR 0265. The reconciler "
+            "restarted once during the boot (read, not repaired). On the CX23 a three-project "
+            "cold start took 156 s."
+        ),
+    ),
 )
 
 
@@ -1267,6 +1551,19 @@ ENVELOPE: tuple[Measurement, ...] = (
 #: dishonest reporting §7 warns about — arriving as a document that looks
 #: complete rather than as a claim that is false.
 UNMEASURED: tuple[Unmeasured, ...] = (
+    Unmeasured(
+        subject="The resize and sleep windows as the slot's own routes see them (D2171)",
+        reason=(
+            "The probe was started on the three projects before the creation, and the slot's "
+            "document is root's until Sheet K2 copies it -- the instrument timed each "
+            "operation and sampled only after it ended. The resize row is the deploy step, an "
+            "upper bound."
+        ),
+        unblocked_by=(
+            "a probe target added for the slot's routes once its document is copied, before "
+            "the first resize (Session 39's trip)"
+        ),
+    ),
     Unmeasured(
         subject="Alpha-dev's 1.15.0 deploy window, per class (Session 37 R2a)",
         reason=(

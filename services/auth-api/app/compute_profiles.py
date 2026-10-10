@@ -79,10 +79,12 @@ PROFILES: dict[str, dict[str, Any]] = {
 }
 
 #: The restart a resize causes, in seconds, as MEASURED on this server -- or
-#: None while no envelope row exists (D2157). Session 38's close sets it from the
-#: trip's resize row, and a test holds the two equal. Never a guess: the message
-#: below says the window is unmeasured rather than print a number nobody read.
-RESIZE_WINDOW_SECONDS: int | None = None
+#: None while no envelope row exists (D2157). Set at Session 38's close from the
+#: trip's resize row (`capacity.ENVELOPE`, small -> standard: the operation's
+#: deploy step, 70.5 s on apg-ovh-01, an upper bound on the restart), and a test
+#: holds the two equal. Never a guess: with no row the message below says the
+#: window is unmeasured rather than print a number nobody read.
+RESIZE_WINDOW_SECONDS: int | None = 71
 
 UNMEASURED_RESIZE_MESSAGE = (
     "Resizing restarts the database and the services that use it; "
