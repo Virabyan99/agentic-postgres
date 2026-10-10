@@ -84,11 +84,23 @@ read-only root, tmpfs `/tmp`, `cap_drop: ALL`, `no-new-privileges`):
   5; the script's refusals keep their codes (6 no mirror, 2 an empty field, 3
   an empty secret).
 
-Against the providers -- **owed to Sheet RP-2** (after 00:00 UTC, when B2's
-daily download allowance has reset, D2288): on beta's real buckets, `size`
-on both sides, a `--checksum` dry run (what it would transfer and delete, and
-whether it re-copies what `mc` already copied), and a real sync whose final
-`size` equals the source's.
+Against the providers, Sheet RP-2 (`/home/op/r-rclone-host.sh`, OVH,
+2026-10-10 05:21-05:23Z, after B2's daily allowance reset, D2288): the image
+built from this tree, run as Compose runs it, with beta's real mirror secrets
+(R2 primary `apg-beta-dev-backup`, B2 mirror at `s3.eu-central-003`):
+
+- **`count`** (the product's action): `{"count":22415,...}` in 7 s -- the SAME
+  number `mc`'s last nightly record wrote (22,415): the two clients count
+  alike. The source: 22,452 in 14 s.
+- **The region:** the mirror listed identically WITHOUT the derived region
+  (B2 accepted the default signature); the derivation is kept as harmless.
+- **The `--checksum` dry run:** exit 0 in 16 s, **would copy 37, would delete
+  0** -- the 37 the WAL segments archived since that night's `mc` pass; not
+  one object `mc` had copied was re-copied, so size+MD5 compares across the
+  two clients' uploads.
+- **The real `copy`** (the product's action, what the nightly unit runs):
+  exit 0 in 27 s; then mirror **22,453 = source 22,453**.
+- **A second dry run:** would copy 0, delete 0.
 
 ## Consequences
 
@@ -97,8 +109,8 @@ whether it re-copies what `mc` already copied), and a real sync whose final
 - Every host builds a new mirror image at its first pass after the deploy;
   `--build` makes each pass contact the build cache, and a pass on a host
   with no registry reachable fails at the build exactly as `mc` did on OVH.
-- The first rclone pass over a bucket `mc` filled compares by checksum; what
-  it transfers is the measurement Sheet RP-2 owes.
+- The first rclone pass over a bucket `mc` filled compares by checksum and
+  transfers only what is new (measured: 37 of 22,452).
 
 ## Rejected
 
