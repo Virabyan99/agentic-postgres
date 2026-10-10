@@ -786,7 +786,7 @@ Targeted: 21 modules, 1,531 passed + the two re-run after their repair (the inde
 import); battery **10/10 killed**, controls green, files restored `cmp`-equal; `f0603b6`. **CI on
 `f0603b6` red** (run 37994389812): ONE failure was this run's -- `test_container_selectors` read
 `count_objects`' local `document.get("count")` as a deployed-document read (D1184: the identifier
-means the deployed document; the targeted list missed that module) -- repaired in `f459bd6`; the
+means the deployed document; the targeted list missed that module) -- repaired in `f459bd6`, **CI green** (run 38027196652, all three jobs); the
 other five failures and 86 setup errors were Docker Hub timing out on the runner (`python:3.12-slim`,
 `pgvector:pg18`, `apg dev up` exit 9). **Sheet RP-2** (`/home/op/r-rclone-host.sh`, 05:21-05:23Z):
 ADR 0264 measured on beta's real buckets (D2295's row). **OVH's first unattended night**: the three
