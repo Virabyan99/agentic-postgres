@@ -466,12 +466,12 @@ def count_objects(text: str) -> int | None:
     not zero, and zero is the number a restore would be planned against.
     """
     try:
-        document = json.loads(text)
+        answer = json.loads(text)
     except ValueError:
         return None
-    if not isinstance(document, dict):
+    if not isinstance(answer, dict):
         return None
-    count = document.get("count")
+    count = answer.get("count")
     if not isinstance(count, int) or isinstance(count, bool) or count < 0:
         return None
     return count
