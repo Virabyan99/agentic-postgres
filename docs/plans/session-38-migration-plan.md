@@ -810,7 +810,26 @@ first reboot after Run 11's deploy. Rows **D2295–D2298**. **NEXT FREE D2299, A
    naming this plan's Done, §7 and Sheet S1 per D2246; CLAUDE.md §2 rewritten (scratchpad
    copy first); memory updated. Commit, push, no CI read.
 
-**Done.** *(the executor writes it)*
+**Done -- the documentation half (2026-10-10, at the operator's request before the hold).**
+`docs/node-loss-runbook.md` § *8. A planned move* (the order M5 MEASURED: freeze → DNS → adopt
+and restore → deploy on the same bucket → backups → registry; D2284 corrected D2248's
+DNS-after-deploy; the store first, D2240; the uid by name, D2290; the reboot read, D2291; the way
+back and the 72 h hold, D2254) and two §7 rows (B2's cap, D2288/D2289; the `mc` build, D2285);
+`docs/operator-guide.md` §3 step 1 (the `ubuntu` lock, D2245) and step 3 (the edge unit enabled,
+D2273). **Session 38's plan amended** (D2262): rows **D2299-D2304** and an `Amended` marker at each
+changed passage -- Run 11's precondition is this plan's Done through M6b and CI on main's HEAD;
+`s36-redeploy-before.py` before R2a (D2302); the slot's A record and H1's region (D2300); §7 and
+Run 12: **239 claims, `failed` 2 (`documented_path`, `admission_live`), `replacement_host_restore`
+expected passed** (D2301); B1 is ADR 0265's proof (D2303); the envelope names OVH and `rest` on
+control-prod is watched (D2304). **The instruments** in `~/s38/run9` moved to OVH's declarations
+(`s38-sweep.sh`, `s38-v1.sh`, `s38-external.sh`; originals in `~/s38/run9/pre-m7/`). CLAUDE.md §2
+rewritten (the previous copy in the scratchpad); memory updated. Rows **D2299-D2304**.
+**NEXT FREE D2305, ADR 0266.**
+
+**Owed -- Sheets X1 and X2, after the hold.** The 72 h run from the last touch of the running
+projects, M6b's A/B restart at 2026-10-09 21:28Z: **not before 2026-10-12 ~21:30Z**, and only on
+a clean reading then (units active, last night's backup and mirror units `success`, `healthz` 200
+× 3). Their outcomes are this run's last Done.
 
 ---
 

@@ -147,7 +147,13 @@ it.
    `ssh.operator_user` names, created by hand with its key and its sudoers
    line, and **proved with a new session while root still works** — step 2
    installs `PermitRootLogin no` and removes the only other way in (D659).
-   Measured 2026-09-06.
+   Measured 2026-09-06. **On an image that logs in as `ubuntu`** (OVH's,
+   where root has no key and `ubuntu` has `NOPASSWD` sudo through
+   cloud-init's `/etc/sudoers.d/90-cloud-init-users`): create `op` through
+   `ubuntu`'s sudo, prove it in a new session, then **lock `ubuntu`** -- empty
+   its `authorized_keys`, `sudo usermod -L ubuntu`, remove that sudoers file
+   -- and read `sudo -l -U ubuntu` naming nothing. One privileged account per
+   host, the one the product names (D2245, measured 2026-10-08).
 2. **The host baseline**, three `--apply` passes because the two steps that
    can lock you out each need their own armed rollback timer:
    ```bash
@@ -166,7 +172,12 @@ it.
    ```bash
    sudo bin/edge.sh --host host.yaml up
    sudo bin/edge.sh --host host.yaml status
+   sudo systemctl enable agentic-postgres-edge.service   # no --now: it is up
+   systemctl is-enabled agentic-postgres-edge.service    # enabled
    ```
+   `provision-host.sh` installs the edge's unit and enables nothing; without
+   the `enable` line the edge does not come back after a reboot (D2273: one
+   host had it enabled by an unrecorded hand, the next did not).
    DNS `A` records per project hostname, **grey cloud**; a proxied record
    breaks HTTP-01. Under staging a first deploy prints one
    `CERTIFICATE_VERIFY_FAILED` line per route per kind and exits 0 (D1047);

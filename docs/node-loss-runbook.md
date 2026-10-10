@@ -24,7 +24,9 @@ Two terms. The **kit** is `dr-kit.sh export`'s output: the host and
 capability manifests and, per project, the manifest, `bootstrap-state.json`,
 the deployed document and `secrets.txt`. The **rehearsal** is this runbook
 performed while production still runs, under a drill domain, on a host that
-is retired afterwards; §6 says what a rehearsal must not do.
+is retired afterwards; §6 says what a rehearsal must not do. A **planned
+move** -- both hosts alive, the old one stopped deliberately -- is §8: the
+same commands in a different order, measured end to end on 2026-10-09.
 
 ---
 
@@ -212,3 +214,77 @@ destroyed. The records are the trip's evidence.
 | `restore.sh` exits 5, *no backup set to restore* | The cipher pass in this host's generation is not the one the mirror's objects were written under, or the mirror is empty | `secrets.txt` names the pass; compare the provider's value with what production materializes. An empty mirror is a mirror that never copied: `backup_state.mirror` in the kit's document says so |
 | The instance exits before promoting | Recovery could not reach a segment: the mirror's last copy predates WAL the backup set needs | Restore `--target-time` at the last copied set's stop time (the document's `latest_recoverable_time`) |
 | The deploy's 6c `check` fails | The new primary bucket's credential or bucket name | The Session 10 guide's repository section; the restore is intact and the deploy re-runs |
+| `restore.sh` exits 6, *pgBackRest exit 39*, from the mirror | The mirror's provider refused the reads: Backblaze B2's free **daily download (Class B) cap**, reached by earlier restores the same day (D2288). Since 1.16.0 the message shows pgBackRest's own `ERROR` line (D2289) | Remove the partial volume (`docker volume rm`, its printed name) and restore `--from primary`, which is the same backups -- or raise the cap and wait for the reset (00:00 UTC). Plan one mirror restore per day on the free tier |
+| The mirror's first pass fails at the build, `401 UNAUTHORIZED` | A release before 1.16.0 builds the mirror on MinIO's `mc`, which is no longer served (D2285) | 1.16.0's mirror is rclone (ADR 0264) and rebuilds on every pass; on an older release, carry a built mirror image from a host that has one (`docker save` / `docker load`) |
+
+---
+
+## 8. A planned move: both hosts alive
+
+Measured on 2026-10-09 moving three projects from one host to another
+(`docs/plans/session-38-migration-plan.md`, Runs M1-M6; rows D2239-D2298).
+Unlike a loss, the old host keeps working until each project is frozen, and
+it is kept, stopped, as the way back.
+
+**If the secret store moves too, it moves FIRST, on the old host** (ADR 0263,
+D2240): `bootstrap-providers.sh --rehome-check` then `--rehome` per project,
+then a kit exported from the old host naming the NEW store. Adoption binds by
+id within ONE store, so a host cannot move across stores and hosts at once.
+
+**The new host** by §1, with two additions measured on an image that logs in
+as `ubuntu`: `op` is created through `ubuntu`'s sudo and `ubuntu` is then
+locked (`docs/operator-guide.md` §3 step 1, D2245), and the edge unit is
+enabled (§3 step 3, D2273). The edge runs on staging until the first project
+moves. **`op`'s uid can differ between the hosts** (1000 on one, 1001 on the
+other, where 1000 was `ubuntu`): carry root-owned records in a tar that
+stores owners **by name**, never `--numeric-owner` (D2290).
+
+**Per project, cheapest first and the control project LAST** (D2253):
+
+1. **Freeze, on the old host.** `backup.sh … schedule disable`; the row counts
+   of the project's tables (the check the move is judged by); `backup.sh …
+   backup --type incr`; `backup.sh … info` (it needs the running cluster);
+   `sudo systemctl disable --now agentic-postgres-project@<key>`; then `backup.sh
+   … mirror`, which works with the project down (measured). The project is
+   now down, and its last WAL is in both buckets.
+2. **DNS, BEFORE the new host's deploy** (D2284): the A record to the new
+   address, grey, no AAAA, read back from public resolvers. The edge asks for
+   a certificate the moment the deploy creates the router -- not on the first
+   request -- so a name still pointing at the old host fails validation.
+3. **Adopt and restore, on the new host**, §2-§4. After `--adopt`, `--plan`
+   lists every value as *create*: it compares with the adopted state and
+   contacts nothing. `--apply` must then print *already present … not
+   overwritten* for every one -- **measure the store's duplicate answer first
+   if you have not used that store before** (D2287: the self-hosted store
+   answered 400 and kept the value). Restore `--from mirror --latest`.
+4. **Deploy** -- the **same primary bucket** (D2243): the old host's archiving
+   stopped at the freeze, and 6c finds the stanza the restored cluster
+   belongs to. With the first project, promote the edge to production
+   certificates (operator guide §3 step 3, D2249). Ports are allocated from
+   THIS host's registry, so they may differ from the old host's (D2286):
+   `--render-runtime-only`, the printed `verify`, the second deploy. Enable
+   the unit. The row counts must equal the freeze's.
+5. **Backups on the new host**: `backup --type incr`, `schedule enable`,
+   `mirror`, `doctor` 12 ok.
+6. **The registry and the copies**: `control.sh adopt` for every project
+   after the LAST deploy, `registry` agrees; the op-owned copies of each
+   document; a kit exported on the new host.
+
+Measured downtime per project: 19-56 minutes (the restore, 469-564 s against
+backups on another continent, is most of it). **Three mirror restores in one
+day reached B2's free download cap** (D2288); the third restored `--from
+primary`.
+
+**Then, on the new host: reboot it** and read that every unit came back by
+itself. On 2026-10-09 it did not -- the collector's health check timed out at
+a cold boot and took each project down (D2291, repaired by ADR 0265 in
+1.16.0). Start them by hand (`sudo systemctl start
+agentic-postgres-project@<key>`, one at a time) and find out why before
+trusting the host.
+
+**The way back**, until the old host is retired: `systemctl enable --now` the
+project's unit there, `schedule enable`, the A record back. **Retire the old
+host only after the new one has run unattended for 72 hours** (D2254):
+`bootstrap-providers.sh --destroy` on the old host revokes the identity the
+rehome minted there; the old store's projects and identities are deleted at
+its console; the server is cancelled.

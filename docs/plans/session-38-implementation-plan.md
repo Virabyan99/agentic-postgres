@@ -3,6 +3,8 @@
 **Status: PLANNED 2026-10-07 at `87b80bf`. NOT STARTED: the next chat executes it from Run 1.**
 **Runs 1-10 DONE (`da03eb8`). The move to OVH and the self-hosted secret store run
 next, from `docs/plans/session-38-migration-plan.md` (Runs M1-M7), then Run 11.**
+**Amended 2026-10-10 by the migration's M7 (D2299-D2304): the deployment is on OVH
+`15.204.231.45`; M1-M6b are Done; the trip runs there.**
 The third session of Stage 5 (`docs/plans/stage-5-plan.md` §3). Thirteen runs
 and **two sittings on two days**: the release on the three projects, the
 reconciler installed and one customer slot prepared (day 1); then, from the
@@ -75,7 +77,8 @@ were right on 2026-10-07 and `ruff format` moves them.
 
 **The eight sentences the executor most needs, in case nothing else is read:**
 
-1. **The host stays the CX23, with ONE customer slot** (§1 D2145, the
+1. **(Amended by D2299: the host is OVH `15.204.231.45`, 7,745 MiB, ~5,700 available with
+   three projects; the rest of this sentence is the CX23's.)** **The host stays the CX23, with ONE customer slot** (§1 D2145, the
    operator, 2026-10-07). 1,624 MiB available, 912 of 1,600 MiB committed. The
    slot is created at the `small` profile; **stop if `available` falls below
    1,024 MiB** after its creation. The rescale or a move is owed before
@@ -491,6 +494,12 @@ D2189.** Rows the runs add go in a second table below it, in execution order.
 | **D2236** | D2055: a Ledger row's text moves when it is false; its status moves with its evidence. | `management_api` (`beta`) told a customer *"Creating a project is not available yet and says so"*, false on this commit. | **Its `customer_text` and `today` moved** (the project operations are being verified, each concept's entry says so; a type is accepted while its row is available, beta or trial); status and evidence unchanged. The page's preamble and `_operation_lines` name `trial`. | A beta row's sentence that the release contradicts is the surface claiming less than the node does -- the stage's failure mode read backwards. | 0261 |
 | **D2237** | Run 10's host proofs read the slot through `bin/slot.sh status`. | `slot.sh` requires `--host FILE` (`bin/slot.py:313`). | **`test_the_slot_was_consumed_and_its_volumes_removed` passes `APG_HOST_MANIFEST`**, which the host gate already exports from `--host` (Session 31) and the sweep already gives; `OPN-LIVE-001`'s marker names it. | The operator's own command, called as its `--help` says. | — |
 | **D2238** | Run 10's targeted list: *"the modules the change touches"*. | The offline gate on `213e6d5` (7,402 passed, 3 failed) found three proofs the list did not reach: `test_control_keys.py::test_a_demotion_narrows_a_key` and `test_control_roles.py::test_every_route_and_role_answers_as_the_matrix_says` each asserted `409 not_available` on a write that is now accepted (a sleep answered `202`, an empty creation `400`) -- question 5, two readers of *nothing is accepted* that the diff did not touch -- and `test_suite_shape.py::test_no_local_shadows_a_module_level_function` found Run 10's own `offences = ...` local over the module's `offences()` in `test_control_boundary.py`. | **Repaired, never weakened**: the two control proofs withdraw the one type they exercise (`project.sleep`, `project.create`) for that request -- the refusal stays the answer after authorisation, no row written -- and the roles proof adds the control, the creation accepted, answering the body's `400`; the local renamed. The three modules plus the boundary scan 17 passed; battery R1/R2 (the gate opened in `require_accepted`) 2/2 killed, each with its control. Both gates re-run on the repair commit. | The gate is the instrument that sees a caller the diff does not touch (D1486); it did. | 0261 |
+| **D2299** | Run 11 *"Before the day"*: CI green on Run 10's commit; Sheet P1; *"the Infisical plan upgraded (D2146)"*; §0 sentence 1: *"The host stays the CX23"*. | The deployment moved (`docs/plans/session-38-migration-plan.md`, M1-M6b, D2239-D2298): **OVH `15.204.231.45`** (`apg-ovh-01`; 4 vCPU Haswell, 7,745 MiB, 72 GB, no swap; Ubuntu 26.04; US-East, Reston VA, D2251), the secret store self-hosted at `secrets.agenticpostgresql.com` (ADR 0262), the three projects at 1.15.0 `c3eec1d` there, Hetzner stopped and kept until M7's sheets. `doctor capacity` on OVH: 912 MiB committed, 4,620 safe available, `free -m` available ~5,700 (D2252). And main is no longer Run 10's commit: M3 (`454fe41`) and M6b (`f0603b6`, `f459bd6`, CI green) are code. | **Run 11's precondition is the migration plan's Done through M6b** (M7's two sheets may follow Run 13); the trip ships `c3eec1d..main` (OVH's checkout is `c3eec1d`); CI green on main's HEAD by full SHA; D2146 void (D2255). The slot fits with room (one slot, D2252's floor stands). | The trip reads this plan; this plan must describe the host the trip uses. | 0262 |
+| **D2300** | Sheet P1 item 2: *"`A slot1.agenticpostgresql.com → 62.238.99.122`"*; Sheet H1's region values (D2161). | Both name Hetzner. | **`A slot1.agenticpostgresql.com → 15.204.231.45`**, DNS only, no AAAA; H1's `region` values are read from the OVH console for the VPS (US-East, Reston VA; D2251: never from ARIN). `~/s38/host-address` already holds `15.204.231.45` (M6). | The record and the region describe this host. | 0257 |
+| **D2301** | §7: *"237 claims … `not_run` 1: `replacement_host_restore` (D1028) … Exit 5 for those two"*; Run 12 step 7 the same. | (a) **239 claims, 91 offline** (D2278: M3 added `provider_rehome` and `secret_store_files`). (b) **`replacement_host_restore` can PASS** (D2246): alpha on OVH IS a replacement restored from the mirror and deployed; M6's `-k` run read its identity half passing, and its two failures are repaired -- REC-NODE-002's route rule (D2294/D2298, in M6b) and REC-REPO-001's document member (D2293, written by Run 11's redeploy after the nightly mirror copies). (c) **`admission_live` will FAIL** (D2292): no valid third project can be refused on a host with 4,620 MiB safe available; the operator chose to record it rather than raise the reserve. | **Expected at the merge: 239 claims; `failed` 2 -- `documented_path` (D1935) and `admission_live` (D2292); `not_run` 0; exit 5 for those two and no other reason.** If `replacement_host_restore` reads anything but `passed`, that is a finding, not the prediction. A skip-when-unmeasurable for NODE-ADMIT-002's refusal half (a test change, needs an ADR) is §10's, not this trip's. | A prediction moves with the evidence that moved it. | 0163, 0189 |
+| **D2302** | Sheets V1 and S1: the sweep's declarations as Session 37's (`--restore-evidence-file /home/op/restore-alpha-dev-202609060727818b.json`, `--redeploy-before-file /root/s36-redeploy-before.json`, `--candidate-manifest /home/op/s31-third.yaml`, `--kit-dir /home/op/kit-2026-09-11`). | On OVH (M6, D2247): every Hetzner declaration was carried byte-identical (50/50) EXCEPT the re-made ones -- `/home/op/s31-third.yaml` (Hetzner's, unchanged), the admission rehearsal (`evidence/rehearsal-alpha-dev-admission-refused-2026100920191418.json`), and **`/root/s36-redeploy-before.json`, which does NOT exist on OVH yet**. | **The instruments were moved on 2026-10-10** (`~/s38/run9/s38-sweep.sh`, `s38-v1.sh`: `--replacement-host-outputs /home/op/alpha-dev-outputs.json` + `--restore-evidence-file /home/op/restore-alpha-dev-202610091911abae.json`; `s38-external.sh`: 239 / failed 2; originals in `~/s38/run9/pre-m7/`). **Run 11 gains a step before R2a**: `~/s36/run7/s36-redeploy-before.py` shipped to `/home/op` and run as root (it writes the sentinel through the product's RPC and `/root/s36-redeploy-before.json`), so R2a is the redeploy DEP-002 measures. `--kit-dir` stays `kit-2026-09-11` (D1282). | A declaration is a file on the host the sweep runs on. | — |
+| **D2303** | Sheet B1 + Run 12 step 5: the reboot; `s38-after-reboot.sh` reads five units BOOT-started. | **On OVH at 1.15.0 the boot failed** (D2291): every project unit exited 9 on the collector's health check and took its project down. ADR 0265 (in this trip's release) sizes the check for a cold boot; its proof is exactly this reboot (D2297). Also: the first nightly mirror after Run 11's deploy is rclone's (ADR 0264, measured on beta's buckets in M6b), the image rebuilt by `run --build`. | **B1 IS ADR 0265's proof**: five units BOOT-started is the pass; a project unit `failed` again is a **stop** before the sweep -- start the three by hand (`sudo systemctl start agentic-postgres-project@<key>`, one at a time), read `journalctl -b -u agentic-postgres-project@<key>`, and the repair is reopened. Read the morning after R2: the three mirror units `success` on rclone. | The reboot that found the defect is the one that proves its repair. | 0265 |
+| **D2304** | Run 13: the envelope rows *"each naming the CX23"*; Run 11's sweep watch list. | The host is OVH. And since Session 38's REST reader (D2137/D2172), control-prod's REST route reads `unavailable` by design after R2c while the deployed document carries no flag that says so (D2298). | **The envelope rows name the OVH host** (`apg-ovh-01`, 4 vCPU, 7,745 MiB). **Watch in the sweep**: a proof reading control-prod's routes reports `rest` unready -- the honest reading, recorded, not repaired on the day. | — | — |
 
 ---
 
@@ -1544,6 +1553,10 @@ operator (any day before) and the Infisical plan upgraded (D2146).
 **Amended 2026-10-08 (D2223):** the move comes first -- `docs/plans/session-38-migration-plan.md` Runs M1-M7 Done (the self-hosted store, the
 deployment on OVH at `c3eec1d`, D2239-D2262); its M7 rewrites this run's host values
 and voids D2146 (D2255).
+**Amended 2026-10-10 (D2299-D2302):** the precondition is the migration plan's Done through
+M6b and CI green on main's HEAD; ship `c3eec1d..main`; before step 7, ship
+`~/s36/run7/s36-redeploy-before.py` and run it as root on OVH (D2302); the instruments in
+`~/s38/run9` already carry OVH's declarations.
 
 **In order** (agent steps over SSH as `op`; the operator's are the sheets):
 
@@ -1600,12 +1613,14 @@ and voids D2146 (D2255).
    `GET /v1/operations?organization=`).
 4. **Sheet A1'** — `control.sh registry` → agrees × 3 + `agrees (deleted)`.
 5. **Sheet B1** — the reboot; `s38-after-reboot.sh` (five units, each left
-   `inactive` before `multi-user.target`).
+   `inactive` before `multi-user.target`). **Amended (D2303): this reboot is ADR 0265's proof;
+   a project unit `failed` is a stop before the sweep.**
 6. **Sheet S1** — the op copies, the sweep launched (`--lifecycle-record-file`,
    `--slot-outputs`, every Session 37 declaration).
 7. External (`s38-external.sh`), the merge (`bin/write-session-evidence.py` over
    CI's offline artifact for the deployed SHA, the host and external halves) →
-   **exit 5 for `documented_path` and `replacement_host_restore` only** (§7).
+   **exit 5 for `documented_path` and `replacement_host_restore` only** (§7). **Amended
+   (D2301): `documented_path` and `admission_live`; `replacement_host_restore` expected passed.**
 8. **The tag from the workstation** (`git tag -a 1.16.0 <sha> -F <file>`, push,
    `ls-remote`).
 9. **Sheet SL4** — `slot.sh revoke --slot slot1-prod` (the credential placed and
@@ -1623,7 +1638,8 @@ and voids D2146 (D2255).
   removed from `ACCEPTED_TYPES` and the Done saying why; `customer_text`
   without *"being verified"* for a `beta` row; `--write`.
 - **`capacity.ENVELOPE`**: D2171's rows by `~/s38/run13/s38-envelope.py`
-  (Session 37's `s37-envelope.py` the model), each naming the CX23.
+  (Session 37's `s37-envelope.py` the model), each naming the CX23. **Amended (D2304): each
+  naming the OVH host, `apg-ovh-01`.**
 - **`compute_profiles.RESIZE_WINDOW_SECONDS`** set from the resize row (D2157)
   with its test.
 - `docs/scope-closure.md` **§31**; the stage plan's Status block; CLAUDE.md §2
@@ -1646,7 +1662,13 @@ not by default**, so the 37 proof is unchanged) — **plus the eighteen new ones
 `replacement_host_restore`** (D1028). Predictions, each moved only by the
 evidence. Exit 5 for those two and no other reason.
 
-**The three modes.** Offline: CI's artifact for the deployed SHA (89 claims).
+**Amended 2026-10-10 (D2301):** **239 claims** (91 offline, D2278). `failed` 2:
+`documented_path` (D1935) and `admission_live` (D2292, no valid project can be refused on
+OVH; the operator's option 1). `not_run` 0: `replacement_host_restore` is expected
+**passed** (D2246 -- alpha on OVH is the replacement; D2293/D2294 repaired). Exit 5 for
+those two failures and no other reason.
+
+**The three modes.** Offline: CI's artifact for the deployed SHA (89 claims; **91**, D2301).
 Host: S1 with `--lifecycle-record-file` and `--slot-outputs`. External: from WSL,
 with `--control-outputs`, `--control-probe-file` and `--lifecycle-record-file` —
 the customer proofs reach only `routes.control` and the slot's recorded
@@ -1769,9 +1791,9 @@ sudo bash /home/op/s38-e0.sh      # tees /home/op/s38-e0.txt; changes nothing
 
 ### Sheet P1 — the consoles (any day before Run 11)
 
-1. **Infisical**: upgrade the plan so a fifth machine identity can be created
-   (D2146).
-2. **Cloudflare DNS**: `A slot1.agenticpostgresql.com → 62.238.99.122`, **DNS
+1. ~~**Infisical**: upgrade the plan so a fifth machine identity can be created
+   (D2146).~~ **Void (D2255): the self-hosted store has no identity limit.**
+2. **Cloudflare DNS**: `A slot1.agenticpostgresql.com → 15.204.231.45` (**amended, D2300**), **DNS
    only**, no AAAA (D2148).
 3. **Cloudflare R2**: buckets `apg-slot1-prod` and `apg-slot1-prod-backup`, in
    alpha's location; two Account API tokens, *Object Read & Write*, one scoped to
@@ -1903,6 +1925,10 @@ sudo install -o op -g op -m 0600 /etc/agentic-postgres/projects/beta-dev/outputs
 sudo install -o op -g op -m 0600 /etc/agentic-postgres/projects/control-prod/outputs.json /home/op/control-prod-outputs.json
 sudo bash /home/op/s38-launch.sh      # refuses while the reconciler is working; detaches s38-sweep.sh
 ```
+
+(Amended, D2302: `s38-sweep.sh` declares `--replacement-host-outputs /home/op/alpha-dev-outputs.json`
+and alpha's M5 record `/home/op/restore-alpha-dev-202610091911abae.json`; `/root/s36-redeploy-before.json`
+is the one Run 11 wrote before R2a.)
 
 ### Sheet SL4 — the slot's identity revoked (Run 12, day 2, after the tag)
 
