@@ -1,9 +1,9 @@
 # Session 39 — Public TLS endpoints and customer roles
 
-**Status: EXECUTING. Runs 1–7 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
+**Status: EXECUTING. Runs 1–8 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
 threat list; Sheet E0 read). Rows **D2325–D2355** at planning; Run 1 added
 **D2356–D2360**, Run 2 **D2361–D2364**, Run 3 **D2365–D2369**, Run 4 **D2370–D2374**,
-Run 5 **D2375–D2381**, Run 6 **D2382–D2387**, Run 7 **D2388–D2391**. ADRs **0268–0270** written. **NEXT FREE: D2392, ADR 0271.**
+Run 5 **D2375–D2381**, Run 6 **D2382–D2387**, Run 7 **D2388–D2391**, Run 8 **D2392–D2396**. ADRs **0268–0270** written. **NEXT FREE: D2397, ADR 0271.**
 
 The fourth session of Stage 5 (`docs/plans/stage-5-plan.md` §3, §5 *Session 39*).
 Twelve runs and **two sittings on two days**: the firewall, the edge's one
@@ -477,6 +477,11 @@ table below it, in execution order.
 | **D2389** | D2353's `credential`: *"generates ..., writes F (0600, `O_EXCL`), ..., posts it"*. | Order and failure were unstated: a password written after the request could be lost while the server recorded its verifier; one written before a refusal would be a file for a credential that does not exist. | **The file is written before anything is sent** (an existing file is refused, exit 2, before a password exists); **only `{role, verifier}` is sent** (`agentic_postgres.scram`, 4096 iterations, 16-byte salt); a server REFUSAL removes the file (nothing was recorded); an unknown outcome keeps it and says so -- `project create`'s handoff shape (ADR 0260). `--wait` prints one document. `--role app|admin` names `customer_app`/`customer_admin`. | The handoff's rule, reused rather than re-decided. | 0269, 0260 |
 | **D2390** | D2350: *"The fixture IMAGES gain one input, `APG_SSLMODE` (default `disable`; `verify-full` with `sslrootcert=system` for libpq clients and Node's bundled CAs for `pg`/Prisma)"*. | node-postgres with no `ssl` member reads `PGSSLMODE` itself, so a fixture that did not say would depend on the environment it was run in; Prisma takes no libpq `sslmode` names. | **Explicit per driver, refusing any other value (exit 2 / a thrown error)**: psql and psycopg's entrypoints export `PGSSLMODE` (+ `PGSSLROOTCERT=system` for `verify-full`); node-postgres gets `ssl: false` or `{rejectUnauthorized: true}`; Prisma's URL `sslmode=disable` or `sslmode=require&sslaccept=strict`. Measured offline: the libpq blocks EXECUTED by `sh` for unset/`disable`/`verify-full`/`require`; `url.mjs` run in the locked Node image for the same four (`?sslmode=disable`, `disable`, `?sslmode=require&sslaccept=strict`, refused); both `.mjs` files `node --check`ed. The public-CA half is EP-LIVE-001's (D2387). | A fixture's TLS is a decision it states. | 0268 |
 | **D2391** | -- (the verifier's proof on a real cluster) | The first version logged in from INSIDE the cluster's container, over `127.0.0.1` -- which the image's `pg_hba.conf` TRUSTS -- so its positive half passed for any password; its control (a wrong password refused) failed and said so. | **The login crosses a network from another container** (`host all all all scram-sha-256` applies): the verifier `scram.verifier` computed, set VERBATIM with `CREATE ROLE ... PASSWORD :'verifier'` (`pg_authid` holds it byte for byte), admits its password and refuses another. | A positive half without its control would have been a measurement of the rig. | 0269 |
+| **D2392** | Run 8: *"a `connect` through both names (psql `select current_user`)"*; D2350's fixtures with `sslrootcert=system`. | The workstation has NO `psql`; and the locked Postgres image -- the psql fixture's base -- carries NO CA bundle: `openssl s_client` to a Let's Encrypt name answers `Verify return code: 20` in it, `0` with the workstation's bundle mounted at OpenSSL's default file (`/usr/lib/ssl/cert.pem`). So `sslrootcert=system` cannot verify a public certificate inside that image. (The Python and Node bases carry their own bundles.) | **`~/s39/run8/bin/psql`**: the locked image's psql, the workstation's roots mounted at `/usr/lib/ssl/cert.pem`, the passfile's directory mounted read-only at its own path, the host's network; first on the lifecycle's PATH. Rehearsed through rig 39a: the rig CA as the roots logs in; the workstation's roots refuse (`certificate verify failed`); no passfile refuses (`no password supplied`). **`s39-endpoints.sh` gives every client ONE CA file at `/certs/ca.crt`.** **Owed by Run 9**: EP-LIVE-001's external proof cannot run the psql fixture with `PGSSLROOTCERT=system` as written -- it must hand that container a CA file (the fixture entrypoint's `system` is right for an image that has roots). | A trust store measured, not assumed. | 0268 |
+| **D2393** | -- (EP-LIVE-001's Prisma half) | `prisma migrate deploy` REFUSES a `public` schema that already holds tables it did not make: `P3005 The database schema is not empty` (the first rehearsal of `s39-endpoints.sh`, whose psql step had just created one). Rig 39c ran Prisma first and never met it. | **The instrument runs Prisma's `migrate deploy` (direct) and its Client (pooled) BEFORE any other DDL in `public`**; rehearsed: 13 checks of 13 as expected. **Owed by Run 9**: the external proof migrates first, into the slot's fresh `public`, or it fails on a database another check wrote to. | The order is part of what was measured. | 0268 |
+| **D2394** | Run 7's `endpoint connect`. | It turns a `psql` it cannot EXECUTE into a Python traceback (exit 1): only `FileNotFoundError` is caught, and `\\wsl$` writes strip the executable bit (CLAUDE.md §1) -- the lifecycle rehearsal met exactly that on its first run. | **Fixed in Run 9's code commit**: any `OSError` starting psql is exit 3 naming it, with a proof (a non-executable psql on PATH). | A refusal reports; a traceback does not. | 0195 |
+| **D2395** | Session 38's lifecycle instrument *"resize large (on OVH ADMITTED, D2310: expected succeeded)"*. | That expectation is the shape ADR 0270 retired: it measured the host, not the rule. | **`s39-lifecycle.py` judges EACH resize by its own `result.admission`** (D2362): `refused` iff `requested_mb > safe_available_mb`, the outcome must agree, and the profile after the large one is `large` or `standard` accordingly -- never forced. Rehearsed both ways (standard admitted on 300/4,600; large refused on 840/412). | ADR 0270 at the instrument too. | 0270 |
+| **D2396** | Run 11 step 3: *"Create `slot3-prod` (`small`) → claim → `credential` app and admin into `~/s39/run11/creds/slot3-prod/`"*. | No instrument named for it; the lifecycle's steps up to the credentials are the same and its record discipline is the one wanted. | **`s39-lifecycle.py --create-only`** (login, create, claim, the administrator's sign-in, both credentials, both names reached, the app role rotated and its old password refused) into its own `--home`/`--record`, `--creds-dir ~/s39/run11/creds` -- the `--customer-credential-dir` layout (`<dir>/<key>/customer_app`, `customer_admin`, 0700/0600). Rehearsed: PASSED. | One instrument, two lengths. | 0269 |
 | **D2359** | Run 1 item 6: *"a throwaway MinIO as both source and mirror (two buckets)"*. | One server holding both buckets lets rclone copy server-side (`CopyObject`), which R2→B2 never can — the measured path would not be production's. | **Two MinIO servers** (the local `quay.io/minio/minio` image), one per remote. Measured: without the flag, **50 HEAD + 50 PUT at the mirror** (+51 GET at the source, 1 at the mirror) for 50 objects; with `--s3-no-head`, **0 HEAD, 50 PUT**; **control**: `rclone size --json` of the mirror = the source's (50 objects, 441 bytes) both times. Run 2 adds the flag (D2346). | A rig that measured a different copy path would have priced the wrong request. | 0264 |
 
 ---
@@ -1267,6 +1272,42 @@ the three records per slot. **`s39-hostyaml.py`**, **`s39-e0.sh`**, the sweep's
 launch script (refuses while the reconciler is *working*), the external script.
 Rehearse every instrument against the planning rig's containers and a rendered
 example — nothing touches the host. Commit only the `**Done.**`.
+
+**Done.** 2026-10-11 (documentation only; the instruments live in WSL `~/s39/run8/`,
+backed up to the scratchpad's `s39/run8/`). **Derived by named substitution, every count
+asserted** (`s39-derive.py`, Session 38's method): `s39-units.sh`, `s39-free.sh`,
+`s39-probe-start.sh`, `s39-probe-stop.sh`, `s39-launch.sh` (refuses while the reconciler
+is `working`), `s39-sweep.sh` (HEAD and the boot checked against alpha, beta, control
+AND slot3-prod; the declarations moved to Session 39's files), `s39-v1.sh`,
+`s39-after-reboot.sh` (six units, slot3-prod's among them), `s39-external.sh` (four
+copies fetched; the merge expecting 253 claims, `documented_path` the one failure).
+Against their parents: the sweep adds exactly `--live-slot-outputs`, the external half
+exactly `--customer-credential-dir`, V1 none; no host address typed in any instrument.
+**Written by hand**: `s39-hostyaml.py` (appends declared slots by text, the product's
+loader and `declared_slots` read them back; rehearsed on `host.example.yaml` -- inserted
+in place, three refusals before anything is written); `s39-dns.sh` (the three names of a
+slot, read from the product, never typed; `dig` is the host's -- the workstation has
+none, so its readings are `s38-dns.sh`'s, used there in Session 38); `bin/psql` (D2392);
+`s39-endpoints.sh` (D2392, D2393; rehearsed through rig 39a's gateway: **13 checks of 13
+as expected** -- psql both doors and the grants, Prisma migrate and Client, node-postgres,
+psycopg prepared and `cancel_safe()`; **control**: the workstation's roots instead of the
+rig CA, every TLS check refused; no password in the record or transcript);
+`s39-lifecycle.py` (D2395, D2396) and its rehearsal `rehearse_lifecycle.py` -- the real
+control plane served, a fake reconciler, and **rig 39's gateway as the customer's doors**
+(the fake's `credential.rotate` sets the verifier and rewrites the door's userlist by
+rename + SIGHUP): **PASSED** in 33 s -- three rotations, both names reached
+(`customer_app`, `customer_admin`), the old password refused (psql exit 2) and the new
+admitted, both doors refused while asleep, each resize decided as its reading implies,
+the export holding exactly `api`, `app`, `public` (`pg_restore --list` does name
+`public`), the expiry control 200 then 403, the second creation refused with no row;
+`--create-only` PASSED; no secret in the record or transcript (seven checked). Two
+defects found by the rehearsals before the trip: the wrapper read `versions.env` through
+`$HOME`, which the instrument points at its own state (now the passwd home); and D2394.
+The offline rehearsal of the derived scripts (`rehearse-offline.sh`): derivation, syntax,
+`--help`, flags, refusals -- all as designed; the gate lines rehearse only to the gate
+(`bin/session-39-check.sh` is Run 9's). `~/s39/host-address` holds the OVH address,
+copied from Session 38's. **Run 7's code commit
+`c8a64150a804bf03fad6cf07127d86db6477074f`: CI run `38124684276`, success.**
 
 ### Run 9 — the bump, the registry, the gate, the threat rows, the Ledger to `trial`, the documents
 
