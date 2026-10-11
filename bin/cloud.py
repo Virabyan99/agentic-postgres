@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-"""`apg login|logout|context|org|project|compute|operation`: the management API (D2066, D2169).
+"""`apg login|logout|context|org|project|compute|operation|endpoint`: the management API.
 
 Invoked by `bin/login.sh`, `bin/logout.sh`, `bin/context.sh`, `bin/org.sh`,
-`bin/project.sh`, `bin/compute.sh` and `bin/operation.sh`, each passing its
-family as the first argument. Everything a
+`bin/project.sh`, `bin/compute.sh`, `bin/operation.sh` and `bin/endpoint.sh`,
+each passing its family as the first argument. Everything a
 test can hold still -- the private state directory, the checked secret files,
 the context, the refresh exchange, https -- is
 `agentic_postgres.control_client`; this file is the verbs.
@@ -29,6 +29,14 @@ export` waits for the operation, downloads the archive without following a
 redirect, checks its SHA-256 against the operation's result, and writes it
 0600 to `--output`; the URL is printed nowhere.
 
+**A customer's database password never leaves this machine** (Session 39, ADR
+0269, D2353): `endpoint credential` generates it here, writes it ONCE to
+`--password-file` (0600, refused if it exists, written before anything is
+sent) and sends only its SCRAM-SHA-256 verifier (`agentic_postgres.scram`);
+`endpoint connect` hands it to a local `psql` through a 0600 `PGPASSFILE` in a
+private temporary directory, removed when psql ends, never through an argument
+or the environment.
+
 Exit codes: 0 ok; 2 usage; 3 no context, no credential, an unusable local file,
 or not https; 5 refused by the server, or the operation failed; 6 the server
 unreachable or unreadable, or an outcome that could not be determined; 7
@@ -42,8 +50,11 @@ import getpass
 import hashlib
 import json
 import os
+import re
 import secrets
+import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -53,6 +64,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from agentic_postgres import control_client as cc  # noqa: E402
+from agentic_postgres import scram  # noqa: E402
 from agentic_postgres.control_client import ClientError  # noqa: E402
 
 ROLES = ("owner", "admin", "member", "viewer")
@@ -841,6 +853,144 @@ def operation_cancel(arguments: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# endpoint (Session 39, ADR 0268, ADR 0269, D2353)
+# ---------------------------------------------------------------------------
+
+#: `--role` -> the customer role it names and the door that admits it: the
+#: pooled door (transaction mode) admits `customer_app` only, the direct door
+#: (a session) `customer_admin` only (ADR 0269 item 3).
+ENDPOINT_ROLES = {"app": ("customer_app", "pooled"), "admin": ("customer_admin", "direct")}
+
+_HOST = re.compile(r"(?=.{1,253}\Z)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
+_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_]{0,62}")
+
+
+def _door(current: cc.Session, key: str, role: str) -> dict[str, Any]:
+    """The door `role` opens, as the server recorded it -- each member checked,
+    because a value from a response is about to become a psql argument."""
+    _name, door = ENDPOINT_ROLES[role]
+    served = current.call("GET", f"/projects/{key}/connections")
+    found = served.get(door) if isinstance(served, dict) else None
+    if not isinstance(found, dict):
+        raise ClientError(cc.EXIT_UNREACHABLE, "the server's answer names no such door")
+    host, port = found.get("host"), found.get("port")
+    user, database = found.get("user"), found.get("database")
+    if (
+        not isinstance(host, str)
+        or not _HOST.fullmatch(host)
+        or not isinstance(port, int)
+        or isinstance(port, bool)
+        or not 0 < port < 65536
+        or not all(isinstance(v, str) and _IDENTIFIER.fullmatch(v) for v in (user, database))
+    ):
+        raise ClientError(cc.EXIT_UNREACHABLE, "the server's door is not a door this CLI can use")
+    return {"host": host, "port": port, "user": user, "database": database}
+
+
+def endpoint_show(arguments: argparse.Namespace) -> int:
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    served = current.call("GET", f"/projects/{key}/connections")
+    lines = [f"{key}: two doors, both TLS (sslmode verify-full) on port 5432"]
+    for flag, (role, door) in ENDPOINT_ROLES.items():
+        found = served[door]
+        lines.append(
+            f"  {door:<7} {found['host']}:{found['port']}  user {found['user']}  "
+            f"database {found['database']}  (--role {flag}, {role})"
+        )
+    lines.append(
+        f"  the password is the file `credential` wrote; snippets say {served['password']}"
+    )
+    for client, snippet in served["snippets"].items():
+        lines += ["", f"# {client}", snippet]
+    emit(served, arguments.json, lines)
+    return cc.EXIT_OK
+
+
+def endpoint_credential(arguments: argparse.Namespace) -> int:
+    """A new password for one customer role (ADR 0269): generated HERE, written
+    once 0600 before anything is sent -- so a request the server recorded
+    always has its password on this machine -- and only its verifier sent."""
+    output = Path(arguments.password_file)
+    cc.refuse_existing_output(output)
+    current = person_session()
+    key = _project_key(current, arguments.project_key)
+    role, _door_name = ENDPOINT_ROLES[arguments.role]
+    password = secrets.token_urlsafe(32)
+    cc.write_new_private_file(output, (password + "\n").encode("utf-8"))
+    body = {"role": role, "verifier": scram.verifier(password)}
+    del password
+    try:
+        answer = current.call("POST", f"/projects/{key}/credentials", body)
+    except ClientError as error:
+        if error.code == cc.EXIT_REFUSED:
+            output.unlink(missing_ok=True)  # refused: nothing was recorded
+        else:
+            print(f"endpoint: whether the credential was recorded is not known; the password "
+                  f"it would set is kept in {output}", file=sys.stderr)  # fmt: skip
+        raise
+    if not arguments.wait:
+        _accepted(answer, arguments.json, what=f"setting {role}'s password")
+        if not arguments.json:
+            print(f"  the password is in {output} (0600); it works once the operation succeeds")
+        return cc.EXIT_OK
+    operation = answer["operation"]
+    print(f"endpoint: operation {operation['id']} recorded; waiting for it", file=sys.stderr)
+    final = _wait(current, str(operation["id"]), arguments.timeout, arguments.interval)
+    if final["status"] != "succeeded":
+        raise _unsuccessful(final)
+    emit(
+        {"operation": final["id"], "role": role, "password_file": str(output)},
+        arguments.json,
+        [f"set: {role}'s password is in {output} (0600); the previous one no longer works"],
+    )
+    return cc.EXIT_OK
+
+
+def _pgpass(value: str) -> str:
+    """One `.pgpass` field: backslash and colon escaped, as libpq reads them."""
+    return value.replace("\\", "\\\\").replace(":", "\\:")
+
+
+def endpoint_connect(arguments: argparse.Namespace) -> int:
+    """A local `psql` through one door, `verify-full` against the system's
+    authorities. The password reaches psql through a 0600 `PGPASSFILE` in a
+    private temporary directory -- never an argument, never `PGPASSWORD` -- and
+    the directory is removed when psql ends, whatever ended it. psql is a CHILD
+    with this terminal, not an `exec`: an exec could not remove the file."""
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    door = _door(current, key, arguments.role)
+    password = cc.read_private_file(Path(arguments.password_file)).decode("utf-8").strip()
+    if not password or "\n" in password:
+        raise ClientError(cc.EXIT_PREREQUISITE, f"{arguments.password_file} holds no password")
+    extra = list(arguments.psql)
+    if extra[:1] == ["--"]:
+        extra = extra[1:]
+    conninfo = (
+        f"host={door['host']} port={door['port']} dbname={door['database']} "
+        f"user={door['user']} sslmode=verify-full sslrootcert=system"
+    )
+    with tempfile.TemporaryDirectory(prefix="apg-connect-") as scratch:
+        passfile = Path(scratch) / "pgpass"
+        fields = (door["host"], str(door["port"]), door["database"], door["user"], password)
+        cc.write_new_private_file(passfile, (":".join(map(_pgpass, fields)) + "\n").encode())
+        del password
+        environment = {k: v for k, v in os.environ.items() if k != "PGPASSWORD"}
+        environment["PGPASSFILE"] = str(passfile)
+        try:
+            child = subprocess.Popen(["psql", conninfo, *extra], env=environment)
+        except FileNotFoundError as error:
+            raise ClientError(cc.EXIT_PREREQUISITE, "psql is not installed here") from error
+        while True:
+            try:
+                return child.wait()
+            except KeyboardInterrupt:
+                # psql's to answer (it cancels the query); this process waits on.
+                continue
+
+
+# ---------------------------------------------------------------------------
 # The parser
 # ---------------------------------------------------------------------------
 
@@ -978,6 +1128,25 @@ def parser() -> argparse.ArgumentParser:
     verb.add_argument("--project-key")
     verb.add_argument("--profile", required=True, choices=PROFILES)
     verb.add_argument("--json", action="store_true")
+
+    endpoint = _verbs(families.add_parser("endpoint", add_help=False))
+    verb = endpoint.add_parser("show", add_help=False)
+    verb.set_defaults(run=endpoint_show)
+    verb.add_argument("--project-key")
+    verb.add_argument("--json", action="store_true")
+    verb = endpoint.add_parser("credential", add_help=False)
+    verb.set_defaults(run=endpoint_credential)
+    verb.add_argument("--project-key")
+    verb.add_argument("--role", required=True, choices=tuple(ENDPOINT_ROLES))
+    verb.add_argument("--password-file", required=True)
+    verb.add_argument("--wait", action="store_true")
+    _waiting(verb)
+    verb = endpoint.add_parser("connect", add_help=False)
+    verb.set_defaults(run=endpoint_connect)
+    verb.add_argument("--project-key")
+    verb.add_argument("--role", required=True, choices=tuple(ENDPOINT_ROLES))
+    verb.add_argument("--password-file", required=True)
+    verb.add_argument("psql", nargs=argparse.REMAINDER)
 
     operation = _verbs(families.add_parser("operation", add_help=False))
     for name, run in (("show", operation_show), ("cancel", operation_cancel)):

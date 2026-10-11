@@ -1,9 +1,9 @@
 # Session 39 — Public TLS endpoints and customer roles
 
-**Status: EXECUTING. Runs 1–6 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
+**Status: EXECUTING. Runs 1–7 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
 threat list; Sheet E0 read). Rows **D2325–D2355** at planning; Run 1 added
 **D2356–D2360**, Run 2 **D2361–D2364**, Run 3 **D2365–D2369**, Run 4 **D2370–D2374**,
-Run 5 **D2375–D2381**, Run 6 **D2382–D2387**. ADRs **0268–0270** written. **NEXT FREE: D2388, ADR 0271.**
+Run 5 **D2375–D2381**, Run 6 **D2382–D2387**, Run 7 **D2388–D2391**. ADRs **0268–0270** written. **NEXT FREE: D2392, ADR 0271.**
 
 The fourth session of Stage 5 (`docs/plans/stage-5-plan.md` §3, §5 *Session 39*).
 Twelve runs and **two sittings on two days**: the firewall, the edge's one
@@ -473,6 +473,10 @@ table below it, in execution order.
 | **D2385** | D2362: *"the reconciler's resize parses the `admit.sh --json` it already runs into `{"requested_mb", "safe_available_mb"}` and records it on BOTH outcomes"*. | `admit.sh --json` prints `requested_unreclaimable_mb` and the decision's `lines`; the proof that judges a decision (NODE-ADMIT-002, `test_session31_capacity`) reads the LINES `requested` and `safe available`. | **`reconciler_dispatch.admission_reading` reads admission's own two lines** (`<n> MiB`, `(injected)` tolerated), the numbers the decision was taken on; recorded on refused (`capacity_exhausted`), failed (`operation_failed`) and admitted outcomes; **absent, never invented,** when admission printed nothing readable. | One reading, the one the decision used. | 0270 |
 | **D2386** | §7: CTL-OPS-001's `test_no_type_is_accepted_and_the_six_stay_executed` is *"REPLACED by its exact-set form for 39 -- seven executed types"*. | The executed set moves in Run 6 (this run), the accepted set in Run 9; a test named for six executed types would fail now and lie after. And `test_the_argument_schema_has_one_branch_per_executed_type` read the type list from `0004`'s `control_request_operation`, which `0005` supersedes. | **Renamed now to `test_no_type_is_accepted_and_the_seven_are_executed`** (EXECUTED = the six + `credential.rotate`, ACCEPTED still empty), its registry node id moved (D1119) and the matrix regenerated; Run 9 changes its ACCEPTED half. The SQL type list is read from the NEWEST template that defines the function. The not-accepted proof walks the seventh route (`POST .../credentials`, 400 past the gate). | A test's name is part of what it claims. | 0254, 0269 |
 | **D2387** | D2352: snippets *"the flags rig 39c decides"*. | Rig 39c connected every driver with the rig's OWN certificate authority (`sslrootcert=`, `ssl: {ca}`, Prisma `sslcert=…&sslaccept=strict`); production presents a public Let's Encrypt certificate, which no rig here can mint. | **The snippets name the public-CA form of each measured setting**: libpq `sslmode=verify-full sslrootcert=system`, Prisma `sslmode=require&sslaccept=strict` with no `pgbouncer=true`, node-postgres `ssl: {rejectUnauthorized: true}`. **Not measured offline, owed by EP-LIVE-001** (Run 11, through `slot3-prod`'s real door) -- the snippet a driver fails on there is that run's divergence row. | A flag measured against a different trust store is not measured. | 0268 |
+| **D2388** | Run 7 item 1 / D2353: *"`connect` writes a temporary `PGPASSFILE` 0600 and `exec`s `psql`"*, the file *"removed after"*. | An `exec` replaces the process that would remove the file, so the two halves of the sentence cannot both hold. | **psql is a CHILD with the person's terminal** (`subprocess.Popen`, its exit status the command's), the passfile 0600 in a `tempfile.TemporaryDirectory` (0700) removed when psql ends, whatever ended it; Ctrl-C is psql's (it cancels the query) and the parent waits on. `PGPASSWORD` is stripped from psql's environment; the conninfo is `verify-full sslrootcert=system`. ADR 0218's guard is about docker/compose children handed a terminal; an interactive psql on the customer's own machine is this verb's purpose, and its scan finds no docker argv here. | The removal is the property; the exec was a means. | 0269, 0218 |
+| **D2389** | D2353's `credential`: *"generates ..., writes F (0600, `O_EXCL`), ..., posts it"*. | Order and failure were unstated: a password written after the request could be lost while the server recorded its verifier; one written before a refusal would be a file for a credential that does not exist. | **The file is written before anything is sent** (an existing file is refused, exit 2, before a password exists); **only `{role, verifier}` is sent** (`agentic_postgres.scram`, 4096 iterations, 16-byte salt); a server REFUSAL removes the file (nothing was recorded); an unknown outcome keeps it and says so -- `project create`'s handoff shape (ADR 0260). `--wait` prints one document. `--role app|admin` names `customer_app`/`customer_admin`. | The handoff's rule, reused rather than re-decided. | 0269, 0260 |
+| **D2390** | D2350: *"The fixture IMAGES gain one input, `APG_SSLMODE` (default `disable`; `verify-full` with `sslrootcert=system` for libpq clients and Node's bundled CAs for `pg`/Prisma)"*. | node-postgres with no `ssl` member reads `PGSSLMODE` itself, so a fixture that did not say would depend on the environment it was run in; Prisma takes no libpq `sslmode` names. | **Explicit per driver, refusing any other value (exit 2 / a thrown error)**: psql and psycopg's entrypoints export `PGSSLMODE` (+ `PGSSLROOTCERT=system` for `verify-full`); node-postgres gets `ssl: false` or `{rejectUnauthorized: true}`; Prisma's URL `sslmode=disable` or `sslmode=require&sslaccept=strict`. Measured offline: the libpq blocks EXECUTED by `sh` for unset/`disable`/`verify-full`/`require`; `url.mjs` run in the locked Node image for the same four (`?sslmode=disable`, `disable`, `?sslmode=require&sslaccept=strict`, refused); both `.mjs` files `node --check`ed. The public-CA half is EP-LIVE-001's (D2387). | A fixture's TLS is a decision it states. | 0268 |
+| **D2391** | -- (the verifier's proof on a real cluster) | The first version logged in from INSIDE the cluster's container, over `127.0.0.1` -- which the image's `pg_hba.conf` TRUSTS -- so its positive half passed for any password; its control (a wrong password refused) failed and said so. | **The login crosses a network from another container** (`host all all all scram-sha-256` applies): the verifier `scram.verifier` computed, set VERBATIM with `CREATE ROLE ... PASSWORD :'verifier'` (`pg_authid` holds it byte for byte), admits its password and refuses another. | A positive half without its control would have been a measurement of the rig. | 0269 |
 | **D2359** | Run 1 item 6: *"a throwaway MinIO as both source and mirror (two buckets)"*. | One server holding both buckets lets rclone copy server-side (`CopyObject`), which R2→B2 never can — the measured path would not be production's. | **Two MinIO servers** (the local `quay.io/minio/minio` image), one per remote. Measured: without the flag, **50 HEAD + 50 PUT at the mirror** (+51 GET at the source, 1 at the mirror) for 50 objects; with `--s3-no-head`, **0 HEAD, 50 PUT**; **control**: `rclone size --json` of the mirror = the source's (50 objects, 441 bytes) both times. Run 2 adds the flag (D2346). | A rig that measured a different copy path would have priced the wrong request. | 0264 |
 
 ---
@@ -1222,6 +1226,32 @@ password), restored and `cmp`-equal (`~/s39/run6/battery.sh`, `mutations.py`).
 Targeted: `test_cli_contract`, `test_endpoint_cli` (new), `test_control_cli`,
 `test_client_fixtures`. Battery: M1 the file opened without `O_EXCL`; M2 the
 password included in the request body; M3 `connect` leaving the passfile.
+
+**Done.** 2026-10-11; the code commit and its CI verdict are recorded at the end of
+this paragraph. **`bin/endpoint.sh`** (`apg endpoint`, dispatched into `bin/cloud.py`
+like `project.sh`): `show` (the doors, the snippets, `--json` the server's document),
+`credential` (D2389), `connect` (D2388); **`agentic_postgres.scram`** (the verifier, the
+shape the argument schema accepts). **The four fixtures' `APG_SSLMODE`** (D2390).
+**New proofs**: `test_endpoint_cli.py` (6, the control app served, every command a
+subprocess with its own HOME and a stand-in psql on PATH: the recorded row's verifier
+admits the file's password and not another, the password in no output; the file 0600,
+an existing one refused before anything is sent, a server refusal leaving no file;
+`--wait` reading `succeeded` and `failed` on THIS project's row; `show`; `connect`'s
+conninfo, its `--` arguments, the 0600 passfile in a 0700 directory, `PGPASSWORD` not
+passed on, both removed, psql's status the command's, and a wide file refused before
+psql; and the verifier admitting its password on PostgreSQL across a network, D2391),
+and two in `test_client_fixtures.py`. **Targeted, once** (the plan's four plus
+`test_completion_command`, `test_container_exec`, `test_documentation_index` and the three
+new-module guards; `shellcheck` on the three shells): first pass 912 passed, 1 failed --
+`test_environment_gates` again, on a dict WRITE for the child's environment
+(`environment["APG_SSLMODE"] = value`, now `.update(...)`); the two modules re-run: 70
+passed. Two defects of the new module found before the run and fixed: its `--wait`
+helper finished the oldest pending row (another proof's), and D2391. **Battery 3/3
+KILLED** with controls (M1 the file written without `O_EXCL` AND without the pre-check --
+both layers, since each alone is caught by the other; M2 the password in the request
+body; M3 `connect` leaving the passfile), restored and `cmp`-equal (`~/s39/run7/`).
+**Run 6's code commit `6dd5eb0bd9d4a48b1fd0a83b2f91f72796243f51`: CI run `38123548777`,
+success.**
 
 ### Run 8 — the trip's instruments, written and rehearsed offline
 

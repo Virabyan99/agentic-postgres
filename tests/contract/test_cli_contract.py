@@ -102,6 +102,8 @@ SHELL_COMMANDS = (
     # Session 39 (ADR 0269): the customer poolers' userlists from pg_authid.
     # Listed the run it landed (D1014), `git add`ed first (D1188).
     "bin/customer-credentials.sh",
+    # Session 39 (D2353): a customer's doors -- show, credential, connect.
+    "bin/endpoint.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/db.sh",
@@ -532,6 +534,8 @@ COMMANDS_WITH_VERBS = {
     "bin/operation.sh",
     # Session 39: `sync`, verb-first.
     "bin/customer-credentials.sh",
+    # Session 39 (D2353): show, credential, connect -- verb-first.
+    "bin/endpoint.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/dev.sh",

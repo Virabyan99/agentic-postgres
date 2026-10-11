@@ -23,6 +23,29 @@ for name in PGHOST PGPORT PGUSER PGDATABASE APG_TRANSPORT APG_USER_A APG_USER_B;
     fi
 done
 
+# Session 39 (D2350): the TLS input. `disable`, the default, is the platform
+# transports' setting -- an `internal: true` network with no route off the host,
+# and a cluster that serves no certificate (DBX-001..004 are unchanged).
+# `verify-full` is the public door's (ADR 0268): libpq checks the edge's
+# certificate against this machine's authorities (`sslrootcert=system`, libpq
+# 16 and later) and the name it asked for. Anything else is refused rather than
+# passed through.
+case "${APG_SSLMODE:-disable}" in
+    disable)
+        PGSSLMODE=disable
+        ;;
+    verify-full)
+        PGSSLMODE=verify-full
+        PGSSLROOTCERT=system
+        export PGSSLROOTCERT
+        ;;
+    *)
+        printf 'client-psycopg: APG_SSLMODE must be disable or verify-full, not %s\n' "${APG_SSLMODE}" >&2
+        exit 2
+        ;;
+esac
+export PGSSLMODE
+
 if [ -z "${PGPASSFILE:-}" ]; then
     secret="/run/secrets/app_runtime_password"
     if [ ! -r "${secret}" ]; then

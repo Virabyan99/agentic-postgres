@@ -56,7 +56,19 @@ if (!["pooled", "direct"].includes(TRANSPORT)) {
 // reads them; pg honours all four. `application_name` is set here rather than
 // left to the caller because it is what makes a pooled server connection
 // attributable in pg_stat_activity.
-const client = new pg.Client({ application_name: APPLICATION_NAME });
+// Session 39 (D2350): the TLS input, explicit rather than left to pg's reading
+// of PGSSLMODE. `disable` (the default) is the platform transports' setting on
+// an internal network; `verify-full` is the public door's: Node's bundled
+// authorities and the hostname checked (`rejectUnauthorized: true`).
+const SSLMODE = process.env.APG_SSLMODE || "disable";
+if (!["disable", "verify-full"].includes(SSLMODE)) {
+  console.error(`client-node-pg: APG_SSLMODE must be disable or verify-full, not ${SSLMODE}`);
+  process.exit(2);
+}
+const client = new pg.Client({
+  application_name: APPLICATION_NAME,
+  ssl: SSLMODE === "verify-full" ? { rejectUnauthorized: true } : false,
+});
 
 // Every statement below is parameterized. There is no string concatenation into
 // SQL anywhere in this file, and a claim is set with set_config(..., true)

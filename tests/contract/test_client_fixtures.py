@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -492,3 +493,55 @@ def test_the_two_fixture_identities_are_distinct_uuids() -> None:
     assert pattern.fullmatch(rendering.FIXTURE_USER_A)
     assert pattern.fullmatch(rendering.FIXTURE_USER_B)
     assert rendering.FIXTURE_USER_A != rendering.FIXTURE_USER_B
+
+
+# ---------------------------------------------------------------------------
+# Session 39 (D2350): the TLS input
+# ---------------------------------------------------------------------------
+
+
+def _tls_block(name: str) -> str:
+    """The `case "${APG_SSLMODE...}"` block of a libpq fixture's entrypoint."""
+    source = (CLIENTS / name / "entrypoint.sh").read_text(encoding="utf-8")
+    start = source.index('case "${APG_SSLMODE:-disable}" in')
+    end = source.index("export PGSSLMODE", start) + len("export PGSSLMODE")
+    return source[start:end]
+
+
+@pytest.mark.parametrize("name", ["psql", "psycopg"])
+def test_the_libpq_fixtures_take_the_tls_input_and_default_to_disable(name: str) -> None:
+    """The entrypoint's own block, EXECUTED by `sh` for each value: unset and
+    `disable` are the platform transports' `disable` (DBX-001..004 unchanged);
+    `verify-full` adds the system's authorities; anything else exits 2."""
+    program = _tls_block(name) + '\nprintf "%s|%s" "$PGSSLMODE" "${PGSSLROOTCERT:-}"\n'
+
+    def run(value: str | None) -> subprocess.CompletedProcess:
+        environment = {"PATH": "/usr/bin:/bin"}
+        if value is not None:
+            environment.update(APG_SSLMODE=value)
+        return subprocess.run(
+            ["sh", "-c", program], capture_output=True, text=True, env=environment,
+            stdin=subprocess.DEVNULL, check=False,
+        )  # fmt: skip
+
+    assert run(None).stdout == "disable|"
+    assert run("disable").stdout == "disable|"
+    assert run("verify-full").stdout == "verify-full|system"
+    refused = run("require")
+    assert refused.returncode == 2 and "must be disable or verify-full" in refused.stderr
+
+
+def test_the_node_fixtures_take_the_tls_input_and_default_to_disable() -> None:
+    """node-postgres is told explicitly -- `ssl: false`, or `rejectUnauthorized:
+    true` for `verify-full` -- rather than left to its reading of PGSSLMODE;
+    Prisma's URL carries `sslmode=disable`, or `sslmode=require&sslaccept=strict`
+    (rig 39c's pair). Both refuse any other value. (Run 7 executed `url.mjs` in
+    the locked Node image for the four values; the text is held here.)"""
+    probe = (CLIENTS / "node-pg" / "probe.mjs").read_text(encoding="utf-8")
+    assert 'const SSLMODE = process.env.APG_SSLMODE || "disable";' in probe
+    assert 'ssl: SSLMODE === "verify-full" ? { rejectUnauthorized: true } : false,' in probe
+    assert '["disable", "verify-full"].includes(SSLMODE)' in probe
+    url = (CLIENTS / "prisma" / "url.mjs").read_text(encoding="utf-8")
+    assert 'const sslmode = process.env.APG_SSLMODE || "disable";' in url
+    assert '{ sslmode: "require", sslaccept: "strict" } : { sslmode: "disable" }' in url
+    assert '["disable", "verify-full"].includes(sslmode)' in url

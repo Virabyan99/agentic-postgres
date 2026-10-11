@@ -87,12 +87,22 @@ export function databaseUrl({ transport, applicationName, role, secretFile, sche
     );
   }
 
+  // Session 39 (D2350): the TLS input. `disable`, the default, is honest
+  // rather than lax, and the same reasoning as dbmate's: the platform's
+  // transports cross a Docker network declared `internal: true`, which has no
+  // route off the host, and the cluster serves no TLS certificate for any peer
+  // to verify; over a tunnel, SSH is the encrypted channel. `verify-full` is
+  // the public door's (ADR 0268): Prisma's `sslmode=require` with
+  // `sslaccept=strict`, the certificate checked -- the pair rig 39c connected
+  // through the gateway with.
+  const sslmode = process.env.APG_SSLMODE || "disable";
+  if (!["disable", "verify-full"].includes(sslmode)) {
+    throw new Error(`databaseUrl: APG_SSLMODE must be disable or verify-full, not ${sslmode}`);
+  }
+  const tls =
+    sslmode === "verify-full" ? { sslmode: "require", sslaccept: "strict" } : { sslmode: "disable" };
   const parameters = new URLSearchParams({
-    // Honest rather than lax, and the same reasoning as dbmate's: this
-    // connection crosses a Docker network declared `internal: true`, which has
-    // no route off the host, and the cluster serves no TLS certificate for any
-    // peer to verify. Over a tunnel, SSH is the encrypted channel.
-    sslmode: "disable",
+    ...tls,
     application_name: applicationName,
   });
 
