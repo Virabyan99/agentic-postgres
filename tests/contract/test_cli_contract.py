@@ -99,6 +99,9 @@ SHELL_COMMANDS = (
     "bin/lock-versions.sh",
     "bin/materialize-secrets.sh",
     "bin/mcp-contract.sh",
+    # Session 39 (ADR 0269): the customer poolers' userlists from pg_authid.
+    # Listed the run it landed (D1014), `git add`ed first (D1188).
+    "bin/customer-credentials.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/db.sh",
@@ -268,6 +271,7 @@ PYTHON_COMMANDS = (
     # Session 37 (D2068). Every call is a function the control set grants to
     # nobody, reached as the superuser through `container_exec.run`.
     "bin/control.py",
+    "bin/customer-credentials.py",
     "bin/database-access.py",
     "bin/database-ports.py",
     "bin/db-verify.py",
@@ -526,6 +530,8 @@ COMMANDS_WITH_VERBS = {
     # Session 38 Run 8: get/set and show/list/wait/cancel, verb-first.
     "bin/compute.sh",
     "bin/operation.sh",
+    # Session 39: `sync`, verb-first.
+    "bin/customer-credentials.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/dev.sh",

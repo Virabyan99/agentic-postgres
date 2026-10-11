@@ -1,9 +1,9 @@
 # Session 39 — Public TLS endpoints and customer roles
 
-**Status: EXECUTING. Runs 1–4 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
+**Status: EXECUTING. Runs 1–5 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
 threat list; Sheet E0 read). Rows **D2325–D2355** at planning; Run 1 added
-**D2356–D2360**, Run 2 **D2361–D2364**, Run 3 **D2365–D2369**, Run 4 **D2370–D2374**.
-ADRs **0268–0270** written. **NEXT FREE: D2375, ADR 0271.**
+**D2356–D2360**, Run 2 **D2361–D2364**, Run 3 **D2365–D2369**, Run 4 **D2370–D2374**,
+Run 5 **D2375–D2380**. ADRs **0268–0270** written. **NEXT FREE: D2381, ADR 0271.**
 
 The fourth session of Stage 5 (`docs/plans/stage-5-plan.md` §3, §5 *Session 39*).
 Twelve runs and **two sittings on two days**: the firewall, the edge's one
@@ -460,6 +460,12 @@ table below it, in execution order.
 | **D2372** | -- | `host_config._validate_database_access` refuses a loopback port range containing `ssh.port` only; `ssh.port`'s schema forbids 80 and 443. 5432 is above 1024, so unlike 80/443 an allocation range CAN reach it, and since this run the edge binds it on every address: a transport allocated there could never bind. | **A range containing `EDGE_PUBLIC_POSTGRES_PORT` (5432) is refused** (`test_a_range_containing_the_edges_postgres_port_is_refused`, control the example's range), and `ssh.port` may not be 5432 (schema `not enum [80, 443, 5432]`). `host_config.EDGE_POSTGRES_ENTRYPOINT`/`EDGE_POSTGRES_PORT` (8432)/`EDGE_PUBLIC_POSTGRES_PORT` (5432) are the one authority, held equal to `naming.PUBLIC_POSTGRES_PORT`. The OVH host's range (15432-) is unaffected. | A new published port is a new listener every allocator must avoid. | 0268 |
 | **D2373** | §2: `test_session4_public_transports.py:142`'s 5432 assertion removed **in the same commit as** EP-LIVE-002's stricter one; EP-LIVE-002's node ids are Run 7's module. | Removing the "5432 closed" assertion without its replacement would leave a commit in which nothing says what 5432 answers. | **`tests/external/test_session39_public_endpoints.py` is created in Run 4** with EP-LIVE-002's three proofs (`test_only_the_four_ports_answer` -- 22/80/443/5432 open, the platform's and the edge's container ports and the project's allocated transports closed; `test_plaintext_is_refused` -- no `R`/`E` reply, bounded by the read deadline; `test_a_wrong_or_absent_sni_is_refused` -- `SSLRequest` answered `S` (the control that this IS the gateway), then no SNI, `nobody.invalid` and alpha's `pool.<domain>` (a project without a door) refused) and `test_this_module_uses_no_ssh`; Run 7 adds EP-LIVE-001's to the same module. None has run: first execution is Run 11's external mode. | §2's rule, kept literally. | 0268 |
 | **D2374** | Run 4 item 2: *"`require_edge_serves_this_release` requires the `postgres` entrypoint too"*. | The metrics entrypoint is required only from `METRICS_PLANE_SESSION` (14), the session that introduced the dependency (D811). Requiring `postgres` unconditionally would refuse every deploy through 38 -- the three projects' redeploys before E1. | **Required from `PUBLIC_ENDPOINTS_SESSION = 39`**, after the metrics check, present AND on `:8432`; an unreadable config is not called stale (D600). Run 10's order holds: E1 (the edge recreated) before R2a-c (the deploys through 39). | The precedent's shape, and the order the sheets already have. | 0268, 0244 |
+| **D2375** | Run 5 item 3: the poolers' *"`mem_limit`/`pids_limit`/`cpus` from rig 39e and ADR 0244's rule"*. | ADR 0222's split is walked over `compose.yaml`: a long-running service takes `pids_limit`/`cpus` from `config.SERVICE_RESOURCE_DEFAULTS` through `${X_PIDS_LIMIT:?required}`, never a literal (`test_the_nine_take_theirs_from_the_environment_and_the_eleven_the_literal`); a literal 64 would be refused. The variable spelling was `service.upper()`, which cannot spell `customer-pool`. | **Both poolers join `SERVICE_RESOURCE_DEFAULTS` (64 / `"1.0"`, pgbouncer's) and `SERVICE_MEMORY_LIMITS_MB` (64)**; `SERVICE_RESOURCE_ORDER` gains `CUSTOMER_POOL`/`CUSTOMER_DIRECT`, a hyphen is an underscore in the render (`edge-probe`'s memory-key rule) and in the two spelling guards. Exact guards moved to the new measured sets under ADR 0269: 20 -> 22 services, 9 -> 11 long-running, the memory set 4 -> 6. | The split is the contract; the numbers are ADR 0269's. | 0269, 0222, 0244 |
+| **D2376** | Run 5 item 3: *"a healthcheck asserting the mode through the admin console as `pgbouncer`'s does"*. | `pgbouncer`'s check logs in to the admin console with `pgbouncer_admin_password` from a mounted secret. A customer pooler holds no secret of any kind (ADR 0269): an admin credential at the public door is the thing the ADR forbids. | **The admin console as `pgbouncer` over the Unix socket in `/tmp`, from the daemon's own uid, no password, no `admin_users`** (rig 5a; TCP and another uid refused). The check reads `pool_mode` AND `auth_file` out of the running daemon, then `test -r` the userlist -- red when the bind is absent (proved: a pooler with no bind answers its console and is unhealthy). It proves no customer can log in; `test_customer_poolers` proves that. | The check without the credential, measured. | 0269 |
+| **D2377** | Run 5 item 4: `_endpoint_labels` writes `apg.traefik.scope` and `traefik.docker.network` with the routers, and `tls.domains[0]` *"on `customer-pool`"*. | Every routed service carries the scope and network labels STATICALLY in `compose.yaml` (postgrest's, D186) and the override writes only routers. ADR 0268 item 4 and rig 39b: BOTH routers named the resolver and the same `main`/`sans`, and that produced the one certificate. | **Scope, project key, environment and network are `compose.yaml` labels on both poolers; the override's `_customer_tcp_labels` writes the TCP router, its service port 6432, `tls.options=postgres@file`, the resolver and the SAME domain pair on BOTH routers** -- the measured shape, not the plan's one-router sentence. No HTTP router (39b needed no fallback). | The tree's pattern and the rig's measured shape. | 0268 |
+| **D2378** | Run 5 item 5: *"a deploy step 6f runs it for an enabled project after bootstrap"*. | The poolers were in no deferral set, so step 5 would start them -- routed at the edge before 6b, against §4.1's "the route is added last" -- and 6f directly after 6 would signal poolers whose role had just become LOGIN. A bind source that does not exist is created by Docker as a directory (D463). | **The poolers join `POST_BOOTSTRAP_SERVICES`** (they log in upstream as roles the bootstrap makes LOGIN; deferring them where they do not run holds back nothing); **step 4 creates `customer-poolers/` (0750 root:70) and an EMPTY userlist per door, never overwriting**; **6f runs after 6b and before 6c**, with the RENDERED document (D465). **Residual, named**: the mount digest (ADR 0155) covers the directory's bytes, so the first deploy after a rotation recreates both poolers once. | Ordering by the reasons the deploy already writes down. | 0269, 0063, 0133 |
+| **D2379** | Run 5 item 5's exits *"0 / 3 / 6"*, and *"the poolers by their derived container names"*. | No container name for a pooler is derived anywhere; `postgres_container` is `compose_name("apg-<key>-postgres-1")` because `container_name:` is forbidden in the model. A document below outputs 22 (the deployed 1.16.0 documents) has no `database.public`. | **`naming.customer_pooler_containers(key)`** by the same rule. A document without the facility is **exit 0, "nothing to sync"**, nothing read; a cluster that cannot be read is 6 with NOTHING written; written but a pooler not signalled is **6 naming which pooler still serves its previous list**, never 0. A non-SCRAM stored value or a missing role is 6. | ADR 0195: the third outcome reported. | 0269, 0195 |
+| **D2380** | Run 5 item 4: the labels' hosts and router names. | Compose cannot interpolate a label KEY (ADR 0013), so the router names must be rendered into the override, read from compose.env like every other router name (`_override_names`, `_override_control`); the SNI names are values. | **compose.env gains `CUSTOMER_POOL_ROUTER_NAME`, `CUSTOMER_DIRECT_ROUTER_NAME`, `CUSTOMER_POOL_HOST`, `CUSTOMER_DIRECT_HOST`** (with `APG_PUBLIC_ENDPOINTS` and the two `CUSTOMER_*_CONNECTIONS`), rendered for EVERY project as the control router's name is; `_override_public_endpoints` reads them. | One reader of the facility for the profile and the labels. | 0268, 0013 |
 | **D2359** | Run 1 item 6: *"a throwaway MinIO as both source and mirror (two buckets)"*. | One server holding both buckets lets rclone copy server-side (`CopyObject`), which R2→B2 never can — the measured path would not be production's. | **Two MinIO servers** (the local `quay.io/minio/minio` image), one per remote. Measured: without the flag, **50 HEAD + 50 PUT at the mirror** (+51 GET at the source, 1 at the mirror) for 50 objects; with `--s3-no-head`, **0 HEAD, 50 PUT**; **control**: `rclone size --json` of the mirror = the source's (50 objects, 441 bytes) both times. Run 2 adds the flag (D2346). | A rig that measured a different copy path would have priced the wrong request. | 0264 |
 
 ---
@@ -1062,6 +1068,50 @@ Targeted (fast): `test_bootstrap_statements`, `test_agent_plane_contract`,
 M1 `customer_admin` granted CREATE on the database; M2 the pool's userlist naming
 both roles; M3 a TCP router targeting `postgres`; M4 the budget term dropped; M5
 the bootstrap setting a customer PASSWORD; **controls** green.
+
+**Done.** 2026-10-11; the code commits and the CI verdict are recorded at the end of
+this paragraph. **Items 1-2** (commit `820a10c`): the roles' grants and `LOGIN
+CONNECTION LIMIT n` without `PASSWORD`, NOLOGIN when off; the profile's
+`CUSTOMER_CONNECTIONS` small 2/2, standard 2/2, large 5/5 summed by the budget check,
+subtracted by `connection_limits`, published as each endpoint's `connection_limit`;
+`test_customer_roles_on_a_cluster` (Docker, 10). **Item 3**: `customer-pool`
+(transaction, `customer_app` only) and `customer-direct` (session, `customer_admin`
+only) in `compose.yaml`, `profiles: [public-endpoints]`, pgbouncer's image, uid 70,
+read-only, both tmpfs, networks `internal` + `edge`, no secret, no port, no volume; the
+ini inline: `scram-sha-256`, `auth_file` on the bind, `default_pool_size` =
+`max_db_connections` = the claimant, `max_client_conn = 100` (PgBouncer's default,
+written down), `max_prepared_statements = 100`, `track_extra_parameters = search_path`,
+pgbouncer's reset query (`_always` only on the transaction door); the healthcheck by the
+Unix-socket console (D2376); resources by ADR 0222/0244's tables (D2375);
+`project-runtime.sh`'s `session_profiles` takes the rendered directory at all five call
+sites and adds `public-endpoints` iff `APG_PUBLIC_ENDPOINTS=1`. **Item 4**: the TCP
+routers on BOTH poolers (D2377), only when the facility is on, and the userlist
+directory bound read-only at `/run/apg/customer` (D2380 for the names). **Item 5**:
+`agentic_postgres.customer_credentials` (query, parse, line, rename at 0640 `root:70`,
+directory 0750) and `bin/customer-credentials.sh`/`.py sync --outputs` (D2379); the
+deploy creates the directory at step 4 and runs 6f after 6b (D2378). **New proofs**:
+`test_endpoint_routes.py` (19, offline: the exact label sets, the walk that finds a TCP
+router on the two poolers and nothing else with its HTTP control, the override refusing
+a missing name, the entrypoint and TLS option read from the edge's own files, the model's
+declaration of each door, the deferral, 6f's place, the render per profile, and
+`session_profiles` EXECUTED from the script); `test_customer_poolers.py` (module, the
+verb in process -- never prints a verifier, 6 when unsignalled or unreadable, 0 when off,
+3 when not root -- and, against the locked cluster and PgBouncer with each pooler started
+from `compose.yaml`'s own entrypoint and healthcheck: one role per door, an empty list
+admitting nobody, the daemon's own `pool_mode`/`max_db_connections` 2/`search_path`, a
+rotation reaching the RUNNING poolers by rename + SIGHUP with the old credential working
+until the signal as the control, and the healthcheck red without the bind). The rig
+writes as a non-root user and opens the modes for uid 70; the product's modes are the
+module tests'. **Targeted, once** (20 modules: the plan's eleven plus the resource, override,
+deploy, mount-digest, registry, module-shape, printed-command, output-schema and secret
+guards): first pass 9 failures -- the CLI lists (the command `git add`ed first, D1188),
+the stale `fixture-alpine-dev` render (re-rendered; `fixture-control-dev` removed), the
+process-limit pins (D2375) -- and one in the new module (the edge's dynamic file is a
+template, now read through `_render_dynamic`); final: **1440 passed, 0 skipped**. Derived
+documents: no drift. **Battery 5/5 KILLED** with controls (M1 `customer_admin` granted
+CREATE on the database, M2 a door's userlist naming both roles, M3 a TCP router on
+`postgres`, M4 the budget terms dropped, M5 a customer `PASSWORD` in the bootstrap),
+restored and `cmp`-equal (`~/s39/run5/battery.sh`, `mutations.py`).
 
 ### Run 6 — the control plane: `0005`, the routes, `credential.rotate`, the snippets
 

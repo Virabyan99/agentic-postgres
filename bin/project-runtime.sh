@@ -97,12 +97,22 @@ USAGE
 # session-3 project runs the session-2 services too; `migration` is deliberately
 # absent, because dbmate is a one-shot the migration plane runs, not a service
 # `up` starts.
+#
+# Session 39 (ADR 0268, D2344): plus `public-endpoints` -- a FACILITY profile,
+# not a session one -- exactly when the rendered compose.env says the project
+# has public endpoints (`APG_PUBLIC_ENDPOINTS=1`, written by the render from the
+# manifest). A session profile is about WHEN a service exists; this one is about
+# WHICH project has it: a slot starts its two customer poolers, alpha, beta and
+# the control project start none.
 session_profiles() {
-  local session="$1" n
+  local session="$1" rendered="$2" n
   local -a profiles=()
   for n in $(seq 2 "${session}"); do
     profiles+=(--profile "session${n}")
   done
+  if grep -qx 'APG_PUBLIC_ENDPOINTS=1' "${rendered}/compose.env" 2>/dev/null; then
+    profiles+=(--profile public-endpoints)
+  fi
   printf '%s\n' "${profiles[@]}"
 }
 
@@ -276,7 +286,7 @@ main() {
       # this near-free when nothing changed, and a release is meant to be what
       # is actually running.
       local -a profiles=()
-      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}")
+      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}" "${rendered}")
 
       # Filtered here, in the parent, so HELD_BACK is in scope below. See
       # model_services for what putting it in the function cost.
@@ -350,7 +360,7 @@ main() {
         || die 8 "the mount digests could not be rendered for ${PROJECT_KEY}."
 
       local -a profiles=()
-      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}")
+      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}" "${rendered}")
 
       "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" up -d --build --wait \
         || die 9 "the deferred services did not become healthy."
@@ -373,7 +383,7 @@ main() {
       # No -v. The Postgres volume outlives the project by design; removing it
       # here would make `systemctl restart` a data-loss command.
       local -a profiles=()
-      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}")
+      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}" "${rendered}")
 
       "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" down \
         || die 9 "the project did not stop cleanly."
@@ -393,7 +403,7 @@ main() {
         || die 9 "could not detach the edge; refusing to stop underneath it."
 
       local -a profiles=()
-      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}")
+      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}" "${rendered}")
 
       "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" stop \
         || die 9 "the project did not stop cleanly."
@@ -411,7 +421,7 @@ main() {
       rendered="$(resolved_directory "${PROJECT_RENDERED_ROOT}/${PROJECT_KEY}" "rendered output")"
 
       local -a profiles=()
-      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}")
+      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}" "${rendered}")
 
       "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" \
         start --wait --wait-timeout 120 \

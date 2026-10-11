@@ -24,7 +24,13 @@ from typing import Any
 
 import yaml
 
-from agentic_postgres.naming import CONTROL_PATH_SUFFIX, HEALTH_ROUTE_PATH
+from agentic_postgres.host_config import EDGE_POSTGRES_ENTRYPOINT
+from agentic_postgres.naming import (
+    CONTROL_PATH_SUFFIX,
+    CUSTOMER_DIRECT_SERVICE,
+    CUSTOMER_POOL_SERVICE,
+    HEALTH_ROUTE_PATH,
+)
 
 #: The two services Session 4 publishes on host loopback, and the ports they
 #: listen on *inside* the container. The pooler's is the 6432 convention rather
@@ -33,6 +39,27 @@ from agentic_postgres.naming import CONTROL_PATH_SUFFIX, HEALTH_ROUTE_PATH
 #: would map a host port onto nothing.
 POOLER_SERVICE = "pgbouncer"
 POOLER_SERVICE_PORT = 6432
+
+#: Session 39 (ADR 0268, ADR 0269). The customer poolers listen where
+#: `pgbouncer` does; the edge's TCP routers reach them on `edge`.
+CUSTOMER_POOLER_PORT = 6432
+#: The directory `bin/customer-credentials.sh sync` writes the two userlists
+#: into, under the project's root-owned state directory, and where the poolers
+#: see it. A DIRECTORY bind, read-only: rig 5a measured that a directory bind
+#: sees a renamed file after SIGHUP, while a FILE bind keeps serving the inode it
+#: was created with -- so a rotation by rename would never reach a file bind.
+CUSTOMER_USERLIST_DIRNAME = "customer-poolers"
+CUSTOMER_USERLIST_MOUNT = "/run/apg/customer"
+#: The userlist each pooler reads, by service. One role per file (ADR 0269
+#: item 3): the pool's names `customer_app` only, the direct door's
+#: `customer_admin` only, so neither door admits the other's role.
+CUSTOMER_USERLISTS: dict[str, str] = {
+    CUSTOMER_POOL_SERVICE: "pool.userlist",
+    CUSTOMER_DIRECT_SERVICE: "direct.userlist",
+}
+#: The Traefik TLS option every customer router names (ADR 0268, Run 4's
+#: `infra/edge/dynamic/baseline.yaml`): TLS 1.2+, SNI strict, ALPN postgresql.
+CUSTOMER_TLS_OPTION = "postgres@file"
 DATABASE_SERVICE = "postgres"
 DATABASE_SERVICE_PORT = 5432
 
@@ -176,7 +203,19 @@ MCP_SERVICE_PORT = 8080
 #: database identity, this tuple is the first thing that has to move -- and the
 #: reason it would have to is written here, where somebody adding one is
 #: already standing.
-POST_BOOTSTRAP_SERVICES: tuple[str, ...] = (REST_SERVICE, AUTH_SERVICE, STORAGE_SERVICE)
+#:
+#: Session 39 (ADR 0269): the two customer poolers too. They log in upstream as
+#: `customer_app` / `customer_admin`, which the bootstrap makes LOGIN; and held
+#: back to 6b, their TCP routes appear with the rest, last (§4.1). A project
+#: without public endpoints does not run them, so deferring them holds back
+#: nothing there (`project-runtime.sh`'s HELD_BACK).
+POST_BOOTSTRAP_SERVICES: tuple[str, ...] = (
+    REST_SERVICE,
+    AUTH_SERVICE,
+    STORAGE_SERVICE,
+    CUSTOMER_POOL_SERVICE,
+    CUSTOMER_DIRECT_SERVICE,
+)
 
 #: Services that cannot start until the deploy has WRITTEN the files they mount
 #: (ADR 0133).
@@ -609,6 +648,16 @@ def build_override(
     #: Defaulted off, so a project with no set gets exactly the override it got
     #: before ADR 0206.
     project_migrations: bool = False,
+    #: Session 39 (ADR 0268). Does the manifest enable public endpoints? Read
+    #: from the rendered `APG_PUBLIC_ENDPOINTS`, never sniffed. Off -- every
+    #: project but a slot -- the override names neither customer pooler, so
+    #: alpha's, beta's and the control project's documents are unchanged.
+    public_endpoints: bool = False,
+    customer_pool_router_name: str = "",
+    customer_direct_router_name: str = "",
+    #: The host directory the two userlists live in (absolute), derived by the
+    #: deploy from the project's state root, never typed.
+    customer_userlist_directory: str = "",
 ) -> dict[str, Any]:
     """Build the override document for one project's health route and migrations.
 
@@ -673,6 +722,14 @@ def build_override(
         raise ValueError("https_entrypoint is required")
     if not rendered_directory or not rendered_directory.startswith("/"):
         raise ValueError("rendered_directory must be an absolute path")
+    if public_endpoints:
+        if not (customer_pool_router_name and customer_direct_router_name):
+            raise ValueError(
+                "customer_pool_router_name and customer_direct_router_name are "
+                "required for public endpoints"
+            )
+        if not customer_userlist_directory.startswith("/"):
+            raise ValueError("customer_userlist_directory must be an absolute path")
 
     router = f"traefik.http.routers.{router_name}"
     service = f"traefik.http.services.{router_name}"
@@ -955,7 +1012,67 @@ def build_override(
                     f"{rendered_directory}/{MCP_LOCK_FILENAME}:{MCP_LOCK_CONTAINER_PATH}:ro",
                 ],
             },
+            # Session 39 (ADR 0268, ADR 0269). The customer's two doors: a TCP
+            # router each on the edge's `postgres` entrypoint, chosen by SNI,
+            # and the read-only userlist directory. Only when the facility is
+            # on; the services are `profiles: [public-endpoints]`, so a project
+            # without it neither starts them nor names them here.
+            **(
+                _customer_pooler_services(
+                    pool_router_name=customer_pool_router_name,
+                    direct_router_name=customer_direct_router_name,
+                    userlist_directory=customer_userlist_directory,
+                )
+                if public_endpoints
+                else {}
+            ),
         }
+    }
+
+
+def _customer_tcp_labels(router_name: str, host_key: str) -> dict[str, str]:
+    """One customer pooler's TCP router (ADR 0268 items 1-4).
+
+    `HostSNI` on the door's own name, interpolated from the rendered compose.env
+    (a value, so ADR 0013 lets Compose fill it; the router NAME is a key and is
+    rendered). TLS terminates at the edge with the `postgres` option -- the
+    PgBouncer behind it speaks plaintext on `edge`, as every routed service does.
+
+    **Both routers name the resolver and the SAME domain pair**, `main` the pool
+    host and `sans` the direct host: rig 39b measured that this yields ONE
+    certificate naming both (`... for domain [pool.a.test direct.a.test]`),
+    served on both SNIs, by the edge's existing HTTP-01 resolver. No HTTP router
+    was needed for the challenge.
+    """
+    router = f"traefik.tcp.routers.{router_name}"
+    service = f"traefik.tcp.services.{router_name}"
+    return {
+        "traefik.enable": "true",
+        f"{router}.entrypoints": EDGE_POSTGRES_ENTRYPOINT,
+        f"{router}.rule": f"HostSNI(`${{{host_key}:?required}}`)",
+        f"{router}.tls.options": CUSTOMER_TLS_OPTION,
+        f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
+        f"{router}.tls.domains[0].main": "${CUSTOMER_POOL_HOST:?required}",
+        f"{router}.tls.domains[0].sans": "${CUSTOMER_DIRECT_HOST:?required}",
+        f"{router}.service": router_name,
+        f"{service}.loadbalancer.server.port": str(CUSTOMER_POOLER_PORT),
+    }
+
+
+def _customer_pooler_services(
+    *, pool_router_name: str, direct_router_name: str, userlist_directory: str
+) -> dict[str, Any]:
+    """The two customer poolers' override entries: labels and the userlist bind."""
+    volume = f"{userlist_directory}:{CUSTOMER_USERLIST_MOUNT}:ro"
+    return {
+        CUSTOMER_POOL_SERVICE: {
+            "labels": _customer_tcp_labels(pool_router_name, "CUSTOMER_POOL_HOST"),
+            "volumes": [volume],
+        },
+        CUSTOMER_DIRECT_SERVICE: {
+            "labels": _customer_tcp_labels(direct_router_name, "CUSTOMER_DIRECT_HOST"),
+            "volumes": [volume],
+        },
     }
 
 
@@ -1695,6 +1812,10 @@ def render_override(
     control_router_name: str = "",
     control_stripprefix_middleware_name: str = "",
     project_migrations: bool = False,
+    public_endpoints: bool = False,
+    customer_pool_router_name: str = "",
+    customer_direct_router_name: str = "",
+    customer_userlist_directory: str = "",
 ) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
     document = build_override(
@@ -1724,6 +1845,10 @@ def render_override(
         control=control,
         control_router_name=control_router_name,
         control_stripprefix_middleware_name=control_stripprefix_middleware_name,
+        public_endpoints=public_endpoints,
+        customer_pool_router_name=customer_pool_router_name,
+        customer_direct_router_name=customer_direct_router_name,
+        customer_userlist_directory=customer_userlist_directory,
     )
     header = (
         "# Generated from host.yaml and the rendered compose.env by ./deploy.sh.\n"

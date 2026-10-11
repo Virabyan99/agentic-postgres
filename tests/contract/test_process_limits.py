@@ -32,7 +32,8 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 COMPOSE = REPO_ROOT / "compose.yaml"
 
-#: The nine that run for as long as the project does. Spelled here so that the
+#: The eleven that run for as long as the project does (nine until Session
+#: 39 added the two customer poolers, ADR 0269). Spelled here so that the
 #: walk below has something to compare against -- and derived from
 #: `config.SERVICE_RESOURCE_DEFAULTS` rather than retyped, so the two cannot
 #: disagree about which services are which.
@@ -51,7 +52,8 @@ def test_every_service_carries_a_pids_limit(model: dict) -> None:
     nothing this product does until this holds.
     """
     services = model["services"]
-    assert len(services) == 20, f"the service count moved to {len(services)}; check the split"
+    # 22 since Session 39: `customer-pool` and `customer-direct` (ADR 0269).
+    assert len(services) == 22, f"the service count moved to {len(services)}; check the split"
 
     without = sorted(name for name, service in services.items() if "pids_limit" not in service)
     assert not without, f"these services are unbounded in processes: {without}"
@@ -86,7 +88,7 @@ def test_the_nine_take_theirs_from_the_environment_and_the_eleven_the_literal(
                 wrong.append(f"{name}: short-lived but carries a cpus cap")
     assert not wrong, wrong
 
-    assert len(LONG_RUNNING) == 9
+    assert len(LONG_RUNNING) == 11
     assert len(services) - len(LONG_RUNNING) == 11
 
 
@@ -96,7 +98,10 @@ def test_every_interpolation_is_required_and_named_for_its_service(model: dict) 
     would leave the service unbounded and the file looking bounded."""
     for name in sorted(LONG_RUNNING):
         service = model["services"][name]
-        upper = name.upper()
+        # A service name's hyphen is a variable's underscore (ADR 0269):
+        # `customer-pool` -> `CUSTOMER_POOL_PIDS_LIMIT`, as `edge-probe`'s
+        # memory key has always been spelled.
+        upper = name.upper().replace("-", "_")
         assert service["pids_limit"] == f"${{{upper}_PIDS_LIMIT:?required}}"
         assert service["cpus"] == f"${{{upper}_CPUS:?required}}"
 
@@ -109,13 +114,13 @@ def test_every_key_the_compose_file_interpolates_is_in_the_env_keys() -> None:
     fails the deploy, on the host, at the moment Compose is asked to start.
     """
     for name in sorted(LONG_RUNNING):
-        upper = name.upper()
+        upper = name.upper().replace("-", "_")
         assert f"{upper}_PIDS_LIMIT" in rendering.COMPOSE_ENV_KEYS
         assert f"{upper}_CPUS" in rendering.COMPOSE_ENV_KEYS
 
-    assert set(rendering.SERVICE_RESOURCE_ORDER) == {n.upper() for n in LONG_RUNNING}, (
-        "the render order and the defaults table name different services"
-    )
+    assert set(rendering.SERVICE_RESOURCE_ORDER) == {
+        n.upper().replace("-", "_") for n in LONG_RUNNING
+    }, "the render order and the defaults table name different services"
 
 
 def test_every_default_is_a_power_of_two_at_least_sixty_four() -> None:
@@ -233,7 +238,16 @@ def test_the_four_new_memory_limits_are_rendered_from_config(model: dict) -> Non
     is in `COMPOSE_ENV_KEYS`, and an in-process render writes `<n>m`."""
     from agentic_postgres import naming
 
-    assert set(config.SERVICE_MEMORY_LIMITS_MB) == {"pgbouncer", "postgrest", "docs", "edge-probe"}
+    # The four of ADR 0244 and, since Session 39, the two customer poolers by
+    # the same rule (ADR 0269).
+    assert set(config.SERVICE_MEMORY_LIMITS_MB) == {
+        "pgbouncer",
+        "postgrest",
+        "docs",
+        "edge-probe",
+        "customer-pool",
+        "customer-direct",
+    }
     identity = naming.derive(
         slug="alpha",
         environment="dev",

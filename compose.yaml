@@ -699,6 +699,208 @@ services:
     networks:
       - internal
 
+  # Session 39 (ADR 0268, ADR 0269): the CUSTOMER's doors. Two PgBouncers from
+  # the platform's own pooler image, behind the edge's `postgres` entrypoint:
+  # `customer-pool` (transaction mode, `pool.<domain>`, `customer_app` only)
+  # and `customer-direct` (session mode, `direct.<domain>`, `customer_admin`
+  # only). `profiles: [public-endpoints]`, a FACILITY profile that
+  # `project-runtime.sh` adds only when the render says `APG_PUBLIC_ENDPOINTS=1`
+  # (D2344): a slot starts them, alpha, beta and the control project never do.
+  #
+  # WHAT IS DIFFERENT FROM `pgbouncer`, and why each difference is the point:
+  #
+  #   * NO SECRET IS MOUNTED. The userlist holds SCRAM verifiers read from
+  #     `pg_authid` by `bin/customer-credentials.sh sync` (root), not a
+  #     password -- ADR 0269 rig 39c: a verifier-only userlist authenticates the
+  #     client AND logs in upstream with the client's own keys. The file arrives
+  #     by a READ-ONLY bind of the DIRECTORY `/etc/agentic-postgres/projects/
+  #     <key>/customer-poolers/`, written into the root-owned runtime override,
+  #     never here: rig 5a measured that a directory bind sees a renamed file
+  #     after SIGHUP and a FILE bind keeps serving the old inode. Without the
+  #     override (a render, `compose config`) the file is absent and the
+  #     healthcheck below says so.
+  #   * NO ADMIN USER, NO ADMIN PASSWORD. The healthcheck reaches the admin
+  #     console as `pgbouncer` over the Unix socket in `/tmp` from the daemon's
+  #     own uid, which PgBouncer admits with no password and no `admin_users`
+  #     (rig 5a: the same login over TCP, or from another uid, is refused). A
+  #     customer door that held a platform credential would be the one thing
+  #     ADR 0269 forbids.
+  #   * `max_db_connections` = `default_pool_size` = the door's claimant
+  #     (`CUSTOMER_*_CONNECTIONS`, the profile's number, which is also the
+  #     role's CONNECTION LIMIT and a summand of the connection budget).
+  #   * `track_extra_parameters = search_path` (ADR 0268 rig 39c: Prisma's
+  #     `schema=` fails without it in transaction mode).
+  #   * networks `internal` (to reach the cluster) AND `edge` (to be reached by
+  #     Traefik's TCP router). The database itself stays off `edge`.
+  #
+  # Same reset query as `pgbouncer` and for the same two findings (D116,
+  # D117); `server_reset_query_always` only on the transaction door, where
+  # PgBouncer would otherwise run no reset at all.
+  customer-pool:
+    pids_limit: ${CUSTOMER_POOL_PIDS_LIMIT:?required}
+    cpus: ${CUSTOMER_POOL_CPUS:?required}
+    mem_limit: ${CUSTOMER_POOL_MEMORY_LIMIT:?required}
+    image: ${PGBOUNCER_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    profiles: [public-endpoints]
+    restart: "on-failure:5"
+    # `apg.traefik.scope` and `traefik.docker.network` for postgrest's reasons
+    # (D186; two networks): the TCP router the runtime override writes is
+    # attached to nothing Traefik looks at without the first, and could pick
+    # `internal` without the second.
+    labels:
+      apg.traefik.scope: managed
+      apg.project.key: ${PROJECT_KEY:?required}
+      apg.environment: ${PROJECT_ENVIRONMENT:?required}
+      traefik.docker.network: ${EDGE_NETWORK_NAME:?required}
+    user: "70:70"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+    tmpfs:
+      - /etc/pgbouncer:rw,mode=0700,uid=70,gid=70
+      - /tmp:rw,mode=0700,uid=70,gid=70
+    environment:
+      APG_CLUSTER_HOST: ${POSTGRES_SERVICE_HOST:?required}
+      APG_DATABASE_NAME: ${POSTGRES_DATABASE_NAME:?required}
+      APG_POOL_MODE: transaction
+      APG_POOL_CONNECTIONS: ${CUSTOMER_POOL_CONNECTIONS:?required}
+      APG_AUTH_FILE: /run/apg/customer/pool.userlist
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        set -eu;
+        umask 077;
+        printf '%s\n'
+        "[databases]"
+        "$$APG_DATABASE_NAME = host=$$APG_CLUSTER_HOST port=5432 dbname=$$APG_DATABASE_NAME"
+        ""
+        "[pgbouncer]"
+        "listen_addr = 0.0.0.0"
+        "listen_port = 6432"
+        "unix_socket_dir = /tmp"
+        "auth_type = scram-sha-256"
+        "auth_file = $$APG_AUTH_FILE"
+        "pool_mode = $$APG_POOL_MODE"
+        "default_pool_size = $$APG_POOL_CONNECTIONS"
+        "max_db_connections = $$APG_POOL_CONNECTIONS"
+        "max_client_conn = 100"
+        "max_prepared_statements = 100"
+        "track_extra_parameters = search_path"
+        "server_reset_query = DISCARD PLANS; DISCARD SEQUENCES; DISCARD TEMP; RESET ALL"
+        "server_reset_query_always = 1"
+        "ignore_startup_parameters = extra_float_digits"
+        "log_connections = 1"
+        "log_disconnections = 1"
+        > /etc/pgbouncer/pgbouncer.ini;
+        exec /usr/bin/pgbouncer /etc/pgbouncer/pgbouncer.ini
+    # The daemon's own reading, as `pgbouncer`'s check reads it: the mode and
+    # the userlist path out of the running process, then the userlist readable
+    # by uid 70 -- the failure PgBouncer logs and then keeps listening through.
+    # It proves no customer can log in (a fresh slot has no credential yet);
+    # the verb that writes the credential proves that.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          psql -h /tmp -p 6432 -U pgbouncer -d pgbouncer -w -X -qtA
+          -c 'SHOW CONFIG' 2>/dev/null
+          | awk -F'|' -v mode="$$APG_POOL_MODE" -v file="$$APG_AUTH_FILE" '
+              $$1 == "pool_mode" && $$2 == mode { m = 1 }
+              $$1 == "auth_file" && $$2 == file { f = 1 }
+              END { exit !(m && f) }' && test -r "$$APG_AUTH_FILE"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - internal
+      - edge
+
+  customer-direct:
+    pids_limit: ${CUSTOMER_DIRECT_PIDS_LIMIT:?required}
+    cpus: ${CUSTOMER_DIRECT_CPUS:?required}
+    mem_limit: ${CUSTOMER_DIRECT_MEMORY_LIMIT:?required}
+    image: ${PGBOUNCER_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    profiles: [public-endpoints]
+    restart: "on-failure:5"
+    # `apg.traefik.scope` and `traefik.docker.network` for postgrest's reasons
+    # (D186; two networks): the TCP router the runtime override writes is
+    # attached to nothing Traefik looks at without the first, and could pick
+    # `internal` without the second.
+    labels:
+      apg.traefik.scope: managed
+      apg.project.key: ${PROJECT_KEY:?required}
+      apg.environment: ${PROJECT_ENVIRONMENT:?required}
+      traefik.docker.network: ${EDGE_NETWORK_NAME:?required}
+    user: "70:70"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+    tmpfs:
+      - /etc/pgbouncer:rw,mode=0700,uid=70,gid=70
+      - /tmp:rw,mode=0700,uid=70,gid=70
+    environment:
+      APG_CLUSTER_HOST: ${POSTGRES_SERVICE_HOST:?required}
+      APG_DATABASE_NAME: ${POSTGRES_DATABASE_NAME:?required}
+      APG_POOL_MODE: session
+      APG_POOL_CONNECTIONS: ${CUSTOMER_DIRECT_CONNECTIONS:?required}
+      APG_AUTH_FILE: /run/apg/customer/direct.userlist
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        set -eu;
+        umask 077;
+        printf '%s\n'
+        "[databases]"
+        "$$APG_DATABASE_NAME = host=$$APG_CLUSTER_HOST port=5432 dbname=$$APG_DATABASE_NAME"
+        ""
+        "[pgbouncer]"
+        "listen_addr = 0.0.0.0"
+        "listen_port = 6432"
+        "unix_socket_dir = /tmp"
+        "auth_type = scram-sha-256"
+        "auth_file = $$APG_AUTH_FILE"
+        "pool_mode = $$APG_POOL_MODE"
+        "default_pool_size = $$APG_POOL_CONNECTIONS"
+        "max_db_connections = $$APG_POOL_CONNECTIONS"
+        "max_client_conn = 100"
+        "max_prepared_statements = 100"
+        "track_extra_parameters = search_path"
+        "server_reset_query = DISCARD PLANS; DISCARD SEQUENCES; DISCARD TEMP; RESET ALL"
+        "ignore_startup_parameters = extra_float_digits"
+        "log_connections = 1"
+        "log_disconnections = 1"
+        > /etc/pgbouncer/pgbouncer.ini;
+        exec /usr/bin/pgbouncer /etc/pgbouncer/pgbouncer.ini
+    # The daemon's own reading, as `pgbouncer`'s check reads it: the mode and
+    # the userlist path out of the running process, then the userlist readable
+    # by uid 70 -- the failure PgBouncer logs and then keeps listening through.
+    # It proves no customer can log in (a fresh slot has no credential yet);
+    # the verb that writes the credential proves that.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          psql -h /tmp -p 6432 -U pgbouncer -d pgbouncer -w -X -qtA
+          -c 'SHOW CONFIG' 2>/dev/null
+          | awk -F'|' -v mode="$$APG_POOL_MODE" -v file="$$APG_AUTH_FILE" '
+              $$1 == "pool_mode" && $$2 == mode { m = 1 }
+              $$1 == "auth_file" && $$2 == file { f = 1 }
+              END { exit !(m && f) }' && test -r "$$APG_AUTH_FILE"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - internal
+      - edge
+
   # Session 5. The REST surface.
   #
   # NO ENTRYPOINT, NO CONFIG FILE, AND NO SHELL -- and that is measured rather

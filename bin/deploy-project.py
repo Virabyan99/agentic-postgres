@@ -64,6 +64,7 @@ from agentic_postgres import (
     connector_definition,
     connector_install,
     container_exec,
+    customer_credentials,
     database_observation,
     deployed_output,
     edge_credentials,
@@ -437,6 +438,22 @@ def _override_control(compose_env: Path) -> dict[str, Any]:
         "control_stripprefix_middleware_name": _env_value(
             compose_env, "CONTROL_STRIPPREFIX_MIDDLEWARE_NAME"
         ),
+    }
+
+
+def _override_public_endpoints(compose_env: Path, key: str) -> dict[str, Any]:
+    """The public-endpoint arguments `render_override` takes (ADR 0268).
+
+    Read from the same compose.env as every other override name, so the
+    profile `project-runtime.sh` starts and the labels the override writes
+    cannot disagree: both read `APG_PUBLIC_ENDPOINTS`. The userlist directory is
+    derived from the key by the one function the sync verb also writes it from.
+    """
+    return {
+        "public_endpoints": _env_value(compose_env, "APG_PUBLIC_ENDPOINTS") == "1",
+        "customer_pool_router_name": _env_value(compose_env, "CUSTOMER_POOL_ROUTER_NAME"),
+        "customer_direct_router_name": _env_value(compose_env, "CUSTOMER_DIRECT_ROUTER_NAME"),
+        "customer_userlist_directory": str(customer_credentials.userlist_directory(key)),
     }
 
 
@@ -2274,6 +2291,7 @@ def render_runtime_only(arguments: argparse.Namespace) -> int:
     payload = runtime_override.render_override(
         **_override_names(compose_env),
         **_override_control(compose_env),
+        **_override_public_endpoints(compose_env, key),
         rest_enabled=_rest_enabled(compose_env),
         https_entrypoint=host["edge"]["https_entrypoint"],
         rendered_directory=str(rendered_directory),
@@ -2460,6 +2478,7 @@ def main(argv: list[str] | None = None) -> int:
     override_payload = runtime_override.render_override(
         **_override_names(rendered_dir / "compose.env"),
         **_override_control(rendered_dir / "compose.env"),
+        **_override_public_endpoints(rendered_dir / "compose.env", key),
         rest_enabled=_rest_enabled(rendered_dir / "compose.env"),
         https_entrypoint=host["edge"]["https_entrypoint"],
         # The installed path, not the checkout's. The override is written into
@@ -2474,6 +2493,19 @@ def main(argv: list[str] | None = None) -> int:
         rendered_dir, deployed_output.rendered_path(key), override_payload
     )
     print(f"  {rendered_directory}")
+
+    # Session 39 (ADR 0269). The customer poolers' userlist directory is a bind
+    # SOURCE, so it exists before anything is started -- or Docker creates it as
+    # an empty root directory and the pooler opens nothing (D463). Created with
+    # an EMPTY userlist per pooler and never overwritten here: step 6f writes
+    # the verifiers once the bootstrap has run.
+    public_endpoints = _env_value(rendered_dir / "compose.env", "APG_PUBLIC_ENDPOINTS") == "1"
+    if public_endpoints:
+        userlists = customer_credentials.userlist_directory(key)
+        customer_credentials.ensure_directory(userlists)
+        for filename in runtime_override.CUSTOMER_USERLISTS.values():
+            customer_credentials.ensure_userlist(userlists, filename)
+        print(f"  {userlists}")
 
     step("5. Start the data plane, holding back what the bootstrap must precede")
     # From the release, not the checkout. Compose records its project directory
@@ -2747,6 +2779,27 @@ def main(argv: list[str] | None = None) -> int:
     if resumed.returncode != 0:
         fail(EXIT_VALIDATION, f"the deferred services did not start:\n{resumed.stderr}")
     edge["project_network_attached"] = True
+
+    # Session 39 (ADR 0269 item 5). After 6b, because the poolers are
+    # POST_BOOTSTRAP services and are only now running to be told; after 6,
+    # because the verifiers are the cluster's. The rendered document, for
+    # D465's reason (the deployed one is the previous deploy's). A restore or a
+    # branch carries `pg_authid`, so a redeploy after either re-derives the
+    # lists from the data rather than from anything the host kept.
+    if public_endpoints and arguments.through_session >= 3:
+        step("6f. Write the customer poolers' userlists from the cluster")
+        synced = run(
+            str(release / "bin" / "customer-credentials.sh"),
+            "sync",
+            "--outputs",
+            str(deployed_output.rendered_path(key) / "outputs.json"),
+        )
+        print(synced.stdout, end="")
+        if synced.returncode != 0:
+            fail(
+                EXIT_VALIDATION,
+                f"the customer poolers' userlists could not be written:\n{synced.stderr}",
+            )
 
     # ------------------------------------------------------------------
     # Step 6c -- the repository (Session 10 Run 6, ADR 0149)

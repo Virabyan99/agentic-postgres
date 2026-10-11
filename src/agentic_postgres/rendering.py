@@ -700,6 +700,11 @@ SERVICE_RESOURCE_ORDER: tuple[str, ...] = (
     "AUTH",
     "STORAGE",
     "MCP",
+    # Session 39 (ADR 0269). A service name's hyphen is a Compose variable's
+    # underscore: `customer-pool` -> `CUSTOMER_POOL_PIDS_LIMIT`, the spelling
+    # `SERVICE_MEMORY_LIMITS_MB` already uses for `edge-probe`.
+    "CUSTOMER_POOL",
+    "CUSTOMER_DIRECT",
 )
 
 #: be here. ``host.yaml`` is not one of the digested render inputs, so a
@@ -724,6 +729,24 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "POSTGREST_MEMORY_LIMIT",
     "DOCS_MEMORY_LIMIT",
     "EDGE_PROBE_MEMORY_LIMIT",
+    # Session 39 (ADR 0268, ADR 0269). The customer poolers: their memory caps,
+    # whether the project starts them (`project-runtime.sh` reads
+    # APG_PUBLIC_ENDPOINTS to add the `public-endpoints` profile, D2344), and
+    # each pooler's claimant. Rendered for every project, for D178's reason:
+    # Compose resolves every service's interpolations, started or not.
+    "CUSTOMER_POOL_MEMORY_LIMIT",
+    "CUSTOMER_DIRECT_MEMORY_LIMIT",
+    "APG_PUBLIC_ENDPOINTS",
+    "CUSTOMER_POOL_CONNECTIONS",
+    "CUSTOMER_DIRECT_CONNECTIONS",
+    # The customer routers' names (rendered into label KEYS by the runtime
+    # override, ADR 0013) and the two SNI names their rules and the one
+    # certificate read (values, interpolated). Rendered for every project, as
+    # the control router's name is; only a slot's override reads them.
+    "CUSTOMER_POOL_ROUTER_NAME",
+    "CUSTOMER_DIRECT_ROUTER_NAME",
+    "CUSTOMER_POOL_HOST",
+    "CUSTOMER_DIRECT_HOST",
     "COMPOSE_PROJECT_NAME",
     "EDGE_NETWORK_NAME",
     "INTERNAL_NETWORK_NAME",
@@ -1857,6 +1880,10 @@ def build_compose_env(
     directly and a manifest missing one raises here rather than rendering an
     invented number that would look measured.
     """
+    # Session 39 (ADR 0268): read from the manifest's database block this
+    # function is handed, as `pooled_public` is; the claimants from the profile.
+    public_endpoints = config.public_endpoints_enabled({"database": database})
+    customer_claim = compute_profiles.CUSTOMER_CONNECTIONS[compute_profile]
     settings: dict[str, int] = {
         key: int(database.get(key, default)) for key, default in config.POOL_DEFAULTS.items()
     }
@@ -1921,11 +1948,11 @@ def build_compose_env(
         # defaults, member by member -- `small` moves postgres's cpus and
         # nothing else; `standard` and `large` move none.
         **{
-            f"{service}_PIDS_LIMIT": str(resources[service.lower()]["pids_limit"])
+            f"{service}_PIDS_LIMIT": str(resources[service.lower().replace("_", "-")]["pids_limit"])
             for service in SERVICE_RESOURCE_ORDER
         },
         **{
-            f"{service}_CPUS": str(resources[service.lower()]["cpus"])
+            f"{service}_CPUS": str(resources[service.lower().replace("_", "-")]["cpus"])
             for service in SERVICE_RESOURCE_ORDER
         },
         # Session 35 (ADR 0244). Lowercase `m`, Docker's byte suffix, as
@@ -1935,6 +1962,17 @@ def build_compose_env(
             "{}_MEMORY_LIMIT".format(service.upper().replace("-", "_")): f"{limit}m"
             for service, limit in config.SERVICE_MEMORY_LIMITS_MB.items()
         },
+        # Session 39 (ADR 0268/0269). `1` starts the two customer poolers; each
+        # pooler's `max_db_connections` is its door's claimant -- the profile's
+        # number even when off (the services are not started then, and a
+        # resolved model must not depend on whether they will be).
+        "APG_PUBLIC_ENDPOINTS": "1" if public_endpoints else "0",
+        "CUSTOMER_POOL_CONNECTIONS": str(customer_claim["pool"]),
+        "CUSTOMER_DIRECT_CONNECTIONS": str(customer_claim["direct"]),
+        "CUSTOMER_POOL_ROUTER_NAME": naming.customer_pool_router_name(identity.key),
+        "CUSTOMER_DIRECT_ROUTER_NAME": naming.customer_direct_router_name(identity.key),
+        "CUSTOMER_POOL_HOST": naming.endpoint_hosts(identity.domain)[0],
+        "CUSTOMER_DIRECT_HOST": naming.endpoint_hosts(identity.domain)[1],
         # Session 10's archiving four (ADR 0144).
         #
         # A project with backups disabled renders `off` and an archive command

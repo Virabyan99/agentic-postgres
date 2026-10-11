@@ -746,6 +746,12 @@ SERVICE_RESOURCE_DEFAULTS: dict[str, dict[str, int | str]] = {
     "auth": {"pids_limit": 64, "cpus": "1.0"},
     "storage": {"pids_limit": 64, "cpus": "1.0"},
     "mcp": {"pids_limit": 64, "cpus": "1.0"},
+    # Session 39 (ADR 0269, D2358): the two customer poolers, by pgbouncer's
+    # numbers -- the same image and the same daemon, with a smaller pool.
+    # Long-running, so here and not under SHORT_LIVED_PIDS_LIMIT; only a
+    # project with public endpoints starts them.
+    "customer-pool": {"pids_limit": 64, "cpus": "1.0"},
+    "customer-direct": {"pids_limit": 64, "cpus": "1.0"},
 }
 
 #: The memory cap of each long-running project service that had none (ADR
@@ -776,6 +782,11 @@ SERVICE_MEMORY_LIMITS_MB: dict[str, int] = {
     "postgrest": 128,
     "docs": 224,
     "edge-probe": 224,
+    # Session 39 (ADR 0269, D2358): the two customer poolers, by the same rule
+    # -- rig 39c read one at ~1.5 MiB after the four drivers, so the floor of 64
+    # decides. Only a project with public endpoints starts them.
+    "customer-pool": 64,
+    "customer-direct": 64,
 }
 
 #: Every short-lived service's process limit: one-shots, probes and clients.

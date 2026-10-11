@@ -557,6 +557,21 @@ def customer_direct_router_name(key: str) -> str:
     return traefik_name(f"apg-{key}-customer-direct", context="traefik_router_customer_direct")
 
 
+def customer_pooler_containers(key: str) -> tuple[str, str]:
+    """`(pool, direct)`: the two customer poolers' container names, as Compose
+    names them (`<project>-<service>-1`) -- the rule `postgres_container`
+    follows, for the reason it gives: `container_name:` is forbidden in the
+    model. `bin/customer-credentials.sh` signals these two and nothing else."""
+    return (
+        compose_name(
+            f"apg-{key}-{CUSTOMER_POOL_SERVICE}-1", context="compose_container_customer_pool"
+        ),
+        compose_name(
+            f"apg-{key}-{CUSTOMER_DIRECT_SERVICE}-1", context="compose_container_customer_direct"
+        ),
+    )
+
+
 def project_router_names(key: str) -> tuple[str, ...]:
     """Every Traefik router name this project owns, enumerated (ADR 0167).
 
