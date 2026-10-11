@@ -2557,7 +2557,8 @@
         "port",
         "user",
         "database",
-        "sslmode"
+        "sslmode",
+        "connection_limit"
       ],
       "properties": {
         "host": {
@@ -2576,6 +2577,11 @@
         },
         "sslmode": {
           "const": "verify-full"
+        },
+        "connection_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The door's claimant on `max_connections` (ADR 0269): the customer role's CONNECTION LIMIT and its pooler's max_db_connections, from the profile's CUSTOMER_CONNECTIONS. Published so the bootstrap reads the number the budget check charged."
         }
       },
       "description": "Version 22. One public name: `pool.<domain>` (customer_app, through the transaction-mode customer pooler) or `direct.<domain>` (customer_admin, through the session-mode one), on the edge's port 5432, TLS verified in full."

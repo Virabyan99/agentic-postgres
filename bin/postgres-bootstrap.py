@@ -59,6 +59,7 @@ from agentic_postgres.bootstrap_statements import (
     BACKUP_SETTINGS_ROLE,  # noqa: F401 -- re-export; same
     IDENTITY_FIELDS,
     build_statements,
+    public_endpoints,
 )
 from agentic_postgres.secrets_contract import SECRET_ROOT
 
@@ -377,6 +378,8 @@ def check_violations(container: str, database: str, document: dict[str, Any]) ->
                     f"{role} has statement_timeout '{observed}', the document says '{timeout}'"
                 )
 
+    # Session 39 (ADR 0269): the customer roles' login state and grants.
+    violations += customer_violations(container, database, document, present)
     return violations
 
 
@@ -423,6 +426,116 @@ def apply_connection_limit(container: str, database: str, role: str, limit: int)
     """
     statement = f"ALTER ROLE {migrations.quote_identifier(role)} CONNECTION LIMIT {int(limit)};"
     psql(container, database, statement)
+
+
+#: The two customer roles, by suffix (ADR 0269), in the order the doors are named:
+#: `customer_app` behind `pool.<domain>`, `customer_admin` behind `direct.<domain>`.
+CUSTOMER_ROLES = ("customer_app", "customer_admin")
+
+
+def customer_limits(document: dict[str, Any]) -> dict[str, int]:
+    """Each customer role's CONNECTION LIMIT, read from the document's endpoints
+    (the render published the profile's claimants there); empty without public
+    endpoints. The bootstrap reads one document (D102) -- it never re-derives."""
+    public = public_endpoints(document)
+    if not public["enabled"]:
+        return {}
+    return {
+        "customer_app": int(public["pooled"]["connection_limit"]),
+        "customer_admin": int(public["direct"]["connection_limit"]),
+    }
+
+
+def activate_customer_roles(
+    container: str, database: str, roles: dict[str, str], limits: dict[str, int]
+) -> None:
+    """LOGIN with its limit for each customer role the document gives a limit,
+    NOLOGIN for each it does not. **No PASSWORD clause, ever** -- without a
+    verifier a LOGIN role authenticates against nothing, and the verifier is the
+    customer's (`credential.rotate`), which a redeploy must not touch."""
+    for suffix in CUSTOMER_ROLES:
+        if suffix not in roles:
+            continue  # a document older than outputs 22 names no customer role
+        role = migrations.quote_identifier(roles[suffix])
+        if suffix in limits:
+            statement = f"ALTER ROLE {role} LOGIN CONNECTION LIMIT {int(limits[suffix])};"
+        else:
+            statement = f"ALTER ROLE {role} NOLOGIN;"
+        psql(container, database, statement)
+    if limits:
+        shown = ", ".join(f"{suffix} {limit}" for suffix, limit in limits.items())
+        print(f"  customer roles LOGIN, CONNECTION LIMIT {shown}; no password set here")
+    else:
+        print("  customer roles NOLOGIN: this project has no public endpoints")
+
+
+def customer_violations(
+    container: str, database: str, document: dict[str, Any], present: set[str]
+) -> list[str]:
+    """The customer roles as the catalog holds them (ADR 0269, D2332), read back
+    rather than trusted. Without public endpoints: NOLOGIN. With them: LOGIN at
+    the document's limit, CONNECT, the `public` grants exactly (CREATE for the
+    admin only), `extensions` USAGE -- and NOTHING on `app`, `api` or
+    `app_private`, no CREATE or TEMPORARY on the database. Guarded by existence:
+    a schema not yet created (a fresh cluster before its migrations) is skipped,
+    and a missing role is the role check's violation, not this one's."""
+    roles = document["database"]["roles"]
+    name = document["database"]["name"]
+    literal = migrations.quote_literal
+    limits = customer_limits(document)
+    violations: list[str] = []
+    schemas = set(
+        query(
+            container,
+            database,
+            "SELECT nspname FROM pg_namespace WHERE nspname IN "
+            "('public', 'extensions', 'app', 'api', 'app_private');",
+        ).splitlines()
+    )
+    for suffix in CUSTOMER_ROLES:
+        role = roles.get(suffix)
+        if role is None or role not in present:
+            continue
+        login = query(
+            container,
+            database,
+            f"SELECT rolcanlogin::text || ' ' || rolconnlimit::text FROM pg_roles "  # noqa: S608
+            f"WHERE rolname = {literal(role)};",
+        )
+        if suffix not in limits:
+            if not login.startswith("false"):
+                violations.append(f"{role} can log in, and this project has no public endpoints")
+            continue
+        if login != f"true {limits[suffix]}":
+            violations.append(
+                f"{role} is '{login}' (canlogin, limit); the document says 'true {limits[suffix]}'"
+            )
+        expected = {("database", "CONNECT"): True, ("database", "CREATE"): False,
+                    ("database", "TEMPORARY"): False}  # fmt: skip
+        for schema in ("public", "extensions"):
+            expected[(schema, "USAGE")] = True
+        expected[("public", "CREATE")] = suffix == "customer_admin"
+        for schema in ("app", "api", "app_private"):
+            expected[(schema, "USAGE")] = False
+            expected[(schema, "CREATE")] = False
+        for (target, privilege), wanted in expected.items():
+            if target == "database":
+                sql = (
+                    f"SELECT has_database_privilege({literal(role)}, {literal(name)}, "
+                    f"'{privilege}')::text;"
+                )
+            elif target in schemas:
+                sql = (
+                    f"SELECT has_schema_privilege({literal(role)}, {literal(target)}, "
+                    f"'{privilege}')::text;"
+                )
+            else:
+                continue
+            held = query(container, database, sql) == "true"
+            if held != wanted:
+                verb = "holds" if held else "lacks"
+                violations.append(f"{role} {verb} {privilege} on {target}")
+    return violations
 
 
 def read_secret(project_key: str, consumer: str, name: str) -> str:
@@ -491,6 +604,7 @@ def connection_limits(
     auth_budget: int,
     storage_budget: int,
     pooler_pool_size: int,
+    customer_budget: int = 0,
 ) -> tuple[int, int, int, int, int]:
     """Every ceiling, computed together (D161, ADR 0070; D327, ADR 0099).
 
@@ -539,20 +653,25 @@ def connection_limits(
     """
     backup_budget = config.BACKUP_RESERVED_CONNECTIONS
     available = maximum - reserved
+    # Session 39 (ADR 0269): the two customer poolers' claimants, the sum of the
+    # document's endpoint limits -- 0 without public endpoints. Subtracted here
+    # because `config._validate_connection_budget` charges them: a claimant in
+    # one arithmetic and not the other is D327 exactly.
     application = (
         available
         - api_budget
         - auth_budget
         - storage_budget
         - backup_budget
+        - customer_budget
         - OPERATIONAL_CONNECTION_HEADROOM
     )
     if application < 1:
         raise ValueError(
             f"max_connections={maximum} with {reserved} reserved leaves {available} usable; "
             f"the API commits {api_budget}, the auth service {auth_budget}, the storage "
-            f"service {storage_budget}, the backup identity {backup_budget}, and "
-            f"{OPERATIONAL_CONNECTION_HEADROOM} are held for "
+            f"service {storage_budget}, the backup identity {backup_budget}, the customer "
+            f"poolers {customer_budget}, and {OPERATIONAL_CONNECTION_HEADROOM} are held for "
             f"operations, so the application would be left with {application}. Raise "
             "database.max_connections or lower a pool_size; do not remove the headroom, "
             "because it is what leaves a psql available when this is wrong"
@@ -564,6 +683,7 @@ def connection_limits(
             + auth_budget
             + storage_budget
             + backup_budget
+            + customer_budget
             + OPERATIONAL_CONNECTION_HEADROOM
             + reserved
         )
@@ -970,8 +1090,15 @@ def main() -> int:
     # It is the manifest's `database.pool_size`, carried through the document
     # rather than re-read, because the bootstrap plane reads one document (D102).
     pooler_pool_size = int(document["database"]["pooler_pool_size"])
+    customer = customer_limits(document)
     runtime_limit, api_limit, auth_limit, storage_limit, backup_limit = connection_limits(
-        maximum, reserved, api_budget, auth_budget, storage_budget, pooler_pool_size
+        maximum,
+        reserved,
+        api_budget,
+        auth_budget,
+        storage_budget,
+        pooler_pool_size,
+        sum(customer.values()),
     )
 
     if app_runtime_password_available(key):
@@ -1077,6 +1204,12 @@ def main() -> int:
     # leaves it correctly privileged, so the deploy that finally carries a secret
     # activates a role that is already right rather than one that becomes right.
     activate_backup_user(container, database, key, roles["backup_user"], backup_limit)
+
+    # The customer roles (Session 39, ADR 0269). LOGIN and the door's limit when
+    # the project has public endpoints, NOLOGIN when it has not -- and never a
+    # PASSWORD: a customer's verifier is set only by `credential.rotate`, so a
+    # redeploy leaves it exactly where the customer put it (D2354).
+    activate_customer_roles(container, database, roles, customer)
 
     # Applied, then read back. The statements above returning 0 says psql
     # accepted them, which is not the same as the catalog holding what they

@@ -189,6 +189,7 @@ def test_the_public_endpoints_are_classified_by_what_they_name() -> None:
         for member in ("port", "sslmode"):
             assert classify(f"database.public.{door}.{member}") == "match", (door, member)
         assert classify(f"database.public.{door}") == "not_authority", door
+        assert classify(f"database.public.{door}.connection_limit") == "not_authority", door
         assert classify(f"database.public.{door}x") is None, f"a prefix swallowed {door}x"
     assert classify("database.public.enabled") == "not_authority"
     assert classify("database.roles.customer_app") == "differ"

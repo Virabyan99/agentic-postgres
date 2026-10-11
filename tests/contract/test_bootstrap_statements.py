@@ -800,3 +800,150 @@ def test_the_bootstrap_still_pairs_the_schema_with_the_extension(bootstrap: Any)
     source = inspect.getsource(bootstrap.build_statements)
     assert "CREATE SCHEMA IF NOT EXISTS extensions" in source
     assert "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions" in source
+
+
+# ---------------------------------------------------------------------------
+# Session 39 (ADR 0269): the customer roles
+# ---------------------------------------------------------------------------
+
+
+def with_public_endpoints(document: dict[str, Any], *, enabled: bool) -> dict[str, Any]:
+    """The fixture at outputs 22's shape for the customer roles: the two roles
+    derived from the fixture's own prefix, and `database.public` on or off."""
+    out = json.loads(json.dumps(document))
+    roles = out["database"]["roles"]
+    prefix = roles["app_runtime"].removesuffix("app_runtime")
+    roles["customer_app"] = prefix + "customer_app"
+    roles["customer_admin"] = prefix + "customer_admin"
+    if not enabled:
+        out["database"]["public"] = {"enabled": False, "pooled": None, "direct": None}
+        return out
+
+    def door(host: str, role: str, limit: int) -> dict[str, Any]:
+        return {"host": host, "port": 5432, "user": roles[role], "sslmode": "verify-full",
+                "database": out["database"]["name"], "connection_limit": limit}  # fmt: skip
+
+    out["database"]["public"] = {
+        "enabled": True,
+        "pooled": door("pool.slot.example.test", "customer_app", 2),
+        "direct": door("direct.slot.example.test", "customer_admin", 3),
+    }
+    return out
+
+
+def test_the_customer_roles_are_created_without_login(
+    bootstrap: Any, document: dict[str, Any]
+) -> None:
+    """D2354: both customer roles are created on EVERY project, NOLOGIN NOINHERIT
+    and with every attribute denied -- the role loop's uniform statements -- and
+    nothing in the statement list ever gives them LOGIN (that is the bootstrap's
+    `activate_customer_roles`, from the document's limits). Off, they get no
+    grant at all; on, exactly `customer_statements`'."""
+    for enabled in (False, True):
+        current = with_public_endpoints(document, enabled=enabled)
+        statements = bootstrap.build_statements(current, INSTANCE_UUID)
+        for suffix in ("customer_app", "customer_admin"):
+            role = current["database"]["roles"][suffix]
+            assert any(f'CREATE ROLE "{role}" NOLOGIN NOINHERIT' in s for s in statements), role
+            denied = "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+            assert f'ALTER ROLE "{role}" {denied};' in statements, role
+            assert not [s for s in statements if role in s and re.search(r"\bLOGIN\b", s)], role
+        granted = [
+            s for s in statements if "customer_" in s and s.startswith(("GRANT", "ALTER DEFAULT"))
+        ]
+        if enabled:
+            assert granted == bootstrap_statements_module().customer_statements(current)
+        else:
+            assert granted == [], granted
+
+
+def bootstrap_statements_module() -> Any:
+    from agentic_postgres import bootstrap_statements
+
+    return bootstrap_statements
+
+
+def test_no_statement_sets_a_customer_password(bootstrap: Any, document: dict[str, Any]) -> None:
+    """D2354, D2368: a customer's verifier is the customer's (`credential.rotate`),
+    so no statement the bootstrap BUILDS and no statement it ISSUES for a
+    customer role names a PASSWORD -- a redeploy cannot reset it. Read from the
+    statement list and from every statement `activate_customer_roles` issues,
+    captured, on and off -- exact, so a PASSWORD clause cannot hide in one."""
+    for enabled in (False, True):
+        current = with_public_endpoints(document, enabled=enabled)
+        for statement in bootstrap.build_statements(current, INSTANCE_UUID):
+            if "customer_" in statement:
+                assert "PASSWORD" not in statement.upper(), statement
+
+    issued: list[str] = []
+    bootstrap_psql = bootstrap.psql
+    try:
+        bootstrap.psql = lambda container, database, sql: issued.append(sql)
+        current = with_public_endpoints(document, enabled=True)
+        bootstrap.activate_customer_roles(
+            "c", "d", current["database"]["roles"], bootstrap.customer_limits(current)
+        )
+        off = with_public_endpoints(document, enabled=False)
+        bootstrap.activate_customer_roles(
+            "c", "d", off["database"]["roles"], bootstrap.customer_limits(off)
+        )
+    finally:
+        bootstrap.psql = bootstrap_psql
+    roles = current["database"]["roles"]
+    assert issued == [
+        f'ALTER ROLE "{roles["customer_app"]}" LOGIN CONNECTION LIMIT 2;',
+        f'ALTER ROLE "{roles["customer_admin"]}" LOGIN CONNECTION LIMIT 3;',
+        f'ALTER ROLE "{roles["customer_app"]}" NOLOGIN;',
+        f'ALTER ROLE "{roles["customer_admin"]}" NOLOGIN;',
+    ], issued
+
+
+def test_the_customer_grants_are_exactly_these(document: dict[str, Any]) -> None:
+    """D2332, measured in rig 39c: DDL in `public` for the admin, DML through
+    default privileges for the application role, `extensions` for pgvector's
+    types, CONNECT -- and nothing else: no grant names `app`, `api`,
+    `app_private`, CREATE or TEMPORARY on the database, or a role. Off: none."""
+    from agentic_postgres import bootstrap_statements
+
+    current = with_public_endpoints(document, enabled=True)
+    roles = current["database"]["roles"]
+    db = current["database"]["name"]
+    app, admin = f'"{roles["customer_app"]}"', f'"{roles["customer_admin"]}"'
+    assert bootstrap_statements.customer_statements(current) == [
+        f'GRANT CONNECT ON DATABASE "{db}" TO {app}, {admin};',
+        f"GRANT USAGE, CREATE ON SCHEMA public TO {admin};",
+        f"GRANT USAGE ON SCHEMA public TO {app};",
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {admin} IN SCHEMA public "
+        f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {app};",
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {admin} IN SCHEMA public "
+        f"GRANT USAGE, SELECT ON SEQUENCES TO {app};",
+        f"GRANT USAGE ON SCHEMA extensions TO {app}, {admin};",
+    ]
+    for statement in bootstrap_statements.customer_statements(current):
+        for forbidden in (" app;", " api;", "app_private", "TEMPORARY", "CREATE ON DATABASE"):
+            assert forbidden not in statement, statement
+    assert (
+        bootstrap_statements.customer_statements(with_public_endpoints(document, enabled=False))
+        == []
+    )
+    assert bootstrap_statements.customer_statements(document) == [], "an older document has a door"
+
+
+def test_the_application_gives_way_to_the_customer_claimants(
+    bootstrap: Any, document: dict[str, Any]
+) -> None:
+    """D2334: the bootstrap's division subtracts the customer claimants -- read
+    from the document's endpoints, 2 + 3 here -- exactly as the manifest check
+    charges them, and refuses when what is left cannot fill the pooler's pool.
+    Control: without public endpoints the division is what it always was."""
+    on = with_public_endpoints(document, enabled=True)
+    off = with_public_endpoints(document, enabled=False)
+    assert bootstrap.customer_limits(on) == {"customer_app": 2, "customer_admin": 3}
+    assert bootstrap.customer_limits(off) == {} == bootstrap.customer_limits(document)
+    before, *_ = bootstrap.connection_limits(56, 3, 13, 6, 6, 10)
+    after, *_ = bootstrap.connection_limits(
+        56, 3, 13, 6, 6, 10, sum(bootstrap.customer_limits(on).values())
+    )
+    assert before - after == 5
+    with pytest.raises(ValueError, match="customer poolers"):
+        bootstrap.connection_limits(56, 3, 13, 6, 6, before - 1, before)

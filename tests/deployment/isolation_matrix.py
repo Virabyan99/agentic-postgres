@@ -169,6 +169,10 @@ NOT_AUTHORITY_EXACT = (
     # and an absent door is not a shared one.
     "database.public.pooled",
     "database.public.direct",
+    # Each door's claimant (ADR 0269): a capacity figure from the profile, which
+    # two projects may share and which grants nothing.
+    "database.public.pooled.connection_limit",
+    "database.public.direct.connection_limit",
 )
 
 #: Carries no authority. Prefix rules rather than an enumeration: these grow

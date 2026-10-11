@@ -88,11 +88,12 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
 
     statements: list[str] = []
 
-    # The thirteen roles. NOLOGIN and NOINHERIT, with a null password verifier:
-    # migration_user is the only one Session 3 activates, and it is activated by
-    # the secret flow rather than here. Bootstrap clears an unexpected verifier
-    # rather than tolerating it -- a role that acquired a password outside the
-    # generation flow is a credential nobody can rotate.
+    # Every derived role, sixteen since Session 39, created NOLOGIN and NOINHERIT
+    # when absent. A role is activated later, by the secret flow (each service's
+    # password) or -- the two customer roles -- by `credential.rotate`'s
+    # verifier. This loop never sets or clears a verifier (D2368: an earlier
+    # comment here said it cleared "an unexpected" one; nothing ever did), which
+    # is what keeps a redeploy from wiping a customer's password.
     for name in roles.values():
         # S608 is suppressed here and at the sentinel INSERT below, and only
         # there. Every interpolated value is a derived identity from
@@ -409,7 +410,53 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
         f"VALUES ({identity_values}) ON CONFLICT (singleton) DO NOTHING;"
     )
     statements.append(bind_identity)
+    statements += customer_statements(document)
     return statements
+
+
+def public_endpoints(document: dict[str, Any]) -> dict[str, Any]:
+    """`database.public` (outputs 22), or no door for a document older than 22.
+
+    Every document a deploy renders carries it; an archived one (a proof's
+    version 7 fixture) does not, and reads as a project without public
+    endpoints -- which fails closed: no customer grant, both roles NOLOGIN."""
+    return document["database"].get("public") or {"enabled": False, "pooled": None, "direct": None}
+
+
+def customer_statements(document: dict[str, Any]) -> list[str]:
+    """The customer roles' grants (Session 39, ADR 0269, D2332), for a project
+    with public endpoints; none for any other -- the roles exist there NOLOGIN
+    with nothing (the role loop above creates them everywhere, D2354).
+
+    **A customer's DDL lives in `public` and nowhere else** (measured, rig 39c):
+    `customer_admin` may create there and `customer_app` reads and writes what
+    it creates through default privileges; both may use `extensions` (pgvector's
+    types). Nothing on `app`, `api` or `app_private`, no CREATE or TEMPORARY on
+    the database (so no schema and no extension), no role attribute.
+
+    **Never a PASSWORD** (D2354, D2368): a customer's verifier is set only by
+    `credential.rotate`, and nothing here or in the bootstrap may set or reset
+    it -- `test_no_statement_sets_a_customer_password` holds that. LOGIN and the
+    CONNECTION LIMIT are applied by `bin/postgres-bootstrap.py`, which reads the
+    limits from the document's endpoints.
+    """
+    if not public_endpoints(document)["enabled"]:
+        return []
+    q = migrations.quote_identifier
+    roles = document["database"]["roles"]
+    db = q(document["database"]["name"])
+    app = q(roles["customer_app"])
+    admin = q(roles["customer_admin"])
+    return [
+        f"GRANT CONNECT ON DATABASE {db} TO {app}, {admin};",
+        f"GRANT USAGE, CREATE ON SCHEMA public TO {admin};",
+        f"GRANT USAGE ON SCHEMA public TO {app};",
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {admin} IN SCHEMA public "
+        f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {app};",
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {admin} IN SCHEMA public "
+        f"GRANT USAGE, SELECT ON SEQUENCES TO {app};",
+        f"GRANT USAGE ON SCHEMA extensions TO {app}, {admin};",
+    ]
 
 
 #: Every privilege an online backup needs on PG 18, and nothing else.

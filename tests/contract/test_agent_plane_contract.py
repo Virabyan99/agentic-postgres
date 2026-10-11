@@ -292,12 +292,19 @@ def test_an_unpublished_agent_plane_names_nothing_at_all() -> None:
 #: identity is in the sum because it carries a server-enforced `CONNECTION
 #: LIMIT`; the administration reserve beside it bounds the claimants that
 #: carry none.
+#:
+#: **`customer_pool_budget` and `customer_direct_budget` joined in Session 39**
+#: (ADR 0269, D2334): the two customer poolers, each a server-enforced
+#: `CONNECTION LIMIT`, charged only for a project with public endpoints. Widened
+#: under that ADR, still an exact set -- and still no term for the agent plane.
 BUDGET_CLAIMANTS = frozenset(
     {
         "rest_budget",
         "auth_budget",
         "storage_budget",
         "database",
+        "customer_pool_budget",
+        "customer_direct_budget",
         "BACKUP_RESERVED_CONNECTIONS",
         "ADMINISTRATION_RESERVED_CONNECTIONS",
     }
@@ -378,8 +385,12 @@ def test_no_module_derives_an_mcp_connection_budget() -> None:
         for name in dir(config)
         if name.endswith("_connection_budget") and not name.startswith("_")
     )
+    # `customer_connection_budget` since Session 39 (ADR 0269): the two customer
+    # poolers, each a real claimant with a CONNECTION LIMIT -- and still none
+    # for the agent plane, which opens no pool.
     assert derivers == [
         "auth_connection_budget",
+        "customer_connection_budget",
         "postgrest_connection_budget",
         "storage_connection_budget",
     ], f"config derives {derivers}; a budget for a claimant that opens no connection is a fiction"

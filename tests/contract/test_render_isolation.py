@@ -207,13 +207,16 @@ def test_the_public_endpoints_are_derived_and_disjoint(
         domain = document["project"]["domain"]
         roles = document["database"]["roles"]
         assert public["enabled"] is True
+        # The example manifests name no profile, so `standard`'s 2/2 (D2358).
         assert public["pooled"] == {
             "host": f"pool.{domain}", "port": 5432, "user": roles["customer_app"],
             "database": document["database"]["name"], "sslmode": "verify-full",
+            "connection_limit": 2,
         }  # fmt: skip
         assert public["direct"] == {
             "host": f"direct.{domain}", "port": 5432, "user": roles["customer_admin"],
             "database": document["database"]["name"], "sslmode": "verify-full",
+            "connection_limit": 2,
         }  # fmt: skip
     a, b = public_documents
     assert {a["database"]["public"][d]["host"] for d in ("pooled", "direct")}.isdisjoint(

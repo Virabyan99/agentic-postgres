@@ -23,6 +23,7 @@ _profiles = service_source.load("compute_profiles")
 
 PROFILE_NAMES: tuple[str, ...] = _profiles.PROFILE_NAMES
 PROFILES: dict[str, dict[str, Any]] = _profiles.PROFILES
+CUSTOMER_CONNECTIONS: dict[str, dict[str, int]] = _profiles.CUSTOMER_CONNECTIONS
 RESIZE_WINDOW_SECONDS: int | None = _profiles.RESIZE_WINDOW_SECONDS
 UNMEASURED_RESIZE_MESSAGE: str = _profiles.UNMEASURED_RESIZE_MESSAGE
 resize_message = _profiles.resize_message
@@ -31,6 +32,7 @@ resize_message = _profiles.resize_message
 DEFAULT_PROFILE = "standard"
 
 __all__ = [
+    "CUSTOMER_CONNECTIONS",
     "DEFAULT_PROFILE",
     "PROFILES",
     "PROFILE_NAMES",

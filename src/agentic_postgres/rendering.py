@@ -268,20 +268,25 @@ def resolve_public_endpoints(
     if not config.public_endpoints_enabled(project):
         return {"enabled": False, "pooled": None, "direct": None}
     pool_host, direct_host = naming.endpoint_hosts(project["project"]["domain"])
+    # ADR 0269, D2334: each door's claimant -- the role's CONNECTION LIMIT and
+    # the pooler's max_db_connections -- published here so the bootstrap and
+    # the compose model read the number the budget check charged.
+    pool_limit, direct_limit = config.customer_connection_budget(project)
 
-    def endpoint(host: str, role: str) -> dict[str, Any]:
+    def endpoint(host: str, role: str, limit: int) -> dict[str, Any]:
         return {
             "host": host,
             "port": naming.PUBLIC_POSTGRES_PORT,
             "user": roles[role],
             "database": database_name,
             "sslmode": naming.PUBLIC_POSTGRES_SSLMODE,
+            "connection_limit": limit,
         }
 
     return {
         "enabled": True,
-        "pooled": endpoint(pool_host, "customer_app"),
-        "direct": endpoint(direct_host, "customer_admin"),
+        "pooled": endpoint(pool_host, "customer_app", pool_limit),
+        "direct": endpoint(direct_host, "customer_admin", direct_limit),
     }
 
 

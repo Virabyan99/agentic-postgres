@@ -1421,7 +1421,10 @@ def validate_project_semantics(
     _validate_pool(database)
     _validate_memory_budget(database)
     _validate_connection_budget(
-        api, database, {**STORAGE_DEFAULTS, **(document.get("storage") or {})}
+        api,
+        database,
+        {**STORAGE_DEFAULTS, **(document.get("storage") or {})},
+        customer_connection_budget(document),
     )
     # Unconditional, for the reason D256 recorded about the line above: the
     # renderer charges the auth service's budget whether or not it is enabled,
@@ -1560,8 +1563,24 @@ def _validate_auth_memory(api: dict[str, Any]) -> None:
         )
 
 
+def customer_connection_budget(document: dict[str, Any]) -> tuple[int, int]:
+    """`(pool, direct)`: the two customer claimants on `max_connections` (ADR
+    0269, D2334) -- the profile's `CUSTOMER_CONNECTIONS` for a project with
+    public endpoints, `(0, 0)` for every other. Each is the matching customer
+    role's `CONNECTION LIMIT` and its pooler's `max_db_connections`; the render
+    publishes them as each endpoint's `connection_limit`, so the bootstrap reads
+    the number this function charged (D102: one document)."""
+    if not public_endpoints_enabled(document):
+        return 0, 0
+    claim = compute_profiles.CUSTOMER_CONNECTIONS[compute_profile(document)]
+    return int(claim["pool"]), int(claim["direct"])
+
+
 def _validate_connection_budget(
-    api: dict[str, Any], database: dict[str, Any], storage: dict[str, Any]
+    api: dict[str, Any],
+    database: dict[str, Any],
+    storage: dict[str, Any],
+    customer: tuple[int, int] = (0, 0),
 ) -> None:
     """Every claimant on `max_connections`, summed once (ADR 0070).
 
@@ -1596,6 +1615,12 @@ def _validate_connection_budget(
     the relation `application >= database.pool_size` is checked in the plane
     that can ask the server, and what stays here is the cheaper, earlier check
     that does not need to be right about the live cluster to be useful.
+
+    **The sixth and seventh are the customer poolers** (Session 39, ADR 0269):
+    `customer` is `customer_connection_budget(document)`, `(0, 0)` without
+    public endpoints. Summed here AND subtracted by the bootstrap's division,
+    because a claimant in one arithmetic and not the other is D327 exactly.
+    `max_connections` was not raised to fit them (rig 39e fixed the numbers).
     """
     rest = {**API_REST_DEFAULTS, **(api.get("rest") or {})}
     app = {**API_APP_DEFAULTS, **(api.get("app") or {})}
@@ -1603,11 +1628,14 @@ def _validate_connection_budget(
     rest_budget = postgrest_connection_budget(rest)
     auth_budget = auth_connection_budget(app)
     storage_budget = storage_connection_budget(storage)
+    customer_pool_budget, customer_direct_budget = customer
     committed = (
         rest_budget
         + auth_budget
         + storage_budget
         + database["pool_size"]
+        + customer_pool_budget
+        + customer_direct_budget
         + BACKUP_RESERVED_CONNECTIONS
         + ADMINISTRATION_RESERVED_CONNECTIONS
     )
@@ -1619,7 +1647,9 @@ def _validate_connection_budget(
             f"api.app.pool_size ({app['pool_size']}) plus {AUTH_RESERVED_CONNECTIONS} "
             f"reserved, storage.pool_size ({storage['pool_size']}) plus "
             f"{STORAGE_RESERVED_CONNECTIONS} reserved, database.pool_size "
-            f"({database['pool_size']}), {BACKUP_RESERVED_CONNECTIONS} for the backup "
+            f"({database['pool_size']}), {customer_pool_budget} and "
+            f"{customer_direct_budget} for the two customer poolers, "
+            f"{BACKUP_RESERVED_CONNECTIONS} for the backup "
             f"identity, and {ADMINISTRATION_RESERVED_CONNECTIONS} held "
             f"for administration come to {committed}, above database.max_connections "
             f"({ceiling}). The connection that cannot be opened is the pooler's, the "

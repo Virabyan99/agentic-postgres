@@ -223,3 +223,56 @@ def test_the_resize_message_names_only_a_measured_window() -> None:
     # Control: given a window, the message carries it.
     assert "42 seconds" in compute_profiles.resize_message(42)
     assert copy.deepcopy(compute_profiles.PROFILE_NAMES) == ("small", "standard", "large")
+
+
+def test_every_profile_fits_with_the_customer_claimants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR 0269, D2334, D2358 (rig 39e). A slot's manifest -- public endpoints
+    on, `pool_size` 16 -- at every profile passes BOTH arithmetics with its two
+    customer claimants: the manifest's sum (`_validate_connection_budget`) and
+    the bootstrap's division with PostgreSQL's 3 reserved, whose remainder must
+    still fill the pooler's pool. Control: small at 3/3 -- what the plan first
+    proposed -- leaves the application 15 < 16 and the bootstrap refuses it."""
+    import importlib.util
+
+    from agentic_postgres import host_config, slot
+
+    spec = importlib.util.spec_from_file_location(
+        "pgb", REPO_ROOT / "bin" / "postgres-bootstrap.py"
+    )
+    assert spec and spec.loader
+    bootstrap = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bootstrap)
+    host = host_config.load_host_manifest(REPO_ROOT / "host.example.yaml")
+    declared = host_config.declared_slots(host)[0]
+    assert compute_profiles.CUSTOMER_CONNECTIONS == {
+        "small": {"pool": 2, "direct": 2},
+        "standard": {"pool": 2, "direct": 2},
+        "large": {"pool": 5, "direct": 5},
+    }
+
+    def division(profile: str) -> int:
+        document = slot.slot_manifest(host, declared)
+        document["compute"] = {"profile": profile}
+        manifest = config.load_project_manifest(_manifest(tmp_path, document, f"{profile}.yaml"))
+        pool, direct = config.customer_connection_budget(manifest)
+        assert (pool, direct) == tuple(compute_profiles.CUSTOMER_CONNECTIONS[profile].values())
+        database, api = manifest["database"], manifest["api"]
+        application, *_ = bootstrap.connection_limits(
+            int(database["max_connections"]),
+            3,
+            config.postgrest_connection_budget({**config.API_REST_DEFAULTS, **api["rest"]}),
+            config.auth_connection_budget({**config.API_APP_DEFAULTS, **api["app"]}),
+            config.storage_connection_budget({**config.STORAGE_DEFAULTS, **manifest["storage"]}),
+            int(database["pool_size"]),
+            pool + direct,
+        )
+        return application
+
+    for profile in compute_profiles.PROFILE_NAMES:
+        assert division(profile) >= 16, profile
+
+    monkeypatch.setitem(compute_profiles.CUSTOMER_CONNECTIONS, "small", {"pool": 3, "direct": 3})
+    with pytest.raises(ValueError, match="below the pooler's server-side pool"):
+        division("small")

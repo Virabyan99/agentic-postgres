@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
+    "CUSTOMER_CONNECTIONS",
     "PROFILES",
     "PROFILE_NAMES",
     "RESIZE_WINDOW_SECONDS",
@@ -76,6 +77,21 @@ PROFILES: dict[str, dict[str, Any]] = {
         "storage": {"memory_limit_mb": 512, "pool_size": 6},
         "resources": {},
     },
+}
+
+#: Session 39 (ADR 0269, D2358): each profile's two CUSTOMER claimants on
+#: `max_connections` -- what the transaction-mode customer pooler (`pool`,
+#: `customer_app`) and the session-mode one (`direct`, `customer_admin`) may hold
+#: on the cluster, each pooler's `max_db_connections` and each role's `CONNECTION
+#: LIMIT`. Charged only for a project with public endpoints. Beside `PROFILES`,
+#: not in it: every member of a profile there is a MANIFEST member the profile
+#: writes in, and these are not. Rig 39e, through the product's own arithmetic
+#: with the slot's pool_size 16: small and standard fit 2/2 and not 3/3 (the
+#: application's remainder would fall to 15); large fits up to 8/8.
+CUSTOMER_CONNECTIONS: dict[str, dict[str, int]] = {
+    "small": {"pool": 2, "direct": 2},
+    "standard": {"pool": 2, "direct": 2},
+    "large": {"pool": 5, "direct": 5},
 }
 
 #: The restart a resize causes, in seconds, as MEASURED on this server -- or
