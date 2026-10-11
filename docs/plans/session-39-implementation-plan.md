@@ -1001,7 +1001,9 @@ reading the edge templates, the rules or the host schema) -- 8 `test_listeners` 
 and external modules collect (63). **Battery 5/5 KILLED** with controls (M1 a sixth
 entrypoint, M2 the ALPN list emptied, M3 the firewall admitting 6432, M4 the edge check
 reading only `apgmetrics`, M5 the range reaching 5432), restored and `cmp`-equal
-(`~/s39/run4/battery.sh`, `mutations.py`).
+(`~/s39/run4/battery.sh`, `mutations.py`). **Code commit
+`684a33c5f2bb390820090778dfa65fc177015da9`; CI run `38118411283` (`contract`, the only
+run registered for that SHA): completed, success.**
 
 ### Run 5 — the database side: roles, budget, the customer poolers, their labels, the sync verb
 
