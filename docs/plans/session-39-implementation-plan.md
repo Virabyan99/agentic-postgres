@@ -839,6 +839,11 @@ M7 one 403 called a refusal (`all`→`any`), M8 the storage observer unguarded, 
 the policy not carried. **M4 (the live decision test's `iff` reduced to *if
 refused*) cannot run offline** — its module needs the host; its first execution is
 the Run 11 sweep. Battery `~/s39/run2/battery.py`, transcript `battery.txt`.
+**Code commit `06531bf17528d80696e8747cd170728c2a08179b`; CI run `38113831887`
+(`contract`, the only run registered for that SHA): completed, success.** The
+host's Sunday mirror passes E0 saw running were read again at 05:08Z: all three
+`agentic-postgres-backup-mirror@*` units `inactive`, `Result=success`, exit 0 —
+long passes after the weekly fulls, not a hang.
 
 ### Run 3 — the schemas: manifest 11, outputs 22, naming, isolation, the slot's manifest and DNS
 
