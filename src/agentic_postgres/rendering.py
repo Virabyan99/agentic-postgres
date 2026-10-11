@@ -252,6 +252,39 @@ def resolve_storage_connection_budget(project: dict[str, Any]) -> int:
     return config.storage_connection_budget(storage)
 
 
+def resolve_public_endpoints(
+    project: dict[str, Any], roles: dict[str, str], database_name: str
+) -> dict[str, Any]:
+    """`database.public` (outputs 22, ADR 0268): the two public names, or none.
+
+    Everything here is derived -- the hosts from the project's one declared
+    domain (`naming.endpoint_hosts`), the users from the derived customer
+    roles, the port and `sslmode` from `naming` -- so the document a slot's
+    deploy writes is the address book the control plane copies (ADR 0158) and
+    names nothing a customer typed. No URL and no password: the password is the
+    customer's own file (ADR 0269). Off, both endpoints are null, never a
+    half-filled pair.
+    """
+    if not config.public_endpoints_enabled(project):
+        return {"enabled": False, "pooled": None, "direct": None}
+    pool_host, direct_host = naming.endpoint_hosts(project["project"]["domain"])
+
+    def endpoint(host: str, role: str) -> dict[str, Any]:
+        return {
+            "host": host,
+            "port": naming.PUBLIC_POSTGRES_PORT,
+            "user": roles[role],
+            "database": database_name,
+            "sslmode": naming.PUBLIC_POSTGRES_SSLMODE,
+        }
+
+    return {
+        "enabled": True,
+        "pooled": endpoint(pool_host, "customer_app"),
+        "direct": endpoint(direct_host, "customer_admin"),
+    }
+
+
 def resolve_statement_timeouts(project: dict[str, Any], roles: dict[str, str]) -> dict[str, str]:
     """Resolve the manifest's suffix-keyed timeouts to derived role names.
 
@@ -434,6 +467,11 @@ def build_outputs(
             # compared them; this is the field that lets the plane which knows
             # the live numbers do the comparison.
             "pooler_pool_size": int(project["database"]["pool_size"]),
+            # Version 22 (ADR 0268). Carried whole to the deployed document,
+            # which copies `database` from the render.
+            "public": resolve_public_endpoints(
+                project, dict(identity.roles), identity.database_name
+            ),
         },
         "routes": {
             "rest": identity.route_rest,

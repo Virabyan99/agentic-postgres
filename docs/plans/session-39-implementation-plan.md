@@ -1,9 +1,9 @@
 # Session 39 — Public TLS endpoints and customer roles
 
-**Status: EXECUTING. Runs 1–2 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
+**Status: EXECUTING. Runs 1–3 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
 threat list; Sheet E0 read). Rows **D2325–D2355** at planning; Run 1 added
-**D2356–D2360**, Run 2 **D2361–D2364**. ADRs **0268–0270** written. **NEXT FREE: D2365,
-ADR 0271.**
+**D2356–D2360**, Run 2 **D2361–D2364**, Run 3 **D2365–D2369**. ADRs **0268–0270**
+written. **NEXT FREE: D2370, ADR 0271.**
 
 The fourth session of Stage 5 (`docs/plans/stage-5-plan.md` §3, §5 *Session 39*).
 Twelve runs and **two sittings on two days**: the firewall, the edge's one
@@ -450,6 +450,11 @@ table below it, in execution order.
 | **D2362** | ADR 0270 / Run 1: *"the lifecycle record gains `admission` (the JSON `admit.sh --json` printed for each resize) — the Session 39 instrument writes it (Run 8)"*. | The lifecycle instrument runs from the WORKSTATION and opens no SSH (§7, `test_this_module_uses_no_ssh`), so it cannot run `admit.sh`. Admission's reading reaches nothing a customer can read: a refused resize's result carries only `refusal` (a sentence, `bin/reconciler.py` resize), an admitted one nothing; `operations.RESULT_MEMBERS["project.resize"]` is `{profile}` plus the common four, and `app.control_result_members` lives in the APPLIED `0004` (`:132-142`, D912: never amended). | **The reading travels in the operation's own result**: Run 6's `0005` replaces `app.control_result_members` so `project.resize` may carry `admission`; `RESULT_MEMBERS` gains it (the test holding the two equal moves with it); the reconciler's resize parses the `admit.sh --json` it already runs into `{"requested_mb", "safe_available_mb"}` and records it on BOTH outcomes. The proofs read it back through `/v1` (`_implied_status`, `tests/external/test_session38_public_lifecycle.py`). Session 38's module now reads only its six types and accepts a record of session 38 or 39, so Session 39's record (with `credential.rotate` interleaved) re-runs it (D2343). | The server's own reading, served through the customer's door, is the only copy the external half may read; a workstation copy of a host command's output would be a second source. | 0270, 0256 |
 | **D2363** | Run 2 item 1: *"take the host manifest's declared slots (the caller passes them; grep every caller of `capacity_probe.read` first)"*; `bin/control.py compare` reads a prepared slot. | `capacity_probe.read` already loads the host manifest itself (`:240`), and has three callers (`bin/deploy-project.py:2342`, `bin/admit.py:162`, `bin/doctor.py:927`) plus two proofs. `bin/control.py` reads no host manifest at all. A third reader of the state root, `bin/fleet.py project_keys` (`:78-82`), lists a prepared slot as an invalid row; `doctor capacity`'s committed line (`diagnosis.py:917-925`) is a fourth. | **`read` takes the declaration from the manifest it already loads** (one place reaches all three callers, none changed); a declared slot that `is_prepared_slot` (bootstrap state a file, document absent, both READ — an `OSError` falls through to unreadable) is `Reading.prepared` and named on the committed line by `decide` AND by `doctor capacity`. **`control.py` identifies a prepared slot by both halves of its preparation** — the slot manifest `slot.sh prepare` writes under `SLOT_ROOT` and the bootstrap state — and a read it cannot make is `undetermined`. **`fleet.py` is left as it is**: an inventory row saying *"no deployed document"* is a true report, decides nothing, and no slot sits prepared during the sweep (slot3-prod is created before B1). | Passing the slots in from three callers is three chances to forget one (question 5); the registry has no host.yaml to read and the slot's own files say what it is. | 0257, 0195 |
 | **D2364** | D2347: `dr_kit.plan_export` carries the policy; `bin/dr-kit.py` passes `access_policy.POLICY_PATH`. | Measured in Run 2's targeted run: with the fixed `/etc/agentic-postgres/database-access-policy.json`, `test_the_command_writes_owner_only_refuses_an_existing_directory_and_verifies` and `test_every_directory_in_the_kit_is_owner_only` exited **3** — this workstation HAS a root-only `/etc/agentic-postgres/`, so an export pointed at a proof's `--state-root` read the HOST's policy and failed closed on the permission. | **The policy is derived beside the state root** (`dr_kit.access_policy_beside(state_root)` = `state_root.parent / database-access-policy.json`); on a host that is `POLICY_PATH` exactly, and `test_the_access_policy_travels_in_the_kit` holds the two equal. | An export reads everything from one root; a second, fixed root is how a proof reaches the host's file. | 0189 |
+| **D2365** | Run 3 item 3: *"`build_deployed_document` fills [`database.public`] from the manifest and naming"*; `migrate_v21_to_v22` adds `{enabled: false, …}`. | `build_deployed_document` copies the rendered `database` whole (`**rendered["database"]`, `deployed_output.py` deployed builder) and has no manifest; `compute` (outputs 21) is the precedent: rendered, then carried. `databaseRoles` is required with `additionalProperties: false` (`outputs.schema.json`), so the two customer roles are a v22 member on BOTH branches, and `migrate_v5_to_v6` is the precedent for a step that adds a role: the CALLER derives the name, the migrator validates it (ADR 0002). | **`rendering.resolve_public_endpoints` derives `database.public` at the render** (hosts from `naming.endpoint_hosts(domain)`, users the customer roles, `naming.PUBLIC_POSTGRES_PORT`/`PUBLIC_POSTGRES_SSLMODE`), the deploy carries it unchanged. **`migrate_v21_to_v22(document, *, customer_roles)`** adds `public` = `NO_PUBLIC_ENDPOINTS` and the two roles, refusing anything but exactly the two bare identifiers and any name another role holds; **`migrate_rendered` gains the required `customer_roles`**; `tests/contract/outputs_chain.py` derives them from the document's own key. | The deploy knows nothing about the door the render does not; a second derivation of a role name is ADR 0002's defect. | 0268, 0269, 0002 |
+| **D2366** | Run 3 item 2: *"the two TCP router names derived like the HTTP ones"*. | `naming.project_router_names` (`:503`) is the ENUMERATED allowlist behind the metrics collector's scrape filter (ADR 0167, D300): HTTP routers whose series a project may read. | **`customer_pool_router_name`/`customer_direct_router_name` derive like the HTTP ones and are NOT added to `project_router_names`**; whether a TCP router's series belong in a project's metrics is Run 5's question, with a measurement, if at all. | Widening a security allowlist as a side effect of naming is the subset-check shape §6 forbids. | 0268, 0167 |
+| **D2367** | Run 3 item 4: `ISOLATED_FIELDS` 18 → 20; `MUST_DIFFER` hosts and users; `MUST_MATCH` ports and `sslmode`; `enabled` RELEASE_STATE or NOT_AUTHORITY. | Three readers meet a disabled door's NULL: `evidence.at` raised on `None[...]`; `test_render_isolation` asserts every `MUST_DIFFER` pointer differs between the two EXAMPLE renders, where both are null; the matrix's `NOT_AUTHORITY_PREFIXES` is a prefix rule, so `database.public.pooled` there would swallow every leaf a later version adds under it. | **`evidence.at` returns None through a null member** (a missing KEY still raises), so `collision_count`'s both-null exemption (ADR 0016) covers it; **`test_render_isolation` asserts the public pointers on `public_documents`** (the two examples with the facility on, rendered in a SANDBOX, nothing under `.generated/`); **a new `NOT_AUTHORITY_EXACT`** holds the two null door leaves; `database.public.*.database` joins `MUST_DIFFER` too (stricter than the plan: the database behind a door is the project's). An offline proof of the categories is added (`test_isolation_leaves_offline.py::test_the_public_endpoints_are_classified_by_what_they_name`): the existing leaf proof says only that each leaf HAS a category. | An absent door is not a shared one; a prefix over a null is how a later leaf arrives unclassified. | 0268, 0016 |
+| **D2368** | D2354: the bootstrap must never set or reset a customer's verifier. | Appending the two suffixes reaches `bootstrap_statements.build_statements`' role loop (`:96-115`): from the next deploy every project has `customer_app`/`customer_admin` NOLOGIN NOINHERIT with no attribute — D2354's first half, by construction, before Run 5. The loop's comment says the bootstrap *"clears an unexpected verifier"*; **nothing does** (grep `PASSWORD NULL`, `rolpassword` in `bootstrap_statements.py` and `bin/postgres-bootstrap.py`: only `check_violations`' read of `migration_user`). | **Recorded for Run 5**: its guard (`test_no_statement_sets_a_customer_password`) stands, and Run 5 corrects the comment. No verifier is cleared today, so a deploy cannot wipe a customer's password. | A comment that claims a behaviour nothing performs is how a later edit "restores" it. | 0269 |
+| **D2369** | CLAUDE.md §1: *"Run a long gate DETACHED (`setsid nohup bash /tmp/x.sh … &`)"*. | Run 3's 127-module run started that way inside `wsl bash -lc "…"` **never ran**: no output file, no process. The same script as a harness background task (`run_in_background` on a foreground `wsl bash -lc`) ran to completion (13 min 28 s). | **CLAUDE.md §1 corrected** (the launch folder's file, not the repository's). | A recipe that fails silently is worse than none. | — |
 | **D2359** | Run 1 item 6: *"a throwaway MinIO as both source and mirror (two buckets)"*. | One server holding both buckets lets rclone copy server-side (`CopyObject`), which R2→B2 never can — the measured path would not be production's. | **Two MinIO servers** (the local `quay.io/minio/minio` image), one per remote. Measured: without the flag, **50 HEAD + 50 PUT at the mirror** (+51 GET at the source, 1 at the mirror) for 50 objects; with `--s3-no-head`, **0 HEAD, 50 PUT**; **control**: `rclone size --json` of the mirror = the source's (50 objects, 441 bytes) both times. Run 2 adds the flag (D2346). | A rig that measured a different copy path would have priced the wrong request. | 0264 |
 
 ---
@@ -882,6 +887,53 @@ Targeted: `test_project_manifest`, `test_output_migrations`, `test_output_schema
 `test_slot_command`, `test_repository_contract`. Battery: M1 the v11 gate removed;
 M2 the control refusal removed; M3 a public host classified MUST_MATCH; M4 `ready`
 on the domain's record alone.
+
+**Done.** 2026-10-11; the code commit and its CI verdict are recorded at the end of
+this paragraph. **Manifest 11**: `config.SUPPORTED_PROJECT_SCHEMA_VERSIONS` gains 11,
+`PROJECT_PUBLIC_ENDPOINTS_FROM = 11`, `config.public_endpoints_enabled`, the named
+refusal `CONTROL_PUBLIC_ENDPOINT` (*"the control project's database has no public
+endpoint (ADR 0268) …"*); `schemas/project.schema.json` enum 11, `database.public_endpoints:
+{enabled}` (`additionalProperties: false`) and the v11 gate; the three examples at 11,
+none enabling it. **Naming**: `endpoint_hosts`, `PUBLIC_POSTGRES_PORT` 5432,
+`PUBLIC_POSTGRES_SSLMODE` `verify-full`, `CUSTOMER_POOL_SERVICE`/`CUSTOMER_DIRECT_SERVICE`,
+the two TCP router names (D2366); `ROLE_SUFFIXES` ends `customer_app`, `customer_admin`.
+**Outputs 22**: `SCHEMA_VERSION`/`CURRENT_VERSION` 22 (so `READABLE_PREVIOUS_VERSION`
+21); the schema's two version enums, `databaseRoles` +2, `database.public`
+(`publicEndpoints`/`publicEndpoint`: null pair when off, both endpoints when on, port
+`const` 5432, `sslmode` `const` `verify-full`, host `^(pool|direct)\.`); rendered then
+carried; `migrate_v21_to_v22` (D2365). **Isolation**: `ISOLATED_FIELDS` 20, the matrix's
+new leaves and `NOT_AUTHORITY_EXACT` (D2367). **The slot**: `slot_manifest` at 11 with
+the door on; `slot.slot_dns` reads the domain, `pool.` and `direct.` -- the first
+determinately wrong name decides `prepared` and is the reason, an unread one with none
+wrong is `undetermined`, `ready` only with all three. **The neighbour's OLD document,
+rigged** (Session 34's lesson): the host's real version 21 copies of alpha-dev,
+beta-dev, control-prod and slot1-prod (`/home/op/*-outputs.json`, `efaef09`) read at
+this checkout AS FOUND, each yields its registry fields, admission sums them
+(304/304/304/840 MiB, nothing unreadable); **control**: a version 20 copy is named
+unreadable (`~/s39/run3/old_neighbour.py`, `.txt`). **Targeted**: the 127 modules
+Session 38's Run 3 touched plus every contract module naming a version, the role set,
+a render or a slot (`~/s39/run3/select.sh`) -- **4,702 passed, 16 failed, 57 skipped**
+(13 min 28 s): nine version pins (10 → 11, 21 → 22, the DR kit's
+`_previous_version`), the two gate fixture renders stale at v21 (re-rendered with
+`./deploy.sh --render-only`; the control example's render removed), `test_naming`'s
+truncated-role count 13 → 15, and three migration tests that validated by naming each
+step and stopped at 21 -- replaced by `carry_to_current` (D1105's class). The
+failed modules re-run with the owed guards: one failure was MINE (`_previous_version`
+deleted roles from a dict the module-scoped `rendered` fixture shares -- a deep copy),
+one pin and the acceptance matrix (regenerated, the chain test's registry node id moved
+to `…_at_version_22_…`, D1119); then **240 passed**. New proofs:
+`test_project_manifest.py::test_public_endpoints_is_refused_below_schema_eleven`,
+`::test_the_control_project_refuses_a_public_endpoint`,
+`test_output_migrations.py::test_v22_adds_the_public_endpoints`, `::test_v22_does_not_mutate_its_input`,
+`test_naming.py::test_the_endpoint_hosts_derive_from_the_domain`,
+`test_render_isolation.py::test_the_public_endpoints_are_derived_and_disjoint`,
+`test_slot_command.py::test_a_slot_is_ready_only_when_all_three_records_are`,
+`test_isolation_leaves_offline.py::test_the_public_endpoints_are_classified_by_what_they_name`.
+**Battery 6/6 KILLED** with controls, restored and `cmp`-equal: M1 the v11 gate, M2 the
+control refusal, M3 the public host's MUST_DIFFER pattern removed (the plan's "classified
+MUST_MATCH": MUST_MATCH is exact paths, so removal is the reachable form), M4 `ready` on
+the domain alone, M5 the render never opening a door, M6 the migration forgetting the
+roles (`~/s39/run3/battery.py`).
 
 ### Run 4 — the edge, the firewall and every publication guard (ADR 0268)
 

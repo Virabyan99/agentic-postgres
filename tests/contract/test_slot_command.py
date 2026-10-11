@@ -164,6 +164,56 @@ def test_an_unreadable_dns_reading_is_undetermined_never_ready(
     assert slot.state(readings)[0] == "ready"
 
 
+def test_a_slot_is_ready_only_when_all_three_records_are(
+    command: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ADR 0268 (D2335, D2342): a slot with public endpoints has THREE grey
+    records -- its domain, `pool.` and `direct.` below it -- and is `ready` only
+    when every one is this host alone. Each name wrong in turn keeps it
+    `prepared` with THAT name in the reason; an unreadable name with none wrong
+    is `undetermined` (exit 6); a wrong name decides even beside an unreadable
+    one. Control: all three right -> `ready`. The slot's manifest asks for the
+    door it is read for: schema 11, `public_endpoints.enabled: true`."""
+    assert command.main(["prepare", "--host", str(HOST), "--slot", KEY]) == 0
+    _prepared(command)
+    capsys.readouterr()
+    domain = "slot1.example.test"
+    names = (domain, f"pool.{domain}", f"direct.{domain}")
+    asked: list[str] = []
+
+    def reading(wrong: str | None = None, unread: str | None = None) -> Any:
+        def dns(name: str, expected: str | None) -> tuple[bool | None, str]:
+            asked.append(name)
+            if name == wrong:
+                return False, f"{name} resolves to 188.114.96.1, not {expected} alone"
+            if name == unread:
+                return None, f"dig A {name} did not answer"
+            return True, f"{name} A {expected}, no AAAA"
+
+        return dns
+
+    for wrong in names:
+        command.dns_reading = reading(wrong=wrong)
+        code, row = _status(command, capsys)
+        assert (code, row["state"]) == (0, "prepared"), (wrong, row)
+        assert wrong in row["reason"], (wrong, row["reason"])
+    command.dns_reading = reading(unread=f"direct.{domain}")
+    code, row = _status(command, capsys)
+    assert (code, row["state"]) == (6, "undetermined") and "direct." in row["reason"], row
+    command.dns_reading = reading(wrong=f"pool.{domain}", unread=domain)
+    assert _status(command, capsys)[1]["state"] == "prepared"
+    asked.clear()
+    command.dns_reading = reading()
+    code, row = _status(command, capsys)
+    assert (code, row["state"]) == (0, "ready"), row
+    assert asked == list(names), asked
+
+    manifest = yaml.safe_load((command.SLOT_ROOT / KEY / slot.MANIFEST).read_text("utf-8"))
+    assert manifest["schema_version"] == 11
+    assert manifest["database"]["public_endpoints"] == {"enabled": True}
+    assert config.public_endpoints_enabled(manifest)
+
+
 def test_nothing_removes_a_tombstone(command: Any, capsys: pytest.CaptureFixture[str]) -> None:
     """A consumed slot is never reissued: `prepare` refuses it and leaves the
     tombstone where it is, and no code in `bin/` or `src/` names the tombstone

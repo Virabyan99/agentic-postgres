@@ -819,8 +819,8 @@ def test_schema_eight_admits_approvals_required_beside_a_set(
     never anything else. It lives inside `migrations`, whose schema requires
     `set`, so a manifest carrying it without a set is refused by the schema."""
     assert config.PROJECT_APPROVALS_FROM == 8
-    # The base is version 10 since Session 38 (ADR 0258); the key arrived at 8.
-    assert base["schema_version"] == 10
+    # The base is version 11 since Session 39 (ADR 0268); the key arrived at 8.
+    assert base["schema_version"] == 11
     assert config.approvals_required(check(tmp_path, base)) == 1
 
     for value in (0, 1):
@@ -844,7 +844,7 @@ def test_schema_eight_admits_approvals_required_beside_a_set(
         check(tmp_path, without_set)
 
     second = config.load_project_manifest(REPO_ROOT / "project.second.example.yaml")
-    assert second["schema_version"] == 10  # 10 since Session 38 (ADR 0258)
+    assert second["schema_version"] == 11  # 11 since Session 39 (ADR 0268)
     assert config.approvals_required(second) == 0
 
 
@@ -1596,3 +1596,57 @@ def test_a_storage_bound_outside_its_range_is_refused(tmp_path: Path, base: dict
         candidate = {**base, "storage": {**base["storage"], field: value}}
         with pytest.raises(config.ManifestError):
             check(tmp_path, candidate)
+
+
+# ---------------------------------------------------------------------------
+# Version 11: database.public_endpoints (ADR 0268, D2337)
+# ---------------------------------------------------------------------------
+
+
+def test_public_endpoints_is_refused_below_schema_eleven(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """`database.public_endpoints` is forbidden below 11 (the v10 gate's shape)
+    and optional at 11; absent, the facility is off. Control: the same member at
+    11 loads, enabled and disabled, and an unknown member inside it is refused."""
+    assert config.PROJECT_PUBLIC_ENDPOINTS_FROM == 11
+    on = copy.deepcopy(base)
+    on["database"]["public_endpoints"] = {"enabled": True}
+    for below in (10, 9):
+        older = copy.deepcopy(on)
+        older["schema_version"] = below
+        if below < config.PROJECT_COMPUTE_FROM:
+            older.pop("compute", None)
+        with pytest.raises(config.ManifestError, match="public_endpoints"):
+            check(tmp_path, older)
+        # The refusal is the member's: the same document without it loads here.
+        del older["database"]["public_endpoints"]
+        assert check(tmp_path, older)["schema_version"] == below
+
+    assert config.public_endpoints_enabled(check(tmp_path, on)) is True
+    on["database"]["public_endpoints"] = {"enabled": False}
+    assert config.public_endpoints_enabled(check(tmp_path, on)) is False
+    assert config.public_endpoints_enabled(check(tmp_path, base)) is False, (
+        "a manifest that says nothing has a public door"
+    )
+    on["database"]["public_endpoints"] = {"enabled": True, "port": 6432}
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, on)
+
+
+def test_the_control_project_refuses_a_public_endpoint(tmp_path: Path) -> None:
+    """D2337: the control plane's database never gets a public door -- the
+    control example with the facility on is refused by name. Control: the same
+    manifest with it off loads, and the facility alone (no control) loads."""
+    control = yaml.safe_load(
+        (REPO_ROOT / "project.control.example.yaml").read_text(encoding="utf-8")
+    )
+    assert config.control_enabled(control)
+    control["database"]["public_endpoints"] = {"enabled": True}
+    with pytest.raises(config.ManifestError) as refused:
+        check(tmp_path, control)
+    assert str(refused.value) == config.CONTROL_PUBLIC_ENDPOINT
+    assert "ADR 0268" in config.CONTROL_PUBLIC_ENDPOINT
+
+    control["database"]["public_endpoints"] = {"enabled": False}
+    assert config.control_enabled(check(tmp_path, control))

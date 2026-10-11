@@ -55,6 +55,39 @@ def documents() -> tuple[dict[str, Any], dict[str, Any]]:
     return rendered[0], rendered[1]
 
 
+@pytest.fixture(scope="module")
+def public_documents(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The same two manifests with `database.public_endpoints` on (ADR 0268) --
+    the shape a slot's manifest has -- rendered into a SANDBOX: these are not
+    the gate's fixture renders, and nothing is published under `.generated/`."""
+    import yaml
+
+    base = tmp_path_factory.mktemp("public-endpoints")
+    rendered = []
+    with pytest.MonkeyPatch.context() as patch:
+        generated = base / "generated"
+        patch.setattr(rendering, "GENERATED_ROOT", generated)
+        patch.setattr(rendering, "STAGING_ROOT", generated / ".staging")
+        patch.setattr(rendering, "LOCK_ROOT", generated / ".locks")
+        for manifest in ("project.example.yaml", "project.second.example.yaml"):
+            document = yaml.safe_load((REPO_ROOT / manifest).read_text(encoding="utf-8"))
+            document["database"]["public_endpoints"] = {"enabled": True}
+            copy = base / manifest
+            copy.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            directory = rendering.render_project(copy, REPO_ROOT / "capabilities.example.yaml")
+            rendered.append(json.loads((directory / "outputs.json").read_text(encoding="utf-8")))
+    return rendered[0], rendered[1]
+
+
+#: Outputs v22 (ADR 0268). Null in both example renders -- no door -- so these
+#: are asserted on `public_documents`, the same manifests with the facility on.
+PUBLIC_POINTERS = (
+    ("database", "public", "pooled", "host"),
+    ("database", "public", "direct", "host"),
+)
+
 #: Runbook §8: every one of these must differ across the two projects.
 MUST_DIFFER = (
     ("project", "key"),
@@ -81,6 +114,7 @@ MUST_DIFFER = (
     # Session 10, outputs v13.
     ("backup", "bucket"),
     ("compose", "networks", "backup"),
+    *PUBLIC_POINTERS,
 )
 
 
@@ -150,10 +184,46 @@ def at(document: dict[str, Any], pointer: tuple[str, ...]) -> Any:
 
 @pytest.mark.parametrize("pointer", MUST_DIFFER, ids=lambda p: ".".join(p))
 def test_project_scoped_identity_differs(
-    documents: tuple[dict[str, Any], dict[str, Any]], pointer: tuple[str, ...]
+    documents: tuple[dict[str, Any], dict[str, Any]],
+    public_documents: tuple[dict[str, Any], dict[str, Any]],
+    pointer: tuple[str, ...],
 ) -> None:
-    alpha, alpine = documents
+    alpha, alpine = public_documents if pointer in PUBLIC_POINTERS else documents
+    assert at(alpha, pointer) is not None, f"{'.'.join(pointer)} is null: nothing compared"
     assert at(alpha, pointer) != at(alpine, pointer), f"{'.'.join(pointer)} collides"
+
+
+def test_the_public_endpoints_are_derived_and_disjoint(
+    documents: tuple[dict[str, Any], dict[str, Any]],
+    public_documents: tuple[dict[str, Any], dict[str, Any]],
+) -> None:
+    """Outputs v22 (ADR 0268, D2349): with the facility on, each project's two
+    names are `pool.`/`direct.` + its own domain, its own customer roles and
+    database, port 5432 and `verify-full` -- no URL, no password member at all.
+    Off (the examples as committed), the block is `enabled: false` and two
+    nulls, and every other member of the document is unchanged by the flag."""
+    for document in public_documents:
+        public = document["database"]["public"]
+        domain = document["project"]["domain"]
+        roles = document["database"]["roles"]
+        assert public["enabled"] is True
+        assert public["pooled"] == {
+            "host": f"pool.{domain}", "port": 5432, "user": roles["customer_app"],
+            "database": document["database"]["name"], "sslmode": "verify-full",
+        }  # fmt: skip
+        assert public["direct"] == {
+            "host": f"direct.{domain}", "port": 5432, "user": roles["customer_admin"],
+            "database": document["database"]["name"], "sslmode": "verify-full",
+        }  # fmt: skip
+    a, b = public_documents
+    assert {a["database"]["public"][d]["host"] for d in ("pooled", "direct")}.isdisjoint(
+        {b["database"]["public"][d]["host"] for d in ("pooled", "direct")}
+    )
+    for off, on in zip(documents, public_documents, strict=True):
+        assert off["database"]["public"] == {"enabled": False, "pooled": None, "direct": None}
+        assert {k: v for k, v in off["database"].items() if k != "public"} == {
+            k: v for k, v in on["database"].items() if k != "public"
+        }
 
 
 @pytest.mark.parametrize("pointer", MAY_MATCH, ids=lambda p: ".".join(p))
@@ -195,11 +265,20 @@ def test_project_manifest_digests_differ(
     assert alpha["inputs"]["project_sha256"] != alpine["inputs"]["project_sha256"]
 
 
-def test_collision_count_is_zero(documents: tuple[dict[str, Any], dict[str, Any]]) -> None:
+def test_collision_count_is_zero(
+    documents: tuple[dict[str, Any], dict[str, Any]],
+    public_documents: tuple[dict[str, Any], dict[str, Any]],
+) -> None:
     """The single number the evidence file reports."""
     alpha, alpine = documents
     collisions = [
-        ".".join(pointer) for pointer in MUST_DIFFER if at(alpha, pointer) == at(alpine, pointer)
+        ".".join(pointer)
+        for pointer in MUST_DIFFER
+        if pointer not in PUBLIC_POINTERS and at(alpha, pointer) == at(alpine, pointer)
+    ]
+    on_a, on_b = public_documents
+    collisions += [
+        ".".join(pointer) for pointer in PUBLIC_POINTERS if at(on_a, pointer) == at(on_b, pointer)
     ]
     collisions += [
         f"database.roles.{suffix}"

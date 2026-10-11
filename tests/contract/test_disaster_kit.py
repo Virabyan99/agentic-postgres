@@ -848,19 +848,24 @@ def _previous_version(rendered: dict[str, Any]) -> dict[str, Any]:
     what the current version added -- Session 20's fixture-by-subtraction
     shape, so this document is the one an older release actually wrote.
 
-    **This helper moves with the outputs version.** At 21 the subtraction is
-    `compute` and `region` (ADR 0258, 0257; at 20 it was `control` and
-    `routes.control`, at 19 `connectors`, at 18 `mcp.project_capabilities`, at
-    17 the `migrations` block); when a run bumps the version it must subtract
-    that version's addition instead, and the assertion below is what says so.
+    **This helper moves with the outputs version.** At 22 the subtraction is
+    `database.public` and the two customer roles (ADR 0268, 0269; at 21 it was
+    `compute` and `region`, at 20 `control` and `routes.control`, at 19
+    `connectors`, at 18 `mcp.project_capabilities`, at 17 the `migrations`
+    block); when a run bumps the version it must subtract that version's
+    addition instead, and the assertion below is what says so.
     """
-    document = deployed_document(rendered)
-    assert deployed_output.SCHEMA_VERSION == 21, (
+    # A DEEP copy: the deployed document shares `database.roles` with the
+    # module-scoped `rendered` fixture (a shallow merge), so deleting a role
+    # from it would delete it from every later test's render.
+    document = json.loads(json.dumps(deployed_document(rendered)))
+    assert deployed_output.SCHEMA_VERSION == 22, (
         "the outputs version moved; teach this helper what the new version added"
     )
-    del document["compute"]
-    del document["region"]
-    document["schema_version"] = 20
+    del document["database"]["public"]
+    del document["database"]["roles"]["customer_app"]
+    del document["database"]["roles"]["customer_admin"]
+    document["schema_version"] = 21
     return document
 
 

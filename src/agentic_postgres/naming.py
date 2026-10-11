@@ -187,6 +187,13 @@ ROLE_SUFFIXES: tuple[str, ...] = (
     # tuple's order reaches rendered output, and inserting into the middle would
     # move twelve names that nothing about this change touches.
     "api_documentation",
+    # Session 39 (ADR 0269, D2354). The two customer roles, appended LAST for
+    # the same reason. They exist NOLOGIN on every project; only a project with
+    # public endpoints gives them LOGIN and a connection limit, and nothing in
+    # this release ever sets their password -- the customer's own CLI does,
+    # by verifier, through `credential.rotate`.
+    "customer_app",
+    "customer_admin",
 )
 
 
@@ -498,6 +505,56 @@ def mcp_router_name(key: str) -> str:
     status code.
     """
     return traefik_name(f"apg-{key}-mcp", context="traefik_router_mcp")
+
+
+#: The two Compose services that are a project's public Postgres door (ADR 0268,
+#: ADR 0269): customer-only PgBouncers, transaction mode behind `pool.<domain>`
+#: and session mode behind `direct.<domain>`. Named here, beside the routers
+#: that reach them, so the override, the compose model and the proofs read one
+#: spelling.
+CUSTOMER_POOL_SERVICE = "customer-pool"
+CUSTOMER_DIRECT_SERVICE = "customer-direct"
+
+#: The host port a customer connects to: the edge's `postgres` entrypoint,
+#: published `5432:8432` (ADR 0268). One port for every project; the TLS SNI
+#: names the project and the door.
+PUBLIC_POSTGRES_PORT = 5432
+
+#: The only `sslmode` a public endpoint is published with: the gateway serves a
+#: certificate for exactly these names, and a client that does not verify it
+#: cannot tell this door from any other (ADR 0268).
+PUBLIC_POSTGRES_SSLMODE = "verify-full"
+
+
+def endpoint_hosts(domain: str) -> tuple[str, str]:
+    """`(pool.<domain>, direct.<domain>)`: a project's two public Postgres names
+    (ADR 0268, D2327).
+
+    Derived from the one name the operator declares for the project -- a slot's
+    `domain` -- so the grey records an operator creates are the domain's and two
+    names below it, and nothing else is typed. One host port (the edge's 5432)
+    carries both; the TLS SNI decides which pooler a connection reaches. A
+    domain long enough that a prefix pushes it past DNS's 253 is refused rather
+    than truncated: a truncated hostname is a different hostname.
+    """
+    hosts = (f"pool.{domain}", f"direct.{domain}")
+    for host in hosts:
+        if len(host) > 253:
+            raise NamingError(f"endpoint host exceeds 253 characters: {host!r}")
+    return hosts
+
+
+def customer_pool_router_name(key: str) -> str:
+    """The TCP router and service name for `pool.<domain>` (ADR 0268). A TCP
+    router, on the edge's `postgres` entrypoint; never in
+    :func:`project_router_names`, which enumerates the HTTP routers whose
+    series the metrics collector may scrape."""
+    return traefik_name(f"apg-{key}-customer-pool", context="traefik_router_customer_pool")
+
+
+def customer_direct_router_name(key: str) -> str:
+    """The TCP router and service name for `direct.<domain>` (ADR 0268)."""
+    return traefik_name(f"apg-{key}-customer-direct", context="traefik_router_customer_direct")
 
 
 def project_router_names(key: str) -> tuple[str, ...]:

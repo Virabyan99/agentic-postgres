@@ -96,8 +96,9 @@ def test_roles_are_derived_independently_not_from_a_shared_prefix() -> None:
     assert set(untruncated) == {"anon"}, f"corpus assumption changed: {sorted(untruncated)}"
     # A literal rather than `len(ROLE_SUFFIXES) - 1`, deliberately: derived from
     # the tuple it is checking, this would agree with any future edit without
-    # anyone reading it. Thirteen since Session 5 Run 7 added `api_documentation`.
-    assert len(truncated) == 13
+    # anyone reading it. Thirteen since Session 5 Run 7 added `api_documentation`;
+    # fifteen since Session 39 appended `customer_app` and `customer_admin` (ADR 0269).
+    assert len(truncated) == 15
 
     # Every truncated role is exactly at the limit and carries its own
     # fingerprint. Shared fingerprints would mean one truncated prefix was
@@ -536,4 +537,39 @@ def test_the_derived_metrics_route_matches_its_published_path(
     assert alpha.metrics_router == naming.metrics_router_name(alpha.key)
     assert alpha.metrics_credential_middleware == naming.metrics_credential_middleware_name(
         alpha.key
+    )
+
+
+def test_the_endpoint_hosts_derive_from_the_domain() -> None:
+    """ADR 0268 (D2327): a project's two public names are `pool.` and `direct.`
+    below its one declared domain -- nothing else typed -- one port (5432) for
+    both, `verify-full`; distinct domains give disjoint names; a domain a prefix
+    would push past DNS's 253 is refused, never truncated. The customer roles
+    are the LAST two suffixes (D2354: the order reaches rendered output), and
+    the two TCP routers derive from the key like the HTTP ones and are not in
+    the metrics allowlist of HTTP routers."""
+    assert naming.endpoint_hosts("slot2.agenticpostgresql.com") == (
+        "pool.slot2.agenticpostgresql.com",
+        "direct.slot2.agenticpostgresql.com",
+    )
+    assert set(naming.endpoint_hosts("a.example.test")).isdisjoint(
+        naming.endpoint_hosts("b.example.test")
+    )
+    assert naming.PUBLIC_POSTGRES_PORT == 5432
+    assert naming.PUBLIC_POSTGRES_SSLMODE == "verify-full"
+    long_domain = ".".join(["a" * 61] * 4)  # 247 characters: valid, prefixes are not
+    assert len(long_domain) <= 253
+    with pytest.raises(naming.NamingError, match="exceeds 253"):
+        naming.endpoint_hosts(long_domain)
+
+    assert naming.ROLE_SUFFIXES[-2:] == ("customer_app", "customer_admin")
+    assert naming.ROLE_SUFFIXES.index("api_documentation") == 13
+
+    key = "slot2-prod"
+    pool, direct = naming.customer_pool_router_name(key), naming.customer_direct_router_name(key)
+    assert (pool, direct) == ("apg-slot2-prod-customer-pool", "apg-slot2-prod-customer-direct")
+    assert not {pool, direct} & set(naming.project_router_names(key))
+    assert (naming.CUSTOMER_POOL_SERVICE, naming.CUSTOMER_DIRECT_SERVICE) == (
+        "customer-pool",
+        "customer-direct",
     )

@@ -101,7 +101,7 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 21
+CURRENT_VERSION = 22
 
 #: What a project with no capability manifest of its own records at version 18
 #: (ADR 0201), on both branches: `capabilities.project` rendered and
@@ -244,6 +244,7 @@ def migrate_rendered(
     backup_retain_full: int,
     backup_network: str,
     metrics_url: str,
+    customer_roles: dict[str, str],
 ) -> dict[str, Any]:
     """Migrate a ``rendered`` document of any earlier version to the current one.
 
@@ -336,7 +337,10 @@ def migrate_rendered(
     if detect_version(document) == 19:
         document = migrate_v19_to_v20(document)
 
-    return migrate_v20_to_v21(document)
+    if detect_version(document) == 20:
+        document = migrate_v20_to_v21(document)
+
+    return migrate_v21_to_v22(document, customer_roles=customer_roles)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -1500,6 +1504,75 @@ def migrate_v20_to_v21(document: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+#: What an archived document's public endpoints were: none. No manifest below
+#: schema 11 could ask for them (ADR 0268).
+NO_PUBLIC_ENDPOINTS: dict[str, Any] = {"enabled": False, "pooled": None, "direct": None}
+
+
+def migrate_v21_to_v22(
+    document: dict[str, Any], *, customer_roles: dict[str, str]
+) -> dict[str, Any]:
+    """Return a version 22 ``rendered`` document derived from a version 21 one.
+
+    Version 22 adds two things (ADR 0268, ADR 0269):
+
+    * `database.public` = :data:`NO_PUBLIC_ENDPOINTS` -- no archived manifest
+      could enable the facility, so no archived document had a door;
+    * `database.roles.customer_app` and `customer_admin` -- `databaseRoles` is
+      required with `additionalProperties: false`, so a v21 document cannot
+      validate at 22 without them.
+
+    ``customer_roles`` is the caller's, derived, for `migrate_v5_to_v6`'s
+    reason: the names ARE derivable (``naming.database_role(key_sql, ...)``),
+    and deriving them here would make this module a second authority on a
+    derived identity (ADR 0002). This validates the shape: exactly the two
+    keys, bare identifiers, and no name another role in the document already
+    holds.
+    """
+    version = detect_version(document)
+    if version == 22:
+        raise MigrationError("document is already version 22; migration would be a no-op")
+    if version != 21:
+        raise MigrationError(f"only version 21 can be migrated to 22, got {version}")
+
+    require_kind(document, "rendered")
+
+    database = document.get("database")
+    if not isinstance(database, dict) or not isinstance(database.get("roles"), dict):
+        raise MigrationError("database.roles is missing; this is not a version 21 document")
+    if "public" in database:
+        raise MigrationError(
+            "the document already carries `database.public`; this is not a version 21 document"
+        )
+    roles = database["roles"]
+    if set(customer_roles) != {"customer_app", "customer_admin"}:
+        raise MigrationError(
+            f"customer_roles must name exactly customer_app and customer_admin, got "
+            f"{sorted(customer_roles)}"
+        )
+    for suffix, name in customer_roles.items():
+        if suffix in roles:
+            raise MigrationError(
+                f"database.roles already names {suffix}; this is not a version 21 document"
+            )
+        if not _POSTGRES_IDENTIFIER.match(name):
+            raise MigrationError(f"{suffix} is not a bare lowercase SQL identifier: {name!r}")
+        collision = sorted(key for key, value in roles.items() if value == name)
+        if collision:
+            raise MigrationError(
+                f"{suffix} {name!r} is already this document's {collision}: two role keys "
+                "naming one role is a document in which a grant reaches the wrong one"
+            )
+    if customer_roles["customer_app"] == customer_roles["customer_admin"]:
+        raise MigrationError("customer_app and customer_admin must be two roles")
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["database"]["roles"].update(customer_roles)
+    migrated["database"]["public"] = _copy(NO_PUBLIC_ENDPOINTS)
+    migrated["schema_version"] = 22
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -1521,6 +1594,7 @@ __all__ = [
     "NO_MIRROR",
     "NO_PROJECT_CAPABILITIES",
     "NO_PROJECT_SET",
+    "NO_PUBLIC_ENDPOINTS",
     "PERMANENT_LIFECYCLE",
     "STANDARD_COMPUTE",
     "MigrationError",
@@ -1547,5 +1621,6 @@ __all__ = [
     "migrate_v18_to_v19",
     "migrate_v19_to_v20",
     "migrate_v20_to_v21",
+    "migrate_v21_to_v22",
     "require_kind",
 ]

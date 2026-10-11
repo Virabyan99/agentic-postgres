@@ -65,6 +65,12 @@ ISOLATED_FIELDS = (
     # is the class the two networks above are in.
     ("backup", "bucket"),
     ("compose", "networks", "backup"),
+    # Session 39, outputs v22 (ADR 0268). The public names select a project by
+    # SNI on one shared port, so two projects with one name would share a door.
+    # Null for every project without the facility, which `collision_count`
+    # does not count -- an absent door is not a shared one.
+    ("database", "public", "pooled", "host"),
+    ("database", "public", "direct", "host"),
 )
 
 
@@ -247,8 +253,14 @@ def load_rendered() -> dict[str, dict[str, Any]]:
 
 
 def at(document: dict[str, Any], pointer: tuple[str, ...]) -> Any:
+    """The value at `pointer`, or None when a member on the way is null -- a
+    disabled facility's block (outputs 22: `database.public.pooled` is null
+    without public endpoints). A MISSING key still raises: absence of a member
+    the schema requires is a defect, not a disabled facility."""
     value: Any = document
     for key in pointer:
+        if value is None:
+            return None
         value = value[key]
     return value
 

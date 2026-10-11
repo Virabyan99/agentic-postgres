@@ -50,7 +50,7 @@ from hashlib import sha256
 from typing import Any
 
 import pytest
-from outputs_chain import carry_to_current
+from outputs_chain import carry_to_current, customer_roles_of
 
 from agentic_postgres import REPO_ROOT, config, naming, output_migrations
 from agentic_postgres.output_migrations import MigrationError
@@ -354,6 +354,7 @@ def chained(v1: dict[str, Any]) -> dict[str, Any]:
         database_container=CONTAINER,
         access_profiles=profiles_for(v1),
         documentation_role=documentation_role_for(v1),
+        customer_roles=customer_roles_of(v1),
         statement_timeouts=statement_timeouts_for(v1),
         api_connection_budget=api_budget_for(v1),
         app_docs_url=app_docs_url_for(v1),
@@ -454,6 +455,7 @@ def test_migration_does_not_mutate_its_input(v1: dict[str, Any]) -> None:
         database_container=CONTAINER,
         access_profiles=profiles_for(v1),
         documentation_role=documentation_role_for(v1),
+        customer_roles=customer_roles_of(v1),
         statement_timeouts=statement_timeouts_for(v1),
         api_connection_budget=api_budget_for(v1),
         app_docs_url=app_docs_url_for(v1),
@@ -619,6 +621,7 @@ def test_migration_requires_a_real_contract_digest(v1: dict[str, Any]) -> None:
             database_container=CONTAINER,
             access_profiles=profiles_for(v1),
             documentation_role=documentation_role_for(v1),
+            customer_roles=customer_roles_of(v1),
             statement_timeouts=statement_timeouts_for(v1),
             api_connection_budget=api_budget_for(v1),
             app_docs_url=app_docs_url_for(v1),
@@ -703,7 +706,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 21"):
+    with pytest.raises(MigrationError, match="already version 22"):
         output_migrations.migrate_rendered(
             chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -711,6 +714,7 @@ def test_a_current_version_document_is_not_migrated_again(
             database_container=CONTAINER,
             access_profiles=profiles_for(chained),
             documentation_role=documentation_role_for(chained),
+            customer_roles=customer_roles_of(chained),
             statement_timeouts=statement_timeouts_for(chained),
             api_connection_budget=api_budget_for(chained),
             app_docs_url=app_docs_url_for(chained),
@@ -744,6 +748,7 @@ def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
             database_container=CONTAINER,
             access_profiles=profiles_for(v1),
             documentation_role=documentation_role_for(v1),
+            customer_roles=customer_roles_of(v1),
             statement_timeouts=statement_timeouts_for(v1),
             api_connection_budget=api_budget_for(v1),
             app_docs_url=app_docs_url_for(v1),
@@ -769,6 +774,7 @@ def test_an_incomplete_v1_document_is_refused(v1: dict[str, Any]) -> None:
             database_container=CONTAINER,
             access_profiles=profiles_for(v1),
             documentation_role=documentation_role_for(v1),
+            customer_roles=customer_roles_of(v1),
             statement_timeouts=statement_timeouts_for(v1),
             api_connection_budget=api_budget_for(v1),
             app_docs_url=app_docs_url_for(v1),
@@ -803,6 +809,7 @@ def test_a_document_with_unexpected_fields_is_refused(v1: dict[str, Any]) -> Non
             database_container=CONTAINER,
             access_profiles=profiles_for(v1),
             documentation_role=documentation_role_for(v1),
+            customer_roles=customer_roles_of(v1),
             statement_timeouts=statement_timeouts_for(v1),
             api_connection_budget=api_budget_for(v1),
             app_docs_url=app_docs_url_for(v1),
@@ -2360,7 +2367,7 @@ def v14(v15: dict[str, Any]) -> dict[str, Any]:
     return document
 
 
-def test_the_chain_ends_at_version_21_with_nothing_of_a_projects_own(
+def test_the_chain_ends_at_version_22_with_nothing_of_a_projects_own(
     chained: dict[str, Any],
 ) -> None:
     """The premise of the `v14` to `v19` fixtures, as a test rather than
@@ -2368,11 +2375,17 @@ def test_the_chain_ends_at_version_21_with_nothing_of_a_projects_own(
     FAIL an assertion, not ERROR every test that shares the fixture.
 
     Renamed from `..._at_version_18_...` in Session 34, from
-    `..._at_version_19_...` in Session 37 and from `..._at_version_20_...` in
-    Session 38, each time the chain moved: a name that said one version over an
-    assertion of the next would be a proof that reads as measuring one thing and
-    measures another."""
-    assert chained["schema_version"] == 21
+    `..._at_version_19_...` in Session 37, from `..._at_version_20_...` in
+    Session 38 and from `..._at_version_21_...` in Session 39, each time the
+    chain moved: a name that said one version over an assertion of the next
+    would be a proof that reads as measuring one thing and measures another."""
+    assert chained["schema_version"] == 22
+    # Version 22, ADR 0268/0269. No document below 22 could have a public door,
+    # and the two customer roles are derived for every project.
+    assert chained["database"]["public"] == output_migrations.NO_PUBLIC_ENDPOINTS
+    assert (
+        chained["database"]["roles"]["customer_app"] == customer_roles_of(chained)["customer_app"]
+    )
     assert chained["compute"] == output_migrations.STANDARD_COMPUTE
     assert chained["project"]["lifecycle"] == output_migrations.PERMANENT_LIFECYCLE
     assert chained["backup"]["mirror"] == output_migrations.NO_MIRROR
@@ -2446,10 +2459,24 @@ def test_v15_refuses_a_document_already_at_15(v14: dict[str, Any]) -> None:
 
 
 @pytest.fixture
-def v20(chained: dict[str, Any]) -> dict[str, Any]:
-    """A version 20 document, derived from the chain's current one by removing
-    what version 21 added (ADR 0258: `compute`). Session 38."""
+def v21(chained: dict[str, Any]) -> dict[str, Any]:
+    """A version 21 document, derived from the chain's current one by removing
+    what version 22 added (ADR 0268/0269: `database.public` and the two customer
+    roles). Session 39."""
     document = json.loads(json.dumps(chained))
+    document["database"].pop("public", None)
+    for suffix in ("customer_app", "customer_admin"):
+        document["database"]["roles"].pop(suffix, None)
+    document["schema_version"] = 21
+    return document
+
+
+@pytest.fixture
+def v20(v21: dict[str, Any]) -> dict[str, Any]:
+    """A version 20 document, derived from the version 21 one by removing what
+    version 21 added (ADR 0258: `compute`) -- chained through `v21` since
+    Session 39."""
+    document = json.loads(json.dumps(v21))
     document.pop("compute", None)
     document["schema_version"] = 20
     return document
@@ -2608,10 +2635,11 @@ def test_v18_to_v19_adds_connectors_disabled(v18: dict[str, Any]) -> None:
     del stripped["connectors"]
     stripped["schema_version"] = 18
     assert stripped == v18, "the step changed something other than what version 19 adds"
-    # The schema admits the current version only (20 since Session 37), so the
-    # document is carried the last step before it is validated.
+    # The schema admits the current version only, so the document is carried
+    # to it -- by `carry_to_current`, never by naming the steps (D1105: three
+    # hand chains here stopped at 21 when Session 39 added 22).
     config.validate_against_schema(
-        output_migrations.migrate_v20_to_v21(output_migrations.migrate_v19_to_v20(migrated)),
+        carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION),
         "outputs.schema.json",
     )
 
@@ -2662,9 +2690,10 @@ def test_v19_to_v20_adds_control_off_and_the_route_and_nothing_else(
     del stripped["routes"]["control"]
     stripped["schema_version"] = 19
     assert stripped == v19, "the step changed something other than what version 20 adds"
-    # The schema admits the current version only (21 since Session 38).
+    # The schema admits the current version only; carried to it (D1105).
     config.validate_against_schema(
-        output_migrations.migrate_v20_to_v21(migrated), "outputs.schema.json"
+        carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION),
+        "outputs.schema.json",
     )
 
 
@@ -2724,11 +2753,9 @@ def test_v17_to_v18_adds_the_project_capabilities_block_and_nothing_else(
     assert stripped == v17, "the step changed something other than what version 18 adds"
 
     # And the result is the current schema's once the chain's last steps have
-    # run: the chain's end validates (Session 38: the current schema is 21's).
+    # run: the chain's end validates, carried by `carry_to_current` (D1105).
     config.validate_against_schema(
-        output_migrations.migrate_v20_to_v21(
-            output_migrations.migrate_v19_to_v20(output_migrations.migrate_v18_to_v19(migrated))
-        ),
+        carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION),
         "outputs.schema.json",
     )
 
@@ -2849,10 +2876,12 @@ def test_the_renderer_and_the_migrator_agree_on_the_lifecycle(v14: dict[str, Any
 # ---------------------------------------------------------------------------
 
 
-def test_v21_refuses_a_current_document(chained: dict[str, Any]) -> None:
-    """The same property for the step Session 38 adds."""
+def test_v21_refuses_a_current_document(v21: dict[str, Any]) -> None:
+    """The same property for the step Session 38 adds: a version 21 document is
+    refused as already there (Session 39: the chain's current document is 22,
+    so the version 21 one is the fixture's)."""
     with pytest.raises(MigrationError, match="already version 21"):
-        output_migrations.migrate_v20_to_v21(chained)
+        output_migrations.migrate_v20_to_v21(v21)
 
 
 def test_v21_adds_region_and_profile(v20: dict[str, Any]) -> None:
@@ -2873,8 +2902,69 @@ def test_v21_adds_region_and_profile(v20: dict[str, Any]) -> None:
     del stripped["compute"]
     stripped["schema_version"] = 20
     assert stripped == v20, "the step changed something other than what version 21 adds"
-    config.validate_against_schema(migrated, "outputs.schema.json")
+    # The schema admits the current version only (22 since Session 39), so the
+    # document is carried one step further before it is validated.
+    config.validate_against_schema(
+        carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION),
+        "outputs.schema.json",
+    )
 
     v20["compute"] = {"profile": "small"}
     with pytest.raises(MigrationError, match="already carries `compute`"):
         output_migrations.migrate_v20_to_v21(v20)
+
+
+# ---------------------------------------------------------------------------
+# Version 22: the public endpoints and the customer roles (ADR 0268/0269, Session 39)
+# ---------------------------------------------------------------------------
+
+
+def test_v22_adds_the_public_endpoints(v21: dict[str, Any]) -> None:
+    """ADR 0268, ADR 0269 (D2349, D2354). A rendered version 21 document gains
+    `database.public` = `{enabled: false, pooled: null, direct: null}` -- no
+    manifest below 11 could ask for a door -- and the two customer roles the
+    caller derived, and NOTHING else. The result validates against the current
+    schema. Controls: a current document is refused as already there; a
+    document already carrying `public` is refused; roles that are not exactly
+    the two, not bare identifiers, or already another role's name are refused."""
+    roles = customer_roles_of(v21)
+    migrated = output_migrations.migrate_v21_to_v22(v21, customer_roles=roles)
+    assert migrated["schema_version"] == 22
+    assert migrated["database"]["public"] == output_migrations.NO_PUBLIC_ENDPOINTS
+    assert migrated["database"]["public"] is not output_migrations.NO_PUBLIC_ENDPOINTS
+    assert output_migrations.NO_PUBLIC_ENDPOINTS == {
+        "enabled": False, "pooled": None, "direct": None,
+    }  # fmt: skip
+    for suffix, name in roles.items():
+        assert migrated["database"]["roles"][suffix] == name
+    config.validate_against_schema(migrated, "outputs.schema.json")
+
+    stripped = json.loads(json.dumps(migrated))
+    del stripped["database"]["public"]
+    for suffix in roles:
+        del stripped["database"]["roles"][suffix]
+    stripped["schema_version"] = 21
+    assert stripped == v21, "the step changed something other than what version 22 adds"
+
+    with pytest.raises(MigrationError, match="already version 22"):
+        output_migrations.migrate_v21_to_v22(migrated, customer_roles=roles)
+    with pytest.raises(MigrationError, match="exactly customer_app and customer_admin"):
+        output_migrations.migrate_v21_to_v22(
+            v21, customer_roles={"customer_app": roles["customer_app"]}
+        )
+    with pytest.raises(MigrationError, match="bare lowercase SQL identifier"):
+        output_migrations.migrate_v21_to_v22(
+            v21, customer_roles={**roles, "customer_app": "Bad-Role"}
+        )
+    taken = v21["database"]["roles"]["app_runtime"]
+    with pytest.raises(MigrationError, match="already this document's"):
+        output_migrations.migrate_v21_to_v22(v21, customer_roles={**roles, "customer_admin": taken})
+    v21["database"]["public"] = dict(output_migrations.NO_PUBLIC_ENDPOINTS)
+    with pytest.raises(MigrationError, match=r"already carries `database\.public`"):
+        output_migrations.migrate_v21_to_v22(v21, customer_roles=roles)
+
+
+def test_v22_does_not_mutate_its_input(v21: dict[str, Any]) -> None:
+    before = json.loads(json.dumps(v21))
+    output_migrations.migrate_v21_to_v22(v21, customer_roles=customer_roles_of(v21))
+    assert v21 == before

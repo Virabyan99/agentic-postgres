@@ -118,6 +118,8 @@ def slot_manifest(host: dict[str, Any], slot: host_config.DeclaredSlot) -> dict[
     enabled, the backup with its mirror; connectors off; no migration set (a
     customer's own SQL is not this session's); `compute: small`. The profile
     owns every memory and pool member, so none is written here (D2198).
+    Schema 11 with `database.public_endpoints.enabled: true` (ADR 0268): the
+    slot's `pool.` and `direct.` names, which is why it needs three records.
     """
     defaults = host_config.slot_defaults(host)
     if defaults is None:
@@ -149,7 +151,9 @@ def slot_manifest(host: dict[str, Any], slot: host_config.DeclaredSlot) -> dict[
     if defaults["backup"].get("jurisdiction") not in (None, "default"):
         backup["jurisdiction"] = defaults["backup"]["jurisdiction"]
     return {
-        "schema_version": 10,
+        # 11 (ADR 0268): a slot is the project a customer holds, so it is the
+        # one that gets the public Postgres door.
+        "schema_version": 11,
         "project": {
             "slug": slug,
             "environment": environment,
@@ -162,6 +166,7 @@ def slot_manifest(host: dict[str, Any], slot: host_config.DeclaredSlot) -> dict[
             "pooled_public_cidrs": [],
             "max_client_connections": 100,
             "pool_size": 16,
+            "public_endpoints": {"enabled": True},
         },
         "api": {
             "public_base_path": "/api",
@@ -326,6 +331,28 @@ def dns_reading(domain: str, expected_ipv4: str | None) -> tuple[bool | None, st
     return True, f"{domain} A {expected_ipv4}, no AAAA"
 
 
+def slot_dns(
+    domain: str,
+    expected_ipv4: str | None,
+    dns: Callable[[str, str | None], tuple[bool | None, str]],
+) -> tuple[bool | None, str]:
+    """A slot's THREE records read as one (ADR 0268, D2335): its domain and its
+    two public Postgres names, `pool.` and `direct.` below it (`naming.
+    endpoint_hosts`). True only when every one is this host alone with no
+    AAAA. A name that is determinately wrong decides False -- the first, by
+    that order, is the reason -- whatever another could not be read; with none
+    wrong, one unread is None (ADR 0195), never a guessed answer."""
+    names = (domain, *naming.endpoint_hosts(domain))
+    readings = [(name, *dns(name, expected_ipv4)) for name in names]
+    for _name, answer, reason in readings:
+        if answer is False:
+            return False, reason
+    for _name, answer, reason in readings:
+        if answer is None:
+            return None, reason
+    return True, "; ".join(reason for _name, _answer, reason in readings)
+
+
 def observe(
     host: dict[str, Any],
     *,
@@ -342,7 +369,7 @@ def observe(
     expected = host["host"].get("expected_public_ipv4")
     rows = []
     for entry in host_config.declared_slots(host):
-        answer, dns_reason = dns(entry.domain, expected)
+        answer, dns_reason = slot_dns(entry.domain, expected, dns)
         readings = read(
             entry.key,
             dns=answer,

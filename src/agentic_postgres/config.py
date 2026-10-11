@@ -61,7 +61,7 @@ MAX_MANIFEST_BYTES = 65_536
 #: `project.lifecycle`. Versions 1 and 2 still load and render as permanent
 #: projects, because both host manifests are version 1 and no commit can edit
 #: them.
-SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11})
 SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
 
 #: The project manifest version at which `mcp.capabilities` exists (ADR 0201):
@@ -92,6 +92,12 @@ PROJECT_CONTROL_FROM = 9
 #: is `standard` -- today's defaults exactly -- and the documents record
 #: `compute.profile: standard` for it (outputs version 21).
 PROJECT_COMPUTE_FROM = 10
+
+#: The project manifest version at which `database.public_endpoints` exists
+#: (ADR 0268): optional at 11, forbidden below. Absent, or below 11, the project
+#: has no public Postgres door, and the documents record `database.public.
+#: enabled: false` for it (outputs version 22). Only a slot's manifest sets it.
+PROJECT_PUBLIC_ENDPOINTS_FROM = 11
 
 #: The project manifest version at which `backup.mirror` exists (ADR 0188):
 #: optional at 4, forbidden below. A manifest below 4 has no mirror, and the
@@ -477,6 +483,28 @@ def control_enabled(document: dict[str, Any]) -> bool:
     and `bin/control.sh` finds the control project by it rather than by a name.
     """
     return bool((document.get("control") or {}).get("enabled", False))
+
+
+def public_endpoints_enabled(document: dict[str, Any]) -> bool:
+    """Does this MANIFEST give the project public Postgres endpoints? (ADR 0268.)
+
+    `database.public_endpoints.enabled` at schema 11; an absent block means off,
+    which is every manifest below 11 and every project but a slot. A rendered or
+    deployed document says the same thing at `database.public.enabled`.
+    """
+    database = document.get("database") or {}
+    return bool((database.get("public_endpoints") or {}).get("enabled", False))
+
+
+#: The refusal a control project asking for a public door gets (ADR 0268,
+#: D2337). A constant for `UNSUPPORTED_PUBLIC_POOL`'s reason: an operator reads
+#: it, a test matches it.
+CONTROL_PUBLIC_ENDPOINT = (
+    "the control project's database has no public endpoint (ADR 0268): "
+    "database.public_endpoints.enabled may not be true beside control.enabled. The "
+    "control plane holds every organisation's accounts; its database is reached "
+    "through its own services and never from the internet."
+)
 
 
 def connector_endpoints(manifest: dict[str, Any]) -> dict[str, str]:
@@ -1321,6 +1349,10 @@ def validate_project_semantics(
     # plane with nowhere to keep an account -- a deploy that would start `/v1`
     # over a database with no control table and answer every request with an
     # undefined-function error. Refused at the render, where a human is looking.
+    # ADR 0268 (D2337): the control plane's database never gets a public door.
+    if control_enabled(document) and public_endpoints_enabled(document):
+        raise ManifestError(CONTROL_PUBLIC_ENDPOINT)
+
     if control_enabled(document) and set_path is None:
         raise ManifestError(
             "control.enabled is true and the manifest declares no migrations.set. The control "

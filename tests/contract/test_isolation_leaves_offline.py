@@ -172,3 +172,28 @@ def test_a_planted_unclassified_leaf_is_reported(
     leaves = _schema_leaves(planted, "", {})
     assert [p for p in leaves if classify(p) is None] == ["zz.unclassified"]
     assert len(_deployed_schema_leaves()) > 100, "the schema walk found almost nothing"
+
+
+def test_the_public_endpoints_are_classified_by_what_they_name() -> None:
+    """Outputs v22 (ADR 0268, D2349). Classified, and classified RIGHT -- the
+    leaf proof above only says each has a category. A public host, the role a
+    door admits and the database behind it are project scope (two projects
+    sharing one would share a door); the port and `sslmode` are the substrate
+    (one edge, one TLS policy); the facility flag and a disabled door's null
+    carry no authority, matched exactly so a future leaf under a null is not
+    swallowed by a prefix. Control: the leaves Session 38 classified keep their
+    categories."""
+    for door in ("pooled", "direct"):
+        for member in ("host", "user", "database"):
+            assert classify(f"database.public.{door}.{member}") == "differ", (door, member)
+        for member in ("port", "sslmode"):
+            assert classify(f"database.public.{door}.{member}") == "match", (door, member)
+        assert classify(f"database.public.{door}") == "not_authority", door
+        assert classify(f"database.public.{door}x") is None, f"a prefix swallowed {door}x"
+    assert classify("database.public.enabled") == "not_authority"
+    assert classify("database.roles.customer_app") == "differ"
+    assert classify("database.roles.customer_admin") == "differ"
+    # Control: unchanged neighbours.
+    assert classify("database.pooled.port") == "differ"
+    assert classify("region.id") == "match"
+    assert classify("compute.profile") == "not_authority"

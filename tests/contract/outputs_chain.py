@@ -17,7 +17,8 @@ profiles, a documentation role, connection budgets, storage settings, backup
 names) and each test that starts lower derives them from its own document in
 its own way; a helper that accepted eighteen keyword arguments would be
 `migrate_rendered` with a second signature. From 13 upward the only parameter
-is the metrics URL, and every caller passes it.
+is the metrics URL, and every caller passes it -- and the v22 step's customer
+roles, which this helper derives from the document's own key.
 
 Not a test module: no `test_` prefix, no fixtures, importable by name from a
 sibling because pytest's prepend import mode puts this directory on the path.
@@ -30,7 +31,7 @@ from typing import Any
 
 from agentic_postgres import output_migrations
 
-__all__ = ["FIRST_CARRIED_VERSION", "STEPS", "carry_to_current"]
+__all__ = ["FIRST_CARRIED_VERSION", "STEPS", "carry_to_current", "customer_roles_of"]
 
 #: The lowest version this helper starts from. Below it, a step needs a
 #: fixture parameter the document cannot supply.
@@ -48,6 +49,21 @@ def _steps(metrics_url: str) -> dict[int, Callable[[dict[str, Any]], dict[str, A
         18: output_migrations.migrate_v18_to_v19,
         19: output_migrations.migrate_v19_to_v20,
         20: output_migrations.migrate_v20_to_v21,
+        21: lambda d: output_migrations.migrate_v21_to_v22(d, customer_roles=customer_roles_of(d)),
+    }
+
+
+def customer_roles_of(document: dict[str, Any]) -> dict[str, str]:
+    """What a caller supplies for the v22 step (ADR 0269): the two customer
+    roles, derived through `naming` from the document's OWN key -- the caller
+    derives and the migrator validates, as for the v6 step's documentation role
+    (ADR 0002: one derivation path per name)."""
+    from agentic_postgres import naming
+
+    key_sql = naming.sql_key(document["project"]["key"])
+    return {
+        suffix: naming.database_role(key_sql, suffix)
+        for suffix in ("customer_app", "customer_admin")
     }
 
 

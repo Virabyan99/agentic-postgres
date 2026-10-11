@@ -50,6 +50,12 @@ MUST_DIFFER = (
     "database.pooled.port",
     "database.direct.port",
     "database.statement_timeouts.*",
+    # Version 22 (ADR 0268). A project's public names, the role each door
+    # admits and the database behind it: the SNI is what picks the project, so
+    # two projects sharing a host name would share a door.
+    "database.public.*.host",
+    "database.public.*.user",
+    "database.public.*.database",
     # Token authority. Two projects verifying each other's tokens is the
     # sharpest form of shared authority there is.
     "jwt.issuer",
@@ -114,6 +120,13 @@ MUST_MATCH = (
     # and the members (D1029's lesson: classify the null and the object).
     "region",
     "region.*",
+    # Version 22 (ADR 0268). One edge, one published Postgres port, one TLS
+    # policy: two projects with public endpoints carry the same port and the
+    # same `sslmode`. Exact paths, so a project without endpoints (null) skips.
+    "database.public.pooled.port",
+    "database.public.direct.port",
+    "database.public.pooled.sslmode",
+    "database.public.direct.sslmode",
 )
 
 #: **Release state is deliberately NOT in MUST_MATCH**, and the first draft had
@@ -146,6 +159,16 @@ RELEASE_STATE = (
     "document_kind",
     "deployed_through_session",
     "project.environment",
+)
+
+#: Carries no authority, matched EXACTLY: a null whose object's leaves are
+#: classified elsewhere. A prefix here would swallow every leaf a later version
+#: adds below it, unclassified (D1029's lesson, the other way round).
+NOT_AUTHORITY_EXACT = (
+    # Version 22 (ADR 0268): a project without public endpoints has no door,
+    # and an absent door is not a shared one.
+    "database.public.pooled",
+    "database.public.direct",
 )
 
 #: Carries no authority. Prefix rules rather than an enumeration: these grow
@@ -214,6 +237,10 @@ NOT_AUTHORITY_PREFIXES = (
     # Version 21 (ADR 0258): which compute profile the project runs. Two projects
     # may share one and a project's size is not its authority.
     "compute.",
+    # Version 22 (ADR 0268): whether the project has public endpoints. A
+    # facility -- `control.enabled`'s reasoning. The null each door is when it
+    # does not is NOT_AUTHORITY_EXACT below, never a prefix here.
+    "database.public.enabled",
     "backup_state.",
     "bootstrap.status",
     "routes.",
@@ -247,7 +274,7 @@ def classify(path: str) -> str | None:
     for pattern in MUST_MATCH:
         if matches(path, pattern):
             return "match"
-    if path in RELEASE_STATE:
+    if path in RELEASE_STATE or path in NOT_AUTHORITY_EXACT:
         return "not_authority"
     for prefix in NOT_AUTHORITY_PREFIXES:
         if path == prefix or path.startswith(prefix):
