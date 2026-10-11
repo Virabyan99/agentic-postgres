@@ -31,6 +31,7 @@ __all__ = [
     "FIELDS",
     "OperatorError",
     "Reading",
+    "document_endpoints",
     "document_fields",
     "enables_control",
     "find_control",
@@ -142,6 +143,16 @@ def target(document: dict[str, Any]) -> tuple[str, str]:
             EXIT_PREREQUISITE, "the control project's deployed document names no database container"
         )
     return str(container), str(name)
+
+
+def document_endpoints(document: dict[str, Any]) -> str:
+    """The document's `database.public` as the JSON `control_adopt_project`
+    records (D2351), or "" for a document that carries none (outputs < 22),
+    which the adoption passes as NULL and so never erases a recorded value."""
+    public = (document.get("database") or {}).get("public")
+    if not isinstance(public, dict):
+        return ""
+    return json.dumps(public, sort_keys=True, separators=(",", ":"))
 
 
 def document_fields(key: str, document: dict[str, Any]) -> tuple[dict[str, str] | None, str | None]:

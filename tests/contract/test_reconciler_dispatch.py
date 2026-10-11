@@ -58,6 +58,30 @@ ARGUMENTS = {
     "handoff_sha256": HANDOFF,
 }
 ADMISSION_REASON = "the host has 412 MiB left and the candidate charges 840"
+#: Admission's own lines (D2362): what `admit.sh --json` prints its decision on.
+REQUESTED_MB = 840
+SAFE_REFUSED_MB = 412
+SAFE_ADMITTED_MB = 4600
+#: Session 39 (ADR 0269): the doors a slot's document records, and a verifier
+#: shaped as PostgreSQL stores one -- never a password.
+POOL_USER = "slot1_dev_customer_app"
+DIRECT_USER = "slot1_dev_customer_admin"
+VERIFIER = (
+    "SCRAM-SHA-256$4096:c2FsdHNhbHRzYWx0c2FsdA==$"
+    "U3RvcmVkS2V5U3RvcmVkS2V5U3RvcmVkS2V5U3RvcmU=:"
+    "U2VydmVyS2V5U2VydmVyS2V5U2VydmVyS2V5U2VydmU="
+)
+DOORS = {
+    "enabled": True,
+    "pooled": {
+        "host": "pool.slot1.example.test", "port": 5432, "user": POOL_USER,
+        "database": "slot1_dev", "sslmode": "verify-full", "connection_limit": 2,
+    },
+    "direct": {
+        "host": "direct.slot1.example.test", "port": 5432, "user": DIRECT_USER,
+        "database": "slot1_dev", "sslmode": "verify-full", "connection_limit": 2,
+    },
+}  # fmt: skip
 #: What the fake storage container prints, and the archive the fake pg_dump writes.
 URL = "https://r2.example.test/bucket/apg/exports/x.dump?X-Amz-Expires=900&X-Amz-Signature=5ec"
 ARCHIVE = b"PGDMP\x01 the customer's schemas"
@@ -120,6 +144,8 @@ class Database:
         self.interrupted: list[dict[str, Any]] = []
         self.uploaded: bytes | None = None
         self.upload_code = 0
+        #: A statement containing this marker is refused, as psql refuses one.
+        self.refuse: str | None = None
 
     def __call__(self, container: str, *argv: str, **kwargs: Any) -> Any:
         if argv and argv[0] == "pg_dump":
@@ -133,6 +159,8 @@ class Database:
         self.calls.append(
             {"container": container, "argv": list(argv), "input": text, "vars": _variables(text)}
         )
+        if self.refuse is not None and self.refuse in text:
+            return subprocess.CompletedProcess(argv, 1, "", "ERROR:  refused by the rig\n")
         answers = (
             (
                 "control_claim_operation",
@@ -167,6 +195,10 @@ class Children:
         self.password: str | None = None
         self.kill_at: str | None = None
         self.running = "true"
+        #: What `admit.sh` prints instead of its decision, when a proof says so.
+        self.admit_output: str | None = None
+        #: The `database.public` the next deployed document records (outputs 22).
+        self.doors: dict[str, Any] | None = None
 
     @staticmethod
     def label(argv: list[str]) -> str:
@@ -206,7 +238,17 @@ class Children:
             out = STORAGE + "\n"
         code = self.codes.get(label, 0)
         if label == "admit.sh":
-            out = json.dumps({"exit_code": code, "reason": ADMISSION_REASON if code else None})
+            safe = SAFE_REFUSED_MB if code == 12 else SAFE_ADMITTED_MB
+            out = self.admit_output or json.dumps(
+                {
+                    "exit_code": code,
+                    "reason": ADMISSION_REASON if code else None,
+                    "lines": [
+                        {"label": "requested", "value": f"{REQUESTED_MB} MiB for {KEY}"},
+                        {"label": "safe available", "value": f"{safe} MiB"},
+                    ],
+                }
+            )
         if kwargs.get("capture_output"):
             return subprocess.CompletedProcess(argv, code, out, "")
         handle = kwargs.get("stdout")
@@ -234,6 +276,9 @@ class Children:
             "compute": {"profile": profile},
             "routes": {"app": {"url": "https://slot1.example.test/api/app", "status": "published"}},
         }
+        if self.doors is not None:
+            document["schema_version"] = 22
+            document["database"]["public"] = self.doors
         (directory / "outputs.json").write_text(json.dumps(document), "utf-8")
 
     def labels(self) -> list[str]:
@@ -714,11 +759,17 @@ def test_a_result_carries_only_declared_members() -> None:
 
 
 def _deployed_slot(
-    host: Host, operation_type: str, arguments: dict[str, Any] | None = None
+    host: Host,
+    operation_type: str,
+    arguments: dict[str, Any] | None = None,
+    *,
+    doors: dict[str, Any] | None = None,
 ) -> None:
-    """The slot created and running: allocated, its document deployed; one
-    operation of `operation_type` pending on it."""
+    """The slot created and running: allocated, its document deployed (with
+    `doors` as its `database.public`, Session 39); one operation of
+    `operation_type` pending on it."""
     (host.slot_directory / slot.ALLOCATED).write_text("an earlier creation\n", "utf-8")
+    host.children.doors = doors
     host.children.deployed("small")
     host.database.claims = [_row(type=operation_type, arguments=arguments or {}, project_key=KEY)]
 
@@ -798,14 +849,16 @@ def test_resize_admits_a_candidate_before_anything_changes(host: Host) -> None:
 
 
 def test_the_export_names_only_the_customer_schemas(host: Host) -> None:
-    """D2164 (rig 38d): `pg_dump -Fc -n app -n api --no-owner --no-privileges`
-    in the project's database container -- never `app_private`."""
+    """D2164 (rig 38d): `pg_dump -Fc -n app -n api -n public --no-owner
+    --no-privileges` in the project's database container -- never
+    `app_private`. `public` since Session 39 (D2333): the schema
+    `customer_admin` creates the customer's own tables in -- exactly three."""
     _deployed_slot(host, "project.export")
     assert host.once() == 0
     (dump,) = [c for c in host.database.calls if c["argv"][:1] == ["pg_dump"]]
     assert dump["container"] == "apg-slot1-dev-postgres-1"
     assert dump["argv"] == [
-        "pg_dump", "-U", "postgres", "-Fc", "-n", "app", "-n", "api",
+        "pg_dump", "-U", "postgres", "-Fc", "-n", "app", "-n", "api", "-n", "public",
         "--no-owner", "--no-privileges", "-d", "slot1_dev",
     ]  # fmt: skip
     assert not any("app_private" in part for call in host.database.calls for part in call["argv"])
@@ -965,3 +1018,173 @@ def test_start_waits_for_the_control_database(capsys: pytest.CaptureFixture[str]
     body = source.split("def start() -> Reconciler:", 1)[1].split("\ndef ", 1)[0]
     assert body.index("control_target()") < body.index("wait_for_control(control)")
     assert body.index("wait_for_control(control)") < body.index("reconciler.recover()")
+
+
+# ---------------------------------------------------------------------------
+# Session 39: admission's reading in a resize's result (D2362, ADR 0270)
+# ---------------------------------------------------------------------------
+
+
+def test_a_resize_records_its_admission_reading_on_both_outcomes(host: Host) -> None:
+    """D2362: the two numbers admission decided on travel in the operation's
+    own result -- refused AND admitted -- so the lifecycle proof compares the
+    outcome with its reading through `/v1` (ADR 0270). They are admission's
+    lines, parsed; when admission printed none, no reading is invented."""
+    _deployed_slot(host, "project.resize", {"profile": "large"})
+    host.children.codes["admit.sh"] = 12
+    assert host.once() == 0
+    refused = host.finished()
+    assert refused["error_code"] == "capacity_exhausted"
+    assert refused["result"]["admission"] == {
+        "requested_mb": REQUESTED_MB,
+        "safe_available_mb": SAFE_REFUSED_MB,
+    }
+    assert REQUESTED_MB > SAFE_REFUSED_MB  # the reading implies the refusal
+
+    host.database.calls.clear()
+    host.children.calls.clear()
+    host.children.codes.clear()
+    host.database.claims = [_row(type="project.resize", arguments={"profile": "large"},
+                                 project_key=KEY)]  # fmt: skip
+    assert host.once() == 0
+    admitted = host.finished()
+    assert admitted["status"] == "succeeded"
+    assert admitted["result"]["admission"] == {
+        "requested_mb": REQUESTED_MB,
+        "safe_available_mb": SAFE_ADMITTED_MB,
+    }
+    assert set(admitted["result"]) <= operations.RESULT_MEMBERS["project.resize"]
+
+    # The third outcome: admission printed nothing readable -- no reading.
+    host.database.calls.clear()
+    host.children.calls.clear()
+    host.children.admit_output = "not a decision"
+    host.database.claims = [_row(type="project.resize", arguments={"profile": "large"},
+                                 project_key=KEY)]  # fmt: skip
+    assert host.once() == 0
+    assert "admission" not in host.finished()["result"]
+
+
+def test_admission_reading_reads_only_admissions_own_lines() -> None:
+    reading = reconciler_dispatch.admission_reading
+    lines = [
+        {"label": "requested", "value": "840 MiB for slot1-dev"},
+        {"label": "safe available", "value": "4600 MiB  (injected)"},
+    ]
+    assert reading(json.dumps({"lines": lines})) == {"requested_mb": 840, "safe_available_mb": 4600}
+    assert reading(json.dumps({"lines": lines[:1]})) is None
+    assert reading(json.dumps({"lines": [{"label": "requested", "value": "lots"}]})) is None
+    assert reading("") is None
+    assert reading("[]") is None
+
+
+# ---------------------------------------------------------------------------
+# Session 39: credential.rotate (ADR 0269, D2330)
+# ---------------------------------------------------------------------------
+
+
+def _rotation(host: Host, role: str = "customer_admin", **changes: Any) -> None:
+    _deployed_slot(
+        host,
+        "credential.rotate",
+        {"role": role, "verifier": VERIFIER, **changes},
+        doors=DOORS,
+    )
+
+
+def test_a_rotation_sets_the_verifier_on_stdin_and_rewrites_both_userlists(host: Host) -> None:
+    """D2330: the role's NAME read from the deployed document's door, never the
+    argument; `ALTER ROLE` in the project's database with BOTH values psql
+    variables on stdin; then `customer-credentials.sh sync` on the deployed
+    document. The verifier is in no argv and in no result."""
+    _rotation(host)
+    assert host.once() == 0
+    assert host.children.labels() == ["docker inspect", "customer-credentials.sh"]
+    (altered,) = [c for c in host.database.calls if "ALTER ROLE" in c["input"]]
+    assert altered["container"] == "apg-slot1-dev-postgres-1"
+    assert altered["vars"] == {"role": DIRECT_USER, "verifier": VERIFIER}
+    assert reconciler_dispatch.ALTER_PASSWORD_SQL in altered["input"]
+    sync = host.children.calls[-1]["argv"]
+    assert Path(sync[0]).name == "customer-credentials.sh"
+    assert sync[1:] == ["sync", "--outputs", str(host.module.STATE_ROOT / KEY / "outputs.json")]
+    every_argv = [c["argv"] for c in host.children.calls] + [c["argv"] for c in host.database.calls]
+    assert not any(VERIFIER in part for argv in every_argv for part in argv)
+    finished = host.finished()
+    assert finished["status"] == "succeeded"
+    assert {k: v for k, v in finished["result"].items() if k != "steps"} == {
+        "role": "customer_admin"
+    }
+    assert [s["step"] for s in finished["result"]["steps"]] == ["check", "alter", "sync"]
+    assert VERIFIER not in json.dumps(finished["result"])
+
+    # Control: the other role, the other door's user.
+    host.database.calls.clear()
+    host.children.calls.clear()
+    _rotation(host, "customer_app")
+    assert host.once() == 0
+    (altered,) = [c for c in host.database.calls if "ALTER ROLE" in c["input"]]
+    assert altered["vars"]["role"] == POOL_USER
+
+
+def test_a_project_without_doors_is_refused_before_anything_runs(host: Host) -> None:
+    for doors in (None, {"enabled": False, "pooled": None, "direct": None}):
+        host.database.calls.clear()
+        host.children.calls.clear()
+        _deployed_slot(
+            host, "credential.rotate", {"role": "customer_app", "verifier": VERIFIER}, doors=doors
+        )
+        assert host.once() == 0
+        assert host.children.labels() == []
+        assert not any("ALTER ROLE" in c["input"] for c in host.database.calls)
+        finished = host.finished()
+        assert (finished["error_code"], finished["result"]["reason"]) == (
+            "invalid_request",
+            "the project has no public endpoints",
+        )
+
+
+def test_a_refused_credential_fails_the_operation_and_syncs_nothing(host: Host) -> None:
+    _rotation(host)
+    host.database.refuse = "ALTER ROLE"
+    assert host.once() == 0
+    assert host.children.labels() == ["docker inspect"]
+    finished = host.finished()
+    assert finished["error_code"] == "operation_failed"
+    assert finished["result"]["reason"] == "the project's database refused the credential"
+    assert "refused by the rig" not in json.dumps(finished["result"])
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"role": "customer_app", "verifier": "hunter2"},
+        {"role": "customer_app", "verifier": "md5" + "0" * 32},
+        {"role": "customer_app", "verifier": VERIFIER + "\n"},
+        {"role": "postgres", "verifier": VERIFIER},
+        {"role": "customer_app", "verifier": VERIFIER, "password": "hunter2"},
+    ],
+)
+def test_a_rotation_whose_arguments_are_not_a_verifier_runs_nothing(
+    host: Host, arguments: dict[str, Any]
+) -> None:
+    _deployed_slot(host, "credential.rotate", arguments, doors=DOORS)
+    assert host.once() == 0
+    assert host.children.labels() == []
+    assert not any("ALTER ROLE" in c["input"] for c in host.database.calls)
+    assert host.finished()["error_code"] == "invalid_request"
+
+
+def test_the_registry_refresh_records_the_doors(host: Host) -> None:
+    """D2351: the refresh after a deploy carries the document's
+    `database.public` whole; a document without it passes none (NULL), which
+    the adoption reads as 'not named' and never erases."""
+    _deployed_slot(host, "project.resize", {"profile": "large"}, doors=DOORS)
+    assert host.once() == 0
+    (adopted,) = host.database.named("control_adopt_project")
+    assert json.loads(adopted["endpoints"]) == DOORS
+    host.database.calls.clear()
+    host.children.calls.clear()
+    _deployed_slot(host, "project.resize", {"profile": "large"})
+    assert host.once() == 0
+    (adopted,) = host.database.named("control_adopt_project")
+    assert adopted["endpoints"] == ""

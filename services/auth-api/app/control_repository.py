@@ -309,6 +309,15 @@ class ControlRepository:
         assert row is not None
         return row["operation_id"], bool(row["created"])
 
+    async def project_endpoints(self, user: UUID, key: str) -> dict[str, Any] | None:
+        """The project's recorded `database.public`, or None when never recorded
+        (D2351). A foreign, missing or deleted project is the one `not_found`."""
+        row = await self._one(
+            user, "SELECT app.control_project_endpoints(%s, %s) AS endpoints", (user, key)
+        )
+        endpoints = None if row is None else row["endpoints"]
+        return endpoints if isinstance(endpoints, dict) else None
+
     async def cancel_operation(self, user: UUID, operation: UUID) -> None:
         await self._rows(user, "SELECT app.control_cancel_operation(%s, %s)", (user, operation))
 

@@ -85,6 +85,11 @@ MATRIX: Final[dict[str, str]] = {
     "export_project": ACCOUNT,
     "delete_project": ACCOUNT,
     "cancel_operation": ACCOUNT,
+    # Session 39 (ADR 0268, ADR 0269): a project's public doors and its
+    # customer credentials. The organisation is read from the project row; the
+    # read needs `viewer`, the write PROJECT_WRITES'.
+    "get_connections": ACCOUNT,
+    "rotate_credential": ACCOUNT,
 }
 
 #: Session 38's writes (D2165, ADR 0256) -> the role they need in the
@@ -100,6 +105,8 @@ PROJECT_WRITES: Final[dict[str, str]] = {
     "export_project": "member",
     "delete_project": "admin",
     "cancel_operation": "viewer",
+    # Session 39 (ADR 0269): member and above, as every write but deletion.
+    "rotate_credential": "member",
 }
 
 #: Each write route -> the operation type it requests.
@@ -110,6 +117,7 @@ OPERATION_OF_ROUTE: Final[dict[str, str]] = {
     "resize_project": "project.resize",
     "export_project": "project.export",
     "delete_project": "project.delete",
+    "rotate_credential": "credential.rotate",
 }
 
 #: The key vocabulary: exactly the scopes a route checks (D2052) -- the control
@@ -156,6 +164,10 @@ KEY_SCOPES: Final[dict[str, str]] = {
     "sleep_project": "projects:write",
     "wake_project": "projects:write",
     "resize_project": "projects:write",
+    # Session 39: the doors' metadata, which names no secret, is a read. Setting
+    # a credential is NOT here: a person does it (ADR 0269), so a leaked key
+    # can never replace the customer's database credential with its own.
+    "get_connections": "projects:read",
 }
 
 

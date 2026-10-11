@@ -45,6 +45,17 @@
       "template": "templates/0004-control-operations.sql",
       "template_sha256": "f573abd35fa99a9ed5a1dc23ba92a5389652dd450eae0eb6ca7ea3336af1674d",
       "version": "20261007120004"
+    },
+    {
+      "canonical_render_sha256": "66b34b631fb4fd7cd6907a104e468ee6cc40a8fb959bfc0d957c2475a24d252a",
+      "name": "control_endpoints",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0005-control-endpoints.sql",
+      "template_sha256": "d77e4ee41b6f65947a1c70d465b855ac1753f6bae50ca2df3d274a624d9b8e83",
+      "version": "20261011120005"
     }
   ],
   "schema_version": 3

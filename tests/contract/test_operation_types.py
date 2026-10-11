@@ -91,18 +91,24 @@ THE_ACCEPTED_SIX = {
     "project.export",
 }
 
+#: What the reconciler executes since Session 39's Run 6: the six and
+#: `credential.rotate` (ADR 0269), which no ledger row accepts before Run 9.
+THE_EXECUTED_SEVEN = THE_ACCEPTED_SIX | {"credential.rotate"}
 
-def test_no_type_is_accepted_and_the_six_stay_executed() -> None:
+
+def test_no_type_is_accepted_and_the_seven_are_executed() -> None:
     """The exact-set form at Session 38's close (ADR 0261 authorises it; D2170
     applied): the six types the reconciler executes are built and NOT accepted
     -- their rows went back to `planned` because live claims they name failed on
     Session 38's evidence -- so the service accepts no type at all, as Session
-    37's did, and a type outside the table is never accepted. Session 39 moves
-    the six back to `trial` and this test with them. The ledger half (accepted
-    iff the row is reachable) is `test_reality_ledger`'s."""
+    37's did, and a type outside the table is never accepted. Session 39's Run 6
+    adds `credential.rotate` to what is executed (ADR 0269) -- renamed from
+    `..._the_six_stay_executed` -- and its Run 9 moves the rows to `trial` and
+    this test with them. The ledger half (accepted iff the row is reachable) is
+    `test_reality_ledger`'s."""
     assert operations.ACCEPTED_TYPES == frozenset()
-    assert operations.EXECUTED_TYPES == THE_ACCEPTED_SIX
-    assert THE_ACCEPTED_SIX < THE_ELEVEN
+    assert operations.EXECUTED_TYPES == THE_EXECUTED_SEVEN
+    assert THE_EXECUTED_SEVEN < THE_ELEVEN
     assert not any(service_operations.is_accepted(t) for t in THE_ELEVEN)
     assert not service_operations.is_accepted("project.rename")
 
@@ -114,6 +120,21 @@ def test_no_type_is_accepted_and_the_six_stay_executed() -> None:
 OPERATIONS_TEMPLATE = (
     REPO_ROOT / "projects" / "control" / "migrations" / "templates" / "0004-control-operations.sql"
 )
+TEMPLATES = REPO_ROOT / "projects" / "control" / "migrations" / "templates"
+
+
+def _newest_request_operation() -> str:
+    """The NEWEST template that defines `control_request_operation` -- 0005 since
+    Session 39 replaces it -- so the type list read is the one a migrated
+    cluster runs, never a superseded one."""
+    defining = [
+        path
+        for path in sorted(TEMPLATES.glob("*.sql"))
+        if re.search(r"FUNCTION app\.control_request_operation\(", path.read_text("utf-8"))
+    ]
+    assert defining, "no template defines control_request_operation"
+    return defining[-1].read_text(encoding="utf-8")
+
 
 #: Each write route -> (method, path) with `{key}` for the project.
 WRITES = {
@@ -123,6 +144,7 @@ WRITES = {
     "project.resize": ("PUT", "/v1/projects/{key}/compute"),
     "project.export": ("POST", "/v1/projects/{key}/export"),
     "project.delete": ("DELETE", "/v1/projects/{key}"),
+    "credential.rotate": ("POST", "/v1/projects/{key}/credentials"),
 }
 
 
@@ -148,7 +170,7 @@ def test_a_type_not_accepted_is_refused_not_available_before_its_body(
         url = path.format(key="nosuch-prod")
         body = {"organization_id": org, "x": 1}
         monkeypatch.setattr(
-            service_operations, "ACCEPTED_TYPES", THE_ACCEPTED_SIX - {operation_type}
+            service_operations, "ACCEPTED_TYPES", THE_EXECUTED_SEVEN - {operation_type}
         )
         refused = drive.call(method, url, token=token, body=body)
         assert (refused.status_code, refused.json()) == (
@@ -157,10 +179,11 @@ def test_a_type_not_accepted_is_refused_not_available_before_its_body(
         ), operation_type
         assert refused.headers["cache-control"] == "no-store"
         monkeypatch.undo()
-        monkeypatch.setattr(service_operations, "ACCEPTED_TYPES", THE_ACCEPTED_SIX)
+        monkeypatch.setattr(service_operations, "ACCEPTED_TYPES", THE_EXECUTED_SEVEN)
         passed = drive.call(method, url, token=token, body=body)
         monkeypatch.undo()
-        expected = 400 if operation_type in ("project.create", "project.resize") else 404
+        with_body = ("project.create", "project.resize", "credential.rotate")
+        expected = 400 if operation_type in with_body else 404
         assert passed.status_code == expected, (operation_type, passed.text)
     assert drive.cluster.query("SELECT count(*) FROM app.control_operations;") == before
     listed = drive.call("GET", f"/v1/operations?organization={org}", token=token)
@@ -192,7 +215,7 @@ def test_the_argument_schema_has_one_branch_per_executed_type() -> None:
     assert tuple(re.findall(r"'([a-z]+)'", profile_check.group(1))) == (
         compute_profiles.PROFILE_NAMES
     )
-    executed = re.search(r"IF p_type NOT IN \((.*?)\)", sql, re.DOTALL)
+    executed = re.search(r"IF p_type NOT IN \((.*?)\)", _newest_request_operation(), re.DOTALL)
     assert executed is not None
     assert set(re.findall(r"'([a-z_.]+)'", executed.group(1))) == operations.EXECUTED_TYPES
 
@@ -209,6 +232,13 @@ def test_the_error_codes_are_one_closed_list() -> None:
 #: reconciler reads and by the model the control mode reads, and the two must
 #: agree on every one (D2154). The trailing-newline cases are why the schema
 #: does not end its patterns in `$` (D2199).
+#: A SCRAM-SHA-256 verifier's exact shape: 4096 iterations, a 16-byte salt,
+#: two 32-byte keys, base64 (ADR 0269).
+VERIFIER = (
+    "SCRAM-SHA-256$4096:c2FsdHNhbHRzYWx0c2FsdA==$"
+    "U3RvcmVkS2V5U3RvcmVkS2V5U3RvcmVkS2V5U3RvcmU=:"
+    "U2VydmVyS2V5U2VydmVyS2V5U2VydmVyS2V5U2VydmU="
+)
 GOOD_CREATE = {
     "name": "Shop backend",
     "profile": "small",
@@ -240,6 +270,20 @@ EXAMPLES: list[tuple[str, dict[str, Any], bool]] = [
     ("project.sleep", {"path": "/etc"}, False),
     ("project.delete", {}, True),
     ("project.export", {"schemas": ["app_private"]}, False),
+    # Session 39 (ADR 0269, D2330): a role and a SCRAM verifier, never a password.
+    ("credential.rotate", {"role": "customer_app", "verifier": VERIFIER}, True),
+    ("credential.rotate", {"role": "customer_admin", "verifier": VERIFIER}, True),
+    ("credential.rotate", {"role": "customer_app", "verifier": VERIFIER + "\n"}, False),
+    ("credential.rotate", {"role": "customer_app", "verifier": "hunter2"}, False),
+    ("credential.rotate", {"role": "customer_app", "verifier": "md5" + "0" * 32}, False),
+    (
+        "credential.rotate",
+        {"role": "customer_app", "verifier": VERIFIER.replace("4096", "1")},
+        False,
+    ),
+    ("credential.rotate", {"role": "postgres", "verifier": VERIFIER}, False),
+    ("credential.rotate", {"role": "customer_app"}, False),
+    ("credential.rotate", {"role": "customer_app", "verifier": VERIFIER, "password": "x"}, False),
 ]
 
 
@@ -252,6 +296,7 @@ def test_the_schema_and_the_models_agree(
     model = {
         "project.create": models.CreateProjectRequest,
         "project.resize": models.ResizeProjectRequest,
+        "credential.rotate": models.RotateCredentialRequest,
     }.get(operation_type)
     if model is None:
         by_model = arguments == {}

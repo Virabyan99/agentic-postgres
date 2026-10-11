@@ -137,6 +137,8 @@ CHILD_SECONDS = {
     "project-runtime.sh": 300,
     "project-retire.sh": 900,
     "docker": 60,
+    # Session 39: a read of two rows, two renames and two signals.
+    "customer-credentials.sh": 120,
 }
 DATABASE_SECONDS = 120
 #: `pg_dump` of a slot's customer schemas, and its upload (D2164).
@@ -574,6 +576,7 @@ def refresh_registry(operation: Operation, key: str, display_name: str) -> str |
         slot=key,
         app_route=app_route or "",
         display_name=display_name,
+        endpoints=control_registry.document_endpoints(document),
     )
     return region
 
@@ -725,6 +728,10 @@ def resize(operation: Operation) -> dict[str, Any]:
     key, document = slot_project(operation)
     profile = operation.arguments["profile"]
     manifest = _slot_manifest(key)
+    #: D2362, ADR 0270: the numbers admission decided on, recorded on BOTH
+    #: outcomes, so a proof reads the decision against its own reading through
+    #: `/v1`. Absent only when `admit.sh` printed none (its own failure).
+    reading: dict[str, Any] = {}
     with operation.step("admit"):
         require_running(operation, document)
         candidate = manifest.with_name(f".candidate.{operation.id}.yaml")
@@ -742,13 +749,19 @@ def resize(operation: Operation) -> dict[str, Any]:
                     {"reason": "the resized manifest was refused by the loader"},
                 ) from error
             done = operation.child(dispatch.admit_argv(REPO_ROOT, candidate), capture=True)
+            admission = dispatch.admission_reading(done.stdout or "")
+            if admission is not None:
+                reading["admission"] = admission
             if done.returncode == ADMISSION_REFUSED:
                 raise Refused(
                     "capacity_exhausted",
-                    {"reason": "admission", "refusal": admission_reason(done.stdout)},
+                    {"reason": "admission", "refusal": admission_reason(done.stdout), **reading},
                 )
             if done.returncode != 0:
-                raise Refused("operation_failed", {"reason": f"admission exited {done.returncode}"})
+                raise Refused(
+                    "operation_failed",
+                    {"reason": f"admission exited {done.returncode}", **reading},
+                )
             os.replace(candidate, manifest)
         finally:
             candidate.unlink(missing_ok=True)
@@ -761,7 +774,7 @@ def resize(operation: Operation) -> dict[str, Any]:
         )
     with operation.step("registry"):
         refresh_registry(operation, key, "")
-    return {"profile": profile}
+    return {"profile": profile, **reading}
 
 
 def export(operation: Operation) -> dict[str, Any]:
@@ -849,6 +862,52 @@ def delete(operation: Operation) -> dict[str, Any]:
     return {}
 
 
+def rotate(operation: Operation) -> dict[str, Any]:
+    """`credential.rotate` (ADR 0269, D2330): the customer's verifier set as its
+    role's password, then both poolers' userlists rewritten from `pg_authid`.
+
+    The role's NAME is the deployed document's (`database.public.<door>.user`),
+    never the argument; the verifier reaches psql on stdin as a variable, never
+    an argv and never a log line. A project without public doors is refused
+    before anything runs; a sleeping one is woken first, as every write asks.
+    """
+    key, document = slot_project(operation)
+    role = operation.arguments["role"]
+    database = document.get("database") or {}
+    with operation.step("check"):
+        public = database.get("public") or {}
+        if not public.get("enabled"):
+            raise Refused("invalid_request", {"reason": "the project has no public endpoints"})
+        door = public.get(dispatch.CUSTOMER_DOORS[role]) or {}
+        name = door.get("user")
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", name):
+            raise Refused(
+                "could_not_determine",
+                {"reason": "the deployed document names no role for this door"},
+            )
+        require_running(operation, document)
+    with operation.step("alter"):
+        try:
+            database_call(
+                str(database.get("container", "")),
+                str(database.get("name", "")),
+                dispatch.ALTER_PASSWORD_SQL,
+                {"role": name, "verifier": operation.arguments["verifier"]},
+            )
+        except ControlError as error:
+            # psql's line is not carried: the reason names the step, never a value.
+            raise Refused(
+                "operation_failed", {"reason": "the project's database refused the credential"}
+            ) from error
+    with operation.step("sync"):
+        outputs = deployed_output.deployed_path(key, root=STATE_ROOT)
+        operation.require(
+            operation.child(dispatch.credentials_argv(REPO_ROOT, outputs)),
+            "customer-credentials sync",
+        )
+    return {"role": role}
+
+
 #: The closed table's executing half: one handler per type of `dispatch.STEPS`.
 HANDLERS: dict[str, Callable[[Operation], dict[str, Any]]] = {
     "project.create": create,
@@ -857,6 +916,7 @@ HANDLERS: dict[str, Callable[[Operation], dict[str, Any]]] = {
     "project.resize": resize,
     "project.export": export,
     "project.delete": delete,
+    "credential.rotate": rotate,
 }
 
 

@@ -22,10 +22,13 @@ requires it to equal what the ledger says: a row moved without this set
 following, or a type added here while its row is `planned`, fails that guard.
 That is the fake-complete guard ADR 0247 wrote, read in both directions.
 
-**`EXECUTED_TYPES` are the six Session 38 builds** (ADR 0256): the types the
-control set's `control_request_operation` records and the reconciler
-dispatches, each with one branch of `ARGUMENT_SCHEMA_PATH` (D2154). A type may
-be accepted only if it is executed; the converse waits on the ledger.
+**`EXECUTED_TYPES` are the six Session 38 builds and Session 39's
+`credential.rotate`** (ADR 0256, ADR 0269): the types the control set's
+`control_request_operation` records and the reconciler dispatches, each with
+one branch of `ARGUMENT_SCHEMA_PATH` (D2154). A type may be accepted only if it
+is executed; the converse waits on the ledger -- `credential.rotate` is
+executed from Session 39's Run 6 and accepted only when `direct_endpoint`'s row
+says so (Run 9).
 
 **`RESULT_MEMBERS`** (D2151): what a finished operation of each type may record
 in its `result`. The control set's `app.control_result_members` returns the
@@ -56,7 +59,8 @@ OPERATION_TYPES: Final[dict[str, str]] = {
     "credential.rotate": "direct_endpoint",
 }
 
-#: The types the control set records and the reconciler executes (Session 38).
+#: The types the control set records and the reconciler executes (Session 38;
+#: `credential.rotate` since Session 39, ADR 0269).
 EXECUTED_TYPES: Final[frozenset[str]] = frozenset(
     {
         "project.create",
@@ -65,6 +69,7 @@ EXECUTED_TYPES: Final[frozenset[str]] = frozenset(
         "project.wake",
         "project.resize",
         "project.export",
+        "credential.rotate",
     }
 )
 
@@ -90,8 +95,13 @@ RESULT_MEMBERS: Final[dict[str, frozenset[str]]] = {
     "project.delete": COMMON_RESULT_MEMBERS,
     "project.sleep": COMMON_RESULT_MEMBERS,
     "project.wake": COMMON_RESULT_MEMBERS,
-    "project.resize": COMMON_RESULT_MEMBERS | {"profile"},
+    # D2362, ADR 0270: the reading admission decided by, on both outcomes --
+    # `{"requested_mb", "safe_available_mb"}` from the reconciler's `admit.sh --json`.
+    "project.resize": COMMON_RESULT_MEMBERS | {"admission", "profile"},
     "project.export": COMMON_RESULT_MEMBERS | {"expires_at", "sha256", "size_bytes"},
+    # ADR 0269: which role was rotated. Never the verifier, which the row's
+    # arguments carry and no result repeats.
+    "credential.rotate": COMMON_RESULT_MEMBERS | {"role"},
 }
 
 

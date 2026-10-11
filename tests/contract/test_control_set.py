@@ -66,6 +66,8 @@ GRANTED = {
     "control_remove_member",
     "control_list_projects",
     "control_get_project",
+    # Session 39 (D2351): a project's recorded doors, viewer and above.
+    "control_project_endpoints",
     "control_list_operations",
     "control_get_operation",
     # Session 38 (ADR 0256): requesting, cancelling, the one-time secret, the
@@ -313,7 +315,7 @@ def test_the_control_example_renders_as_the_control_plane() -> None:
         assert outputs["control"] == {"enabled": True}
         assert outputs["routes"]["control"] == "https://fixture-control-dev.test/api/v1"
         assert outputs["migrations"]["project_set"]["root"] == "projects/control"
-        assert outputs["migrations"]["project_set"]["count"] == 4
+        assert outputs["migrations"]["project_set"]["count"] == 5
         assert outputs["storage"]["enabled"] is False
         values = dict(
             line.split("=", 1)
@@ -324,7 +326,7 @@ def test_the_control_example_renders_as_the_control_plane() -> None:
         assert values["CONTROL_ROUTE_PATH"] == "/api/v1"
         assert values["API_CONTROL_PATH"] == "/api"
         rendered_set = sorted(p.name for p in (directory / "migrations-project").glob("*.sql"))
-        assert len(rendered_set) == 4, rendered_set
+        assert len(rendered_set) == 5, rendered_set
     finally:
         # CLAUDE.md §1: a proof that renders deletes what it published.
         shutil.rmtree(directory, ignore_errors=True)

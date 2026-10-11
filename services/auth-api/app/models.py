@@ -656,6 +656,23 @@ class ResizeProjectRequest(_Strict):
     profile: ComputeProfile
 
 
+#: The two customer roles a credential is set for (ADR 0269): the suffixes,
+#: never a derived role name.
+CustomerRole = Literal["customer_app", "customer_admin"]
+
+
+class RotateCredentialRequest(_Strict):
+    """`POST /v1/projects/{key}/credentials`: which customer role, and the
+    SCRAM-SHA-256 verifier the CLI computed from a password that never leaves
+    the customer's workstation (ADR 0269, D2330). There is no password member:
+    a customer cannot choose one, and this plane never holds one."""
+
+    role: CustomerRole
+    verifier: str = Field(
+        pattern=r"^SCRAM-SHA-256\$4096:[A-Za-z0-9+/]{22}==\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$"
+    )
+
+
 class OperationAcceptedResponse(BaseModel):
     """`202`: the operation recorded, `pending`; follow it at `/v1/operations/{id}`."""
 

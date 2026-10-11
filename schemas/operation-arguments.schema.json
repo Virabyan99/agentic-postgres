@@ -38,6 +38,23 @@
         }
       }
     },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "arguments"],
+      "properties": {
+        "type": { "const": "credential.rotate" },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["role", "verifier"],
+          "properties": {
+            "role": { "enum": ["customer_app", "customer_admin"], "description": "Which customer role (ADR 0269): the pooled door's or the direct door's. The reconciler reads the role's NAME from the deployed document; this is never a role name and never reaches an argv." },
+            "verifier": { "type": "string", "pattern": "^SCRAM-SHA-256\\$4096:[A-Za-z0-9+/]{22}==\\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=(?![\\s\\S])", "description": "The SCRAM-SHA-256 verifier the customer's CLI computed from a password that never leaves the workstation: 4096 iterations, a 16-byte salt, two 32-byte keys (ADR 0269, D2330). It reaches psql on stdin as a variable, never an argv." }
+          }
+        }
+      }
+    },
     { "$ref": "#/$defs/no_arguments", "properties": { "type": { "const": "project.sleep" } } },
     { "$ref": "#/$defs/no_arguments", "properties": { "type": { "const": "project.wake" } } },
     { "$ref": "#/$defs/no_arguments", "properties": { "type": { "const": "project.export" } } },

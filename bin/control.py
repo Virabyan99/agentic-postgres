@@ -60,6 +60,7 @@ from agentic_postgres.control_registry import (  # noqa: E402
     FIELDS,
     OperatorError,
     Reading,
+    document_endpoints,
     document_fields,
     enables_control,
     find_control,
@@ -96,9 +97,13 @@ __all__ = [
 #: A project key as `naming` derives one: what may be joined onto STATE_ROOT.
 _KEY = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 
+#: Session 39 (D2351): the document's `database.public` by name, NULL for a
+#: document that carries none -- so an operator's re-adoption never erases
+#: doors the reconciler recorded, and the other optional members stay unnamed.
 ADOPT_SQL = (
     "SELECT app.control_adopt_project(:'key', :'organization'::uuid, :'slug', "
-    ":'environment', :'domain', :'template_version', :'source_commit');"
+    ":'environment', :'domain', :'template_version', :'source_commit', "
+    "p_endpoints => nullif(:'endpoints', '')::jsonb);"
 )
 REGISTRY_SQL = (
     "SELECT coalesce(json_agg(r ORDER BY r.key), '[]'::json) FROM app.control_registry_rows() r;"
@@ -227,6 +232,8 @@ def adopt(key: str, *, organization: str, confirm: str) -> int:
     container, database = target(control.document or {})
     variables = [f"key={key}", f"organization={organization}"]
     variables += [f"{name}={fields[name]}" for name in FIELDS]
+    endpoints = document_endpoints(reading.document)
+    variables.append(f"endpoints={endpoints}")
     try:
         done = psql(container, database, ADOPT_SQL, *variables)
     except (OSError, subprocess.TimeoutExpired) as error:

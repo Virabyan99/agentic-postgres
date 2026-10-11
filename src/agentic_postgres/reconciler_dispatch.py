@@ -35,11 +35,13 @@ from agentic_postgres import REPO_ROOT, compute_profiles, operations, slot
 __all__ = [
     "ADMIN_ID_SQL",
     "ADOPT_SQL",
+    "ALTER_PASSWORD_SQL",
     "ARGV_MEMBERS",
     "BACKUP_SEQUENCE",
     "BACKUP_VERBS",
     "CLAIM_SQL",
     "COMMANDS",
+    "CUSTOMER_DOORS",
     "EXPORT_SCHEMAS",
     "FINISH_SQL",
     "INSTANCE_UUID_SQL",
@@ -50,9 +52,11 @@ __all__ = [
     "RECORD_SLOTS_SQL",
     "RESULT_MEMBERS",
     "STEPS",
+    "admission_reading",
     "admit_argv",
     "backup_argv",
     "bootstrap_argv",
+    "credentials_argv",
     "deploy_argv",
     "disable_argv",
     "dump_argv",
@@ -95,6 +99,10 @@ STEPS: dict[str, tuple[tuple[str, int], ...]] = {
     "project.export": (("dump", 10), ("upload", 60)),
     # D2158: the retirement (provider deferred), the tombstone, the registry.
     "project.delete": (("retire", 10), ("tombstone", 80), ("registry", 90)),
+    # Session 39 (ADR 0269, D2330): the door and its role read from the
+    # deployed document, the verifier set in the project's database, both
+    # poolers' userlists rewritten from `pg_authid`.
+    "credential.rotate": (("check", 10), ("alter", 40), ("sync", 70)),
 }
 
 #: What a finished operation may record (D2151): the service's table, which
@@ -119,12 +127,21 @@ COMMANDS = frozenset(
         "project-runtime.sh",
         "project-retire.sh",
         "docker",
+        # Session 39 (ADR 0269): the userlists from `pg_authid`, and the SIGHUP.
+        "customer-credentials.sh",
     }
 )
 
 #: The schemas an export carries: the customer's, never `app_private` (D2164,
-#: rig 38d: `-n app -n api` lists no `app_private`; without `-n` it does).
-EXPORT_SCHEMAS = ("app", "api")
+#: rig 38d: `-n app -n api` lists no `app_private`; without `-n` it does) --
+#: and since Session 39 `public`, where `customer_admin` creates the
+#: customer's own tables (D2333, ADR 0259 amended, rig 39c's `pg_dump -n public`).
+EXPORT_SCHEMAS = ("app", "api", "public")
+
+#: Session 39 (ADR 0269): a credential's role -> the door of `database.public`
+#: whose `user` names it. The argument is the suffix; the role's NAME is the
+#: deployed document's.
+CUSTOMER_DOORS = {"customer_app": "pooled", "customer_admin": "direct"}
 
 #: A container name as Compose writes one, read from a deployed document or
 #: from `docker ps` -- never one a value chose.
@@ -166,7 +183,8 @@ RECORD_SLOTS_SQL = "SELECT app.control_record_slots(:'slots'::jsonb);"
 ADOPT_SQL = (
     "SELECT app.control_adopt_project(:'key', :'organization'::uuid, :'slug', :'environment', "
     ":'domain', :'template_version', :'source_commit', nullif(:'region', ''), :'profile', "
-    "nullif(:'slot', ''), nullif(:'app_route', ''), nullif(:'display_name', ''));"
+    "nullif(:'slot', ''), nullif(:'app_route', ''), nullif(:'display_name', ''), "
+    "nullif(:'endpoints', '')::jsonb);"
 )
 
 # ---------------------------------------------------------------------------
@@ -183,6 +201,12 @@ OPEN_HANDOFF_SQL = (
     "SELECT app_private.auth_open_password_reset(:'user'::uuid, :'user'::uuid, :'hash', "
     "now() + interval '24 hours');"
 )
+#: Session 39 (ADR 0269, D2330): the customer's verifier set as the role's
+#: password -- both values psql variables on stdin, the role an identifier
+#: (`:"role"`), the verifier a literal (`:'verifier'`). PostgreSQL stores a
+#: value already shaped as a SCRAM verifier as it is, and no password exists.
+ALTER_PASSWORD_SQL = "ALTER ROLE :\"role\" PASSWORD :'verifier';"  # noqa: S105 -- a statement; the value is a variable
+
 #: The identity the volume carries -- read the way `deploy-project.py`'s
 #: `cluster_instance_uuid` reads it, never from a printed line (D2173).
 INSTANCE_UUID_SQL = "SELECT instance_uuid FROM app_private.project_identity;"
@@ -343,6 +367,30 @@ def _container(name: str) -> str:
     if not _CONTAINER.fullmatch(name):
         raise ValueError("not a container name")
     return name
+
+
+def credentials_argv(checkout: Path, outputs: Path) -> list[str]:
+    """Both customer poolers' userlists from `pg_authid`, then SIGHUP (ADR 0269)."""
+    return [str(checkout / "bin" / "customer-credentials.sh"), "sync", "--outputs", str(outputs)]
+
+
+def admission_reading(stdout: str) -> dict[str, int] | None:
+    """`{"requested_mb", "safe_available_mb"}` out of `admit.sh --json`'s own
+    lines (D2362, ADR 0270) -- the numbers its decision was taken on -- or None
+    when they cannot be read. Never a number the reconciler computed."""
+    try:
+        decision = json.loads(stdout)
+        lines = {line["label"]: line["value"] for line in decision["lines"]}
+    except (ValueError, TypeError, KeyError):
+        return None
+    reading = {}
+    for member, label in (("requested_mb", "requested"), ("safe_available_mb", "safe available")):
+        value = lines.get(label)
+        found = re.match(r"(-?[0-9]+) MiB", value) if isinstance(value, str) else None
+        if found is None:
+            return None
+        reading[member] = int(found.group(1))
+    return reading
 
 
 def disable_argv(key: str) -> list[str]:

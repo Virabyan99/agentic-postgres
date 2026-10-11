@@ -53,6 +53,7 @@ from app.models import (
     OperationAcceptedResponse,
     RefreshRequest,
     ResizeProjectRequest,
+    RotateCredentialRequest,
     SessionTokenResponse,
     SetMemberRoleRequest,
 )
@@ -872,6 +873,63 @@ async def export_project(request: Request, key: str) -> Response:
 async def delete_project(request: Request, key: str) -> Response:
     async def run() -> Response:
         return await _write(request, await _offered(request), key)
+
+    return await _guard(run)
+
+
+@router.post(
+    "/projects/{key}/credentials",
+    status_code=202,
+    openapi_extra=openapi_docs.described(
+        summary="Set a customer role's database credential",
+        description=(
+            "Member and above, a person only. `role` is `customer_app` (the pooled door) or "
+            "`customer_admin` (the direct door); `verifier` is the SCRAM-SHA-256 verifier your "
+            "CLI computed from a password it wrote to a file on your machine -- the password "
+            "itself never reaches this plane, and there is no way to send one. The reconciler "
+            "sets it and both doors re-read their lists; the previous credential stops working "
+            "then. `not_available` naming `pooled_endpoint` for a project without public doors."
+        ),
+        request_model=RotateCredentialRequest,
+    ),
+    responses={202: ACCEPTED, 400: openapi_docs.MALFORMED, 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_YOURS, 409: NOT_OFFERED},
+)  # fmt: skip
+async def rotate_credential(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        caller = await _offered(request)
+        payload = await _body(request, RotateCredentialRequest)
+        assert isinstance(payload, RotateCredentialRequest)
+        operation = await _service(request).rotate_credential(
+            caller, key, payload.role, payload.verifier
+        )
+        return _accepted(operation)
+
+    return await _guard(run)
+
+
+@router.get(
+    "/projects/{key}/connections",
+    openapi_extra=openapi_docs.described(
+        summary="A project's public database doors",
+        description=(
+            "Viewer and above, or a key holding `projects:read`. The pooled door (transaction "
+            "mode, `customer_app`) and the direct door (a session, `customer_admin`) as the "
+            "project's deploy recorded them, and a snippet per client measured through them. "
+            "Every snippet's password is a placeholder: the password is the file your CLI "
+            "wrote, and this plane never held it. `not_available` naming `pooled_endpoint` for "
+            "a project without public doors."
+        ),
+    ),
+    responses={200: openapi_docs.ok("The two doors and the snippets."),
+               401: openapi_docs.UNAUTHENTICATED, 403: FACTOR_GATE, 404: NOT_YOURS,
+               409: {"model": NotAvailableResponse,
+                     "description": "`not_available`: the project has no public doors."}},
+)  # fmt: skip
+async def get_connections(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        return JSONResponse(await _service(request).connections(caller, key))
 
     return await _guard(run)
 

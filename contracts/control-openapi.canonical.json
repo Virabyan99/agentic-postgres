@@ -2067,6 +2067,186 @@
         "summary": "Change a project's compute profile"
       }
     },
+    "/v1/projects/{key}/connections": {
+      "get": {
+        "description": "Viewer and above, or a key holding `projects:read`. The pooled door (transaction mode, `customer_app`) and the direct door (a session, `customer_admin`) as the project's deploy recorded them, and a snippet per client measured through them. Every snippet's password is a placeholder: the password is the file your CLI wrote, and this plane never held it. `not_available` naming `pooled_endpoint` for a project without public doors.",
+        "operationId": "get_connections_v1_projects__key__connections_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The two doors and the snippets."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAvailableResponse"
+                }
+              }
+            },
+            "description": "`not_available`: the project has no public doors."
+          }
+        },
+        "summary": "A project's public database doors"
+      }
+    },
+    "/v1/projects/{key}/credentials": {
+      "post": {
+        "description": "Member and above, a person only. `role` is `customer_app` (the pooled door) or `customer_admin` (the direct door); `verifier` is the SCRAM-SHA-256 verifier your CLI computed from a password it wrote to a file on your machine -- the password itself never reaches this plane, and there is no way to send one. The reconciler sets it and both doors re-read their lists; the previous credential stops working then. `not_available` naming `pooled_endpoint` for a project without public doors.",
+        "operationId": "rotate_credential_v1_projects__key__credentials_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "`POST /v1/projects/{key}/credentials`: which customer role, and the\nSCRAM-SHA-256 verifier the CLI computed from a password that never leaves\nthe customer's workstation (ADR 0269, D2330). There is no password member:\na customer cannot choose one, and this plane never holds one.",
+                "properties": {
+                  "role": {
+                    "enum": [
+                      "customer_app",
+                      "customer_admin"
+                    ],
+                    "title": "Role",
+                    "type": "string"
+                  },
+                  "verifier": {
+                    "pattern": "^SCRAM-SHA-256\\$4096:[A-Za-z0-9+/]{22}==\\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$",
+                    "title": "Verifier",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "role",
+                  "verifier"
+                ],
+                "title": "RotateCredentialRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAcceptedResponse"
+                }
+              }
+            },
+            "description": "Recorded, `pending`: the reconciler executes it; follow it at `/v1/operations/{id}`."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAvailableResponse"
+                }
+              }
+            },
+            "description": "`not_available`, with the ledger row that says why: the operation is not offered yet, and nothing is recorded. Or `conflict` (ConflictResponse), with the id of the operation already holding the project."
+          }
+        },
+        "summary": "Set a customer role's database credential"
+      }
+    },
     "/v1/projects/{key}/export": {
       "post": {
         "description": "Member and above, a person only. An archive of the project's own schemas; when the operation succeeds, `GET /v1/operations/{id}` returns its `download_url` -- valid at most 15 minutes -- ONCE, to the person who asked.",

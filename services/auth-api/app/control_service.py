@@ -59,6 +59,7 @@ from uuid import UUID
 
 from app import (
     compute_profiles,
+    connection_snippets,
     control_roles,
     control_states,
     errors,
@@ -104,6 +105,14 @@ STALE_SLOT_MESSAGE = (
     "This server's slots were last observed more than ten minutes ago, so none is known "
     "to be ready. No resources were created."
 )
+
+#: Session 39 (D2351): what a project without recorded doors is refused with --
+#: the Reality Ledger row of the concept that is not there for it.
+NO_ENDPOINT_LEDGER_ROW = "pooled_endpoint"
+
+#: The members of a door `GET /v1/projects/{key}/connections` serves, from the
+#: deployed document's `database.public` (ADR 0268 item 6). No URL, no password.
+DOOR_MEMBERS = ("host", "port", "user", "database", "sslmode", "connection_limit")
 
 
 def mint_key() -> tuple[str, str, str]:
@@ -670,6 +679,58 @@ class ControlService:
         row = await self.repository.get_operation(caller.user_id, operation)
         assert row is not None, "the operation just recorded is not readable by its requester"
         return _operation(row)
+
+    async def _doors(self, caller: ControlPrincipal, key: str, minimum: str) -> dict[str, Any]:
+        """A project of the caller's organisations, the caller holding
+        `minimum` there, and its recorded doors -- or `not_available` naming
+        `pooled_endpoint` when it has none (D2351): never recorded, a project
+        without the facility, or a record no snippet can be built from."""
+        row = await self.repository.get_project(caller.user_id, key)
+        if row is None or not self._visible(caller, row["organization_id"]):
+            raise errors.ControlRefused(errors.NOT_FOUND)
+        if row["deleted_at"] is not None:
+            raise errors.ControlRefused(errors.NOT_FOUND)
+        self.require_role(caller, row["organization_id"], minimum)
+        endpoints = await self.repository.project_endpoints(caller.user_id, key)
+        try:
+            served = connection_snippets.snippets(endpoints or {})
+        except ValueError as error:
+            raise errors.ControlRefused(
+                errors.NOT_AVAILABLE, ledger_row=NO_ENDPOINT_LEDGER_ROW
+            ) from error
+        assert endpoints is not None
+        return {"organization": row["organization_id"], "endpoints": endpoints, "snippets": served}
+
+    async def connections(self, caller: ControlPrincipal, key: str) -> dict[str, Any]:
+        """A project's two public doors and a snippet per measured client
+        (ADR 0268 item 6). Names no password: none exists in this plane."""
+        doors = await self._doors(caller, key, "viewer")
+        endpoints = doors["endpoints"]
+        return {
+            "project": key,
+            **{
+                door: {member: endpoints[door].get(member) for member in DOOR_MEMBERS}
+                for door in ("pooled", "direct")
+            },
+            "password": connection_snippets.PASSWORD_PLACEHOLDER,
+            "snippets": doors["snippets"],
+        }
+
+    async def rotate_credential(
+        self, caller: ControlPrincipal, key: str, role: str, verifier: str
+    ) -> dict[str, Any]:
+        """Request `credential.rotate` (ADR 0269): member and above, a person
+        only, on a project with public doors. The verifier is the row's
+        argument; the reconciler sets it and rewrites the poolers' userlists."""
+        route = "rotate_credential"
+        doors = await self._doors(caller, key, control_roles.PROJECT_WRITES[route])
+        return await self._request(
+            caller,
+            doors["organization"],
+            key,
+            control_roles.OPERATION_OF_ROUTE[route],
+            {"role": role, "verifier": verifier},
+        )
 
     @staticmethod
     def resize_message() -> str:

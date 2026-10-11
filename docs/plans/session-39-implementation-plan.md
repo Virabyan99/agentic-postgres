@@ -1,9 +1,9 @@
 # Session 39 — Public TLS endpoints and customer roles
 
-**Status: EXECUTING. Runs 1–5 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
+**Status: EXECUTING. Runs 1–6 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
 threat list; Sheet E0 read). Rows **D2325–D2355** at planning; Run 1 added
 **D2356–D2360**, Run 2 **D2361–D2364**, Run 3 **D2365–D2369**, Run 4 **D2370–D2374**,
-Run 5 **D2375–D2381**. ADRs **0268–0270** written. **NEXT FREE: D2382, ADR 0271.**
+Run 5 **D2375–D2381**, Run 6 **D2382–D2387**. ADRs **0268–0270** written. **NEXT FREE: D2388, ADR 0271.**
 
 The fourth session of Stage 5 (`docs/plans/stage-5-plan.md` §3, §5 *Session 39*).
 Twelve runs and **two sittings on two days**: the firewall, the edge's one
@@ -467,6 +467,12 @@ table below it, in execution order.
 | **D2379** | Run 5 item 5's exits *"0 / 3 / 6"*, and *"the poolers by their derived container names"*. | No container name for a pooler is derived anywhere; `postgres_container` is `compose_name("apg-<key>-postgres-1")` because `container_name:` is forbidden in the model. A document below outputs 22 (the deployed 1.16.0 documents) has no `database.public`. | **`naming.customer_pooler_containers(key)`** by the same rule. A document without the facility is **exit 0, "nothing to sync"**, nothing read; a cluster that cannot be read is 6 with NOTHING written; written but a pooler not signalled is **6 naming which pooler still serves its previous list**, never 0. A non-SCRAM stored value or a missing role is 6. | ADR 0195: the third outcome reported. | 0269, 0195 |
 | **D2380** | Run 5 item 4: the labels' hosts and router names. | Compose cannot interpolate a label KEY (ADR 0013), so the router names must be rendered into the override, read from compose.env like every other router name (`_override_names`, `_override_control`); the SNI names are values. | **compose.env gains `CUSTOMER_POOL_ROUTER_NAME`, `CUSTOMER_DIRECT_ROUTER_NAME`, `CUSTOMER_POOL_HOST`, `CUSTOMER_DIRECT_HOST`** (with `APG_PUBLIC_ENDPOINTS` and the two `CUSTOMER_*_CONNECTIONS`), rendered for EVERY project as the control router's name is; `_override_public_endpoints` reads them. | One reader of the facility for the profile and the labels. | 0268, 0013 |
 | **D2381** | Run 5's targeted list (the plan's eleven plus nine guards). | `test_environment_gates::test_every_test_declares_the_environment_it_consumes` walks EVERY test body for a subscript `x["APG_..."]` and reads it as an environment read; four of Run 5's new proofs read compose-MODEL and rendered-env dictionaries that way (`environment["APG_POOL_MODE"]`). CI run `38121171227` failed on exactly that guard (1 failed, 7,531 passed); the targeted list never ran it. | **The model reads use `.get("APG_...")`** -- a missing key is `None` and fails the same assertion, so no proof weakened; the guard is unchanged. **The guard joins the targeted list of every run that adds a test module** (CLAUDE.md §1, beside D1242's). | A whole-tree scanner is the class a diff-derived list cannot see (D1486). | -- |
+| **D2382** | D2333 (export `-n public`) and §7's LIFE-EXPORT-001 (*"exactly `app`, `api`, `public`"*). | No run in §5 carries D2333's code; `reconciler_dispatch.EXPORT_SCHEMAS` was still `("app", "api")`, so Run 11's lifecycle would export a customer's database without the tables `customer_admin` makes. | **Landed in Run 6** with the rest of the reconciler's Session 39 work: `EXPORT_SCHEMAS = ("app", "api", "public")`; `test_the_export_names_only_the_customer_schemas` names exactly the three argv members (stricter). | A row with no run is a decision nobody executes. | 0259 |
+| **D2383** | Run 6 item 2: the two routes; D2351: *"`409 not_available` (`ledger_row: pooled_endpoint`) when `endpoints` is null"*. | The plan names the refusal for the read only. A rotation on a project without doors would record a row the reconciler can only refuse; a record no snippet can be built from is neither "offered" nor served. | **Both routes refuse a project without doors with `409 not_available` naming `pooled_endpoint`, before any row** -- never recorded (NULL), `{"enabled": false}`, or a record `connection_snippets` refuses; the reconciler's `check` step refuses again (`invalid_request`). `GET .../connections` serves exactly `project`, `pooled`, `direct` (each `host, port, user, database, sslmode, connection_limit`), `password` (the placeholder) and `snippets`; viewer and above or a `projects:read` key. `POST .../credentials` is member and above, a person only (absent from `KEY_SCOPES`), `202` with the operation; its body is `RotateCredentialRequest`, the schema branch's mirror. **Residual, named**: an unbuildable record answers `not_available`, not a third outcome -- the registry is root-written from a schema-validated document, so the case is a corrupted registry. | One refusal for "this project has no doors", wherever it is asked. | 0268, 0269 |
+| **D2384** | D2351: *"`0005` ... replaced `control_adopt_project` to take the endpoints ... adds the `credential.rotate` argument CHECK if the set validates arguments in SQL"*. | The set validates no argument in SQL (the route and the reconciler validate against the schema, D2154); `control_get_project`'s `RETURNS TABLE` feeds four routes, and widening it is a drop, a re-create and a re-grant. | **`0005-control-endpoints.sql`**: `endpoints jsonb NULL` (an object or NULL); `control_adopt_project` re-created with `p_endpoints jsonb DEFAULT NULL`, coalesced like 0004's members (an adoption that names none never erases); a NEW definer reader `control_project_endpoints(p_user, p_key)` (viewer, row security's one `not_found`) granted to the identity service; `control_request_operation` replaced with the SAME signature (its grant stands) accepting `credential.rotate` at member; `control_result_members` replaced (`credential.rotate` -> `role`, `project.resize` -> `admission`). No argument CHECK. Frozen (5 migrations, follows 20261003120039); proposal `f0dabad8…` by `propose` (lint passed, 44 applied from empty as `migration_user` in 21.0 s, surface empty, six destructive findings -- 0004's five and 0005's re-created adoption, each intended); the render removed. `bin/control.py adopt` passes the document's `database.public` by name (`p_endpoints =>`), the reconciler's refresh positionally; `control_registry.document_endpoints` is the one reader. | The narrowest change to an applied set (D912). | 0268, 0243 |
+| **D2385** | D2362: *"the reconciler's resize parses the `admit.sh --json` it already runs into `{"requested_mb", "safe_available_mb"}` and records it on BOTH outcomes"*. | `admit.sh --json` prints `requested_unreclaimable_mb` and the decision's `lines`; the proof that judges a decision (NODE-ADMIT-002, `test_session31_capacity`) reads the LINES `requested` and `safe available`. | **`reconciler_dispatch.admission_reading` reads admission's own two lines** (`<n> MiB`, `(injected)` tolerated), the numbers the decision was taken on; recorded on refused (`capacity_exhausted`), failed (`operation_failed`) and admitted outcomes; **absent, never invented,** when admission printed nothing readable. | One reading, the one the decision used. | 0270 |
+| **D2386** | §7: CTL-OPS-001's `test_no_type_is_accepted_and_the_six_stay_executed` is *"REPLACED by its exact-set form for 39 -- seven executed types"*. | The executed set moves in Run 6 (this run), the accepted set in Run 9; a test named for six executed types would fail now and lie after. And `test_the_argument_schema_has_one_branch_per_executed_type` read the type list from `0004`'s `control_request_operation`, which `0005` supersedes. | **Renamed now to `test_no_type_is_accepted_and_the_seven_are_executed`** (EXECUTED = the six + `credential.rotate`, ACCEPTED still empty), its registry node id moved (D1119) and the matrix regenerated; Run 9 changes its ACCEPTED half. The SQL type list is read from the NEWEST template that defines the function. The not-accepted proof walks the seventh route (`POST .../credentials`, 400 past the gate). | A test's name is part of what it claims. | 0254, 0269 |
+| **D2387** | D2352: snippets *"the flags rig 39c decides"*. | Rig 39c connected every driver with the rig's OWN certificate authority (`sslrootcert=`, `ssl: {ca}`, Prisma `sslcert=…&sslaccept=strict`); production presents a public Let's Encrypt certificate, which no rig here can mint. | **The snippets name the public-CA form of each measured setting**: libpq `sslmode=verify-full sslrootcert=system`, Prisma `sslmode=require&sslaccept=strict` with no `pgbouncer=true`, node-postgres `ssl: {rejectUnauthorized: true}`. **Not measured offline, owed by EP-LIVE-001** (Run 11, through `slot3-prod`'s real door) -- the snippet a driver fails on there is that run's divergence row. | A flag measured against a different trust store is not measured. | 0268 |
 | **D2359** | Run 1 item 6: *"a throwaway MinIO as both source and mirror (two buckets)"*. | One server holding both buckets lets rclone copy server-side (`CopyObject`), which R2→B2 never can — the measured path would not be production's. | **Two MinIO servers** (the local `quay.io/minio/minio` image), one per remote. Measured: without the flag, **50 HEAD + 50 PUT at the mirror** (+51 GET at the source, 1 at the mirror) for 50 objects; with `--s3-no-head`, **0 HEAD, 50 PUT**; **control**: `rclone size --json` of the mirror = the source's (50 objects, 441 bytes) both times. Run 2 adds the flag (D2346). | A rig that measured a different copy path would have priced the wrong request. | 0264 |
 
 ---
@@ -540,7 +546,9 @@ weakened — CLAUDE.md §6, under the ADR named):
   `test_every_accepted_type_has_one_handler` (the table, not a new test).
 - **CTL-OPS-001**: `test_no_type_is_accepted_and_the_six_stay_executed`
   (`test_operation_types.py:95`) is REPLACED by its exact-set form for 39 — seven
-  executed types, accepted iff the row is reachable (D2343).
+  executed types, accepted iff the row is reachable (D2343). **Run 6 renamed it
+  `test_no_type_is_accepted_and_the_seven_are_executed` (D2386)**; Run 9 moves its
+  accepted half.
 - **`THR-*` table rows**: four added in Run 9 (Run 1 item 3); none removed.
 
 **New environment gates: two**, in `tests/conftest.py`'s roster:
@@ -1157,6 +1165,45 @@ Targeted: `test_control_projects`, `test_control_roles` (or whatever holds
 `test_migration_lint` (the control set). Battery: M1 a key allowed to rotate; M2
 the verifier pattern loosened to `.*`; M3 the verifier passed in argv; M4 a
 snippet with a password member.
+
+**Done.** 2026-10-11; the code commit and its CI verdict are recorded at the end of
+this paragraph. **The control set's `0005`** (D2384): `control_projects.endpoints`,
+the wider adoption, `control_project_endpoints`, `credential.rotate` requested at
+member, the result members (`role`; resize's `admission`); frozen, proposed
+(`f0dabad8…`). **Service**: `operations.py` executes `credential.rotate` (ACCEPTED
+still empty) and declares its `role` and resize's `admission`; the argument schema's
+seventh branch (`role` enum, the verifier's exact SCRAM shape ending `(?![\s\S])`) and
+its mirror `RotateCredentialRequest`; `control_roles` (`get_connections` viewer +
+`projects:read` key, `rotate_credential` member, a person only); the two routes and
+`main.control_paths`; `connection_snippets.py` (D2387); the control snapshot
+regenerated (+180 lines). **Reconciler**: `credential.rotate`'s handler (`check` the
+document's door and its role's NAME, `alter` with both values psql variables on stdin,
+`sync` = `customer-credentials.sh sync` on the deployed document, result `{role}`),
+`STEPS`, `COMMANDS`, `CHILD_SECONDS` 120; the resize's admission reading on every
+outcome (D2385); the registry refresh carrying the doors; the export's `public`
+(D2382). **New proofs**: `test_control_connections.py` (15, Docker -- the doors served
+to a viewer and a `projects:read` key with the placeholder and the exact snippets,
+refused to another scope and a stranger; three shapes of "no doors" `not_available`; a
+re-adoption keeping unnamed doors and replacing named ones; a rotation recorded with
+`{role, verifier}` and finished with `role` while `verifier` is `AP422
+undeclared_result`; a resize finished with `admission`; six malformed bodies `400` with
+no row; viewer `403`, a write key `human_session_required`, a project without doors
+`409`, the member `202` as the control; and `not_available` naming `direct_endpoint`
+without `accepting`), `test_connection_snippets.py` (12), seven proofs in
+`test_reconciler_dispatch.py` (the rotation on stdin with the other role's user as its
+control, refused without doors in two shapes, a refused `ALTER` syncing nothing and
+carrying no psql line, five non-verifier arguments running nothing, the refresh's
+doors, the resize's reading on both outcomes and its absence when unreadable) and the
+schema-vs-model examples (nine `credential.rotate` cases). **Pins moved by decisions**
+(D2386 and the routes): the control snapshot's paths, `control_project_endpoints` in
+the granted set, the set's count 4 -> 5, the export argv. **Targeted, once** (the plan's
+nine plus the control modules, `test_container_selectors`, the registry and the three
+new-module guards): first pass 246 -- one failure, the acceptance matrix stale after the CTL-OPS-001 rename (regenerated; the registry module re-run: 24 passed); 245 passed otherwise, 0 skipped. `verify-lock` and `app-contract --check` agree.
+**Battery 4/4 KILLED** with controls (M1 a key allowed to rotate, M2 the verifier
+pattern loosened to `.*`, M3 the verifier passed in argv, M4 a snippet carrying a
+password), restored and `cmp`-equal (`~/s39/run6/battery.sh`, `mutations.py`).
+**Run 5's repair commit `ffa52fca5d8f1931077f7b96c9e1259542c60c4f`: CI run
+`38122318435`, success.**
 
 ### Run 7 — the CLI: `bin/endpoint.sh` and the fixtures' TLS input
 
