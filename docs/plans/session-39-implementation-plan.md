@@ -933,7 +933,9 @@ to `…_at_version_22_…`, D1119); then **240 passed**. New proofs:
 control refusal, M3 the public host's MUST_DIFFER pattern removed (the plan's "classified
 MUST_MATCH": MUST_MATCH is exact paths, so removal is the reachable form), M4 `ready` on
 the domain alone, M5 the render never opening a door, M6 the migration forgetting the
-roles (`~/s39/run3/battery.py`).
+roles (`~/s39/run3/battery.py`). **Code commit
+`b9bc4a9457cbaa7f6b005a6eacd01097360c67d6`; CI run `38116725147` (`contract`, the only
+run registered for that SHA): completed, success.**
 
 ### Run 4 — the edge, the firewall and every publication guard (ADR 0268)
 
