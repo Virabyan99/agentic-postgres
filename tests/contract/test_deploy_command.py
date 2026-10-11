@@ -526,6 +526,61 @@ def test_a_plane_serving_another_lock_publishes_null_and_names_both_digests(
     )
 
 
+def test_the_deploy_refuses_an_edge_without_the_postgres_entrypoint(
+    deploy_module, tmp_path, monkeypatch, capsys
+) -> None:
+    """EP-EDGE-001, D2339 (D811's precedent): from session 39 the deploy refuses
+    an edge whose RUNNING static config lacks the `postgres` entrypoint on its
+    derived port, exit 4, naming the edge's restart. Controls: the same edge at
+    session 38 is admitted (the dependency is 39's); an edge with both
+    entrypoints is admitted at 39; an unreadable config is not called stale
+    (D600); the metrics refusal still comes first for an edge lacking both."""
+    import yaml
+
+    from agentic_postgres import host_config
+
+    monkeypatch.setattr(deploy_module, "EDGE_STATE_DIR", str(tmp_path))
+    metrics = {
+        "entryPoints": {host_config.EDGE_METRICS_ENTRYPOINT: {"address": ":8089"}},
+        "metrics": {"prometheus": {"entryPoint": host_config.EDGE_METRICS_ENTRYPOINT}},
+    }
+    static = tmp_path / "traefik.yaml"
+
+    def edge(document: dict) -> None:
+        static.write_text(yaml.safe_dump(document), encoding="utf-8")
+
+    edge(metrics)
+    with pytest.raises(SystemExit) as refused:
+        deploy_module.require_edge_serves_this_release(39)
+    assert refused.value.code == deploy_module.EXIT_PRECONDITION
+    said = capsys.readouterr().err
+    assert (
+        "'postgres'" in said and ":8432" in said and "bin/edge.sh --host host.yaml restart" in said
+    )
+
+    deploy_module.require_edge_serves_this_release(38)  # not yet a dependency
+
+    wrong_port = {
+        **metrics,
+        "entryPoints": {**metrics["entryPoints"], "postgres": {"address": ":5432"}},
+    }
+    edge(wrong_port)
+    with pytest.raises(SystemExit):
+        deploy_module.require_edge_serves_this_release(39)
+
+    both = {**metrics, "entryPoints": {**metrics["entryPoints"], "postgres": {"address": ":8432"}}}
+    edge(both)
+    deploy_module.require_edge_serves_this_release(39)
+
+    static.unlink()
+    deploy_module.require_edge_serves_this_release(39)  # unreadable is not absent
+
+    edge({"entryPoints": {"postgres": {"address": ":8432"}}})
+    with pytest.raises(SystemExit):
+        deploy_module.require_edge_serves_this_release(39)
+    assert "apgmetrics" in capsys.readouterr().err
+
+
 def test_a_disabled_storage_route_is_not_observed(tmp_path, monkeypatch) -> None:
     """D2305 (D2341's run): a manifest with `storage.enabled: false` spends no
     observation window on the storage route -- control-prod's deploy polled it

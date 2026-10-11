@@ -485,7 +485,7 @@ check_baseline() {
   listening="$(ss -H -lnt 2>/dev/null || true)"
   unexpected="$(
     APG_LISTENING_SOCKETS="${listening}" PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - \
-      "${ssh_port}" 80 443 <<'PYTHON'
+      "${ssh_port}" 80 443 5432 <<'PYTHON'
 import os
 import sys
 
@@ -498,7 +498,7 @@ print(" ".join(str(port) for port in ports))
 PYTHON
   )"
   if [ -z "${unexpected}" ]; then
-    ok "only ${ssh_port}, 80 and 443 listen on a public address"
+    ok "only ${ssh_port}, 80, 443 and 5432 listen on a public address"
   else
     bad "unexpected public listening ports: ${unexpected}"
     violations=$((violations + 1))
@@ -1005,6 +1005,10 @@ apply_baseline() {
   ufw allow "${ssh_port}/tcp" >/dev/null
   ufw allow 80/tcp >/dev/null
   ufw allow 443/tcp >/dev/null
+  # Session 39 (ADR 0268): the edge's public Postgres entrypoint. Docker's
+  # published port is decided by DOCKER-USER (FORWARD), not here; this keeps
+  # ufw's list the same three ports the DOCKER-USER policy admits.
+  ufw allow 5432/tcp >/dev/null
 
   # `ufw show added`, not `ufw status`. While ufw is inactive, `status` prints
   # "Status: inactive" and lists nothing at all — so on the one host state where
@@ -1032,13 +1036,13 @@ apply_baseline() {
     note "ufw is already active; rules reconciled"
   elif ufw_rollback_is_armed; then
     ufw --force enable >/dev/null
-    note "ufw enabled with ${ssh_port}, 80 and 443 permitted"
+    note "ufw enabled with ${ssh_port}, 80, 443 and 5432 permitted"
     note "Open a NEW session NOW and confirm it works."
     note "Then run: sudo ${ROOT_DIR}/bin/provision-host.sh --host ${HOST_MANIFEST} --confirm-firewall-ok"
   else
     printf '  SKIPPED enabling ufw: no firewall rollback timer is armed.\n'
     printf '\n'
-    printf '  The allow rules for %s, 80 and 443 are in place but not enforcing.\n' "${ssh_port}"
+    printf '  The allow rules for %s, 80, 443 and 5432 are in place but not enforcing.\n' "${ssh_port}"
     printf '  Arm the timer, confirm it shows a future trigger, then re-run --apply:\n\n'
     printf '    sudo systemd-run --on-active=10min --unit=%s \\\n' "${UFW_ROLLBACK_UNIT}"
     printf '      /usr/sbin/ufw --force disable\n'

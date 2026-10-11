@@ -64,8 +64,8 @@ entryPoints:
     address: ":8082"
   # The metrics exposition, reachable only from the project edge networks the
   # proxy is attached to. NOT published to the host in `infra/edge/compose.yaml`
-  # — 80 and 443 remain the only published ports, and this is the same shape
-  # `ping` already has.
+  # — 80, 443 and (since Session 39) 5432 are the only published ports, and
+  # this is the same shape `ping` already has.
   apgmetrics:
     address: ":8089"
   web:
@@ -98,6 +98,23 @@ entryPoints:
         readTimeout: 30s
         writeTimeout: 30s
         idleTimeout: 60s
+  # Session 39 (ADR 0268). The public Postgres port: published 5432:8432 in
+  # `infra/edge/compose.yaml`, unprivileged in the container like `web` and
+  # `websecure`. TLS only, routed by SNI by label TCP routers to a project's
+  # customer poolers -- never to a database or a platform pooler -- each naming
+  # the `postgres` TLS option in `dynamic/baseline.yaml` (ALPN `postgresql`:
+  # without it libpq 18 is refused, rig 39a).
+  #
+  # `readTimeout` bounds the bytes BEFORE a route is chosen: a plaintext peer
+  # is answered and closed after it instead of holding a socket for Traefik's
+  # 60 s default. Measured in rig 39a: plaintext refused in 11.4 s, and the
+  # control -- a 75 s query with the client silent, through both names --
+  # survived (76.7 s), because the deadline does not apply once routed.
+  postgres:
+    address: ":8432"
+    transport:
+      respondingTimeouts:
+        readTimeout: 10s
 
 providers:
   docker:

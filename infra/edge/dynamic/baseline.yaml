@@ -21,6 +21,18 @@ tls:
       # external suite may legitimately run from.
       minVersion: VersionTLS12
       sniStrict: true
+    # Session 39 (ADR 0268). Every TCP router on the `postgres` entrypoint
+    # names this (`tls.options=postgres@file`). ALPN `postgresql` is what libpq
+    # 17+ offers; with the default option Traefik offers `h2`/`http/1.1` and
+    # libpq 18 aborts the handshake ("tlsv1 alert no application protocol",
+    # rig 39a 0a). A client offering no ALPN (node-pg, Prisma) is unaffected.
+    # sniStrict: a connection naming no project, or another, gets no
+    # certificate -- the refusal a wrong or absent SNI meets.
+    postgres:
+      minVersion: VersionTLS12
+      sniStrict: true
+      alpnProtocols:
+        - postgresql
 
 http:
   middlewares:

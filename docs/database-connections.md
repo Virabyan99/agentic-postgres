@@ -57,6 +57,15 @@ There is no host port, so there is nothing to reach even from the host without a
 container address. An operator with root on the host uses
 `bin/db.sh --project … --runtime psql`, which goes through `docker exec`.
 
+**One exception since Session 39, and it is not this path**
+([ADR 0268](decisions/0268-the-public-postgres-port-is-an-edge-entrypoint-routed-by-name-to-customer-poolers.md)):
+the edge publishes **5432** for a managed project's *customers* — `pool.<domain>`
+and `direct.<domain>`, TLS verified in full, routed by name to two customer-only
+poolers that admit only the customer roles. No platform role, the profiles above
+included, is ever admitted there; the database and the platform pooler stay
+unpublished, and a project without the facility (every operator project) has no
+door. Everything on this page is unchanged.
+
 ## The allocation
 
 Two ports per project, allocated together from a host range, keyed by

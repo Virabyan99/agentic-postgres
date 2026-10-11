@@ -307,6 +307,17 @@ EDGE_METRICS_PORT = 8089
 #: like a Traefik built-in beside `traefik` and `ping`, and this one is ours.
 EDGE_METRICS_ENTRYPOINT = "apgmetrics"
 
+#: The edge's public Postgres entrypoint (Session 39, ADR 0268): its name, the
+#: container port it binds, and the host port Docker publishes for it
+#: (`naming.PUBLIC_POSTGRES_PORT`, what a customer dials). Every customer TCP
+#: router names this entrypoint; the deploy refuses an edge that lacks it.
+EDGE_POSTGRES_ENTRYPOINT = "postgres"
+EDGE_POSTGRES_PORT = 8432
+#: The host port Docker publishes it on -- `naming.PUBLIC_POSTGRES_PORT`, held
+#: equal by a test. Named here because a host manifest's loopback port range
+#: and its SSH port may not reach it.
+EDGE_PUBLIC_POSTGRES_PORT = 5432
+
 #: The exact key set of the edge `compose.env`. Disjoint from `versions.env` and
 #: from every project `compose.env`, so no --env-file ordering can let one
 #: silently override another.
@@ -454,6 +465,16 @@ def _validate_database_access(access: dict[str, Any], *, ssh_port: int) -> None:
             "An allocator works through its range; a range that contains a listener "
             "this host depends on will reach it, and the failure arrives as a service "
             "that cannot bind rather than as a bad allocation"
+        )
+
+    # Session 39 (ADR 0268): the edge publishes 5432 on every address, so a
+    # loopback transport allocated there could never bind -- the same failure,
+    # arriving the first time the allocator reaches it.
+    if start <= EDGE_PUBLIC_POSTGRES_PORT <= end:
+        raise ManifestError(
+            f"database_access port range {start}-{end} contains {EDGE_PUBLIC_POSTGRES_PORT}, "
+            "the edge's published Postgres port (ADR 0268). An allocator works through its "
+            "range; a transport allocated on a port the edge holds cannot bind"
         )
 
 

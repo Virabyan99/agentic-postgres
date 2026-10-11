@@ -137,9 +137,11 @@ def test_the_direct_endpoint_is_not_publicly_reachable(
     assert not port_is_open(public_ipv4, allocated_ports["direct"]), (
         f"the direct PostgreSQL endpoint is reachable at {public_ipv4}:{allocated_ports['direct']}"
     )
-    # 5432 as well: the container port, in case a publication were ever written
-    # without going through the allocator.
-    assert not port_is_open(public_ipv4, 5432)
+    # 5432 is no longer asserted closed: since Session 39 it is the edge's
+    # public Postgres door (ADR 0268, D2338). The stricter statement replaces
+    # it in the same commit -- 5432 answers only TLS naming a project with a
+    # door, and refuses plaintext, a wrong name and no name
+    # (`test_session39_public_endpoints.py`, EP-LIVE-002).
 
 
 # ---------------------------------------------------------------------------

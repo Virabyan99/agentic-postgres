@@ -85,6 +85,8 @@ from agentic_postgres.bootstrap_state import load_state, state_path
 from agentic_postgres.config import ManifestError, load_project_manifest
 from agentic_postgres.host_config import (
     EDGE_METRICS_ENTRYPOINT,
+    EDGE_POSTGRES_ENTRYPOINT,
+    EDGE_POSTGRES_PORT,
     EDGE_STACK_NAME,
     EDGE_STATE_DIR,
     load_host_manifest,
@@ -162,6 +164,11 @@ BACKUP_PLANE_SESSION = 10
 #: carries `profiles: [session14]`, so a deployment through 13 renders the
 #: route, names it in the document, and starts nothing behind it.
 METRICS_PLANE_SESSION = 14
+
+#: The session whose release needs the edge's `postgres` entrypoint (ADR 0268):
+#: a slot's customer TCP routers name it, and a Traefik without it rejects
+#: them. Checked from here, like the metrics entrypoint from 14.
+PUBLIC_ENDPOINTS_SESSION = 39
 
 #: The session that gives a project workflow definitions (ADR 0228).
 #:
@@ -733,6 +740,22 @@ def _edge_serves_the_metrics_entrypoint() -> bool:
     return prometheus.get("entryPoint") == EDGE_METRICS_ENTRYPOINT
 
 
+def _edge_serves_the_postgres_entrypoint() -> bool:
+    """Does the RUNNING edge declare the public Postgres entrypoint (ADR 0268)?
+
+    `_edge_serves_the_metrics_entrypoint`'s reading, for the entrypoint a
+    slot's customer TCP routers name: present, on its derived port. Unreadable
+    is not absent -- the same D600 reasoning.
+    """
+    deployed = Path(EDGE_STATE_DIR) / "traefik.yaml"
+    try:
+        document = yaml.safe_load(deployed.read_text(encoding="utf-8")) or {}
+    except OSError:
+        return True
+    entrypoint = (document.get("entryPoints") or {}).get(EDGE_POSTGRES_ENTRYPOINT) or {}
+    return entrypoint.get("address") == f":{EDGE_POSTGRES_PORT}"
+
+
 def require_edge_is_up(host: dict[str, Any]) -> dict[str, Any]:
     """The edge must already be serving. Its networks are what a project joins.
 
@@ -785,18 +808,33 @@ def require_edge_serves_this_release(session: int) -> None:
     Checked only from the session that introduces the dependency. A deployment
     through an earlier session neither needs the entrypoint nor should be told
     to re-render an edge for it.
+
+    **Session 39 (ADR 0268) adds the second entrypoint a release depends on**:
+    `postgres`, which a slot's customer TCP routers name. From session 39 an
+    edge without it is refused the same way, with the same remedy -- the edge's
+    one announced recreation (Sheet E1).
     """
     if session < METRICS_PLANE_SESSION:
         return
-    if _edge_serves_the_metrics_entrypoint():
+    if not _edge_serves_the_metrics_entrypoint():
+        fail(
+            EXIT_PRECONDITION,
+            f"the running edge declares no {EDGE_METRICS_ENTRYPOINT!r} entry "
+            f"point, and a deployment through session {session} scrapes it for every "
+            "project's route metrics. The edge is not brought up by this command.\n"
+            "Run: sudo bin/edge.sh --host host.yaml restart",
+        )
+    if session < PUBLIC_ENDPOINTS_SESSION:
         return
-    fail(
-        EXIT_PRECONDITION,
-        f"the running edge declares no {EDGE_METRICS_ENTRYPOINT!r} entry "
-        f"point, and a deployment through session {session} scrapes it for every "
-        "project's route metrics. The edge is not brought up by this command.\n"
-        "Run: sudo bin/edge.sh --host host.yaml restart",
-    )
+    if not _edge_serves_the_postgres_entrypoint():
+        fail(
+            EXIT_PRECONDITION,
+            f"the running edge declares no {EDGE_POSTGRES_ENTRYPOINT!r} entry point on "
+            f":{EDGE_POSTGRES_PORT}, and a deployment through session {session} routes "
+            "a slot's public Postgres names through it (ADR 0268). The edge is not "
+            "brought up by this command.\n"
+            "Run: sudo bin/edge.sh --host host.yaml restart",
+        )
 
 
 def _secrets_the_provider_is_missing(

@@ -1188,11 +1188,14 @@ def test_inherited_edge_stack_name_cannot_override() -> None:
 
 
 def test_only_traefik_publishes_host_ports() -> None:
-    """Runbook §9 and SEC-NET-001, asserted against the resolved edge model."""
+    """Runbook §9 and SEC-NET-001, asserted against the resolved edge model.
+
+    Widened to the measured set in Session 39 (ADR 0268, D2338): 5432 is the
+    edge's public Postgres entrypoint. Still an exact set."""
     document = yaml.safe_load(edge("config").stdout)
     assert "ports" not in document["services"]["docker-socket-proxy"]
     published = {p["published"] for p in document["services"]["traefik"]["ports"]}
-    assert published == {"80", "443"}
+    assert published == {"80", "443", "5432"}
 
 
 def test_traefik_has_no_direct_docker_socket_mount() -> None:

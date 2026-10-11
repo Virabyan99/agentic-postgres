@@ -43,9 +43,11 @@ pytestmark = [
     pytest.mark.requires_environment("APG_PUBLIC_IPV4", "APG_PROJECT_A_OUTPUTS"),
 ]
 
-#: Ports a project could plausibly leak. 5432 is the requirement; the rest are
-#: the neighbours that would indicate the same class of mistake.
-FORBIDDEN_PORTS = (5432, 6432, 8080, 8443, 9000, 2375, 2376, 5433)
+#: Ports a project could plausibly leak: the neighbours that would indicate a
+#: platform transport published by mistake. 5432 left this list in Session 39
+#: (ADR 0268, D2338): it is the edge's public Postgres door, open by design, and
+#: what it ANSWERS is asserted by `test_session39_public_endpoints.py`.
+FORBIDDEN_PORTS = (6432, 8080, 8443, 9000, 2375, 2376, 5433)
 
 CONNECT_TIMEOUT = 5.0
 

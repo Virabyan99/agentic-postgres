@@ -1,9 +1,9 @@
 # Session 39 — Public TLS endpoints and customer roles
 
-**Status: EXECUTING. Runs 1–3 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
+**Status: EXECUTING. Runs 1–4 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
 threat list; Sheet E0 read). Rows **D2325–D2355** at planning; Run 1 added
-**D2356–D2360**, Run 2 **D2361–D2364**, Run 3 **D2365–D2369**. ADRs **0268–0270**
-written. **NEXT FREE: D2370, ADR 0271.**
+**D2356–D2360**, Run 2 **D2361–D2364**, Run 3 **D2365–D2369**, Run 4 **D2370–D2374**.
+ADRs **0268–0270** written. **NEXT FREE: D2375, ADR 0271.**
 
 The fourth session of Stage 5 (`docs/plans/stage-5-plan.md` §3, §5 *Session 39*).
 Twelve runs and **two sittings on two days**: the firewall, the edge's one
@@ -455,6 +455,11 @@ table below it, in execution order.
 | **D2367** | Run 3 item 4: `ISOLATED_FIELDS` 18 → 20; `MUST_DIFFER` hosts and users; `MUST_MATCH` ports and `sslmode`; `enabled` RELEASE_STATE or NOT_AUTHORITY. | Three readers meet a disabled door's NULL: `evidence.at` raised on `None[...]`; `test_render_isolation` asserts every `MUST_DIFFER` pointer differs between the two EXAMPLE renders, where both are null; the matrix's `NOT_AUTHORITY_PREFIXES` is a prefix rule, so `database.public.pooled` there would swallow every leaf a later version adds under it. | **`evidence.at` returns None through a null member** (a missing KEY still raises), so `collision_count`'s both-null exemption (ADR 0016) covers it; **`test_render_isolation` asserts the public pointers on `public_documents`** (the two examples with the facility on, rendered in a SANDBOX, nothing under `.generated/`); **a new `NOT_AUTHORITY_EXACT`** holds the two null door leaves; `database.public.*.database` joins `MUST_DIFFER` too (stricter than the plan: the database behind a door is the project's). An offline proof of the categories is added (`test_isolation_leaves_offline.py::test_the_public_endpoints_are_classified_by_what_they_name`): the existing leaf proof says only that each leaf HAS a category. | An absent door is not a shared one; a prefix over a null is how a later leaf arrives unclassified. | 0268, 0016 |
 | **D2368** | D2354: the bootstrap must never set or reset a customer's verifier. | Appending the two suffixes reaches `bootstrap_statements.build_statements`' role loop (`:96-115`): from the next deploy every project has `customer_app`/`customer_admin` NOLOGIN NOINHERIT with no attribute — D2354's first half, by construction, before Run 5. The loop's comment says the bootstrap *"clears an unexpected verifier"*; **nothing does** (grep `PASSWORD NULL`, `rolpassword` in `bootstrap_statements.py` and `bin/postgres-bootstrap.py`: only `check_violations`' read of `migration_user`). | **Recorded for Run 5**: its guard (`test_no_statement_sets_a_customer_password`) stands, and Run 5 corrects the comment. No verifier is cleared today, so a deploy cannot wipe a customer's password. | A comment that claims a behaviour nothing performs is how a later edit "restores" it. | 0269 |
 | **D2369** | CLAUDE.md §1: *"Run a long gate DETACHED (`setsid nohup bash /tmp/x.sh … &`)"*. | Run 3's 127-module run started that way inside `wsl bash -lc "…"` **never ran**: no output file, no process. The same script as a harness background task (`run_in_background` on a foreground `wsl bash -lc`) ran to completion (13 min 28 s). | **CLAUDE.md §1 corrected** (the launch folder's file, not the repository's). | A recipe that fails silently is worse than none. | — |
+| **D2370** | §2: `test_listeners.py` `BASELINE_PORTS` `(22, 80, 443, 5432)`. | `BASELINE_PORTS` there is the CLASSIFIER's baseline for eight tests that probe *"a database bound publicly"* on 5432 (`test_a_publicly_bound_database_port_is_always_reported` and its neighbours); with 5432 in it all eight failed -- they would pass by being allowed rather than classified. `bin/provision-host.sh --check` passes `ssh 80 443` to the same classifier for the HOST. | **Two constants**: `BASELINE_PORTS = (22, 80, 443)` stays the classifier's; `HOST_BASELINE_PORTS = (22, 80, 443, 5432)` is the host's, and `test_the_host_check_admits_the_edges_postgres_door` reads `provision-host.sh` for exactly that set (control: a public 6432 is still reported). **Residual, named**: the host listener check can no longer tell the edge's 5432 from another process's; what keeps the DATABASE off the internet is the compose model and the DOCKER-USER policy, not this list. | Moving the probe's port would have kept the tests green and lost what they mean. | 0268 |
+| **D2371** | Sheet F1: `provision-host.sh --host host.yaml --check` *"expected exit 6: the firewall only"*. | `check_baseline` (`bin/provision-host.sh:447-468`) asserts ufw ACTIVE and the DOCKER-USER policy file RENDERED -- never its content against the template, nor the running chain; the listener check finds 5432 only once the edge publishes it (after E1). Before F1 and E1 nothing deviates. | **Sheet F1 reads `--check` expecting exit 0** (a deviation is §9's stop, as written), then `--apply`, then the proof is the running chain: `sudo iptables -S DOCKER-USER` and `ip6tables -S` each naming `--ctorigdstport 5432`. The external scan (EP-LIVE-002) is the end-to-end proof after E1. | A sheet that expects a failure a check cannot produce trains the operator to ignore its exit code. | 0268 |
+| **D2372** | -- | `host_config._validate_database_access` refuses a loopback port range containing `ssh.port` only; `ssh.port`'s schema forbids 80 and 443. 5432 is above 1024, so unlike 80/443 an allocation range CAN reach it, and since this run the edge binds it on every address: a transport allocated there could never bind. | **A range containing `EDGE_PUBLIC_POSTGRES_PORT` (5432) is refused** (`test_a_range_containing_the_edges_postgres_port_is_refused`, control the example's range), and `ssh.port` may not be 5432 (schema `not enum [80, 443, 5432]`). `host_config.EDGE_POSTGRES_ENTRYPOINT`/`EDGE_POSTGRES_PORT` (8432)/`EDGE_PUBLIC_POSTGRES_PORT` (5432) are the one authority, held equal to `naming.PUBLIC_POSTGRES_PORT`. The OVH host's range (15432-) is unaffected. | A new published port is a new listener every allocator must avoid. | 0268 |
+| **D2373** | §2: `test_session4_public_transports.py:142`'s 5432 assertion removed **in the same commit as** EP-LIVE-002's stricter one; EP-LIVE-002's node ids are Run 7's module. | Removing the "5432 closed" assertion without its replacement would leave a commit in which nothing says what 5432 answers. | **`tests/external/test_session39_public_endpoints.py` is created in Run 4** with EP-LIVE-002's three proofs (`test_only_the_four_ports_answer` -- 22/80/443/5432 open, the platform's and the edge's container ports and the project's allocated transports closed; `test_plaintext_is_refused` -- no `R`/`E` reply, bounded by the read deadline; `test_a_wrong_or_absent_sni_is_refused` -- `SSLRequest` answered `S` (the control that this IS the gateway), then no SNI, `nobody.invalid` and alpha's `pool.<domain>` (a project without a door) refused) and `test_this_module_uses_no_ssh`; Run 7 adds EP-LIVE-001's to the same module. None has run: first execution is Run 11's external mode. | §2's rule, kept literally. | 0268 |
+| **D2374** | Run 4 item 2: *"`require_edge_serves_this_release` requires the `postgres` entrypoint too"*. | The metrics entrypoint is required only from `METRICS_PLANE_SESSION` (14), the session that introduced the dependency (D811). Requiring `postgres` unconditionally would refuse every deploy through 38 -- the three projects' redeploys before E1. | **Required from `PUBLIC_ENDPOINTS_SESSION = 39`**, after the metrics check, present AND on `:8432`; an unreadable config is not called stale (D600). Run 10's order holds: E1 (the edge recreated) before R2a-c (the deploys through 39). | The precedent's shape, and the order the sheets already have. | 0268, 0244 |
 | **D2359** | Run 1 item 6: *"a throwaway MinIO as both source and mirror (two buckets)"*. | One server holding both buckets lets rclone copy server-side (`CopyObject`), which R2→B2 never can — the measured path would not be production's. | **Two MinIO servers** (the local `quay.io/minio/minio` image), one per remote. Measured: without the flag, **50 HEAD + 50 PUT at the mirror** (+51 GET at the source, 1 at the mirror) for 50 objects; with `--s3-no-head`, **0 HEAD, 50 PUT**; **control**: `rclone size --json` of the mirror = the source's (50 objects, 441 bytes) both times. Run 2 adds the flag (D2346). | A rig that measured a different copy path would have priced the wrong request. | 0264 |
 
 ---
@@ -961,6 +966,43 @@ Targeted: `test_edge_config`, `test_compose_contract`, `test_host_infrastructure
 emptied; M3 the firewall admitting 6432; M4 the edge check reading only
 `apgmetrics`.
 
+**Done.** 2026-10-11; the code commit and its CI verdict are recorded at the end of
+this paragraph. **The edge**: `infra/edge/traefik.yaml` gains the `postgres` entrypoint
+(`:8432`, `readTimeout: 10s` -- rig 39a's value), `infra/edge/compose.yaml` publishes
+`5432:8432`, `infra/edge/dynamic/baseline.yaml` gains `tls.options.postgres`
+(`minVersion: VersionTLS12`, `sniStrict: true`, `alpnProtocols: [postgresql]`) exactly as
+rig 39a ran it; the `apgmetrics` comment no longer says 80 and 443 are the only ports.
+**The deploy** refuses an edge without `postgres` on `:8432` from session 39 (D2374),
+naming `sudo bin/edge.sh --host host.yaml restart`. **The firewall**:
+`docker-user-rules.v4`/`.v6` admit NEW to 5432; `provision-host.sh` adds `ufw allow
+5432/tcp`, passes `80 443 5432` to the listener check and says so in its three messages;
+a host manifest's range and `ssh.port` may not reach 5432 (D2372). **Every guard, one
+commit (D2338)**: `test_only_traefik_publishes_host_ports` `{"80","443","5432"}`;
+`test_no_dashboard_entry_point_is_published` five entry points and three ports (exact),
+its local-entrypoint half excluding `postgres`; the redirect test's port map;
+`test_policy_permits_exactly_eighty_and_four_four_three` -> `…_exactly_the_three_ports`;
+`test_session2_host.py` (listener allowance +5432, `test_the_edge_publishes_exactly_eighty_
+and_four_four_three` -> `…_exactly_the_three_ports`, its registry node id moved, D1119);
+`test_listeners.py` two baselines (D2370); external `FORBIDDEN_PORTS` loses 5432 only;
+`test_session4_public_transports.py`'s 5432 assertion removed beside the new EP-LIVE-002
+module (D2373); DBX-005 reworded. `publication()` and its two tests are byte-identical.
+**Documentation**: `docs/database-connections.md` (one paragraph: the customer door, not
+this path), `docs/host-baseline.md`'s firewall row, `THR-PUBLIC-INGRESS`'s residual;
+operator guide §1 has no port sentence -- it is the release-pinned table Run 9 rewrites
+(ADR 0209), and carries 5432 then. The acceptance matrix and product contract
+regenerated. **New proofs**: `test_edge_config.py::test_the_postgres_entrypoint_is_the_only_one_added`,
+`::test_the_postgres_tls_option_offers_only_the_postgres_protocol`,
+`test_deploy_command.py::test_the_deploy_refuses_an_edge_without_the_postgres_entrypoint`,
+`test_host_manifest.py::test_a_range_containing_the_edges_postgres_port_is_refused`,
+`test_listeners.py::test_the_host_check_admits_the_edges_postgres_door`, and the external
+module's four. **Targeted, once**: 18 modules (the plan's seven plus every module
+reading the edge templates, the rules or the host schema) -- 8 `test_listeners` failures
+(D2370) and the stale acceptance matrix; repaired and re-run: 50 passed. The edited live
+and external modules collect (63). **Battery 5/5 KILLED** with controls (M1 a sixth
+entrypoint, M2 the ALPN list emptied, M3 the firewall admitting 6432, M4 the edge check
+reading only `apgmetrics`, M5 the range reaching 5432), restored and `cmp`-equal
+(`~/s39/run4/battery.sh`, `mutations.py`).
+
 ### Run 5 — the database side: roles, budget, the customer poolers, their labels, the sync verb
 
 **Code.** CI read by full SHA. The largest run; **commit at each numbered item
@@ -1304,8 +1346,9 @@ sudo bash /home/op/s39-e0.sh      # tees /home/op/s39-e0.txt; changes nothing
 
 ```
 cd /home/op/agentic-postgres
-sudo bin/provision-host.sh --host host.yaml --check     # (D2360) expected exit 6: the firewall only
+sudo bin/provision-host.sh --host host.yaml --check     # (D2360, D2371) expected exit 0: nothing deviates yet
 sudo bin/provision-host.sh --host host.yaml --apply     # ufw is active: reconciles, no rollback timer
+sudo ip6tables -S DOCKER-USER | grep -- '--ctorigdstport'    # 80, 443, 5432 (v6 too)
 sudo iptables -S DOCKER-USER | grep -- '--ctorigdstport'     # 80, 443, 5432
 ```
 

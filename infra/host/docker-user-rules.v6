@@ -18,6 +18,8 @@
 
 -i __PUBLIC_INTERFACE__ -p tcp -m conntrack --ctstate NEW --ctorigdstport 80 -j RETURN
 -i __PUBLIC_INTERFACE__ -p tcp -m conntrack --ctstate NEW --ctorigdstport 443 -j RETURN
+# 5432 since Session 39 (ADR 0268): the edge's public Postgres entrypoint.
+-i __PUBLIC_INTERFACE__ -p tcp -m conntrack --ctstate NEW --ctorigdstport 5432 -j RETURN
 
 # ICMPv6 is not optional the way ICMP is on v4. Path MTU discovery and neighbour
 # discovery both depend on it, and dropping it produces connections that

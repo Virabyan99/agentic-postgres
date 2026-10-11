@@ -131,10 +131,12 @@ services:
     security_opt: [no-new-privileges:true]
     # The only published ports on the host. Container ports are unprivileged so
     # no capability is needed to bind them; the host side is the privileged
-    # half and Docker handles it.
+    # half and Docker handles it. 5432 since Session 39 (ADR 0268): the public
+    # Postgres entrypoint, TLS only, routed by SNI to customer poolers.
     ports:
       - "80:8080"
       - "443:8443"
+      - "5432:8432"
     volumes:
       - type: bind
         source: ${EDGE_STATE_DIR:?required}/traefik.yaml

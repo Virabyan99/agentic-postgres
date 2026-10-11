@@ -149,7 +149,7 @@ Priorities:
 | `DBX-001` | 4 | Prisma Migrate runs through the direct endpoint. |
 | `DBX-002` | 4 | Prisma Client operates through the pooled endpoint. |
 | `DBX-003` | 4 | psql connects through both the direct and pooled endpoints. |
-| `DBX-005` | 4 | The direct endpoint is not publicly reachable. |
+| `DBX-005` | 4 | The platform's transports are not publicly reachable: the direct endpoint at its allocated port answers nothing from off the host. Since Session 39 (ADR 0268, D2338) 5432 is the edge's public Postgres door rather than a closed port; what it answers -- only TLS naming a project with a door, never plaintext, a wrong name or no name -- is EP-LIVE-002's. |
 | `DBX-POOL-001` | 4 | The pooler runs in transaction mode with explicit, bounded limits and non-zero prepared-statement tracking, read from its own configuration rather than from the file that was meant to produce it. |
 | `DBX-POOL-002` | 4 | More clients than the server-connection budget complete their transactions, and the number of server connections is observed never to exceed it. |
 | `DBX-POOL-003` | 4 | A protocol-level named prepared statement is reusable after the pooler has moved the client to a different backend, proved by observing the backend change rather than by assuming it. |

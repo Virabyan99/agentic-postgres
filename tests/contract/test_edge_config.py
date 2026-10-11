@@ -96,19 +96,25 @@ def test_no_dashboard_entry_point_is_published(static_config: dict[str, Any]) ->
     can check a string its target cannot contain** (D374); this one was reading
     the wrong file for the thing it was named after, and passed for thirteen
     sessions because no entry point had ever been added.
+
+    **Widened again in Session 39 (ADR 0268), to the measured set and still
+    exact**: `postgres` is the fifth entry point and 5432 the third published
+    port -- the public Postgres door. Every other entry point stays unpublished.
     """
-    assert set(static_config["entryPoints"]) == {"apgmetrics", "ping", "web", "websecure"}
+    assert set(static_config["entryPoints"]) == {
+        "apgmetrics", "ping", "postgres", "web", "websecure",
+    }  # fmt: skip
 
     model = yaml.safe_load((REPO_ROOT / "infra" / "edge" / "compose.yaml").read_text("utf-8"))
     published = model["services"]["traefik"]["ports"]
-    assert published == ["80:8080", "443:8443"]
+    assert published == ["80:8080", "443:8443", "5432:8432"]
 
     # Derived from the entry points rather than from a list of the safe ones,
     # so a future entry point is covered by this without anybody remembering to.
     local = {
         name: spec["address"]
         for name, spec in static_config["entryPoints"].items()
-        if name not in {"web", "websecure"}
+        if name not in {"web", "websecure", "postgres"}
     }
     assert local, "no container-local entry point; this half would be measuring nothing"
     for name, address in local.items():
@@ -200,7 +206,7 @@ def test_the_redirect_names_the_published_port_not_the_container_port(
         "there is no `port` field in a Traefik redirection; it refuses to start with one"
     )
 
-    published = {"80": "8080", "443": "8443"}
+    published = {"80": "8080", "443": "8443", "5432": "8432"}
     model = yaml.safe_load((REPO_ROOT / "infra" / "edge" / "compose.yaml").read_text("utf-8"))
     ports = dict(entry.split(":") for entry in model["services"]["traefik"]["ports"])
     assert ports == published, f"the published ports moved; the redirect port must follow: {ports}"
@@ -409,6 +415,49 @@ def test_documenting_the_placeholder_cannot_inject_configuration() -> None:
 
 def test_tls_minimum_version_is_at_least_1_2(dynamic_config: dict[str, Any]) -> None:
     assert dynamic_config["tls"]["options"]["default"]["minVersion"] == "VersionTLS12"
+
+
+def test_the_postgres_entrypoint_is_the_only_one_added(static_config: dict[str, Any]) -> None:
+    """EP-EDGE-001 (ADR 0268). Session 39 adds exactly one entry point:
+    `postgres` on the derived container port (`host_config.EDGE_POSTGRES_PORT`),
+    published as the derived customer port (`naming.PUBLIC_POSTGRES_PORT`), with
+    the read deadline rig 39a measured -- 10 s refused plaintext in 11.4 s while
+    a 75 s silent query survived. It carries no HTTP section: nothing on it is
+    an HTTP router. Control: `websecure` keeps its own timeouts."""
+    from agentic_postgres import naming
+
+    entrypoint = static_config["entryPoints"][host_config.EDGE_POSTGRES_ENTRYPOINT]
+    assert entrypoint == {
+        "address": f":{host_config.EDGE_POSTGRES_PORT}",
+        "transport": {"respondingTimeouts": {"readTimeout": "10s"}},
+    }, entrypoint
+    model = yaml.safe_load((REPO_ROOT / "infra" / "edge" / "compose.yaml").read_text("utf-8"))
+    assert (
+        f"{naming.PUBLIC_POSTGRES_PORT}:{host_config.EDGE_POSTGRES_PORT}"
+        in model["services"]["traefik"]["ports"]
+    )
+    assert (
+        static_config["entryPoints"]["websecure"]["transport"]["respondingTimeouts"]["readTimeout"]
+        == "30s"
+    )
+
+
+def test_the_postgres_tls_option_offers_only_the_postgres_protocol(
+    dynamic_config: dict[str, Any],
+) -> None:
+    """EP-EDGE-001 (ADR 0268). The option every customer TCP router names
+    (`postgres@file`): ALPN `postgresql` and nothing else -- with the default
+    option Traefik offers `h2`/`http/1.1` and libpq 18 aborts the handshake
+    (rig 39a 0a) -- TLS 1.2 minimum, and `sniStrict`, so a wrong or absent name
+    gets no certificate. Control: the `default` option every HTTP router uses
+    is unchanged and offers no Postgres protocol."""
+    options = dynamic_config["tls"]["options"]
+    assert options["postgres"] == {
+        "minVersion": "VersionTLS12",
+        "sniStrict": True,
+        "alpnProtocols": ["postgresql"],
+    }, options["postgres"]
+    assert options["default"] == {"minVersion": "VersionTLS12", "sniStrict": True}
 
 
 def test_the_baseline_chain_exists_and_is_referenced_by_name(

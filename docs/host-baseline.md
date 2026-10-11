@@ -15,7 +15,7 @@ it as a deviation.
 | Area | Policy | Where it comes from |
 |---|---|---|
 | SSH | Key-only. `PermitRootLogin no`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `MaxAuthTries 3`. **Source addresses are not restricted** — see below. | `infra/host/00-agentic-postgres-ssh.conf` → `/etc/ssh/sshd_config.d/` |
-| Firewall | UFW default-deny inbound; the configured SSH port, 80 and 443 allowed. | `bin/provision-host.sh` |
+| Firewall | UFW default-deny inbound; the configured SSH port, 80, 443 and 5432 allowed (5432 since Session 39: the edge's public Postgres door, ADR 0268). The `DOCKER-USER` policy admits new connections to the same three published ports and drops the rest. | `bin/provision-host.sh` |
 | Container ingress | A `DOCKER-USER` policy that matches the **pre-DNAT** destination port and ends in a drop, so a published container port is not a public one. | `infra/host/docker-user-rules.v{4,6}` → `/etc/agentic-postgres/`, applied by `bin/docker-firewall.sh` |
 | Docker daemon | No TCP socket. Local socket only, read through an allowlisting proxy by anything public-facing. | `infra/host/daemon.json` |
 | Patching | `unattended-upgrades` enabled, and configured **not** to reboot itself. | `infra/host/20auto-upgrades` |

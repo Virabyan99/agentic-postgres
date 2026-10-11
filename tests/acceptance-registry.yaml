@@ -316,7 +316,7 @@
     - tests/deployment/test_session2_host.py::test_the_live_policy_is_the_installed_policy
     - tests/contract/test_host_infrastructure.py::test_policy_matches_the_original_destination_port
     - tests/contract/test_compose_contract.py::test_only_traefik_publishes_host_ports
-    - tests/deployment/test_session2_host.py::test_the_edge_publishes_exactly_eighty_and_four_four_three
+    - tests/deployment/test_session2_host.py::test_the_edge_publishes_exactly_the_three_ports
     - tests/deployment/test_session2_host.py::test_the_docker_user_chain_is_reachable_from_forward
   description: >-
     Only the edge publishes a host port, and forwarded public traffic to
@@ -702,7 +702,12 @@
   target_session: 4
   test_nodeids:
     - tests/external/test_session4_public_transports.py::test_the_direct_endpoint_is_not_publicly_reachable
-  description: The direct endpoint is not publicly reachable.
+  description: >-
+    The platform's transports are not publicly reachable: the direct endpoint at
+    its allocated port answers nothing from off the host. Since Session 39 (ADR
+    0268, D2338) 5432 is the edge's public Postgres door rather than a closed
+    port; what it answers -- only TLS naming a project with a door, never
+    plaintext, a wrong name or no name -- is EP-LIVE-002's.
 
 # The ten below were added in Session 4 Run 1, for claims none of DBX-001..005
 # covers. `ISO` is not a registered prefix -- ID_PATTERN admits DEP CFG DBX SEC

@@ -182,8 +182,8 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 65535,
-          "not": { "enum": [80, 443] },
-          "description": "May not be 80 or 443: those belong to Traefik, and a collision would be discovered by losing either SSH or ingress."
+          "not": { "enum": [80, 443, 5432] },
+          "description": "May not be 80, 443 or 5432: those belong to Traefik (5432 since Session 39, the edge's public Postgres entrypoint, ADR 0268), and a collision would be discovered by losing either SSH or ingress."
         },
         "operator_user": {
           "type": "string",

@@ -635,6 +635,30 @@ def test_a_range_containing_the_declared_ssh_port_is_refused(
         host_config.load_host_manifest(write(tmp_path, document))
 
 
+def test_a_range_containing_the_edges_postgres_port_is_refused(
+    tmp_path: Path, example: dict[str, Any]
+) -> None:
+    """Session 39 (ADR 0268): the edge publishes 5432 on every address, so a
+    loopback transport allocated there could never bind. Unlike 80 and 443 the
+    range CAN reach it (5432 is above 1024), so this is a real check, and its
+    control is the example's own range, which does not contain it. `ssh.port`
+    may not be 5432 either. The edge's two numbers agree with `naming`'s."""
+    from agentic_postgres import naming
+
+    assert host_config.EDGE_PUBLIC_POSTGRES_PORT == naming.PUBLIC_POSTGRES_PORT == 5432
+    document = copy.deepcopy(example)
+    document["database_access"]["port_range_start"] = 5400
+    document["database_access"]["port_range_end"] = 5499
+    with pytest.raises(ManifestError, match="the edge's published Postgres port"):
+        host_config.load_host_manifest(write(tmp_path, document))
+    host_config.load_host_manifest(write(tmp_path, copy.deepcopy(example)))  # control
+
+    with_ssh = copy.deepcopy(example)
+    with_ssh["ssh"]["port"] = 5432
+    with pytest.raises(ManifestError):
+        host_config.load_host_manifest(write(tmp_path, with_ssh))
+
+
 @pytest.mark.parametrize("port", [22, 80, 443, 1023])
 def test_a_privileged_port_cannot_bound_the_range(
     tmp_path: Path, example: dict[str, Any], port: int

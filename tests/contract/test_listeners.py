@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pytest
 
+from agentic_postgres import REPO_ROOT
 from agentic_postgres.listeners import parse_listeners, unexpected_public_ports
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
@@ -43,12 +44,40 @@ udp   UNCONN 0      0                   [::1]:323          [::]:*
     + HOST_SS_TCP
 )
 
+#: The CLASSIFIER's baseline in the tests below, which probe "a database bound
+#: publicly" on 5432 -- the port a PostgreSQL would take. Deliberately not the
+#: host's admitted set (`HOST_BASELINE_PORTS`): with 5432 in it every one of
+#: those probes would pass by being allowed rather than by being classified.
 BASELINE_PORTS = (22, 80, 443)
+
+#: What `bin/provision-host.sh --check` admits since Session 39 (ADR 0268,
+#: D2370): 5432 is the edge's public Postgres entrypoint, a docker-proxy bind on
+#: every address.
+HOST_BASELINE_PORTS = (22, 80, 443, 5432)
 
 
 def test_the_real_host_reports_nothing_unexpected() -> None:
     """The state that produced a spurious DEVIATE must now be clean."""
     assert unexpected_public_ports(HOST_SS_TCP, BASELINE_PORTS) == ()
+    assert unexpected_public_ports(HOST_SS_TCP, HOST_BASELINE_PORTS) == ()
+
+
+def test_the_host_check_admits_the_edges_postgres_door() -> None:
+    """D2370. The host check passes exactly `HOST_BASELINE_PORTS` (read from
+    `bin/provision-host.sh`, not assumed), so the edge's public bind of 5432 is
+    not a deviation -- and the cost is named: this check can no longer tell the
+    edge's 5432 from another process's. What keeps the DATABASE off the
+    internet is the compose model (no project service publishes) and the
+    DOCKER-USER policy, not this listener list. Control: 6432 bound publicly is
+    still reported."""
+    script = (REPO_ROOT / "bin" / "provision-host.sh").read_text(encoding="utf-8")
+    assert '"${ssh_port}" 80 443 5432 <<' in script
+    edge = (
+        "tcp   LISTEN 0      4096 0.0.0.0:5432 0.0.0.0:*\ntcp   LISTEN 0      4096 [::]:5432 [::]:*"
+    )
+    assert unexpected_public_ports(edge, HOST_BASELINE_PORTS) == ()
+    pooler = "tcp   LISTEN 0      4096 0.0.0.0:6432 0.0.0.0:*"
+    assert unexpected_public_ports(pooler, HOST_BASELINE_PORTS) == (6432,)
 
 
 def test_the_baseline_reads_tcp_and_that_is_a_choice() -> None:

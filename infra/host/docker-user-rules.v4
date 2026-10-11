@@ -34,10 +34,14 @@
 # First, so the cost of the rest is only paid by new connections.
 -i __PUBLIC_INTERFACE__ -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
 
-# The only two ports the public Internet may open a new connection to. Both
-# belong to Traefik; no project service publishes a host port.
+# The only three ports the public Internet may open a new connection to. All
+# belong to Traefik; no project service publishes a host port. 5432 since
+# Session 39 (ADR 0268): the edge's public Postgres entrypoint, TLS only and
+# routed by SNI to customer poolers -- never to a database (SEC-NET-001 below
+# still holds: nothing publishes the direct PostgreSQL endpoint).
 -i __PUBLIC_INTERFACE__ -p tcp -m conntrack --ctstate NEW --ctorigdstport 80 -j RETURN
 -i __PUBLIC_INTERFACE__ -p tcp -m conntrack --ctstate NEW --ctorigdstport 443 -j RETURN
+-i __PUBLIC_INTERFACE__ -p tcp -m conntrack --ctstate NEW --ctorigdstport 5432 -j RETURN
 
 # Everything else forwarded from the public interface toward a Docker network
 # is dropped. This is what makes "no public route reaches the direct PostgreSQL

@@ -143,7 +143,11 @@ def test_only_ssh_and_the_edge_listen_on_a_public_address(sshd_config: dict[str,
     ignoring UDP altogether. Ignoring UDP wholesale would hide a real UDP
     service the day one appears.
     """
-    allowed = {("tcp", int(sshd_config["port"])), ("tcp", 80), ("tcp", 443), ("udp", 68)}
+    # 5432 since Session 39 (ADR 0268): the edge's public Postgres entrypoint.
+    allowed = {
+        ("tcp", int(sshd_config["port"])), ("tcp", 80), ("tcp", 443), ("tcp", 5432),
+        ("udp", 68),
+    }  # fmt: skip
 
     offenders = [
         listener
@@ -171,9 +175,10 @@ def test_only_the_edge_publishes_container_ports(running_containers: list[dict[s
 
 
 @pytest.mark.requires_environment("APG_EDGE_DEPLOYED")
-def test_the_edge_publishes_exactly_eighty_and_four_four_three(
+def test_the_edge_publishes_exactly_the_three_ports(
     running_containers: list[dict[str, Any]],
 ) -> None:
+    """80, 443 and 5432 (ADR 0268, D2338); renamed with the set (D1119)."""
     published: set[int] = set()
     for container in running_containers:
         if not container["Names"].startswith(EDGE_STACK_NAME):
@@ -181,7 +186,7 @@ def test_the_edge_publishes_exactly_eighty_and_four_four_three(
         published.update(
             int(match) for match in re.findall(r":(\d+)->", container.get("Ports") or "")
         )
-    assert published == {80, 443}, f"the edge publishes {sorted(published)}"
+    assert published == {80, 443, 5432}, f"the edge publishes {sorted(published)}"
 
 
 @pytest.mark.parametrize("command", ["iptables", "ip6tables"])

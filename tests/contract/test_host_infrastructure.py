@@ -148,13 +148,16 @@ def test_policy_ends_in_a_default_drop(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", ["docker-user-rules.v4", "docker-user-rules.v6"])
-def test_policy_permits_exactly_eighty_and_four_four_three(name: str) -> None:
+def test_policy_permits_exactly_the_three_ports(name: str) -> None:
+    """80, 443 and -- since Session 39 (ADR 0268, D2338) -- 5432, the edge's
+    public Postgres entrypoint; renamed from `..._eighty_and_four_four_three`
+    with the set, so the name does not claim the old one. Exact, both families."""
     ports = set()
     for line in rule_lines(name):
         match = re.search(r"--ctorigdstport (\d+)", line)
         if match:
             ports.add(int(match.group(1)))
-    assert ports == {80, 443}, f"{name} permits {sorted(ports)}"
+    assert ports == {80, 443, 5432}, f"{name} permits {sorted(ports)}"
 
 
 @pytest.mark.parametrize("name", ["docker-user-rules.v4", "docker-user-rules.v6"])
