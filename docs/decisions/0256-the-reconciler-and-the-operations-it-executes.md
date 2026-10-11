@@ -1,6 +1,6 @@
 # 0256 — The reconciler, and the operations it executes
 
-- **Status:** Accepted
+- **Status:** Accepted; its unit-ordering sentence corrected by Session 39 (D2348, D2355)
 - **Date:** 2026-10-07
 - **Session:** 38, Run 1 (D2151–D2154, D2159–D2160, D2165–D2168, D2173,
   D2178–D2179, D2184, D2188; rig rows D2189, D2191)
@@ -183,3 +183,18 @@ reconciler created (D2218); its argv carries `--permanent` and never
 `bin/reconciler.py` never reads `expires_at`. ADR 0186's sentence stands for
 what it was about: no timer acts on expiry. A deletion is still a human's
 decision; it reaches the host as a validated row instead of a terminal.
+
+## Amendment (Session 39, Run 1, D2348, D2355)
+
+Decision 1 says the unit runs *"after Docker and the control project's unit"*.
+It never did: `systemd/agentic-postgres-reconciler.service` orders on
+`docker.service` and `agentic-postgres-edge.service` only. At Session 38's
+reboot (Run 12, B1) the control project's containers arrived ~40 s after the
+edge, `start()` raised exit 6 on the control database's error, and systemd
+restarted the reconciler 30 s later (`NRestarts` 1) -- read then, not
+explained. **The unit is not reordered**: which project is the control
+project is known to `find_control` at run time, not to a static unit file.
+Instead (Session 39 Run 2) `start()` waits for the control database for up to
+180 s, retrying every 10 s and printing *"waiting for the control project's
+database (n s)"*, before it fails with exit 6. The reboot read after it
+(Session 39, Sheet B1) expects `NRestarts` 0.

@@ -1,6 +1,6 @@
 # 0246 — Stage 5's boundary: a hosted product on one node; ADRs 0042, 0043, 0044, 0216 and 0217 superseded together
 
-- **Status:** Accepted
+- **Status:** Accepted; item 2's Postgres port named by ADR 0268 (Session 39): 5432, the edge's
 - **Date:** 2026-10-03
 - **Session:** 36, Run 1 (D1949, D1978, D1999, D2004)
 - **Affects:** no requirement, no schema, no migration, no deployed field, no

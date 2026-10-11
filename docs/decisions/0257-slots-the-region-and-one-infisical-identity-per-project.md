@@ -1,6 +1,6 @@
 # 0257 — Slots, the region, and one Infisical identity per project
 
-- **Status:** Accepted
+- **Status:** Accepted; a prepared slot's readers and a slot's three records added by Session 39 (D2341, D2335, D2342)
 - **Date:** 2026-10-07
 - **Session:** 38, Run 1 (D2145, D2146, D2148–D2150, D2158, D2161, D2180)
 - **Affects:** `schemas/host.schema.json` (schema 4: `region`, `slots`, Run 3),
@@ -105,3 +105,25 @@ to make an explicit grey A record per slot (D2148).
   deletion-policy window exists (D2181).
 - `quarantined` has no clearing command: an interrupted creation is retired
   by the operator by hand and then marked consumed.
+
+## Amendment (Session 39, Run 1, D2341, D2335, D2342)
+
+**A prepared slot commits nothing, and two readers now say so.** A key that is a
+declared slot (`host_config.declared_slots`) with `bootstrap-state.json` and no
+`outputs.json` is recorded by `capacity_probe.read` under a `prepared` list,
+named on the committed line (*"slot3-prod prepared, commits nothing"*), never
+`unreadable` -- which had refused every other project's deploy at exit 12 while
+a slot was prepared. `bin/control.py compare` reads the same key with no row as
+`prepared`, agreeing (exit 0). A directory that is not a declared slot and has
+no document stays a difference: the repair names the kind instead of guessing.
+
+**A slot with public endpoints has three grey records** -- its domain,
+`pool.<domain>` and `direct.<domain>` (ADR 0268) -- and `slot.observe` is
+`ready` only when all three resolve to exactly the host's address with no
+AAAA; the first that does not is the reason.
+
+**Two slots are declared at once on this host, one alive at a time** (the
+operator, 2026-10-10): the second is held `prepared` by withholding its DNS
+until the first's lifecycle has ended. The consequence above, *"Slots are a
+stock of ONE on this host"*, now reads: two declared, one created at a time,
+until the deferred OVH upgrade.

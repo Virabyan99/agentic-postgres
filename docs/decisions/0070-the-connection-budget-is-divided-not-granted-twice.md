@@ -1,6 +1,6 @@
 # 0070 — The connection budget is divided, not granted twice
 
-Status: accepted
+Status: accepted; two claimants added, for a project with public endpoints only, by ADR 0269 (Session 39)
 Date: 2026-08-13
 Session: 5, Run 10
 Settles: D161

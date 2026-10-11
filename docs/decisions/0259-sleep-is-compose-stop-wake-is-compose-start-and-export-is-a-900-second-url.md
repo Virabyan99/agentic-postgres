@@ -1,6 +1,6 @@
 # 0259 — Sleep is `compose stop`, wake is `compose start`, and an export is a 900-second URL
 
-- **Status:** Accepted
+- **Status:** Accepted; the export's schemas widened to `public` by Session 39 (D2333)
 - **Date:** 2026-10-07
 - **Session:** 38, Run 1 (D2155, D2164, D2182; rig rows D2190, D2192)
 - **Affects:** `bin/project-runtime.sh stop|start` (Run 5), the reconciler's
@@ -109,3 +109,12 @@ schema only — the release seeds no rows); the control without `-n` lists it
   time.
 - The wake window a customer sees is the first 200 after `start`, read on the
   host in Run 12 (D2171); this rig's 4.6 s used a 1 s healthcheck.
+
+## Amendment (Session 39, Run 1, D2333)
+
+A customer's own tables live in `public` (ADR 0269), so an export dumps
+`-n app -n api -n public` -- `pg_dump -U postgres -Fc -n app -n api -n public
+--no-owner --no-privileges`. LIFE-EXPORT-001's
+`test_the_export_names_only_the_customer_schemas` names exactly the three
+(stricter). An export that omitted the tables the customer made would be the
+worst kind of success.

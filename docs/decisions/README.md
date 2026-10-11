@@ -133,7 +133,7 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0067](0067-a-validated-value-must-reach-the-plane-that-applies-it.md) | A validated value must reach the plane that applies it | 5 | Accepted |
 | [0068](0068-the-pre-request-hook-carries-the-roles-statement-timeout.md) | The pre-request hook carries the role's statement timeout | 5 | Accepted |
 | [0069](0069-the-documentation-page-is-a-first-party-build-under-our-own-csp.md) | The documentation page is a first-party build under our own CSP | 5 | Accepted |
-| [0070](0070-the-connection-budget-is-divided-not-granted-twice.md) | The connection budget is divided, not granted twice | 5 | Accepted |
+| [0070](0070-the-connection-budget-is-divided-not-granted-twice.md) | The connection budget is divided, not granted twice | 5 | Accepted, two claimants added by ADR 0269 |
 | [0071](0071-a-read-only-diagnostic-surface-for-an-unprivileged-agent.md) | A read-only diagnostic surface for an unprivileged agent | 5 | Accepted |
 | [0072](0072-a-service-identity-that-can-log-in-is-published.md) | A service identity that can log in is published | 5 | Accepted |
 | [0073](0073-a-rendered-fixture-is-current-or-it-is-absent.md) | A rendered fixture is current, or it is absent | 5 | Accepted |
@@ -309,7 +309,7 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0243](0243-a-change-to-a-project-set-is-proposed-and-a-host-applies-only-a-proposed-set.md) | A change to a project's migration set is proposed, recorded with the readings that exist, and a host applies a pending set only when a committed proposal names it; the names in both records are declared | 35 | Accepted |
 | [0244](0244-the-edge-and-every-long-running-service-are-bounded.md) | The edge and every long-running project service are bounded in memory, processes and CPU, and recreating the edge is a measured act | 35 | Accepted |
 | [0245](0245-the-diagnostic-account-reads-the-auth-storage-and-mcp-logs.md) | The diagnostic account reads the auth, storage and MCP logs, and its redaction knows a JSON key | 35 | Accepted |
-| [0246](0246-stage-5s-boundary-a-hosted-product-on-one-node.md) | Stage 5's boundary: a hosted product on one node; ADRs 0042, 0043, 0044, 0216 and 0217 superseded together | 36 | Accepted |
+| [0246](0246-stage-5s-boundary-a-hosted-product-on-one-node.md) | Stage 5's boundary: a hosted product on one node; ADRs 0042, 0043, 0044, 0216 and 0217 superseded together | 36 | Accepted, item 2's port named by ADR 0268 |
 | [0247](0247-the-reality-ledger-is-a-programs-input.md) | The Reality Ledger is a program's input | 36 | Accepted, amended by 0254 |
 | [0248](0248-retention-extends-adr-0213-to-the-stage-4-record-by-aggregate-with-a-verb.md) | Retention extends ADR 0213 to the Stage 4 record, by aggregate, with a verb | 36 | Accepted |
 | [0249](0249-the-request-and-worker-lines-are-printed.md) | The request and worker lines are printed | 36 | Accepted |
@@ -319,10 +319,10 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0253](0253-management-api-keys-the-v1-contract-and-the-clis-state.md) | Management API keys, the `/v1` contract and the CLI's state | 37 | Accepted |
 | [0254](0254-an-operation-type-is-accepted-only-when-its-ledger-row-is-available-or-beta.md) | An operation type is accepted only when its Ledger row is `available` or `beta`; a row's status moves with its evidence | 37 | Accepted, amended by 0261 |
 | [0255](0255-a-providers-rate-limit-is-waited-out-within-a-budget.md) | A provider's rate limit is waited out, within a budget | 37 | Accepted |
-| [0256](0256-the-reconciler-and-the-operations-it-executes.md) | The reconciler, and the operations it executes | 38 | Accepted |
-| [0257](0257-slots-the-region-and-one-infisical-identity-per-project.md) | Slots, the region, and one Infisical identity per project | 38 | Accepted |
+| [0256](0256-the-reconciler-and-the-operations-it-executes.md) | The reconciler, and the operations it executes | 38 | Accepted, its unit-ordering sentence corrected in Session 39 |
+| [0257](0257-slots-the-region-and-one-infisical-identity-per-project.md) | Slots, the region, and one Infisical identity per project | 38 | Accepted, amended in Session 39 (a prepared slot's readers, three records) |
 | [0258](0258-compute-profiles-and-resize.md) | Compute profiles, and a resize that says what it has measured | 38 | Accepted |
-| [0259](0259-sleep-is-compose-stop-wake-is-compose-start-and-export-is-a-900-second-url.md) | Sleep is `compose stop`, wake is `compose start`, and an export is a 900-second URL | 38 | Accepted |
+| [0259](0259-sleep-is-compose-stop-wake-is-compose-start-and-export-is-a-900-second-url.md) | Sleep is `compose stop`, wake is `compose start`, and an export is a 900-second URL | 38 | Accepted, the export's schemas widened by Session 39 |
 | [0260](0260-the-first-administrator-is-handed-over-by-hash.md) | The first administrator is handed over by hash | 38 | Accepted |
 | [0261](0261-a-trial-ledger-status-bounded-to-the-session-that-introduced-its-claims.md) | A `trial` Ledger status, bounded to the session that introduced its claims | 38 | Accepted |
 | [0262](0262-the-secret-store-is-self-hosted-infisical-on-its-own-host.md) | The secret store is self-hosted Infisical on its own host | 38 | Accepted |
@@ -331,3 +331,6 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0265](0265-the-collectors-health-check-is-sized-for-a-cold-boot.md) | The collector's health check is sized for a cold boot | 38 | Accepted |
 | [0266](0266-the-mirror-image-is-built-apart-from-its-run.md) | The mirror image is built apart from its run | 38 | Accepted |
 | [0267](0267-the-runtime-wrapper-permits-stop-and-start.md) | The runtime wrapper permits `stop` and `start` | 38 | Accepted |
+| [0268](0268-the-public-postgres-port-is-an-edge-entrypoint-routed-by-name-to-customer-poolers.md) | The public Postgres port is an edge entrypoint, routed by name to customer poolers | 39 | Accepted |
+| [0269](0269-customer-roles-and-their-credentials-by-verifier.md) | Customer roles, and their credentials by verifier | 39 | Accepted |
+| [0270](0270-a-refusal-proof-proves-the-decision-not-the-refusal.md) | A refusal proof proves the decision, not the refusal | 39 | Accepted |

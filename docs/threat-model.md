@@ -189,16 +189,33 @@ technically bounded in this beta"* (D1971).
    Owed: a foreign branch id and a missing one return the same answer. Session
    37's half -- organisations, members and projects -- is `THR-CTL-ENUMERATION`
    in the table.
-2. **Endpoint confusion and gateway attacks** (Session 39). A plaintext
-   connection, a wrong or absent SNI, or one project's hostname used to reach
-   another project's database through the shared Postgres port. Owed: plaintext
-   refused; a wrong SNI refused; project A's credential refused at project B's
-   endpoint (the isolation matrix extended to the listener).
-3. **Wake-on-connect abuse** (Session 39). Unauthenticated connections used to
-   keep a sleeping project awake or to make the node wake many projects at once.
-   Owed: the measured rule for what wakes a project, and a wake that admission
-   would refuse is refused — or, if Session 39's rig refuses wake-on-connect,
-   the Ledger says `planned` and the client sees `project_sleeping`.
+2. **Endpoint confusion and gateway attacks** (Session 39, ADR 0268). A
+   plaintext connection, a wrong or absent SNI, or one project's hostname used
+   to reach another project's database through the shared port 5432. Owed, by
+   node id: plaintext, a wrong SNI and no SNI refused on the public address
+   (`tests/external/test_session39_public_endpoints.py::test_plaintext_is_refused`,
+   `::test_a_wrong_or_absent_sni_is_refused`); only 22, 80, 443 and 5432
+   answer (`::test_only_the_four_ports_answer`); a project without endpoints
+   has no door (`::test_a_project_without_endpoints_has_no_door`); an enabled
+   project renders exactly two TCP routers, by label, to its own customer
+   poolers and never to the database or the platform pooler
+   (`tests/contract/test_endpoint_routes.py::test_an_enabled_project_renders_exactly_two_tcp_routers`,
+   `::test_no_router_reaches_the_database_or_the_platform_pooler`,
+   `::test_no_tcp_router_is_a_file_provider_router`). Residuals, measured in
+   rig 39a: Postgres sees the gateway's address, so no per-client address rule
+   exists; a plaintext peer holds a socket for the read deadline (~10 s);
+   channel binding is not offered through a terminating gateway; a cancel
+   request crosses only when the client encrypts it (D2356). Moves into the
+   table as `THR-EP-GATEWAY` in Run 9.
+3. **Wake-on-connect abuse** (Session 39) — **closed as not built** (ADR 0268,
+   D2336). Unauthenticated connections used to keep a sleeping project awake or
+   to make the node wake many projects at once. A stopped container's label
+   router is gone, so a sleeping project's names refuse exactly like a wrong
+   name (rig 39a: the backend stopped, *"unexpected eof"*; started again,
+   connected); nothing on the network wakes a project. `wake_on_connect` stays
+   `planned` and the customer wakes a project with `apg project wake`. Owed:
+   a sleeping slot refused both names
+   (`tests/external/test_session39_public_lifecycle.py::test_a_sleeping_slot_refused_both_names`).
 4. **Project-creation and branch-creation exhaustion** (Sessions 40, 41). A
    member creates projects or branches until the node or the slots run out.
    Session 38's half -- capacity, from two readers under one code, and the
@@ -219,7 +236,17 @@ technically bounded in this beta"* (D1971).
     plane. Session 37's half is `THR-CTL-PLANE-CONFUSION` in the table, and
     Session 38's -- the first administrator handed over by hash, a key that
     cannot create, export or delete, and the bounded export URL -- is
-    `THR-LIFE-PLANE-CONFUSION`.
+    `THR-LIFE-PLANE-CONFUSION`. **Session 39's half** (ADR 0269): the control
+    plane holds a customer credential's verifier, never its password, and the
+    password never leaves the workstation
+    (`tests/contract/test_endpoint_cli.py::test_the_password_never_leaves_the_workstation`);
+    a management key cannot rotate a credential
+    (`tests/contract/test_control_projects.py::test_a_key_cannot_rotate_a_credential`);
+    the verifier reaches no argv and no log line
+    (`tests/contract/test_reconciler_dispatch.py::test_a_rotation_sets_the_verifier_through_stdin`,
+    `::test_the_verifier_reaches_no_argv_and_no_log`). A control-plane session
+    or key is not a database role, so the public door refuses it like any name
+    it does not hold. Moves as `THR-EP-PLANE-CONFUSION` in Run 9.
 8. **Connector abuse by a customer** (Session 42). A customer-defined
     connector used to reach another project, an internal address, or the
     node's own services. Owed: the connector planes' existing refusals hold for
@@ -244,6 +271,18 @@ technically bounded in this beta"* (D1971).
     (`tests/deployment/test_session38_reconciler.py::test_the_slot_was_isolated_from_every_project`),
     and every leaf of a built deployed document is classified offline
     (`test_isolation_leaves_offline.py::test_every_leaf_of_a_built_deployed_document_is_classified`).
+    **Session 39's**: the public endpoints' hosts and roles are MUST_DIFFER
+    leaves and `ISOLATED_FIELDS` has 20 (the same offline proof, stricter);
+    the live slot's deployed document shares no isolated value with A's, B's
+    or the control project's
+    (`tests/deployment/test_session39_endpoints.py::test_the_slot_was_isolated_from_every_project`);
+    each customer pooler's userlist names only its own project's role, so
+    project A's customer credential is refused at B's door with the message
+    every unknown name gets
+    (`tests/contract/test_customer_poolers.py::test_the_userlist_names_only_its_role`);
+    a snippet carries no value
+    (`tests/contract/test_connection_snippets.py::test_no_snippet_can_carry_a_password`).
+    Moves as `THR-EP-ISOLATION` in Run 9.
 11. **TOTP seed disclosure** (Session 37, ADR 0252). A dump of the control
     project's database, or a backup read with its cipher pass, reveals every
     enrolled second-factor seed, so the factor stops being a second factor for
@@ -254,6 +293,22 @@ technically bounded in this beta"* (D1971).
     (`test_control_sessions.py::test_no_seed_reaches_a_log_line`). Residual:
     seeds are plaintext at rest, because computing the code needs the key;
     encrypting them is `planned`, and ADR 0252 says so.
+12. **The public door admits a platform credential** (Session 39, ADR 0269).
+    A platform role's password -- the application runtime's, which `op` can
+    print with `bin/connect.sh print-env`, the superuser's, any service's --
+    presented at 5432 from the internet. Owed: each customer pooler's userlist
+    is generated from `pg_authid` and names one customer role, and every other
+    role, the superuser included, is refused with one message
+    (`tests/contract/test_customer_poolers.py::test_the_userlist_names_only_its_role`,
+    `::test_every_other_role_is_refused_with_one_message`); live, the
+    superuser and a platform role name refused at both doors
+    (`tests/external/test_session39_public_endpoints.py::test_no_platform_role_passes_either_door`);
+    the database still joins only `internal` and `backup`
+    (`tests/deployment/test_session39_endpoints.py::test_the_database_is_still_unrouted`);
+    a customer role never reaches `app`, `api` or `app_private`
+    (`tests/contract/test_customer_roles_on_a_cluster.py::test_the_admin_is_refused_everything_else`).
+    Residual: a customer's password is the customer's to keep; the operator
+    can read its verifier, never the password. Moves as `THR-EP-DOOR` in Run 9.
 
 ## Scope
 

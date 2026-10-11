@@ -1,8 +1,8 @@
 # Session 39 — Public TLS endpoints and customer roles
 
-**Status: PLANNED 2026-10-10 at `f47cee4`.** Not started. Rows **D2325–D2355** at
-planning; rows the runs add start at **D2356**. ADRs **0268–0270** are this
-session's. **NEXT FREE after this plan: D2356, ADR 0271.**
+**Status: EXECUTING. Run 1 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
+threat list; Sheet E0 shipped). Rows **D2325–D2355** at planning; Run 1 added
+**D2356–D2359**. ADRs **0268–0270** written. **NEXT FREE: D2360, ADR 0271.**
 
 The fourth session of Stage 5 (`docs/plans/stage-5-plan.md` §3, §5 *Session 39*).
 Twelve runs and **two sittings on two days**: the firewall, the edge's one
@@ -441,6 +441,10 @@ table below it, in execution order.
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
+| **D2356** | Run 1 item 1(c): a cancel request through Traefik to PgBouncer, expected *"canceling statement due to user request"*. | Rig 39a: psql 18's cancel (`timeout -s INT 3`) through the gateway **did not cancel** — psql printed *"Cancel request sent"* and the 30 s statement ran to the end (31.6 s); **control** straight to the pooler: cancelled in 4.4 s. Rig 39c: psycopg 3.2.12's **`cancel_safe()`** (libpq 17.6, the encrypted cancel that repeats the TLS negotiation with SNI) cancelled through the gateway in 3.0 s; its legacy `cancel()` did not (20 s). A legacy CancelRequest is plaintext and names no host, so no `HostSNI` router can match it. | **No product change; recorded.** ADR 0268's consequences, the threat list's item 2 residual, and (Run 9) the Ledger's `pooled_endpoint`/`direct_endpoint` Connect text: *a cancel reaches the database only from a client that encrypts it (libpq 17+'s `PQcancelCreate` family, e.g. psycopg's `cancel_safe()`); psql's Ctrl-C does not, and says it did; `statement_timeout` bounds the rest.* No snippet promises a cancel. | Routing a nameless plaintext cancel would need a proxy that tracks cancel keys across projects — the product-owned proxy D2325 avoided, holding exactly the cross-tenant state the edge must not. | 0268 |
+| **D2357** | D2350/rig 39c: Prisma pooled, *"whether Prisma needs `pgbouncer=true`"*; the snippet names `DATABASE_URL` pooled. | Rig 39c/39c2: Prisma 6.19.1's **Client** sends `search_path` as a startup parameter whenever the URL names `schema=`, and PgBouncer 1.24.1 refused it, *"FATAL: unsupported startup parameter: search_path"* (the platform's DBX-002 never met it: `url.mjs` sets `schema` only for migrate, which goes straight to `postgres`). With **`track_extra_parameters = search_path`** in the pooler's ini the same URL passed (12 rows, four parallel reads), and `schema=app_private` was refused by the grants (`42501`), not the door. `migrate deploy` sends no such parameter (passed through `customer-direct` with and without it). **Prisma needs no `pgbouncer=true`** (`max_prepared_statements = 100`). | **Both customer poolers render `track_extra_parameters = search_path`** (Run 5; EP-POOL-001 gains the assertion). Prisma's snippet names no `pgbouncer=true`. The platform `pgbouncer` is unchanged. **Owed by Run 7's fixture run**: Prisma's hostname verification (rig 39c read its chain verification — no CA given, *"unable to get local issuer certificate"* with `sslaccept=strict` — not a name mismatch, which the gateway's `sniStrict` prevents from being staged). | A snippet that fails on its first query is worse than none; the setting lets a client's own `search_path` reach only its own server connection. | 0268, 0269 |
+| **D2358** | D2334: claimants *"proposed small 2/2, standard 3/3, large 5/5 and fixed by rig 39e"*. | Rig 39e, the product's own summands (`config` budget functions, `postgres-bootstrap.connection_limits`), the slot manifest's `pool_size` 16, `superuser_reserved_connections` 3 (unset in `compose.yaml`, so PostgreSQL's default): **standard 3/3 leaves the application 15 < 16** — the bootstrap would refuse it; small fits 2/2 (3/3 also 15); large fits up to 8/8. | **small 2/2, standard 2/2, large 5/5.** Each pooler `mem_limit` 64m and `pids_limit` 64: ADR 0244's floor decides (a customer pooler read ~1.5 MiB after the four drivers). | The table is what both arithmetics accept, not what looked symmetric. | 0269 |
+| **D2359** | Run 1 item 6: *"a throwaway MinIO as both source and mirror (two buckets)"*. | One server holding both buckets lets rclone copy server-side (`CopyObject`), which R2→B2 never can — the measured path would not be production's. | **Two MinIO servers** (the local `quay.io/minio/minio` image), one per remote. Measured: without the flag, **50 HEAD + 50 PUT at the mirror** (+51 GET at the source, 1 at the mirror) for 50 objects; with `--s3-no-head`, **0 HEAD, 50 PUT**; **control**: `rclone size --json` of the mirror = the source's (50 objects, 441 bytes) both times. Run 2 adds the flag (D2346). | A rig that measured a different copy path would have priced the wrong request. | 0264 |
 
 ---
 
@@ -681,6 +685,49 @@ D2354). **0270** a refusal proof proves the decision (D2340). **Amended**: ADR
 0259 (`-n public`, D2333), ADR 0257 (a prepared slot's readers; the slot's three
 records, D2341, D2335), ADR 0256 (one sentence: the unit does not order on the
 control project's unit; `start()` waits, D2348).
+
+**Done.** 2026-10-11, WSL (Traefik 3.7.10, PgBouncer 1.24.1, psql/PostgreSQL
+18.4, node-pg 8.16.3, psycopg 3.2.12 with libpq 17.6, Prisma 6.19.1, rclone
+1.75.1). Rigs in WSL `~/s39/run1/rig39/` (`rig39a.sh`…`rig39f.sh`, `rig39e.py`,
+transcripts `rig39a.txt`…`rig39f.txt`, `rig39f-counts.txt`), copied to the
+scratchpad `s39/run1/`; every rig removed what it made (`docker ps -a | grep -c
+rig39` = 0, networks 0). **Rig 39a** (label routers via the Docker provider,
+the option file exactly as Run 4 ships it): both names connect verify-full by
+`SSLRequest` and by `sslnegotiation=direct`, and through a published port;
+wrong SNI, no SNI refused (*"unexpected eof"*); `channel_binding=require`
+refused; the superuser refused at the pool door (*"SASL authentication
+failed"*); **`readTimeout: 10s` refuses plaintext in 11.4 s and the control —
+a 75 s silent query on both names — survived (76.7 s)**, so Run 4 ships 10 s;
+the backend stopped → refused like a wrong SNI, started → connected; **a psql
+cancel does not cross the gateway (D2356)**. **Rig 39b** (Pebble
+`sha256:ddf23064…`, challtestsrv `sha256:12ce2188…`): **case 1 issues** — the TCP
+routers' `tls.certresolver` + `tls.domains` produced ONE certificate naming
+`pool.a.test` and `direct.a.test` in ~6 s, served on both SNIs with ALPN
+`postgresql`; control (an HTTP router) issued; **Run 5 builds case 1**, no
+fallback. **Rig 39c/39c2**: psql, node-pg, psycopg and Prisma (Client pooled,
+`migrate deploy` direct) all connect through the gateway — every one sends SNI
+and none is refused for ALPN; `customer_admin` made an `extensions.vector(3)`
+column in `public`; `CREATE EXTENSION` refused (*"Must have CREATE privilege on
+current database"*), `app` refused; Prisma needs `track_extra_parameters =
+search_path` and no `pgbouncer=true` (D2357); psycopg's `cancel_safe()`
+crosses (D2356). **Rig 39d**: the owed control — a FRESH pooler with a
+different-salt verifier is refused (*"password authentication failed"*), the
+server's own verifier connects; planning's 1f is now read: a reused server
+connection (passes after SIGHUP alone, refused after a restart); an empty
+userlist starts, stays up (0 restarts), refuses (*"SASL authentication
+failed"*), and admits after the verifier and a SIGHUP. **Rig 39e**: small 2/2,
+standard **2/2** (not 3/3), large 5/5; 64m/64 pids (D2358). **Rig 39f**: 50
+HEADs → 0 with `--s3-no-head`, the count agreeing (D2359). **ADRs 0268, 0269,
+0270** written and indexed; **amended**: 0256 (the unit's ordering sentence,
+D2348), 0257 (a prepared slot's readers, the three records, two slots), 0259
+(`-n public`), 0246's status (item 2's port), 0070's status (two claimants).
+**The threat list**: items 2, 3 (closed, not built), 7's and 10's Session 39
+halves rewritten with their negative tests by node id; item 12 added (*the
+public door admits a platform credential*). **Sheet E0**: `s39-e0.sh` shipped
+to `/home/op` (sha256 `34afe687…a0b15d`, the checkout at `efaef09`); its
+readings are recorded below when the operator has run it. Rows **D2356–D2359**.
+Documentation only: `test_acceptance_registry`, `test_documentation_index` once
+before the push; no CI read.
 
 ### Run 2 — the debts: prepared slots, the claim, the mirror, the kit, the reconciler's start, the refusal proofs
 
