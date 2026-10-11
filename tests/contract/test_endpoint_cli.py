@@ -332,10 +332,40 @@ def test_connect_hands_psql_a_private_passfile_and_removes_it(person: Person, se
     assert not person.record.exists()
 
 
-def test_a_psql_that_cannot_run_is_said_not_a_traceback(person: Person, served: Any) -> None:
+def _path_whose_only_psql_is(tools: Path, scratch: Path) -> str:
+    """The caller's PATH with `tools` first and every OTHER psql gone (D2404).
+
+    exec walks PATH past an entry it cannot run, so a machine with a real psql
+    (CI's /usr/bin) would run that one and the refusal would never be met. A
+    directory holding a psql also holds bash and python, so it is replaced by a
+    copy of itself made of symlinks, psql left out."""
+    parts = [str(tools)]
+    for index, entry in enumerate(os.environ.get("PATH", "/usr/bin:/bin").split(":")):
+        directory = Path(entry)
+        if not entry or not directory.is_dir():
+            continue
+        if not (directory / "psql").exists():
+            parts.append(entry)
+            continue
+        shadow = scratch / f"path-{index}"
+        shadow.mkdir()
+        for item in directory.iterdir():
+            if item.name != "psql":
+                (shadow / item.name).symlink_to(item)
+        parts.append(str(shadow))
+    found = [p for p in parts if (Path(p) / "psql").exists()]
+    assert found == [str(tools)], found
+    return ":".join(parts)
+
+
+def test_a_psql_that_cannot_run_is_said_not_a_traceback(
+    person: Person, served: Any, tmp_path: Path
+) -> None:
     """D2394: a psql on PATH without its executable bit -- what a write through
     `\\\\wsl$` leaves -- is exit 3 naming it, never a Python traceback. The
-    control in the same proof: made executable again, it runs (its own 3)."""
+    control in the same proof: made executable again, it runs (its own 3). The
+    PATH holds no other psql (D2404), or exec would run that one instead."""
+    path = {"PATH": _path_whose_only_psql_is(person.tools, tmp_path)}
     user, _org, key = _project(served, "noexec", role="viewer")
     person.login(user)
     password_file = person.home / "app.password"
@@ -344,14 +374,14 @@ def test_a_psql_that_cannot_run_is_said_not_a_traceback(person: Person, served: 
     psql = person.tools / "psql"
     psql.chmod(0o644)
     refused = person.run("endpoint", "connect", "--project-key", key, "--role", "app",
-                         "--password-file", str(password_file))  # fmt: skip
+                         "--password-file", str(password_file), extra_env=path)  # fmt: skip
     assert refused.returncode == 3, refused.stderr
     assert "psql could not be started" in refused.stderr
     assert "Traceback" not in refused.stderr
     assert not person.record.exists()
     psql.chmod(0o755)
     ran = person.run("endpoint", "connect", "--project-key", key, "--role", "app",
-                     "--password-file", str(password_file))  # fmt: skip
+                     "--password-file", str(password_file), extra_env=path)  # fmt: skip
     assert ran.returncode == 3 and person.record.exists(), ran.stderr
 
 
