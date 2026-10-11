@@ -298,9 +298,9 @@ class Rig:
         environment = {
             "APG_CLUSTER_HOST": self.cluster,
             "APG_DATABASE_NAME": "app",
-            "APG_POOL_MODE": model["environment"]["APG_POOL_MODE"],
+            "APG_POOL_MODE": model["environment"].get("APG_POOL_MODE"),
             "APG_POOL_CONNECTIONS": "2",
-            "APG_AUTH_FILE": model["environment"]["APG_AUTH_FILE"],
+            "APG_AUTH_FILE": model["environment"].get("APG_AUTH_FILE"),
         }
         argv = ["run", "-d", "--name", name, "--network", self.network, "--user", "70:70",
                 "--read-only", "--cap-drop", "ALL",
@@ -419,7 +419,9 @@ def test_the_daemon_reads_its_mode_and_its_claimant(rig: Rig) -> None:
         assert reading["default_pool_size"] == "2"
         assert "search_path" in reading["track_extra_parameters"].lower()
         assert reading["auth_type"] == "scram-sha-256"
-        assert reading["auth_file"] == MODEL["services"][service]["environment"]["APG_AUTH_FILE"]
+        assert reading["auth_file"] == MODEL["services"][service]["environment"].get(
+            "APG_AUTH_FILE"
+        )
 
 
 @requires_docker

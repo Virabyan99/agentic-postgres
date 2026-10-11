@@ -3,7 +3,7 @@
 **Status: EXECUTING. Runs 1–5 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
 threat list; Sheet E0 read). Rows **D2325–D2355** at planning; Run 1 added
 **D2356–D2360**, Run 2 **D2361–D2364**, Run 3 **D2365–D2369**, Run 4 **D2370–D2374**,
-Run 5 **D2375–D2380**. ADRs **0268–0270** written. **NEXT FREE: D2381, ADR 0271.**
+Run 5 **D2375–D2381**. ADRs **0268–0270** written. **NEXT FREE: D2382, ADR 0271.**
 
 The fourth session of Stage 5 (`docs/plans/stage-5-plan.md` §3, §5 *Session 39*).
 Twelve runs and **two sittings on two days**: the firewall, the edge's one
@@ -466,6 +466,7 @@ table below it, in execution order.
 | **D2378** | Run 5 item 5: *"a deploy step 6f runs it for an enabled project after bootstrap"*. | The poolers were in no deferral set, so step 5 would start them -- routed at the edge before 6b, against §4.1's "the route is added last" -- and 6f directly after 6 would signal poolers whose role had just become LOGIN. A bind source that does not exist is created by Docker as a directory (D463). | **The poolers join `POST_BOOTSTRAP_SERVICES`** (they log in upstream as roles the bootstrap makes LOGIN; deferring them where they do not run holds back nothing); **step 4 creates `customer-poolers/` (0750 root:70) and an EMPTY userlist per door, never overwriting**; **6f runs after 6b and before 6c**, with the RENDERED document (D465). **Residual, named**: the mount digest (ADR 0155) covers the directory's bytes, so the first deploy after a rotation recreates both poolers once. | Ordering by the reasons the deploy already writes down. | 0269, 0063, 0133 |
 | **D2379** | Run 5 item 5's exits *"0 / 3 / 6"*, and *"the poolers by their derived container names"*. | No container name for a pooler is derived anywhere; `postgres_container` is `compose_name("apg-<key>-postgres-1")` because `container_name:` is forbidden in the model. A document below outputs 22 (the deployed 1.16.0 documents) has no `database.public`. | **`naming.customer_pooler_containers(key)`** by the same rule. A document without the facility is **exit 0, "nothing to sync"**, nothing read; a cluster that cannot be read is 6 with NOTHING written; written but a pooler not signalled is **6 naming which pooler still serves its previous list**, never 0. A non-SCRAM stored value or a missing role is 6. | ADR 0195: the third outcome reported. | 0269, 0195 |
 | **D2380** | Run 5 item 4: the labels' hosts and router names. | Compose cannot interpolate a label KEY (ADR 0013), so the router names must be rendered into the override, read from compose.env like every other router name (`_override_names`, `_override_control`); the SNI names are values. | **compose.env gains `CUSTOMER_POOL_ROUTER_NAME`, `CUSTOMER_DIRECT_ROUTER_NAME`, `CUSTOMER_POOL_HOST`, `CUSTOMER_DIRECT_HOST`** (with `APG_PUBLIC_ENDPOINTS` and the two `CUSTOMER_*_CONNECTIONS`), rendered for EVERY project as the control router's name is; `_override_public_endpoints` reads them. | One reader of the facility for the profile and the labels. | 0268, 0013 |
+| **D2381** | Run 5's targeted list (the plan's eleven plus nine guards). | `test_environment_gates::test_every_test_declares_the_environment_it_consumes` walks EVERY test body for a subscript `x["APG_..."]` and reads it as an environment read; four of Run 5's new proofs read compose-MODEL and rendered-env dictionaries that way (`environment["APG_POOL_MODE"]`). CI run `38121171227` failed on exactly that guard (1 failed, 7,531 passed); the targeted list never ran it. | **The model reads use `.get("APG_...")`** -- a missing key is `None` and fails the same assertion, so no proof weakened; the guard is unchanged. **The guard joins the targeted list of every run that adds a test module** (CLAUDE.md §1, beside D1242's). | A whole-tree scanner is the class a diff-derived list cannot see (D1486). | -- |
 | **D2359** | Run 1 item 6: *"a throwaway MinIO as both source and mirror (two buckets)"*. | One server holding both buckets lets rclone copy server-side (`CopyObject`), which R2→B2 never can — the measured path would not be production's. | **Two MinIO servers** (the local `quay.io/minio/minio` image), one per remote. Measured: without the flag, **50 HEAD + 50 PUT at the mirror** (+51 GET at the source, 1 at the mirror) for 50 objects; with `--s3-no-head`, **0 HEAD, 50 PUT**; **control**: `rclone size --json` of the mirror = the source's (50 objects, 441 bytes) both times. Run 2 adds the flag (D2346). | A rig that measured a different copy path would have priced the wrong request. | 0264 |
 
 ---
@@ -1111,7 +1112,12 @@ template, now read through `_render_dynamic`); final: **1440 passed, 0 skipped**
 documents: no drift. **Battery 5/5 KILLED** with controls (M1 `customer_admin` granted
 CREATE on the database, M2 a door's userlist naming both roles, M3 a TCP router on
 `postgres`, M4 the budget terms dropped, M5 a customer `PASSWORD` in the bootstrap),
-restored and `cmp`-equal (`~/s39/run5/battery.sh`, `mutations.py`).
+restored and `cmp`-equal (`~/s39/run5/battery.sh`, `mutations.py`). **Items 1-2's code
+(`820a10c`, pushed under `8cfedfd`): CI run `38119433191`, success. Items 3-5's code commit
+`7fb01232141bdc2a721fe02b3fc532eb559f36eb`: CI run `38121171227` (`contract`, the only run
+registered for that SHA): completed, FAILURE** -- `test_environment_gates` alone (D2381);
+repaired in the next commit (the four reads, nothing else), the guard and both new modules
+re-run: 51 passed. That commit's verdict is recorded with Run 6.
 
 ### Run 6 — the control plane: `0005`, the routes, `credential.rotate`, the snippets
 

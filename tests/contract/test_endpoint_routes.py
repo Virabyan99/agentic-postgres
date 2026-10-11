@@ -200,10 +200,10 @@ def test_the_model_declares_each_door_customer_only(name: str, mode: str) -> Non
     assert "ports" not in service
     assert "volumes" not in service
     environment = service["environment"]
-    assert environment["APG_POOL_MODE"] == mode
+    assert environment.get("APG_POOL_MODE") == mode
     upper = name.upper().replace("-", "_")
-    assert environment["APG_POOL_CONNECTIONS"] == f"${{{upper}_CONNECTIONS:?required}}"
-    assert environment["APG_AUTH_FILE"] == (
+    assert environment.get("APG_POOL_CONNECTIONS") == f"${{{upper}_CONNECTIONS:?required}}"
+    assert environment.get("APG_AUTH_FILE") == (
         f"{runtime_override.CUSTOMER_USERLIST_MOUNT}/{runtime_override.CUSTOMER_USERLISTS[name]}"
     )
     script = service["entrypoint"][2]
@@ -272,7 +272,7 @@ def compose_env(*, public: bool, profile: str = "standard") -> dict[str, str]:
 def test_the_render_names_the_doors_and_their_claimants(profile: str) -> None:
     env = compose_env(public=True, profile=profile)
     claim = compute_profiles.CUSTOMER_CONNECTIONS[profile]
-    assert env["APG_PUBLIC_ENDPOINTS"] == "1"
+    assert env.get("APG_PUBLIC_ENDPOINTS") == "1"
     assert env["CUSTOMER_POOL_CONNECTIONS"] == str(claim["pool"])
     assert env["CUSTOMER_DIRECT_CONNECTIONS"] == str(claim["direct"])
     assert env["CUSTOMER_POOL_HOST"] == "pool.alpha.example.com"
@@ -284,7 +284,7 @@ def test_the_render_names_the_doors_and_their_claimants(profile: str) -> None:
 
 
 def test_off_the_render_says_so() -> None:
-    assert compose_env(public=False)["APG_PUBLIC_ENDPOINTS"] == "0"
+    assert compose_env(public=False).get("APG_PUBLIC_ENDPOINTS") == "0"
 
 
 def _session_profiles(tmp_path: Path, env_line: str | None) -> list[str]:
