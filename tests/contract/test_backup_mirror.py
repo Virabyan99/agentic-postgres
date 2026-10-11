@@ -752,6 +752,8 @@ def test_the_client_syncs_by_checksum_with_its_credentials_in_the_environment_on
     execs = [line.strip() for line in script.splitlines() if line.strip().startswith("exec ")]
     copy_line = next(line for line in execs if "rclone sync" in line)
     assert "--checksum" in copy_line and "--retries 1" in copy_line, copy_line
+    # D2346: no HEAD after each upload (one B2 Class B call per object, D2315).
+    assert "--s3-no-head" in copy_line, copy_line
     assert "--dry-run" not in script and " -n " not in copy_line
     assert any(line.startswith("exec rclone size --json") for line in execs), execs
     for line in execs:
@@ -793,7 +795,9 @@ class Compose:
         copy_exits: tuple[int, ...] | None = None,
         listing: str = SIZE_OUTPUT,
         count_exit: int = 0,
+        copy_stderr: tuple[str, ...] = (),
     ):
+        self.copy_stderr = copy_stderr
         assert copy_exit is None or copy_exits is None, (
             "give copy_exit or copy_exits, not both: two spellings of one fact disagree"
         )
@@ -813,8 +817,9 @@ class Compose:
                 f"the verb ran {passes} copy passes and this fake describes "
                 f"{len(self.copy_exits)}. ADR 0220 bounds the retry at ONE extra pass"
             )
+            stderr = self.copy_stderr[passes - 1] if passes <= len(self.copy_stderr) else ""
             return subprocess.CompletedProcess(
-                [], self.copy_exits[passes - 1], stdout="…\n", stderr=""
+                [], self.copy_exits[passes - 1], stdout="…\n", stderr=stderr
             )
         if action == "count":
             return subprocess.CompletedProcess([], self.count_exit, stdout=self.listing, stderr="")
@@ -935,6 +940,49 @@ def test_a_pass_that_fails_twice_is_a_failure_and_writes_nothing(
     error = capsys.readouterr().err
     assert "D1001" in error
     assert "both passes" in error
+    assert "403" not in error, "a failure that named no refusal was reported as one"
+
+
+#: rclone's line from D2315, verbatim in shape: B2 refused the HEAD after each
+#: upload when the account's Class B transactions were over the free cap.
+REFUSED_LINE = (
+    "ERROR : base/20261010-130322F/pg_data/PG_VERSION.gz: Failed to copy: "
+    "operation error S3: HeadObject, https response error StatusCode: 403 Forbidden\n"
+)
+
+
+def test_a_refused_mirror_names_the_provider(
+    backup: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """D2346: a 403 on BOTH passes is the provider refusing the requests (D2315:
+    B2's Class B cap), and the sentence sends the operator to the account's
+    transaction caps -- not to D1001's next pass, which a cap does not lift.
+
+    Goes red if: the 403 is folded into the generic two-failures sentence, or
+    the refusal writes a record."""
+    compose = Compose(copy_exits=(1, 1), copy_stderr=(REFUSED_LINE, REFUSED_LINE))
+    monkeypatch.setattr(backup, "compose_mirror", compose)
+    assert backup.main(["--outputs", str(outputs_for(backup, mirror=True)), "mirror"]) == 5
+    assert compose.calls == ["copy", "copy"]
+    error = capsys.readouterr().err
+    assert "the provider refused the requests (403)" in error
+    assert "transaction caps" in error
+    record_path = deployed_output.mirror_record_path(KEY, root=backup.TMP / "state")
+    assert not record_path.exists(), "a refused copy wrote a copy record"
+
+
+def test_a_403_on_one_pass_only_is_not_named_a_refusal(
+    backup: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The control: the provider sentence needs the refusal on EVERY pass. A
+    first pass refused and a second failing for another reason is D1001's
+    case, and says so."""
+    compose = Compose(copy_exits=(1, 1), copy_stderr=(REFUSED_LINE, "ERROR : timeout\n"))
+    monkeypatch.setattr(backup, "compose_mirror", compose)
+    assert backup.main(["--outputs", str(outputs_for(backup, mirror=True)), "mirror"]) == 5
+    error = capsys.readouterr().err
+    assert "D1001" in error
+    assert "the provider refused" not in error
 
 
 @pytest.mark.parametrize(

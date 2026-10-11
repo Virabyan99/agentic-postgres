@@ -268,7 +268,12 @@ stores owners **by name**, never `--numeric-owner` (D2290).
    `mirror`, `doctor` 12 ok.
 6. **The registry and the copies**: `control.sh adopt` for every project
    after the LAST deploy, `registry` agrees; the op-owned copies of each
-   document; a kit exported on the new host.
+   document; a kit exported on the new host. **The database access policy is
+   host state, not a project's**: publish it on the new host from the old
+   host's kit -- `sudo bin/database-access.sh publish --policy
+   <kit>/database-access-policy.json` -- before anyone needs `op`'s database
+   access (a kit carries it since Session 39, D2347; the 2026-10-09 move forgot
+   it, D2320).
 
 Measured downtime per project: 19-56 minutes (the restore, 469-564 s against
 backups on another continent, is most of it). **Three mirror restores in one

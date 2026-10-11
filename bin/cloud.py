@@ -635,9 +635,25 @@ def project_claim(arguments: argparse.Namespace) -> int:
         and row["project_key"] == key
         and row["status"] == "succeeded"
     ]
-    if len(created) != 1:
+    if not created:
         raise ClientError(cc.EXIT_PREREQUISITE, f"no succeeded creation of {key} is visible")
-    path = cc.handoff_directory(current.directory) / _operation_id(str(created[0]["id"]))
+    # D2316/D2345: a key reused after a deletion has more than one succeeded
+    # creation. The token names the creation: the one whose handoff file this
+    # CLI holds is the one to claim -- never the first row, never a guess.
+    handoffs = cc.handoff_directory(current.directory)
+    held = [
+        handoffs / _operation_id(str(row["id"]))
+        for row in created
+        if (handoffs / _operation_id(str(row["id"]))).is_file()
+    ]
+    if not held:
+        raise ClientError(cc.EXIT_PREREQUISITE, f"no handoff token for {key} is held here")
+    if len(held) > 1:
+        raise ClientError(
+            cc.EXIT_PREREQUISITE,
+            f"{len(held)} succeeded creations of {key} have a token here",
+        )
+    (path,) = held
     token = cc.read_private_file(path).decode("utf-8").strip()
     password = read_password(
         arguments.password_file, f"new password for {key}'s administrator: ", confirm=True

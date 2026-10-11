@@ -2976,30 +2976,46 @@ def main(argv: list[str] | None = None) -> int:
             control_status = observe_control(rendered["routes"]["control"], control=False)
 
     if arguments.through_session >= STORAGE_PLANE_SESSION:
-        # The credential is read first, for the reason the administrator above
-        # is: a project without one records `unavailable` without spending the
-        # observation window polling a route it is not going to publish.
-        #
-        # From the ACTIVE generation's required set, not from the manifest.
-        # A project whose manifest declares storage and whose generation carries
-        # no R2 credential is exactly the state a first Session 7 deploy is in,
-        # and the two are different facts (D76, D306).
-        credentialed = all(name in secrets["required_names"] for name in STORAGE_CREDENTIAL_NAMES)
-        storage_status = observation.await_observation(
-            lambda: observe_storage(rendered["routes"]["storage"], credentialed=credentialed),
-            lambda observed: observed == "ready",
-        )
-        if not credentialed:
-            missing = [
-                name for name in STORAGE_CREDENTIAL_NAMES if name not in secrets["required_names"]
-            ]
-            print(
-                "\n  This project has no R2 credential in its active secret generation, so "
-                "its storage route\n  is not published. Provision it, then re-run this "
-                f"deploy:\n\n    missing: {', '.join(missing)}\n"
-                "    see docs/session-07-operator-guide.md for the provider steps\n\n"
-                "  A project awaiting its storage credential is not a failed deploy (D326)."
+        storage_enabled = bool(rendered["storage"]["enabled"])
+        if not storage_enabled:
+            # D2305: D2172's REST repair, given to its sibling. A manifest that
+            # disables storage has nothing on the route to wait for --
+            # control-prod's deploy spent the whole window (31 attempts) on it
+            # before recording the same `unavailable` this records without a
+            # request. The router itself is still emitted (D2144); what is
+            # skipped is the observation.
+            print("  storage disabled by the manifest (storage.enabled: false): not observed")
+            storage_status = "unavailable"
+        else:
+            # The credential is read first, for the reason the administrator
+            # above is: a project without one records `unavailable` without
+            # spending the observation window polling a route it is not going
+            # to publish.
+            #
+            # From the ACTIVE generation's required set, not from the manifest.
+            # A project whose manifest declares storage and whose generation
+            # carries no R2 credential is exactly the state a first Session 7
+            # deploy is in, and the two are different facts (D76, D306).
+            credentialed = all(
+                name in secrets["required_names"] for name in STORAGE_CREDENTIAL_NAMES
             )
+            storage_status = observation.await_observation(
+                lambda: observe_storage(rendered["routes"]["storage"], credentialed=credentialed),
+                lambda observed: observed == "ready",
+            )
+            if not credentialed:
+                missing = [
+                    name
+                    for name in STORAGE_CREDENTIAL_NAMES
+                    if name not in secrets["required_names"]
+                ]
+                print(
+                    "\n  This project has no R2 credential in its active secret generation, "
+                    "so its storage route\n  is not published. Provision it, then re-run this "
+                    f"deploy:\n\n    missing: {', '.join(missing)}\n"
+                    "    see docs/session-07-operator-guide.md for the provider steps\n\n"
+                    "  A project awaiting its storage credential is not a failed deploy (D326)."
+                )
 
     # The repository, version 13. Unlike the three blocks around it this one
     # publishes for EVERY session rather than behind a `>= BACKUP_PLANE_SESSION`

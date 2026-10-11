@@ -7,8 +7,9 @@
 - **Affects:** `tests/deployment/test_session31_capacity.py`
   (`test_a_third_project_that_does_not_fit_is_refused_on_this_host`, Run 2),
   `tests/external/test_session38_public_lifecycle.py` (`LIFECYCLE` and
-  `test_the_refused_resize_changed_nothing`, Run 2), Session 39's lifecycle
-  instrument and record (the `admission` member, Run 8),
+  `test_the_refused_resize_changed_nothing`, Run 2), a resize's operation
+  result (the `admission` member: the control set's `0005`,
+  `operations.RESULT_MEMBERS` and `bin/reconciler.py`, Run 6, D2362),
   `tests/external/test_session39_public_lifecycle.py::test_the_resizes_followed_the_admission_reading`
   (Run 7). Requirements `NODE-ADMIT-002`, `LIFE-LIVE-001`, `LIFE-LIVE-003`.
 - **Related:** ADR 0221/0222 (the host declares itself; admission refuses at
@@ -40,21 +41,26 @@ outcome; the proof reads both from the SAME document and requires:
 > `succeeded`) otherwise.
 
 - **NODE-ADMIT-002**: `test_a_third_project_that_does_not_fit_is_refused_on_this_host`
-  keeps its node id and its structural assertions (the six labelled lines, the
-  committed line naming the deployed projects, no injected declaration) and
-  replaces the fixed `exit 12` with the decision assertion. On a host where
-  the candidate fits, it **requires** that the admission rehearsal's injected
-  refusal record exists, was written on this host at this commit, and is green
-  (`test_the_admission_rehearsal_recorded_a_refusal_and_a_control`, already a
-  node id) — so the refusal path itself is still exercised, against an
-  injected declaration, every time.
-- **LIFE-LIVE-001 / LIFE-LIVE-003**: each resize in the lifecycle record
-  carries `admission`, the JSON `admit.sh --json` printed for it; the proof
-  requires the operation's terminal status to be the one that reading implies,
+  keeps its node id and its structural assertions (the five labelled reading
+  lines, the suggested action iff refused, the committed line naming the
+  deployed projects, no injected declaration) and replaces the fixed `exit 12`
+  with the decision assertion. On a host where the candidate fits, it
+  **requires** that the admission rehearsal's injected refusal and its control
+  are recorded on this host, in a record that **finished after the deployed
+  commit's own commit time** — the record carries no commit and the deployed
+  document no deploy time, so the commit's time, read from the checkout, is
+  the bound (D2361) — so the refusal path itself is still exercised, against
+  an injected declaration, at this release.
+- **LIFE-LIVE-001 / LIFE-LIVE-003**: each resize's operation result carries
+  `admission` — `requested_mb` and `safe_available_mb`, read by the reconciler
+  from the `admit.sh --json` it runs at the resize's `admit` step, on both
+  outcomes (D2362) — and the proof reads it back through `/v1`, never from the
+  host. It requires the terminal status to be the one that reading implies,
   and the profile the customer read afterwards to be the one admission left.
-  **The member is required**: a record without it (Session 38's) fails the
-  proof — that claim already failed, so nothing moves — and there is no
-  fallback to an envelope row.
+  **The member is required**: a resize without it (every Session 38 resize)
+  fails the proof — that claim already failed, so nothing moves — and there is
+  no fallback to an envelope row. Session 38's module reads only its six
+  types, so it can be run against Session 39's record too (D2343).
 
 ## Consequences
 

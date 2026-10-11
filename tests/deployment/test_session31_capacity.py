@@ -45,7 +45,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -158,22 +160,42 @@ def test_a_third_project_that_does_not_fit_is_refused_on_this_host(
     so a root-less run fails here loudly rather than passing for the wrong
     reason.
 
-    Goes red if: the candidate manifest's claim was set too low to be refused
-    (the reason the control beside it exists); `host.yaml` was left at schema
-    2; the deployed documents could not be summed; or exit 12 is not what a
-    refusal returns.
+    **ADR 0270: the proof asserts the DECISION, not the refusal.** On the CX23
+    this candidate did not fit; on OVH (7,745 MiB) it does, and a fixed `exit
+    12` measured the host rather than the rule (D2292, D2340). So the outcome
+    must equal what the reading in the SAME admission document implies --
+    refused (exit 12) iff the requested charge exceeds `safe available`,
+    admitted (exit 0) otherwise -- and both numbers are printed. Where the
+    candidate fits, the refusal path is still required to have run on this
+    host: the admission rehearsal's injected refusal and its control, finished
+    after the deployed commit existed.
+
+    Goes red if: the decision disagrees with its own reading in either
+    direction; `host.yaml` was left at schema 2; the deployed documents could
+    not be summed; exit 12 is not what a refusal returns; or, on a host where
+    the candidate fits, no rehearsal refusal was recorded since this commit.
     """
     code, out, err = _admit(
         "--host", str(host_manifest), "--project", str(candidate_manifest), "--json"
     )  # fmt: skip
-    assert code == capacity_reading.EXIT_ADMISSION_REFUSED, (
-        f"admit.sh exited {code}, not {capacity_reading.EXIT_ADMISSION_REFUSED}. "
-        f"This project was supposed to be too large for this host.\n{out}\n{err}"
+    assert code in (0, capacity_reading.EXIT_ADMISSION_REFUSED), (
+        f"admit.sh exited {code}, neither a decision to admit nor to refuse\n{out}\n{err}"
     )
-
     decision = json.loads(out)
-    assert decision["outcome"] == "refused", decision
-    assert decision["exit_code"] == capacity_reading.EXIT_ADMISSION_REFUSED
+    lines = {line["label"]: line["value"] for line in decision["lines"]}
+    requested = _mib(lines["requested"])
+    safe_available = _mib(lines["safe available"])
+    implied = "refused" if requested > safe_available else "admitted"
+    print(
+        f"NODE-ADMIT-002: requested {requested} MiB, safe available {safe_available} MiB; "
+        f"the reading implies {implied}, admission decided {decision['outcome']} (exit {code})"
+    )
+    assert decision["outcome"] == implied, (
+        f"admission decided {decision['outcome']} while its own reading implies {implied}: "
+        f"requested {requested} MiB against {safe_available} MiB safely available"
+    )
+    expected_exit = capacity_reading.EXIT_ADMISSION_REFUSED if implied == "refused" else 0
+    assert code == expected_exit and decision["exit_code"] == expected_exit, (code, decision)
     assert decision["declaration_injected"] is False, (
         "the host's own declaration was overridden, so this measured a rehearsal "
         "rather than the host"
@@ -184,20 +206,21 @@ def test_a_third_project_that_does_not_fit_is_refused_on_this_host(
     )
 
     labels = [line["label"] for line in decision["lines"]]
-    assert labels[:6] == [
+    assert labels[:5] == [
         "declared memory",
         "reserved",
         "committed",
         "requested",
         "safe available",
-        "suggested action",
     ], labels
+    # A memory refusal names its suggested action next; an admission goes on
+    # to the disk lines instead.
+    assert (labels[5:6] == ["suggested action"]) == (implied == "refused"), labels
 
-    lines = {line["label"]: line["value"] for line in decision["lines"]}
     # The committed line names the two projects that ARE deployed. Without
-    # this the refusal could be a host that summed nothing.
+    # this the decision could be about a host that summed nothing.
     assert "unknown" not in lines["committed"], (
-        f"the committed total could not be read: {lines['committed']}. A refusal "
+        f"the committed total could not be read: {lines['committed']}. A decision "
         "on that basis says nothing about capacity (D1606)"
     )
     for key in ("alpha-dev", "beta-dev"):
@@ -205,6 +228,66 @@ def test_a_third_project_that_does_not_fit_is_refused_on_this_host(
             f"{key} is absent from the committed line, so this host's existing "
             f"claims were not all counted: {lines['committed']}"
         )
+
+    if implied == "admitted":
+        _require_the_rehearsed_refusal_since_the_deployed_commit()
+
+
+def _mib(value: str) -> int:
+    """`1234 MiB ...` -> 1234: the figure a decision line opens with."""
+    match = re.match(r"^(-?\d+) MiB\b", value)
+    assert match, f"not a MiB figure: {value!r}"
+    return int(match.group(1))
+
+
+def _require_the_rehearsed_refusal_since_the_deployed_commit() -> None:
+    """ADR 0270: on a host where the candidate fits, the refusal path must have
+    run HERE since the deployed commit existed -- the admission rehearsal's
+    injected refusal and its control, in a record that finished after that
+    commit's own time. The record carries no commit, so the commit's time,
+    read from this checkout, is the bound (D2361)."""
+    deployed = json.loads(Path(os.environ["APG_PROJECT_A_OUTPUTS"]).read_text(encoding="utf-8"))
+    commit = deployed["source_commit"]
+    shown = subprocess.run(
+        [
+            "git",
+            "-c",
+            "safe.directory=*",
+            "-C",
+            str(REPO_ROOT),
+            "show",
+            "-s",
+            "--format=%cI",
+            commit,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        stdin=subprocess.DEVNULL,
+    )
+    assert shown.returncode == 0, (
+        f"the deployed commit {commit} is not in this checkout: {shown.stderr}"
+    )
+    committed_at = datetime.fromisoformat(shown.stdout.strip())
+
+    directory = Path(os.environ["APG_REHEARSAL_EVIDENCE_DIR"])
+    records = sorted(directory.glob("rehearsal-*-admission-refused-*.json"))
+    assert records, (
+        f"the candidate fits this host, and no admission-refused rehearsal record is under "
+        f"{directory}: the refusal path was not exercised here (ADR 0270)"
+    )
+    newest = max(records, key=lambda path: path.stat().st_mtime)
+    record = json.loads(newest.read_text(encoding="utf-8"))
+    finished = datetime.fromisoformat(record["finished_at"].replace("Z", "+00:00"))
+    assert finished >= committed_at, (
+        f"{newest.name} finished {record['finished_at']}, before the deployed commit "
+        f"{commit[:12]} existed ({committed_at.isoformat()}): it rehearsed another release"
+    )
+    readings = record["readings"]
+    assert readings["admission_refused"] == "refused", readings
+    assert readings["admission_refused_exit"] == capacity_reading.EXIT_ADMISSION_REFUSED, readings
+    assert readings["admission_as_declared"] == "admitted", readings
+    assert readings["control_declaration_injected"] is False, readings
 
 
 def test_the_same_project_at_the_default_budget_is_admitted(

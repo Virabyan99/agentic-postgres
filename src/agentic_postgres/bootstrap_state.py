@@ -64,8 +64,14 @@ class BootstrapStateError(ManifestError):
     """State is unreadable, invalid, or disagrees with what was asked of it."""
 
 
+#: The file's name inside a project's state directory. Named so a reader that
+#: walks another state root (`capacity_probe` reading a prepared slot, D2341)
+#: does not spell it again.
+STATE_FILENAME = "bootstrap-state.json"
+
+
 def state_path(project_key: str) -> Path:
-    return STATE_ROOT / project_key / "bootstrap-state.json"
+    return STATE_ROOT / project_key / STATE_FILENAME
 
 
 def credential_paths(project_key: str) -> dict[str, str]:

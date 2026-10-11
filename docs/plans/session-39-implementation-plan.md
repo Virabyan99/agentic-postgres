@@ -1,8 +1,9 @@
 # Session 39 — Public TLS endpoints and customer roles
 
-**Status: EXECUTING. Run 1 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
+**Status: EXECUTING. Runs 1–2 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
 threat list; Sheet E0 read). Rows **D2325–D2355** at planning; Run 1 added
-**D2356–D2360**. ADRs **0268–0270** written. **NEXT FREE: D2361, ADR 0271.**
+**D2356–D2360**, Run 2 **D2361–D2364**. ADRs **0268–0270** written. **NEXT FREE: D2365,
+ADR 0271.**
 
 The fourth session of Stage 5 (`docs/plans/stage-5-plan.md` §3, §5 *Session 39*).
 Twelve runs and **two sittings on two days**: the firewall, the edge's one
@@ -445,6 +446,10 @@ table below it, in execution order.
 | **D2357** | D2350/rig 39c: Prisma pooled, *"whether Prisma needs `pgbouncer=true`"*; the snippet names `DATABASE_URL` pooled. | Rig 39c/39c2: Prisma 6.19.1's **Client** sends `search_path` as a startup parameter whenever the URL names `schema=`, and PgBouncer 1.24.1 refused it, *"FATAL: unsupported startup parameter: search_path"* (the platform's DBX-002 never met it: `url.mjs` sets `schema` only for migrate, which goes straight to `postgres`). With **`track_extra_parameters = search_path`** in the pooler's ini the same URL passed (12 rows, four parallel reads), and `schema=app_private` was refused by the grants (`42501`), not the door. `migrate deploy` sends no such parameter (passed through `customer-direct` with and without it). **Prisma needs no `pgbouncer=true`** (`max_prepared_statements = 100`). | **Both customer poolers render `track_extra_parameters = search_path`** (Run 5; EP-POOL-001 gains the assertion). Prisma's snippet names no `pgbouncer=true`. The platform `pgbouncer` is unchanged. **Owed by Run 7's fixture run**: Prisma's hostname verification (rig 39c read its chain verification — no CA given, *"unable to get local issuer certificate"* with `sslaccept=strict` — not a name mismatch, which the gateway's `sniStrict` prevents from being staged). | A snippet that fails on its first query is worse than none; the setting lets a client's own `search_path` reach only its own server connection. | 0268, 0269 |
 | **D2358** | D2334: claimants *"proposed small 2/2, standard 3/3, large 5/5 and fixed by rig 39e"*. | Rig 39e, the product's own summands (`config` budget functions, `postgres-bootstrap.connection_limits`), the slot manifest's `pool_size` 16, `superuser_reserved_connections` 3 (unset in `compose.yaml`, so PostgreSQL's default): **standard 3/3 leaves the application 15 < 16** — the bootstrap would refuse it; small fits 2/2 (3/3 also 15); large fits up to 8/8. | **small 2/2, standard 2/2, large 5/5.** Each pooler `mem_limit` 64m and `pids_limit` 64: ADR 0244's floor decides (a customer pooler read ~1.5 MiB after the four drivers). | The table is what both arithmetics accept, not what looked symmetric. | 0269 |
 | **D2360** | Sheet F1: `sudo bin/provision-host.sh --check` then `--apply`. | E0's `--help`: the usage is `sudo bin/provision-host.sh --host FILE` with `--check` or `--apply` — `--host` is required. `apply_baseline` (`bin/provision-host.sh:997-1052`): on a host where ufw is already active the re-apply only reconciles the allow rules and needs no rollback timer (`:1029-1032`); `bin/docker-firewall.sh reconcile` then applies the rendered `DOCKER-USER` rules. `--apply` also re-runs the release, launcher, unit and Docker steps (`install_docker` restarts Docker only if `daemon.json` changed, `:990-995`). | **Sheet F1 is `sudo bin/provision-host.sh --host host.yaml --check`, then `--host host.yaml --apply`**, from `/home/op/agentic-postgres`. The `--check` reading is the guard: any deviation other than the firewall's (ufw's 5432 rule and the `DOCKER-USER` rules) is §9's stop, so `--apply` never restarts Docker unannounced. No rollback timer (ufw is active). | The sheet must be the command the tool accepts; the check before the apply is what keeps an unrelated step from riding along. | 0268 |
+| **D2361** | ADR 0270 (Run 1): the admitted branch *"requires the rehearsal's injected refusal record … written on this host at this commit"*. | The rehearsal record (`rehearsal.record`, `src/agentic_postgres/rehearsal.py:1458-1487`) carries `started_at`/`finished_at` and no commit; the deployed document carries `source_commit` and no deploy time. "At this commit" cannot be read from either. | **The bound is the deployed commit's own commit time**: `git -c safe.directory=* show -s --format=%cI <source_commit>` from the checkout, against `APG_PROJECT_A_OUTPUTS`' `source_commit`; the newest `admission-refused` record must have finished at or after it, and its readings must be the refusal (exit 12) and the admitted control. ADR 0270's sentence corrected to say so. | A record that finished before the commit existed rehearsed another release; one after it is as close to *this commit* as the two documents allow. | 0270 |
+| **D2362** | ADR 0270 / Run 1: *"the lifecycle record gains `admission` (the JSON `admit.sh --json` printed for each resize) — the Session 39 instrument writes it (Run 8)"*. | The lifecycle instrument runs from the WORKSTATION and opens no SSH (§7, `test_this_module_uses_no_ssh`), so it cannot run `admit.sh`. Admission's reading reaches nothing a customer can read: a refused resize's result carries only `refusal` (a sentence, `bin/reconciler.py` resize), an admitted one nothing; `operations.RESULT_MEMBERS["project.resize"]` is `{profile}` plus the common four, and `app.control_result_members` lives in the APPLIED `0004` (`:132-142`, D912: never amended). | **The reading travels in the operation's own result**: Run 6's `0005` replaces `app.control_result_members` so `project.resize` may carry `admission`; `RESULT_MEMBERS` gains it (the test holding the two equal moves with it); the reconciler's resize parses the `admit.sh --json` it already runs into `{"requested_mb", "safe_available_mb"}` and records it on BOTH outcomes. The proofs read it back through `/v1` (`_implied_status`, `tests/external/test_session38_public_lifecycle.py`). Session 38's module now reads only its six types and accepts a record of session 38 or 39, so Session 39's record (with `credential.rotate` interleaved) re-runs it (D2343). | The server's own reading, served through the customer's door, is the only copy the external half may read; a workstation copy of a host command's output would be a second source. | 0270, 0256 |
+| **D2363** | Run 2 item 1: *"take the host manifest's declared slots (the caller passes them; grep every caller of `capacity_probe.read` first)"*; `bin/control.py compare` reads a prepared slot. | `capacity_probe.read` already loads the host manifest itself (`:240`), and has three callers (`bin/deploy-project.py:2342`, `bin/admit.py:162`, `bin/doctor.py:927`) plus two proofs. `bin/control.py` reads no host manifest at all. A third reader of the state root, `bin/fleet.py project_keys` (`:78-82`), lists a prepared slot as an invalid row; `doctor capacity`'s committed line (`diagnosis.py:917-925`) is a fourth. | **`read` takes the declaration from the manifest it already loads** (one place reaches all three callers, none changed); a declared slot that `is_prepared_slot` (bootstrap state a file, document absent, both READ — an `OSError` falls through to unreadable) is `Reading.prepared` and named on the committed line by `decide` AND by `doctor capacity`. **`control.py` identifies a prepared slot by both halves of its preparation** — the slot manifest `slot.sh prepare` writes under `SLOT_ROOT` and the bootstrap state — and a read it cannot make is `undetermined`. **`fleet.py` is left as it is**: an inventory row saying *"no deployed document"* is a true report, decides nothing, and no slot sits prepared during the sweep (slot3-prod is created before B1). | Passing the slots in from three callers is three chances to forget one (question 5); the registry has no host.yaml to read and the slot's own files say what it is. | 0257, 0195 |
+| **D2364** | D2347: `dr_kit.plan_export` carries the policy; `bin/dr-kit.py` passes `access_policy.POLICY_PATH`. | Measured in Run 2's targeted run: with the fixed `/etc/agentic-postgres/database-access-policy.json`, `test_the_command_writes_owner_only_refuses_an_existing_directory_and_verifies` and `test_every_directory_in_the_kit_is_owner_only` exited **3** — this workstation HAS a root-only `/etc/agentic-postgres/`, so an export pointed at a proof's `--state-root` read the HOST's policy and failed closed on the permission. | **The policy is derived beside the state root** (`dr_kit.access_policy_beside(state_root)` = `state_root.parent / database-access-policy.json`); on a host that is `POLICY_PATH` exactly, and `test_the_access_policy_travels_in_the_kit` holds the two equal. | An export reads everything from one root; a second, fixed root is how a proof reaches the host's file. | 0189 |
 | **D2359** | Run 1 item 6: *"a throwaway MinIO as both source and mirror (two buckets)"*. | One server holding both buckets lets rclone copy server-side (`CopyObject`), which R2→B2 never can — the measured path would not be production's. | **Two MinIO servers** (the local `quay.io/minio/minio` image), one per remote. Measured: without the flag, **50 HEAD + 50 PUT at the mirror** (+51 GET at the source, 1 at the mirror) for 50 objects; with `--s3-no-head`, **0 HEAD, 50 PUT**; **control**: `rclone size --json` of the mirror = the source's (50 objects, 441 bytes) both times. Run 2 adds the flag (D2346). | A rig that measured a different copy path would have priced the wrong request. | 0264 |
 
 ---
@@ -787,6 +792,54 @@ green in the same invocation. Targeted: `test_capacity_probe`, `test_control_com
 `verb_mirror` in `tests/contract/`), `test_dr_kit`, `test_reconciler_dispatch`,
 `test_acceptance_registry`, `test_evidence_claims`.
 
+**Done.** 2026-10-11; the code commit and its CI verdict are recorded at the end of
+this paragraph. **D2341**: `capacity_probe.read`
+reads the declared slots from the host manifest it already loads and records a
+declared slot with `bootstrap-state.json` and no `outputs.json` (both READ; an
+`OSError` falls through to unreadable) as `Reading.prepared`; `decide` and
+`doctor capacity` name it on the committed line (*"slot1-dev prepared, commits
+nothing"*); `bin/control.py` reads a key with no row and no document as `prepared
+(slot)` (agreeing, exit 0) only when BOTH the slot manifest and the bootstrap state
+are there (D2363); the storage observer is guarded by `if not storage_enabled:`
+(the rendered document's `storage.enabled`) and records `unavailable` without a
+request (D2305). **D2345**: `claim` takes the succeeded creation whose handoff
+file this CLI holds (none: exit 3 *"no handoff token for K is held here"*; two:
+exit 3 *"2 succeeded creations of K have a token here"*). **D2346**: `mirror.sh`
+syncs with `--s3-no-head`; `verb_mirror` names a 403 on BOTH passes as *"the
+provider refused the requests (403): read the account's transaction caps"*
+(rclone's D2315 line, `StatusCode: 403`). **D2347**: the kit carries
+`database-access-policy.json` at its root when the host has one, validated by
+`access_policy.validate` on export and by `verify` (beside its digest), derived
+beside the state root (D2364); the runbook's §8 step 6 publishes it from the kit.
+**D2348**: `start()` waits for the control database (`wait_for_control`, 180 s,
+every 10 s, *"waiting for the control project's database (n s)"*); ADR 0256's
+amendment already says so. **D2340 / ADR 0270**: NODE-ADMIT-002's direct test
+asserts admission's outcome equals its own reading (requested vs safe available,
+both printed), exit 12 iff refused, and on an admitted candidate requires the
+rehearsal's refusal and control finished after the deployed commit (D2361);
+LIFE-LIVE-001's resizes are decided by `result.admission` read through `/v1`, the
+producer owed by Run 6 (D2362); ADR 0270's wording corrected to both. New proofs:
+`tests/contract/test_capacity_probe.py` (new module, `pytestmark` first: three
+tests), `test_control_command.py::test_a_prepared_slot_agrees`,
+`test_deploy_command.py::test_a_disabled_storage_route_is_not_observed`,
+`test_control_cli.py::test_the_claim_picks_the_creation_whose_token_is_held`,
+`test_backup_mirror.py::test_a_refused_mirror_names_the_provider` and
+`::test_a_403_on_one_pass_only_is_not_named_a_refusal` (and `--s3-no-head` in the
+existing argv proof), `test_disaster_kit.py::test_the_access_policy_travels_in_the_kit`,
+`test_reconciler_dispatch.py::test_start_waits_for_the_control_database`.
+**Targeted, once**: 15 modules, 354 passed and 2 failed — the two kit-command
+proofs, exit 3 on this workstation's root-only `/etc/agentic-postgres` (D2364);
+repaired, `test_disaster_kit` re-run alone: 35 passed. The two live modules
+collect (14 tests); `test_control_boundary` + `test_capacity_probe`: 7 passed.
+**Battery 8/8 KILLED**, each killer `FAILED` (never `ERROR`) beside a green control
+in the same invocation, every file restored by copy and `cmp`-equal: M1 a prepared
+slot left unread, M2 `registry` without `prepared`, M3 the claim ignoring which
+token is held, M5 `start` without the wait, M6 the mirror without `--s3-no-head`,
+M7 one 403 called a refusal (`all`→`any`), M8 the storage observer unguarded, M9
+the policy not carried. **M4 (the live decision test's `iff` reduced to *if
+refused*) cannot run offline** — its module needs the host; its first execution is
+the Run 11 sweep. Battery `~/s39/run2/battery.py`, transcript `battery.txt`.
+
 ### Run 3 — the schemas: manifest 11, outputs 22, naming, isolation, the slot's manifest and DNS
 
 **Code.** CI read by full SHA.
@@ -909,7 +962,11 @@ the bootstrap setting a customer PASSWORD; **controls** green.
 
 ### Run 6 — the control plane: `0005`, the routes, `credential.rotate`, the snippets
 
-**Code.** CI read by full SHA.
+**Code.** CI read by full SHA. **Also owed here since Run 2 (D2362):** `0005`
+replaces `app.control_result_members` so `project.resize` may record `admission`;
+`operations.RESULT_MEMBERS` gains it; `bin/reconciler.py`'s resize records
+`{"requested_mb", "safe_available_mb"}` parsed from its `admit.sh --json` on both
+outcomes — the Session 38 and 39 lifecycle proofs require it (ADR 0270).
 
 1. **`projects/control/migrations/templates/0005-control-endpoints.sql`** (D2351):
    `SET LOCAL ROLE {{object_owner}}`; `ALTER TABLE app.control_projects ADD COLUMN

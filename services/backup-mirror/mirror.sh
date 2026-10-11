@@ -68,7 +68,12 @@ case "${1:-copy}" in
     # invocation is ONE pass, so the verb's single extra pass stays the verb's
     # (ADR 0220); rclone's per-request retries are left on. A pass that exits
     # non-zero has left objects behind and the next pass completes it (D1001).
-    exec rclone sync --checksum --fast-list --retries 1 \
+    # `--s3-no-head`: no HEAD after each upload. That HEAD is one Class B call
+    # per object at B2, and the free daily cap stopped a creation's mirror on
+    # it (D2315); rig 39f counted 50 HEADs for 50 uploads without the flag and
+    # 0 with it, the mirror's count agreeing both times (D2346, D2359). The
+    # verb's `count` listing after the copy already reads what landed.
+    exec rclone sync --checksum --fast-list --retries 1 --s3-no-head \
       "source:${BACKUP_MIRROR_SOURCE_BUCKET}" "mirror:${BACKUP_MIRROR_BUCKET}"
     ;;
   count)

@@ -631,6 +631,53 @@ def test_the_handoff_token_is_private_and_removed_after_claim(
     assert token not in claimed.stdout + claimed.stderr
 
 
+def test_the_claim_picks_the_creation_whose_token_is_held(
+    person: Person, served: Any, accepting: None, project_address: Elsewhere
+) -> None:
+    """D2316/D2345: a key reused after a deletion has two succeeded creations,
+    and `claim` takes the one whose handoff token THIS CLI holds -- never the
+    first row. None held is exit 3 naming the token; two held is exit 3 naming
+    the count; neither presents anything to the project."""
+    _, drive = served
+    _, org = _member(served, "reuse-member")
+    assert person.login("reuse-member").returncode == 0
+    key = "slot1-prod"
+    elsewhere = project_address
+    _adopt(drive, org, key, f"{elsewhere.base}/{org}/api/app")
+    handoffs = person.state / "handoffs"
+    made = []
+    for _ in range(2):
+        _ready_slot(drive)
+        operation, token = _created(person)
+        _finish(drive, operation["id"], "succeeded", result={"project_key": key}, project_key=key)
+        made.append((operation["id"], token))
+    (first, _), (second, second_token) = made
+    password = person.private("reuse.password", "the second administrator's choice")
+    reset = f"/{org}/api/app/auth/reset-password"
+    elsewhere.answer("POST", reset, 200, b'{"credential_version": 2}')
+
+    def claim() -> Any:
+        return person.run(
+            "project", "claim", "--project-key", key, "--password-file", str(password),
+            trust=elsewhere.certificate,
+        )  # fmt: skip
+
+    both = claim()
+    assert both.returncode == 3 and f"2 succeeded creations of {key}" in both.stderr, both.stderr
+    kept = (handoffs / first).read_bytes()
+    (handoffs / first).unlink()
+    claimed = claim()
+    assert claimed.returncode == 0, claimed.stderr
+    sent = [json.loads(body) for method, path, body in elsewhere.requests if path == reset]
+    assert sent == [{"reset_token": second_token, "password": "the second administrator's choice"}]
+    assert not (handoffs / second).exists()
+
+    none = claim()
+    assert none.returncode == 3 and f"no handoff token for {key}" in none.stderr, none.stderr
+    assert len([path for method, path, body in elsewhere.requests if path == reset]) == 1
+    assert kept  # the first creation's token existed; removing it was the proof's move
+
+
 def test_export_downloads_once_without_following_a_redirect(
     person: Person, served: Any, accepting: None, elsewhere: Elsewhere
 ) -> None:

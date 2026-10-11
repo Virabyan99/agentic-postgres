@@ -904,3 +904,64 @@ def test_an_operator_managed_project_is_refused(host: Host) -> None:
         finished = host.finished()
         assert finished["error_code"] == "invalid_request"
         assert "operator-managed" in finished["result"]["reason"]
+
+
+class _Clock:
+    """A clock the proof advances only by sleeping, so 180 s takes no time."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.slept: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+
+class _Control:
+    """The control database, answering after `failures` refusals."""
+
+    def __init__(self, module: Any, failures: int) -> None:
+        self.module = module
+        self.failures = failures
+        self.calls: list[str] = []
+
+    def call(self, sql: str, **_: str) -> str:
+        self.calls.append(sql)
+        if len(self.calls) <= self.failures:
+            raise self.module.ControlError("could not connect to server")
+        return "1"
+
+
+def test_start_waits_for_the_control_database(capsys: pytest.CaptureFixture[str]) -> None:
+    """D2348: at a boot the control project's containers arrive after the edge,
+    and `start` used to fail exit 6 on the first refusal (NRestarts 1 after
+    Session 38's reboot). It now asks every 10 s and says so, and returns when
+    the database answers -- here after 40 s. Control: a database that never
+    answers fails exit 6 once 180 s are spent -- 18 waits, at 0 through 170 s,
+    never a nineteenth."""
+    module = _load()
+    clock = _Clock()
+    control = _Control(module, failures=4)
+    module.wait_for_control(control, clock=clock, sleep=clock.sleep)
+    assert len(control.calls) == 5 and clock.slept == [10] * 4
+    printed = capsys.readouterr().out
+    assert printed.count("waiting for the control project's database") == 4, printed
+    assert "(30 s)" in printed
+
+    clock = _Clock()
+    never = _Control(module, failures=10**6)
+    with pytest.raises(module.OperatorError) as raised:
+        module.wait_for_control(never, clock=clock, sleep=clock.sleep)
+    assert raised.value.code == module.EXIT_UNKNOWN
+    assert "within 180 s" in str(raised.value)
+    assert clock.now == module.CONTROL_WAIT_SECONDS and len(clock.slept) == 18, clock.slept
+
+    # The wait is in `start`, between finding the control project and using it.
+    source = (REPO_ROOT / "bin" / "reconciler.py").read_text(encoding="utf-8")
+    body = source.split("def start() -> Reconciler:", 1)[1].split("\ndef ", 1)[0]
+    assert body.index("control_target()") < body.index("wait_for_control(control)")
+    assert body.index("wait_for_control(control)") < body.index("reconciler.recover()")

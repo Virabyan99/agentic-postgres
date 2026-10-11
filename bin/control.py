@@ -28,6 +28,12 @@ exactly.
 document is deployed under the key and the slot's tombstone is present, and as
 ``differs: deleted`` when a document is still deployed there.
 
+**A prepared slot** (Session 39, D2341): a key with no row and no document
+whose slot ``slot.sh prepare`` prepared -- its slot manifest written and its
+bootstrap state in the state root -- reads ``prepared (slot)``, agreeing. It is
+the state between a slot's bootstrap and its creation, and it commits nothing.
+Any other key with no row and no document is still a difference.
+
 Exit codes: 0 adopted, reset, or all agree; 2 invalid input; 3 not root, no
 deployed document, no control project, or no docker; 5 the database refused,
 two control projects, or a difference; 6 something could not be read.
@@ -48,7 +54,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from agentic_postgres import container_exec, deployed_output, slot  # noqa: E402
+from agentic_postgres import bootstrap_state, container_exec, deployed_output, slot  # noqa: E402
 from agentic_postgres.control_registry import (  # noqa: E402
     CONTROL_SINCE_VERSION,
     FIELDS,
@@ -110,7 +116,11 @@ OUTCOME_TEXT = {
     "no_deployed_document": "no deployed document",
     "undetermined": "could not determine",
     "deleted": "agrees (deleted)",
+    "prepared": "prepared (slot)",
 }
+
+#: The outcomes `registry` counts as agreement (exit 0).
+AGREEING = frozenset({"agrees", "deleted", "prepared"})
 
 
 def require_root() -> None:
@@ -140,6 +150,26 @@ def tombstone(key: str) -> bool | None:
         return False
     try:
         os.lstat(path)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return None
+    return True
+
+
+def prepared_slot(key: str) -> bool | None:
+    """Whether `key` is a slot prepared and not yet created (D2341): True,
+    False, or None when it could not be read. Both halves of a preparation are
+    read -- the slot manifest `slot.sh prepare` writes and the bootstrap state
+    the provider half writes into the state root -- and a key that is not a
+    slot's is never one."""
+    try:
+        directory = slot.slot_directory(key, root=SLOT_ROOT)
+    except ValueError:
+        return False
+    try:
+        os.lstat(directory / slot.MANIFEST)
+        os.lstat(STATE_ROOT / key / bootstrap_state.STATE_FILENAME)
     except FileNotFoundError:
         return False
     except OSError:
@@ -266,6 +296,16 @@ def compare(rows: list[dict[str, Any]], readings: list[Reading]) -> list[dict[st
                 outcome["outcome"] = "deleted"
             else:
                 outcome.update(outcome="differs", fields=["tombstone"])
+        elif row is None and reading is not None and reading.missing:
+            # D2341: no row and no document is a difference -- unless it is a
+            # slot between its bootstrap and its creation.
+            prepared = prepared_slot(key)
+            if prepared is None:
+                outcome.update(
+                    outcome="undetermined", reason="the slot's preparation could not be read"
+                )
+            else:
+                outcome["outcome"] = "prepared" if prepared else "no_deployed_document"
         elif reading is None or reading.missing:
             outcome["outcome"] = "no_deployed_document"
         elif reading.document is None:
@@ -303,7 +343,7 @@ def registry(*, as_json: bool) -> int:
     kinds = {o["outcome"] for o in outcomes}
     if "undetermined" in kinds:
         return EXIT_UNKNOWN
-    return EXIT_OK if kinds and kinds <= {"agrees", "deleted"} else EXIT_REFUSED
+    return EXIT_OK if kinds and kinds <= AGREEING else EXIT_REFUSED
 
 
 def totp_reset(username: str, *, confirm: str) -> int:

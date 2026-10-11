@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from agentic_postgres import (
+    access_policy,
     bootstrap_state,
     config,
     deployed_output,
@@ -39,6 +40,7 @@ from agentic_postgres.config import ManifestError
 from agentic_postgres.secrets_contract import active_secrets, enabled_facilities
 
 __all__ = [
+    "ACCESS_POLICY",
     "BOOTSTRAP_STATE",
     "CAPABILITIES_MANIFEST",
     "CARRIED_AGES",
@@ -53,6 +55,7 @@ __all__ = [
     "SECRETS_LISTING",
     "KitEntry",
     "KitError",
+    "access_policy_beside",
     "kit_manifest",
     "plan_export",
     "secrets_listing",
@@ -77,6 +80,20 @@ PROJECT_ARTIFACTS = (PROJECT_MANIFEST, BOOTSTRAP_STATE, DEPLOYED_DOCUMENT, SECRE
 #: and every project that never moved, has none. Times and names, no value.
 CARRIED_AGES = secret_age.CARRIED_AGES
 OPTIONAL_PROJECT_ARTIFACTS = (CARRIED_AGES,)
+#: What the kit MAY hold beside the two host manifests: the database access
+#: policy (D2347). Host state that belongs to no project, so it sits at the
+#: kit's root. Optional because a host that delegates nothing may have none;
+#: carried when present because a move that forgot it left `op` with no
+#: database access on the new host (D2320). Names and profiles, no value.
+ACCESS_POLICY = "database-access-policy.json"
+
+
+def access_policy_beside(state_root: Path) -> Path:
+    """Where the database access policy sits relative to a state root: its
+    parent, beside `projects/`. On a host that is `access_policy.POLICY_PATH`
+    exactly; derived rather than fixed so an export pointed at another state
+    root never reads the host's file (D2347)."""
+    return state_root.parent / Path(access_policy.POLICY_PATH).name
 
 
 class KitError(ManifestError):
@@ -129,6 +146,7 @@ def plan_export(
     state_root: Path,
     contract: dict[str, Any],
     session: int,
+    access_policy_path: Path | None = None,
 ) -> list[KitEntry]:
     """Every artifact the kit holds, validated on the way in.
 
@@ -137,6 +155,11 @@ def plan_export(
     passes its schema; the listing is generated. Two manifests deriving one key
     are refused: a kit holding two projects under one directory is a kit that
     restores the wrong one.
+
+    `access_policy_path`, when given and present, adds the database access
+    policy (D2347), validated by `access_policy.validate`. Absent is not an
+    error: the artifact is optional. Unreadable is -- a permission error
+    reaches the caller like every other read here.
     """
     if not project_paths:
         raise KitError("a kit needs at least one project manifest")
@@ -151,6 +174,19 @@ def plan_export(
         KitEntry(HOST_MANIFEST, host_path.read_bytes(), host_path),
         KitEntry(CAPABILITIES_MANIFEST, capabilities_path.read_bytes(), capabilities_path),
     ]
+    if access_policy_path is not None:
+        try:
+            raw = access_policy_path.read_bytes()
+        except FileNotFoundError:
+            raw = None
+        if raw is not None:
+            try:
+                access_policy.validate(json.loads(raw))
+            except (ValueError, ManifestError) as problem:
+                raise KitError(
+                    f"{access_policy_path} is not a valid database access policy: {problem}"
+                ) from None
+            entries.append(KitEntry(ACCESS_POLICY, raw, access_policy_path))
     seen: set[str] = set()
     for path in project_paths:
         try:
@@ -391,6 +427,14 @@ def verify_kit(kit_dir: Path) -> list[str]:
                 loader(kit_dir / name)
             except (OSError, ValueError) as problem:
                 problems.append(f"{name} does not load: {problem}")
+
+    # D2347: optional, so only checked when the kit names it; its digest was
+    # checked above with every other artifact.
+    if ACCESS_POLICY in artifacts and (kit_dir / ACCESS_POLICY).is_file():
+        try:
+            access_policy.validate(json.loads((kit_dir / ACCESS_POLICY).read_bytes()))
+        except (OSError, ValueError, ManifestError) as problem:
+            problems.append(f"{ACCESS_POLICY} is not a valid database access policy: {problem}")
 
     for key in projects:
         prefix = f"projects/{key}"

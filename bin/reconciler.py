@@ -116,6 +116,14 @@ UNIT = "agentic-postgres-reconciler.service"
 POLL_SECONDS = 5
 RECORD_SECONDS = 120
 
+#: How long `start` waits for the control database, and how often it asks
+#: (D2348). The unit orders on Docker and the edge, never on the control
+#: project's unit -- which project that is, only `find_control` knows -- and
+#: at Session 38's boot the control project's containers arrived ~40 s after
+#: the edge, so `start` failed exit 6 and systemd restarted it 30 s later.
+CONTROL_WAIT_SECONDS = 180
+CONTROL_RETRY_SECONDS = 10
+
 #: An operation's bound, and each child's own (ADR 0256 §8). A child that
 #: outlives its bound leaves its step's outcome unknown: `could_not_determine`.
 OPERATION_SECONDS = 30 * 60
@@ -1053,11 +1061,39 @@ class Reconciler:
 # ---------------------------------------------------------------------------
 
 
+def wait_for_control(
+    control: Control,
+    *,
+    bound: float = CONTROL_WAIT_SECONDS,
+    every: float = CONTROL_RETRY_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Return once the control database answers; exit 6 if it has not within
+    `bound` seconds (D2348). Each wait is said, so a boot's journal shows a
+    reconciler waiting rather than a restart that looks like a fault."""
+    started = clock()
+    while True:
+        try:
+            control.call("SELECT 1;")
+            return
+        except ControlError as error:
+            waited = clock() - started
+            if waited + every > bound:
+                raise OperatorError(
+                    EXIT_UNKNOWN,
+                    f"the control database did not answer within {int(bound)} s: {error}",
+                ) from error
+            say(f"waiting for the control project's database ({int(waited)} s)")
+            sleep(every)
+
+
 def start() -> Reconciler:
     require_root()
     owner = checkout_owner()
     host = load_host()
     control = control_target()
+    wait_for_control(control)
     try:
         head, porcelain = checkout_reading(owner)
     except (OSError, subprocess.TimeoutExpired) as error:

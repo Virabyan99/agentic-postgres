@@ -53,18 +53,30 @@ pytestmark = [
 
 TIMEOUT = 30
 
+#: A resize's terminal status is not fixed: it is what its admission reading
+#: implies (ADR 0270, D2340). On the CX23 the `large` resize could not fit; on
+#: OVH it can, and a fixed `failed` measured the host rather than the rule.
+DECIDED = "decided by its admission reading"
+
 #: What the lifecycle ran, in the order it ran it (D2175): each operation's type
-#: and the terminal status the customer read.
+#: and the terminal status the customer read. A later session's lifecycle may
+#: interleave operations of other types (Session 39's `credential.rotate`); the
+#: proofs read only these six (D2362).
 LIFECYCLE = (
     ("project.create", "succeeded"),
     ("project.sleep", "succeeded"),
     ("project.wake", "succeeded"),
-    ("project.resize", "succeeded"),
-    ("project.resize", "failed"),
+    ("project.resize", DECIDED),
+    ("project.resize", DECIDED),
     ("project.export", "succeeded"),
     ("project.export", "succeeded"),
     ("project.delete", "succeeded"),
 )
+LIFECYCLE_TYPES = frozenset(kind for kind, _ in LIFECYCLE)
+
+#: The sessions whose lifecycle records these proofs read (D2343, D2362):
+#: Session 39 re-runs them against its own record.
+RECORD_SESSIONS = frozenset({38, 39})
 
 #: The edge's answer for a host or path no router serves (rig 38b: 19 bytes).
 EDGE_404 = b"404 page not found"
@@ -147,7 +159,7 @@ def record(control: dict[str, Any], endpoint: str, probe: dict[str, Any]) -> dic
     path = Path(os.environ["APG_LIFECYCLE_RECORD_FILE"])
     assert stat.S_IMODE(path.stat().st_mode) == 0o600, f"{path} is not 0600"
     document = json.loads(path.read_text(encoding="utf-8"))
-    assert document.get("session") == 38, document.get("session")
+    assert document.get("session") in RECORD_SESSIONS, document.get("session")
     assert document.get("finished") is True and "stopped" not in document, (
         f"the lifecycle did not run to its end: {document.get('stopped')}"
     )
@@ -199,18 +211,43 @@ def _read_back(
     return sorted(rows, key=lambda row: row["created_at"])
 
 
+def _implied_status(row: dict[str, Any]) -> str:
+    """ADR 0270: the status a resize's own admission reading implies, with both
+    numbers printed. The reading travels in the operation's `result.admission`
+    (D2362) -- read back through `/v1`, never from the host. **Required**: a
+    resize without it fails, and there is no fallback to an envelope row."""
+    admission = (row.get("result") or {}).get("admission")
+    assert isinstance(admission, dict), (
+        f"{row['id']}: the resize recorded no admission reading, so whether its "
+        f"outcome followed the rule cannot be checked (ADR 0270): {row.get('result')}"
+    )
+    requested, safe = admission["requested_mb"], admission["safe_available_mb"]
+    implied = "failed" if requested > safe else "succeeded"
+    print(
+        f"{row['id']}: requested {requested} MiB, safe available {safe} MiB -> "
+        f"{implied}; the operation {row['status']}"
+    )
+    return implied
+
+
 def test_the_operations_read_as_the_lifecycle_ran(
     recorder: Recorder, endpoint: str, owner: str, record: dict[str, Any]
 ) -> None:
     """LIFE-LIVE-001: the eight operations the record names read back through
-    `/v1`, in creation order, as the lifecycle ran -- create, sleep, wake and
-    resize `standard` succeeded, resize `large` failed, both exports and the
-    deletion succeeded -- each on the record's project and each agreeing with
-    what the record kept; and no read hands a download URL a second time."""
-    rows = _read_back(recorder, endpoint, owner, record)
-    assert [(row["type"], row["status"]) for row in rows] == list(LIFECYCLE), [
-        (row["type"], row["status"]) for row in rows
+    `/v1`, in creation order, as the lifecycle ran -- create, sleep and wake
+    succeeded, each resize ended as its admission reading implies (ADR 0270),
+    both exports and the deletion succeeded -- each on the record's project and
+    each agreeing with what the record kept; and no read hands a download URL a
+    second time."""
+    rows = [row for row in _read_back(recorder, endpoint, owner, record)
+            if row["type"] in LIFECYCLE_TYPES]  # fmt: skip
+    expected = [
+        (kind, _implied_status(row) if status == DECIDED else status)
+        for (kind, status), row in zip(LIFECYCLE, rows, strict=False)
     ]
+    assert [(row["type"], row["status"]) for row in rows] == expected and len(rows) == len(
+        LIFECYCLE
+    ), [(row["type"], row["status"]) for row in rows]
     kept = {operation["id"]: operation for operation in record["operations"]}
     for row in rows:
         assert row["project_key"] == record["project_key"], row
@@ -224,18 +261,27 @@ def test_the_operations_read_as_the_lifecycle_ran(
 def test_the_refused_resize_changed_nothing(
     recorder: Recorder, endpoint: str, owner: str, record: dict[str, Any]
 ) -> None:
-    """LIFE-LIVE-001, D2160: the `large` resize failed `capacity_exhausted`
-    with admission as its reason, after the `standard` one succeeded -- and the
-    profile the customer read after the refusal was still `standard`."""
+    """LIFE-LIVE-001, D2160, ADR 0270: each resize ended as its own admission
+    reading implies. A refused one failed `capacity_exhausted` with admission as
+    its reason and no profile, and the profile the customer read afterwards was
+    the one before it; an admitted one recorded the profile it moved to. Goes
+    red on a wrong decision in EITHER direction, which the fixed `failed` this
+    replaces could not see."""
     rows = _read_back(recorder, endpoint, owner, record)
     resizes = [row for row in rows if row["type"] == "project.resize"]
-    assert [row["status"] for row in resizes] == ["succeeded", "failed"], resizes
-    served, refused = resizes
-    assert (served.get("result") or {}).get("profile") == "standard", served.get("result")
-    assert refused.get("error_code") == "capacity_exhausted", refused
-    assert (refused.get("result") or {}).get("reason") == "admission", refused.get("result")
-    assert "profile" not in (refused.get("result") or {}), refused.get("result")
-    assert record["observations"].get("profile_after_refused_resize") == "standard"
+    assert len(resizes) == 2, resizes
+    profile = "small"  # a slot is created `small` (slot.SLOT_PROFILE)
+    for row in resizes:
+        result = row.get("result") or {}
+        assert row["status"] == _implied_status(row), row
+        if row["status"] == "failed":
+            assert row.get("error_code") == "capacity_exhausted", row
+            assert result.get("reason") == "admission", result
+            assert "profile" not in result, result
+            assert record["observations"].get("profile_after_refused_resize") == profile
+        else:
+            assert result.get("profile") in {"standard", "large"}, result
+            profile = result["profile"]
     _only(recorder, endpoint)
 
 

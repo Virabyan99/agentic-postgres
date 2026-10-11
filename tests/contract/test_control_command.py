@@ -396,3 +396,49 @@ def test_a_deleted_project_agrees_only_with_its_tombstone(
     host.answer(_registry_answer(*rows[:3], _row("slot1-prod")))
     assert host.main("registry") == 0
     assert _lines(capsys.readouterr().out)["slot1-prod"] == "agrees"
+
+
+def test_a_prepared_slot_agrees(
+    host: Host,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """D2341 (D2307 on the host): a slot between its bootstrap and its creation
+    -- the slot manifest `slot.sh prepare` wrote, the bootstrap state in the
+    state root, no document and no row -- reads `prepared (slot)`, agreeing,
+    exit 0. Each half alone is still a difference (exit 5): a directory with
+    only a bootstrap state is not a prepared slot, and neither is a manifest
+    with no state directory's record."""
+    slots = tmp_path / "slots"
+    monkeypatch.setattr(host.module, "SLOT_ROOT", slots)
+    rows = (_row(CONTROL), _row("alpha-dev"), _row("beta-dev"))
+    (host.state / "slot3-prod").mkdir()
+    (host.state / "slot3-prod" / "bootstrap-state.json").write_text("{}", "utf-8")
+
+    host.answer(_registry_answer(*rows))
+    assert host.main("registry") == 5, "a bootstrap state alone was read as a prepared slot"
+    assert _lines(capsys.readouterr().out)["slot3-prod"] == "no deployed document"
+
+    (slots / "slot3-prod").mkdir(parents=True)
+    (slots / "slot3-prod" / "manifest.yaml").write_text("project: {}\n", "utf-8")
+    host.answer(_registry_answer(*rows))
+    assert host.main("registry") == 0
+    assert _lines(capsys.readouterr().out)["slot3-prod"] == "prepared (slot)"
+    host.answer(_registry_answer(*rows))
+    assert host.main("registry", "--json") == 0
+    projects = json.loads(capsys.readouterr().out)["projects"]
+    assert [o["outcome"] for o in projects if o["project"] == "slot3-prod"] == ["prepared"]
+
+    # The manifest without the state's record is not prepared either.
+    (host.state / "slot3-prod" / "bootstrap-state.json").unlink()
+    host.answer(_registry_answer(*rows))
+    assert host.main("registry") == 5
+    assert _lines(capsys.readouterr().out)["slot3-prod"] == "no deployed document"
+
+    # And a key that is not a slot's never reads prepared, whatever it holds.
+    (host.state / "gamma-dev").mkdir()
+    (host.state / "gamma-dev" / "bootstrap-state.json").write_text("{}", "utf-8")
+    host.answer(_registry_answer(*rows))
+    assert host.main("registry") == 5
+    assert _lines(capsys.readouterr().out)["gamma-dev"] == "no deployed document"

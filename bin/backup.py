@@ -52,6 +52,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -687,6 +688,21 @@ def _compose_mirror_step(
     )
 
 
+#: rclone's words for a request the provider refused. Measured on B2 (D2315):
+#: `HeadObject ... StatusCode: 403 Forbidden`, on every object of both passes,
+#: when the account's Class B transactions were over the free daily cap.
+PROVIDER_REFUSED = re.compile(r"StatusCode:\s*403\b|\b403 Forbidden\b")
+
+
+def provider_refused(*passes: subprocess.CompletedProcess) -> bool:
+    """True when EVERY pass's output names a 403 (D2346): the provider
+    refusing the requests, which is an account's limit to read, not an
+    upstream flake for the next pass to complete."""
+    return bool(passes) and all(
+        PROVIDER_REFUSED.search(f"{done.stdout or ''}\n{done.stderr or ''}") for done in passes
+    )
+
+
 def write_mirror_record(path: Path, record: dict) -> None:
     """Root-owned, 0600, replaced atomically: a half-written record is a
     record the doctor cannot parse, which it reports as unknown, not as a copy."""
@@ -751,6 +767,7 @@ def verb_mirror(arguments: argparse.Namespace) -> int:
 
     copy = compose_mirror(rendered, "copy", timeout=MIRROR_TIMEOUT_SECONDS)
     _relay(copy)
+    first = copy
     retried = False
     if copy.returncode != 0:
         # **One extra pass, here, now** (ADR 0220). No backoff, no loop, no
@@ -767,6 +784,15 @@ def verb_mirror(arguments: argparse.Namespace) -> int:
         retried = True
         copy = compose_mirror(rendered, "copy", timeout=MIRROR_TIMEOUT_SECONDS)
         _relay(copy)
+    if copy.returncode != 0 and provider_refused(first, copy):
+        # D2346: one sentence that sends the operator to the provider's
+        # console, not to D1001's next pass -- a cap does not lift by retrying.
+        raise OperatorError(
+            EXIT_STATE,
+            f"the mirror copy exited {copy.returncode} on both passes and the provider "
+            "refused the requests (403): read the account's transaction caps. The copy "
+            "record was not written.",
+        )
     if copy.returncode != 0:
         raise OperatorError(
             EXIT_STATE,

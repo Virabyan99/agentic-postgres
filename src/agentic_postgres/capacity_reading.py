@@ -165,6 +165,11 @@ class Reading:
     #: where it is not, an operator reads the path rather than a number that
     #: quietly describes a different disk.
     docker_root_measured_at: str = ""
+    #: Declared slots between their bootstrap and their creation (D2341): a
+    #: state directory with a provider record and no document. They commit
+    #: nothing and are NAMED on the committed line rather than left out, so a
+    #: reader of a decision sees every directory the state root holds.
+    prepared: tuple[str, ...] = ()
 
     @property
     def committed_total_mb(self) -> int:
@@ -439,7 +444,8 @@ def decide(
             (
                 "committed",
                 f"{committed} MiB across {len(reading.committed)} project(s): "
-                + (", ".join(f"{k} {v}" for k, v in sorted(reading.committed.items())) or "none"),
+                + (", ".join(f"{k} {v}" for k, v in sorted(reading.committed.items())) or "none")
+                + "".join(f"; {key} prepared, commits nothing" for key in sorted(reading.prepared)),
             ),
             ("requested", f"{candidate_unreclaimable_mb} MiB for {candidate_key}"),
             ("safe available", f"{safe_available} MiB"),

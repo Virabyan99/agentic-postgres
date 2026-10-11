@@ -524,3 +524,69 @@ def test_a_plane_serving_another_lock_publishes_null_and_names_both_digests(
         "a plane that said nothing was reported as serving a different lock, which "
         "is the second outcome standing in for the third (ADR 0195)"
     )
+
+
+def test_a_disabled_storage_route_is_not_observed(tmp_path, monkeypatch) -> None:
+    """D2305 (D2341's run): a manifest with `storage.enabled: false` spends no
+    observation window on the storage route -- control-prod's deploy polled it
+    31 times before recording the `unavailable` it now records at once. D2172's
+    REST repair, given to its sibling.
+
+    Structural, for the reason REST's proof is (`test_rest_flag.py`): `main()`
+    is a whole deploy. `observe_storage` has ONE call site, in the `else` of an
+    `if not storage_enabled:` whose body records `unavailable`; the flag is the
+    rendered document's own `storage.enabled`. Control: the control example
+    renders storage disabled and the alpha example enabled, so the branch is
+    reached by a real manifest each way."""
+    import ast
+    import json
+
+    from agentic_postgres import rendering
+
+    tree = ast.parse(ENTRY_POINT.read_text(encoding="utf-8"))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "observe_storage"
+    ]
+    assert len(calls) == 1, f"observe_storage is called {len(calls)} times"
+
+    def names_in(nodes: list[ast.stmt]) -> set[str]:
+        return {
+            inner.func.id
+            for node in nodes
+            for inner in ast.walk(node)
+            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)
+        }
+
+    guards = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.UnaryOp)
+        and isinstance(node.test.op, ast.Not)
+        and isinstance(node.test.operand, ast.Name)
+        and node.test.operand.id == "storage_enabled"
+    ]
+    assert len(guards) == 1, f"{len(guards)} `if not storage_enabled:` guards"
+    (guard,) = guards
+    assert "observe_storage" in names_in(guard.orelse)
+    assert "observe_storage" not in names_in(guard.body)
+    assert "not observed" in ast.unparse(guard.body)
+    assert "storage_status = 'unavailable'" in ast.unparse(guard.body)
+    assert 'rendered["storage"]["enabled"]' in ENTRY_POINT.read_text(encoding="utf-8")
+
+    # A sandboxed render: nothing is published under the checkout's
+    # `.generated/`, which the gate compares across every rendered project.
+    generated = tmp_path / "generated"
+    monkeypatch.setattr(rendering, "GENERATED_ROOT", generated)
+    monkeypatch.setattr(rendering, "STAGING_ROOT", generated / ".staging")
+    monkeypatch.setattr(rendering, "LOCK_ROOT", generated / ".locks")
+    for manifest, enabled in (("project.control.example.yaml", False), (PROJECT, True)):
+        directory = rendering.render_project(
+            REPO_ROOT / manifest, REPO_ROOT / CAPABILITIES, validate_compose=False
+        )
+        outputs = json.loads((directory / "outputs.json").read_text(encoding="utf-8"))
+        assert outputs["storage"]["enabled"] is enabled, (manifest, outputs["storage"])

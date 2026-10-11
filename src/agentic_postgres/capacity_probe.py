@@ -34,7 +34,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
-from agentic_postgres import capacity_reading, config, deployed_output, host_config
+from agentic_postgres import (
+    bootstrap_state,
+    capacity_reading,
+    config,
+    deployed_output,
+    host_config,
+)
 from agentic_postgres.capacity_reading import Figure, Reading
 
 __all__ = ["PROJECT_ROOT_UNREADABLE", "Runner", "read", "read_deployed"]
@@ -89,6 +95,29 @@ def read_deployed(root: Path, key: str) -> tuple[dict[str, Any] | None, str | No
     except config.ManifestError:
         return None, "the deployed document does not validate against the outputs schema"
     return deployed, None
+
+
+def is_prepared_slot(root: Path, key: str) -> bool:
+    """A slot's state directory between its bootstrap and its creation (D2341).
+
+    `slot.sh`'s preparation writes `bootstrap-state.json` into the state root
+    and nothing else; the creation's first deploy writes `outputs.json`. In
+    between the directory holds a provider record and **commits nothing**:
+    no container runs under the key, so there is no claim to sum.
+
+    True only when both are READ: the bootstrap state is a file and the
+    document is absent. Anything that cannot be stat'd is False, so the key
+    falls through to :func:`read_deployed` and is reported unreadable -- a
+    decision may fail closed (ADR 0195), and this one does. The caller decides
+    whether the key is a DECLARED slot; a directory nobody declared is never
+    read this way, whatever it holds.
+    """
+    try:
+        has_state = (root / key / bootstrap_state.STATE_FILENAME).is_file()
+        has_document = deployed_output.deployed_path(key, root=root).exists()
+    except OSError:
+        return False
+    return has_state and not has_document
 
 
 def read_meminfo(path: Path = Path(capacity_reading.MEMINFO_PATH)) -> dict[str, int] | None:
@@ -237,7 +266,9 @@ def read(
     injected figure as injected in what it prints, so that a rehearsal's
     reading can never be mistaken for the host's.
     """
-    declared = host_config.declared_capacity(host_config.load_host_manifest(host_manifest))
+    host_document = host_config.load_host_manifest(host_manifest)
+    declared = host_config.declared_capacity(host_document)
+    slot_keys = {declared_slot.key for declared_slot in host_config.declared_slots(host_document)}
     if declared_override is not None:
         declared = declared_override(declared)
 
@@ -288,7 +319,14 @@ def read(
         )
         keys = []
 
+    prepared: list[str] = []
     for key in keys:
+        # D2341: a DECLARED slot between its bootstrap and its creation commits
+        # nothing. Undeclared, the same directory is still a claim this
+        # command cannot sum, and is reported unreadable below.
+        if key in slot_keys and key != exclude and is_prepared_slot(root, key):
+            prepared.append(key)
+            continue
         deployed, why = read_deployed(root, key)
         if deployed is None:
             unreadable[key] = why or "the deployed document could not be read"
@@ -317,5 +355,6 @@ def read(
         ceilings=ceilings,
         unbounded=unbounded,
         docker_root_measured_at=measured_at,
+        prepared=tuple(prepared),
     )
     return reading, ceilings_reason

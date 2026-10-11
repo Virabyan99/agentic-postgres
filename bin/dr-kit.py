@@ -36,7 +36,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from agentic_postgres import CURRENT_SESSION, REPO_ROOT, deployed_output, dr_kit, installed_release
+from agentic_postgres import (
+    CURRENT_SESSION,
+    REPO_ROOT,
+    deployed_output,
+    dr_kit,
+    installed_release,
+)
 from agentic_postgres.secrets_contract import load_secret_contract
 
 EXIT_INPUT = 2
@@ -74,6 +80,11 @@ def export(arguments: argparse.Namespace) -> int:
             state_root=arguments.state_root,
             contract=contract,
             session=arguments.session,
+            # D2347: beside the state root this export reads everything else
+            # from -- on a host, exactly `access_policy.POLICY_PATH` (a test
+            # holds the two equal); under a proof's `--state-root`, the
+            # proof's own. Carried when present, skipped when absent.
+            access_policy_path=dr_kit.access_policy_beside(arguments.state_root),
         )
     except PermissionError as problem:
         return fail(EXIT_PREREQUISITE, f"{problem}; the state root is root-owned on a host")

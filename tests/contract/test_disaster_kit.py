@@ -185,6 +185,70 @@ def export(host: dict[str, Path], contract: dict[str, Any]) -> list[dr_kit.KitEn
     )
 
 
+def test_the_access_policy_travels_in_the_kit(
+    tmp_path: Path, host: dict[str, Path], contract: dict[str, Any]
+) -> None:
+    """D2347 (D2320: the move to OVH forgot it): the database access policy is
+    exported at the kit's root when the host has one, digest-recorded and
+    validated by its own loader on the way in and again by `verify`. Absent is
+    not an error (a host may delegate nothing); invalid is refused at export;
+    altered after export is refused by `verify`.
+
+    Control: the same export without the policy yields the kit it always did."""
+    policy = {
+        "schema_version": 1,
+        "grants": [
+            {"unix_user": "op", "project_key": KEY,
+             "profiles": ["runtime_direct", "runtime_pooled"]},
+        ],
+    }  # fmt: skip
+    path = tmp_path / "database-access-policy.json"
+    path.write_text(json.dumps(policy), encoding="utf-8")
+
+    def export_with(policy_path: Path) -> list[dr_kit.KitEntry]:
+        return dr_kit.plan_export(
+            host_path=REPO_ROOT / "host.example.yaml",
+            capabilities_path=REPO_ROOT / "capabilities.example.yaml",
+            project_paths=(REPO_ROOT / "project.example.yaml",),
+            state_root=host["state_root"],
+            contract=contract,
+            session=SESSION,
+            access_policy_path=policy_path,
+        )
+
+    entries = export_with(path)
+    carried = [entry for entry in entries if entry.relative == dr_kit.ACCESS_POLICY]
+    assert len(carried) == 1 and json.loads(carried[0].content) == policy
+    kit = write_kit(entries, tmp_path / "kit")
+    assert dr_kit.verify_kit(kit) == []
+    manifest = json.loads((kit / dr_kit.KIT_MANIFEST).read_text(encoding="utf-8"))
+    assert dr_kit.ACCESS_POLICY in manifest["artifacts"]
+
+    # Altered after export: the digest refuses it, and so does the loader.
+    (kit / dr_kit.ACCESS_POLICY).write_text('{"schema_version": 1, "grants": "all"}', "utf-8")
+    problems = dr_kit.verify_kit(kit)
+    assert any("digest mismatch" in p and dr_kit.ACCESS_POLICY in p for p in problems), problems
+    assert any("not a valid database access policy" in p for p in problems), problems
+
+    # Absent: nothing carried, the kit as it always was (the control).
+    without = export_with(tmp_path / "absent.json")
+    assert [e.relative for e in without] == [e.relative for e in export(host, contract)]
+
+    # Invalid at the source: refused at export, nothing half-made.
+    path.write_text('{"schema_version": 1, "grants": [{"unix_user": "op"}]}', "utf-8")
+    with pytest.raises(dr_kit.KitError, match="not a valid database access policy"):
+        export_with(path)
+
+    # The command derives the policy beside its state root: on a host, the
+    # published location exactly; under a proof's root, the proof's own.
+    from agentic_postgres import access_policy
+
+    assert dr_kit.access_policy_beside(deployed_output.PROJECT_STATE_ROOT) == Path(
+        access_policy.POLICY_PATH
+    )
+    assert dr_kit.access_policy_beside(host["state_root"]) == tmp_path / dr_kit.ACCESS_POLICY
+
+
 def write_kit(entries: list[dr_kit.KitEntry], directory: Path) -> Path:
     for entry in entries:
         path = directory / entry.relative
