@@ -1076,9 +1076,9 @@ from pathlib import Path
 #: -- the eighth release in a row whose price the command sees only by
 #: declaration. **Five leaves differ**: `template_version` 1.16.0 -> 1.17.0,
 #: `schema_version` 21 -> 22, `database.public.enabled` absent -> `false`, and
-#: the two customer roles absent -> derived (6,136 -> 6,350 bytes). **ADR 0162
-#: prices it a MINOR, and `1.17.0` is that floor exactly**: the outputs move is
-#: MIGRATABLE, manifest 11 invalidates no older manifest, and no capability,
+#: the two customer roles absent -> derived (6,136 -> 6,350 bytes).
+#: **ADR 0162 prices it a MINOR, and `1.17.0` is that floor exactly**: the
+#: outputs move is MIGRATABLE, manifest 11 invalidates no older manifest, and no capability,
 #: lock or secret schema moves. What an operator must KNOW the reading cannot
 #: show: the edge must be recreated with the new entrypoint before any deploy
 #: through 39 (the deploy refuses otherwise, D2374), the host firewall must
