@@ -1,8 +1,8 @@
 # Session 39 — Public TLS endpoints and customer roles
 
 **Status: EXECUTING. Run 1 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
-threat list; Sheet E0 shipped). Rows **D2325–D2355** at planning; Run 1 added
-**D2356–D2359**. ADRs **0268–0270** written. **NEXT FREE: D2360, ADR 0271.**
+threat list; Sheet E0 read). Rows **D2325–D2355** at planning; Run 1 added
+**D2356–D2360**. ADRs **0268–0270** written. **NEXT FREE: D2361, ADR 0271.**
 
 The fourth session of Stage 5 (`docs/plans/stage-5-plan.md` §3, §5 *Session 39*).
 Twelve runs and **two sittings on two days**: the firewall, the edge's one
@@ -444,6 +444,7 @@ table below it, in execution order.
 | **D2356** | Run 1 item 1(c): a cancel request through Traefik to PgBouncer, expected *"canceling statement due to user request"*. | Rig 39a: psql 18's cancel (`timeout -s INT 3`) through the gateway **did not cancel** — psql printed *"Cancel request sent"* and the 30 s statement ran to the end (31.6 s); **control** straight to the pooler: cancelled in 4.4 s. Rig 39c: psycopg 3.2.12's **`cancel_safe()`** (libpq 17.6, the encrypted cancel that repeats the TLS negotiation with SNI) cancelled through the gateway in 3.0 s; its legacy `cancel()` did not (20 s). A legacy CancelRequest is plaintext and names no host, so no `HostSNI` router can match it. | **No product change; recorded.** ADR 0268's consequences, the threat list's item 2 residual, and (Run 9) the Ledger's `pooled_endpoint`/`direct_endpoint` Connect text: *a cancel reaches the database only from a client that encrypts it (libpq 17+'s `PQcancelCreate` family, e.g. psycopg's `cancel_safe()`); psql's Ctrl-C does not, and says it did; `statement_timeout` bounds the rest.* No snippet promises a cancel. | Routing a nameless plaintext cancel would need a proxy that tracks cancel keys across projects — the product-owned proxy D2325 avoided, holding exactly the cross-tenant state the edge must not. | 0268 |
 | **D2357** | D2350/rig 39c: Prisma pooled, *"whether Prisma needs `pgbouncer=true`"*; the snippet names `DATABASE_URL` pooled. | Rig 39c/39c2: Prisma 6.19.1's **Client** sends `search_path` as a startup parameter whenever the URL names `schema=`, and PgBouncer 1.24.1 refused it, *"FATAL: unsupported startup parameter: search_path"* (the platform's DBX-002 never met it: `url.mjs` sets `schema` only for migrate, which goes straight to `postgres`). With **`track_extra_parameters = search_path`** in the pooler's ini the same URL passed (12 rows, four parallel reads), and `schema=app_private` was refused by the grants (`42501`), not the door. `migrate deploy` sends no such parameter (passed through `customer-direct` with and without it). **Prisma needs no `pgbouncer=true`** (`max_prepared_statements = 100`). | **Both customer poolers render `track_extra_parameters = search_path`** (Run 5; EP-POOL-001 gains the assertion). Prisma's snippet names no `pgbouncer=true`. The platform `pgbouncer` is unchanged. **Owed by Run 7's fixture run**: Prisma's hostname verification (rig 39c read its chain verification — no CA given, *"unable to get local issuer certificate"* with `sslaccept=strict` — not a name mismatch, which the gateway's `sniStrict` prevents from being staged). | A snippet that fails on its first query is worse than none; the setting lets a client's own `search_path` reach only its own server connection. | 0268, 0269 |
 | **D2358** | D2334: claimants *"proposed small 2/2, standard 3/3, large 5/5 and fixed by rig 39e"*. | Rig 39e, the product's own summands (`config` budget functions, `postgres-bootstrap.connection_limits`), the slot manifest's `pool_size` 16, `superuser_reserved_connections` 3 (unset in `compose.yaml`, so PostgreSQL's default): **standard 3/3 leaves the application 15 < 16** — the bootstrap would refuse it; small fits 2/2 (3/3 also 15); large fits up to 8/8. | **small 2/2, standard 2/2, large 5/5.** Each pooler `mem_limit` 64m and `pids_limit` 64: ADR 0244's floor decides (a customer pooler read ~1.5 MiB after the four drivers). | The table is what both arithmetics accept, not what looked symmetric. | 0269 |
+| **D2360** | Sheet F1: `sudo bin/provision-host.sh --check` then `--apply`. | E0's `--help`: the usage is `sudo bin/provision-host.sh --host FILE` with `--check` or `--apply` — `--host` is required. `apply_baseline` (`bin/provision-host.sh:997-1052`): on a host where ufw is already active the re-apply only reconciles the allow rules and needs no rollback timer (`:1029-1032`); `bin/docker-firewall.sh reconcile` then applies the rendered `DOCKER-USER` rules. `--apply` also re-runs the release, launcher, unit and Docker steps (`install_docker` restarts Docker only if `daemon.json` changed, `:990-995`). | **Sheet F1 is `sudo bin/provision-host.sh --host host.yaml --check`, then `--host host.yaml --apply`**, from `/home/op/agentic-postgres`. The `--check` reading is the guard: any deviation other than the firewall's (ufw's 5432 rule and the `DOCKER-USER` rules) is §9's stop, so `--apply` never restarts Docker unannounced. No rollback timer (ufw is active). | The sheet must be the command the tool accepts; the check before the apply is what keeps an unrelated step from riding along. | 0268 |
 | **D2359** | Run 1 item 6: *"a throwaway MinIO as both source and mirror (two buckets)"*. | One server holding both buckets lets rclone copy server-side (`CopyObject`), which R2→B2 never can — the measured path would not be production's. | **Two MinIO servers** (the local `quay.io/minio/minio` image), one per remote. Measured: without the flag, **50 HEAD + 50 PUT at the mirror** (+51 GET at the source, 1 at the mirror) for 50 objects; with `--s3-no-head`, **0 HEAD, 50 PUT**; **control**: `rclone size --json` of the mirror = the source's (50 objects, 441 bytes) both times. Run 2 adds the flag (D2346). | A rig that measured a different copy path would have priced the wrong request. | 0264 |
 
 ---
@@ -724,8 +725,24 @@ D2348), 0257 (a prepared slot's readers, the three records, two slots), 0259
 **The threat list**: items 2, 3 (closed, not built), 7's and 10's Session 39
 halves rewritten with their negative tests by node id; item 12 added (*the
 public door admits a platform credential*). **Sheet E0**: `s39-e0.sh` shipped
-to `/home/op` (sha256 `34afe687…a0b15d`, the checkout at `efaef09`); its
-readings are recorded below when the operator has run it. Rows **D2356–D2359**.
+to `/home/op` (sha256 `34afe687…a0b15d`) and run by the operator at
+2026-10-11 04:47Z (transcript WSL `~/s39/run1/s39-e0.txt`): checkout `efaef09`,
+clean; `free -m` available **5,435 MiB** of 7,745; 34 containers, the three
+projects' ten each plus the edge's two, and two `backup-mirror-run-*`
+containers (alpha's and control-prod's nightly mirror passes, Sunday's after
+the weekly fulls — beta's had finished; read again at Run 2's close);
+`DOCKER-USER` v4 admits NEW to 80 and 443 only, v6 the same plus rate-limited
+ICMPv6, everything else DROPped; ufw active, 22/80/443 v4 and v6; listeners 22,
+80, 443 (and the resolver's loopback 53); the rendered edge has the four
+entrypoints `ping`, `apgmetrics`, `web`, `websecure` and publishes
+`80->8080`, `443->8443`; **all six names `slot2.`, `pool.slot2.`,
+`direct.slot2.`, `slot3.`, `pool.slot3.`, `direct.slot3.` answer with the proxied
+wildcard's Cloudflare A AND AAAA records** (`104.21.4.166`, `172.67.132.69`,
+`2606:4700:3030::6815:4a6`, `2606:4700:3031::ac43:8445`) — so each grey record
+must exist AND carry no AAAA for `dns_reading` to read True; the reconciler
+active since 2026-10-10 14:43Z with **`NRestarts=1`** (D2348's boot restart);
+`/` 72 G, 9.3 G used. `provision-host.sh --help` corrects Sheet F1 (D2360).
+Rows **D2356–D2360**.
 Documentation only: `test_acceptance_registry`, `test_documentation_index` once
 before the push; no CI read.
 
@@ -1170,8 +1187,9 @@ sudo bash /home/op/s39-e0.sh      # tees /home/op/s39-e0.txt; changes nothing
 ### Sheet F1 — the firewall (Run 10, day 1)
 
 ```
-sudo bin/provision-host.sh --check      # (flags corrected from --help on E0) expected exit 6: the firewall only
-sudo bin/provision-host.sh --apply
+cd /home/op/agentic-postgres
+sudo bin/provision-host.sh --host host.yaml --check     # (D2360) expected exit 6: the firewall only
+sudo bin/provision-host.sh --host host.yaml --apply     # ufw is active: reconciles, no rollback timer
 sudo iptables -S DOCKER-USER | grep -- '--ctorigdstport'     # 80, 443, 5432
 ```
 
