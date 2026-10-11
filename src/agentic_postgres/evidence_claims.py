@@ -381,6 +381,32 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         # live proofs are Session 18's and the sweep's (D2246).
         "provider_rehome",
         "secret_store_files",
+        # Session 39 (ADR 0268-0270). TEN, each a property of a CHECKOUT: the
+        # edge's files and the firewall's policy (`edge_postgres_entrypoint`);
+        # the runtime override and the render (`endpoint_routes`); the manifest,
+        # the outputs migration and the naming (`endpoint_document`); the
+        # bootstrap's statements and a throwaway cluster (`customer_roles`,
+        # `customer_connection_budget`); the poolers on the locked images and
+        # the sync verb (`customer_poolers`); the CLI, the reconciler over a
+        # recorder and a cluster (`credential_rotation`); the control routes on
+        # a control cluster (`connection_api`); the snippets and the fixtures'
+        # TLS input (`connection_snippets`); and a prepared slot's readers
+        # (`prepared_slot_readers`).
+        #
+        # The session's other FOUR are deliberately not here: three are a
+        # customer's reach through the public names and the lifecycle read back
+        # (EXTERNAL), and one is the edge, the firewall and the live slot on the
+        # host.
+        "edge_postgres_entrypoint",
+        "endpoint_routes",
+        "endpoint_document",
+        "customer_roles",
+        "customer_connection_budget",
+        "customer_poolers",
+        "credential_rotation",
+        "connection_api",
+        "connection_snippets",
+        "prepared_slot_readers",
     }
 )
 
@@ -779,6 +805,27 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     # project's values moved between stores by value, and the store's files.
     "provider_rehome": ("REC-REHOME-001",),
     "secret_store_files": ("REC-STORE-001",),
+    # Session 39 (ADR 0268-0270). FOURTEEN claims, landing with the constant
+    # (D690): ten offline, three external -- a customer at the live slot's
+    # public names, the public address scanned, and the re-trial lifecycle read
+    # back -- and one host. Each requirement is its own claim (ADR 0089). The
+    # session's subject is a project's public Postgres doors: the edge's port
+    # 5432 routing TLS by name to two customer-only poolers, the customer's
+    # roles, and a credential set by its verifier alone.
+    "edge_postgres_entrypoint": ("EP-EDGE-001",),
+    "endpoint_routes": ("EP-ROUTE-001",),
+    "endpoint_document": ("EP-DOC-001",),
+    "customer_roles": ("EP-ROLE-001",),
+    "customer_connection_budget": ("EP-BUDGET-001",),
+    "customer_poolers": ("EP-POOL-001",),
+    "credential_rotation": ("EP-CRED-001",),
+    "connection_api": ("EP-API-001",),
+    "connection_snippets": ("EP-SNIP-001",),
+    "prepared_slot_readers": ("LIFE-SLOT-002",),
+    "lifecycle_retrial_live": ("LIFE-LIVE-003",),
+    "public_endpoints_live": ("EP-LIVE-001",),
+    "public_port_scan": ("EP-LIVE-002",),
+    "endpoints_host_live": ("EP-LIVE-003",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

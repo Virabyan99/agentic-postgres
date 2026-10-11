@@ -115,7 +115,10 @@ ID_PATTERN = re.compile(
     # operations it executes, and `LIFE` for a managed project's lifecycle --
     # slots, profiles, region, sleep, export, deletion and the first-admin
     # handoff.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV|LEDGER|CTL|KEY|OPN|LIFE)-[A-Z0-9]+(-\d+)?$"
+    # Session 39 (ADR 0268-0270) adds `EP` for the public Postgres endpoints --
+    # the edge's entrypoint, the customer poolers, the customer roles and their
+    # credentials.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV|LEDGER|CTL|KEY|OPN|LIFE|EP)-[A-Z0-9]+(-\d+)?$"
 )
 
 

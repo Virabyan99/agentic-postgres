@@ -58,8 +58,11 @@ different row (control: an uninterrupted operation `succeeded`, attempt 1).
 1. **A root systemd unit with no listener.** `bin/reconciler.py` (+
    `bin/reconciler.sh run|once|status|install`), the unit
    `agentic-postgres-reconciler.service` (`Type=simple`, `Restart=on-failure`,
-   `RestartSec=30`, `StandardInput=null`, after Docker and the control
-   project's unit). It opens no socket and binds no port. It finds the control
+   `RestartSec=30`, `StandardInput=null`, ordered after Docker and the edge
+   -- **not** after the control project's unit, whose containers arrive
+   later at boot, so since Session 39 `start()` waits up to 180 s for the
+   control database before failing exit 6 (D2348, D2355)). It opens no
+   socket and binds no port. It finds the control
    project with `find_control`, moved to `src/agentic_postgres/control_registry.py`
    and imported by both commands — two control projects is exit 5 at start
    (D2168).

@@ -50,6 +50,10 @@ no-op.
 | `THR-LIFE-STORAGE` | One project's own workload writes until the shared disk is full | The neighbouring projects' databases, WAL and backups | Admission's disk FLOOR (D1596): free space at the Docker root against `capacity.reserve_disk_gb`, read before a creation or a resize is rendered, refused at exit 12 as `capacity_exhausted {reason: admission}`; and the Reality Ledger's sentence that no per-project disk quota exists | `doctor capacity`; `df` at the path the reading names | Nothing bounds what one RUNNING project writes -- no quota, no `blkio` -- so a project can fill the disk after admission admitted it. Storage as a limit stays `planned` | `LIFE-CAP-001`, `NODE-ADMIT-001` | `tests/contract/test_reconciler_dispatch.py::test_admission_refusal_is_capacity_exhausted_and_creates_nothing`, `tests/contract/test_capacity_reading.py::test_disk_is_a_floor_and_the_reserve_is_what_it_protects` | 38 |
 | `THR-OPN-RECONCILER` | A customer, or anyone holding a control-plane credential, whose request a root process acts on; a superuser of the control database writing an operation row | The host: the reconciler runs as root and deploys, retires and executes into containers | A CLOSED table of typed operations (ADR 0256); arguments validated against one schema at the API and again by the reconciler before dispatch; every command an argv list from validated members -- of the arguments only the administrator's username reaches one; no shell and no string command (an AST guard); it acts only on declared slots; it opens no socket and listens on no port; its database functions are executable by no role; an operation interrupted by a crash is finished `failed interrupted` with its step and never resumed; its children act for the checkout's owner with stdin closed, and a moved or dirty checkout refuses every operation | Each operation's row with its steps and their seconds; a 0600 log per step; `bin/reconciler.sh status`; the unit's journal | A superuser of the control database can enqueue any operation the table admits -- as root on the host could anyway. The reconciler and an operator's sheet are serialised by a rule, not a lock (D2178) | `OPN-DISPATCH-001`, `OPN-CLAIM-001`, `OPN-LIVE-001` | `tests/contract/test_reconciler_dispatch.py::test_the_closed_table_is_the_executed_types`, `tests/contract/test_reconciler_dispatch.py::test_invalid_arguments_run_nothing`, `tests/contract/test_reconciler_dispatch.py::test_every_argv_is_built_from_validated_members`, `tests/contract/test_reconciler_dispatch.py::test_the_reconciler_builds_no_shell_command`, `tests/contract/test_reconciler_dispatch.py::test_the_unit_is_a_root_service_with_no_listener`, `tests/contract/test_reconciler_dispatch.py::test_an_operator_managed_project_is_refused`, `tests/contract/test_reconciler_claim.py::test_the_claim_functions_are_executable_by_no_role`, `tests/contract/test_reconciler_claim.py::test_an_interrupted_operation_is_finished_once_and_never_rewritten`, `tests/deployment/test_session38_reconciler.py::test_the_reconciler_is_enabled_and_listens_nowhere` | 38 |
 | `THR-LIFE-SLOT` | A creation that lands in a slot that was used, half-made or prepared for something else | The next customer's names, data and provider resources | A slot's state is derived from what exists, three outcomes each -- a DNS answer that could not be read is `undetermined`, exit 6, never `ready` -- and only `ready` is allocated (ADR 0257); an interrupted creation quarantines its slot; `prepare` refuses a slot already prepared, consumed or undeclared; no code removes a tombstone | `bin/slot.sh status`; the slot reading the reconciler records in the control database | `quarantined` has no command that clears it: the operator retires the slot by hand | `LIFE-SLOT-001`, `OPN-CLAIM-001` | `tests/contract/test_slot_command.py::test_prepare_writes_a_manifest_the_loader_accepts`, `tests/contract/test_slot_command.py::test_status_derives_each_state_from_what_exists`, `tests/contract/test_slot_command.py::test_an_unreadable_dns_reading_is_undetermined_never_ready`, `tests/contract/test_slot_command.py::test_nothing_removes_a_tombstone`, `tests/contract/test_reconciler_claim.py::test_an_interrupted_creation_fails_and_quarantines_its_slot_never_resumed` | 38 |
+| `THR-EP-GATEWAY` | Reaches the host's public address from anywhere and speaks to port 5432: plaintext, TLS with a wrong or absent server name, or one project's name used to reach another project's database through the shared port | Every project's database, the platform's own pooler, and the edge itself | The edge's `postgres` entrypoint (`:8432`, published as 5432) admits only TLS and routes by SNI alone, through TCP routers carried as LABELS on a project's two customer poolers -- never the database, never the platform pooler, never a file-provider router; a project without the facility renders neither pooler; a sleeping project's router is gone with its container, so its names refuse like a wrong one (ADR 0268) | The edge's access log; `endpoints_host_live` reads the only listener on 5432 and the firewall's three ports; `public_port_scan` from off the host | Postgres sees the gateway's address, so no per-client address rule exists; a plaintext peer holds a socket for the read deadline (rig 39a); channel binding is not offered through a terminating gateway; a cancel request crosses only when the client encrypts it (D2356). Wake-on-connect is not built (D2336) | `EP-ROUTE-001`, `EP-EDGE-001`, `EP-LIVE-002`, `EP-LIVE-003` | `tests/external/test_session39_public_endpoints.py::test_plaintext_is_refused`, `tests/external/test_session39_public_endpoints.py::test_a_wrong_or_absent_sni_is_refused`, `tests/external/test_session39_public_endpoints.py::test_only_the_four_ports_answer`, `tests/external/test_session39_public_endpoints.py::test_a_project_without_endpoints_has_no_door`, `tests/contract/test_endpoint_routes.py::test_each_door_carries_exactly_its_tcp_router_and_the_userlist_bind`, `tests/contract/test_endpoint_routes.py::test_no_tcp_router_reaches_anything_but_a_customer_pooler`, `tests/contract/test_endpoint_routes.py::test_without_the_facility_the_override_names_neither_pooler`, `tests/contract/test_endpoint_routes.py::test_the_entrypoint_and_the_tls_option_are_the_edges_own`, `tests/external/test_session39_public_lifecycle.py::test_a_sleeping_slot_refused_both_names` | 39 |
+| `THR-EP-PLANE-CONFUSION` | Holds a control-plane session or a management key and wants a customer database credential, or holds the control database and wants a customer's password | A managed project's two customer credentials | A credential is set by its SCRAM verifier alone: the password is generated on the customer's workstation and never leaves it; the control plane and the reconciler carry the verifier, which reaches `ALTER ROLE` as a psql variable on stdin and no argv, no result and no log line; only a PERSON who is a member may rotate, never a key, and only on a project with doors (ADR 0269). A control-plane session or key is not a database role, so the public door refuses it like any name it does not hold | The operation rows (`credential.rotate`, its result naming the role only); the reconciler's step list | The control database, its WAL and its backups hold the verifier, which admits an offline guessing attack against a weak password; a customer's password is the customer's to keep | `EP-CRED-001`, `EP-API-001` | `tests/contract/test_endpoint_cli.py::test_the_password_never_leaves_the_workstation`, `tests/contract/test_control_connections.py::test_only_a_person_who_is_member_may_rotate_and_only_with_doors`, `tests/contract/test_control_connections.py::test_a_body_that_is_not_one_verifier_is_refused_before_a_row`, `tests/contract/test_reconciler_dispatch.py::test_a_rotation_sets_the_verifier_on_stdin_and_rewrites_both_userlists`, `tests/contract/test_reconciler_dispatch.py::test_a_rotation_whose_arguments_are_not_a_verifier_runs_nothing` | 39 |
+| `THR-EP-DOOR` | Holds a platform role's password -- the application runtime's, which `op` can print, the superuser's, any service's -- and presents it at 5432 from the internet | Every platform role's reach into `app`, `api` and `app_private` | Each customer pooler's userlist is generated from `pg_authid` and names one customer role or nothing, so every other role is refused before a password is compared; the database still joins only `internal` and `backup`; `customer_admin` creates in `public` and nothing else, `customer_app` reads and writes what the administrator grants it (ADR 0269) | `customer-credentials.sh sync` exits 6 when a pooler was not signalled; the pooler's healthcheck is red without its userlist | A customer's password is the customer's to keep; the operator can read its verifier, never the password | `EP-POOL-001`, `EP-ROLE-001`, `EP-LIVE-001`, `EP-LIVE-003` | `tests/contract/test_customer_poolers.py::test_a_userlist_names_one_role_or_nothing`, `tests/contract/test_customer_poolers.py::test_each_door_admits_its_one_role_and_an_empty_list_admits_nobody`, `tests/contract/test_customer_poolers.py::test_sync_writes_one_role_per_door_and_never_prints_a_verifier`, `tests/external/test_session39_public_endpoints.py::test_no_platform_role_passes_either_door`, `tests/external/test_session39_public_endpoints.py::test_the_admin_writes_only_in_public`, `tests/deployment/test_session39_endpoints.py::test_the_database_is_still_unrouted`, `tests/contract/test_customer_roles_on_a_cluster.py::test_the_admin_is_refused_everything_else` | 39 |
+| `THR-EP-ISOLATION` | A customer of one project, or a reader of a snippet or a deployed document, looking for another project's door, role or value | Each project's public names, customer roles and credentials | The public endpoints' hosts and roles are MUST_DIFFER leaves of the deployed document, so `ISOLATED_FIELDS` has 20 and every leaf is classified offline; each pooler's userlist names only its own project's role, so project A's customer credential meets B's door as an unknown name; a snippet carries a placeholder, never a value (ADR 0268, ADR 0269) | `endpoints_host_live` compares the live slot's deployed document with A's, B's and the control project's | A project's public names are public by design: knowing one is not a credential | `EP-DOC-001`, `EP-SNIP-001`, `EP-LIVE-003` | `tests/deployment/test_session39_endpoints.py::test_the_slot_was_isolated_from_every_project`, `tests/contract/test_isolation_leaves_offline.py::test_every_leaf_of_a_built_deployed_document_is_classified`, `tests/contract/test_customer_poolers.py::test_a_userlist_names_one_role_or_nothing`, `tests/contract/test_connection_snippets.py::test_no_snippet_can_carry_a_password` | 39 |
 
 ## Studio: a page in the operator's browser, on the operator's machine
 
@@ -191,22 +195,8 @@ technically bounded in this beta"* (D1971).
    in the table.
 2. **Endpoint confusion and gateway attacks** (Session 39, ADR 0268). A
    plaintext connection, a wrong or absent SNI, or one project's hostname used
-   to reach another project's database through the shared port 5432. Owed, by
-   node id: plaintext, a wrong SNI and no SNI refused on the public address
-   (`tests/external/test_session39_public_endpoints.py::test_plaintext_is_refused`,
-   `::test_a_wrong_or_absent_sni_is_refused`); only 22, 80, 443 and 5432
-   answer (`::test_only_the_four_ports_answer`); a project without endpoints
-   has no door (`::test_a_project_without_endpoints_has_no_door`); an enabled
-   project renders exactly two TCP routers, by label, to its own customer
-   poolers and never to the database or the platform pooler
-   (`tests/contract/test_endpoint_routes.py::test_an_enabled_project_renders_exactly_two_tcp_routers`,
-   `::test_no_router_reaches_the_database_or_the_platform_pooler`,
-   `::test_no_tcp_router_is_a_file_provider_router`). Residuals, measured in
-   rig 39a: Postgres sees the gateway's address, so no per-client address rule
-   exists; a plaintext peer holds a socket for the read deadline (~10 s);
-   channel binding is not offered through a terminating gateway; a cancel
-   request crosses only when the client encrypts it (D2356). Moves into the
-   table as `THR-EP-GATEWAY` in Run 9.
+   to reach another project's database through the shared port 5432. **In the
+   table as `THR-EP-GATEWAY`** since Session 39's Run 9.
 3. **Wake-on-connect abuse** (Session 39) — **closed as not built** (ADR 0268,
    D2336). Unauthenticated connections used to keep a sleeping project awake or
    to make the node wake many projects at once. A stopped container's label
@@ -236,17 +226,9 @@ technically bounded in this beta"* (D1971).
     plane. Session 37's half is `THR-CTL-PLANE-CONFUSION` in the table, and
     Session 38's -- the first administrator handed over by hash, a key that
     cannot create, export or delete, and the bounded export URL -- is
-    `THR-LIFE-PLANE-CONFUSION`. **Session 39's half** (ADR 0269): the control
-    plane holds a customer credential's verifier, never its password, and the
-    password never leaves the workstation
-    (`tests/contract/test_endpoint_cli.py::test_the_password_never_leaves_the_workstation`);
-    a management key cannot rotate a credential
-    (`tests/contract/test_control_projects.py::test_a_key_cannot_rotate_a_credential`);
-    the verifier reaches no argv and no log line
-    (`tests/contract/test_reconciler_dispatch.py::test_a_rotation_sets_the_verifier_through_stdin`,
-    `::test_the_verifier_reaches_no_argv_and_no_log`). A control-plane session
-    or key is not a database role, so the public door refuses it like any name
-    it does not hold. Moves as `THR-EP-PLANE-CONFUSION` in Run 9.
+    `THR-LIFE-PLANE-CONFUSION`. **Session 39's half** -- a customer
+    credential set by its verifier alone, rotated only by a person -- is
+    `THR-EP-PLANE-CONFUSION`.
 8. **Connector abuse by a customer** (Session 42). A customer-defined
     connector used to reach another project, an internal address, or the
     node's own services. Owed: the connector planes' existing refusals hold for
@@ -271,18 +253,8 @@ technically bounded in this beta"* (D1971).
     (`tests/deployment/test_session38_reconciler.py::test_the_slot_was_isolated_from_every_project`),
     and every leaf of a built deployed document is classified offline
     (`test_isolation_leaves_offline.py::test_every_leaf_of_a_built_deployed_document_is_classified`).
-    **Session 39's**: the public endpoints' hosts and roles are MUST_DIFFER
-    leaves and `ISOLATED_FIELDS` has 20 (the same offline proof, stricter);
-    the live slot's deployed document shares no isolated value with A's, B's
-    or the control project's
-    (`tests/deployment/test_session39_endpoints.py::test_the_slot_was_isolated_from_every_project`);
-    each customer pooler's userlist names only its own project's role, so
-    project A's customer credential is refused at B's door with the message
-    every unknown name gets
-    (`tests/contract/test_customer_poolers.py::test_the_userlist_names_only_its_role`);
-    a snippet carries no value
-    (`tests/contract/test_connection_snippets.py::test_no_snippet_can_carry_a_password`).
-    Moves as `THR-EP-ISOLATION` in Run 9.
+    **Session 39's** -- the doors' names and roles, the userlists and the
+    snippets -- is `THR-EP-ISOLATION`.
 11. **TOTP seed disclosure** (Session 37, ADR 0252). A dump of the control
     project's database, or a backup read with its cipher pass, reveals every
     enrolled second-factor seed, so the factor stops being a second factor for
@@ -294,21 +266,8 @@ technically bounded in this beta"* (D1971).
     seeds are plaintext at rest, because computing the code needs the key;
     encrypting them is `planned`, and ADR 0252 says so.
 12. **The public door admits a platform credential** (Session 39, ADR 0269).
-    A platform role's password -- the application runtime's, which `op` can
-    print with `bin/connect.sh print-env`, the superuser's, any service's --
-    presented at 5432 from the internet. Owed: each customer pooler's userlist
-    is generated from `pg_authid` and names one customer role, and every other
-    role, the superuser included, is refused with one message
-    (`tests/contract/test_customer_poolers.py::test_the_userlist_names_only_its_role`,
-    `::test_every_other_role_is_refused_with_one_message`); live, the
-    superuser and a platform role name refused at both doors
-    (`tests/external/test_session39_public_endpoints.py::test_no_platform_role_passes_either_door`);
-    the database still joins only `internal` and `backup`
-    (`tests/deployment/test_session39_endpoints.py::test_the_database_is_still_unrouted`);
-    a customer role never reaches `app`, `api` or `app_private`
-    (`tests/contract/test_customer_roles_on_a_cluster.py::test_the_admin_is_refused_everything_else`).
-    Residual: a customer's password is the customer's to keep; the operator
-    can read its verifier, never the password. Moves as `THR-EP-DOOR` in Run 9.
+    A platform role's password presented at 5432 from the internet. **In the
+    table as `THR-EP-DOOR`** since Session 39's Run 9.
 
 ## Scope
 

@@ -332,6 +332,29 @@ def test_connect_hands_psql_a_private_passfile_and_removes_it(person: Person, se
     assert not person.record.exists()
 
 
+def test_a_psql_that_cannot_run_is_said_not_a_traceback(person: Person, served: Any) -> None:
+    """D2394: a psql on PATH without its executable bit -- what a write through
+    `\\\\wsl$` leaves -- is exit 3 naming it, never a Python traceback. The
+    control in the same proof: made executable again, it runs (its own 3)."""
+    user, _org, key = _project(served, "noexec", role="viewer")
+    person.login(user)
+    password_file = person.home / "app.password"
+    password_file.write_text(secrets.token_urlsafe(32) + "\n", encoding="utf-8")
+    password_file.chmod(0o600)
+    psql = person.tools / "psql"
+    psql.chmod(0o644)
+    refused = person.run("endpoint", "connect", "--project-key", key, "--role", "app",
+                         "--password-file", str(password_file))  # fmt: skip
+    assert refused.returncode == 3, refused.stderr
+    assert "psql could not be started" in refused.stderr
+    assert "Traceback" not in refused.stderr
+    assert not person.record.exists()
+    psql.chmod(0o755)
+    ran = person.run("endpoint", "connect", "--project-key", key, "--role", "app",
+                     "--password-file", str(password_file))  # fmt: skip
+    assert ran.returncode == 3 and person.record.exists(), ran.stderr
+
+
 # ---------------------------------------------------------------------------
 # The verifier on a real cluster
 # ---------------------------------------------------------------------------

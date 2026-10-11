@@ -319,9 +319,16 @@ def test_only_a_person_who_is_member_may_rotate_and_only_with_doors(
     assert drive.call("POST", path, token=org["tokens"]["member"], body=body).status_code == 202
 
 
-def test_the_rotation_is_not_offered_until_its_row_is(drive: Any) -> None:
-    """Without `accepting`: `direct_endpoint` is `planned` until Run 9, so the
-    route answers `not_available` naming it, before the body is read."""
+def test_the_rotation_is_not_offered_until_its_row_is(
+    drive: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`credential.rotate` withdrawn from the accepted set -- as it was while
+    `direct_endpoint` was `planned`, and will be if the close returns the row --
+    and the route answers `not_available` naming the row, before the body is
+    read. (Since Session 39's Run 9 the committed set accepts it.)"""
+    monkeypatch.setattr(
+        operations, "ACCEPTED_TYPES", operations.EXECUTED_TYPES - {"credential.rotate"}
+    )
     org = _org(drive, "planned")
     answered = drive.call(
         "POST", f"/v1/projects/{org['project']}/credentials", token=org["tokens"]["member"],

@@ -234,6 +234,9 @@ SHELL_COMMANDS = (
     "bin/session-36-check.sh",
     "bin/session-37-check.sh",
     "bin/session-38-check.sh",
+    # Session 39 (ADR 0268-0270). Derived from 38's by diff with exactly two
+    # flags added, --customer-credential-dir and --live-slot-outputs (D1133).
+    "bin/session-39-check.sh",
     # Session 38 (ADR 0257, D2150): customer slots -- prepare, status, revoke.
     # Listed the run it landed (D1014), `git add`ed first (D1188).
     "bin/slot.sh",

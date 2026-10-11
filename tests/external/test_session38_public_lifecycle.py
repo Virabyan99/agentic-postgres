@@ -36,6 +36,7 @@ import stat
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -302,7 +303,7 @@ def test_the_second_creation_was_refused_without_a_row(
     assert second["creations_before"] == second["creations_after"], second
     organization = probe["organization_id"]
     status, body = recorder.json("POST", f"{endpoint}/projects", {
-        "organization_id": organization, "name": "Lifecycle s38 again", "profile": "small",
+        "organization": organization, "name": "Lifecycle s38 again", "profile": "small",
         "admin_username": "again.admin", "handoff_sha256": "0" * 64,
     }, owner)  # fmt: skip
     assert (status, body.get("error"), body.get("reason")) == (
@@ -312,7 +313,11 @@ def test_the_second_creation_was_refused_without_a_row(
         "GET", f"{endpoint}/operations?organization={organization}", None, owner
     )
     assert status == 200, status
-    creations = [row["id"] for row in listed["operations"] if row["type"] == "project.create"]
+    # Within the record's own run (D2343): the probe organisation holds every
+    # session's creations -- Session 38's on slot1, then 39's on slot2 and slot3.
+    start, end = (datetime.fromisoformat(record[k]) for k in ("started_at", "finished_at"))
+    creations = [row["id"] for row in listed["operations"] if row["type"] == "project.create"
+                 and start <= datetime.fromisoformat(row["created_at"]) <= end]  # fmt: skip
     recorded = [o["id"] for o in record["operations"] if o["type"] == "project.create"]
     assert creations == recorded and len(creations) == 1, (creations, recorded)
     _only(recorder, endpoint)
@@ -361,7 +366,9 @@ def test_the_export_holds_only_the_customer_schemas(
     read of the operation handed no URL; and the second export's URL answered
     200 at once and 403 after its expiry."""
     schemas = record["observations"]["archive_schemas"]
-    assert schemas == {"pg_restore": 0, "schemas": ["api", "app"], "app_private": False}, schemas
+    # D2333: `public` joins the export at Session 39 (the customer's own tables).
+    names = ["api", "app"] if record["session"] == 38 else ["api", "app", "public"]
+    assert schemas == {"pg_restore": 0, "schemas": names, "app_private": False}, schemas
     exported = record["observations"]["export"]
     assert exported["mode"] == "0o600" and exported["second_read_handed_a_url"] is False, exported
     rows = _read_back(recorder, endpoint, owner, record)

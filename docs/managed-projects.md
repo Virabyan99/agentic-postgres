@@ -91,7 +91,8 @@ changes** -- the project keeps its profile and keeps running.
 ## Exporting
 
 `bin/project.sh export --output FILE` asks for an archive of the project's own
-schemas, `api` and `app` -- your tables and your API, never the platform's
+schemas, `api`, `app` and -- since `1.17.0` -- `public`, where your
+administrator creates -- your tables and your API, never the platform's
 private state -- in `pg_dump`'s custom format (`pg_restore` reads it). The
 command waits for the operation, downloads the archive **once**, checks its
 SHA-256 against the operation's, and writes it 0600 (never over an existing
@@ -109,6 +110,20 @@ project's backups, in the operator's storage, until the operator removes them
 -- this beta removes nothing automatically -- and the slot itself, which is
 **never given to another project**: a deleted project's key, address and names
 are not reused. A deleted project accepts no further operation.
+
+## Connecting to the database
+
+Since `1.17.0` (ADR 0268-0270) a managed project has two public Postgres
+names on port 5432 -- `pool.<domain>` for the application as `customer_app`,
+`direct.<domain>` for migrations and administration as `customer_admin` --
+TLS verified in full. **Set each password first**: `bin/endpoint.sh
+credential --role app|admin --password-file FILE --wait` generates it on
+your machine and sends only its verifier; nobody else ever holds it, and a
+lost password is replaced by rotating again. `bin/endpoint.sh show` prints
+the doors and a snippet per client; `bin/endpoint.sh connect` opens `psql`.
+A sleeping project's doors refuse until it is woken. The details are in
+[database connections](database-connections.md). **The doors are being
+verified** (Reality Ledger `trial`).
 
 ## What a refusal means
 

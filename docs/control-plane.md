@@ -170,7 +170,7 @@ server (for `operation wait`, the operation failed); 6 the server could not be
 reached or read; 7 `operation wait` reached its own `--timeout` with the
 operation still running -- never read as an outcome.
 
-## Project operations (1.16.0)
+## Project operations (1.16.0, 1.17.0)
 
 Since `1.16.0` (Session 38, ADR 0256-0261) the control plane accepts six
 operation types on a **managed project** -- one the control plane created
@@ -187,6 +187,8 @@ a root unit on the host, the **reconciler**, executes it; `GET
 | `PUT /v1/projects/{key}/compute` | `project.resize` | member and above; a key with `projects:write` |
 | `POST /v1/projects/{key}/export` | `project.export` | member and above, a person's session only |
 | `DELETE /v1/projects/{key}` | `project.delete` | admin and above, a person's session only |
+| `POST /v1/projects/{key}/credentials` | `credential.rotate` (since 1.17.0) | member and above, a person's session only; a project with public endpoints |
+| `GET /v1/projects/{key}/connections` | -- (a read: the doors and the snippets) | viewer and above; a key with `projects:read` |
 | `POST /v1/operations/{id}/cancel` | -- | its requester, or an admin or owner, while it is `pending` |
 
 **One operation at a time**: a second write on a project, or a second creation

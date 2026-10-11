@@ -9,11 +9,11 @@ the two equal.
 **`ACCEPTED_TYPES` follows the rows, and that is the decision.** A type is
 accepted exactly when its ledger row is `available`, `beta` or `trial` (ADR
 0254, ADR 0261). Session 38's Run 10 moved the six rows the executed types act
-on to `trial`, so the six were accepted on the commit its trip deployed (1.16.0).
-Run 13 resolved them as D2170 says: each named a live claim that failed on
-evidence/session-38.json (D2310, D2318, D2321), so all six are `planned` again
-and this set is EMPTY -- every type answers `409 not_available` naming its row,
-as Session 37's did. Session 39 moves the six back to `trial`. This
+on to `trial`; its close returned them to `planned` (D2170). **Session 39's Run 9
+moves them to `trial` again, with `direct_endpoint`** (`credential.rotate`'s
+row), so the seven executed types are accepted on the commit its trip deploys,
+and the four unbuilt ones (`branch.*`, `restore.create`) stay refused; the
+session's close resolves each row. This
 image cannot read the ledger file -- it is not in the build context, and a
 running service deciding what exists from a document would make a document its
 authority -- so the set is written here and
@@ -74,10 +74,20 @@ EXECUTED_TYPES: Final[frozenset[str]] = frozenset(
 )
 
 #: The types the control mode accepts. Equal, by the guard, to the types whose
-#: ledger row accepts: none since Session 38's close, whose six rows went back to
-#: `planned` (D2170). Written out, never derived from `EXECUTED_TYPES` --
-#: building a type is not the decision to accept it.
-ACCEPTED_TYPES: Final[frozenset[str]] = frozenset()
+#: ledger row accepts: the seven executed types, their rows `trial` since
+#: Session 39's Run 9 (D2343). Written out, never derived from `EXECUTED_TYPES`
+#: -- building a type is not the decision to accept it.
+ACCEPTED_TYPES: Final[frozenset[str]] = frozenset(
+    {
+        "project.create",
+        "project.delete",
+        "project.sleep",
+        "project.wake",
+        "project.resize",
+        "project.export",
+        "credential.rotate",
+    }
+)
 
 #: The JSON Schema every operation's `{type, arguments}` validates against,
 #: relative to the repository: read by the reconciler before dispatch, and

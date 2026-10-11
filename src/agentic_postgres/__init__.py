@@ -1025,7 +1025,69 @@ from pathlib import Path
 #: the class against a DEPLOYMENT: `upgrade plan` on every project, with the
 #: same two declarations, before the first 1.16.0 deploy -- and a `major`
 #: there is a stop condition.
-CURRENT_SESSION = 38
+#:
+#: **Session 39 moves it to 39, all-or-nothing again** (D690): FOURTEEN
+#: requirements and fourteen claims -- `CLAIMS` 239 -> 253 and `OFFLINE_CLAIMS`
+#: 91 -> 101, counted from the tuples (D1628) -- ten declared offline, three
+#: EXTERNAL and one host, every offline half written in the run that built its
+#: piece (Runs 2-8) and every live half here. One family joins the registry:
+#: `EP`, the public Postgres endpoints. The three external claims are a
+#: customer at the live slot's public names, the public address scanned, and
+#: the re-trial lifecycle read back through `/v1` (D2343); the host claim is
+#: the edge, the firewall and the live slot's doors on the machine.
+#:
+#: **The session's subject is a project's public Postgres doors**, and three
+#: ADRs are their shape. ADR 0268: the edge's `postgres` entrypoint on `:8432`,
+#: published as 5432, routes TLS by name to two customer-only PgBouncers --
+#: `pool.<domain>` in transaction mode, `direct.<domain>` in session mode --
+#: never to the database or the platform's own pooler, with one certificate per
+#: project by HTTP-01; only a slot has the facility. ADR 0269: two customer
+#: roles, `customer_app` and `customer_admin`, the second creating in `public`
+#: and nothing else, each a claimant on the connection budget, and a credential
+#: set by its SCRAM verifier alone -- the password is generated on the
+#: customer's workstation and never exists on the host or in the control plane.
+#: ADR 0270: a refusal proof proves the DECISION against admission's own
+#: reading, which a resize now records in its result.
+#:
+#: **No released migration** -- the doors' registry is the control set's
+#: `0005`. **Outputs move to v22** (`database.public` and the two customer
+#: roles, migrated from v21) and **the project manifest to schema 11**
+#: (`database.public_endpoints`, optional); no host, capability, lock or secret
+#: schema moves. The Ledger's six managed-project rows and the two endpoint rows
+#: are `trial` again (ADR 0261), so the seven executed types are accepted.
+#:
+#: **`VERSION` moves to `1.17.0`.** What moved: the control mode's two routes,
+#: `credential.rotate` accepted and the connection snippets in
+#: `services/auth-api`, so the image moves and a deploy recreates `auth`,
+#: `storage` and `mcp`; the edge's static configuration and dynamic baseline
+#: (the edge is recreated once, its own sheet); the firewall policy (5432);
+#: the compose model's two customer poolers and the runtime override's TCP
+#: routers; the bootstrap's customer roles and budget; the control set's
+#: `0005`; manifest 11 and outputs 22; `bin/customer-credentials.sh`,
+#: `bin/endpoint.sh` and `deploy.sh`'s step 6f.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig as Sessions
+#: 34-38 ran it: a git worktree at `efaef09`, the commit that IS deployed, and
+#: a `tar`-piped copy of this working tree, both rendering the INSTALLED tree's
+#: `project.example.yaml` (schema 10). With `--also document_schema_migratable
+#: --also api_operation_added`: `bump minor`, **`requires minor`**, verdict
+#: `ok`, `changes [api_operation_added, document_schema_migratable]`, `reasons
+#: []`, `operator_digests_moved []`. Without the declarations: `requires patch`
+#: -- the eighth release in a row whose price the command sees only by
+#: declaration. **Five leaves differ**: `template_version` 1.16.0 -> 1.17.0,
+#: `schema_version` 21 -> 22, `database.public.enabled` absent -> `false`, and
+#: the two customer roles absent -> derived (6,136 -> 6,350 bytes). **ADR 0162
+#: prices it a MINOR, and `1.17.0` is that floor exactly**: the outputs move is
+#: MIGRATABLE, manifest 11 invalidates no older manifest, and no capability,
+#: lock or secret schema moves. What an operator must KNOW the reading cannot
+#: show: the edge must be recreated with the new entrypoint before any deploy
+#: through 39 (the deploy refuses otherwise, D2374), the host firewall must
+#: admit 5432, and a slot's three DNS records -- its domain, `pool.` and
+#: `direct.` -- are the operator's, grey, before its creation. **The trip**
+#: confirms the class against a DEPLOYMENT: `upgrade plan` on every project,
+#: with the same two declarations, before the first 1.17.0 deploy -- and a
+#: `major` there is a stop condition.
+CURRENT_SESSION = 39
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

@@ -982,6 +982,12 @@ def endpoint_connect(arguments: argparse.Namespace) -> int:
             child = subprocess.Popen(["psql", conninfo, *extra], env=environment)
         except FileNotFoundError as error:
             raise ClientError(cc.EXIT_PREREQUISITE, "psql is not installed here") from error
+        except OSError as error:
+            # D2394: a psql that is there and cannot be run (no executable bit,
+            # a wrong interpreter line) is a prerequisite, said -- not a traceback.
+            raise ClientError(
+                cc.EXIT_PREREQUISITE, f"psql could not be started: {error.strerror}"
+            ) from error
         while True:
             try:
                 return child.wait()

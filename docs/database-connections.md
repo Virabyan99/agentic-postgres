@@ -66,6 +66,37 @@ included, is ever admitted there; the database and the platform pooler stay
 unpublished, and a project without the facility (every operator project) has no
 door. Everything on this page is unchanged.
 
+## A managed project's customer door
+
+A customer of a managed project reaches its database without SSH, through the
+two public names above, with commands that run on the customer's own machine:
+
+```bash
+bin/endpoint.sh show --project-key KEY                                   # both doors and a snippet per client
+bin/endpoint.sh credential --project-key KEY --role admin --password-file ~/admin-password --wait
+bin/endpoint.sh credential --project-key KEY --role app   --password-file ~/app-password   --wait
+bin/endpoint.sh connect --project-key KEY --role admin --password-file ~/admin-password
+```
+
+- `credential` generates the password HERE, writes it 0600 (never over an
+  existing file) and sends only its SCRAM verifier; it needs a person's
+  session, a member or above. The previous password stops when the operation
+  succeeds -- `--wait` waits for that.
+- `connect` runs the local `psql` with `sslmode=verify-full` against this
+  machine's certificate authorities and the password through a temporary 0600
+  `PGPASSFILE`, removed when `psql` ends.
+- `show` prints a snippet for psql, Prisma, node-postgres and psycopg; **every
+  snippet's password is a placeholder** -- the password is your file.
+
+**Which door**: the application's ordinary queries through `pool.` as
+`customer_app` (transaction pooling: no session state between transactions);
+migrations, `LISTEN` and anything session-shaped through `direct.` as
+`customer_admin`. Prisma: `DATABASE_URL` pooled, `DIRECT_URL` direct. The
+administrator creates in `public` and grants the application role what it
+needs; neither role sees `app`, `api` or `app_private`. **Prisma's `migrate
+deploy` refuses a `public` that already holds tables it did not make** (P3005):
+run Prisma's migrations first.
+
 ## The allocation
 
 Two ports per project, allocated together from a host range, keyed by

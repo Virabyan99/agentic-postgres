@@ -205,6 +205,15 @@ ENVIRONMENT_VARIABLES = (
     # the deletion, so the host proofs can compare it with its neighbours.
     "APG_LIFECYCLE_RECORD_FILE",
     "APG_SLOT_OUTPUTS",
+    # Session 39 (ADR 0268-0270). `APG_CUSTOMER_CREDENTIAL_DIR` (external) holds
+    # the live slot's two password files -- `<dir>/<key>/customer_app` and
+    # `customer_admin`, 0700/0600, written by `bin/endpoint.sh credential` --
+    # read by the customer proofs and never printed. `APG_LIVE_SLOT_OUTPUTS`
+    # (host) is the LIVE slot's deployed document, copied op-readable on Sheet
+    # K3; `APG_LIFECYCLE_RECORD_FILE` and `APG_SLOT_OUTPUTS` are reused for the
+    # re-trial slot (slot2-prod).
+    "APG_CUSTOMER_CREDENTIAL_DIR",
+    "APG_LIVE_SLOT_OUTPUTS",
 )
 
 

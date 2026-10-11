@@ -1,9 +1,9 @@
 # Session 39 — Public TLS endpoints and customer roles
 
-**Status: EXECUTING. Runs 1–8 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
+**Status: EXECUTING. Runs 1–9 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
 threat list; Sheet E0 read). Rows **D2325–D2355** at planning; Run 1 added
 **D2356–D2360**, Run 2 **D2361–D2364**, Run 3 **D2365–D2369**, Run 4 **D2370–D2374**,
-Run 5 **D2375–D2381**, Run 6 **D2382–D2387**, Run 7 **D2388–D2391**, Run 8 **D2392–D2396**. ADRs **0268–0270** written. **NEXT FREE: D2397, ADR 0271.**
+Run 5 **D2375–D2381**, Run 6 **D2382–D2387**, Run 7 **D2388–D2391**, Run 8 **D2392–D2396**, Run 9 **D2397–D2402**. ADRs **0268–0270** written. **NEXT FREE: D2403, ADR 0271.**
 
 The fourth session of Stage 5 (`docs/plans/stage-5-plan.md` §3, §5 *Session 39*).
 Twelve runs and **two sittings on two days**: the firewall, the edge's one
@@ -482,6 +482,12 @@ table below it, in execution order.
 | **D2394** | Run 7's `endpoint connect`. | It turns a `psql` it cannot EXECUTE into a Python traceback (exit 1): only `FileNotFoundError` is caught, and `\\wsl$` writes strip the executable bit (CLAUDE.md §1) -- the lifecycle rehearsal met exactly that on its first run. | **Fixed in Run 9's code commit**: any `OSError` starting psql is exit 3 naming it, with a proof (a non-executable psql on PATH). | A refusal reports; a traceback does not. | 0195 |
 | **D2395** | Session 38's lifecycle instrument *"resize large (on OVH ADMITTED, D2310: expected succeeded)"*. | That expectation is the shape ADR 0270 retired: it measured the host, not the rule. | **`s39-lifecycle.py` judges EACH resize by its own `result.admission`** (D2362): `refused` iff `requested_mb > safe_available_mb`, the outcome must agree, and the profile after the large one is `large` or `standard` accordingly -- never forced. Rehearsed both ways (standard admitted on 300/4,600; large refused on 840/412). | ADR 0270 at the instrument too. | 0270 |
 | **D2396** | Run 11 step 3: *"Create `slot3-prod` (`small`) → claim → `credential` app and admin into `~/s39/run11/creds/slot3-prod/`"*. | No instrument named for it; the lifecycle's steps up to the credentials are the same and its record discipline is the one wanted. | **`s39-lifecycle.py --create-only`** (login, create, claim, the administrator's sign-in, both credentials, both names reached, the app role rotated and its old password refused) into its own `--home`/`--record`, `--creds-dir ~/s39/run11/creds` -- the `--customer-credential-dir` layout (`<dir>/<key>/customer_app`, `customer_admin`, 0700/0600). Rehearsed: PASSED. | One instrument, two lengths. | 0269 |
+| **D2397** | Session 38's `test_the_second_creation_was_refused_without_a_row` (LIFE-LIVE-002), re-run by this session's sweep. | Its own `POST /v1/projects` body named `organization_id`; the route's model takes `organization` (`models.CreateProjectRequest`). It never reached its assertion in Session 38: the record it needed was refused at setup, so the 422 it would have met was never seen. | **The body field corrected** in Run 9; the proof's assertion unchanged. | A proof that has never executed fails on first execution more often than not (§7 question 2) -- this one would have failed for a reason that is not the product's. | 0260 |
+| **D2398** | Run 9 item E: `test_this_module_uses_no_ssh` (EP-LIVE-001's module). | The static scan read the module's own text for `ssh` and `subprocess`, and the new `_docker` helper and the test's own needles matched themselves. | **Rewritten over the AST**: `subprocess` is called only inside `_docker`, whose argv starts `docker`; the needles are split so the scan cannot match its own source. | A guard that matches itself is either always red or, once excused, never red. | 0268 |
+| **D2399** | Plan §5 Run 9: *"a project without endpoints has no door"* over alpha and beta (`APG_PROJECT_B_OUTPUTS`). | The external gate exports no project B document -- its comment: *"no external test reads project B"* (`bin/session-38-check.sh:1843`). A proof gated on it would skip in every sweep. | **The proof reads alpha and the CONTROL project** (`APG_CONTROL_OUTPUTS`, exported in external mode), neither with a door. No gate change. | A variable no gate exports is a proof that can only skip (D687). | 0268 |
+| **D2400** | Run 1's threat list (§2): nine node ids for `THR-EP-*` (`test_an_enabled_project_renders_exactly_two_tcp_routers`, `test_no_router_reaches_the_database_or_the_platform_pooler`, `test_no_tcp_router_is_a_file_provider_router`, `test_a_key_cannot_rotate_a_credential`, `test_a_rotation_sets_the_verifier_through_stdin`, `test_the_verifier_reaches_no_argv_and_no_log`, `test_the_userlist_names_only_its_role` (twice), `test_every_other_role_is_refused_with_one_message`). | Runs 3-7 built each property under another name: `test_each_door_carries_exactly_its_tcp_router_and_the_userlist_bind`, `test_no_tcp_router_reaches_anything_but_a_customer_pooler`, `test_without_the_facility_the_override_names_neither_pooler` + `test_the_entrypoint_and_the_tls_option_are_the_edges_own`, `test_control_connections.py::test_only_a_person_who_is_member_may_rotate_and_only_with_doors`, `test_a_rotation_sets_the_verifier_on_stdin_and_rewrites_both_userlists` (its argv and result assertions are the second), `test_a_userlist_names_one_role_or_nothing`, `test_each_door_admits_its_one_role_and_an_empty_list_admits_nobody`. | **The four rows name the BUILT tests**; `test_threat_model_node_ids_are_collectible` holds them (battery M4). The hosted list's four items now point at the rows. | A threat row naming a test that does not exist is a control that looks measured (the parser would have refused it). | 0268, 0269 |
+| **D2401** | Session 38's LIFE-LIVE-002 proofs, re-run against Session 39's record. | (a) The probe organisation holds every session's creations -- slot1 at 38, slot2 and slot3 at 39 -- so *"the organisation's creations still one"* is false by construction; (b) the export holds `public` since D2333. | **(a) Creations counted within the record's own `started_at`..`finished_at`**; **(b) the schema list read by the record's `session`** (`[api, app]` at 38, `[api, app, public]` from 39). Both stricter for the run they read, neither weaker. | A live proof re-run in a later session meets that session's world. | 0259, 0261 |
+| **D2402** | D2355: *"`APG_ADMIN_PASSWORD_FILE` is exported by the gate but absent from the roster"*. | `test_every_operator_supplied_gate_can_be_supplied_by_a_session_gate` (D687) checks roster -> exported only. The reverse is not guarded; the one variable in it is DELIBERATE -- read by a fixture through a constant (`tests/deployment/conftest.py:1230`), as the gate's own comment says. | **No change.** The direction that has a consequence (a roster entry no gate can supply) is guarded; an exported variable nothing gates on costs nothing. | Recorded so the next planner does not chase it. | -- |
 | **D2359** | Run 1 item 6: *"a throwaway MinIO as both source and mirror (two buckets)"*. | One server holding both buckets lets rclone copy server-side (`CopyObject`), which R2→B2 never can — the measured path would not be production's. | **Two MinIO servers** (the local `quay.io/minio/minio` image), one per remote. Measured: without the flag, **50 HEAD + 50 PUT at the mirror** (+51 GET at the source, 1 at the mirror) for 50 objects; with `--s3-no-head`, **0 HEAD, 50 PUT**; **control**: `rclone size --json` of the mirror = the source's (50 objects, 441 bytes) both times. Run 2 adds the flag (D2346). | A rig that measured a different copy path would have priced the wrong request. | 0264 |
 
 ---
@@ -1313,6 +1319,29 @@ copied from Session 38's. **Run 7's code commit
 
 **Code.** `bin/session-01-check.sh` once and the new gate `--mode offline` once,
 detached (CLAUDE.md §1), then CI.
+
+**Done.** 2026-10-11. **Measured**: 1.17.0 priced `requires minor` by D1624's rig
+(worktree at `efaef09` against this tree, `--also document_schema_migratable --also
+api_operation_added`; `requires patch` without; five leaves differ, 6,136 -> 6,350
+bytes) -- the paragraph beside `CURRENT_SESSION` carries it. `CURRENT_SESSION` 39,
+`VERSION` 1.17.0, 16 `--session`/`--through-session` literals moved (none left on the
+documented path). Registry **346** requirements (+14, the `EP` family), `CLAIMS` **253**,
+`OFFLINE_CLAIMS` **101**; the roster's two variables. The Ledger: the six managed-project
+rows and `pooled_endpoint`/`direct_endpoint` -> `trial`, `wake_on_connect`
+`target_session: null`; `ACCEPTED_TYPES` = seven (CTL-OPS-001 renamed
+`test_exactly_the_seven_executed_types_are_accepted`). **`bin/session-39-check.sh`**
+derived from 38's: flag tokens 63 -> 65 (exactly `--customer-credential-dir`,
+`--live-slot-outputs`), parser arms 30 -> 32, header and usage rewritten whole;
+`test_session_thirty_nine_gate_modes.py` derived (30 passed). The live modules:
+EP-LIVE-001 (six proofs), EP-LIVE-002 (three), EP-LIVE-003 (six), LIFE-LIVE-003 (six) --
+**`--setup-plan` with every variable set: exit 0, 84 setup/teardown lines, no error**;
+none has executed. Four `THR-EP-*` rows (D2400). Documents: operator guide §21 and §20's
+three records; the upgrade row; the customer's section in database connections;
+managed projects' *Connecting*; the control plane's two routes; ADR 0256's ordering
+sentence (D2355). D2394 fixed (`connect` with an unrunnable `psql` -> exit 3, said).
+Targeted modules once: **1290 passed, 30 skipped** (the live proofs, environment absent);
+ruff clean. **Battery 4/4 killed**, each control green: the host export dropped, the
+seventh type unaccepted, the `OSError` arm removed, a threat row naming a missing test.
 
 - `CURRENT_SESSION = 39`, Session 39's paragraph in `__init__.py`; `VERSION`
   1.17.0; `README.md:7`; every `--session 38` / `--through-session 38` literal on

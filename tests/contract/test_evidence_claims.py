@@ -1237,6 +1237,23 @@ CLAIM_INTRODUCED_IN = {
     # Session 38's migration (ADR 0262-0263): two more, both offline.
     "provider_rehome": 38,
     "secret_store_files": 38,
+    # Session 39 (ADR 0268-0270). FOURTEEN, ten offline, three external and one
+    # host, landing with the constant (D690): a project's public Postgres
+    # doors. A `trial` Ledger row may name only these (ADR 0261, D2343).
+    "edge_postgres_entrypoint": 39,
+    "endpoint_routes": 39,
+    "endpoint_document": 39,
+    "customer_roles": 39,
+    "customer_connection_budget": 39,
+    "customer_poolers": 39,
+    "credential_rotation": 39,
+    "connection_api": 39,
+    "connection_snippets": 39,
+    "prepared_slot_readers": 39,
+    "lifecycle_retrial_live": 39,
+    "public_endpoints_live": 39,
+    "public_port_scan": 39,
+    "endpoints_host_live": 39,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

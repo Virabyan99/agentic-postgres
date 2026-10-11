@@ -13,7 +13,8 @@
 # Every entry needs:
 #   id              stable, unique, prefixed per runbook §4.2
 #   priority        P0 | P1 | P2
-#   target_session  1-12; the session that must make it pass
+#   target_session  the session that must make it pass (1 to CURRENT_SESSION;
+#                   it said `1-12` until Session 39 corrected it, D2355)
 #   test_nodeids    exact Pytest node IDs, verified by real collection
 #   description     what the requirement guarantees, not how it is tested
 #
@@ -2585,6 +2586,7 @@
     - tests/contract/test_disaster_kit.py::test_the_command_writes_owner_only_refuses_an_existing_directory_and_verifies
     - tests/contract/test_disaster_kit.py::test_every_directory_in_the_kit_is_owner_only
     - tests/deployment/test_session18_recovery.py::test_the_kit_exported_from_this_host_verifies_and_holds_no_value
+    - tests/contract/test_disaster_kit.py::test_the_access_policy_travels_in_the_kit
   description: >-
     dr-kit.sh export writes every artifact the node-loss runbook names -- the
     host and capability manifests and, per project, the manifest, the
@@ -4278,6 +4280,8 @@
     - tests/contract/test_backup_mirror.py::test_the_verb_writes_the_record_only_after_a_clean_copy_and_a_parsed_listing
     - tests/contract/test_backup_mirror.py::test_the_record_round_trips_and_only_a_complete_record_parses
     - tests/contract/test_backup_mirror.py::test_the_reading_has_three_states_and_each_validates_against_the_schema
+    - tests/contract/test_backup_mirror.py::test_a_refused_mirror_names_the_provider
+    - tests/contract/test_backup_mirror.py::test_a_403_on_one_pass_only_is_not_named_a_refusal
   description: >-
     A mirror pass has three outcomes and the verb reports three (ADR 0220). A
     pass that transferred what it could is completed by an IMMEDIATE second
@@ -6299,7 +6303,7 @@
   test_nodeids:
     - tests/contract/test_reality_ledger.py::test_every_operation_type_names_a_ledger_row_and_is_accepted_iff_its_row_is_reachable
     - tests/contract/test_operation_types.py::test_the_type_table_is_closed
-    - tests/contract/test_operation_types.py::test_no_type_is_accepted_and_the_seven_are_executed
+    - tests/contract/test_operation_types.py::test_exactly_the_seven_executed_types_are_accepted
     - tests/contract/test_operation_types.py::test_a_type_not_accepted_is_refused_not_available_before_its_body
   description: >-
     `operations.py`'s type table is closed and every type names an
@@ -6453,6 +6457,9 @@
     - tests/contract/test_operation_types.py::test_the_error_codes_are_one_closed_list
     - tests/contract/test_operation_types.py::test_the_schema_and_the_models_agree
     - tests/contract/test_render_atomicity.py::test_a_failed_render_under_sudo_hands_the_lock_back
+    - tests/contract/test_reconciler_dispatch.py::test_start_waits_for_the_control_database
+    - tests/contract/test_reconciler_dispatch.py::test_a_resize_records_its_admission_reading_on_both_outcomes
+    - tests/contract/test_reconciler_dispatch.py::test_admission_reading_reads_only_admissions_own_lines
   description: >-
     The reconciler executes a closed table (ADR 0256): one handler per
     executed type and one bound per command an operation may run; arguments
@@ -6697,6 +6704,7 @@
     - tests/contract/test_control_cli.py::test_only_the_hash_reaches_the_control_plane
     - tests/contract/test_reconciler_dispatch.py::test_the_bootstrap_password_is_never_stored
     - tests/contract/test_control_cli.py::test_the_handoff_token_is_private_and_removed_after_claim
+    - tests/contract/test_control_cli.py::test_the_claim_picks_the_creation_whose_token_is_held
   description: >-
     The first administrator handed over by hash (ADR 0260, D2163, D2226): on
     a release cluster, `auth_open_password_reset` with `sha256(T)` opens the
@@ -6840,3 +6848,314 @@
     before anything writes or uploads it, on a timer that catches up after
     downtime; both gates linting the backup script; and no file shaped like a
     key.
+
+# Session 39 (ADR 0268-0270)
+- id: EP-EDGE-001
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/contract/test_edge_config.py::test_the_postgres_entrypoint_is_the_only_one_added
+    - tests/contract/test_edge_config.py::test_the_postgres_tls_option_offers_only_the_postgres_protocol
+    - tests/contract/test_host_infrastructure.py::test_policy_permits_exactly_the_three_ports
+    - tests/contract/test_deploy_command.py::test_the_deploy_refuses_an_edge_without_the_postgres_entrypoint
+    - tests/contract/test_host_manifest.py::test_a_range_containing_the_edges_postgres_port_is_refused
+    - tests/contract/test_listeners.py::test_the_host_check_admits_the_edges_postgres_door
+  description: >-
+    **The edge's Postgres door** (ADR 0268 item 1): the static configuration
+    adds exactly the `postgres` entrypoint on `:8432` (published `5432:8432`)
+    with a 10 s read deadline, and the dynamic baseline its `postgres` TLS
+    option -- TLS 1.2 at least, SNI strict, ALPN `postgresql` and nothing else;
+    the host firewall's v4 and v6 policies admit exactly 80, 443 and 5432 by
+    their pre-DNAT port; a deploy through Session 39 refuses an edge that does
+    not serve the entrypoint; a host manifest's loopback range may not reach
+    5432; and the host's listener check admits the edge's 5432 and still reports
+    any other public port.
+
+- id: EP-ROUTE-001
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/contract/test_endpoint_routes.py::test_each_door_carries_exactly_its_tcp_router_and_the_userlist_bind
+    - tests/contract/test_endpoint_routes.py::test_no_tcp_router_reaches_anything_but_a_customer_pooler
+    - tests/contract/test_endpoint_routes.py::test_without_the_facility_the_override_names_neither_pooler
+    - tests/contract/test_endpoint_routes.py::test_an_enabled_override_refuses_a_missing_name_or_a_relative_directory
+    - tests/contract/test_endpoint_routes.py::test_the_entrypoint_and_the_tls_option_are_the_edges_own
+    - tests/contract/test_endpoint_routes.py::test_the_render_names_the_doors_and_their_claimants
+    - tests/contract/test_endpoint_routes.py::test_off_the_render_says_so
+    - tests/contract/test_endpoint_routes.py::test_the_runtime_adds_the_profile_exactly_when_the_render_says_one
+    - tests/contract/test_endpoint_routes.py::test_every_call_site_hands_the_function_its_rendered_directory
+  description: >-
+    **A project's two TCP routers** (ADR 0268 items 2-4): a project with public
+    endpoints renders exactly two routers on the `postgres` entrypoint --
+    `HostSNI(pool.<domain>)` to `customer-pool:6432` and
+    `HostSNI(direct.<domain>)` to `customer-direct:6432` -- each naming
+    `postgres@file`, the edge's resolver and the SAME domain pair (one
+    certificate); a walk of every service finds a TCP router on the two poolers
+    and nothing else, never `postgres` or `pgbouncer`; a project without the
+    facility names neither pooler; the router names are rendered and the hosts
+    interpolated from compose.env; and `project-runtime.sh` adds the
+    `public-endpoints` profile exactly when the render says the project has
+    doors.
+
+- id: EP-DOC-001
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/contract/test_project_manifest.py::test_public_endpoints_is_refused_below_schema_eleven
+    - tests/contract/test_project_manifest.py::test_the_control_project_refuses_a_public_endpoint
+    - tests/contract/test_output_migrations.py::test_v22_adds_the_public_endpoints
+    - tests/contract/test_output_migrations.py::test_v22_does_not_mutate_its_input
+    - tests/contract/test_naming.py::test_the_endpoint_hosts_derive_from_the_domain
+    - tests/contract/test_isolation_leaves_offline.py::test_the_public_endpoints_are_classified_by_what_they_name
+    - tests/contract/test_render_isolation.py::test_the_public_endpoints_are_derived_and_disjoint
+  description: >-
+    **The doors in the address book** (ADR 0268 items 5-6): manifest schema 11
+    accepts `database.public_endpoints` and refuses it below 11 and on the
+    control project; outputs 22 carries `database.public` -- `{enabled, pooled,
+    direct}`, each door its host, port 5432, role, database, `verify-full` and
+    connection limit, no URL and no password, null doors when off -- and
+    `migrate_v21_to_v22` adds it without mutating its input; the hosts derive
+    from the project's one domain; every new leaf is classified; two projects'
+    doors are derived and disjoint.
+
+- id: EP-ROLE-001
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/contract/test_bootstrap_statements.py::test_the_customer_roles_are_created_without_login
+    - tests/contract/test_bootstrap_statements.py::test_no_statement_sets_a_customer_password
+    - tests/contract/test_bootstrap_statements.py::test_the_customer_grants_are_exactly_these
+    - tests/contract/test_customer_roles_on_a_cluster.py::test_the_admin_writes_only_in_public
+    - tests/contract/test_customer_roles_on_a_cluster.py::test_the_admin_is_refused_everything_else
+    - tests/contract/test_customer_roles_on_a_cluster.py::test_the_application_role_writes_rows_not_tables
+  description: >-
+    **The customer roles** (ADR 0269 items 1-2): `customer_app` and
+    `customer_admin` exist NOLOGIN on every project and LOGIN with their
+    connection limit only where the facility is on; the bootstrap never sets a
+    customer password; the grants are exactly D2332's and `check_violations`
+    reads them back; on a real cluster `customer_admin` creates in `public` (a
+    vector column too) and is refused `app`, `api`, `app_private`, `CREATE
+    SCHEMA`, `CREATE EXTENSION` and `CREATE ROLE`, and `customer_app` writes
+    rows through default privileges and creates nothing.
+
+- id: EP-BUDGET-001
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/contract/test_compute_profiles.py::test_every_profile_fits_with_the_customer_claimants
+    - tests/contract/test_bootstrap_statements.py::test_the_application_gives_way_to_the_customer_claimants
+  description: >-
+    **Two claimants on `max_connections`** (ADR 0269 item 4, D2334): the
+    customer poolers' claimants -- small 2/2, standard 2/2, large 5/5 -- are
+    summed by the budget check only for a project with doors, every profile
+    still fits, and the bootstrap's application remainder gives way to them;
+    each role's connection limit and each pooler's `max_db_connections` is the
+    claimant. (The budget's summands are held exactly by
+    `test_the_connection_budget_has_no_term_for_the_agent_plane`, widened by the
+    two under ADR 0269.)
+
+- id: EP-POOL-001
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/contract/test_endpoint_routes.py::test_the_model_declares_each_door_customer_only
+    - tests/contract/test_endpoint_routes.py::test_the_poolers_wait_for_the_bootstrap
+    - tests/contract/test_endpoint_routes.py::test_the_deploy_writes_the_userlists_after_6b_and_before_6c
+    - tests/contract/test_endpoint_routes.py::test_the_userlist_directory_is_derived_once
+    - tests/contract/test_customer_poolers.py::test_parse_reads_both_roles_and_a_null_as_no_credential
+    - tests/contract/test_customer_poolers.py::test_parse_refuses_what_a_pooler_could_not_use
+    - tests/contract/test_customer_poolers.py::test_a_userlist_names_one_role_or_nothing
+    - tests/contract/test_customer_poolers.py::test_a_write_is_a_rename_at_0640_and_leaves_no_staging_file
+    - tests/contract/test_customer_poolers.py::test_ensure_creates_empty_and_never_overwrites
+    - tests/contract/test_customer_poolers.py::test_sync_writes_one_role_per_door_and_never_prints_a_verifier
+    - tests/contract/test_customer_poolers.py::test_a_pooler_not_signalled_is_exit_6_never_success
+    - tests/contract/test_customer_poolers.py::test_a_cluster_that_cannot_be_read_is_exit_6_and_writes_nothing
+    - tests/contract/test_customer_poolers.py::test_without_the_facility_there_is_nothing_to_sync
+    - tests/contract/test_customer_poolers.py::test_the_command_refuses_a_caller_who_is_not_root
+    - tests/contract/test_customer_poolers.py::test_each_door_admits_its_one_role_and_an_empty_list_admits_nobody
+    - tests/contract/test_customer_poolers.py::test_the_daemon_reads_its_mode_and_its_claimant
+    - tests/contract/test_customer_poolers.py::test_the_healthcheck_is_red_without_the_userlist
+  description: >-
+    **The customer poolers** (ADR 0269 item 3): two PgBouncers from the
+    platform's image, `customer-pool` in transaction mode and `customer-direct`
+    in session mode, under the `public-endpoints` profile, uid 70, read-only, no
+    secret, no port, on `edge` and `internal`, bounded by the resource tables,
+    deferred until the bootstrap; each one's userlist names only its own role,
+    written by `bin/customer-credentials.sh sync` from `pg_authid` (0640
+    root:70, by rename, a NULL credential an empty list that admits nobody,
+    never a verifier printed; exit 6 when the cluster cannot be read or a pooler
+    cannot be told), the deploy creating the directory before the poolers start
+    and syncing after them; on the locked images the daemon reports its own mode
+    and claimant, and its healthcheck is red without the userlist.
+
+- id: EP-CRED-001
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/contract/test_endpoint_cli.py::test_the_password_never_leaves_the_workstation
+    - tests/contract/test_endpoint_cli.py::test_the_password_file_is_private_and_written_once
+    - tests/contract/test_endpoint_cli.py::test_credential_wait_reads_the_outcome
+    - tests/contract/test_endpoint_cli.py::test_a_verifier_from_here_admits_its_password_on_postgresql
+    - tests/contract/test_endpoint_cli.py::test_a_psql_that_cannot_run_is_said_not_a_traceback
+    - tests/contract/test_reconciler_dispatch.py::test_a_rotation_sets_the_verifier_on_stdin_and_rewrites_both_userlists
+    - tests/contract/test_reconciler_dispatch.py::test_a_project_without_doors_is_refused_before_anything_runs
+    - tests/contract/test_reconciler_dispatch.py::test_a_refused_credential_fails_the_operation_and_syncs_nothing
+    - tests/contract/test_reconciler_dispatch.py::test_a_rotation_whose_arguments_are_not_a_verifier_runs_nothing
+    - tests/contract/test_customer_poolers.py::test_a_rotation_reaches_the_running_poolers_by_rename_and_sighup
+  description: >-
+    **A credential by its verifier** (ADR 0269 item 5): `bin/endpoint.sh
+    credential` generates the password on the workstation, writes it once 0600
+    before anything is sent (an existing file refused, a refused request leaving
+    none), and sends only its SCRAM-SHA-256 verifier, which PostgreSQL stores as
+    it is and which admits that password and no other; `credential.rotate`'s
+    arguments are `{role, verifier}`, validated by the route and by the
+    reconciler; the reconciler takes the role's NAME from the deployed document,
+    sets the verifier through psql's stdin (in no argv, no log, no result),
+    refuses a project without doors, and rewrites both userlists; a running
+    pooler takes the new list on SIGHUP -- the old password refused, the new
+    admitted.
+
+- id: EP-API-001
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/contract/test_control_connections.py::test_a_viewer_reads_the_two_doors_and_no_password
+    - tests/contract/test_control_connections.py::test_a_project_without_doors_is_not_available
+    - tests/contract/test_control_connections.py::test_a_readoption_keeps_unnamed_doors_and_replaces_named_ones
+    - tests/contract/test_control_connections.py::test_a_member_requests_a_rotation_by_its_verifier_alone
+    - tests/contract/test_control_connections.py::test_a_resize_may_record_its_admission_reading
+    - tests/contract/test_control_connections.py::test_a_body_that_is_not_one_verifier_is_refused_before_a_row
+    - tests/contract/test_control_connections.py::test_only_a_person_who_is_member_may_rotate_and_only_with_doors
+    - tests/contract/test_control_connections.py::test_the_rotation_is_not_offered_until_its_row_is
+    - tests/contract/test_reconciler_dispatch.py::test_the_registry_refresh_records_the_doors
+    - tests/contract/test_endpoint_cli.py::test_show_names_both_doors_and_no_password
+    - tests/contract/test_endpoint_cli.py::test_connect_hands_psql_a_private_passfile_and_removes_it
+  description: >-
+    **The doors through `/v1`** (ADR 0268 item 6, D2351): the control set's
+    `0005` records a project's `database.public` from its deployed document;
+    `GET /v1/projects/{key}/connections` serves the two doors and a snippet per
+    measured client to a viewer or a `projects:read` key, never a password, and
+    answers `not_available` naming `pooled_endpoint` for a project without
+    doors; `POST /v1/projects/{key}/credentials` records `credential.rotate`
+    with `{role, verifier}` for a person, member and above, refusing a key, a
+    viewer, any other body and a project without doors before a row exists;
+    `bin/endpoint.sh show` and `connect` read it -- `connect` handing psql the
+    password only through a 0600 passfile in a 0700 directory, removed when psql
+    ends.
+
+- id: EP-SNIP-001
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/contract/test_connection_snippets.py::test_every_measured_client_has_one_snippet_and_no_other
+    - tests/contract/test_connection_snippets.py::test_no_snippet_can_carry_a_password
+    - tests/contract/test_connection_snippets.py::test_each_client_verifies_the_server
+    - tests/contract/test_connection_snippets.py::test_the_pooled_door_is_the_default_and_the_direct_is_named
+    - tests/contract/test_connection_snippets.py::test_a_record_that_is_not_one_yields_no_snippet
+    - tests/contract/test_client_fixtures.py::test_the_libpq_fixtures_take_the_tls_input_and_default_to_disable
+    - tests/contract/test_client_fixtures.py::test_the_node_fixtures_take_the_tls_input_and_default_to_disable
+  description: >-
+    **Snippets for the measured clients** (D2352): one each for psql, Prisma,
+    node-postgres and psycopg, every password the placeholder and no record
+    value able to reach the text, each verifying the server (libpq
+    `verify-full`, Prisma `sslaccept=strict` with no `pgbouncer=true`,
+    node-postgres `rejectUnauthorized`), the pooled door the default and the
+    direct one named; and the four client fixtures take the TLS input explicitly
+    -- `disable` by default for the platform's transports, `verify-full` for the
+    public door, anything else refused.
+
+- id: LIFE-SLOT-002
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/contract/test_capacity_probe.py::test_a_prepared_slot_commits_nothing
+    - tests/contract/test_capacity_probe.py::test_an_undeclared_directory_is_still_undetermined
+    - tests/contract/test_capacity_probe.py::test_the_candidate_slot_is_not_named_prepared
+    - tests/contract/test_control_command.py::test_a_prepared_slot_agrees
+    - tests/contract/test_deploy_command.py::test_a_disabled_storage_route_is_not_observed
+    - tests/contract/test_slot_command.py::test_a_slot_is_ready_only_when_all_three_records_are
+  description: >-
+    **A prepared slot's readers** (D2305, D2307, D2312): admission charges a
+    declared, prepared slot nothing and names it on the committed line, while an
+    undeclared directory without a document is still undetermined and the
+    candidate is never named prepared; the registry reads a prepared slot
+    `prepared (slot)` and agrees; the deploy does not observe a storage route
+    the manifest switched off; and a slot is `ready` only when its domain and
+    both door names resolve to this host.
+
+- id: LIFE-LIVE-003
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/external/test_session39_public_lifecycle.py::test_every_accepted_type_ran_on_the_slot
+    - tests/external/test_session39_public_lifecycle.py::test_the_resizes_followed_the_admission_reading
+    - tests/external/test_session39_public_lifecycle.py::test_the_export_holds_the_three_customer_schemas
+    - tests/external/test_session39_public_lifecycle.py::test_the_slot_was_reached_through_both_names
+    - tests/external/test_session39_public_lifecycle.py::test_a_sleeping_slot_refused_both_names
+    - tests/external/test_session39_public_lifecycle.py::test_the_second_creation_was_refused_without_a_row
+  description: >-
+    **The re-trial, read back** (D2343, ADR 0270): Session 39's lifecycle on
+    `slot2-prod`, through `/v1` and the slot's own doors -- every one of the
+    seven accepted types succeeded at the deployed commit, the resizes ended as
+    their own admission readings imply, the export held exactly `app`, `api` and
+    `public`, both public names admitted their own role with the passwords the
+    CLI wrote and the rotation refused the old one, both names refused while it
+    slept, and a second creation was refused `no_slot` with no row.
+
+- id: EP-LIVE-001
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/external/test_session39_public_endpoints.py::test_prisma_migrates_through_the_direct_name
+    - tests/external/test_session39_public_endpoints.py::test_psql_reaches_both_names
+    - tests/external/test_session39_public_endpoints.py::test_the_four_drivers_reach_the_pooled_name
+    - tests/external/test_session39_public_endpoints.py::test_the_admin_writes_only_in_public
+    - tests/external/test_session39_public_endpoints.py::test_no_platform_role_passes_either_door
+    - tests/external/test_session39_public_endpoints.py::test_a_project_without_endpoints_has_no_door
+    - tests/external/test_session39_public_endpoints.py::test_this_module_uses_no_ssh
+  description: >-
+    **A customer at the live slot's doors** (ADR 0268, ADR 0269): from the
+    workstation, with no SSH, every server certificate verified against the
+    workstation's roots -- Prisma migrates through `direct.<domain>` and its
+    Client works through `pool.<domain>` without `pgbouncer=true`; psql reaches
+    both names as their own roles (and a client without the roots is refused);
+    node-postgres, psycopg (prepared statements, the encrypted cancel) and libpq
+    reach the pooled name; the administrator writes only in `public`; the
+    superuser, the slot's platform roles and the other door's role are refused
+    at each door; and a project without doors answers no login at its would-be
+    names.
+
+- id: EP-LIVE-002
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/external/test_session39_public_endpoints.py::test_only_the_four_ports_answer
+    - tests/external/test_session39_public_endpoints.py::test_plaintext_is_refused
+    - tests/external/test_session39_public_endpoints.py::test_a_wrong_or_absent_sni_is_refused
+  description: >-
+    **The public address, scanned** (ADR 0268, D2338): 22, 80, 443 and 5432
+    answer and nothing else -- not the platform's pooler or database ports, not
+    the edge's container ports, not a project's allocated transports; 5432 never
+    lets a plaintext peer reach authentication and does not hold it past its
+    read deadline; and after answering `SSLRequest` it refuses a handshake with
+    no SNI, an unknown name, or the name of a project without doors.
+
+- id: EP-LIVE-003
+  priority: P0
+  target_session: 39
+  test_nodeids:
+    - tests/deployment/test_session39_endpoints.py::test_the_edge_serves_the_postgres_entrypoint
+    - tests/deployment/test_session39_endpoints.py::test_the_firewall_admits_exactly_the_three_ports
+    - tests/deployment/test_session39_endpoints.py::test_the_customer_poolers_are_bounded_and_placed
+    - tests/deployment/test_session39_endpoints.py::test_the_database_is_still_unrouted
+    - tests/deployment/test_session39_endpoints.py::test_the_slot_was_isolated_from_every_project
+  description: >-
+    **The doors on the host** (ADR 0268, ADR 0269): the running edge publishes
+    5432 to its `postgres` entrypoint with the 10 s deadline and the `postgres`
+    TLS option; the running firewall admits exactly 80, 443 and 5432; the live
+    slot's two poolers run healthy, bounded, on `edge` and `internal` only, each
+    with its own router and the userlist bound read-only; its database joins
+    only `internal` and `backup` with no router and nothing published beyond
+    loopback; and its document shares no isolated value with A, B or the control
+    project.
+
