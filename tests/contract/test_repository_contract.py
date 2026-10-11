@@ -404,6 +404,91 @@ def test_no_tracked_file_uses_crlf() -> None:
     assert not offenders, f"tracked files with CRLF: {offenders}"
 
 
+def _executed_copies(dockerfile: str) -> list[str]:
+    """The build-context files an image's exec-form ENTRYPOINT or CMD runs directly.
+
+    A COPY places a file; an exec-form instruction whose first element is that
+    file's destination executes it with no interpreter in front, so the kernel
+    reads the file's mode -- which COPY takes from the build context, which is
+    the checkout, whose mode is the git index's. A COPY that sets `--chmod`
+    states the mode itself and is not the index's to keep.
+    """
+    import json
+    import posixpath
+
+    text = dockerfile.replace("\\\n", " ")
+    placed: dict[str, str] = {}
+    executed: list[str] = []
+    for line in text.splitlines():
+        words = line.split()
+        if not words:
+            continue
+        instruction = words[0].upper()
+        if instruction == "COPY":
+            flags = [w for w in words[1:] if w.startswith("--")]
+            operands = [w for w in words[1:] if not w.startswith("--")]
+            if any(f.startswith("--from") or f.startswith("--chmod") for f in flags):
+                continue
+            *sources, destination = operands
+            for source in sources:
+                target = (
+                    posixpath.join(destination, posixpath.basename(source))
+                    if destination.endswith("/")
+                    else destination
+                )
+                placed[target] = source
+        elif instruction in ("ENTRYPOINT", "CMD"):
+            form = line.split(None, 1)[1].strip()
+            if not form.startswith("["):
+                continue
+            first = json.loads(form)[0]
+            if first in placed:
+                executed.append(placed[first])
+    return executed
+
+
+def test_the_entrypoint_scan_reads_a_copied_script_and_passes_an_interpreter() -> None:
+    """The scan's control: it finds the shape that failed and passes the shapes that cannot."""
+    direct = 'COPY run.sh /usr/local/bin/run.sh\nENTRYPOINT ["/usr/local/bin/run.sh"]\n'
+    assert _executed_copies(direct) == ["run.sh"]
+    into_directory = 'COPY a.sh run.sh /app/\nCMD ["/app/run.sh", "x"]\n'
+    assert _executed_copies(into_directory) == ["run.sh"]
+    interpreted = 'COPY run.sh /app/run.sh\nENTRYPOINT ["/bin/sh", "/app/run.sh"]\n'
+    assert _executed_copies(interpreted) == []
+    stated = 'COPY --chmod=0755 run.sh /app/run.sh\nENTRYPOINT ["/app/run.sh"]\n'
+    assert _executed_copies(stated) == []
+    mirror = (REPO_ROOT / "services" / "backup-mirror" / "Dockerfile").read_text(encoding="utf-8")
+    assert _executed_copies(mirror) == ["mirror.sh"]
+
+
+def test_every_script_an_image_executes_directly_is_executable_in_the_git_index() -> None:
+    """D2412: a COPY carries the checkout's mode, and an exec-form ENTRYPOINT needs the bit.
+
+    Session 39 Run 2 edited `services/backup-mirror/mirror.sh` through the
+    Windows share, which writes every file without its executable bit, and the
+    commit recorded `100755 => 100644`. The habit that restores the bit covered
+    `bin/` only; every offline proof of the mirror reads the script's TEXT. The
+    first container started from 1.17.0's mirror image failed `exec ...
+    permission denied` on both passes, at a live create's backup step.
+    """
+    stages = {}
+    for line in git("ls-files", "--stage", "--", "services").splitlines():
+        mode, _, rest = line.partition(" ")
+        stages[rest.split("\t", 1)[1]] = mode
+    checked = []
+    for dockerfile in sorted((REPO_ROOT / "services").rglob("Dockerfile")):
+        context = dockerfile.parent.relative_to(REPO_ROOT).as_posix()
+        for source in _executed_copies(dockerfile.read_text(encoding="utf-8")):
+            relative = f"{context}/{source}"
+            checked.append(relative)
+            assert stages.get(relative) == "100755", (
+                f"{relative} is {stages.get(relative)} in the git index and "
+                f"{dockerfile.relative_to(REPO_ROOT).as_posix()} executes it directly; "
+                "expected 100755 (git update-index --chmod=+x)"
+            )
+    assert "services/backup-mirror/mirror.sh" in checked, checked
+
+
 # ---------------------------------------------------------------------------
 # Hard-coded fixture identities (runbook §9)
 # ---------------------------------------------------------------------------
