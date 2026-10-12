@@ -1,6 +1,6 @@
 # Session 39 — Public TLS endpoints and customer roles
 
-**Status: EXECUTING. Runs 1–11 DONE 2026-10-11/12 -- 1.17.0 TAGGED on b0249ce (248/253); NEXT = Run 12 (the close), its inherited list first. Runs 1–10 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
+**Status: COMPLETE 2026-10-12. Runs 1–12 DONE -- 1.17.0 TAGGED on b0249ce (248/253); Run 12 closed it: SL4, K4, the D2405/D2409/D2416 repairs, the Ledger (eight rows `planned`, `management_api` `beta`), the envelope; rows D2419–D2421, next free D2422. Runs 1–10 DONE 2026-10-11** (six rigs, ADRs 0268–0270, the
 threat list; Sheet E0 read). Rows **D2325–D2355** at planning; Run 1 added
 **D2356–D2360**, Run 2 **D2361–D2364**, Run 3 **D2365–D2369**, Run 4 **D2370–D2374**,
 Run 5 **D2375–D2381**, Run 6 **D2382–D2387**, Run 7 **D2388–D2391**, Run 8 **D2392–D2396**, Run 9 **D2397–D2404**, Run 10 **D2405–D2410**, Run 11 **D2411–D2418**. ADRs **0268–0270** written. **NEXT FREE: D2419, ADR 0271.**
@@ -506,6 +506,7 @@ table below it, in execution order.
 | **D2418** | ADR 0256: the reconciler deploys a managed project; D1425: every project at the tagged commit. | **No product verb redeploys a managed project at a new commit.** D2413's move needed slot3-prod at `b0249ce`: Sheet D4 ran **the reconciler's own argv** (`bin/reconciler.py:603`, `deploy_argv`, the manifest `/etc/agentic-postgres/slots/slot3-prod/manifest.yaml`) by hand with the reconciler stopped -- admitted, every route `ready`, the certificate kept; then `control.sh adopt --project slot3-prod` under **its own** organisation (`31121d7b...`, from the create's record): `control_adopt_project` keeps slot, profile and display name by `coalesce`, and the registry read `agrees`. | Recorded as the operator's procedure for a release move until the reconciler owns one (a Session 40+ item: an `upgrade` operation, or the deploy refusing a managed key without it). | A release move that the control plane cannot express is an operator's hand on a customer's project. | 0256 |
 | **D2419** | Run 12 *The envelope*: *"`slot2-prod`'s lifecycle rows"*; `compute_profiles.RESIZE_WINDOW_SECONDS = 71` (D2324: *"the resize's deploy step, an upper bound"*). | Attempt 3's record (1.17.0 at `1c40860`): the resize's deploy step **81.3 s** (small -> standard, `3914872b`) and **83.5 s** (standard -> large, `e9fb5c95`) -- both above the constant the customer's message prints as *"measured on this server"* (70.5 / 66.5 s at 1.16.0). An upper bound the newest release exceeds is a value that looks measured and is not (CLAUDE.md §7). | **The envelope's one resize row replaced** by 1.17.0's (1.16.0's figures in its note) and **the constant moved to 84** (the larger step, rounded up, as Session 38's close took 71 from 70.5); `test_the_resize_message_names_only_a_measured_window` holds them equal. No customer reads it until `compute_profiles` is re-trialed (the row is `planned`). The window as the slot's routes see it stays UNMEASURED (D2324). | A bound is re-read with every release it bounds. | 0258 |
 | **D2420** | Run 12 item 2 (D2416): *"every fixture carrying a customer password returns a redacted-`repr` value (grep ... `customer_app`/`customer_admin`/`password`)"*. | The class is wider than customer passwords: a scan of every fixture under `tests/external/` whose code names a password, TOTP seed, token, credential or secret finds **five** -- Session 39's `slot_creds`, and Sessions 37's and 38's `probe` (the probe owner's password and TOTP seed) and `owner` (an access token), each a plain `str` pytest prints with a failing proof's or fixture's arguments (D2415's 12 `record` setup errors took `probe` as an argument). A by-value scan of `~/s37`, `~/s38`, `~/s39`, `evidence/` and `/tmp` finds neither probe secret anywhere but its own source file: none was printed. | **All five repaired**: `tests/external/redaction.py`'s `Secret` (a `str` whose `repr` is redacted; psycopg, `json`, f-strings take it unchanged). Guards in `test_external_helpers.py`: the type (`repr` and pytest's `saferepr`, with a plain-`str` control), the class (AST: every such fixture calls `Secret`; a planted offender found), the run-time half (the three reading fixtures on files written there print no value they read), and D2416's KeyError class (every `naming.database_roles(...)` key a proof reads is one the product derives). **Battery 9/9 killed** (with D2405's three and D2409's one), controls green; M2 (the s38 probe's password unwrapped) is caught by the run-time half alone -- the AST half is per fixture and `probe` still wraps its TOTP seed. | A secret's exposure is a property of every fixture that holds one, not of the one whose test failed. | 0269 |
+| **D2421** | Sheet SL4 (D2185): *"the operator reads the repository's survival ... from the R2 console's listing"*. | The operator, 2026-10-12: *"there is no bucket named apg-slot2-prod-backup"* in the R2 console. The agent's read-only Cloudflare API listing of the same account the same hour: **`apg-slot2-prod-backup` exists** (created 2026-10-11 10:06Z, beside the five other slot buckets) and lists **at least 1,000 objects** (the page truncated) under `pgbackrest/slot2-prod/` -- 946 of attempt 3's full backup `20261012-092646F` and 54 archive segments, the newest 10:12:39Z, before the delete. The console's listing was not a reading of absence. | **The repository survived the deletion** (ADR 0187), read through the provider's API; the console reading recorded as not determining it (ADR 0195). A later sheet that asks a person for a provider listing names the API read beside it. | A person's "it is not there" in a console is a reading with a third outcome, too. | 0187, 0195 |
 | **D2359** | Run 1 item 6: *"a throwaway MinIO as both source and mirror (two buckets)"*. | One server holding both buckets lets rclone copy server-side (`CopyObject`), which R2→B2 never can — the measured path would not be production's. | **Two MinIO servers** (the local `quay.io/minio/minio` image), one per remote. Measured: without the flag, **50 HEAD + 50 PUT at the mirror** (+51 GET at the source, 1 at the mirror) for 50 objects; with `--s3-no-head`, **0 HEAD, 50 PUT**; **control**: `rclone size --json` of the mirror = the source's (50 objects, 441 bytes) both times. Run 2 adds the flag (D2346). | A rig that measured a different copy path would have priced the wrong request. | 0264 |
 
 ---
@@ -1510,6 +1511,36 @@ the repairs it found:
 - `docs/scope-closure.md` **§32**; the stage plan's Status block; CLAUDE.md §2
   rewritten for Session 40's planner (copy it to the scratchpad first); this
   plan's `Status:` COMPLETE.
+
+**Done.** 2026-10-12. **The inherited sheets**: **SL4** at `b0249ce` -- `slot2-prod`'s runtime
+identity revoked (its Infisical project left in place, as designed), the credential shredded;
+`/etc/agentic-postgres/projects/slot2-prod/` read EMPTY (D2405) and `rmdir`ed; `slot.sh status`:
+slot1/slot2 `consumed`, slot3 `allocated`. The repository's survival read through the Cloudflare
+API, the console having shown no bucket (D2421). **K4**: `kit-2026-10-12-s39-b0249ce` (18
+artifacts, three projects, `kit.json` release `b0249ce`), copied to WSL `~/dr-kits/` (19 files,
+0600). **The repairs** (`ea90b2a`): D2416 -- the key `postgrest_authenticator`, and D2420 -- all
+five external fixtures that hold a secret return a `Secret`; D2409 -- `prepared` tolerated, the
+set held to `control.AGREEING`; D2405 -- `revoke` removes the directory it made (after success
+and failure; one it did not make, or one not emptied, left and named). Battery **9/9** killed,
+controls green (M2 by the run-time half alone). **The Ledger from the TAGGED evidence**: the
+eight `trial` rows `planned`, target 40 (each names `lifecycle_retrial_live` or
+`public_endpoints_live`, both `failed`); `ACCEPTED_TYPES` empty and
+`test_no_type_is_accepted_and_the_seven_are_executed` (renamed back, the registry with it);
+`management_api` `beta` (`control_plane_live` passed, D2322); `postgresql` `planned`, target 40.
+**The envelope**: Session 38's rows given their section comment; Session 39's nine -- the edge's
+recreation (23.1 s every class, docs 13.75 s), two creations (1,210.7 / 1,156.3 s claim to
+succeeded), a credential and its rotation (1.8-2.0 s), TLS connects through both names,
+sleep/wake, export/delete, the neighbours (no window), memory with `slot3-prod` live (5,207 MiB
+available, read this day), the four-project cold start (boot+101/102 s); the resize row
+replaced by 1.17.0's and the constant 84 (D2419); the slot's own windows stay UNMEASURED (D2324).
+Targeted once: 68 + 183 + 105 passed; `app-contract --check` matches. **`bin/session-01-check.sh`
+on `ea90b2a`**: every step passed (7,638 contract tests, 3 skipped; P0 inventory 24 + 12;
+generated documentation current; Compose valid) and it **exited 5 at its last step** --
+`write-session-evidence` refused because this close's documentation edits were already in the
+working tree (the clean-tree check is step 1's only); no evidence file written, not re-run (CI
+is the full check). **CI on `ea90b2a`: run `38300269973` success**, all three jobs. `docs/scope-closure.md` §32; the stage
+plan's Status block; CLAUDE.md §2 for Session 40's planner. Rows D2419-D2421; **next free
+D2422, ADR 0271**.
 
 ---
 

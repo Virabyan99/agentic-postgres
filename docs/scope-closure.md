@@ -1469,3 +1469,62 @@ not lose one probe sample through any of it.
    meets one.
 5. **§10's smaller rows** (D2315, D2316, D2320; the reconciler's restart at boot).
 
+## 32. What Session 39 closed, what it left, and what Session 40 inherits
+
+**Session 39 is public TLS endpoints and customer roles.** Twelve runs,
+`D2325`–`D2421`, ADRs 0268–0270. **`1.17.0` is deployed on four projects —
+alpha, beta, control-prod and the customer's `slot3-prod` — swept, merged and
+tagged on `b0249ce`** (D1425), after the commit moved twice when the trip met
+two defects no offline test could see: the mirror's script shipped without its
+executable bit (D2412) and nine restart proofs that did not allow the edge's
+own 5432 (D2413). The merged evidence reads **253 claims: 248 passed, 5
+failed** — `documented_path` by decision (D1935), the three lifecycle claims
+(D2415) and `public_endpoints_live` (D2416).
+
+**The sentence this session would most want carried forward: a trip that
+moves its commit re-reads every reader that pins the commit.** The lifecycle
+ran every step as planned on `slot2-prod` and still could not be counted: the
+external half pins the lifecycle's record to the deployed commit, and the trip
+had left the record's commit for a proof repair. A deleted key can never be
+re-registered, so the claims wait for a new slot.
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **Public TLS endpoints and customer roles** (stage plan §5 *Session 39*) | **Built, deployed and reached from the internet:** the edge's `postgres` entrypoint on 5432, TLS routed by name (ADR 0268); two customer-only poolers and two customer roles per project, a credential set by its verifier alone (ADR 0269); `slot3-prod` reached through both names by psql, Prisma, node-postgres and psycopg with the certificate verified (13/13). |
+| **A resize decided by its own admission reading** (D2310, D2292) | ADR 0270: the operation's result carries the reading; `admission_live` passed on the rehearsal at the commit (D2414). |
+| **Session 38's four repaired proofs** (D2317–D2319, D2321) | Passed in a sweep for the first time: `control_plane_live`, `reconciler_live`, `restore_isolation`, `lifecycle_project_door_live`'s host side. |
+| **`management_api`** (D2322) | `beta` again: `control_plane_live` passed. |
+| **A prepared slot vs the state-root readers** (D2305, D2307, D2312) | D2341: `prepared (slot)` agrees; `prepared_slot_readers` passed. The sweep's registry proof tolerates it since the close (D2409). |
+| **D2405** — `slot.sh revoke` left an empty state directory that refused every deploy | Repaired at the close: `revoke` removes the directory it made. Sheet SL4 (at `b0249ce`, before the repair ships): `slot2-prod`'s identity revoked, the empty directory removed by hand, `slot2-prod consumed`; its backup repository kept (D2421). |
+| **D2412, D2413, D2416/D2420** | Each repaired with a guard: an image's entrypoint script executable in the index; every port the edge publishes allowed by the restart proofs; every external fixture that holds a secret hands out a value whose `repr` is redacted, and every derived role a proof names is one the product derives. |
+| **The resize window** (D2419) | Re-read at 1.17.0 (83.5 s) and the constant moved to 84. |
+| **A DR kit at the tagged commit** | Sheet K4: `kit-2026-10-12-s39-b0249ce` (18 artifacts, three projects, release `b0249ce`), in WSL `~/dr-kits/` at 0700/0600. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **Eight Ledger rows `planned`, no operation type accepted in `main`** (D2415, D2416) | The six managed-project rows named `lifecycle_retrial_live` and the two endpoint rows `public_endpoints_live`, both `failed`. The deployed 1.17.0 still accepts the seven types, with no slot free. |
+| **Four live claims to re-earn on a NEW slot** (D2415) | `slot2-prod`'s key is deleted and can never be re-registered (AP409): `slot4-prod` prepared, then the lifecycle, the sweep and the external half at one commit. |
+| **No product verb redeploys a managed project at a new commit** (D2418) | Sheet D4 ran the reconciler's argv by hand; the next release move does the same until the reconciler owns one. |
+| **The slot's own windows** (D2324) | Unprobed again in Session 39. |
+| **D2325, D2326, D2331** | Postgres sees the gateway's address; no channel binding through the terminating gateway; a plaintext peer holds a socket for the read deadline; `secret_required_added` cannot fire. |
+| **The OVH upgrade** (D2342) | Owed before Session 41. |
+| **Hetzner** (M7 X1/X2) | Not before 2026-10-12 ~21:30Z. |
+| `documented_path` | **`failed` by decision** (D1935). |
+
+### What Session 40 inherits, in order
+
+1. **Branches and restore to a branch** (stage plan §5 *Session 40*), with
+   `slot3-prod` — the only live customer project — as the branch parent. A
+   branch restored from the parent carries the parent's verifiers: **the
+   re-key rotates both customer roles** before the branch's names open.
+2. **The re-earning**: `slot4-prod` prepared (providers, three grey records,
+   `host.yaml` and a reconciler restart, D2411), the eight rows back to `trial`
+   at the bump, and the lifecycle, the sweep and the external half at ONE
+   commit — the slot's routes probed before the first resize (D2324).
+3. **A managed project's release move** (D2418), before the next one.
+4. **The OVH upgrade** (D2342) and §10's smaller rows.
+
