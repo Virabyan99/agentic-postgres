@@ -38,6 +38,13 @@ pytestmark = [
 ]
 
 
+#: The registry's agreeing outcomes for a key NO deployed document names: a
+#: deleted project's tombstone (D2167) and a prepared slot (D2341, D2409). Never
+#: for one of the three. Typed, not imported -- this proof must not share the
+#: command's belief; `test_control_command.py` holds it to `control.AGREEING`.
+AGREEING_WITHOUT_A_DOCUMENT = frozenset({"deleted", "prepared"})
+
+
 @pytest.fixture(scope="module")
 def control_project() -> dict[str, Any]:
     path = Path(os.environ["APG_CONTROL_OUTPUTS"])
@@ -83,12 +90,14 @@ def test_the_registry_agrees_with_every_deployed_document(
     keys = {document["project"]["key"] for document in (project_a, project_b, control_project)}
     assert keys <= set(outcomes), (sorted(keys), sorted(outcomes))
     # A deleted project's row stays as the record of what existed (D2167) and
-    # reads `deleted` once its document is gone: agreeing, for a key no
-    # deployed document names -- never for one of the three (D2317).
+    # reads `deleted` once its document is gone; a prepared slot reads
+    # `prepared` (D2341). Each agrees for a key no deployed document names --
+    # never for one of the three (D2317, D2409).
     differing = {
         key: o
         for key, o in outcomes.items()
-        if o["outcome"] != "agrees" and (key in keys or o["outcome"] != "deleted")
+        if o["outcome"] != "agrees"
+        and (key in keys or o["outcome"] not in AGREEING_WITHOUT_A_DOCUMENT)
     }
     assert not differing, differing
 

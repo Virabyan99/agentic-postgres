@@ -51,6 +51,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from tests.external.redaction import Secret
 from tests.external.test_session38_public_lifecycle import (  # noqa: F401 -- fixtures
     Recorder,
     _only,
@@ -245,9 +246,10 @@ def _docker(*argv: str, timeout: int = 600) -> subprocess.CompletedProcess:
 
 
 @pytest.fixture(scope="module")
-def slot_creds() -> tuple[str, dict[str, str]]:
+def slot_creds() -> tuple[str, dict[str, Secret]]:
     """(key, {role: password}) from the credential directory: exactly one
-    project's, 0700/0600, each file one line -- never printed."""
+    project's, 0700/0600, each file one line -- never printed: each password a
+    `Secret`, so a failing test's arguments print no value (D2416)."""
     root = Path(os.environ["APG_CUSTOMER_CREDENTIAL_DIR"])
     assert stat.S_IMODE(root.stat().st_mode) == 0o700, f"{root} is not 0700"
     projects = [p for p in root.iterdir() if p.is_dir()]
@@ -256,7 +258,7 @@ def slot_creds() -> tuple[str, dict[str, str]]:
     for role in ("customer_app", "customer_admin"):
         path = projects[0] / role
         assert stat.S_IMODE(path.stat().st_mode) == 0o600, f"{path} is not 0600"
-        passwords[role] = path.read_text(encoding="utf-8").strip()
+        passwords[role] = Secret(path.read_text(encoding="utf-8").strip())
     return projects[0].name, passwords
 
 
@@ -448,7 +450,7 @@ def test_no_platform_role_passes_either_door(
     key, passwords = slot_creds
     platform = naming.database_roles(naming.sql_key(key))
     strangers = ["postgres", platform["app_runtime"], platform["migration_user"],
-                 platform["authenticator"]]  # fmt: skip
+                 platform["postgrest_authenticator"]]  # fmt: skip
     for door, own, other in (
         (doors["pooled"], "customer_app", doors["direct"]["user"]),
         (doors["direct"], "customer_admin", doors["pooled"]["user"]),

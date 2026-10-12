@@ -8,9 +8,11 @@ it keeps. The routes and the roles are in [the control plane](control-plane.md);
 the operator's half -- slots, the reconciler, revocation -- is the
 [operator guide](operator-guide.md) §20.
 
-**Every one of these operations is being verified** (Reality Ledger status
-`trial`, ADR 0261): it is open while the evidence that would make it `beta` is
-collected, and [the Reality Ledger](reality-ledger.md) says so for each.
+**None of these operations is open since Session 39's close** (Reality Ledger
+status `planned`, D2415): each was `trial` (ADR 0261) on the 1.17.0 trip, and
+returns to `trial` when a later sitting re-earns its evidence on a new slot; each
+route answers `409 not_available` naming its row until then, and
+[the Reality Ledger](reality-ledger.md) says so for each.
 
 ## The life of a project
 
@@ -122,8 +124,9 @@ your machine and sends only its verifier; nobody else ever holds it, and a
 lost password is replaced by rotating again. `bin/endpoint.sh show` prints
 the doors and a snippet per client; `bin/endpoint.sh connect` opens `psql`.
 A sleeping project's doors refuse until it is woken. The details are in
-[database connections](database-connections.md). **The doors are being
-verified** (Reality Ledger `trial`).
+[database connections](database-connections.md). **A new credential is not
+accepted** since Session 39's close (Reality Ledger `planned`, D2416): a rotation
+answers `409 not_available` until the doors' evidence is re-earned.
 
 ## What a refusal means
 

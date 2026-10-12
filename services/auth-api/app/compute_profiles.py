@@ -96,11 +96,12 @@ CUSTOMER_CONNECTIONS: dict[str, dict[str, int]] = {
 
 #: The restart a resize causes, in seconds, as MEASURED on this server -- or
 #: None while no envelope row exists (D2157). Set at Session 38's close from the
-#: trip's resize row (`capacity.ENVELOPE`, small -> standard: the operation's
-#: deploy step, 70.5 s on apg-ovh-01, an upper bound on the restart), and a test
+#: trip's resize row (`capacity.ENVELOPE`: the operation's deploy step, an upper
+#: bound on the restart -- 70.5 s at 1.16.0), and moved at Session 39's close to
+#: 1.17.0's larger step (83.5 s on apg-ovh-01, standard -> large; D2419); a test
 #: holds the two equal. Never a guess: with no row the message below says the
 #: window is unmeasured rather than print a number nobody read.
-RESIZE_WINDOW_SECONDS: int | None = 71
+RESIZE_WINDOW_SECONDS: int | None = 84
 
 UNMEASURED_RESIZE_MESSAGE = (
     "Resizing restarts the database and the services that use it; "

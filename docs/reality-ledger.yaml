@@ -30,6 +30,13 @@
 # lifecycle_project_door_live (D2321), reconciler_live (D2318), the last two
 # proof defects -- so all six are `planned` again, target Session 39, and no
 # operation type is accepted. Session 39 moves them back to `trial`.
+#
+# Session 39 (Run 9, D2343) moved the six and pooled_endpoint/direct_endpoint to
+# `trial`. Its close (Run 12) read the TAGGED evidence, evidence/session-39.json
+# (248/253): each of the eight names lifecycle_retrial_live (D2415) or
+# public_endpoints_live (D2416), both `failed`, so all eight are `planned` again,
+# target Session 40, and no operation type is accepted. management_api is beta
+# again: control_plane_live passed (D2322).
 
 schema_version: 1
 rows:
@@ -108,7 +115,7 @@ rows:
 
   - id: management_api
     concept: Management API (/api/v1)
-    status: planned
+    status: beta
     customer_text: >-
       https://control.agenticpostgresql.com/api/v1 manages accounts,
       organizations, members, invitations and keys, and lists your projects.
@@ -117,20 +124,18 @@ rows:
       One management API in the control project's app mode, frozen as a
       contract (contracts/control-openapi.canonical.json). A project operation
       is accepted only while its concept's ledger row is available, beta or
-      trial, and refused as not available otherwise (ADR 0254, ADR 0261). The
-      API serves on 1.16.0 as on 1.15.0; the row is planned since Session 38's
-      close because control_plane_live did not pass on evidence/session-38.json
-      -- the proof defect D2317, repaired in Run 13 -- and a beta row's claims
-      must pass on the newest evidence (ADR 0247). Session 39's first trip
-      measures it again and its close moves the row back to beta.
+      trial, and refused as not available otherwise (ADR 0254, ADR 0261).
+      Planned at Session 38's close because control_plane_live did not pass
+      (D2317); it passed on 1.17.0 in Session 39's sweep, and the row is beta
+      again (D2322).
     today_evidence: null
-    evidence: []
+    evidence: [control_api_contract, control_plane_live]
     stage5_reality: >-
       One management API in the control project's app mode, frozen as a
       contract and checked like the other four.
     eventual: A versioned public API with published client libraries.
     controls: []
-    since_session: 38
+    since_session: 36
     target_session: 39
 
   - id: cli_remote
@@ -179,26 +184,27 @@ rows:
   # -------------------------------------------------------------------------
   - id: projects_self_service
     concept: Create a project
-    status: trial
+    status: planned
     customer_text: >-
-      Being verified. A member of an organization creates a project on a slot
-      the operator prepared, and claims its first administrator with a one-time
-      token only they hold. When no slot is ready, or the server has no room,
-      the request is refused with "capacity exhausted" and nothing is created.
+      Not open yet. Creating a project will be refused with "capacity
+      exhausted" when this server has no room, and nothing will be created.
     today: >-
       POST /v1/projects (bin/project.sh create) records a project.create
       operation; the reconciler, a root unit on the host, executes it into a
       prepared slot through admission and the deploy, and bin/project.sh claim
       sets the first administrator's password through the project's own reset
       route. The operator still creates every other project by hand. Built in
-      Session 38 and run end to end on 1.16.0, where its live proofs failed for
-      reasons Session 38's close repaired (D2310, D2317-D2321); re-trialed in
-      Session 39 on 1.17.0, its lifecycle run again on a second slot and read
-      through /v1 and the slot's own door (lifecycle_retrial_live, D2343).
+      Session 38 and run end to end on 1.16.0, where its live proofs failed
+      for reasons Session 38's close repaired (D2310, D2317-D2321); re-trialed
+      in Session 39 on 1.17.0, where its lifecycle ran every step as planned
+      on a second slot (slot2-prod, at 1c40860) but lifecycle_retrial_live did
+      not pass on the tagged evidence: the release moved to b0249ce for a
+      proof repair after the lifecycle ran, and the external proof pins the
+      lifecycle's record to the deployed commit (D2415). Refused as not
+      available since Session 39's close; a later sitting re-earns it on a new
+      slot (slot4-prod), the lifecycle and the sweep at one commit.
     today_evidence: null
-    evidence:
-      - lifecycle_retrial_live
-      - prepared_slot_readers
+    evidence: []
     stage5_reality: >-
       POST /v1/projects records a project.create operation (member and above,
       a person only), refused "capacity exhausted" with no slot ready before
@@ -207,162 +213,162 @@ rows:
       administrator claims the account with a token only its requester holds
       (ADR 0256, ADR 0260).
     eventual: Placement across a fleet of servers.
-    controls:
-      - project.create
-      - bin/project.sh create
-      - bin/project.sh claim
+    controls: []
     since_session: 38
-    target_session: 39
+    target_session: 40
 
   - id: project_deletion
     concept: Delete a project
-    status: trial
+    status: planned
     customer_text: >-
-      Being verified. An admin or owner deletes a project with its data; the
-      slot it ran on is never reissued, and its backups are kept by the
-      operator.
+      Not open yet.
     today: >-
-      DELETE /v1/projects/{key} (bin/project.sh delete --confirm KEY) records a
-      project.delete operation; the reconciler retires the slot's project with
-      its data, leaves the provider's resources for the operator to revoke
-      (bin/slot.sh revoke), and marks the slot consumed. The operator retires
-      every other project with bin/project-retire.sh. Built in Session 38 and
-      run end to end on 1.16.0, where its live proofs failed for reasons Session
-      38's close repaired (D2310, D2317-D2321); re-trialed in Session 39 on
-      1.17.0, its lifecycle run again on a second slot and read through /v1 and
-      the slot's own door (lifecycle_retrial_live, D2343).
+      DELETE /v1/projects/{key} (bin/project.sh delete --confirm KEY) records
+      a project.delete operation; the reconciler retires the slot's project
+      with its data, leaves the provider's resources for the operator to
+      revoke (bin/slot.sh revoke), and marks the slot consumed. The operator
+      retires every other project with bin/project-retire.sh. Built in Session
+      38 and run end to end on 1.16.0, where its live proofs failed for
+      reasons Session 38's close repaired (D2310, D2317-D2321); re-trialed in
+      Session 39 on 1.17.0, where its lifecycle ran every step as planned on a
+      second slot (slot2-prod, at 1c40860) but lifecycle_retrial_live did not
+      pass on the tagged evidence: the release moved to b0249ce for a proof
+      repair after the lifecycle ran, and the external proof pins the
+      lifecycle's record to the deployed commit (D2415). Refused as not
+      available since Session 39's close; a later sitting re-earns it on a new
+      slot (slot4-prod), the lifecycle and the sweep at one commit.
     today_evidence: null
-    evidence:
-      - lifecycle_retrial_live
+    evidence: []
     stage5_reality: >-
       DELETE /v1/projects/{key} records a project.delete operation (admin and
       above, a person only); the reconciler retires the project with its data,
       the slot is consumed and never reissued, and the backups are kept by the
       operator -- this beta has no automatic removal (D2158, D2181).
     eventual: The same, with a grace period and recovery.
-    controls:
-      - project.delete
-      - bin/project.sh delete
+    controls: []
     since_session: 38
-    target_session: 39
+    target_session: 40
 
   - id: export
     concept: Export a project
-    status: trial
+    status: planned
     customer_text: >-
-      Being verified. A member exports a project's own data -- the app, api and
-      public schemas -- as one archive, downloaded once by the person who asked
-      within 15 minutes.
+      Not open yet.
     today: >-
       POST /v1/projects/{key}/export (bin/project.sh export) records a
       project.export operation; the reconciler dumps the app, api and public
       schemas (public since Session 39, D2333: the customer's own tables live
       there), uploads the archive through the project's own storage container,
-      and hands its one-time URL to the requester's first read of the operation.
-      The CLI downloads it once and checks its SHA-256. Built in Session 38 and
-      run end to end on 1.16.0, where its live proofs failed for reasons Session
-      38's close repaired (D2310, D2317-D2321); re-trialed in Session 39 on
-      1.17.0, its lifecycle run again on a second slot and read through /v1 and
-      the slot's own door (lifecycle_retrial_live, D2343).
+      and hands its one-time URL to the requester's first read of the
+      operation. The CLI downloads it once and checks its SHA-256. Built in
+      Session 38 and run end to end on 1.16.0, where its live proofs failed
+      for reasons Session 38's close repaired (D2310, D2317-D2321); re-trialed
+      in Session 39 on 1.17.0, where its lifecycle ran every step as planned
+      on a second slot (slot2-prod, at 1c40860) but lifecycle_retrial_live did
+      not pass on the tagged evidence: the release moved to b0249ce for a
+      proof repair after the lifecycle ran, and the external proof pins the
+      lifecycle's record to the deployed commit (D2415). Refused as not
+      available since Session 39's close; a later sitting re-earns it on a new
+      slot (slot4-prod), the lifecycle and the sweep at one commit.
     today_evidence: null
-    evidence:
-      - lifecycle_retrial_live
+    evidence: []
     stage5_reality: >-
       POST /v1/projects/{key}/export records a project.export operation (a
       person only); the archive holds the project's own schemas, and its
       download URL -- valid at most 15 minutes -- is shown once to the person
       who asked (D2164, ADR 0259).
     eventual: Scheduled exports to a customer's own storage.
-    controls:
-      - project.export
-      - bin/project.sh export
+    controls: []
     since_session: 38
-    target_session: 39
+    target_session: 40
 
   - id: region
     concept: Region
-    status: trial
+    status: planned
     customer_text: >-
-      Being verified. Every project runs in one location, the one server this
-      beta runs on, and each project's record names it.
+      Every project runs in one location, the one server this beta runs on.
     today: >-
       One server in one location. Host manifest schema 4 declares the region;
       every deployed document, the registry row and a creation's result carry
       it. No operation chooses a region: a creation is placed where the server
       is. Built in Session 38 and run end to end on 1.16.0, where its live
       proofs failed for reasons Session 38's close repaired (D2310,
-      D2317-D2321); re-trialed in Session 39 on 1.17.0, its lifecycle run again
-      on a second slot and read through /v1 and the slot's own door
-      (lifecycle_retrial_live, D2343).
+      D2317-D2321); re-trialed in Session 39 on 1.17.0, where its lifecycle
+      ran every step as planned on a second slot (slot2-prod, at 1c40860) but
+      lifecycle_retrial_live did not pass on the tagged evidence: the release
+      moved to b0249ce for a proof repair after the lifecycle ran, and the
+      external proof pins the lifecycle's record to the deployed commit
+      (D2415). Refused as not available since Session 39's close; a later
+      sitting re-earns it on a new slot (slot4-prod), the lifecycle and the
+      sweep at one commit.
     today_evidence: null
-    evidence:
-      - lifecycle_retrial_live
+    evidence: []
     stage5_reality: >-
       The operator's declaration in host.yaml (schema 4), carried into every
       deployed document and the registry, with one value (D1957, D2161).
     eventual: Placement across locations.
-    controls:
-      - project.create
+    controls: []
     since_session: 38
-    target_session: 39
+    target_session: 40
 
   - id: compute_profiles
     concept: Compute size
-    status: trial
+    status: planned
     customer_text: >-
-      Being verified. A member changes a project's compute size (small, standard
-      or large); the change restarts it, the message says for how long it was
-      measured to take, and a size the server has no room for is refused with
-      nothing changed.
+      Not open yet. Changing a project's size will restart it, and the message
+      will say how long the restart was measured to take.
     today: >-
       Three named profiles -- small, standard (the release defaults) and large
       -- selected by a manifest's compute block (schema 10) and applied where
       the manifest is loaded, so every existing limit check bounds them. PUT
       /v1/projects/{key}/compute (bin/compute.sh set) records a project.resize
-      operation the reconciler admits before it changes anything; since Session
-      39 the operation's result carries the reading admission decided on (D2362,
-      ADR 0270). Built in Session 38 and run end to end on 1.16.0, where its
-      live proofs failed for reasons Session 38's close repaired (D2310,
-      D2317-D2321); re-trialed in Session 39 on 1.17.0, its lifecycle run again
-      on a second slot and read through /v1 and the slot's own door
-      (lifecycle_retrial_live, D2343).
+      operation the reconciler admits before it changes anything; since
+      Session 39 the operation's result carries the reading admission decided
+      on (D2362, ADR 0270). Built in Session 38 and run end to end on 1.16.0,
+      where its live proofs failed for reasons Session 38's close repaired
+      (D2310, D2317-D2321); re-trialed in Session 39 on 1.17.0, where its
+      lifecycle ran every step as planned on a second slot (slot2-prod, at
+      1c40860) but lifecycle_retrial_live did not pass on the tagged evidence:
+      the release moved to b0249ce for a proof repair after the lifecycle ran,
+      and the external proof pins the lifecycle's record to the deployed
+      commit (D2415). Refused as not available since Session 39's close; a
+      later sitting re-earns it on a new slot (slot4-prod), the lifecycle and
+      the sweep at one commit.
     today_evidence: null
-    evidence:
-      - lifecycle_retrial_live
+    evidence: []
     stage5_reality: >-
       PUT /v1/projects/{key}/compute records a project.resize operation;
       admission refuses a profile the server has no room for with nothing
       changed, and the message says the restart has not been measured on this
       server until a measured window exists (D1955, D2157, ADR 0258).
     eventual: Compute scheduled independently of storage.
-    controls:
-      - project.resize
-      - bin/compute.sh set
-      - bin/compute.sh get
+    controls: []
     since_session: 38
-    target_session: 39
+    target_session: 40
 
   - id: sleep
     concept: Sleep and wake
-    status: trial
+    status: planned
     customer_text: >-
-      Being verified. A member puts a project to sleep and wakes it; its data is
-      kept, and while it sleeps its addresses and its database doors refuse
-      connections.
+      Not open yet.
     today: >-
       POST /v1/projects/{key}/sleep and /wake (bin/project.sh sleep, wake)
-      record project.sleep and project.wake operations; the reconciler stops and
-      starts the slot's containers with their volumes kept, and the project's
-      boot unit and backup timers with them. While it sleeps its customer
-      poolers are stopped too, so both public names refuse the connection
-      (D2336). Built in Session 38 and run end to end on 1.16.0, where its live
-      proofs failed for reasons Session 38's close repaired (D2310,
-      D2317-D2321); re-trialed in Session 39 on 1.17.0, its lifecycle run again
-      on a second slot and read through /v1 and the slot's own door
-      (lifecycle_retrial_live, D2343).
+      record project.sleep and project.wake operations; the reconciler stops
+      and starts the slot's containers with their volumes kept, and the
+      project's boot unit and backup timers with them. While it sleeps its
+      customer poolers are stopped too, so both public names refuse the
+      connection (D2336). Built in Session 38 and run end to end on 1.16.0,
+      where its live proofs failed for reasons Session 38's close repaired
+      (D2310, D2317-D2321); re-trialed in Session 39 on 1.17.0, where its
+      lifecycle ran every step as planned on a second slot (slot2-prod, at
+      1c40860) but lifecycle_retrial_live did not pass on the tagged evidence:
+      the release moved to b0249ce for a proof repair after the lifecycle ran,
+      and the external proof pins the lifecycle's record to the deployed
+      commit (D2415). Refused as not available since Session 39's close; a
+      later sitting re-earns it on a new slot (slot4-prod), the lifecycle and
+      the sweep at one commit.
     today_evidence: null
-    evidence:
-      - lifecycle_retrial_live
+    evidence: []
     stage5_reality: >-
       project.sleep and project.wake, by request only, stop and start the
       project's containers with volumes kept; while it sleeps a caller gets the
@@ -370,13 +376,9 @@ rows:
       moment it went to sleep (D1956, D2155, ADR 0259). Idle sleep is its own
       row.
     eventual: Compute suspended and resumed independently of storage.
-    controls:
-      - project.sleep
-      - project.wake
-      - bin/project.sh sleep
-      - bin/project.sh wake
+    controls: []
     since_session: 38
-    target_session: 39
+    target_session: 40
 
   - id: idle_sleep
     concept: Sleep when idle
@@ -400,77 +402,64 @@ rows:
   # -------------------------------------------------------------------------
   - id: pooled_endpoint
     concept: Pooled connection string
-    status: trial
+    status: planned
     customer_text: >-
-      Being verified. A project's pooled connection string -- pool.<project
-      domain>, port 5432, TLS required (sslmode=verify-full) -- reaches the
-      project's own transaction pooler as its application role. The password is
-      one your CLI generated (apg endpoint credential); it never left your
-      machine.
+      Not open yet.
     today: >-
       Since Session 39 the edge's port 5432 routes TLS by name to a project's
-      customer poolers: pool.<domain> reaches a transaction-mode PgBouncer that
-      admits only the customer_app role, whose credential is a SCRAM verifier
-      set from the customer's CLI. GET /v1/projects/{key}/connections (apg
-      endpoint show) serves the address and a snippet per client measured
+      customer poolers: pool.<domain> reaches a transaction-mode PgBouncer
+      that admits only the customer_app role, whose credential is a SCRAM
+      verifier set from the customer's CLI. GET /v1/projects/{key}/connections
+      (apg endpoint show) serves the address and a snippet per client measured
       through it. Only a slot has the facility; alpha, beta and the control
       project have none, and the platform's own pooler and the database are
-      never routed (ADR 0268, ADR 0269).
+      never routed (ADR 0268, ADR 0269). Built and deployed in Session 39
+      (1.17.0) and reached through both names by psql and three drivers on
+      slot3-prod; public_endpoints_live did not pass on the tagged evidence --
+      its proof named a platform role the product does not derive (D2416,
+      repaired at Session 39's close) -- so the row is planned again and the
+      doors' credential.rotate is refused as not available until a later
+      sitting re-earns the claim.
     today_evidence: null
-    evidence:
-      - public_endpoints_live
-      - public_port_scan
-      - endpoint_routes
-      - customer_poolers
-      - connection_api
-      - connection_snippets
+    evidence: []
     stage5_reality: >-
       A TLS endpoint per project on the edge's port 5432, routed by name to a
       customer-only transaction pooler, plaintext refused (ADR 0268).
     eventual: The same, behind a fleet-wide gateway.
-    controls:
-      - GET /v1/projects/{key}/connections
-      - bin/endpoint.sh show
-      - bin/endpoint.sh connect
+    controls: []
     since_session: 36
-    target_session: 39
+    target_session: 40
 
   - id: direct_endpoint
     concept: Direct connection string
-    status: trial
+    status: planned
     customer_text: >-
-      Being verified. A project's direct connection string -- direct.<project
-      domain>, port 5432, TLS required -- reaches a session pooler as the
-      project's administrator role, for migrations and tables in the public
-      schema. Setting a role's password again (apg endpoint credential) replaces
-      the previous one.
+      Not open yet.
     today: >-
       direct.<domain> reaches a session-mode PgBouncer that admits only the
       customer_admin role, which may create in the public schema and nothing
       else -- no app, api or app_private; no schema, role or extension. POST
-      /v1/projects/{key}/credentials (apg endpoint credential, a person, member
-      and above) records a credential.rotate operation whose argument is the
-      verifier, never a password; the reconciler sets it and rewrites both
-      poolers' lists. A session, not a raw connection to the database (ADR
-      0269).
+      /v1/projects/{key}/credentials (apg endpoint credential, a person,
+      member and above) records a credential.rotate operation whose argument
+      is the verifier, never a password; the reconciler sets it and rewrites
+      both poolers' lists. A session, not a raw connection to the database
+      (ADR 0269). Built and deployed in Session 39 (1.17.0) and reached
+      through both names by psql and three drivers on slot3-prod;
+      public_endpoints_live did not pass on the tagged evidence -- its proof
+      named a platform role the product does not derive (D2416, repaired at
+      Session 39's close) -- so the row is planned again and the doors'
+      credential.rotate is refused as not available until a later sitting
+      re-earns the claim.
     today_evidence: null
-    evidence:
-      - public_endpoints_live
-      - public_port_scan
-      - customer_roles
-      - credential_rotation
-      - customer_connection_budget
+    evidence: []
     stage5_reality: >-
       A TLS endpoint per project on the edge's port 5432, routed by name to a
       customer-only session pooler for the customer_admin role (ADR 0268, ADR
       0269).
     eventual: The same, behind a fleet-wide gateway.
-    controls:
-      - credential.rotate
-      - bin/endpoint.sh credential
-      - bin/endpoint.sh connect
+    controls: []
     since_session: 36
-    target_session: 39
+    target_session: 40
 
   - id: wake_on_connect
     concept: Wake on connect
@@ -825,8 +814,11 @@ rows:
     customer_text: >-
       Not open yet. Projects will run PostgreSQL 18 with pgvector.
     today: >-
-      Every project runs the locked PostgreSQL 18.4 image, with pgvector in the
-      extensions schema.
+      Every project runs the locked PostgreSQL 18.4 image, with pgvector in
+      the extensions schema. Since Session 39 a slot's customer reaches it
+      through the public endpoints; public_endpoints_live did not pass on
+      Session 39's tagged evidence (D2416), so the row stays planned for a
+      customer until a later sitting re-earns it.
     today_evidence: database_extensions
     evidence: []
     stage5_reality: >-
@@ -835,7 +827,7 @@ rows:
     eventual: The same, with a choice of major version.
     controls: []
     since_session: 36
-    target_session: 39
+    target_session: 40
 
   - id: project_isolation
     concept: Project isolation

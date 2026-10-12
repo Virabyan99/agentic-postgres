@@ -42,6 +42,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
+from tests.external.redaction import Secret
 
 pytestmark = [
     pytest.mark.p0,
@@ -150,7 +151,9 @@ def probe(endpoint: str) -> dict[str, Any]:
     assert document["endpoint"].rstrip("/") == endpoint, (document["endpoint"], endpoint)
     password_file = Path(document["password_file"])
     assert stat.S_IMODE(password_file.stat().st_mode) == 0o600, password_file
-    return {**document, "password": password_file.read_text(encoding="utf-8").strip("\n")}
+    # Secrets, so a failing proof prints neither (D2416).
+    return {**document, "totp_seed": Secret(document["totp_seed"]),
+            "password": Secret(password_file.read_text(encoding="utf-8").strip("\n"))}  # fmt: skip
 
 
 @pytest.fixture(scope="module")
@@ -188,7 +191,7 @@ def owner(endpoint: str, probe: dict[str, Any], fresh_totp_code: Any) -> Iterato
         "totp_code": fresh_totp_code(probe["totp_seed"]),
     })  # fmt: skip
     assert status == 200, (status, body.get("error"))
-    yield body["access_token"]
+    yield Secret(body["access_token"])
     own.send("DELETE", f"{endpoint}/sessions/current",
              {"refresh_token": body["refresh_token"]}, body["access_token"])  # fmt: skip
     _only(own, endpoint)

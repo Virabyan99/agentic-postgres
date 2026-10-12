@@ -11,9 +11,11 @@ accepted exactly when its ledger row is `available`, `beta` or `trial` (ADR
 0254, ADR 0261). Session 38's Run 10 moved the six rows the executed types act
 on to `trial`; its close returned them to `planned` (D2170). **Session 39's Run 9
 moves them to `trial` again, with `direct_endpoint`** (`credential.rotate`'s
-row), so the seven executed types are accepted on the commit its trip deploys,
-and the four unbuilt ones (`branch.*`, `restore.create`) stay refused; the
-session's close resolves each row. This
+row), so the seven executed types were accepted on the commit its trip deployed
+(1.17.0); **its close (Run 12) returned all seven rows to `planned`** --
+`lifecycle_retrial_live` and `public_endpoints_live` failed on the tagged
+evidence (D2415, D2416) -- so no type is accepted until a later sitting re-earns
+them. This
 image cannot read the ledger file -- it is not in the build context, and a
 running service deciding what exists from a document would make a document its
 authority -- so the set is written here and
@@ -74,20 +76,11 @@ EXECUTED_TYPES: Final[frozenset[str]] = frozenset(
 )
 
 #: The types the control mode accepts. Equal, by the guard, to the types whose
-#: ledger row accepts: the seven executed types, their rows `trial` since
-#: Session 39's Run 9 (D2343). Written out, never derived from `EXECUTED_TYPES`
-#: -- building a type is not the decision to accept it.
-ACCEPTED_TYPES: Final[frozenset[str]] = frozenset(
-    {
-        "project.create",
-        "project.delete",
-        "project.sleep",
-        "project.wake",
-        "project.resize",
-        "project.export",
-        "credential.rotate",
-    }
-)
+#: ledger row accepts: NONE since Session 39's close (Run 12) -- the seven
+#: executed types' rows are `planned` again (D2415, D2416). Written out, never
+#: derived from `EXECUTED_TYPES` -- building a type is not the decision to
+#: accept it.
+ACCEPTED_TYPES: Final[frozenset[str]] = frozenset()
 
 #: The JSON Schema every operation's `{type, arguments}` validates against,
 #: relative to the repository: read by the reconciler before dispatch, and

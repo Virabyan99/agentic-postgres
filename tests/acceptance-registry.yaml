@@ -6303,7 +6303,7 @@
   test_nodeids:
     - tests/contract/test_reality_ledger.py::test_every_operation_type_names_a_ledger_row_and_is_accepted_iff_its_row_is_reachable
     - tests/contract/test_operation_types.py::test_the_type_table_is_closed
-    - tests/contract/test_operation_types.py::test_exactly_the_seven_executed_types_are_accepted
+    - tests/contract/test_operation_types.py::test_no_type_is_accepted_and_the_seven_are_executed
     - tests/contract/test_operation_types.py::test_a_type_not_accepted_is_refused_not_available_before_its_body
   description: >-
     `operations.py`'s type table is closed and every type names an
@@ -6311,7 +6311,9 @@
     `beta` or -- since Session 38 (ADR 0261) -- `trial`. Session 37 accepted
     none; Session 38's trip accepted the six executed types (`trial`), and
     its close returned them to `planned` -- no type is accepted, the six stay
-    executed (D2170); a write route whose type is not accepted
+    executed (D2170); Session 39's trip accepted the seven (the six and
+    `credential.rotate`) and its close returned them to `planned` again
+    (D2415, D2416); a write route whose type is not accepted
     answers `409 not_available` naming its row before the project or the body
     is read, and writes no row (ADR 0254, D2054, D2170).
 

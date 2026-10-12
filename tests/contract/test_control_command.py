@@ -16,6 +16,7 @@ adopted as the superuser); what is proved here is the command's half.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import subprocess
@@ -442,3 +443,34 @@ def test_a_prepared_slot_agrees(
     host.answer(_registry_answer(*rows))
     assert host.main("registry") == 5
     assert _lines(capsys.readouterr().out)["gamma-dev"] == "no deployed document"
+
+
+def _typed_set(source: str, name: str) -> frozenset[str] | None:
+    """The string members of `NAME = frozenset({...})` at a module's top level."""
+    for node in ast.parse(source).body:
+        if (
+            isinstance(node, ast.Assign)
+            and [getattr(t, "id", None) for t in node.targets] == [name]
+            and isinstance(node.value, ast.Call)
+            and node.value.args
+            and isinstance(node.value.args[0], ast.Set)
+        ):
+            return frozenset(
+                e.value for e in node.value.args[0].elts if isinstance(e, ast.Constant)
+            )
+    return None
+
+
+def test_the_live_registry_proof_tolerates_every_agreeing_outcome_and_no_other() -> None:
+    """D2409: `prepared` (D2341) joined `control.AGREEING` and the sweep's
+    registry proof still read it as a difference -- a reader of the outcomes
+    that did not move. The proof types its own set (it must not share the
+    command's belief); this holds that set to the command's agreeing outcomes
+    other than `agrees`, read from the proof's text. The control: the scan
+    finds a planted set and misses an absent one."""
+    proof = REPO_ROOT / "tests" / "deployment" / "test_session37_control.py"
+    typed = _typed_set(proof.read_text("utf-8"), "AGREEING_WITHOUT_A_DOCUMENT")
+    assert typed == _load().AGREEING - {"agrees"}, typed
+    planted = 'X = frozenset({"deleted"})\n'
+    assert _typed_set(planted, "X") == {"deleted"}
+    assert _typed_set(planted, "AGREEING_WITHOUT_A_DOCUMENT") is None

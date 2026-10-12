@@ -212,6 +212,24 @@ def status(host_path: Path, *, as_json: bool) -> int:
 # ---------------------------------------------------------------------------
 
 
+def remove_made_directory(directory: Path, *, made: bool) -> None:
+    """D2405: the state directory `revoke` made for the destroy's copy, removed
+    once the destroy leaves it empty -- an empty `<state root>/<key>/` with no
+    deployed document is an undetermined commitment, and every later deploy's
+    admission on the node refuses on it. One `revoke` did not make is left
+    alone; one that is not empty is left and named, never emptied."""
+    if not made:
+        return
+    try:
+        directory.rmdir()
+    except OSError as problem:
+        print(
+            f"slot: {directory} was left ({type(problem).__name__}): every deploy's "
+            "admission refuses while it exists -- read it, and remove it once it is empty.",
+            file=sys.stderr,
+        )
+
+
 def revoke(host_path: Path, key: str, *, credential: Path, confirm: str) -> int:
     if confirm != key:
         raise OperatorError(
@@ -250,7 +268,9 @@ def revoke(host_path: Path, key: str, *, credential: Path, confirm: str) -> int:
     identity = json.loads(retired.read_text(encoding="utf-8")).get("runtime_identity_id")
 
     # Put the kept state where `bootstrap-providers` reads it -- a copy; the
-    # retired file stays the record whatever happens next.
+    # retired file stays the record whatever happens next. A state directory
+    # this command makes is its own to remove (D2405).
+    made = not live.parent.exists()
     live.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     descriptor = os.open(live, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "wb") as handle:
@@ -284,12 +304,14 @@ def revoke(host_path: Path, key: str, *, credential: Path, confirm: str) -> int:
         print(f"  {line}")
     if outcome != 0 or live.exists():
         live.unlink(missing_ok=True)
+        remove_made_directory(live.parent, made=made)
         raise OperatorError(
             EXIT_UNKNOWN,
             f"the revocation of {key} did not complete (bootstrap-providers "
             f"{'did not answer' if outcome is None else f'exited {outcome}'}); the retired "
             f"state is kept at {retired}. Read the provider console before re-running.",
         )
+    remove_made_directory(live.parent, made=made)
     descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         json.dump(

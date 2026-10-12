@@ -96,19 +96,19 @@ THE_ACCEPTED_SIX = {
 THE_EXECUTED_SEVEN = THE_ACCEPTED_SIX | {"credential.rotate"}
 
 
-def test_exactly_the_seven_executed_types_are_accepted() -> None:
-    """The exact-set form for Session 39 (ADR 0261 authorises it, D2343; renamed
-    from `..._no_type_is_accepted_and_the_seven_are_executed`, D2386): the
-    service accepts exactly the seven types the reconciler executes -- the six
-    managed-project types and `credential.rotate`, their rows `trial` -- the FOUR
-    unbuilt ones stay refused, and a type outside the table is never accepted.
-    The ledger half (accepted iff the row is reachable) is `test_reality_ledger`'s."""
-    assert operations.ACCEPTED_TYPES == THE_EXECUTED_SEVEN
+def test_no_type_is_accepted_and_the_seven_are_executed() -> None:
+    """The exact-set form at Session 39's close (ADR 0261 authorises it; renamed
+    from `test_exactly_the_seven_executed_types_are_accepted`, as Session 38's
+    close renamed it the other way): the seven types the reconciler executes are
+    built and NOT accepted -- their rows went back to `planned` because
+    `lifecycle_retrial_live` and `public_endpoints_live` failed on the tagged
+    evidence (D2415, D2416) -- so the service accepts no type at all, and a type
+    outside the table is never accepted. The ledger half (accepted iff the row
+    is reachable) is `test_reality_ledger`'s."""
+    assert operations.ACCEPTED_TYPES == frozenset()
     assert operations.EXECUTED_TYPES == THE_EXECUTED_SEVEN
-    refused = THE_ELEVEN - THE_EXECUTED_SEVEN
-    assert refused == {"branch.create", "branch.reset", "branch.delete", "restore.create"}
-    assert all(service_operations.is_accepted(t) for t in THE_EXECUTED_SEVEN)
-    assert not any(service_operations.is_accepted(t) for t in refused)
+    assert THE_EXECUTED_SEVEN < THE_ELEVEN
+    assert not any(service_operations.is_accepted(t) for t in THE_ELEVEN)
     assert not service_operations.is_accepted("project.rename")
 
 

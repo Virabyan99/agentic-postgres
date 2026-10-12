@@ -1257,6 +1257,7 @@ ENVELOPE: tuple[Measurement, ...] = (
             "print nothing)."
         ),
     ),
+    # ---- Session 38: the trip of 2026-10-09 and -10, on OVH (1.16.0) ----------
     Measurement(
         subject=(
             "Provisioning a managed project (project.create into the prepared slot, end to end)"
@@ -1371,8 +1372,9 @@ ENVELOPE: tuple[Measurement, ...] = (
     Measurement(
         subject="Resize: the restart a profile change causes (RESIZE_WINDOW_SECONDS, D2157)",
         value=(
-            "71 s: small -> standard, the operation's deploy step 70.5 s (operation f0087702); "
-            "standard -> large 66.5 s (16077edb)"
+            "84 s: small -> standard, the operation's deploy step 81.3 s (operation 3914872b, "
+            "claim to succeeded 83.7 s); standard -> large 83.5 s (e9fb5c95, 86.0 s); admission "
+            "read 304 and 840 MB requested against 4,620 MB safe available, both admitted"
         ),
         kind=MACHINE,
         conditions=(
@@ -1380,22 +1382,25 @@ ENVELOPE: tuple[Measurement, ...] = (
                 "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
                 "vCPU, no swap"
             ),
-            "1.16.0 at efaef09, 2026-10-10",
             (
-                "~/s38/run9/s38-lifecycle.py from the workstation as the probe owner, through "
+                "1.17.0 at 1c40860, 2026-10-12, slot2-prod (lifecycle attempt 3); 1c40860 is "
+                "product-identical to the tagged b0249ce (D2415)"
+            ),
+            (
+                "~/s39/run8/s39-lifecycle.py from the workstation as the probe owner, through "
                 "the product's own CLI; each operation's created/started/finished read back "
-                "through /v1, its steps from result.steps (D2171)"
+                "through /v1, its steps and its admission reading from result (D2171, D2362)"
             ),
             (
                 "the window is the resize's own deploy step (postgres and its dependents "
                 "recreated with the new limits) -- an UPPER bound on the restart: the slot's "
-                "routes were not probed"
+                "routes were not probed (D2324)"
             ),
         ),
         note=(
-            "D2310: on this host large is ADMITTED (840 MiB against ~4,600 safe available), so "
-            "the lifecycle measured the refused resize as a success. The CLI's end-to-end "
-            "resize on the rehearsal slot (7b2ff75) read 76.9 s and 76.5 s."
+            "Session 38 (1.16.0 at efaef09) read 70.5 s and 66.5 s and set the constant to 71; "
+            "what the ~13-17 s more at 1.17.0 is spent on was not read. The constant follows "
+            "the newest release's larger step, rounded up (Session 39's close)."
         ),
     ),
     Measurement(
@@ -1541,6 +1546,239 @@ ENVELOPE: tuple[Measurement, ...] = (
             "cold start took 156 s."
         ),
     ),
+    # ---- Session 39: the sittings of 2026-10-11 and -12, on OVH (1.17.0) ------
+    Measurement(
+        subject=(
+            "Recreating the edge with the public Postgres entrypoint (Sheet E1): what every "
+            "project loses"
+        ),
+        value=(
+            "every class of alpha-dev, beta-dev and control-prod down 23.1 s (bound 25.8-26.4 "
+            "s), alpha-dev's rest 24.4 s (bound 27.7 s), docs 13.75 s on both (bound 16.25 s); "
+            "each window ended by up"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            (
+                "2026-10-11, `bin/edge.sh --host host.yaml restart` adding the `postgres` "
+                "entrypoint (:8432 published as 5432), before 1.17.0's first deploy (ADR 0268)"
+            ),
+            (
+                "s39-probe-start.sh from the host as op through the public edge: one "
+                "unauthenticated GET "
+                "per class and project every 1.25 s (alpha, beta: 10 targets) and every 0.625 s "
+                "(control-prod's mcp), 2 s timeout"
+            ),
+            (
+                "down = a transport error, a 502/503/504 or Traefik's 404; bound = observed + "
+                "one interval either side"
+            ),
+        ),
+        note=(
+            "The shared edge is one container: Session 35 read 24.4 s on the CX23. Every edge "
+            "change pays this on every project at once."
+        ),
+    ),
+    Measurement(
+        subject="Provisioning a managed project at 1.17.0 (project.create, end to end), twice",
+        value=(
+            "slot2-prod 1210.7 s from the reconciler's claim to succeeded (queued 3.5 s), the "
+            "CLI's wait 1217.4 s; steps allocate 0.8, admit 0.9, deploy-1 88.9, admin 2.1, ports "
+            "2.2, deploy-2 59.9, unit 1.1, backup 1051.9, registry 0.3 s. slot3-prod 1156.3 s "
+            "(queued 3.4 s), the CLI's 1164.8 s; backup 1006.7 s"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            (
+                "1.17.0 at 1c40860, 2026-10-12, operations 85d48751 (slot2-prod, lifecycle "
+                "attempt 3) and 4b936429 (slot3-prod, the kept project), profile small"
+            ),
+            (
+                "~/s39/run8/s39-lifecycle.py from the workstation as the probe owner, through "
+                "the product's own CLI; each operation's created/started/finished read back "
+                "through /v1, its steps from result.steps (D2171)"
+            ),
+        ),
+        note=(
+            "The first full backup is ~87% of it, as at 1.16.0 (1,227 s, backup 1,100.9 s). "
+            "Attempts 1 and 2 stopped before it succeeded (D2411, D2412)."
+        ),
+    ),
+    Measurement(
+        subject="A customer credential at 1.17.0 (credential.rotate, the CLI's credential)",
+        value=(
+            "a rotation 1.8-2.0 s from claim to succeeded (six operations; steps check 0.0-0.1, "
+            "alter 0.2-0.3, sync 0.7 s; queued 0.2-4.9 s); both roles' credentials through the "
+            "CLI (generate, verifier, wait) 17.3 s on slot2-prod and 22.7 s on slot3-prod; after "
+            "the application role's rotation its old password was refused (exit 2) and the new "
+            "one admitted"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            "1.17.0 at 1c40860, 2026-10-12, slot2-prod and slot3-prod",
+            (
+                "~/s39/run8/s39-lifecycle.py from the workstation as the probe owner, through "
+                "`bin/endpoint.sh credential --wait`; the operations' steps from result.steps"
+            ),
+        ),
+        note=(
+            "The password never leaves the workstation: the operation carries a SCRAM "
+            "verifier (ADR 0269). 'sync' rewrites both customer poolers' lists."
+        ),
+    ),
+    Measurement(
+        subject="A TLS connection through each public name (pool.<domain>, direct.<domain>)",
+        value=(
+            "`bin/endpoint.sh connect` running one `select current_user`, process start to "
+            "exit: slot2-prod pool 4.9 s, direct 3.4 s; slot3-prod pool 4.7 s, direct 3.3 s. "
+            "psql alone, after each reboot: pool 2.7 s, direct 1.9 s (B1); 2.8 s, 2.0 s (B2)"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            (
+                "1.17.0 at 1c40860 (2026-10-12 09:44Z, 10:45Z, and B1 11:01Z) and b0249ce (B2, "
+                "12:49Z); sslmode=verify-full against the workstation's roots"
+            ),
+            "from the workstation, over the internet to Reston VA",
+        ),
+        note=(
+            "Where the time goes (distance, TLS, SCRAM, the CLI's own start) was not split; "
+            "the four drivers' own timings were not kept (13/13 passed)."
+        ),
+    ),
+    Measurement(
+        subject="Sleep and wake at 1.17.0 (project.sleep, project.wake) on slot2-prod",
+        value=(
+            "sleep 17.2 s from claim to succeeded (queued 3.8 s; schedule 3.8, unit 1.0, stop "
+            "11.4 s); asleep, 40 of 40 app-route samples answered the edge's 404 and both "
+            "public names refused (exit 2). Wake: the first answer that was not the edge's 404 "
+            "(401) 23.1 s after the request; the operation 25.9 s (queued 1.8 s; start 18.6, "
+            "unit 1.0, schedule 5.4 s)"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            "1.17.0 at 1c40860, 2026-10-12, operations 2fa78e91 and bf22ca4b, profile small",
+            (
+                "~/s39/run8/s39-lifecycle.py from the workstation as the probe owner, through "
+                "the product's own CLI; each operation's created/started/finished read back "
+                "through /v1, its steps from result.steps (D2171)"
+            ),
+        ),
+        note="Session 38 at 1.16.0: sleep 16.5 s, wake 21.8 s, first answer 19.3 s.",
+    ),
+    Measurement(
+        subject="Export and deletion at 1.17.0 (project.export, project.delete) on slot2-prod",
+        value=(
+            "export 2.6 s and 2.7 s from claim to succeeded (dump 0.4, upload 1.5 s), 40,276 "
+            "bytes holding api, app and public (no app_private); its URL answered 200 at once "
+            "and 403 after 930 s. Delete 18.9 s (queued 1.5 s; retire 17.6, tombstone 0.0, "
+            "registry 0.2 s); the address answered the edge's 404 at once (4 of 4)"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            (
+                "1.17.0 at 1c40860, 2026-10-12, operations 85fd16f6, 527b104e and 7df91215; a "
+                "near-empty project"
+            ),
+            (
+                "~/s39/run8/s39-lifecycle.py from the workstation as the probe owner, through "
+                "the product's own CLI; each operation's created/started/finished read back "
+                "through /v1, its steps from result.steps (D2171)"
+            ),
+        ),
+        note="An export of a project with data was not measured.",
+    ),
+    Measurement(
+        subject="The neighbours while a customer's project lives and dies beside them (1.17.0)",
+        value=(
+            "no window on any of the 11 targets: 23,991 + 4,795 samples all up through the "
+            "creation, three rotations, sleep, wake, two resizes, two exports and the deletion"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            "1.17.0 at 1c40860, 2026-10-12, ~09:23-10:13Z (lifecycle attempt 3), 2,999 s",
+            (
+                "s39-probe-start.sh from the host as op through the public edge: one "
+                "unauthenticated GET "
+                "per class and project every 1.25 s (alpha, beta: 10 targets) and every 0.625 s "
+                "(control-prod's mcp), 2 s timeout"
+            ),
+        ),
+        note="Read from the neighbours' side only; the slot's own routes were not probed (D2324).",
+    ),
+    Measurement(
+        subject="Memory available with four projects live (the customer's slot3-prod among them)",
+        value=(
+            "5,207 MiB available of 7,746 (used 2,538, buff/cache 3,254); with three projects "
+            "(slot2-prod deleted, slot3-prod not yet created) 5,454 MiB"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            (
+                "four projects: 2026-10-12 14:46Z, b0249ce, 2 h after the boot of 12:49Z; three: "
+                "2026-10-12 10:25Z, 1c40860, before slot3-prod's creation"
+            ),
+            "`free -m` as op (docker stats is root's, D1375)",
+        ),
+        note=(
+            "The ~250 MiB difference is not slot3-prod's cost: the readings straddle a reboot "
+            "and the page cache differs. Admission charges budgets, never this figure (D767)."
+        ),
+    ),
+    Measurement(
+        subject="A cold start with four projects on OVH: six units after a reboot",
+        value=(
+            "the edge, four project units and the reconciler each active and started by the "
+            "boot itself, NRestarts 0 on all six; all six first read active at boot+101 s (B1) "
+            "and boot+102 s (B2), three readings in a row by boot+122 s; multi-user.target at "
+            "boot+101 s and boot+96 s; 42 healthy containers after each"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 "
+                "vCPU, no swap"
+            ),
+            "booted 2026-10-12 11:01:05Z at 1c40860 (B1) and 12:49:46Z at b0249ce (B2)",
+            (
+                "s39-after-reboot.sh as op, `systemctl is-active` every 10 s, read before the "
+                "sweep ('started by the boot' as D2140 reads it)"
+            ),
+        ),
+        note="Session 38's three-project cold start: 100 s, the reconciler restarted once.",
+    ),
 )
 
 
@@ -1557,11 +1795,11 @@ UNMEASURED: tuple[Unmeasured, ...] = (
             "The probe was started on the three projects before the creation, and the slot's "
             "document is root's until Sheet K2 copies it -- the instrument timed each "
             "operation and sampled only after it ended. The resize row is the deploy step, an "
-            "upper bound."
+            "upper bound. Session 39's lifecycle (1.17.0) did not probe the slot either."
         ),
         unblocked_by=(
             "a probe target added for the slot's routes once its document is copied, before "
-            "the first resize (Session 39's trip)"
+            "the first resize (the next lifecycle, on slot4-prod)"
         ),
     ),
     Unmeasured(

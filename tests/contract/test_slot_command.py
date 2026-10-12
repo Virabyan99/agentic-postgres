@@ -300,6 +300,59 @@ def test_revoke_restores_the_kept_state_and_runs_the_products_destroy(
     assert command.main([*base, "--confirm", KEY]) == 5, "already revoked"
 
 
+def test_revoke_removes_the_state_directory_it_made(
+    command: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:  # fmt: skip
+    """D2405: after a deletion the key has no state directory; `revoke` makes
+    one for the destroy's copy, and an empty one left behind refused the next
+    deploy's admission on the node. Removed after a destroy that succeeded AND
+    one that failed. The control: a directory `revoke` did not make is left,
+    and so is one the destroy did not empty -- named on stderr."""
+    assert command.main(["prepare", "--host", str(HOST), "--slot", KEY]) == 0
+    credential = tmp_path / "operator-credential"
+    credential.write_text("id\nsecret\n", "utf-8")
+    base = ["revoke", "--host", str(HOST), "--slot", KEY,
+            "--operator-credential-file", str(credential), "--confirm", KEY]  # fmt: skip
+    directory = command.SLOT_ROOT / KEY
+    state = command.STATE_ROOT / KEY
+    live = state / "bootstrap-state.json"
+    (directory / slot.CONSUMED).write_text("", "utf-8")
+    (directory / slot.RETIRED_STATE).write_text('{"runtime_identity_id": "id-1"}\n', "utf-8")
+    behaviour = {"exit": 7, "leave": False}
+
+    def destroy(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        assert live.is_file(), "destroy ran without the kept state"
+        if behaviour["exit"] == 0:
+            live.unlink()
+        if behaviour["leave"]:
+            (state / "stray").write_text("", "utf-8")
+        return subprocess.CompletedProcess(argv, behaviour["exit"], "", "")
+
+    monkeypatch.setattr(command.subprocess, "run", destroy)
+    assert not state.exists(), "the fixture's slot has a state directory before any revoke"
+
+    assert command.main(base) == 6
+    assert not state.exists(), "a failed revocation left the directory it made"
+
+    behaviour.update(exit=0, leave=True)
+    assert command.main(base) == 0
+    assert (state / "stray").exists(), "a directory the destroy did not empty was emptied"
+    assert str(state) in capsys.readouterr().err
+    (state / "stray").unlink()
+    state.rmdir()
+    (directory / slot.REVOKED).unlink()
+
+    behaviour.update(leave=False)
+    assert command.main(base) == 0
+    assert not state.exists(), "the revocation left the directory it made"
+    (directory / slot.REVOKED).unlink()
+
+    state.mkdir(mode=0o700)
+    assert command.main(base) == 0
+    assert state.is_dir(), "a directory revoke did not make was removed"
+
+
 def test_the_slot_vocabulary_is_one_list_everywhere() -> None:
     """The key pattern: `slot.SLOT_KEY`, the host schema and the control set's
     CHECK. The states: `slot.STATES` and `control_slots.state`'s CHECK."""
