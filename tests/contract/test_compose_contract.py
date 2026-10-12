@@ -9,6 +9,7 @@ render successfully.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -1196,6 +1197,36 @@ def test_only_traefik_publishes_host_ports() -> None:
     assert "ports" not in document["services"]["docker-socket-proxy"]
     published = {p["published"] for p in document["services"]["traefik"]["ports"]}
     assert published == {"80", "443", "5432"}
+
+
+def _restart_proofs_allowed_public() -> set[tuple[str, int]]:
+    """`ALLOWED_PUBLIC` from the Session 4 restart proofs, read as text.
+
+    Read with `ast`, never imported: a deployment module is not this suite's to
+    load. A missing assignment fails, so a renamed set cannot pass vacuously."""
+    source = REPO_ROOT / "tests" / "deployment" / "test_session4_convergence.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "ALLOWED_PUBLIC"
+            for target in node.targets
+        ):
+            return set(ast.literal_eval(node.value))
+    raise AssertionError(f"no ALLOWED_PUBLIC assignment in {source}")
+
+
+def test_every_port_the_edge_publishes_is_allowed_by_the_restart_proofs() -> None:
+    """D2413: ADR 0268 published 5432 and D2338 moved every guard it listed, but
+    not the restart proofs' allowlist; nine of them failed Run 11's sweep on the
+    edge's own entrypoint. Held to the resolved edge model, so the next
+    publication moves both or fails here, offline."""
+    document = yaml.safe_load(edge("config").stdout)
+    published = {("tcp", int(p["published"])) for p in document["services"]["traefik"]["ports"]}
+    missing = published - _restart_proofs_allowed_public()
+    assert not missing, (
+        f"the edge publishes {sorted(missing)}, which the restart proofs' ALLOWED_PUBLIC "
+        "(tests/deployment/test_session4_convergence.py) would report as a new public listener"
+    )
 
 
 def test_traefik_has_no_direct_docker_socket_mount() -> None:

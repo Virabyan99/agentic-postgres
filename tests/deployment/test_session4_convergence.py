@@ -86,7 +86,10 @@ TRANSPORT_RETURN_TIMEOUT_SECONDS = 300
 #: question here is different — not "is the baseline intact" but "did a restart
 #: add something" — and because a restart is when a publication would appear.
 #: UDP/68 is the DHCP client, which genuinely binds the public interface.
-ALLOWED_PUBLIC = {("tcp", 22), ("tcp", 80), ("tcp", 443), ("udp", 68)}
+#: TCP/5432 is the edge's public Postgres entrypoint since Session 39 (ADR 0268);
+#: D2338's guard list missed this set and Run 11's sweep failed nine restart
+#: proofs on it (D2413). `test_compose_contract` now holds it to the edge model.
+ALLOWED_PUBLIC = {("tcp", 22), ("tcp", 80), ("tcp", 443), ("tcp", 5432), ("udp", 68)}
 
 
 def key(document: dict[str, Any]) -> str:
