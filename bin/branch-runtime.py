@@ -605,6 +605,17 @@ def detach(names: naming.BranchNames) -> None:
 # ---------------------------------------------------------------------------
 
 
+def rfc3339(value: str) -> str:
+    """One spelling for every instant a record holds (D2483): pgBackRest's target
+    (`2026-10-14 09:30:00.000000+00:00`, D2454) and psql's timestamptz text
+    (`2026-10-14 09:31:07.08+00`) both become RFC 3339 -- the spelling the branch
+    read serves, so an operation's result and the read agree."""
+    parsed = restore_drill.instant(value)
+    if parsed is None:
+        raise OperatorError(EXIT_UNKNOWN, f"not an instant: {value!r}")
+    return parsed.astimezone(UTC).isoformat()
+
+
 def record(plan: branch_plan.BranchPlan, *, state: str, **values: Any) -> branch_record.Record:
     path = branch_record.record_path(plan.project_key, plan.branch, root=BRANCH_ROOT)
     previous = _read(path)
@@ -629,6 +640,9 @@ def record(plan: branch_plan.BranchPlan, *, state: str, **values: Any) -> branch
     )
     base.pop("schema_version", None)
     base.update(values)
+    for member in ("requested_point", "reached_point"):
+        if base.get(member):
+            base[member] = rfc3339(base[member])
     base.update(state=state, updated_at=now())
     written = branch_record.Record(**base)
     branch_record.write(path, written)

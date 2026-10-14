@@ -210,11 +210,12 @@ capacity_exhausted {reason: no_slot}` before anything is recorded; one the
 server has no room for fails `capacity_exhausted {reason: admission}` before
 anything is rendered. No code in 1.16.0 produces `plan_limit_reached`.
 
-**No type is accepted since Session 39's close** (D2415, D2416): the seven
-executed types' rows -- the six and `credential.rotate`'s `direct_endpoint` --
-were `trial` (ADR 0261) on the 1.17.0 trip and are `planned` again, because two
-live claims they name did not pass on the tagged evidence. A type whose row is
-not reachable answers `409 not_available` naming the row -- today every type.
+**All eleven executed types are accepted since Session 40's bump**: the
+seven's rows -- the six and `credential.rotate`'s `direct_endpoint` -- are
+`trial` (ADR 0261) again, re-earned on a new slot (D2442), and the four branch
+types' rows are `trial` for the first time (ADR 0271). Each is being verified
+on the 1.18.0 trip; a type whose row is not reachable answers `409
+not_available` naming the row.
 
 **Only the alpha, beta and control projects are the operator's**: the
 reconciler acts on declared slots alone, and a write naming an adopted project

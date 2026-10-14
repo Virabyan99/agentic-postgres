@@ -71,7 +71,9 @@ ROTATED = ("customer_app", "customer_admin", "customer_app")
 
 @pytest.fixture(scope="module")
 def record39(record: dict[str, Any]) -> dict[str, Any]:
-    assert record["session"] == 39, f"a Session {record['session']} record, not 39's"
+    # D2442: Session 40's record has these members and these eleven operations
+    # too, so 39's claim re-runs against the newest record, asserting all of it.
+    assert record["session"] in (39, 40), f"a Session {record['session']} record, not 39's or 40's"
     assert isinstance(record.get("doors"), dict), "the record names no doors"
     return record
 

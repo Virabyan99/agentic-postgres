@@ -1087,7 +1087,61 @@ from pathlib import Path
 #: confirms the class against a DEPLOYMENT: `upgrade plan` on every project,
 #: with the same two declarations, before the first 1.17.0 deploy -- and a
 #: `major` there is a stop condition.
-CURRENT_SESSION = 39
+#:
+#: **Session 40 moves it to 40, all-or-nothing again** (D690): FOURTEEN
+#: requirements and fourteen claims -- `CLAIMS` 253 -> 267 and `OFFLINE_CLAIMS`
+#: 101 -> 111, counted from the tuples (D1628) -- ten declared offline, three
+#: EXTERNAL and one host, every offline half written in the run that built its
+#: piece (Runs 2-7) and every live half here. One family joins the registry:
+#: `BR`, branches. The three external claims are a customer's branches of the
+#: kept slot through `/v1` and its public names alone, and the re-earned
+#: lifecycle and endpoints on a NEW slot (D2415, D2442); the host claim is the
+#: branch on the machine -- bounded, charged, the parent untouched, back after
+#: the reboot, nothing left after its deletion.
+#:
+#: **The session's subject is a project's branches**, and three ADRs are their
+#: shape. ADR 0271: a branch is its own three-service cluster restored from its
+#: parent's repository to the end of the archive or to a point inside the
+#: window, re-keyed before its two doors open (every platform role NOLOGIN, its
+#: own two customer verifiers), never backed up, one per project, charged
+#: `small`'s 192 MiB. ADR 0272: a branch's expiry is a trigger -- the
+#: reconciler requests ONE deletion on behalf of the member who set it, its
+#: `origin` `expiry`. ADR 0273: the backups surface, a recorded reading served
+#: with its age, a window or `could_not_determine`, never a guess.
+#:
+#: **No released migration** -- the branches' registry is the control set's
+#: `0006` and `0007`. **No outputs, manifest, host, capability, lock or secret
+#: schema moves** (outputs stay v22, the project manifest 11). The Ledger's six
+#: managed-project rows, the two endpoint rows and the three branch rows are
+#: `trial` (ADR 0261), so the eleven executed types are accepted.
+#:
+#: **`VERSION` moves to `1.18.0`.** What moved: the control mode's seven
+#: branch, restore and backups routes and the operation read's `origin` in
+#: `services/auth-api`, so the image moves and a deploy recreates `auth`,
+#: `storage` and `mcp`; the reconciler's four branch handlers, its readings and
+#: its expiry request (`bin/reconciler.py`, a restart of the unit);
+#: `bin/branch-runtime.sh` and `infra/branch/compose.yaml`;
+#: `bin/edge-network.sh`'s network verbs; the control set's `0006` and `0007`;
+#: `bin/branch.sh`, `bin/project.sh backups` and `bin/slot.sh redeploy`.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig: a git
+#: worktree at `b0249ce`, the commit that IS deployed, and a `tar`-piped copy of
+#: this working tree, both rendering the INSTALLED tree's `project.example.yaml`.
+#: With `--also api_operation_added`: `bump minor`, **`requires minor`**,
+#: verdict `ok`, `changes [api_operation_added]`, `reasons []`,
+#: `operator_digests_moved []`. Without the declaration: `requires patch` --
+#: the ninth release in a row whose price the command sees only by
+#: declaration. **One leaf differs**: `template_version` 1.17.0 -> 1.18.0
+#: (6,350 -> 6,350 bytes). **ADR 0162 prices it a MINOR, and `1.18.0` is that
+#: floor exactly.** What an operator must KNOW the reading cannot show: a
+#: branch parent's two grey wildcard records (`*.pool.<domain>`,
+#: `*.direct.<domain>`) before its first branch, the reconciler restarted
+#: after the checkout moves (D2179), and a managed project moved to the
+#: release by `slot.sh redeploy` with the reconciler stopped (D2443). **The
+#: trip** confirms the class against a DEPLOYMENT: `upgrade plan` on every
+#: project, with the same declaration, before the first 1.18.0 deploy -- and
+#: a `major` there is a stop condition.
+CURRENT_SESSION = 40
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

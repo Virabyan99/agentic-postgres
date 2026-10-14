@@ -164,7 +164,12 @@ def test_the_backup_runs_nightly_and_catches_up_after_downtime() -> None:
 def test_both_gates_lint_the_store_script() -> None:
     """A script nothing lints is a script whose refusals nobody checks; the
     newest session gate repeats session-01's line, so both carry it."""
-    for gate in ("session-01-check.sh", "session-38-check.sh", "session-39-check.sh"):
+    for gate in (
+        "session-01-check.sh",
+        "session-38-check.sh",
+        "session-39-check.sh",
+        "session-40-check.sh",
+    ):
         text = (REPO_ROOT / "bin" / gate).read_text(encoding="utf-8")
         assert re.search(r"^\s*shellcheck .*infra/secret-store/\*\.sh", text, re.MULTILINE), gate
 

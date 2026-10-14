@@ -458,6 +458,12 @@ the runs add go in a second table below it, in execution order.
 | **D2485** | Run 7: *"Prisma `migrate deploy` over `dev.direct.…`"*. | `slot3-prod` already holds the Prisma fixture's migration (Session 39's endpoints instrument ran Prisma first), so a branch is a copy in which `migrate deploy` has nothing to apply; a public schema with tables and no `_prisma_migrations` is refused P3005. | **`s40-branches.py` mounts the client image's migrations plus ONE of this run's name** and reads its table on `dev` and NOT on `main`; the rehearsal applies the fixture's migration to its parent first, as Session 39 did to `slot3-prod`. The database URLs reach the container through a 0600 `--env-file`, never an argument. | "A migration applied over the branch's direct name" is a migration that was pending there. | -- |
 | **D2486** | ADR 0272: the expiry's latency, from `expires_at` to deleted, measured (Run 11's envelope row). | The CLI's minimum is 15 minutes and the server measures from receipt (D2475): a rehearsal cannot wait for it honestly in a reasonable time. | **The branch rehearsal WARPS the expiry**: its fake reconciler moves `tmp`'s recorded `expires_at` into the past 20 s after it is ready, so `control_request_expiry` fires in seconds (its `seconds_after_expires_at` reads negative and is the rehearsal's, not a measurement). The real latency is Run 10's; `s40-branches.py` waits up to 45 minutes. | Named so no reader takes the rehearsal's number for the host's. | 0272 |
 
+| **D2487** | §2: BR-LIVE-002's node ids in `tests/deployment/test_session40_branches.py`; BR-LIVE-001's in `tests/external/test_session40_branches.py`. | `tests/external/` and `tests/deployment/` are not packages, so pytest cannot collect two test modules of one basename: `--setup-plan` stopped at collection, *"import file mismatch"*. | **The host module is `tests/deployment/test_session40_branch_host.py`**; the registry's five node ids and the threat rows name it. Then `--setup-plan` with every variable set: **exit 0, 96 setup/teardown lines, no error, no skip**. | D671's cheap half caught it before a sweep could. | -- |
+| **D2488** | §2 BR-LIVE-002: *"the parent's volume, `instance_uuid`, timeline and postmaster start unchanged across its life ... nothing of it left after the deletion"*; Run 10 orders S1 BEFORE `--delete-only`. | At the sweep `dev` is live, so its deletion cannot be read there; and Sheet B1 restarts the parent, so its postmaster start cannot be "unchanged" when the sweep reads it. | **The host's deletion proof reads `tmp`** -- deleted by its expiry BEFORE the sweep -- and the record's `origin = expiry` for it (the external half reads `dev`'s deletion live, after). **"The parent untouched" reads what survives a reboot**: its identity row is its own key; its timeline is ONE below the branch's (a branch promotes from the parent's, the parent never moves); its volume is the derived one and older than the branch; and **every WAL `pgbackrest info` lists is on the parent's timeline** -- the branch archived nothing. Threat item 6 says so. | Each assertion is one the sweep's moment can actually make. | 0271 |
+| **D2489** | §2: the proposed node ids. | Read from the tree with `pytest --collect-only` (~/s40/run8/nodes.py): BR-CTL-001's `::test_only_an_expiry_may_request_without_a_member_route` is the tree's `::test_an_expiry_is_bounded_and_only_an_expiry_requests_without_a_member`, BR-DISPATCH-001's existing proof `::test_the_closed_table_is_the_executed_types` (D2472); 22 Session 40 proofs §2 named nowhere (~/s40/run8/uncovered.py). | **The tree's names are registered**, and the 22 join their requirements (BR-NAME +2, BR-PLAN +3, BR-REKEY +3, BR-CTL +3 and the not-available proof, BR-DISPATCH +8, BR-BACKUP +2); BR-DISPATCH-001's statement carries D2471's steps (check, runtime, record). REC-SAFE-001 gains `test_assert_disposable_refuses_archiving`; CTL-OPS-001's node id moves to `test_exactly_the_eleven_executed_types_are_accepted` (D1119). | A registry that names what was written. | -- |
+| **D2490** | Run 4: `test_control_branches.py::test_a_branch_write_is_not_available_until_its_row_is_reachable` -- *"in the product's own state"*. | At the bump the branch rows are `trial` and `ACCEPTED_TYPES` the eleven, so the product's own state no longer refuses: the proof's premise moved. | **Renamed `::test_a_branch_write_is_not_available_while_its_row_is_unreachable`**: it makes the branch types unaccepted for itself and reads `409 not_available` naming `branches` and `restore_to_branch`, no row; **its control** is the product's state now -- the same nonsense body READ and refused `400 malformed_request`. | A refusal proof must keep a world in which the refusal happens. | 0254 |
+| **D2491** | Run 7: `s40-lifecycle.py`'s EP-LIVE-004 platform-role check and D2444's probes. | Writing the external proof found two instrument defects: `platform_refused` POPPED the door's own role out of the dict it had already recorded (the record's shape depended on a later save), and a rehearsal once read no pool failure inside an 8 s sleep -- seen once in four runs, not reproduced. | **The check reads without mutating** (the record keeps the four platform exits AND the door's own role's 0, which the proof asserts), and **each probe sample's trace is in the record** (offset, verdict, seconds, the status or exit) so a window is read from its evidence. Rehearsal re-run: PASSED, the trace showing the sleep (pool refused 2-10 s, route 404 2-12 s). On the host the asleep phase is at least 60 s. | An instrument's record is the proof's input; its shape may not depend on timing. | 0258 |
+
 ---
 
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1243,6 +1249,42 @@ detached (CLAUDE.md §1), then CI.
   `tests/deployment/test_session40_branches.py` — **`--setup-plan` with every
   variable set: exit 0, no error** (D671); `RECORD_SESSIONS` and `record39`
   (D2442).
+
+**Done.** (2026-10-14; rows **D2487-D2491**.) **Measured**: 1.18.0 priced
+`requires minor` by D1624's rig (worktree at `b0249ce` against this tree, `--also
+api_operation_added`; `requires patch` without -- the ninth release in a row seen
+only by declaration; ONE leaf differs, `template_version`, 6,350 -> 6,350 bytes);
+the paragraph beside `CURRENT_SESSION` carries it. `CURRENT_SESSION` 40, `VERSION`
+1.18.0, `README.md:7`, 15 `--session`/`--through-session` literals moved in five
+files (none left on the documented path). **D2483 repaired**: `branch-runtime.py`'s
+`record()` writes `requested_point` and `reached_point` RFC 3339. Registry **360**
+requirements (+14, the `BR` family; node ids the tree's, D2489), `CLAIMS` **267**,
+`OFFLINE_CLAIMS` **111**, `CLAIM_INTRODUCED_IN` +14 at 40; the roster's one
+variable `APG_BRANCH_RECORD_FILE`. **The Ledger**: the six managed-project rows ->
+`trial` (`lifecycle_reearned_live`), `pooled_endpoint`/`direct_endpoint` -> `trial`
+(`endpoints_reearned_live`), `branches`/`restore_to_branch`/`backups_and_pitr` ->
+`trial` (`branch_live` and Session 40's offline claims), their texts for ADR
+0271-0273; `postgresql` stays `planned`; **`ACCEPTED_TYPES` = the eleven**
+(CTL-OPS-001 renamed `test_exactly_the_eleven_executed_types_are_accepted`;
+D2490). **`bin/session-40-check.sh`** derived from 39's: flag tokens 65 -> 66
+(exactly `--branch-record-file`, exported in host AND external mode), parser arms
+32 -> 33, header and usage rewritten whole; `test_session_forty_gate_modes.py`
+derived (+ the export test). The live modules: BR-LIVE-001
+(`tests/external/test_session40_branches.py`, eight proofs, no process door),
+LIFE-LIVE-004 + EP-LIVE-004 (`tests/external/test_session40_reearning.py`, nine),
+BR-LIVE-002 (`tests/deployment/test_session40_branch_host.py`, five; D2487,
+D2488); `RECORD_SESSIONS` {38, 39, 40}, `record39` {39, 40} (D2442) --
+**`--setup-plan` with every variable set: exit 0, 96 lines, no error**; none has
+executed. Four `THR-BR-*` rows (items 1, 4, 6, 13 pointers). Documents: the
+upgrade guide's 1.18.0 row and both release lines, the control plane's and
+managed projects' acceptance sentences, the product contract (rendered with the
+matrix), `reality-ledger.md`. Instruments repaired against the proofs (D2491).
+Targeted once: **1380 passed, 2 failed** -- the matrix (rendered before the
+rename) and the not-available control (`400`, not `422`); both re-run: 33 passed.
+**Battery 5/5 killed**, each control green (`~/s40/run8/battery8.py`): the branch
+record not exported by the host mode; `restore.create` unaccepted; a trial row
+leaning on an older claim; a threat row naming a missing test; the record keeping
+psql's spelling.
 
 ### Run 9 — sitting 1 (day 1): the release, `slot3-prod` moved by the verb, `slot4-prod` prepared, the dry run
 

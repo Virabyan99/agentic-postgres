@@ -407,6 +407,30 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "connection_api",
         "connection_snippets",
         "prepared_slot_readers",
+        # Session 40 (ADR 0271-0273). TEN, each a property of a CHECKOUT: the
+        # branch's names (`branch_naming`); the restore plan and its cluster
+        # proof (`branch_restore_plan`); the re-key on a throwaway cluster
+        # (`branch_rekey`); the control set and its routes on a control cluster
+        # (`branch_control`); the reconciler's handlers over a recorder
+        # (`branch_dispatch`); the expiry's request on a control cluster
+        # (`branch_expiry`); the charge (`branch_capacity`); the backups reading
+        # (`backups_surface`); the customer's CLI against the real control app
+        # (`branch_cli`); and `slot.sh redeploy` (`slot_redeploy`).
+        #
+        # The session's other FOUR are deliberately not here: three are a
+        # customer's branches of the kept slot and the re-earned lifecycle and
+        # doors on a new slot, read from the workstation (EXTERNAL), and one is
+        # the branch on the host.
+        "branch_naming",
+        "branch_restore_plan",
+        "branch_rekey",
+        "branch_control",
+        "branch_dispatch",
+        "branch_expiry",
+        "branch_capacity",
+        "backups_surface",
+        "branch_cli",
+        "slot_redeploy",
     }
 )
 
@@ -826,6 +850,26 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "public_endpoints_live": ("EP-LIVE-001",),
     "public_port_scan": ("EP-LIVE-002",),
     "endpoints_host_live": ("EP-LIVE-003",),
+    # Session 40 (ADR 0271-0273). FOURTEEN claims, landing with the constant
+    # (D690): ten offline, three external -- a customer's branches of the kept
+    # slot, and the lifecycle and the doors re-earned on a new slot (D2442) --
+    # and one host. Each requirement is its own claim (ADR 0089). The session's
+    # subject is a project's branches: a copy restored from its own backups,
+    # re-keyed before its doors open, never backed up, one per project.
+    "branch_naming": ("BR-NAME-001",),
+    "branch_restore_plan": ("BR-PLAN-001",),
+    "branch_rekey": ("BR-REKEY-001",),
+    "branch_control": ("BR-CTL-001",),
+    "branch_dispatch": ("BR-DISPATCH-001",),
+    "branch_expiry": ("BR-TTL-001",),
+    "branch_capacity": ("BR-CAP-001",),
+    "backups_surface": ("BR-BACKUP-001",),
+    "branch_cli": ("BR-CLI-001",),
+    "slot_redeploy": ("LIFE-SLOT-003",),
+    "branch_live": ("BR-LIVE-001",),
+    "branch_host_live": ("BR-LIVE-002",),
+    "lifecycle_reearned_live": ("LIFE-LIVE-004",),
+    "endpoints_reearned_live": ("EP-LIVE-004",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

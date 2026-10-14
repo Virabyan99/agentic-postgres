@@ -1254,6 +1254,22 @@ CLAIM_INTRODUCED_IN = {
     "public_endpoints_live": 39,
     "public_port_scan": 39,
     "endpoints_host_live": 39,
+    # Session 40 (ADR 0271-0273). FOURTEEN, ten offline, three external and one
+    # host: the branches of the kept slot, the re-earning on a new slot (D2442).
+    "branch_naming": 40,
+    "branch_restore_plan": 40,
+    "branch_rekey": 40,
+    "branch_control": 40,
+    "branch_dispatch": 40,
+    "branch_expiry": 40,
+    "branch_capacity": 40,
+    "backups_surface": 40,
+    "branch_cli": 40,
+    "slot_redeploy": 40,
+    "branch_live": 40,
+    "branch_host_live": 40,
+    "lifecycle_reearned_live": 40,
+    "endpoints_reearned_live": 40,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

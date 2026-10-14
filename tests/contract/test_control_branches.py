@@ -2,10 +2,11 @@
 control cluster (Session 40; ADR 0271, ADR 0272, ADR 0273; D2430, D2433, D2438,
 D2451, D2468).
 
-The routes answer `not_available` in the product until the branch rows are
-`trial` (Run 8); these proofs accept the executed types for their own duration
-(`accepting`), as `test_control_projects` does, and one proof reads the
-refusal without it. The reconciler's half -- recording a branch, a backups
+Since Session 40's bump the branch rows are `trial` and the product accepts
+the branch types; these proofs still accept the executed types for their own
+duration (`accepting`), as `test_control_projects` does, so a row moved back to
+`planned` later cannot silently change them, and one proof makes the rows
+unreachable for itself to read the refusal. The reconciler's half -- recording a branch, a backups
 reading, an expiry -- is played by the superuser calling the set's invoker
 functions, which are granted to nobody.
 """
@@ -374,14 +375,25 @@ def test_the_backups_route_serves_the_recorded_window(drive: Any) -> None:
     assert "archiver" in undetermined["reason"]
 
 
-def test_a_branch_write_is_not_available_until_its_row_is_reachable(drive: Any) -> None:
-    """ADR 0254 in the product's own state: the branch rows are `planned` until
-    Run 8, so a creation answers `409 not_available` naming `branches` and a
-    restore naming `restore_to_branch` -- before the body is read, nothing
-    recorded."""
+def test_a_branch_write_is_not_available_while_its_row_is_unreachable(
+    drive: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR 0254: with the branch types unaccepted -- as a row moved back to
+    `planned` leaves them -- a creation answers `409 not_available` naming
+    `branches` and a restore naming `restore_to_branch`, before the body is
+    read, nothing recorded. The control, the product's own state since Session
+    40's bump (the rows `trial`): the same nonsense body is READ and refused
+    `400 malformed_request`, still recording nothing."""
     org = _org(drive, "planned")
     key, member = org["project"], org["tokens"]["member"]
-    for path, row in (("branches", "branches"), ("restores", "restore_to_branch")):
+    cases = (("branches", "branches"), ("restores", "restore_to_branch"))
+    for path, _row in cases:
+        read = drive.call("POST", f"/v1/projects/{key}/{path}", token=member,
+                          body={"nonsense": secrets.token_hex(4)})  # fmt: skip
+        assert (read.status_code, read.json()) == (400, {"error": "malformed_request"}), path
+    branch_types = {"branch.create", "branch.reset", "branch.delete", "restore.create"}
+    monkeypatch.setattr(operations, "ACCEPTED_TYPES", operations.EXECUTED_TYPES - branch_types)
+    for path, row in cases:
         answer = drive.call("POST", f"/v1/projects/{key}/{path}", token=member,
                             body={"nonsense": secrets.token_hex(4)})  # fmt: skip
         assert (answer.status_code, answer.json()) == (

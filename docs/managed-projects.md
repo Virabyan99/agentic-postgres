@@ -8,11 +8,10 @@ it keeps. The routes and the roles are in [the control plane](control-plane.md);
 the operator's half -- slots, the reconciler, revocation -- is the
 [operator guide](operator-guide.md) §20.
 
-**None of these operations is open since Session 39's close** (Reality Ledger
-status `planned`, D2415): each was `trial` (ADR 0261) on the 1.17.0 trip, and
-returns to `trial` when a later sitting re-earns its evidence on a new slot; each
-route answers `409 not_available` naming its row until then, and
-[the Reality Ledger](reality-ledger.md) says so for each.
+**Every operation here is being verified** (Reality Ledger status `trial`, ADR
+0261): offered on the 1.18.0 trip, re-earned on a new slot (D2442), and moved to
+`beta` or back to `planned` by the session's close, which
+[the Reality Ledger](reality-ledger.md) says for each.
 
 ## The life of a project
 
@@ -127,9 +126,8 @@ your machine and sends only its verifier; nobody else ever holds it, and a
 lost password is replaced by rotating again. `bin/endpoint.sh show` prints
 the doors and a snippet per client; `bin/endpoint.sh connect` opens `psql`.
 A sleeping project's doors refuse until it is woken. The details are in
-[database connections](database-connections.md). **A new credential is not
-accepted** since Session 39's close (Reality Ledger `planned`, D2416): a rotation
-answers `409 not_available` until the doors' evidence is re-earned.
+[database connections](database-connections.md). **Setting a credential is being
+verified** (Reality Ledger `trial`): re-earned on a new slot's names (D2442).
 
 ## Backups
 
@@ -190,8 +188,9 @@ bin/branch.sh delete --project-key KEY --branch dev --confirm dev --wait
 - **A branch is not backed up.** Deleting it, or losing the server, loses
   what it holds. Delete needs an admin or owner; `--confirm` is its name.
 
-The branch operations are not offered until their Reality Ledger rows are
-`trial`; until then each answers `409 not_available` naming its row.
+The branch operations are being verified (Reality Ledger `trial`, ADR 0261):
+offered on the 1.18.0 trip, and moved to `beta` or back to `planned` by the
+session's close.
 
 ## What a refusal means
 

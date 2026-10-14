@@ -98,11 +98,25 @@ MAX_EXPIRY_SECONDS: Final = 7 * 86400
 BACKUP_RECORD_SECONDS: Final = 900
 
 #: The types the control mode accepts. Equal, by the guard, to the types whose
-#: ledger row accepts: NONE since Session 39's close (Run 12) -- the seven
-#: executed types' rows are `planned` again (D2415, D2416). Written out, never
-#: derived from `EXECUTED_TYPES` -- building a type is not the decision to
-#: accept it.
-ACCEPTED_TYPES: Final[frozenset[str]] = frozenset()
+#: ledger row accepts: ALL ELEVEN since Session 40's bump -- the six
+#: managed-project types and `credential.rotate` re-trialed on a new slot (D2442),
+#: the four branch types trialed (ADR 0271). Written out, never derived from
+#: `EXECUTED_TYPES` -- building a type is not the decision to accept it.
+ACCEPTED_TYPES: Final[frozenset[str]] = frozenset(
+    {
+        "project.create",
+        "project.delete",
+        "project.sleep",
+        "project.wake",
+        "project.resize",
+        "project.export",
+        "credential.rotate",
+        "branch.create",
+        "branch.reset",
+        "branch.delete",
+        "restore.create",
+    }
+)
 
 #: The JSON Schema every operation's `{type, arguments}` validates against,
 #: relative to the repository: read by the reconciler before dispatch, and

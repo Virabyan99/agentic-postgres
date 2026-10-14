@@ -54,6 +54,10 @@ no-op.
 | `THR-EP-PLANE-CONFUSION` | Holds a control-plane session or a management key and wants a customer database credential, or holds the control database and wants a customer's password | A managed project's two customer credentials | A credential is set by its SCRAM verifier alone: the password is generated on the customer's workstation and never leaves it; the control plane and the reconciler carry the verifier, which reaches `ALTER ROLE` as a psql variable on stdin and no argv, no result and no log line; only a PERSON who is a member may rotate, never a key, and only on a project with doors (ADR 0269). A control-plane session or key is not a database role, so the public door refuses it like any name it does not hold | The operation rows (`credential.rotate`, its result naming the role only); the reconciler's step list | The control database, its WAL and its backups hold the verifier, which admits an offline guessing attack against a weak password; a customer's password is the customer's to keep | `EP-CRED-001`, `EP-API-001` | `tests/contract/test_endpoint_cli.py::test_the_password_never_leaves_the_workstation`, `tests/contract/test_control_connections.py::test_only_a_person_who_is_member_may_rotate_and_only_with_doors`, `tests/contract/test_control_connections.py::test_a_body_that_is_not_one_verifier_is_refused_before_a_row`, `tests/contract/test_reconciler_dispatch.py::test_a_rotation_sets_the_verifier_on_stdin_and_rewrites_both_userlists`, `tests/contract/test_reconciler_dispatch.py::test_a_rotation_whose_arguments_are_not_a_verifier_runs_nothing` | 39 |
 | `THR-EP-DOOR` | Holds a platform role's password -- the application runtime's, which `op` can print, the superuser's, any service's -- and presents it at 5432 from the internet | Every platform role's reach into `app`, `api` and `app_private` | Each customer pooler's userlist is generated from `pg_authid` and names one customer role or nothing, so every other role is refused before a password is compared; the database still joins only `internal` and `backup`; `customer_admin` creates in `public` and nothing else, `customer_app` reads and writes what the administrator grants it (ADR 0269) | `customer-credentials.sh sync` exits 6 when a pooler was not signalled; the pooler's healthcheck is red without its userlist | A customer's password is the customer's to keep; the operator can read its verifier, never the password | `EP-POOL-001`, `EP-ROLE-001`, `EP-LIVE-001`, `EP-LIVE-003` | `tests/contract/test_customer_poolers.py::test_a_userlist_names_one_role_or_nothing`, `tests/contract/test_customer_poolers.py::test_each_door_admits_its_one_role_and_an_empty_list_admits_nobody`, `tests/contract/test_customer_poolers.py::test_sync_writes_one_role_per_door_and_never_prints_a_verifier`, `tests/external/test_session39_public_endpoints.py::test_no_platform_role_passes_either_door`, `tests/external/test_session39_public_endpoints.py::test_the_admin_writes_only_in_public`, `tests/deployment/test_session39_endpoints.py::test_the_database_is_still_unrouted`, `tests/contract/test_customer_roles_on_a_cluster.py::test_the_admin_is_refused_everything_else` | 39 |
 | `THR-EP-ISOLATION` | A customer of one project, or a reader of a snippet or a deployed document, looking for another project's door, role or value | Each project's public names, customer roles and credentials | The public endpoints' hosts and roles are MUST_DIFFER leaves of the deployed document, so `ISOLATED_FIELDS` has 20 and every leaf is classified offline; each pooler's userlist names only its own project's role, so project A's customer credential meets B's door as an unknown name; a snippet carries a placeholder, never a value (ADR 0268, ADR 0269) | `endpoints_host_live` compares the live slot's deployed document with A's, B's and the control project's | A project's public names are public by design: knowing one is not a credential | `EP-DOC-001`, `EP-SNIP-001`, `EP-LIVE-003` | `tests/deployment/test_session39_endpoints.py::test_the_slot_was_isolated_from_every_project`, `tests/contract/test_isolation_leaves_offline.py::test_every_leaf_of_a_built_deployed_document_is_classified`, `tests/contract/test_customer_poolers.py::test_a_userlist_names_one_role_or_nothing`, `tests/contract/test_connection_snippets.py::test_no_snippet_can_carry_a_password` | 39 |
+| `THR-BR-ENUMERATION` | A caller with any control-plane credential who probes a branch of a project it does not belong to | The existence of another organisation's branches and their names | Every branch route resolves the PROJECT first through the reader `GET /v1/projects/{key}` uses, so a foreign project's branch, a missing project's and a missing branch of the caller's own project answer one `404 not_found` body; a branch write is a person's, never a key's (ADR 0271, D2451, D2468) | None beyond the request line: a refused probe writes no row | Timing is not equalised, as for the project read | `BR-CTL-001` | `tests/contract/test_control_branches.py::test_a_foreign_and_a_missing_branch_answer_alike`, `tests/contract/test_control_branches.py::test_the_branch_routes_need_a_human_or_a_scoped_key` | 40 |
+| `THR-BR-EXHAUSTION` | A member who creates branches, or retries a creation, until the node runs out | The node's capacity and its neighbours' availability | One live branch per project, refused `409 branch_limit_reached` by the route AND the control database before an operation row exists; a branch is charged `small`'s 192 MiB by the same admission a deploy uses and refused `capacity_exhausted` when it does not fit; every recorded branch is on the committed line, and an unreadable record makes the reading `unreadable`, never smaller (ADR 0271, D2430, D2431) | The operation rows; `doctor capacity`'s committed line names each branch | The entitlement half -- branches per plan -- is Session 41's; one per project is a constant here | `BR-CTL-001`, `BR-CAP-001`, `BR-LIVE-001`, `BR-LIVE-002` | `tests/contract/test_control_branches.py::test_a_second_branch_is_refused_before_a_row`, `tests/contract/test_control_branches.py::test_the_route_refuses_a_second_branch_without_asking_the_set`, `tests/contract/test_capacity_probe.py::test_a_branch_is_committed`, `tests/contract/test_capacity_probe.py::test_an_unreadable_branch_is_undetermined`, `tests/contract/test_branch_runtime.py::test_a_branch_that_does_not_fit_is_refused`, `tests/external/test_session40_branches.py::test_the_second_branch_was_refused_before_a_row`, `tests/deployment/test_session40_branch_host.py::test_the_branch_is_charged` | 40 |
+| `THR-BR-RESTORE` | A member who aims a restore at another project's repository, at a point outside the window, or at the parent's live volume | Every project's repository and every parent's data | No argument names a repository, a stanza, a volume or a path: the restore reads the parent's own repository mounts out of its running container, read-only, as the drill does (ADR 0151); the branch's volume is derived by `naming.branch_names` and refused if it equals or is mounted by the parent's (exit 7 before anything starts); a point outside the recorded window is refused before the restore (ADR 0271, ADR 0273, D2425, D2435) | The operation rows (`restore.create` with its point, the point reached in its result); the backups surface | The window is the recorded reading's, up to 30 minutes old; a point inside it the archive cannot reach is refused at the recovery, not before (D2456) | `BR-PLAN-001`, `BR-DISPATCH-001`, `BR-LIVE-002` | `tests/contract/test_branch_plan.py::test_a_plan_that_could_write_the_parent_is_refused`, `tests/contract/test_reconciler_dispatch.py::test_a_point_outside_the_window_is_refused_before_the_restore`, `tests/contract/test_branch_runtime.py::test_a_point_outside_the_window_is_refused_before_anything_persists`, `tests/deployment/test_session40_branch_host.py::test_the_parent_was_untouched` | 40 |
+| `THR-BR-PARENT` | A branch -- a full physical copy of the parent, running beside it -- or whoever holds the parent's credentials, reaching the parent through it | The parent's backup repository and its data | The branch's persistent phase has no repository mount, no path into the parent's secret generation, no backup network, `archive_mode=off` and `archive_command=/bin/false`; its re-key runs before either door exists -- every platform login role `NOLOGIN PASSWORD NULL`, the superuser's password `NULL`, the two customer roles given the branch's own verifiers, every live refresh family revoked and every agent credential expired (ADR 0271, D2424, D2426, D2427) | `branch_host_live` reads the branch's containers, the parent's identity and timeline, and every WAL in the repository on the parent's timeline | A branch shares its parent's `system_identifier` and `app_private.project_identity` row (ADR 0151); a branch is not backed up; the parent's user password hashes are copied into the branch, reachable by nothing a customer holds | `BR-PLAN-001`, `BR-REKEY-001`, `BR-LIVE-001`, `BR-LIVE-002` | `tests/contract/test_branch_plan.py::test_the_persistent_service_cannot_reach_the_repository`, `tests/contract/test_branch_runtime_on_a_cluster.py::test_the_parents_password_opens_nothing_after_the_rekey`, `tests/contract/test_branch_runtime_on_a_cluster.py::test_the_branch_holds_its_point_and_never_wrote_the_repository`, `tests/contract/test_branch_runtime.py::test_the_poolers_start_after_the_rekey`, `tests/deployment/test_session40_branch_host.py::test_the_branch_is_bounded_and_unreachable_from_the_repository`, `tests/external/test_session40_branches.py::test_the_parents_password_opens_no_branch_door` | 40 |
 
 ## Studio: a page in the operator's browser, on the operator's machine
 
@@ -190,15 +194,8 @@ technically bounded in this beta"* (D1971).
 
 1. **Branch enumeration** (Session 40, ADR 0271, D2451). A caller learns that a
    branch of another organisation's project exists from a status code, a timing
-   or an error body. Every branch route resolves the project first through the
-   reader `GET /v1/projects/{key}` already uses, so a foreign project's branch,
-   a missing project's and a missing branch of the caller's own project answer
-   one `404 not_found` body. Owed (BR-CTL-001):
-   `tests/contract/test_control_branches.py::test_a_foreign_and_a_missing_branch_answer_alike`
-   -- the three bodies and statuses compared byte for byte. Timing is not
-   equalised, as for the project read. Session 37's half -- organisations,
-   members and projects -- is `THR-CTL-ENUMERATION` in the table. Run 8 moves
-   this item into the table as `THR-BR-ENUMERATION`.
+   or an error body. **In the table as `THR-BR-ENUMERATION`** since Session
+   40's Run 8; Session 37's half is `THR-CTL-ENUMERATION`.
 2. **Endpoint confusion and gateway attacks** (Session 39, ADR 0268). A
    plaintext connection, a wrong or absent SNI, or one project's hostname used
    to reach another project's database through the shared port 5432. **In the
@@ -217,40 +214,17 @@ technically bounded in this beta"* (D1971).
    Session 38's half -- capacity, from two readers under one code, and the
    serialisation -- is `THR-LIFE-EXHAUSTION` in the table. Owed: the
    entitlement half (`plan_limit_reached` before an operation exists, a limit
-   enforced under concurrency, Session 41). **The branch half (Session 40, ADR
-   0271, D2430, D2431)**: one live branch per project, refused
-   `409 branch_limit_reached` by the route AND by the control database before an
-   operation row exists; a branch is charged `small`'s 192 MiB by the same
-   admission a deploy uses and refused `capacity_exhausted` when it does not
-   fit; every recorded branch is on `doctor capacity`'s committed line, and an
-   unreadable branch record makes the reading `unreadable`, never smaller.
-   Owed (BR-CTL-001, BR-CAP-001, BR-LIVE-001):
-   `tests/contract/test_control_branches.py::test_a_second_branch_is_refused_before_a_row`,
-   `tests/contract/test_capacity_probe.py::test_a_branch_is_committed`,
-   `tests/contract/test_capacity_probe.py::test_an_unreadable_branch_is_undetermined`,
-   `tests/contract/test_branch_runtime.py::test_a_branch_that_does_not_fit_is_refused`,
-   `tests/external/test_session40_branches.py::test_the_second_branch_was_refused_before_a_row`.
-   Run 8 moves the branch half into the table as `THR-BR-EXHAUSTION`.
+   enforced under concurrency, Session 41). **The branch half** (Session 40)
+   is `THR-BR-EXHAUSTION` in the table since Run 8.
 5. **Plan-limit bypass and usage tampering** (Session 41). A caller raises its
    own limits, creates concurrently past a limit, or writes its own usage.
    Owed: a limit enforced under concurrency; no customer surface writes a usage
    sample or an entitlement.
 6. **Restore abuse** (Session 40, ADR 0271, ADR 0273). A restore aimed at
    another project's repository, at a recovery point outside the window, or at
-   the parent's live volume. No argument names a repository, a stanza, a volume
-   or a path: the restore reads the parent's own repository mounts out of the
-   parent's running container, read-only, as the drill does (ADR 0151), and the
-   branch's volume is derived by `naming.branch_names` and refused if it equals
-   or is mounted by the parent's (`branch_plan.assert_branch_safe`, exit 7
-   before anything starts). A point outside the recorded window is refused
-   before the restore (D2425, D2435). Owed (BR-PLAN-001, BR-DISPATCH-001,
-   BR-LIVE-002):
-   `tests/contract/test_branch_plan.py::test_a_plan_that_could_write_the_parent_is_refused`,
-   `tests/contract/test_reconciler_dispatch.py::test_a_point_outside_the_window_is_refused_before_the_restore`,
-   `tests/deployment/test_session40_branches.py::test_the_parent_was_untouched`
-   (the parent's volume, `instance_uuid`, timeline and postmaster start
-   unchanged across the branch's life). Run 8 moves this item into the table as
-   `THR-BR-RESTORE`.
+   the parent's live volume. **In the table as `THR-BR-RESTORE`** since Session
+   40's Run 8. Its host proof reads the parent's identity, timeline, volume and
+   repository -- not its postmaster start, which the sweep's reboot moves.
 7. **Control-plane / data-plane credential confusion** (Session 39).
     A project credential presented to `/api/v1`, or a control-plane credential
     presented to the surfaces Session 39 adds. Owed: each refused at the other
@@ -300,27 +274,9 @@ technically bounded in this beta"* (D1971).
     A platform role's password presented at 5432 from the internet. **In the
     table as `THR-EP-DOOR`** since Session 39's Run 9.
 13. **A branch reaches its parent** (Session 40, ADR 0271, D2424, D2426,
-    D2427). A branch -- a full physical copy of the parent, running beside it --
-    writes the parent's backup repository, or opens the parent's data with the
-    parent's credentials. Its persistent phase has no repository mount, no path
-    into the parent's secret generation, no backup network, `archive_mode=off`
-    and `archive_command=/bin/false`, asserted on the argv; its re-key runs
-    before either door exists -- every platform login role `NOLOGIN PASSWORD
-    NULL`, the superuser's password `NULL` (local socket only), the two customer
-    roles given the branch's own verifiers, every live refresh family revoked
-    and every agent credential expired. Owed (BR-PLAN-001, BR-REKEY-001,
-    BR-LIVE-001, BR-LIVE-002):
-    `tests/contract/test_branch_plan.py::test_the_persistent_service_cannot_reach_the_repository`,
-    `tests/contract/test_branch_runtime_on_a_cluster.py::test_the_parents_password_opens_nothing_after_the_rekey`,
-    `tests/contract/test_branch_runtime.py::test_the_poolers_start_after_the_rekey`,
-    `tests/deployment/test_session40_branches.py::test_the_branch_is_bounded_and_unreachable_from_the_repository`,
-    `tests/external/test_session40_branches.py::test_the_parents_password_opens_no_branch_door`.
-    **Residuals, by design:** a branch shares its parent's `system_identifier`
-    and `app_private.project_identity` row (ADR 0151) -- a reader that tells
-    clusters apart uses the timeline or the branch record; a branch is not
-    backed up; the parent's user password hashes are copied into the branch and
-    are reachable by nothing a customer holds and read by no service there.
-    Run 8 moves this item into the table as `THR-BR-PARENT`.
+    D2427). A branch writes the parent's backup repository, or opens the
+    parent's data with the parent's credentials. **In the table as
+    `THR-BR-PARENT`** since Session 40's Run 8, its residuals with it.
 
 ## Scope
 

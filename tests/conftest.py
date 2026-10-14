@@ -214,6 +214,14 @@ ENVIRONMENT_VARIABLES = (
     # re-trial slot (slot2-prod).
     "APG_CUSTOMER_CREDENTIAL_DIR",
     "APG_LIVE_SLOT_OUTPUTS",
+    # Session 40 (ADR 0271-0273, D2453). `APG_BRANCH_RECORD_FILE` (host and
+    # external) is the 0600 record `s40-branches.py` wrote while the kept
+    # slot's branches were created, restored to a point, expired, reset and
+    # deleted through `/v1`: operation ids and origins, the points, the rows each
+    # side held, the exits at each name -- never a password, token or URL that
+    # authorises anything. `APG_LIFECYCLE_RECORD_FILE` and `APG_SLOT_OUTPUTS` are
+    # reused for the re-earning slot (slot4-prod).
+    "APG_BRANCH_RECORD_FILE",
 )
 
 

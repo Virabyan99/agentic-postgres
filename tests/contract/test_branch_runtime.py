@@ -163,7 +163,8 @@ def test_the_poolers_start_after_the_rekey(recorded: tuple[Any, list[str]]) -> N
     assert calls.index("rekey") < calls.index("open_doors") < calls.index("attach")
     record = branch_record.read(branch_record.record_path(KEY, "dev", root=runtime.BRANCH_ROOT))
     assert record is not None and record.state == "ready"
-    assert (record.reached_point, record.timeline) == ("2026-10-14 08:04:58+00", 2)
+    # D2483: psql's spelling of the reached point is written RFC 3339.
+    assert (record.reached_point, record.timeline) == ("2026-10-14T08:04:58+00:00", 2)
     assert record.parent_commit == "b0249ce5667610a45746c6cec89c3eb38457ed70"
     assert record.unreclaimable_mb == 192
     assert (record.pool_host, record.direct_host) == (f"dev.pool.{DOMAIN}", f"dev.direct.{DOMAIN}")

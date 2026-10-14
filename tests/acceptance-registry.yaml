@@ -1674,6 +1674,7 @@
     - tests/contract/test_restore_test_command.py::test_the_command_never_hands_docker_the_live_volume
     - tests/contract/test_restore_test_command.py::test_a_wrong_derivation_is_caught_and_nothing_is_started
     - tests/contract/test_restore_test_command.py::test_the_command_never_passes_delta_and_never_mounts_read_write_material
+    - tests/contract/test_restore_test_command.py::test_assert_disposable_refuses_archiving
   description: >-
     The restore path never mounts, overwrites, or mutates the active volume.
 
@@ -6303,7 +6304,7 @@
   test_nodeids:
     - tests/contract/test_reality_ledger.py::test_every_operation_type_names_a_ledger_row_and_is_accepted_iff_its_row_is_reachable
     - tests/contract/test_operation_types.py::test_the_type_table_is_closed
-    - tests/contract/test_operation_types.py::test_no_type_is_accepted_and_the_eleven_are_executed
+    - tests/contract/test_operation_types.py::test_exactly_the_eleven_executed_types_are_accepted
     - tests/contract/test_operation_types.py::test_a_type_not_accepted_is_refused_not_available_before_its_body
   description: >-
     `operations.py`'s type table is closed and every type names an
@@ -6313,9 +6314,11 @@
     its close returned them to `planned` -- no type is accepted, the six stay
     executed (D2170); Session 39's trip accepted the seven (the six and
     `credential.rotate`) and its close returned them to `planned` again
-    (D2415, D2416); a write route whose type is not accepted
-    answers `409 not_available` naming its row before the project or the body
-    is read, and writes no row (ADR 0254, D2054, D2170).
+    (D2415, D2416); Session 40's bump accepts all eleven -- the seven
+    re-trialed on a new slot (D2442) and the four branch types (ADR 0271); a
+    write route whose type is not accepted answers `409 not_available` naming
+    its row before the project or the body is read, and writes no row (ADR
+    0254, D2054, D2170).
 
 - id: CTL-REG-001
   priority: P0
@@ -7160,4 +7163,282 @@
     only `internal` and `backup` with no router and nothing published beyond
     loopback; and its document shares no isolated value with A, B or the control
     project.
+
+# Session 40 (ADR 0271-0273)
+- id: BR-NAME-001
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/contract/test_branch_naming.py::test_every_branch_name_derives_from_one_stem
+    - tests/contract/test_branch_naming.py::test_no_branch_stem_equals_a_project_or_drill_stem
+    - tests/contract/test_branch_naming.py::test_the_branch_name_rule_refuses_main_and_bad_names
+    - tests/contract/test_branch_naming.py::test_the_branch_name_rule_accepts_a_name
+    - tests/contract/test_branch_naming.py::test_the_branch_hosts_derive_from_the_domain
+    - tests/contract/test_branch_naming.py::test_a_branch_router_may_hold_the_separator_and_a_project_router_may_not
+  description: >-
+    **A branch's names** (ADR 0271 items 1 and 6, D2423, D2428, D2462): every
+    name of a branch -- its compose project, volume, two networks, three
+    containers, its restore and recovery containers and its two routers --
+    derives from the one stem `apg-<key>_<branch>`, the underscore a project key
+    never holds, so no branch stem equals a project's or a drill's; a branch
+    name is a lowercase letter then 1-11 letters or digits and never `main`; its
+    hosts are `<branch>.pool.<domain>` and `<branch>.direct.<domain>`, refused
+    past 253 characters; and a branch's TCP router may hold the separator where
+    a project's may not.
+
+- id: BR-PLAN-001
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/contract/test_branch_plan.py::test_the_restore_phase_is_the_drills_argv
+    - tests/contract/test_branch_plan.py::test_the_persistent_service_cannot_reach_the_repository
+    - tests/contract/test_branch_plan.py::test_a_plan_that_could_write_the_parent_is_refused
+    - tests/contract/test_branch_plan.py::test_a_parent_without_backups_or_a_bad_branch_has_no_plan
+    - tests/contract/test_restore_test_command.py::test_assert_disposable_refuses_archiving
+    - tests/contract/test_branch_runtime.py::test_the_compose_file_cannot_reach_the_repository
+    - tests/contract/test_branch_runtime_on_a_cluster.py::test_the_branch_holds_its_point_and_never_wrote_the_repository
+  description: >-
+    **The restore plan** (ADR 0271 items 2-4, D2424-D2427): the restore and
+    recovery phases are the restore drill's argv, inheriting only read-only
+    mounts and never `--delta`; the recovery runs `archive_mode=off`; the
+    persistent postgres has no repository mount, no parent secret path, no
+    backup network, archiving off and `archive_command=/bin/false`, and the
+    branch's compose file reaches no repository; a plan that could write the
+    parent is refused exit 7 before anything starts; `assert_disposable` checks
+    `archive_mode` in code; and on a real cluster restored by pgBackRest the
+    branch holds its point and never wrote the parent's repository.
+
+- id: BR-REKEY-001
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/contract/test_branch_rekey.py::test_the_rekey_names_every_role_once
+    - tests/contract/test_branch_rekey.py::test_no_verifier_reaches_an_argv
+    - tests/contract/test_branch_rekey.py::test_the_restore_settings_are_reset_outside_the_transaction
+    - tests/contract/test_branch_runtime_on_a_cluster.py::test_the_parents_password_opens_nothing_after_the_rekey
+    - tests/contract/test_branch_runtime_on_a_cluster.py::test_a_platform_role_cannot_log_in_to_a_branch
+    - tests/contract/test_branch_runtime.py::test_the_poolers_start_after_the_rekey
+    - tests/contract/test_branch_runtime.py::test_the_verifiers_never_reach_an_argument
+    - tests/contract/test_branch_runtime.py::test_the_doors_are_the_projects_doors
+  description: >-
+    **The re-key before the doors** (ADR 0271 item 5, D2458-D2460): every
+    non-customer role `NOLOGIN PASSWORD NULL`, the superuser `PASSWORD NULL`,
+    the branch's own two customer verifiers set through stdin, every refresh
+    family revoked (`administrative`), every unexpired agent credential expired,
+    the restore's settings reset outside the transaction; no verifier reaches an
+    argument; on a real cluster the parent's customer password is accepted
+    before and refused after, the branch's accepted, a platform role refused;
+    the poolers start only after the re-key, with the project's own door shape
+    and userlists read from `pg_authid`.
+
+- id: BR-CTL-001
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/contract/test_control_branches.py::test_a_second_branch_is_refused_before_a_row
+    - tests/contract/test_control_branches.py::test_the_route_refuses_a_second_branch_without_asking_the_set
+    - tests/contract/test_control_branches.py::test_a_foreign_and_a_missing_branch_answer_alike
+    - tests/contract/test_control_branches.py::test_a_project_with_a_branch_cannot_be_deleted
+    - tests/contract/test_control_branches.py::test_the_branch_routes_need_a_human_or_a_scoped_key
+    - tests/contract/test_control_branches.py::test_an_expiry_is_bounded_and_only_an_expiry_requests_without_a_member
+    - tests/contract/test_control_branches.py::test_an_operation_read_names_its_origin
+    - tests/contract/test_control_branches.py::test_a_branch_write_is_not_available_while_its_row_is_unreachable
+    - tests/contract/test_app_contract_aggregate.py::test_the_control_snapshot_is_what_this_checkout_generates
+  description: >-
+    **The control set's branches** (ADR 0271, ADR 0272; `0006`, `0007`):
+    `control_branches` and `control_backup_readings`;
+    `control_operations.origin` (`member` | `expiry`) and its CHECK that only a
+    `branch.delete` may be an expiry's, and every operation read naming it
+    (D2480); `control_request_expiry`, `control_record_branches` and
+    `control_record_backups` granted to nobody; one live branch per project,
+    `409 branch_limit_reached` before any row from the route AND the set
+    (D2430); a missing branch, a foreign project's and a missing project's are
+    one `not_found` (D2451); a project with a live branch is not deleted
+    (D2438); the writes a person's and the reads `projects:read` (D2468);
+    `not_available` while a row is unreachable; the control snapshot is what
+    this checkout generates.
+
+- id: BR-DISPATCH-001
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/contract/test_reconciler_dispatch.py::test_the_closed_table_is_the_executed_types
+    - tests/contract/test_reconciler_dispatch.py::test_a_branch_create_is_argv_only
+    - tests/contract/test_reconciler_dispatch.py::test_a_branch_of_a_sleeping_parent_is_refused
+    - tests/contract/test_reconciler_dispatch.py::test_a_point_outside_the_window_is_refused_before_the_restore
+    - tests/contract/test_reconciler_dispatch.py::test_a_restore_carries_its_point_and_a_reset_reuses_the_branch
+    - tests/contract/test_reconciler_dispatch.py::test_start_brings_every_recorded_branch_back
+    - tests/contract/test_branch_runtime.py::test_a_point_outside_the_window_is_refused_before_anything_persists
+    - tests/contract/test_branch_runtime.py::test_an_existing_branch_or_a_doorless_parent_is_refused_before_anything
+    - tests/contract/test_branch_runtime.py::test_a_failure_after_the_record_leaves_it_failed
+    - tests/contract/test_branch_runtime.py::test_delete_touches_only_derived_names
+    - tests/contract/test_branch_runtime.py::test_start_all_records_a_branch_that_did_not_come_back
+    - tests/contract/test_branch_runtime_on_a_cluster.py::test_a_deleted_branch_left_nothing
+  description: >-
+    **The reconciler's branches** (ADR 0271, D2434, D2438, D2439, D2471): the
+    four branch types have one handler each, `restore.create` sharing
+    `branch.create`'s; a branch operation is ONE `branch-runtime.sh` child, its
+    steps check, runtime and record -- how far the runtime got is its
+    `branch.json` (`creating` before the volume, `failed` part way, `ready`);
+    argv built from typed arguments only, the verifiers on stdin; the parent a
+    slot, with doors, and awake (a deletion reads nothing of it); the window
+    checked by the runtime before anything persists (exit 7, `invalid_request`);
+    an existing branch or a doorless parent refused before anything; a deletion
+    touches only derived names and leaves nothing; the reconciler's start brings
+    every recorded branch back and records one that did not come back `stopped`.
+
+- id: BR-TTL-001
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/contract/test_branch_expiry.py::test_an_expired_branch_is_deleted_by_one_request
+    - tests/contract/test_branch_expiry.py::test_the_request_names_the_member_who_set_the_expiry
+    - tests/contract/test_branch_expiry.py::test_an_open_operation_defers_the_expiry
+    - tests/contract/test_branch_expiry.py::test_a_project_expiry_is_still_never_a_trigger
+  description: >-
+    **A branch's expiry is a trigger** (ADR 0272, D2433): the reconciler's idle
+    loop records each `branch.json` and names each READY branch past its
+    recorded expiry to `control_request_expiry`, which writes ONE
+    `branch.delete`, `origin = expiry`, on behalf of the member whose operation
+    set it -- never a member the reconciler names -- and nothing while any
+    operation for the project is open; no branch without an expiry, ahead of it
+    or stopped is requested; and `origin = expiry` on any other type is refused
+    by the table, so nothing retires a project.
+
+- id: BR-CAP-001
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/contract/test_capacity_probe.py::test_a_branch_is_committed
+    - tests/contract/test_capacity_probe.py::test_an_unreadable_branch_is_undetermined
+    - tests/contract/test_branch_runtime.py::test_a_branch_that_does_not_fit_is_refused
+  description: >-
+    **A branch is charged** (ADR 0271 item 9, D2431): every branch runs the
+    `small` profile's database settings and is charged `small`'s 192 MiB;
+    `capacity_probe` adds every readable `branch.json` on the committed line and
+    names it; an unreadable one is `unreadable`, on which admission refuses; and
+    a branch's own admission refuses exit 12 when the charge does not fit.
+
+- id: BR-BACKUP-001
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/contract/test_backups_surface.py::test_the_window_is_computed_from_the_readings
+    - tests/contract/test_backups_surface.py::test_a_stale_reading_is_not_a_window
+    - tests/contract/test_backups_surface.py::test_a_sleeping_project_says_its_archiver_is_stopped
+    - tests/contract/test_control_branches.py::test_the_backups_route_serves_the_recorded_window
+    - tests/contract/test_branch_runtime_on_a_cluster.py::test_the_earliest_point_is_a_second_after_the_oldest_stop
+  description: >-
+    **The backups surface** (ADR 0273, D2465, D2456): the reconciler records
+    each managed project's reading every `BACKUP_RECORD_SECONDS`; `earliest` is
+    the oldest backup set's stop plus one second -- measured on a real cluster
+    -- and `latest` the archiver's last archived time; the route serves a
+    window, `sleeping`, or `could_not_determine` with its reason -- a reading
+    never recorded, older than 30 minutes, or with a status that could not be
+    read is never a window.
+
+- id: BR-CLI-001
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/contract/test_control_cli.py::test_a_branch_password_never_leaves_the_workstation
+    - tests/contract/test_control_cli.py::test_at_sends_a_restore
+    - tests/contract/test_cli_contract.py::test_the_operator_backup_and_restore_verbs_are_not_customer_verbs
+  description: >-
+    **The customer's branch commands** (ADR 0271, D2437, D2449, D2475-D2479):
+    `apg branch create|list|show|reset|delete` and `apg project backups`; a
+    branch's two passwords generated on the customer's machine, written once
+    0600 under 0700 directories before anything is sent, only their verifiers
+    sent, a refusal keeping none; `--at` sends `restore.create`; `--expires-in`
+    a duration kept inside the server's bounds; an undetermined window exit 6;
+    and no verb named `backup` or `restore` dispatches to a customer command.
+
+- id: LIFE-SLOT-003
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/contract/test_slot_command.py::test_redeploy_runs_the_reconcilers_argv
+    - tests/contract/test_slot_command.py::test_redeploy_refuses_while_the_reconciler_runs
+    - tests/contract/test_slot_command.py::test_redeploy_adopts_under_the_recorded_organisation
+  description: >-
+    **A managed project moved to a release** (D2443, D2418): `slot.sh redeploy`
+    runs the reconciler's own deploy argv on the slot's manifest through this
+    checkout's session -- carrying its exit, admission's 12 included -- refuses
+    while the reconciler runs or cannot be read and a slot that is not
+    allocated, then syncs the doors and adopts under the organisation the
+    registry already records, never typed.
+
+- id: BR-LIVE-001
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/external/test_session40_branches.py::test_the_backups_surface_reads_a_window
+    - tests/external/test_session40_branches.py::test_an_expired_branch_was_deleted_by_the_reconciler
+    - tests/external/test_session40_branches.py::test_the_branch_holds_the_point_before_the_change
+    - tests/external/test_session40_branches.py::test_a_migration_reached_the_branch_through_its_direct_name
+    - tests/external/test_session40_branches.py::test_the_parents_password_opens_no_branch_door
+    - tests/external/test_session40_branches.py::test_the_second_branch_was_refused_before_a_row
+    - tests/external/test_session40_branches.py::test_a_deleted_branch_has_no_door
+    - tests/external/test_session40_branches.py::test_this_module_uses_no_ssh
+  description: >-
+    **A customer's branches of the kept slot** (ADR 0271-0273): from the
+    workstation, with no SSH, through `/v1` and the public names alone, on
+    `slot3-prod` at the deployed commit: the backups surface read with a window;
+    an expiring branch deleted by the reconciler's own request (`origin =
+    expiry`); a branch restored to the instant between two marked rows holds the
+    first and not the second while `main` holds both; a migration applied over
+    the branch's direct name and on it alone; its provenance read; the parent's
+    password refused at both branch names, the branch's accepted; a second
+    branch refused `branch_limit_reached` with no row; a reset reaches the
+    second row; the deleted branch's names refused.
+
+- id: BR-LIVE-002
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/deployment/test_session40_branch_host.py::test_the_branch_is_bounded_and_unreachable_from_the_repository
+    - tests/deployment/test_session40_branch_host.py::test_the_branch_is_charged
+    - tests/deployment/test_session40_branch_host.py::test_the_parent_was_untouched
+    - tests/deployment/test_session40_branch_host.py::test_the_branch_came_back_after_the_reboot
+    - tests/deployment/test_session40_branch_host.py::test_a_deleted_branch_left_nothing
+  description: >-
+    **The branch on the host** (ADR 0271): with `slot3-prod`'s branch live, its
+    three containers bounded and placed -- no backup network, archiving off, no
+    repository mount -- its charge on the committed line by name, the parent's
+    volume, `instance_uuid` and timeline unchanged, the parent's repository
+    written only by the parent, the branch back after the reboot by the
+    reconciler's own start, and nothing of it left once deleted.
+
+- id: LIFE-LIVE-004
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/external/test_session40_reearning.py::test_every_accepted_type_ran_on_the_slot
+    - tests/external/test_session40_reearning.py::test_the_resizes_followed_the_admission_reading
+    - tests/external/test_session40_reearning.py::test_the_export_holds_the_three_customer_schemas
+    - tests/external/test_session40_reearning.py::test_the_second_creation_was_refused_without_a_row
+    - tests/external/test_session40_reearning.py::test_the_slots_own_route_was_probed_through_each_resize
+  description: >-
+    **The managed project's lifecycle, re-earned** (D2415, D2442, D2444):
+    Session 40's lifecycle on `slot4-prod` at the deployed commit, read back
+    through `/v1` and its record: every type it ran succeeded but the resizes,
+    which ended as their own admission readings imply; the export holds exactly
+    `app`, `api` and `public`; a second creation refused `no_slot` with no row;
+    and the slot's own route and pool name probed through sleep, wake and both
+    resizes, each interval covered.
+
+- id: EP-LIVE-004
+  priority: P0
+  target_session: 40
+  test_nodeids:
+    - tests/external/test_session40_reearning.py::test_the_slot_was_reached_through_both_names
+    - tests/external/test_session40_reearning.py::test_a_rotation_refused_the_old_password
+    - tests/external/test_session40_reearning.py::test_a_sleeping_slot_refused_both_names
+    - tests/external/test_session40_reearning.py::test_no_platform_role_passed_either_door
+  description: >-
+    **The doors, re-earned** (D2416, D2442): through `slot4-prod`'s two public
+    names while it lived, every certificate verified: both credentials set from
+    the CLI, both names reached as their own roles, a rotation refused the old
+    password and admitted the new, both names refused while it slept, and the
+    superuser and the slot's platform roles refused at both doors.
 

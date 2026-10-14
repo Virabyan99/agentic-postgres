@@ -118,7 +118,9 @@ ID_PATTERN = re.compile(
     # Session 39 (ADR 0268-0270) adds `EP` for the public Postgres endpoints --
     # the edge's entrypoint, the customer poolers, the customer roles and their
     # credentials.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV|LEDGER|CTL|KEY|OPN|LIFE|EP)-[A-Z0-9]+(-\d+)?$"
+    # Session 40 (ADR 0271-0273) adds `BR` for branches -- their names, the
+    # restore plan, the re-key, the operations, the expiry, the backups surface.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV|LEDGER|CTL|KEY|OPN|LIFE|EP|BR)-[A-Z0-9]+(-\d+)?$"
 )
 
 

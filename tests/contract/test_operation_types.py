@@ -105,19 +105,17 @@ THE_EXECUTED_ELEVEN = THE_EXECUTED_SEVEN | {
 }
 
 
-def test_no_type_is_accepted_and_the_eleven_are_executed() -> None:
-    """The exact-set form between Session 39's close and Session 40's bump (ADR
-    0261 authorises it; renamed from `test_no_type_is_accepted_and_the_seven_are_
-    executed` when the four branch types were built, ADR 0271): every type in the
-    table is built and executed, and NONE is accepted -- the seven's rows went
-    back to `planned` at Session 39's close (D2415, D2416) and the branch rows
-    are `planned` until Run 8 -- so the service accepts no type at all, and a type
-    outside the table is never accepted. The ledger half (accepted iff the row
-    is reachable) is `test_reality_ledger`'s."""
-    assert operations.ACCEPTED_TYPES == frozenset()
+def test_exactly_the_eleven_executed_types_are_accepted() -> None:
+    """The exact-set form at Session 40's bump (ADR 0261 authorises it; renamed
+    from `test_no_type_is_accepted_and_the_eleven_are_executed`, D1119): every
+    type in the table is built and executed, and every one is accepted -- the
+    seven's rows re-trialed on a new slot (D2442), the four branch types'
+    trialed (ADR 0271) -- and a type outside the table is never accepted. The
+    ledger half (accepted iff the row is reachable) is `test_reality_ledger`'s."""
+    assert operations.ACCEPTED_TYPES == THE_ELEVEN
     assert operations.EXECUTED_TYPES == THE_EXECUTED_ELEVEN == THE_ELEVEN
     assert THE_EXECUTED_SEVEN < THE_ELEVEN
-    assert not any(service_operations.is_accepted(t) for t in THE_ELEVEN)
+    assert all(service_operations.is_accepted(t) for t in THE_ELEVEN)
     assert not service_operations.is_accepted("project.rename")
 
 
