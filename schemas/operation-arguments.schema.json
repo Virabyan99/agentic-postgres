@@ -8,18 +8,42 @@
     {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "arguments"],
+      "required": [
+        "type",
+        "arguments"
+      ],
       "properties": {
-        "type": { "const": "project.create" },
+        "type": {
+          "const": "project.create"
+        },
         "arguments": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["name", "profile", "admin_username", "handoff_sha256"],
+          "required": [
+            "name",
+            "profile",
+            "admin_username",
+            "handoff_sha256"
+          ],
           "properties": {
-            "name": { "type": "string", "pattern": "^[A-Za-z0-9 ._-]{1,48}(?![\\s\\S])", "description": "The project's display name (D2180): stored in control_projects.display_name and nowhere else -- never a key, a role or a host." },
-            "profile": { "$ref": "#/$defs/profile" },
-            "admin_username": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,62}(?![\\s\\S])", "description": "The project's first administrator (ADR 0260): the one argument besides the profile that reaches an argv." },
-            "handoff_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}(?![\\s\\S])", "description": "The SHA-256 of the handoff token the requester's CLI keeps; the token never reaches the control plane (ADR 0260)." }
+            "name": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9 ._-]{1,48}(?![\\s\\S])",
+              "description": "The project's display name (D2180): stored in control_projects.display_name and nowhere else -- never a key, a role or a host."
+            },
+            "profile": {
+              "$ref": "#/$defs/profile"
+            },
+            "admin_username": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_.-]{2,62}(?![\\s\\S])",
+              "description": "The project's first administrator (ADR 0260): the one argument besides the profile that reaches an argv."
+            },
+            "handoff_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+              "description": "The SHA-256 of the handoff token the requester's CLI keeps; the token never reaches the control plane (ADR 0260)."
+            }
           }
         }
       }
@@ -27,53 +51,281 @@
     {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "arguments"],
+      "required": [
+        "type",
+        "arguments"
+      ],
       "properties": {
-        "type": { "const": "project.resize" },
+        "type": {
+          "const": "project.resize"
+        },
         "arguments": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["profile"],
-          "properties": { "profile": { "$ref": "#/$defs/profile" } }
+          "required": [
+            "profile"
+          ],
+          "properties": {
+            "profile": {
+              "$ref": "#/$defs/profile"
+            }
+          }
         }
       }
     },
     {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "arguments"],
+      "required": [
+        "type",
+        "arguments"
+      ],
       "properties": {
-        "type": { "const": "credential.rotate" },
+        "type": {
+          "const": "credential.rotate"
+        },
         "arguments": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["role", "verifier"],
+          "required": [
+            "role",
+            "verifier"
+          ],
           "properties": {
-            "role": { "enum": ["customer_app", "customer_admin"], "description": "Which customer role (ADR 0269): the pooled door's or the direct door's. The reconciler reads the role's NAME from the deployed document; this is never a role name and never reaches an argv." },
-            "verifier": { "type": "string", "pattern": "^SCRAM-SHA-256\\$4096:[A-Za-z0-9+/]{22}==\\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=(?![\\s\\S])", "description": "The SCRAM-SHA-256 verifier the customer's CLI computed from a password that never leaves the workstation: 4096 iterations, a 16-byte salt, two 32-byte keys (ADR 0269, D2330). It reaches psql on stdin as a variable, never an argv." }
+            "role": {
+              "enum": [
+                "customer_app",
+                "customer_admin"
+              ],
+              "description": "Which customer role (ADR 0269): the pooled door's or the direct door's. The reconciler reads the role's NAME from the deployed document; this is never a role name and never reaches an argv."
+            },
+            "verifier": {
+              "type": "string",
+              "pattern": "^SCRAM-SHA-256\\$4096:[A-Za-z0-9+/]{22}==\\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=(?![\\s\\S])",
+              "description": "The SCRAM-SHA-256 verifier the customer's CLI computed from a password that never leaves the workstation: 4096 iterations, a 16-byte salt, two 32-byte keys (ADR 0269, D2330). It reaches psql on stdin as a variable, never an argv."
+            }
           }
         }
       }
     },
-    { "$ref": "#/$defs/no_arguments", "properties": { "type": { "const": "project.sleep" } } },
-    { "$ref": "#/$defs/no_arguments", "properties": { "type": { "const": "project.wake" } } },
-    { "$ref": "#/$defs/no_arguments", "properties": { "type": { "const": "project.export" } } },
-    { "$ref": "#/$defs/no_arguments", "properties": { "type": { "const": "project.delete" } } }
+    {
+      "$ref": "#/$defs/no_arguments",
+      "properties": {
+        "type": {
+          "const": "project.sleep"
+        }
+      }
+    },
+    {
+      "$ref": "#/$defs/no_arguments",
+      "properties": {
+        "type": {
+          "const": "project.wake"
+        }
+      }
+    },
+    {
+      "$ref": "#/$defs/no_arguments",
+      "properties": {
+        "type": {
+          "const": "project.export"
+        }
+      }
+    },
+    {
+      "$ref": "#/$defs/no_arguments",
+      "properties": {
+        "type": {
+          "const": "project.delete"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "arguments"
+      ],
+      "properties": {
+        "type": {
+          "const": "branch.create"
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "branch",
+            "app_verifier",
+            "admin_verifier"
+          ],
+          "properties": {
+            "branch": {
+              "$ref": "#/$defs/branch"
+            },
+            "app_verifier": {
+              "$ref": "#/$defs/verifier"
+            },
+            "admin_verifier": {
+              "$ref": "#/$defs/verifier"
+            },
+            "expires_at": {
+              "$ref": "#/$defs/instant"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "arguments"
+      ],
+      "properties": {
+        "type": {
+          "const": "restore.create"
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "branch",
+            "target_time",
+            "app_verifier",
+            "admin_verifier"
+          ],
+          "properties": {
+            "branch": {
+              "$ref": "#/$defs/branch"
+            },
+            "target_time": {
+              "$ref": "#/$defs/instant"
+            },
+            "app_verifier": {
+              "$ref": "#/$defs/verifier"
+            },
+            "admin_verifier": {
+              "$ref": "#/$defs/verifier"
+            },
+            "expires_at": {
+              "$ref": "#/$defs/instant"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "arguments"
+      ],
+      "properties": {
+        "type": {
+          "const": "branch.reset"
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "branch",
+            "app_verifier",
+            "admin_verifier"
+          ],
+          "properties": {
+            "branch": {
+              "$ref": "#/$defs/branch"
+            },
+            "app_verifier": {
+              "$ref": "#/$defs/verifier"
+            },
+            "admin_verifier": {
+              "$ref": "#/$defs/verifier"
+            },
+            "target_time": {
+              "$ref": "#/$defs/instant"
+            },
+            "expires_at": {
+              "$ref": "#/$defs/instant"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "arguments"
+      ],
+      "properties": {
+        "type": {
+          "const": "branch.delete"
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "branch"
+          ],
+          "properties": {
+            "branch": {
+              "$ref": "#/$defs/branch"
+            }
+          }
+        }
+      }
+    }
   ],
   "$defs": {
     "profile": {
       "description": "A compute profile (ADR 0258): compute_profiles.PROFILE_NAMES.",
-      "enum": ["small", "standard", "large"]
+      "enum": [
+        "small",
+        "standard",
+        "large"
+      ]
     },
     "no_arguments": {
       "description": "A type whose only subject is the row's project_key.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "arguments"],
+      "required": [
+        "type",
+        "arguments"
+      ],
       "properties": {
-        "type": { "type": "string" },
-        "arguments": { "type": "object", "additionalProperties": false, "maxProperties": 0 }
+        "type": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "maxProperties": 0
+        }
       }
+    },
+    "branch": {
+      "description": "A branch name (ADR 0271, D2423): a lowercase letter, then 1-11 letters or digits; `main` is the project itself. It reaches an argv as one argument and derives every name the branch owns.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]{1,11}(?![\\s\\S])",
+      "not": {
+        "const": "main"
+      }
+    },
+    "verifier": {
+      "description": "A SCRAM-SHA-256 verifier computed on the customer's workstation (ADR 0269): the branch's own credential for one customer role, set by the re-key on stdin, never an argv (ADR 0271, D2449).",
+      "type": "string",
+      "pattern": "^SCRAM-SHA-256\\$4096:[A-Za-z0-9+/]{22}==\\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=(?![\\s\\S])"
+    },
+    "instant": {
+      "description": "An instant in RFC 3339 UTC with a Z. The runtime renders it in pgBackRest's one accepted form (D2454); never passed through as typed.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z(?![\\s\\S])"
     }
   }
 }

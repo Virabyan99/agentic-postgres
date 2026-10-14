@@ -62,7 +62,8 @@ OPERATION_TYPES: Final[dict[str, str]] = {
 }
 
 #: The types the control set records and the reconciler executes (Session 38;
-#: `credential.rotate` since Session 39, ADR 0269).
+#: `credential.rotate` since Session 39, ADR 0269; the four branch types since
+#: Session 40, ADR 0271 -- `restore.create` is `branch.create` with a point).
 EXECUTED_TYPES: Final[frozenset[str]] = frozenset(
     {
         "project.create",
@@ -72,8 +73,29 @@ EXECUTED_TYPES: Final[frozenset[str]] = frozenset(
         "project.resize",
         "project.export",
         "credential.rotate",
+        "branch.create",
+        "branch.reset",
+        "branch.delete",
+        "restore.create",
     }
 )
+
+#: One live branch per project (the operator, 2026-10-14; ADR 0271, D2430): a
+#: second `branch.create` or `restore.create` is refused `branch_limit_reached`
+#: before any row exists. A constant, not a plan: Session 41's entitlements own
+#: `branches_total`.
+BRANCHES_PER_PROJECT: Final = 1
+
+#: A branch's `expires_at` lies between these, counted from the request (ADR
+#: 0272): long enough to outlive the branch's own creation, short enough that a
+#: forgotten branch's charge and certificate are bounded in time.
+MIN_EXPIRY_SECONDS: Final = 15 * 60
+MAX_EXPIRY_SECONDS: Final = 7 * 86400
+
+#: How often the reconciler records each live managed project's backups
+#: reading (ADR 0273); the API serves a reading older than twice this as
+#: `could_not_determine`.
+BACKUP_RECORD_SECONDS: Final = 900
 
 #: The types the control mode accepts. Equal, by the guard, to the types whose
 #: ledger row accepts: NONE since Session 39's close (Run 12) -- the seven
@@ -91,6 +113,11 @@ ARGUMENT_SCHEMA_PATH: Final = "schemas/operation-arguments.schema.json"
 #: it stopped at, a reason, and admission's refusal (D2152, D2160, D2171).
 COMMON_RESULT_MEMBERS: Final[frozenset[str]] = frozenset({"reason", "refusal", "step", "steps"})
 
+#: What a branch's creation, restore and reset record (ADR 0271).
+BRANCH_RESULT: Final[frozenset[str]] = frozenset(
+    {"branch", "direct_host", "pool_host", "reached_point", "target_time", "timeline"}
+)
+
 #: Type -> the members its `result` may carry. `app.control_result_members`
 #: returns the same lists.
 RESULT_MEMBERS: Final[dict[str, frozenset[str]]] = {
@@ -105,6 +132,12 @@ RESULT_MEMBERS: Final[dict[str, frozenset[str]]] = {
     # ADR 0269: which role was rotated. Never the verifier, which the row's
     # arguments carry and no result repeats.
     "credential.rotate": COMMON_RESULT_MEMBERS | {"role"},
+    # ADR 0271: the branch, its two names, the point asked for and the point
+    # its recovery reached, and its timeline. Never a verifier.
+    "branch.create": COMMON_RESULT_MEMBERS | BRANCH_RESULT,
+    "restore.create": COMMON_RESULT_MEMBERS | BRANCH_RESULT,
+    "branch.reset": COMMON_RESULT_MEMBERS | BRANCH_RESULT,
+    "branch.delete": COMMON_RESULT_MEMBERS | {"branch"},
 }
 
 

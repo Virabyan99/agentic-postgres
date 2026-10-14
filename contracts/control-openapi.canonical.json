@@ -16,6 +16,21 @@
         "title": "AuthenticationFailedResponse",
         "type": "object"
       },
+      "BranchLimitReachedResponse": {
+        "description": "The project already has its one live branch, or a creation of one is in\nflight; nothing was recorded (D2430).",
+        "properties": {
+          "error": {
+            "const": "branch_limit_reached",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "BranchLimitReachedResponse",
+        "type": "object"
+      },
       "CapacityExhaustedResponse": {
         "description": "No room: `reason` is `no_slot` (the API's reading, before any row) or\n`admission` (the reconciler's, as an operation's outcome) -- D2160.",
         "properties": {
@@ -1960,6 +1975,553 @@
         "summary": "One project of the caller's organisations"
       }
     },
+    "/v1/projects/{key}/backups": {
+      "get": {
+        "description": "Viewer and above, or a key holding `projects:read`. The newest reading the server recorded, with its age: `window` (`earliest` ... `latest`), `sleeping`, or `could_not_determine` with the reason -- a reading never recorded, older than 30 minutes, or one whose repository, archiver or mirror could not be read is never served as a window.",
+        "operationId": "get_backups_v1_projects__key__backups_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The reading."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          }
+        },
+        "summary": "A project's backups and its restore window"
+      }
+    },
+    "/v1/projects/{key}/branches": {
+      "get": {
+        "description": "Viewer and above, or a key holding `projects:read`. Each branch's point -- the one asked for and the one its restore reached --, its timeline, its two names and its expiry, as the server last recorded them. A branch is not backed up.",
+        "operationId": "list_branches_v1_projects__key__branches_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The branches."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          }
+        },
+        "summary": "A project's branches"
+      },
+      "post": {
+        "description": "Member and above, a person only. A copy of the project's database restored from its backups to the newest archived moment, its own two credentials -- the verifiers your CLI computed; the passwords stay on your machine -- and two names, `<branch>.pool.<domain>` and `<branch>.direct.<domain>`. One branch per project. `expires_at` (15 minutes to 7 days ahead) deletes it then. A branch is not backed up.",
+        "operationId": "create_branch_v1_projects__key__branches_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "`POST /v1/projects/{key}/branches`: a branch at the end of the archive.",
+                "properties": {
+                  "admin_verifier": {
+                    "pattern": "^SCRAM-SHA-256\\$4096:[A-Za-z0-9+/]{22}==\\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$",
+                    "title": "Admin Verifier",
+                    "type": "string"
+                  },
+                  "app_verifier": {
+                    "pattern": "^SCRAM-SHA-256\\$4096:[A-Za-z0-9+/]{22}==\\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$",
+                    "title": "App Verifier",
+                    "type": "string"
+                  },
+                  "branch": {
+                    "pattern": "^[a-z][a-z0-9]{1,11}$",
+                    "title": "Branch",
+                    "type": "string"
+                  },
+                  "expires_at": {
+                    "anyOf": [
+                      {
+                        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Expires At"
+                  }
+                },
+                "required": [
+                  "app_verifier",
+                  "admin_verifier",
+                  "branch"
+                ],
+                "title": "CreateBranchRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAcceptedResponse"
+                }
+              }
+            },
+            "description": "Recorded, `pending`: the reconciler executes it; follow it at `/v1/operations/{id}`."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BranchLimitReachedResponse"
+                }
+              }
+            },
+            "description": "`branch_limit_reached`: the project already has its one branch, or one is being created; nothing is recorded. Or `not_available` naming the ledger row, or `conflict` naming the operation already holding the project."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Create a branch at the end of the archive"
+      }
+    },
+    "/v1/projects/{key}/branches/{branch}": {
+      "delete": {
+        "description": "Admin and above, a person only. The branch's containers, volume and names are removed; the project is untouched. A branch is not backed up: what it held is gone.",
+        "operationId": "delete_branch_v1_projects__key__branches__branch__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "branch",
+            "required": true,
+            "schema": {
+              "title": "Branch",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAcceptedResponse"
+                }
+              }
+            },
+            "description": "Recorded, `pending`: the reconciler executes it; follow it at `/v1/operations/{id}`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAvailableResponse"
+                }
+              }
+            },
+            "description": "`not_available`, with the ledger row that says why: the operation is not offered yet, and nothing is recorded. Or `conflict` (ConflictResponse), with the id of the operation already holding the project."
+          }
+        },
+        "summary": "Delete a branch"
+      },
+      "get": {
+        "description": "Viewer and above, or a key holding `projects:read`. A missing branch, a foreign project's and a missing project's are one `not_found`.",
+        "operationId": "get_branch_v1_projects__key__branches__branch__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "branch",
+            "required": true,
+            "schema": {
+              "title": "Branch",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The branch."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          }
+        },
+        "summary": "One branch of a project"
+      }
+    },
+    "/v1/projects/{key}/branches/{branch}/reset": {
+      "post": {
+        "description": "Member and above, a person only. The branch is restored again -- to `target_time`, or to the end of the archive -- with the two new credentials; its names stay. Everything written to the branch since is lost.",
+        "operationId": "reset_branch_v1_projects__key__branches__branch__reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "branch",
+            "required": true,
+            "schema": {
+              "title": "Branch",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "`POST /v1/projects/{key}/branches/{branch}/reset`: the branch restored\nagain, at `target_time` or the end of the archive, with new credentials.",
+                "properties": {
+                  "admin_verifier": {
+                    "pattern": "^SCRAM-SHA-256\\$4096:[A-Za-z0-9+/]{22}==\\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$",
+                    "title": "Admin Verifier",
+                    "type": "string"
+                  },
+                  "app_verifier": {
+                    "pattern": "^SCRAM-SHA-256\\$4096:[A-Za-z0-9+/]{22}==\\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$",
+                    "title": "App Verifier",
+                    "type": "string"
+                  },
+                  "expires_at": {
+                    "anyOf": [
+                      {
+                        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Expires At"
+                  },
+                  "target_time": {
+                    "anyOf": [
+                      {
+                        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Target Time"
+                  }
+                },
+                "required": [
+                  "app_verifier",
+                  "admin_verifier"
+                ],
+                "title": "ResetBranchRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAcceptedResponse"
+                }
+              }
+            },
+            "description": "Recorded, `pending`: the reconciler executes it; follow it at `/v1/operations/{id}`."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAvailableResponse"
+                }
+              }
+            },
+            "description": "`not_available`, with the ledger row that says why: the operation is not offered yet, and nothing is recorded. Or `conflict` (ConflictResponse), with the id of the operation already holding the project."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Restore a branch again"
+      }
+    },
     "/v1/projects/{key}/compute": {
       "put": {
         "description": "Member and above, or a key holding `projects:write`. Resizing restarts the database and the services that use it; `message` says how long that was measured to take, or that it has not been measured on this server yet. A profile the server has no room for fails the operation with `capacity_exhausted` (`reason: admission`), and the project stays as it was.",
@@ -2315,6 +2877,149 @@
           }
         },
         "summary": "Export a project's data"
+      }
+    },
+    "/v1/projects/{key}/restores": {
+      "post": {
+        "description": "Member and above, a person only. A branch at `target_time`, which must be inside the window `GET /v1/projects/{key}/backups` serves; otherwise as a branch's creation. The project itself is never overwritten.",
+        "operationId": "create_restore_v1_projects__key__restores_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "`POST /v1/projects/{key}/restores`: a branch at `target_time` (D2434).",
+                "properties": {
+                  "admin_verifier": {
+                    "pattern": "^SCRAM-SHA-256\\$4096:[A-Za-z0-9+/]{22}==\\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$",
+                    "title": "Admin Verifier",
+                    "type": "string"
+                  },
+                  "app_verifier": {
+                    "pattern": "^SCRAM-SHA-256\\$4096:[A-Za-z0-9+/]{22}==\\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$",
+                    "title": "App Verifier",
+                    "type": "string"
+                  },
+                  "branch": {
+                    "pattern": "^[a-z][a-z0-9]{1,11}$",
+                    "title": "Branch",
+                    "type": "string"
+                  },
+                  "expires_at": {
+                    "anyOf": [
+                      {
+                        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Expires At"
+                  },
+                  "target_time": {
+                    "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$",
+                    "title": "Target Time",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "app_verifier",
+                  "admin_verifier",
+                  "branch",
+                  "target_time"
+                ],
+                "title": "CreateRestoreRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAcceptedResponse"
+                }
+              }
+            },
+            "description": "Recorded, `pending`: the reconciler executes it; follow it at `/v1/operations/{id}`."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BranchLimitReachedResponse"
+                }
+              }
+            },
+            "description": "`branch_limit_reached`: the project already has its one branch, or one is being created; nothing is recorded. Or `not_available` naming the ledger row, or `conflict` naming the operation already holding the project."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Restore a project to a point, into a new branch"
       }
     },
     "/v1/projects/{key}/sleep": {

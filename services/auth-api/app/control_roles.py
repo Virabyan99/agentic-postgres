@@ -90,6 +90,16 @@ MATRIX: Final[dict[str, str]] = {
     # read needs `viewer`, the write PROJECT_WRITES'.
     "get_connections": ACCOUNT,
     "rotate_credential": ACCOUNT,
+    # Session 40 (ADR 0271, ADR 0273): a project's branches and its backups.
+    # The organisation is read from the project row; the reads need `viewer`,
+    # the writes PROJECT_WRITES'.
+    "list_branches": ACCOUNT,
+    "get_branch": ACCOUNT,
+    "get_backups": ACCOUNT,
+    "create_branch": ACCOUNT,
+    "create_restore": ACCOUNT,
+    "reset_branch": ACCOUNT,
+    "delete_branch": ACCOUNT,
 }
 
 #: Session 38's writes (D2165, ADR 0256) -> the role they need in the
@@ -107,6 +117,12 @@ PROJECT_WRITES: Final[dict[str, str]] = {
     "cancel_operation": "viewer",
     # Session 39 (ADR 0269): member and above, as every write but deletion.
     "rotate_credential": "member",
+    # Session 40 (ADR 0271, D2436): a branch's deletion is admin, as a
+    # project's; its creation, restore and reset member.
+    "create_branch": "member",
+    "create_restore": "member",
+    "reset_branch": "member",
+    "delete_branch": "admin",
 }
 
 #: Each write route -> the operation type it requests.
@@ -118,6 +134,10 @@ OPERATION_OF_ROUTE: Final[dict[str, str]] = {
     "export_project": "project.export",
     "delete_project": "project.delete",
     "rotate_credential": "credential.rotate",
+    "create_branch": "branch.create",
+    "create_restore": "restore.create",
+    "reset_branch": "branch.reset",
+    "delete_branch": "branch.delete",
 }
 
 #: The key vocabulary: exactly the scopes a route checks (D2052) -- the control
@@ -168,6 +188,15 @@ KEY_SCOPES: Final[dict[str, str]] = {
     # a credential is NOT here: a person does it (ADR 0269), so a leaked key
     # can never replace the customer's database credential with its own.
     "get_connections": "projects:read",
+    # Session 40: a project's branches and its backups reading name no secret,
+    # so they are reads. NO branch write is here (D2468): a creation, a restore
+    # and a reset each carry the branch's own credentials, so a key that could
+    # request one could make itself a door to a full copy of the data -- the
+    # export case and the credential case at once. A person does each, and a
+    # deletion too, as a project's.
+    "list_branches": "projects:read",
+    "get_branch": "projects:read",
+    "get_backups": "projects:read",
 }
 
 

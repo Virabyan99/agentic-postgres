@@ -40,6 +40,10 @@ TABLES = {
     "control_projects",
     "control_operations",
     "control_slots",
+    # Session 40 (ADR 0271, ADR 0273): the reconciler's readings of the
+    # host's branches and of each project's backups.
+    "control_branches",
+    "control_backup_readings",
 }
 #: Every function the identity service may execute, and no other (ADR 0251).
 GRANTED = {
@@ -77,6 +81,11 @@ GRANTED = {
     "control_take_result_secret",
     "control_ready_slot_count",
     "control_project_operations",
+    # Session 40 (D2451): a project's branches and backups, viewer and above,
+    # the project resolved first.
+    "control_list_branches",
+    "control_get_branch",
+    "control_get_backups",
 }
 #: Root's, never granted: the operator's three through `bin/control.sh`
 #: (D2068) and the reconciler's (D2093, D2151).
@@ -90,9 +99,21 @@ OPERATOR = {
     "control_interrupted_operations",
     "control_record_slots",
     "control_mark_deleted",
+    # Session 40: the reconciler records branches and backups, and requests an
+    # expired branch's deletion (ADR 0272) -- granted to nobody.
+    "control_record_branches",
+    "control_record_backups",
+    "control_request_expiry",
 }
 #: The helpers that run only inside the functions above.
-HELPERS = {"control_enter", "control_require_role", "control_role_rank", "control_result_members"}
+HELPERS = {
+    "control_enter",
+    "control_require_role",
+    "control_role_rank",
+    "control_result_members",
+    # Session 40: the project a branch reader resolves first (D2451).
+    "control_project_organization",
+}
 
 
 def _set() -> migrations.MigrationSet:

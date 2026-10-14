@@ -95,18 +95,27 @@ THE_ACCEPTED_SIX = {
 #: `credential.rotate` (ADR 0269), which no ledger row accepts before Run 9.
 THE_EXECUTED_SEVEN = THE_ACCEPTED_SIX | {"credential.rotate"}
 
+#: Since Session 40 (ADR 0271): the seven and the four branch types, which no
+#: ledger row accepts before Run 8.
+THE_EXECUTED_ELEVEN = THE_EXECUTED_SEVEN | {
+    "branch.create",
+    "branch.reset",
+    "branch.delete",
+    "restore.create",
+}
 
-def test_no_type_is_accepted_and_the_seven_are_executed() -> None:
-    """The exact-set form at Session 39's close (ADR 0261 authorises it; renamed
-    from `test_exactly_the_seven_executed_types_are_accepted`, as Session 38's
-    close renamed it the other way): the seven types the reconciler executes are
-    built and NOT accepted -- their rows went back to `planned` because
-    `lifecycle_retrial_live` and `public_endpoints_live` failed on the tagged
-    evidence (D2415, D2416) -- so the service accepts no type at all, and a type
+
+def test_no_type_is_accepted_and_the_eleven_are_executed() -> None:
+    """The exact-set form between Session 39's close and Session 40's bump (ADR
+    0261 authorises it; renamed from `test_no_type_is_accepted_and_the_seven_are_
+    executed` when the four branch types were built, ADR 0271): every type in the
+    table is built and executed, and NONE is accepted -- the seven's rows went
+    back to `planned` at Session 39's close (D2415, D2416) and the branch rows
+    are `planned` until Run 8 -- so the service accepts no type at all, and a type
     outside the table is never accepted. The ledger half (accepted iff the row
     is reachable) is `test_reality_ledger`'s."""
     assert operations.ACCEPTED_TYPES == frozenset()
-    assert operations.EXECUTED_TYPES == THE_EXECUTED_SEVEN
+    assert operations.EXECUTED_TYPES == THE_EXECUTED_ELEVEN == THE_ELEVEN
     assert THE_EXECUTED_SEVEN < THE_ELEVEN
     assert not any(service_operations.is_accepted(t) for t in THE_ELEVEN)
     assert not service_operations.is_accepted("project.rename")
@@ -244,6 +253,9 @@ GOOD_CREATE = {
     "admin_username": "shop.admin",
     "handoff_sha256": "a" * 64,
 }
+#: Session 40: a branch's creation, its credentials the branch's own.
+GOOD_BRANCH = {"branch": "dev", "app_verifier": VERIFIER, "admin_verifier": VERIFIER}
+
 EXAMPLES: list[tuple[str, dict[str, Any], bool]] = [
     ("project.create", GOOD_CREATE, True),
     ("project.create", {**GOOD_CREATE, "name": "x" * 48}, True),
@@ -283,6 +295,30 @@ EXAMPLES: list[tuple[str, dict[str, Any], bool]] = [
     ("credential.rotate", {"role": "postgres", "verifier": VERIFIER}, False),
     ("credential.rotate", {"role": "customer_app"}, False),
     ("credential.rotate", {"role": "customer_app", "verifier": VERIFIER, "password": "x"}, False),
+    # Session 40 (ADR 0271, ADR 0272): a branch's name, its own two verifiers, a
+    # point and an expiry as RFC 3339 instants. Never a password, a path or a key.
+    ("branch.create", GOOD_BRANCH, True),
+    ("branch.create", {**GOOD_BRANCH, "expires_at": "2026-10-15T08:00:00Z"}, True),
+    ("branch.create", {**GOOD_BRANCH, "branch": "main"}, False),
+    ("branch.create", {**GOOD_BRANCH, "branch": "dev-1"}, False),
+    ("branch.create", {**GOOD_BRANCH, "branch": "dev\n"}, False),
+    ("branch.create", {**GOOD_BRANCH, "branch": "abcdefghijklm"}, False),
+    ("branch.create", {**GOOD_BRANCH, "app_verifier": "hunter2"}, False),
+    ("branch.create", {**GOOD_BRANCH, "expires_at": "2026-10-15 08:00:00+00"}, False),
+    ("branch.create", {**GOOD_BRANCH, "target_time": "2026-10-14T08:00:00Z"}, False),
+    ("branch.create", {**GOOD_BRANCH, "password": "x"}, False),
+    ("branch.create", {k: v for k, v in GOOD_BRANCH.items() if k != "admin_verifier"}, False),
+    ("restore.create", {**GOOD_BRANCH, "target_time": "2026-10-14T08:00:00.123456Z"}, True),
+    ("restore.create", GOOD_BRANCH, False),
+    ("restore.create", {**GOOD_BRANCH, "target_time": "2026-10-14T08:00:00+00:00"}, False),
+    ("restore.create", {**GOOD_BRANCH, "target_time": "yesterday"}, False),
+    ("branch.reset", GOOD_BRANCH, True),
+    ("branch.reset", {**GOOD_BRANCH, "target_time": "2026-10-14T08:00:00Z"}, True),
+    ("branch.reset", {**GOOD_BRANCH, "branch": "main"}, False),
+    ("branch.delete", {"branch": "dev"}, True),
+    ("branch.delete", {"branch": "main"}, False),
+    ("branch.delete", {}, False),
+    ("branch.delete", {"branch": "dev", "project": "slot3-prod"}, False),
 ]
 
 
@@ -296,8 +332,29 @@ def test_the_schema_and_the_models_agree(
         "project.create": models.CreateProjectRequest,
         "project.resize": models.ResizeProjectRequest,
         "credential.rotate": models.RotateCredentialRequest,
+        "branch.create": models.CreateBranchRequest,
+        "restore.create": models.CreateRestoreRequest,
+        "branch.reset": models.ResetBranchRequest,
     }.get(operation_type)
-    if model is None:
+    if operation_type in ("branch.reset", "branch.delete"):
+        # The branch of a reset and of a deletion is the route's PATH, judged by
+        # the same pattern the path's handler reaches through the service.
+        body = {k: v for k, v in arguments.items() if k != "branch"}
+        name = arguments.get("branch")
+        path_ok = (
+            isinstance(name, str)
+            and bool(re.fullmatch(models.BRANCH_PATTERN.strip("^$"), name))
+            and name != "main"
+        )
+        if operation_type == "branch.delete":
+            by_model = path_ok and body == {}
+        else:
+            try:
+                models.ResetBranchRequest(**body)
+                by_model = path_ok
+            except pydantic.ValidationError:
+                by_model = False
+    elif model is None:
         by_model = arguments == {}
     else:
         body = dict(arguments)

@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 #: Bounds on the strings a client may send. These are not the password policy --
 #: that is `hashing.assess`, which runs after normalization and says why it
@@ -671,6 +671,62 @@ class RotateCredentialRequest(_Strict):
     verifier: str = Field(
         pattern=r"^SCRAM-SHA-256\$4096:[A-Za-z0-9+/]{22}==\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$"
     )
+
+
+# ---------------------------------------------------------------------------
+# Session 40: branches and restores to a branch (ADR 0271, ADR 0272)
+#
+# Mirrors of the schema's `branch.create`, `restore.create` and `branch.reset`
+# branches; the branch of a reset and of a deletion is the PATH's, never the
+# body's. Each carries the BRANCH's own two verifiers -- the passwords stay on
+# the customer's workstation (D2449) -- which is why these routes are a
+# person's and never a key's (D2468).
+# ---------------------------------------------------------------------------
+
+BRANCH_PATTERN = r"^[a-z][a-z0-9]{1,11}$"
+VERIFIER_PATTERN = (
+    r"^SCRAM-SHA-256\$4096:[A-Za-z0-9+/]{22}==\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$"
+)
+INSTANT_PATTERN = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z$"
+
+
+class _BranchCredentials(_Strict):
+    app_verifier: str = Field(pattern=VERIFIER_PATTERN)
+    admin_verifier: str = Field(pattern=VERIFIER_PATTERN)
+    expires_at: str | None = Field(default=None, pattern=INSTANT_PATTERN)
+
+
+class CreateBranchRequest(_BranchCredentials):
+    """`POST /v1/projects/{key}/branches`: a branch at the end of the archive."""
+
+    branch: str = Field(pattern=BRANCH_PATTERN)
+
+    @field_validator("branch")
+    @classmethod
+    def _not_main(cls, value: str) -> str:
+        if value == "main":
+            raise ValueError("`main` is the project itself")
+        return value
+
+
+class CreateRestoreRequest(CreateBranchRequest):
+    """`POST /v1/projects/{key}/restores`: a branch at `target_time` (D2434)."""
+
+    target_time: str = Field(pattern=INSTANT_PATTERN)
+
+
+class ResetBranchRequest(_BranchCredentials):
+    """`POST /v1/projects/{key}/branches/{branch}/reset`: the branch restored
+    again, at `target_time` or the end of the archive, with new credentials."""
+
+    target_time: str | None = Field(default=None, pattern=INSTANT_PATTERN)
+
+
+class BranchLimitReachedResponse(BaseModel):
+    """The project already has its one live branch, or a creation of one is in
+    flight; nothing was recorded (D2430)."""
+
+    error: Literal["branch_limit_reached"]
 
 
 class OperationAcceptedResponse(BaseModel):

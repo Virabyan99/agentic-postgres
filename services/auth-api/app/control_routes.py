@@ -36,13 +36,16 @@ from app import control_roles, errors, openapi_docs, strict_query
 from app.control_service import ControlPrincipal, ControlService
 from app.models import (
     AcceptInvitationRequest,
+    BranchLimitReachedResponse,
     CapacityExhaustedResponse,
     ConfirmFactorRequest,
     ConflictResponse,
     ControlLoginRequest,
     ControlRefusedResponse,
+    CreateBranchRequest,
     CreateOrganizationRequest,
     CreateProjectRequest,
+    CreateRestoreRequest,
     FactorEnrolmentResponse,
     InvitationResponse,
     KeyResponse,
@@ -52,6 +55,7 @@ from app.models import (
     NotAvailableResponse,
     OperationAcceptedResponse,
     RefreshRequest,
+    ResetBranchRequest,
     ResizeProjectRequest,
     RotateCredentialRequest,
     SessionTokenResponse,
@@ -930,6 +934,190 @@ async def get_connections(request: Request, key: str) -> Response:
     async def run() -> Response:
         caller = await _caller(request)
         return JSONResponse(await _service(request).connections(caller, key))
+
+    return await _guard(run)
+
+
+# ---------------------------------------------------------------------------
+# Session 40: branches, restores to a branch, and the backups surface
+# (ADR 0271, ADR 0272, ADR 0273). Every route resolves the PROJECT first, so a
+# foreign project's branch, a missing project's and a missing branch of the
+# caller's own project are the one `not_found` (D2451). The writes are a
+# person's (D2468): each carries the branch's own credentials.
+# ---------------------------------------------------------------------------
+
+BRANCH_LIMIT = {
+    "model": BranchLimitReachedResponse,
+    "description": (
+        "`branch_limit_reached`: the project already has its one branch, or one is being "
+        "created; nothing is recorded. Or `not_available` naming the ledger row, or "
+        "`conflict` naming the operation already holding the project."
+    ),
+}
+
+
+def _arguments(payload: Any) -> dict[str, Any]:
+    """A branch request's members as the row's arguments, unset members left out."""
+    return {name: value for name, value in payload.model_dump().items() if value is not None}
+
+
+@router.get(
+    "/projects/{key}/branches",
+    openapi_extra=openapi_docs.described(
+        summary="A project's branches",
+        description=(
+            "Viewer and above, or a key holding `projects:read`. Each branch's point -- the one "
+            "asked for and the one its restore reached --, its timeline, its two names and its "
+            "expiry, as the server last recorded them. A branch is not backed up."
+        ),
+    ),
+    responses={200: openapi_docs.ok("The branches."), 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_YOURS},
+)  # fmt: skip
+async def list_branches(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        return JSONResponse(await _service(request).list_branches(caller, key))
+
+    return await _guard(run)
+
+
+@router.post(
+    "/projects/{key}/branches",
+    status_code=202,
+    openapi_extra=openapi_docs.described(
+        summary="Create a branch at the end of the archive",
+        description=(
+            "Member and above, a person only. A copy of the project's database restored from its "
+            "backups to the newest archived moment, its own two credentials -- the verifiers your "
+            "CLI computed; the passwords stay on your machine -- and two names, "
+            "`<branch>.pool.<domain>` and `<branch>.direct.<domain>`. One branch per project. "
+            "`expires_at` (15 minutes to 7 days ahead) deletes it then. A branch is not backed up."
+        ),
+        request_model=CreateBranchRequest,
+    ),
+    responses={202: ACCEPTED, 400: openapi_docs.MALFORMED, 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_YOURS, 409: BRANCH_LIMIT, 422: openapi_docs.INVALID},
+)  # fmt: skip
+async def create_branch(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        caller = await _offered(request)
+        payload = await _body(request, CreateBranchRequest)
+        assert isinstance(payload, CreateBranchRequest)
+        return _accepted(await _service(request).create_branch(caller, key, _arguments(payload)))
+
+    return await _guard(run)
+
+
+@router.post(
+    "/projects/{key}/restores",
+    status_code=202,
+    openapi_extra=openapi_docs.described(
+        summary="Restore a project to a point, into a new branch",
+        description=(
+            "Member and above, a person only. A branch at `target_time`, which must be inside the "
+            "window `GET /v1/projects/{key}/backups` serves; otherwise as a branch's creation. "
+            "The project itself is never overwritten."
+        ),
+        request_model=CreateRestoreRequest,
+    ),
+    responses={202: ACCEPTED, 400: openapi_docs.MALFORMED, 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_YOURS, 409: BRANCH_LIMIT, 422: openapi_docs.INVALID},
+)  # fmt: skip
+async def create_restore(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        caller = await _offered(request)
+        payload = await _body(request, CreateRestoreRequest)
+        assert isinstance(payload, CreateRestoreRequest)
+        return _accepted(await _service(request).create_restore(caller, key, _arguments(payload)))
+
+    return await _guard(run)
+
+
+@router.get(
+    "/projects/{key}/branches/{branch}",
+    openapi_extra=openapi_docs.described(
+        summary="One branch of a project",
+        description="Viewer and above, or a key holding `projects:read`. A missing branch, a "
+                    "foreign project's and a missing project's are one `not_found`.",
+    ),
+    responses={200: openapi_docs.ok("The branch."), 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_YOURS},
+)  # fmt: skip
+async def get_branch(request: Request, key: str, branch: str) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        return JSONResponse(await _service(request).get_branch(caller, key, branch))
+
+    return await _guard(run)
+
+
+@router.post(
+    "/projects/{key}/branches/{branch}/reset",
+    status_code=202,
+    openapi_extra=openapi_docs.described(
+        summary="Restore a branch again",
+        description=(
+            "Member and above, a person only. The branch is restored again -- to `target_time`, "
+            "or to the end of the archive -- with the two new credentials; its names stay. "
+            "Everything written to the branch since is lost."
+        ),
+        request_model=ResetBranchRequest,
+    ),
+    responses={202: ACCEPTED, 400: openapi_docs.MALFORMED, 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_YOURS, 409: NOT_OFFERED, 422: openapi_docs.INVALID},
+)  # fmt: skip
+async def reset_branch(request: Request, key: str, branch: str) -> Response:
+    async def run() -> Response:
+        caller = await _offered(request)
+        payload = await _body(request, ResetBranchRequest)
+        assert isinstance(payload, ResetBranchRequest)
+        operation = await _service(request).reset_branch(caller, key, branch, _arguments(payload))
+        return _accepted(operation)
+
+    return await _guard(run)
+
+
+@router.delete(
+    "/projects/{key}/branches/{branch}",
+    status_code=202,
+    openapi_extra=openapi_docs.described(
+        summary="Delete a branch",
+        description=(
+            "Admin and above, a person only. The branch's containers, volume and names are "
+            "removed; the project is untouched. A branch is not backed up: what it held is gone."
+        ),
+    ),
+    responses={202: ACCEPTED, 401: openapi_docs.UNAUTHENTICATED, 403: FACTOR_GATE,
+               404: NOT_YOURS, 409: NOT_OFFERED},
+)  # fmt: skip
+async def delete_branch(request: Request, key: str, branch: str) -> Response:
+    async def run() -> Response:
+        caller = await _offered(request)
+        return _accepted(await _service(request).delete_branch(caller, key, branch))
+
+    return await _guard(run)
+
+
+@router.get(
+    "/projects/{key}/backups",
+    openapi_extra=openapi_docs.described(
+        summary="A project's backups and its restore window",
+        description=(
+            "Viewer and above, or a key holding `projects:read`. The newest reading the server "
+            "recorded, with its age: `window` (`earliest` ... `latest`), `sleeping`, or "
+            "`could_not_determine` with the reason -- a reading never recorded, older than 30 "
+            "minutes, or one whose repository, archiver or mirror could not be read is never "
+            "served as a window."
+        ),
+    ),
+    responses={200: openapi_docs.ok("The reading."), 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_YOURS},
+)  # fmt: skip
+async def get_backups(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        return JSONResponse(await _service(request).backups(caller, key))
 
     return await _guard(run)
 

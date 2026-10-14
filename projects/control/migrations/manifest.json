@@ -62,6 +62,16 @@
         "auth_service"
       ],
       "description": "A project's public endpoints in the registry and the customer's credential rotation (Session 39; ADR 0268, ADR 0269, ADR 0270): control_projects.endpoints, the deployed document's database.public, written by control_adopt_project (re-created wider, invoker-rights, granted to nobody) and read by a viewer and above through control_project_endpoints (definer, granted to the identity service); control_request_operation accepts credential.rotate (member and above), whose arguments carry a SCRAM verifier and never a password; control_result_members lets credential.rotate record its role and project.resize its admission reading (D2362)."
+    },
+    {
+      "version": "20261014120006",
+      "name": "control_branches",
+      "template": "templates/0006-control-branches.sql",
+      "placeholders": [
+        "object_owner",
+        "auth_service"
+      ],
+      "description": "Branches and the backups surface (Session 40; ADR 0271, ADR 0272, ADR 0273): control_branches (what the reconciler last read of each branch.json, written whole by control_record_branches, granted to nobody) and control_backup_readings (one reading per project with its age, control_record_backups, granted to nobody); the definer readers control_list_branches, control_get_branch and control_get_backups resolve the project first, so a foreign and a missing branch are one not_found (D2451); control_request_operation replaced with the same signature -- the four branch types, one live branch per project refused AP409 branch_limit_reached before any row (D2430), a reset or deletion names a recorded live branch, a project with a live branch is not deleted (D2438), the expiry's 15-minute to 7-day bounds; control_operations.origin (member | expiry) and control_request_expiry, granted to nobody, which requests one branch.delete on behalf of the member who set the expiry (ADR 0272)."
     }
   ]
 }

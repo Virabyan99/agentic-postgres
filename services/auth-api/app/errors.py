@@ -226,6 +226,13 @@ NOT_AVAILABLE: Final = "not_available"
 #: the organisation's creation (D2166).
 CAPACITY_EXHAUSTED: Final = "capacity_exhausted"
 CONFLICT: Final = "conflict"
+#: Session 40 (ADR 0271, D2430): a project already has its one live branch, or
+#: a creation of one is in flight -- answered before any row is written, by the
+#: route and by the control set (`AP409: branch_limit_reached`). An HTTP
+#: refusal, never an operation's outcome, so it is NOT in
+#: `OPERATION_ERROR_CODES` (D2469). Distinct from `capacity_exhausted`, which a
+#: branch's own admission produces (D2431); neither reader produces the other.
+BRANCH_LIMIT_REACHED: Final = "branch_limit_reached"
 
 #: How a FINISHED operation failed -- its `error_code`, never an HTTP refusal.
 #: The control set's `control_operations.error_code` CHECK lists exactly these
@@ -256,6 +263,7 @@ CONTROL_STATUS: Final[dict[str, int]] = {
     NOT_AVAILABLE: 409,
     CAPACITY_EXHAUSTED: 409,
     CONFLICT: 409,
+    BRANCH_LIMIT_REACHED: 409,
 }
 
 

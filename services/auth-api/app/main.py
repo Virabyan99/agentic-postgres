@@ -480,7 +480,8 @@ def control_paths() -> tuple[str, ...]:
     serves them -- the control router strips `{api}`, so `/api/v1/me` arrives
     as `/v1/me`. Run 5 added the keys, projects and operations paths; Session 38
     the project writes and the cancel (ADR 0256); Session 39 a project's public
-    doors and its customer credentials (ADR 0268, ADR 0269)."""
+    doors and its customer credentials (ADR 0268, ADR 0269); Session 40 its
+    branches, restores to a branch and backups (ADR 0271, ADR 0273)."""
     return (
         "/v1/invitations",
         "/v1/invitations/accept",
@@ -500,10 +501,15 @@ def control_paths() -> tuple[str, ...]:
         "/v1/organizations/{organization}/members/{user}",
         "/v1/projects",
         "/v1/projects/{key}",
+        "/v1/projects/{key}/backups",
+        "/v1/projects/{key}/branches",
+        "/v1/projects/{key}/branches/{branch}",
+        "/v1/projects/{key}/branches/{branch}/reset",
         "/v1/projects/{key}/compute",
         "/v1/projects/{key}/connections",
         "/v1/projects/{key}/credentials",
         "/v1/projects/{key}/export",
+        "/v1/projects/{key}/restores",
         "/v1/projects/{key}/sleep",
         "/v1/projects/{key}/wake",
         "/v1/sessions",

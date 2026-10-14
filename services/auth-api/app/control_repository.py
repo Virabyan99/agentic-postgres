@@ -318,6 +318,36 @@ class ControlRepository:
         endpoints = None if row is None else row["endpoints"]
         return endpoints if isinstance(endpoints, dict) else None
 
+    # -- Session 40: branches and the backups reading (ADR 0271, ADR 0273) ----------
+
+    _BRANCH = (
+        "SELECT name, state, requested_point, reached_point, timeline, pool_host, "
+        "direct_host, expires_at, created_at, observed_at FROM "
+    )
+
+    async def list_branches(self, user: UUID, key: str) -> list[dict[str, Any]]:
+        """A project's live branches. A foreign, missing or deleted project is the
+        one `not_found` (D2451)."""
+        return await self._rows(
+            user, self._BRANCH + "app.control_list_branches(%s, %s)", (user, key)
+        )
+
+    async def get_branch(self, user: UUID, key: str, branch: str) -> dict[str, Any] | None:
+        """One live branch; a missing one is the same `not_found` (D2451)."""
+        return await self._one(
+            user, self._BRANCH + "app.control_get_branch(%s, %s, %s)", (user, key, branch)
+        )
+
+    async def get_backups(self, user: UUID, key: str) -> dict[str, Any] | None:
+        """The project's newest recorded backups reading, or None when none was
+        recorded (ADR 0273)."""
+        return await self._one(
+            user,
+            "SELECT observed_at, repository_status, archiver_status, mirror_status, earliest, "
+            "latest, last_full_at, sleeping, reason FROM app.control_get_backups(%s, %s)",
+            (user, key),
+        )
+
     async def cancel_operation(self, user: UUID, operation: UUID) -> None:
         await self._rows(user, "SELECT app.control_cancel_operation(%s, %s)", (user, operation))
 

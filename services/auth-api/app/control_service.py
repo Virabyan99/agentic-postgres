@@ -114,6 +114,31 @@ NO_ENDPOINT_LEDGER_ROW = "pooled_endpoint"
 #: deployed document's `database.public` (ADR 0268 item 6). No URL, no password.
 DOOR_MEMBERS = ("host", "port", "user", "database", "sslmode", "connection_limit")
 
+#: Session 40 (ADR 0273): a backups reading older than two of the reconciler's
+#: recording intervals is not a window -- it is `could_not_determine`, with its age.
+BACKUP_READING_MAX_AGE = timedelta(seconds=2 * operations.BACKUP_RECORD_SECONDS)
+
+#: What the surface says beside a window, and to a sleeping project's reader.
+WINDOW_MESSAGE = (
+    "A branch can be restored to any point in this window. Its top is the archive's last "
+    "archived moment; the newest change in it may be a few seconds earlier, and a point "
+    "after the newest change is refused by the restore itself. To test a restore, create "
+    "a branch at a point in its window."
+)
+SLEEPING_MESSAGE = (
+    "The project sleeps; its archiver is stopped (its last archived point: {latest})."
+)
+
+#: A branch's reader members (D2450): its point, its timeline, its names, its expiry.
+BRANCH_MEMBERS = (
+    "name", "state", "requested_point", "reached_point", "timeline", "pool_host",
+    "direct_host", "expires_at", "created_at", "observed_at",
+)  # fmt: skip
+
+#: Said on every branch read (D2441): a copy that looked backed up would be a
+#: surface claiming more than the node does.
+BRANCH_NOTICE = "A branch is not backed up; deleting it, or losing the server, loses it."
+
 
 def mint_key() -> tuple[str, str, str]:
     """A new key: (the key, its id, the SHA-256 of its secret). **Shown once.**"""
@@ -661,6 +686,12 @@ class ControlService:
         organization = row["organization_id"]
         self.require_role(caller, organization, control_roles.PROJECT_WRITES[route])
         operation_type = control_roles.OPERATION_OF_ROUTE[route]
+        # D2438: a project with a live branch is not deleted -- the branch first.
+        # The control set refuses the same (`AP409: conflict`).
+        if operation_type == "project.delete" and await self.repository.list_branches(
+            caller.user_id, key
+        ):
+            raise errors.ControlRefused(errors.CONFLICT)
         return await self._request(caller, organization, key, operation_type, arguments)
 
     async def _request(
@@ -732,6 +763,113 @@ class ControlService:
             {"role": role, "verifier": verifier},
         )
 
+    # -- Session 40: branches and the backups surface (ADR 0271, ADR 0273) ------
+
+    async def _live_project(self, caller: ControlPrincipal, key: str) -> dict[str, Any]:
+        """A live project of the caller's organisations, or the one `not_found`
+        -- the reader every branch route resolves first (D2451)."""
+        row = await self.repository.get_project(caller.user_id, key)
+        if row is None or not self._visible(caller, row["organization_id"]):
+            raise errors.ControlRefused(errors.NOT_FOUND)
+        if row["deleted_at"] is not None:
+            raise errors.ControlRefused(errors.NOT_FOUND)
+        return row
+
+    async def list_branches(self, caller: ControlPrincipal, key: str) -> dict[str, Any]:
+        row = await self._live_project(caller, key)
+        self.require_role(caller, row["organization_id"], "viewer")
+        branches = await self.repository.list_branches(caller.user_id, key)
+        return {
+            "project": key,
+            "branches": [_branch(b) for b in branches],
+            "notice": BRANCH_NOTICE,
+        }
+
+    async def get_branch(self, caller: ControlPrincipal, key: str, branch: str) -> dict[str, Any]:
+        row = await self._live_project(caller, key)
+        self.require_role(caller, row["organization_id"], "viewer")
+        found = await self.repository.get_branch(caller.user_id, key, branch)
+        if found is None:
+            raise errors.ControlRefused(errors.NOT_FOUND)
+        return {"project": key, **_branch(found), "notice": BRANCH_NOTICE}
+
+    async def backups(
+        self, caller: ControlPrincipal, key: str, *, now: datetime | None = None
+    ) -> dict[str, Any]:
+        """The project's restore window, from the newest recorded reading (ADR
+        0273): `window`, `sleeping`, or `could_not_determine` with its reason --
+        a reading never recorded, older than `BACKUP_READING_MAX_AGE`, or with a
+        status its classifier could not determine is never served as a window."""
+        row = await self._live_project(caller, key)
+        self.require_role(caller, row["organization_id"], "viewer")
+        reading = await self.repository.get_backups(caller.user_id, key)
+        moment = now or datetime.now(UTC)
+        return backups_document(key, reading, moment)
+
+    def _expiry(self, expires_at: str | None, *, now: datetime | None = None) -> None:
+        """At least 15 minutes and at most 7 days ahead, or 422 (ADR 0272)."""
+        if expires_at is None:
+            return
+        moment = now or datetime.now(UTC)
+        instant = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        seconds = (instant - moment).total_seconds()
+        if not operations.MIN_EXPIRY_SECONDS <= seconds <= operations.MAX_EXPIRY_SECONDS:
+            raise errors.InvalidRequest(
+                "expires_at must be at least 15 minutes and at most 7 days from now"
+            )
+
+    async def _branch_write(
+        self,
+        caller: ControlPrincipal,
+        route: str,
+        key: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """One of the four branch writes: the project first (D2451), the role,
+        the one-branch rule before any row (D2430), the named branch for a reset
+        or a deletion, then the row. The control set checks each again."""
+        row = await self._live_project(caller, key)
+        organization = row["organization_id"]
+        self.require_role(caller, organization, control_roles.PROJECT_WRITES[route])
+        operation_type = control_roles.OPERATION_OF_ROUTE[route]
+        self._expiry(arguments.get("expires_at"))
+        if operation_type in ("branch.create", "restore.create"):
+            live = await self.repository.list_branches(caller.user_id, key)
+            history = await self.repository.project_operations(caller.user_id, key)
+            creating = [
+                o for o in history
+                if o["type"] in ("branch.create", "restore.create")
+                and o["status"] in ("pending", "running")
+            ]  # fmt: skip
+            if len(live) + len(creating) >= operations.BRANCHES_PER_PROJECT:
+                raise errors.ControlRefused(errors.BRANCH_LIMIT_REACHED)
+        else:
+            if await self.repository.get_branch(caller.user_id, key, arguments["branch"]) is None:
+                raise errors.ControlRefused(errors.NOT_FOUND)
+        return await self._request(caller, organization, key, operation_type, arguments)
+
+    async def create_branch(
+        self, caller: ControlPrincipal, key: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await self._branch_write(caller, "create_branch", key, arguments)
+
+    async def create_restore(
+        self, caller: ControlPrincipal, key: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await self._branch_write(caller, "create_restore", key, arguments)
+
+    async def reset_branch(
+        self, caller: ControlPrincipal, key: str, branch: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await self._branch_write(
+            caller, "reset_branch", key, {"branch": branch, **arguments}
+        )
+
+    async def delete_branch(
+        self, caller: ControlPrincipal, key: str, branch: str
+    ) -> dict[str, Any]:
+        return await self._branch_write(caller, "delete_branch", key, {"branch": branch})
+
     @staticmethod
     def resize_message() -> str:
         """The sentence a resize's `202` carries (D2157): the measured window,
@@ -792,6 +930,71 @@ class ControlService:
 
 def _iso(value: Any) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _branch(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        member: (_iso(row[member]) if isinstance(row[member], datetime) else row[member])
+        for member in BRANCH_MEMBERS
+    }
+
+
+def backups_document(key: str, reading: dict[str, Any] | None, now: datetime) -> dict[str, Any]:
+    """`GET /v1/projects/{key}/backups`'s body, from the recorded reading (ADR
+    0273). Three outcomes and a fourth fact: a `window`; `sleeping`; or
+    `could_not_determine` naming why -- never a window built from a reading that
+    is missing, stale or undetermined (ADR 0195)."""
+    if reading is None:
+        return {
+            "project": key,
+            "status": "could_not_determine",
+            "reason": "no backups reading has been recorded for this project yet",
+        }
+    observed = reading["observed_at"]
+    base = {"project": key, "observed_at": _iso(observed)}
+    age = (now - observed).total_seconds()
+    if age > BACKUP_READING_MAX_AGE.total_seconds():
+        return {
+            **base,
+            "status": "could_not_determine",
+            "reason": f"the newest backups reading is {int(age)} seconds old, older than "
+            f"{int(BACKUP_READING_MAX_AGE.total_seconds())}; the server has not been read since",
+        }
+    if reading["sleeping"]:
+        latest = _iso(reading["latest"]) or "never recorded"
+        return {
+            **base,
+            "status": "sleeping",
+            "latest": _iso(reading["latest"]),
+            "message": SLEEPING_MESSAGE.format(latest=latest),
+        }
+    statuses = {
+        "repository": reading["repository_status"],
+        "archiver": reading["archiver_status"],
+        "mirror": reading["mirror_status"],
+    }
+    undetermined = sorted(name for name, status in statuses.items() if status == "unknown")
+    if undetermined or reading["earliest"] is None or reading["latest"] is None:
+        why = (
+            f"the {', '.join(undetermined)} could not be read"
+            if undetermined
+            else "the window's bounds were not read"
+        )
+        return {
+            **base,
+            "status": "could_not_determine",
+            "reason": why + (f": {reading['reason']}" if reading["reason"] else ""),
+            "statuses": statuses,
+        }
+    return {
+        **base,
+        "status": "window",
+        "earliest": _iso(reading["earliest"]),
+        "latest": _iso(reading["latest"]),
+        "last_full_at": _iso(reading["last_full_at"]),
+        "statuses": statuses,
+        "message": WINDOW_MESSAGE,
+    }
 
 
 def _organization(row: dict[str, Any]) -> dict[str, Any]:
