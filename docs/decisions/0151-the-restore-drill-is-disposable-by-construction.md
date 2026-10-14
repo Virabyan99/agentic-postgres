@@ -1,6 +1,6 @@
 # 0151 — The restore drill is disposable by construction, not by care
 
-Status: accepted
+Status: accepted; its `archive_mode` check moves into `assert_disposable` itself in Session 40 (D2447), and a branch's persistent phase is not a drill (ADR 0271)
 Date: 2026-08-25
 Session: 10, Run 8
 
@@ -247,3 +247,29 @@ it here, so this is relying on the absence of a setting.
 0002 and by the fact that the generation changes on every deploy. The running
 container is the authority on which generation is active; a second derivation is
 the copy that is right until the next `up`.
+
+## Amendment (Session 40, Run 1, D2447)
+
+**§5's list says `assert_disposable` checks that the drill instance's command
+line carries `archive_mode=off`. The code did not** (`restore_drill.py:414-478`
+at `23e3d92`): the check lived only in
+`tests/contract/test_restore_test_command.py:327`, which asserted the command
+`instance_command()` returns. Session 40's Run 2 adds the check to
+`assert_disposable` itself, so a plan whose instance could archive is refused
+exit 7 like the other four, and the test then reads the code rather than
+standing in for it. Stricter; nothing that passed is weakened.
+
+**A branch's persistent phase is not a drill** (ADR 0271). A branch reuses
+this ADR's restore argv and its read-only inherited mounts for its restore and
+recovery phases, and then starts a THIRD phase this ADR never had: an instance
+that lives, with no repository mount, no configuration mount, no backup
+network, `archive_mode=off` and `archive_command=/bin/false`, asserted by
+`branch_plan.assert_branch_safe`. Everything above about the drill stands; the
+drill's teardown-on-exit does not apply to a branch, whose deletion is its own
+operation.
+
+**The target's form** (D2454, measured in rig 40a on pgBackRest 2.59.1): a time
+target in the ISO `T` form is refused `[029]` (*"time format must be YYYY-MM-DD
+HH:MM:SS …"*) before anything is written. `docs/backup-operations.md`'s example
+uses the space form and works; the drill's `--help`, which says *"ISO 8601 with
+an offset"*, is corrected in Run 2.

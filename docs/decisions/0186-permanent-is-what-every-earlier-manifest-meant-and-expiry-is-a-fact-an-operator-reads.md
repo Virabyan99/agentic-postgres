@@ -1,6 +1,6 @@
 # 0186 — Permanent is what every earlier manifest meant, and expiry is a fact an operator reads
 
-- **Status:** accepted
+- **Status:** accepted; its *expiry is a fact an operator reads, never a trigger* superseded for branches only by ADR 0272
 - **Date:** 2026-09-04
 - **Session:** 17, Run 3 (`FLEET-LIFE-001`, `FLEET-EXPIRE-001`, D949, D951)
 - **Related:** **ADR 0177** (a field is forbidden below the version that
@@ -98,3 +98,11 @@ the console action that would orphan them (D957).
   `--before-expiry` — and reads `expires_at` for nothing else.
 - If a future session wants a timer to act on `expires_at`, this ADR is the
   one it supersedes, and it should start from D713 and D957.
+
+## Superseded in part (Session 40, ADR 0272)
+
+**For branches only**, a branch's `expires_at` is acted on: the reconciler asks
+the control database to request the branch's deletion on behalf of the member
+who set it (ADR 0272). What expires is a copy restored from the parent's
+repository; the parent, its repository and its cipher pass are untouched. For
+a **project** this ADR stands word for word, and D713 remains the reason.

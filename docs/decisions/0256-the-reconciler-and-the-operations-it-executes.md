@@ -1,6 +1,6 @@
 # 0256 — The reconciler, and the operations it executes
 
-- **Status:** Accepted; its unit-ordering sentence corrected by Session 39 (D2348, D2355)
+- **Status:** Accepted; its unit-ordering sentence corrected by Session 39 (D2348, D2355); amended by Session 40 (`slot.sh redeploy`, D2443; the one operation the reconciler requests, ADR 0272)
 - **Date:** 2026-10-07
 - **Session:** 38, Run 1 (D2151–D2154, D2159–D2160, D2165–D2168, D2173,
   D2178–D2179, D2184, D2188; rig rows D2189, D2191)
@@ -201,3 +201,22 @@ Instead (Session 39 Run 2) `start()` waits for the control database for up to
 180 s, retrying every 10 s and printing *"waiting for the control project's
 database (n s)"*, before it fails with exit 6. The reboot read after it
 (Session 39, Sheet B1) expects `NRestarts` 0.
+
+## Amendment (Session 40, Run 1, D2443, D2433)
+
+**The reconciler requests exactly one kind of operation: an expired branch's
+deletion**, through `app.control_request_expiry`, granted to nobody, which
+writes the row on behalf of the member who set the expiry and marks it
+`origin = 'expiry'` (ADR 0272). Every other operation is still created by
+`/api/v1` alone.
+
+**`sudo bin/slot.sh redeploy --host host.yaml --slot K --confirm K`** moves an
+allocated slot's managed project to the checkout's release with the
+reconciler's own argv: it refuses unless the slot is `allocated` with a
+deployed document, refuses while `agentic-postgres-reconciler` is active
+(D2178), runs exactly `reconciler_dispatch.deploy_argv` for
+`/etc/agentic-postgres/slots/<K>/manifest.yaml` with the document's
+`through_session` replaced by `CURRENT_SESSION`, then `customer-credentials.sh
+sync`, then adopts under the organisation the control registry records for K
+(never typed). Admission's exit 12 is carried. Session 39's Sheet D4 did these
+three steps by hand (D2418); its first live run is Session 40's Sheet R2d.

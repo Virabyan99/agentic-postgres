@@ -188,11 +188,17 @@ is not here either: no support grant is built, and the Reality Ledger says why
 — *"the operator of this single node has root on it; support access is not
 technically bounded in this beta"* (D1971).
 
-1. **Branch enumeration** (Session 40). A caller learns that a branch of
-   another organisation exists from a status code, a timing or an error body.
-   Owed: a foreign branch id and a missing one return the same answer. Session
-   37's half -- organisations, members and projects -- is `THR-CTL-ENUMERATION`
-   in the table.
+1. **Branch enumeration** (Session 40, ADR 0271, D2451). A caller learns that a
+   branch of another organisation's project exists from a status code, a timing
+   or an error body. Every branch route resolves the project first through the
+   reader `GET /v1/projects/{key}` already uses, so a foreign project's branch,
+   a missing project's and a missing branch of the caller's own project answer
+   one `404 not_found` body. Owed (BR-CTL-001):
+   `tests/contract/test_control_branches.py::test_a_foreign_and_a_missing_branch_answer_alike`
+   -- the three bodies and statuses compared byte for byte. Timing is not
+   equalised, as for the project read. Session 37's half -- organisations,
+   members and projects -- is `THR-CTL-ENUMERATION` in the table. Run 8 moves
+   this item into the table as `THR-BR-ENUMERATION`.
 2. **Endpoint confusion and gateway attacks** (Session 39, ADR 0268). A
    plaintext connection, a wrong or absent SNI, or one project's hostname used
    to reach another project's database through the shared port 5432. **In the
@@ -211,15 +217,40 @@ technically bounded in this beta"* (D1971).
    Session 38's half -- capacity, from two readers under one code, and the
    serialisation -- is `THR-LIFE-EXHAUSTION` in the table. Owed: the
    entitlement half (`plan_limit_reached` before an operation exists, a limit
-   enforced under concurrency, Session 41) and the branch half (Session 40).
+   enforced under concurrency, Session 41). **The branch half (Session 40, ADR
+   0271, D2430, D2431)**: one live branch per project, refused
+   `409 branch_limit_reached` by the route AND by the control database before an
+   operation row exists; a branch is charged `small`'s 192 MiB by the same
+   admission a deploy uses and refused `capacity_exhausted` when it does not
+   fit; every recorded branch is on `doctor capacity`'s committed line, and an
+   unreadable branch record makes the reading `unreadable`, never smaller.
+   Owed (BR-CTL-001, BR-CAP-001, BR-LIVE-001):
+   `tests/contract/test_control_branches.py::test_a_second_branch_is_refused_before_a_row`,
+   `tests/contract/test_capacity_probe.py::test_a_branch_is_committed`,
+   `tests/contract/test_capacity_probe.py::test_an_unreadable_branch_is_undetermined`,
+   `tests/contract/test_branch_runtime.py::test_a_branch_that_does_not_fit_is_refused`,
+   `tests/external/test_session40_branches.py::test_the_second_branch_was_refused_before_a_row`.
+   Run 8 moves the branch half into the table as `THR-BR-EXHAUSTION`.
 5. **Plan-limit bypass and usage tampering** (Session 41). A caller raises its
    own limits, creates concurrently past a limit, or writes its own usage.
    Owed: a limit enforced under concurrency; no customer surface writes a usage
    sample or an entitlement.
-6. **Restore abuse** (Session 40). A restore aimed at another project's
-   repository, at a recovery point outside the window, or at the parent's live
-   volume. Owed: a foreign repository refused; the parent untouched; a branch
-   refuses the parent's credentials after its re-key.
+6. **Restore abuse** (Session 40, ADR 0271, ADR 0273). A restore aimed at
+   another project's repository, at a recovery point outside the window, or at
+   the parent's live volume. No argument names a repository, a stanza, a volume
+   or a path: the restore reads the parent's own repository mounts out of the
+   parent's running container, read-only, as the drill does (ADR 0151), and the
+   branch's volume is derived by `naming.branch_names` and refused if it equals
+   or is mounted by the parent's (`branch_plan.assert_branch_safe`, exit 7
+   before anything starts). A point outside the recorded window is refused
+   before the restore (D2425, D2435). Owed (BR-PLAN-001, BR-DISPATCH-001,
+   BR-LIVE-002):
+   `tests/contract/test_branch_plan.py::test_a_plan_that_could_write_the_parent_is_refused`,
+   `tests/contract/test_reconciler_dispatch.py::test_a_point_outside_the_window_is_refused_before_the_restore`,
+   `tests/deployment/test_session40_branches.py::test_the_parent_was_untouched`
+   (the parent's volume, `instance_uuid`, timeline and postmaster start
+   unchanged across the branch's life). Run 8 moves this item into the table as
+   `THR-BR-RESTORE`.
 7. **Control-plane / data-plane credential confusion** (Session 39).
     A project credential presented to `/api/v1`, or a control-plane credential
     presented to the surfaces Session 39 adds. Owed: each refused at the other
@@ -268,6 +299,28 @@ technically bounded in this beta"* (D1971).
 12. **The public door admits a platform credential** (Session 39, ADR 0269).
     A platform role's password presented at 5432 from the internet. **In the
     table as `THR-EP-DOOR`** since Session 39's Run 9.
+13. **A branch reaches its parent** (Session 40, ADR 0271, D2424, D2426,
+    D2427). A branch -- a full physical copy of the parent, running beside it --
+    writes the parent's backup repository, or opens the parent's data with the
+    parent's credentials. Its persistent phase has no repository mount, no path
+    into the parent's secret generation, no backup network, `archive_mode=off`
+    and `archive_command=/bin/false`, asserted on the argv; its re-key runs
+    before either door exists -- every platform login role `NOLOGIN PASSWORD
+    NULL`, the superuser's password `NULL` (local socket only), the two customer
+    roles given the branch's own verifiers, every live refresh family revoked
+    and every agent credential expired. Owed (BR-PLAN-001, BR-REKEY-001,
+    BR-LIVE-001, BR-LIVE-002):
+    `tests/contract/test_branch_plan.py::test_the_persistent_service_cannot_reach_the_repository`,
+    `tests/contract/test_branch_runtime_on_a_cluster.py::test_the_parents_password_opens_nothing_after_the_rekey`,
+    `tests/contract/test_branch_runtime.py::test_the_poolers_start_after_the_rekey`,
+    `tests/deployment/test_session40_branches.py::test_the_branch_is_bounded_and_unreachable_from_the_repository`,
+    `tests/external/test_session40_branches.py::test_the_parents_password_opens_no_branch_door`.
+    **Residuals, by design:** a branch shares its parent's `system_identifier`
+    and `app_private.project_identity` row (ADR 0151) -- a reader that tells
+    clusters apart uses the timeline or the branch record; a branch is not
+    backed up; the parent's user password hashes are copied into the branch and
+    are reachable by nothing a customer holds and read by no service there.
+    Run 8 moves this item into the table as `THR-BR-PARENT`.
 
 ## Scope
 
