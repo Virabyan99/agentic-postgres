@@ -435,6 +435,9 @@ the runs add go in a second table below it, in execution order.
 | **D2465** | D2457 / ADR 0273: `earliest` = the oldest kept set's stop. | **Measured in `test_branch_runtime_on_a_cluster` (Run 3):** the first run's point, 0.9 s after the set's recorded stop (`09:35:33` vs `09:35:33.905660`), passed the window check and was refused `[075]: unable to find backup set with stop time less than '…'`. The proof then measured the boundary: a target **0.5 s** after the recorded stop → exit **75**; **1.0 s** after → exit **0**. pgBackRest records the stop in whole seconds and selects a set only when that stop is strictly before the target at that precision. | **`backup_report.earliest_point(oldest_backup_stop)` = the stop + 1 s**; the runtime's window check uses it, and the backups surface will (ADR 0273 amended in place). `summarise` keeps the stop as read. The boundary is held by `test_the_earliest_point_is_a_second_after_the_oldest_stop`. | A window that offers its first second offers a point no restore can reach. | 0273 |
 | **D2466** | Run 3: the poolers *"exactly as `compose.yaml:739-902`"*; `${PGBOUNCER_IMAGE}` (D2422). | A host's `versions.env` is the checkout's, and the parent's poolers run the image its own deploy pulled; a branch is a copy of a RUNNING parent, as its `postgres` is the parent's running image id (D2422). The branch's poolers carry `apg.project.key` in the project's file, which readers count as the project's containers. | **The branch's poolers run the parent's running pooler's image, by id** (`docker inspect` of `customer-pool`); their labels are `apg.branch.project` / `apg.branch.name`, never `apg.project.key` / `apg.environment`; the TCP labels come from `runtime_override.customer_pooler_services` (a public name for the project's own builder). **`reset` is not re-admitted** — it replaces one charged cluster with another of the same charge — and refuses a branch that is not `ready`, `stopped` or `failed`. | The copy runs what the parent runs; a reader counting a project's containers never counts a branch's. | 0271 |
 | **D2467** | §5: Runs 2–6 push and read that commit's own CI verdict. | **CI 38545407629 on `212904a` was CANCELLED, not failed**: both suite jobs (`Session 1 gate`, `Session 2 offline contract`) reached `timeout-minutes: 20` at 97 % with every test so far passing (the job log ends in dots, then *"The operation was canceled"*). The previous green run (`002cb4f`) took 14.3 and 14.7 minutes; the branch cluster proof (an image build, a real backup, three restores, two `compose --wait`) runs in both jobs. A first local re-run of the proof also met the image's first-boot temporary server (`the database system is shutting down`). | **`timeout-minutes` 20 → 30 on the two suite jobs** (`.github/workflows/ci.yml`, commented with this row); the proof waits for the entrypoint's *"init process complete"* line and two answers before it bootstraps, and takes its full backup `--start-fast`. Nothing in the suite is skipped or marked slow. | A cap the suite has outgrown cancels a green run, and a cancelled run is not a verdict (D1057). | — |
+| **D2468** | D2436: *"Branch, restore and backups routes map to `projects:read` (reads) and `projects:write` (writes) in `KEY_SCOPES`"*. | A branch's creation, restore and reset carry `app_verifier` and `admin_verifier` — the branch's own database credentials. `KEY_SCOPES` keeps `credential.rotate` person-only for exactly this reason (ADR 0269: *"a leaked key can never replace the customer's database credential with its own"*), and `project.export` person-only because it yields the data (D2165). A key that could create a branch with verifiers it chose would hold a door to a full physical copy of the project. | **No key reaches a branch write**: `create_branch`, `create_restore`, `reset_branch` and `delete_branch` are absent from `KEY_SCOPES` (`403 human_session_required`); the reads (`list_branches`, `get_branch`, `get_backups`) take `projects:read`. ADR 0271 item 12 corrected in place. Held by `test_control_branches.py::test_the_branch_routes_need_a_human_or_a_scoped_key`; the battery's *"a key reaching a branch write"* kills it. | The brief's mapping would have made a leaked write key worth the whole database. | 0271, 0269 |
+| **D2469** | D2430: *"`OPERATION_ERROR_CODES` (`errors.py:234`) is a closed list a test holds … widened by exactly that code"*. | `OPERATION_ERROR_CODES` is the set of a FINISHED operation's `error_code`, held equal to `control_operations.error_code`'s CHECK (`test_operation_types.py::test_the_error_codes_are_one_closed_list`); `branch_limit_reached` is refused BEFORE any row exists — like `capacity_exhausted {reason: no_slot}` and `conflict`, which are `CONTROL_STATUS` words. `control_repository._refusal` maps `AP409: <word>` to `ControlRefused(word)` exactly when the word is in `CONTROL_STATUS`. | **`errors.BRANCH_LIMIT_REACHED` joins `CONTROL_STATUS` (409)**; `OPERATION_ERROR_CODES` and the CHECK stay five. No finished operation can carry it. | Two closed lists answer different questions; widening the wrong one would let a row record a refusal no row ever had. | 0271 |
+| **D2470** | §5: Runs 2–6 each push and read their own CI. | `EXECUTED_TYPES` is held equal to the newest `control_request_operation`'s allow-list (`test_operation_types.py`) AND to `reconciler_dispatch.STEPS` (`test_reconciler_dispatch.py::test_the_closed_table_is_the_executed_types`); the control set's allow-list (Run 4) and the reconciler's steps (Run 5) must therefore move together. At Run 4's commits that one test fails, naming exactly the four branch types. | **Run 4 is committed and NOT pushed alone; it is pushed with Run 5 and CI read at Run 5's SHA** (D2463's rule). No test is relaxed. | Three readers of one closed set: the set moves in one push. | — |
 
 ---
 
@@ -957,6 +960,51 @@ covers Runs 2 and 3 (D2463).
   counting only rows (not recorded branches), the enumeration body differing for a
   foreign project, `control_request_expiry` granted to the auth role, a stale
   reading served as a window.
+
+**Done.** (2026-10-14; commits `648257f` (code), `9c1e969` (the lock), `96085e2`
+(the proposal) and this record — **not pushed alone, D2470**: pushed with Run 5,
+CI read at its SHA.) Built: **`0006-control-branches.sql`** (`control_branches`,
+`control_backup_readings`, `origin` + its CHECK, `control_project_organization`,
+`control_list_branches` / `control_get_branch` / `control_get_backups` DEFINER
+granted to the auth role, `control_request_operation` replaced — the four types,
+`AP409: branch_limit_reached`, the named-branch rule, `AP409: conflict` for a
+project with a branch, the expiry bounds —, `control_result_members` widened,
+`control_record_branches` / `control_record_backups` / `control_request_expiry`
+granted to nobody); the manifest entry; **the lock frozen** (6 migrations, follows
+`20261003120039`, `verify-lock` agrees); **proposal `8f898750…`** by `propose`
+(lint passed, 45 applied from empty as `migration_user` in 11.8 s, surface empty,
+the same six destructive findings as Session 39's, none from 0006; the render
+removed). Services: `operations.py` (`EXECUTED_TYPES` eleven, `ACCEPTED_TYPES`
+still empty, `BRANCH_RESULT`, `BRANCHES_PER_PROJECT`, `MIN/MAX_EXPIRY_SECONDS`,
+`BACKUP_RECORD_SECONDS` 900), `errors.BRANCH_LIMIT_REACHED` (409, D2469),
+`models.py` (three requests, the 409 response), `control_roles.py` (seven routes;
+key scopes for the three reads only, D2468), `control_repository.py` (three
+readers), `control_service.py` (the branch reads and writes, the route's own
+limit reader, project deletion refused with a branch, `backups_document`),
+`control_routes.py` (seven routes), `main.control_paths` (+5); the schema's four
+branches (the file re-serialised in the standard layout, content unchanged);
+the control snapshot regenerated (`bin/app-contract.sh --check` passes); the
+acceptance matrix (CTL-OPS-001's node id renamed to
+`test_no_type_is_accepted_and_the_eleven_are_executed`, D1119). Tests:
+**`test_control_branches.py`** (8, cluster: the limit before a row by both readers
+and the set's own refusal; **the route refusing without calling the set**; one
+`404` body for a foreign, a missing and a missing-branch read; deletion refused
+with a branch; the role and key matrix; the expiry's bounds, `origin` and the
+expiry function's grant; the backups route; `not_available` until Run 8);
+**`test_backups_surface.py`** (3 + parametrized); `test_operation_types.py` (the
+eleven, 23 branch examples where schema and models must agree);
+`test_control_set.py` (two tables, three granted readers, three functions granted
+to nobody, one helper, the set's count 6). Targeted (15 modules): 272 passed, 4
+failed — the lock (frozen next), the snapshot's path list (`control_paths`), the
+matrix (regenerated) and **the dispatch table, Run 5's (D2470)**; the re-run
+modules all pass. `ruff` clean. **Battery 6/6 killed** (`~/s40/run4/battery4.py`,
+`battery4b.py`): the set's limit ignoring recorded branches; a foreign project
+answering 403; a stale reading served as a window; a key reaching a branch write;
+**two first survived** — the route's limit ignoring recorded branches (the set's
+identical refusal masked it: a proof that the route never asks the set was added)
+and the expiry function granted to the auth role (refused anyway by the TABLES'
+privileges: the assertion now names the function) — both killed after. Rows
+**D2468–D2470**.
 
 ### Run 5 — the reconciler: handlers, records, expiry, start; `slot.sh redeploy`
 

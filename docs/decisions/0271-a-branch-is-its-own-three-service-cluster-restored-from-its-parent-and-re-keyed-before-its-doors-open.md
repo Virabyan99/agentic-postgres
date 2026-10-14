@@ -229,8 +229,12 @@ rows 3 s apart.
     tested restore, D2432); one class, no promotion, no in-place restore
     (D2440, `not_offered`); a branch is **not backed up** (D2441);
     `restore.create` is `branch.create` with `target_time` required (D2434); no
-    new key scope — branch reads are `projects:read`, writes `projects:write`,
-    `branch.delete` admin (D2436); credentials are set at create and reset
+    new key scope — branch and backups reads are `projects:read`, and **no key
+    reaches a branch write** (corrected in Run 4, D2468: each carries the
+    branch's own credentials, so a key that could create one could open a full
+    copy of the data — the export case and ADR 0269's credential case at once);
+    the writes are a person's, member and above, `branch.delete` admin
+    (D2436); credentials are set at create and reset
     only, never by `credential.rotate` (D2449); the customer's nouns are `apg
     branch` and `apg project backups`, the operator's `backup.sh` and
     `restore.sh` keep their meaning (D2437); every branch route resolves the

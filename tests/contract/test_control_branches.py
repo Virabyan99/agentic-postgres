@@ -140,6 +140,44 @@ def test_a_second_branch_is_refused_before_a_row(drive: Any, accepting: None) ->
     assert _rows(drive, key) == 1
 
 
+def test_the_route_refuses_a_second_branch_without_asking_the_set(
+    drive: Any, accepting: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ROUTE is a reader of its own (D2430): with a branch recorded live, and
+    with a creation in flight, a second creation is refused `branch_limit_reached`
+    and the control set's `control_request_operation` is never called -- the
+    proof above holds the set's reader, this one the route's. The control: the
+    same project with neither does reach the set.
+
+    Goes red if: the route stops counting recorded branches or creations in
+    flight, leaving the set as the only reader."""
+    from app.control_repository import ControlRepository
+
+    asked: list[str] = []
+    real = ControlRepository.request_operation
+
+    async def recording(self: Any, *arguments: Any, **named: Any) -> Any:
+        asked.append(arguments[3])
+        return await real(self, *arguments, **named)
+
+    monkeypatch.setattr(ControlRepository, "request_operation", recording)
+    live, flight, empty = _org(drive, "route-a"), _org(drive, "route-b"), _org(drive, "route-c")
+    _record_branch(drive, live["project"])
+    drive.cluster.query(
+        "INSERT INTO app.control_operations (organization_id, project_key, type, status, "
+        f"requested_by, arguments) VALUES ('{flight['id']}', '{flight['project']}', "
+        f"'restore.create', 'running', '{flight['users']['member']}', '{{}}')"
+    )
+    for org in (live, flight):
+        answer = drive.call("POST", f"/v1/projects/{org['project']}/branches",
+                            token=org["tokens"]["member"], body=BRANCH)  # fmt: skip
+        assert (answer.status_code, answer.json()) == (409, {"error": "branch_limit_reached"})
+    assert asked == [], asked
+    reached = drive.call("POST", f"/v1/projects/{empty['project']}/branches",
+                         token=empty["tokens"]["member"], body=BRANCH)  # fmt: skip
+    assert reached.status_code == 202 and asked == ["branch.create"], (reached.text, asked)
+
+
 def test_a_foreign_and_a_missing_branch_answer_alike(drive: Any) -> None:
     """D2451: another organisation's project's branch, a project that does not
     exist and a branch the caller's own project does not have answer ONE
@@ -271,7 +309,10 @@ def test_an_expiry_is_bounded_and_only_an_expiry_requests_without_a_member(
     denied = drive.cluster.run(
         f"SELECT app.control_request_expiry('{key}', 'dev')", as_role=drive.cluster.auth_role
     )
-    assert denied.returncode != 0 and "permission denied" in denied.stderr
+    # The FUNCTION's refusal, not a table's: the auth role holds no table either,
+    # so "permission denied" alone would pass with the function granted.
+    assert denied.returncode != 0, denied.stdout
+    assert "permission denied for function control_request_expiry" in denied.stderr
     forged = drive.cluster.run(
         "INSERT INTO app.control_operations (organization_id, project_key, type, status, "
         f"requested_by, arguments, origin) VALUES ('{org['id']}', '{key}', 'project.sleep', "
