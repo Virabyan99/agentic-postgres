@@ -249,7 +249,7 @@ class ControlRepository:
     )
     _OPERATION = (
         "SELECT id, organization_id, project_key, type, status, progress, error_code, "
-        "created_at, started_at, finished_at, requested_by, step, result FROM "
+        "created_at, started_at, finished_at, requested_by, step, result, origin FROM "
     )
 
     async def list_projects(self, user: UUID, org: UUID | None) -> list[dict[str, Any]]:

@@ -1039,6 +1039,8 @@ def _operation(row: dict[str, Any]) -> dict[str, Any]:
         "step": row["step"],
         "result": row["result"],
         "requested_by": str(row["requested_by"]),
+        # D2480: `member`, or `expiry` -- the one row the reconciler requests (ADR 0272).
+        "origin": row["origin"],
         "created_at": row["created_at"].isoformat(),
         "started_at": _iso(row["started_at"]),
         "finished_at": _iso(row["finished_at"]),

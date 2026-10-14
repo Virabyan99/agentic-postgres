@@ -321,6 +321,34 @@ def test_an_expiry_is_bounded_and_only_an_expiry_requests_without_a_member(
     assert forged.returncode != 0 and "control_operations_expiry_deletes_a_branch" in forged.stderr
 
 
+def test_an_operation_read_names_its_origin(drive: Any, accepting: None) -> None:
+    """D2480: `GET /v1/operations/{id}` and the organisation's list name each
+    row's `origin` -- `member` for the branch a member asked for, `expiry` for
+    the deletion `control_request_expiry` wrote on that member's behalf -- so a
+    customer reads through `/v1` alone that the trigger fired (BR-LIVE-001)."""
+    org = _org(drive, "origin")
+    key, member = org["project"], org["tokens"]["member"]
+    made = drive.call("POST", f"/v1/projects/{key}/branches", token=member, body=BRANCH)
+    assert made.status_code == 202, made.text
+    asked = made.json()["operation"]["id"]
+    _finish(drive, key)
+    expires = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    _record_branch(drive, key, expires_at=expires, expires_for=org["users"]["member"])
+    (expired,) = drive.cluster.query(f"SELECT app.control_request_expiry('{key}', 'dev')::text")
+    origins = {}
+    for operation in (asked, expired):
+        read = drive.call("GET", f"/v1/operations/{operation}", token=member)
+        assert read.status_code == 200, read.text
+        origins[read.json()["type"]] = read.json()["origin"]
+    assert origins == {"branch.create": "member", "branch.delete": "expiry"}, origins
+    listed = drive.call("GET", f"/v1/operations?organization={org['id']}", token=member)
+    assert listed.status_code == 200, listed.text
+    assert {r["id"]: r["origin"] for r in listed.json()["operations"]} == {
+        asked: "member",
+        expired: "expiry",
+    }
+
+
 def test_the_backups_route_serves_the_recorded_window(drive: Any) -> None:
     """ADR 0273 through the route: no reading is `could_not_determine`; a fresh
     reading with every status read is the window, its bounds the reading's; a
