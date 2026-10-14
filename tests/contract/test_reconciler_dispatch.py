@@ -32,7 +32,14 @@ from typing import Any
 import pytest
 import yaml
 
-from agentic_postgres import REPO_ROOT, host_config, operations, reconciler_dispatch, slot
+from agentic_postgres import (
+    REPO_ROOT,
+    branch_record,
+    host_config,
+    operations,
+    reconciler_dispatch,
+    slot,
+)
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
 
@@ -86,6 +93,11 @@ DOORS = {
 URL = "https://r2.example.test/bucket/apg/exports/x.dump?X-Amz-Expires=900&X-Amz-Signature=5ec"
 ARCHIVE = b"PGDMP\x01 the customer's schemas"
 STORAGE = "apg-slot1-dev-storage-1"
+#: Session 40: a branch's arguments, and the point a branch at the end reached.
+BRANCH_ARGUMENTS = {"branch": "dev", "app_verifier": VERIFIER, "admin_verifier": VERIFIER}
+BRANCH_REACHED = "2026-10-14T09:31:07Z"
+POINT = "2026-10-14T09:30:00Z"
+EXPIRES = "2026-10-14T12:00:00Z"
 
 
 def _load() -> Any:
@@ -199,6 +211,8 @@ class Children:
         self.admit_output: str | None = None
         #: The `database.public` the next deployed document records (outputs 22).
         self.doors: dict[str, Any] | None = None
+        #: Where a `branch-runtime.sh` create or reset leaves its record (Session 40).
+        self.branch_root: Path | None = None
 
     @staticmethod
     def label(argv: list[str]) -> str:
@@ -209,6 +223,8 @@ class Children:
             return "backup " + " ".join(argv[3:])
         if name == "project-runtime.sh":
             return "runtime " + argv[-1]
+        if name == "branch-runtime.sh":
+            return "branch " + argv[1]
         if name in ("systemctl", "docker"):
             return f"{name} {argv[1]}"
         return name
@@ -237,6 +253,8 @@ class Children:
         elif label == "docker ps":
             out = STORAGE + "\n"
         code = self.codes.get(label, 0)
+        if label in ("branch create", "branch reset") and code == 0:
+            self.branched(argv)
         if label == "admit.sh":
             safe = SAFE_REFUSED_MB if code == 12 else SAFE_ADMITTED_MB
             out = self.admit_output or json.dumps(
@@ -281,6 +299,21 @@ class Children:
             document["database"]["public"] = self.doors
         (directory / "outputs.json").write_text(json.dumps(document), "utf-8")
 
+    def branched(self, argv: list[str]) -> None:
+        """What a finished runtime leaves: the branch's record, `ready`."""
+        assert self.branch_root is not None
+        name = argv[argv.index("--branch") + 1]
+        point = argv[argv.index("--target-time") + 1] if "--target-time" in argv else None
+        record = branch_record.Record(
+            project_key=KEY, branch=name, state="ready", operation=OPERATION,
+            requested_point=point, reached_point=point or BRANCH_REACHED, timeline=2,
+            parent_commit=HEAD, pool_host=f"pool.{name}.slot1.example.test",
+            direct_host=f"direct.{name}.slot1.example.test", expires_at=None,
+            expires_for=None, unreclaimable_mb=640, created_at=BRANCH_REACHED,
+            updated_at=BRANCH_REACHED,
+        )  # fmt: skip
+        branch_record.write(branch_record.record_path(KEY, name, root=self.branch_root), record)
+
     def labels(self) -> list[str]:
         return [call["label"] for call in self.calls]
 
@@ -294,6 +327,7 @@ class Host:
         self.monkeypatch = monkeypatch
         self.database = Database([_row()])
         self.children = Children(module.STATE_ROOT)
+        self.children.branch_root = module.BRANCH_ROOT
         self.checkout = (HEAD, "")
         monkeypatch.setattr(module.container_exec, "run", self.database)
         monkeypatch.setattr(module.subprocess, "run", self.children)
@@ -335,7 +369,10 @@ class Host:
 @pytest.fixture
 def host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Host:
     module = _load()
-    for name in ("STATE_ROOT", "SLOT_ROOT", "SECRET_ROOT", "LOG_ROOT", "RUN_ROOT", "EXPORT_ROOT"):
+    for name in (
+        "STATE_ROOT", "SLOT_ROOT", "SECRET_ROOT", "LOG_ROOT", "RUN_ROOT", "EXPORT_ROOT",
+        "BRANCH_ROOT",
+    ):  # fmt: skip
         monkeypatch.setattr(module, name, tmp_path / name.lower())
     monkeypatch.setattr(module, "SYSTEMD_DIR", tmp_path / "systemd")
     monkeypatch.setattr(module, "ENVIRONMENT_FILE", tmp_path / "etc" / "reconciler.env")
@@ -588,6 +625,10 @@ def test_the_closed_table_is_the_executed_types(host: Host) -> None:
     command an operation may run."""
     assert set(host.module.HANDLERS) == set(reconciler_dispatch.STEPS)
     assert set(reconciler_dispatch.STEPS) == operations.EXECUTED_TYPES
+    # Session 40 (D2434): four branch types, a restore being a creation at a point.
+    branch_types = {"branch.create", "restore.create", "branch.reset", "branch.delete"}
+    assert branch_types <= set(host.module.HANDLERS)
+    assert host.module.HANDLERS["restore.create"] is host.module.HANDLERS["branch.create"]
     assert set(host.module.CHILD_SECONDS) == set(reconciler_dispatch.COMMANDS)
 
 
@@ -1188,3 +1229,153 @@ def test_the_registry_refresh_records_the_doors(host: Host) -> None:
     assert host.once() == 0
     (adopted,) = host.database.named("control_adopt_project")
     assert adopted["endpoints"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Session 40: branches and restore to a branch (ADR 0271, D2434, D2438, D2439)
+# ---------------------------------------------------------------------------
+
+
+def _branching(host: Host, operation_type: str, **changes: Any) -> None:
+    _deployed_slot(host, operation_type, {**BRANCH_ARGUMENTS, **changes}, doors=DOORS)
+
+
+def test_a_branch_create_is_argv_only(host: Host) -> None:
+    """D2434: the parent read awake, then ONE `branch-runtime.sh create` on the
+    parent's deployed document; the two verifiers are its stdin as JSON and in
+    no argv; the expiry is set for the row's `requested_by`, never an argument
+    (ADR 0272); then the branch reading recorded; the result is the record's."""
+    _branching(host, "branch.create", expires_at=EXPIRES)
+    assert host.once() == 0
+    assert host.children.labels() == ["docker inspect", "branch create"]
+    call = host.children.calls[-1]
+    argv = call["argv"]
+    assert argv[argv.index("--parent-outputs") + 1] == str(
+        host.module.STATE_ROOT / KEY / "outputs.json"
+    )
+    assert argv[argv.index("--branch") + 1] == "dev"
+    assert argv[argv.index("--operation") + 1] == OPERATION
+    assert argv[argv.index("--expires-at") + 1] == EXPIRES
+    assert argv[argv.index("--expires-for") + 1] == REQUESTER
+    assert "--verifiers-stdin" in argv and "--target-time" not in argv
+    assert json.loads(call["input"]) == {"customer_app": VERIFIER, "customer_admin": VERIFIER}
+    every_argv = [c["argv"] for c in host.children.calls] + [c["argv"] for c in host.database.calls]
+    assert not any(VERIFIER in part for argv in every_argv for part in argv)
+    assert host.database.named("control_record_branches"), "the branch reading was recorded"
+    finished = host.finished()
+    assert finished["status"] == "succeeded", finished
+    assert {k: v for k, v in finished["result"].items() if k != "steps"} == {
+        "branch": "dev",
+        "reached_point": BRANCH_REACHED,
+        "timeline": 2,
+        "pool_host": "pool.dev.slot1.example.test",
+        "direct_host": "direct.dev.slot1.example.test",
+    }
+    assert [s["step"] for s in finished["result"]["steps"]] == ["check", "runtime", "record"]
+    assert VERIFIER not in json.dumps(finished["result"])
+
+
+def test_a_restore_carries_its_point_and_a_reset_reuses_the_branch(host: Host) -> None:
+    """`restore.create` is the creation's handler with `--target-time`, which
+    its result names; `branch.reset` is `branch-runtime.sh reset`, verifiers
+    on stdin as well."""
+    _branching(host, "restore.create", target_time=POINT)
+    assert host.once() == 0
+    argv = host.children.calls[-1]["argv"]
+    assert argv[1] == "create" and argv[argv.index("--target-time") + 1] == POINT
+    restored = host.finished()["result"]
+    assert (restored["target_time"], restored["reached_point"]) == (POINT, POINT)
+
+    host.children.calls.clear()
+    host.database.calls.clear()
+    _branching(host, "branch.reset")
+    assert host.once() == 0
+    # The restore left a branch root, so this start brought its branch back first (D2439).
+    assert host.children.labels() == ["branch start", "docker inspect", "branch reset"]
+    reset = host.children.calls[-1]
+    assert "--verifiers-stdin" in reset["argv"] and json.loads(reset["input"])
+    assert host.finished()["status"] == "succeeded"
+
+
+def test_a_branch_of_a_sleeping_parent_is_refused(host: Host) -> None:
+    """A branch is restored through the parent's running database: asleep, a
+    creation, a restore and a reset are `invalid_request` with nothing run but
+    the reading. A deletion reads nothing of the parent (D2438) -- control:
+    the same sleeping parent's branch is deleted."""
+    for operation_type in ("branch.create", "restore.create", "branch.reset"):
+        host.children.calls.clear()
+        host.database.calls.clear()
+        _branching(
+            host, operation_type, **({"target_time": POINT} if "restore" in operation_type else {})
+        )
+        host.children.running = "false"
+        assert host.once() == 0
+        assert host.children.labels() == ["docker inspect"], operation_type
+        finished = host.finished()
+        assert finished["error_code"] == "invalid_request", operation_type
+        assert finished["result"]["reason"] == "the project is sleeping; wake it first"
+
+    host.children.calls.clear()
+    host.database.calls.clear()
+    _deployed_slot(host, "branch.delete", {"branch": "dev"}, doors=DOORS)
+    host.children.running = "false"
+    assert host.once() == 0
+    assert host.children.labels() == ["branch delete"]
+    assert host.children.calls[-1]["argv"][1:] == ["delete", "--parent-key", KEY, "--branch", "dev"]
+    assert host.children.calls[-1].get("input") is None
+    finished = host.finished()
+    assert finished["status"] == "succeeded"
+    assert {k: v for k, v in finished["result"].items() if k != "steps"} == {"branch": "dev"}
+
+
+def test_a_point_outside_the_window_is_refused_before_the_restore(
+    host: Host,
+) -> None:
+    """The window is decided by `branch-runtime.sh` before its restore phase
+    (exit 7, `test_branch_runtime::test_a_point_outside_the_window_is_refused_
+    before_anything_persists`); here, a restore to such a point is the
+    customer's `invalid_request` with nothing recorded as a branch. Exit 12
+    (admission) is `capacity_exhausted`; any other failure `operation_failed`.
+    A parent without public endpoints is refused before anything runs."""
+    host.children.codes = {"branch create": 7}
+    _branching(host, "restore.create", target_time=POINT)
+    assert host.once() == 0
+    assert host.children.labels() == ["docker inspect", "branch create"]
+    finished = host.finished()
+    assert finished["error_code"] == "invalid_request"
+    assert "restore window" in finished["result"]["reason"]
+    assert not host.module.BRANCH_ROOT.exists(), "no record of a refused restore"
+    for code, error in (
+        (7, "invalid_request"),
+        (12, "capacity_exhausted"),
+        (1, "operation_failed"),
+    ):
+        host.children.calls.clear()
+        host.database.calls.clear()
+        host.children.codes = {"branch create": code}
+        _branching(host, "branch.create")
+        assert host.once() == 0
+        assert host.finished()["error_code"] == error, code
+    host.children.codes = {}
+    host.children.calls.clear()
+    host.database.calls.clear()
+    _deployed_slot(host, "branch.create", dict(BRANCH_ARGUMENTS), doors=None)
+    assert host.once() == 0
+    assert host.children.labels() == []
+    assert host.finished()["error_code"] == "invalid_request"
+
+
+def test_start_brings_every_recorded_branch_back(host: Host) -> None:
+    """D2439: a branch has no unit, so the reconciler's start runs
+    `branch-runtime.sh start --all` and records the reading -- on a host that
+    holds a branch root. Control: with no branch root nothing is started."""
+    host.module.start()
+    assert "branch start" not in host.children.labels()
+
+    host.module.BRANCH_ROOT.mkdir(mode=0o700)
+    host.database.calls.clear()
+    host.module.start()
+    (started,) = [c for c in host.children.calls if c["label"] == "branch start"]
+    assert started["argv"][1:] == ["start", "--all"]
+    assert started["stdin"] is subprocess.DEVNULL
+    assert host.database.named("control_record_branches")

@@ -27,6 +27,7 @@ Usage:
   sudo bin/slot.sh prepare --host FILE --slot KEY
   sudo bin/slot.sh status --host FILE [--json]
   sudo bin/slot.sh revoke --host FILE --slot KEY --operator-credential-file FILE --confirm KEY
+  sudo bin/slot.sh redeploy --host FILE --slot KEY --confirm KEY
 
   prepare   Write /etc/agentic-postgres/slots/KEY/manifest.yaml (0600) from the
             host manifest's slots.defaults, the slot's declaration and the
@@ -43,6 +44,11 @@ Usage:
             --destroy. The credential file is the operator's, placed for this
             and shredded after. The Infisical project, the buckets, the backup
             repository and the DNS record stay.
+  redeploy  Move an ALLOCATED slot's project to this checkout's release with the
+            reconciler's own deploy argv (D2443): refused while the reconciler
+            runs (stop it first, D2178); then the doors' userlists synced and
+            the registry row refreshed under the organisation the registry
+            already records -- never typed. Admission's exit 12 is carried.
 
 KEY is a declared slot key (slot1-prod). FILE for --host is the host manifest,
 /etc/agentic-postgres/host.yaml on a host.
@@ -69,7 +75,7 @@ python_bin() {
 main() {
   if [ "$#" -eq 0 ]; then
     usage >&2
-    die 2 "a verb is required: prepare, status or revoke."
+    die 2 "a verb is required: prepare, status, revoke or redeploy."
   fi
   # --help anywhere is a read: no root, no host manifest.
   local argument
@@ -82,8 +88,8 @@ main() {
     esac
   done
   case "$1" in
-    prepare | status | revoke) ;;
-    *) die 2 "unknown verb: $1. One of: prepare status revoke" ;;
+    prepare | status | revoke | redeploy) ;;
+    *) die 2 "unknown verb: $1. One of: prepare status revoke redeploy" ;;
   esac
   exec "$(python_bin)" "${ROOT_DIR}/bin/slot.py" "$@"
 }

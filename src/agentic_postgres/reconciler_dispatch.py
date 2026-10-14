@@ -75,8 +75,10 @@ __all__ = [
 
 #: Type -> its steps, in order, each with the progress recorded when it starts
 #: (ADR 0256 §8: 10/30/40/60/70/90, 100 at the finish). Every executed type
-#: (seven since Session 39), no other -- `EXECUTED_TYPES`, a test holds the two
-#: equal (D2447 corrected the count).
+#: (eleven since Session 40: the four branch types, D2434), no other --
+#: `EXECUTED_TYPES`, a test holds the two equal (D2447 corrected the count). A
+#: branch operation is ONE `branch-runtime.sh` child, so its steps are check,
+#: runtime and record; how far a runtime got is its `branch.json` (D2471).
 STEPS: dict[str, tuple[tuple[str, int], ...]] = {
     "project.create": (
         ("allocate", 10),
@@ -104,6 +106,14 @@ STEPS: dict[str, tuple[tuple[str, int], ...]] = {
     # deployed document, the verifier set in the project's database, both
     # poolers' userlists rewritten from `pg_authid`.
     "credential.rotate": (("check", 10), ("alter", 40), ("sync", 70)),
+    # Session 40 (ADR 0271): the parent checked (a slot, awake), then ONE child
+    # -- `branch-runtime.sh`, whose own order is the property (record, restore,
+    # recover, persist, re-key, userlists, doors, attach) -- then the reading
+    # recorded. `restore.create` is `branch.create` with a point (D2434).
+    "branch.create": (("check", 10), ("runtime", 20), ("record", 95)),
+    "restore.create": (("check", 10), ("runtime", 20), ("record", 95)),
+    "branch.reset": (("check", 10), ("runtime", 20), ("record", 95)),
+    "branch.delete": (("check", 10), ("runtime", 30), ("record", 95)),
 }
 
 #: What a finished operation may record (D2151): the service's table, which
@@ -111,7 +121,12 @@ STEPS: dict[str, tuple[tuple[str, int], ...]] = {
 RESULT_MEMBERS: dict[str, frozenset[str]] = operations.RESULT_MEMBERS
 
 #: The only argument members that may reach a process argument (D2154).
-ARGV_MEMBERS = frozenset({"profile", "admin_username"})
+ARGV_MEMBERS = frozenset(
+    # Session 40: a branch's name, its point and its expiry -- each a value the
+    # schema bounds to a name or an RFC 3339 instant. The verifiers never: they
+    # reach `branch-runtime.sh` as JSON on stdin (ADR 0271, D2449).
+    {"profile", "admin_username", "branch", "target_time", "expires_at"}
+)
 
 #: Every command an operation may run, by the name its argv starts with: the
 #: existing `bin/` commands, `systemctl`, and two `docker` READS -- whether the
@@ -130,6 +145,8 @@ COMMANDS = frozenset(
         "docker",
         # Session 39 (ADR 0269): the userlists from `pg_authid`, and the SIGHUP.
         "customer-credentials.sh",
+        # Session 40 (ADR 0271): a branch's whole life on this host.
+        "branch-runtime.sh",
     }
 )
 
@@ -181,6 +198,11 @@ INTERRUPTED_SQL = (
     "FROM app.control_interrupted_operations() r;"
 )
 RECORD_SLOTS_SQL = "SELECT app.control_record_slots(:'slots'::jsonb);"
+#: Session 40 (ADR 0271, ADR 0272, ADR 0273): the reconciler's three writes of
+#: the control set's branch and backups readings, each granted to nobody.
+RECORD_BRANCHES_SQL = "SELECT app.control_record_branches(:'branches'::jsonb);"
+RECORD_BACKUPS_SQL = "SELECT app.control_record_backups(:'readings'::jsonb);"
+REQUEST_EXPIRY_SQL = "SELECT coalesce(app.control_request_expiry(:'key', :'branch')::text, '');"
 ADOPT_SQL = (
     "SELECT app.control_adopt_project(:'key', :'organization'::uuid, :'slug', :'environment', "
     ":'domain', :'template_version', :'source_commit', nullif(:'region', ''), :'profile', "
@@ -454,3 +476,180 @@ def dump_argv(database: str) -> list[str]:
         "pg_dump", "-U", "postgres", "-Fc", *schemas,
         "--no-owner", "--no-privileges", "-d", database,
     ]  # fmt: skip
+
+
+# ---------------------------------------------------------------------------
+# Session 40: branches (ADR 0271, ADR 0272, ADR 0273)
+# ---------------------------------------------------------------------------
+
+_INSTANT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z")
+
+
+def _branch(name: str) -> str:
+    from agentic_postgres import naming
+
+    return naming.validate_branch_name(name)
+
+
+def _instant(value: str) -> str:
+    if not _INSTANT.fullmatch(value):
+        raise ValueError("not an RFC 3339 UTC instant")
+    return value
+
+
+def _runtime(checkout: Path) -> str:
+    return str(checkout / "bin" / "branch-runtime.sh")
+
+
+def branch_create_argv(
+    checkout: Path,
+    outputs: Path,
+    arguments: dict[str, Any],
+    *,
+    operation: str,
+    requested_by: str,
+) -> list[str]:
+    """`branch-runtime.sh create` for `branch.create` and `restore.create`: the
+    branch name, the point, the expiry and the member it is set for -- the
+    row's own `requested_by`, never an argument (ADR 0272). The verifiers are
+    NOT here: `branch_verifiers_input` carries them on stdin."""
+    argv = [
+        _runtime(checkout), "create",
+        "--parent-outputs", str(outputs),
+        "--branch", _branch(arguments["branch"]),
+        "--verifiers-stdin",
+        "--operation", str(uuid.UUID(operation)),
+        "--host", _host(checkout),
+    ]  # fmt: skip
+    if arguments.get("target_time"):
+        argv += ["--target-time", _instant(arguments["target_time"])]
+    if arguments.get("expires_at"):
+        argv += [
+            "--expires-at", _instant(arguments["expires_at"]),
+            "--expires-for", str(uuid.UUID(requested_by)),
+        ]  # fmt: skip
+    return argv
+
+
+def branch_reset_argv(
+    checkout: Path, outputs: Path, arguments: dict[str, Any], *, operation: str
+) -> list[str]:
+    argv = [
+        _runtime(checkout), "reset",
+        "--parent-outputs", str(outputs),
+        "--branch", _branch(arguments["branch"]),
+        "--verifiers-stdin",
+        "--operation", str(uuid.UUID(operation)),
+        "--host", _host(checkout),
+    ]  # fmt: skip
+    if arguments.get("target_time"):
+        argv += ["--target-time", _instant(arguments["target_time"])]
+    return argv
+
+
+def branch_delete_argv(checkout: Path, key: str, branch: str) -> list[str]:
+    return [
+        _runtime(checkout), "delete", "--parent-key", _key(key), "--branch", _branch(branch)
+    ]  # fmt: skip
+
+
+def branch_start_argv(checkout: Path) -> list[str]:
+    """`start --all` at the reconciler's start: every recorded branch back (D2439)."""
+    return [_runtime(checkout), "start", "--all"]
+
+
+def branch_verifiers_input(arguments: dict[str, Any]) -> str:
+    """The branch's two verifiers as `branch-runtime`'s stdin: JSON, never an argv."""
+    return json.dumps(
+        {"customer_app": arguments["app_verifier"], "customer_admin": arguments["admin_verifier"]}
+    )
+
+
+def branch_reading(found: dict[str, Any], unreadable: dict[str, str]) -> list[dict[str, Any]]:
+    """`control_record_branches`' payload from `branch_record.records()`: each
+    readable record's members, and each unreadable one as `undetermined` (ADR
+    0195) -- a branch the control plane must not call gone because its record
+    could not be read."""
+    rows: list[dict[str, Any]] = []
+    for record in found.values():
+        rows.append(
+            {
+                "project_key": record.project_key,
+                "name": record.branch,
+                "state": record.state,
+                "requested_point": record.requested_point,
+                "reached_point": record.reached_point,
+                "timeline": record.timeline,
+                "parent_commit": record.parent_commit,
+                "pool_host": record.pool_host,
+                "direct_host": record.direct_host,
+                "expires_at": record.expires_at,
+                "expires_for": record.expires_for,
+                "created_at": record.created_at,
+            }
+        )
+    for name in unreadable:
+        key, separator, branch = name.partition("_")
+        if separator and branch and branch != "*":
+            rows.append({"project_key": key, "name": branch, "state": "undetermined"})
+    return rows
+
+
+def expired_branches(found: dict[str, Any], now: str) -> list[tuple[str, str]]:
+    """`(key, branch)` for each READY branch whose recorded expiry has passed;
+    the control set decides whether to request its deletion (ADR 0272)."""
+    return sorted(
+        (record.project_key, record.branch)
+        for record in found.values()
+        if record.state == "ready" and record.expires_at and record.expires_at <= now
+    )
+
+
+def _status(check: Any) -> str:
+    return str(getattr(check, "verdict", "unknown")).lower()
+
+
+def backups_reading(
+    key: str,
+    *,
+    info: dict[str, Any] | None,
+    archiver: dict[str, Any] | None,
+    mirror: Any,
+    sleeping: bool,
+) -> dict[str, Any]:
+    """One project's backups reading for `control_record_backups` (ADR 0273):
+    the doctor's own classifiers over `backup.sh info --json` and the archiver
+    query, the mirror's from the copy record (D2461), the window's bounds -- the
+    oldest stop plus a second (D2465) and the last archived time (D2456)."""
+    from agentic_postgres import backup_report, diagnosis
+
+    repository = diagnosis.repository(
+        status=(info or {}).get("status"),
+        last_full_backup_at=(info or {}).get("last_full_backup_at"),
+    )
+    archived = diagnosis.archiver(
+        failing=None if archiver is None else backup_report.archiving_is_failing(archiver),
+        last_archived_time=(archiver or {}).get("last_archived_time"),
+    )
+    earliest = backup_report.earliest_point((info or {}).get("oldest_backup_stop"))
+    latest = backup_report_instant((archiver or {}).get("last_archived_time"))
+    reasons = [c.detail for c in (repository, archived, mirror) if _status(c) != "ok"]
+    return {
+        "project_key": key,
+        "repository_status": _status(repository),
+        "archiver_status": _status(archived),
+        "mirror_status": _status(mirror),
+        "earliest": earliest.isoformat() if earliest else None,
+        "latest": latest,
+        "last_full_at": (info or {}).get("last_full_backup_at"),
+        "sleeping": sleeping,
+        "reason": ("; ".join(reasons)[:300] or None),
+    }
+
+
+def backup_report_instant(value: str | None) -> str | None:
+    """The archiver's `last_archived_time` text as an ISO instant, or None."""
+    from agentic_postgres import restore_drill
+
+    parsed = restore_drill.instant(value)
+    return parsed.isoformat() if parsed else None

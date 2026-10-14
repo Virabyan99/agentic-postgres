@@ -1,4 +1,5 @@
-"""`bin/slot.sh prepare|status|revoke` and `agentic_postgres.slot` (SLOT-001; ADR 0257).
+"""`bin/slot.sh prepare|status|revoke|redeploy` and `agentic_postgres.slot`
+(SLOT-001; ADR 0257; `redeploy` D2443).
 
 D2149: a slot is DECLARED in the host manifest and its state is DERIVED from
 what exists on the host -- never written. D2150: `prepare` writes the slot's
@@ -20,17 +21,27 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 import yaml
 
-from agentic_postgres import REPO_ROOT, config, host_config, slot
+from agentic_postgres import (
+    REPO_ROOT,
+    config,
+    container_exec,
+    control_registry,
+    host_config,
+    slot,
+)
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
 
 HOST = REPO_ROOT / "host.example.yaml"
 KEY = "slot1-dev"
+#: The organisation the control registry records for the slot (D2443).
+RECORDED_ORG = "31121d7b-1aa3-4206-8f13-d81157c1beaf"
 
 
 def _load() -> Any:
@@ -366,3 +377,131 @@ def test_the_slot_vocabulary_is_one_list_everywhere() -> None:
     check = re.search(r"state\s+text NOT NULL CHECK \(state IN \((.*?)\)\)", sql, re.DOTALL)
     assert check is not None
     assert tuple(re.findall(r"'([a-z]+)'", check.group(1))) == slot.STATES
+
+
+# ---------------------------------------------------------------------------
+# redeploy: a slot's project moved to this checkout's release (D2443)
+# ---------------------------------------------------------------------------
+
+
+class Redeploy:
+    """`subprocess.run` and the control registry's read, recorded."""
+
+    def __init__(self, command: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.calls: list[list[str]] = []
+        self.reads: list[dict[str, Any]] = []
+        self.active = "inactive"
+        self.codes: dict[str, int] = {}
+        monkeypatch.setattr(command.subprocess, "run", self.run)
+        control = SimpleNamespace(key="control-prod", document={})
+        monkeypatch.setattr(control_registry, "read_all", lambda *, root: [control])
+        monkeypatch.setattr(control_registry, "find_control", lambda readings, *, decision: control)
+        monkeypatch.setattr(control_registry, "target", lambda document: ("apg-control", "control"))
+        monkeypatch.setattr(container_exec, "run", self.database)
+
+    def run(self, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        self.calls.append(list(argv))
+        assert kwargs.get("stdin") is subprocess.DEVNULL
+        if argv[0] == "systemctl":
+            return subprocess.CompletedProcess(argv, 0, self.active + "\n", "")
+        return subprocess.CompletedProcess(argv, self.codes.get(Path(argv[0]).name, 0), "", "")
+
+    def database(self, container: str, *argv: str, **kwargs: Any) -> Any:
+        self.reads.append({"container": container, "input": kwargs.get("input", "")})
+        return subprocess.CompletedProcess(argv, 0, RECORDED_ORG + "\n", "")
+
+    def names(self) -> list[str]:
+        return [Path(argv[0]).name for argv in self.calls]
+
+
+def _allocated(command: Any) -> list[str]:
+    """A created slot: prepared, allocated, its document deployed."""
+    assert command.main(["prepare", "--host", str(HOST), "--slot", KEY]) == 0
+    _prepared(command)
+    (command.SLOT_ROOT / KEY / slot.ALLOCATED).write_text("an operation\n", "utf-8")
+    (command.STATE_ROOT / KEY / "outputs.json").write_text("{}", "utf-8")
+    return ["redeploy", "--host", str(HOST), "--slot", KEY, "--confirm", KEY]
+
+
+def test_redeploy_runs_the_reconcilers_argv(
+    command: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """D2443: the deploy is `reconciler_dispatch.deploy_argv` on the slot's own
+    manifest through this checkout's session -- byte for byte the argv the
+    reconciler's creation runs -- then the doors' userlists synced on the
+    deployed document. A failed deploy is carried and nothing else runs."""
+    from agentic_postgres import CURRENT_SESSION
+    from agentic_postgres import reconciler_dispatch as dispatch
+
+    argv = _allocated(command)
+    recorded = Redeploy(command, monkeypatch)
+    assert command.main([*argv[:-1], "slot9-dev"]) == 2
+    assert recorded.calls == []
+    assert command.main(argv) == 0
+    assert recorded.names() == ["systemctl", "deploy.sh", "customer-credentials.sh", "control.sh"]
+    manifest = command.SLOT_ROOT / KEY / slot.MANIFEST
+    assert recorded.calls[1] == dispatch.deploy_argv(
+        REPO_ROOT, manifest, through_session=CURRENT_SESSION
+    )
+    assert recorded.calls[2] == dispatch.credentials_argv(
+        REPO_ROOT, command.STATE_ROOT / KEY / "outputs.json"
+    )
+
+    recorded.calls.clear()
+    recorded.codes = {"deploy.sh": 12}
+    assert command.main(argv) == 12, "admission's refusal is carried"
+    assert recorded.names() == ["systemctl", "deploy.sh"]
+
+
+def test_redeploy_refuses_while_the_reconciler_runs(
+    command: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """D2178: a sheet that deploys stops the reconciler first. Active, or
+    unreadable, is a refusal with nothing deployed; a slot that is not
+    allocated is refused before the unit is read. Control: inactive deploys."""
+    argv = _allocated(command)
+    recorded = Redeploy(command, monkeypatch)
+    for answer in ("active", "activating"):
+        recorded.calls.clear()
+        recorded.active = answer
+        assert command.main(argv) == 5, answer
+        assert recorded.names() == ["systemctl"], answer
+    assert "stop the reconciler first" in capsys.readouterr().err
+
+    recorded.calls.clear()
+    recorded.active = "inactive"
+    assert command.main(argv) == 0
+    assert "deploy.sh" in recorded.names()
+
+    # A slot with neither the marker nor a deployed document is not a created one.
+    recorded.calls.clear()
+    (command.SLOT_ROOT / KEY / slot.ALLOCATED).unlink()
+    (command.STATE_ROOT / KEY / "outputs.json").unlink()
+    assert command.main(argv) == 5
+    assert recorded.calls == []
+
+
+def test_redeploy_adopts_under_the_recorded_organisation(
+    command: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """D2443: the organisation is read from the control registry for THIS key
+    -- never typed -- and the adoption names it and the control project's own
+    key; a registry with no row for the key refuses before anything deploys."""
+    argv = _allocated(command)
+    recorded = Redeploy(command, monkeypatch)
+    assert command.main(argv) == 0
+    (read,) = recorded.reads
+    assert read["container"] == "apg-control"
+    assert f"\\set key '{KEY}'" in read["input"]
+    assert command.ORGANIZATION_SQL in read["input"]
+    adopt = recorded.calls[-1]
+    assert adopt[1:] == [
+        "adopt", "--project", KEY, "--organization", RECORDED_ORG, "--confirm", "control-prod",
+    ]  # fmt: skip
+
+    recorded.calls.clear()
+    monkeypatch.setattr(
+        container_exec, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, "\n", "")
+    )
+    assert command.main(argv) == 6
+    assert recorded.names() == ["systemctl"], "nothing deployed without the recorded organisation"

@@ -53,6 +53,10 @@ RECONCILER = {
     "control_mark_deleted",
     "control_adopt_project",
     "control_registry_rows",
+    # Session 40 (ADR 0271-0273): the branch and backups readings, the expiry.
+    "control_record_branches",
+    "control_record_backups",
+    "control_request_expiry",
 }
 
 #: How long claimer A holds its claim open, and when B starts (rig 38f).
@@ -341,7 +345,7 @@ def reconciler(cluster: cc.ControlCluster, tmp_path: Path, monkeypatch: pytest.M
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    for name in ("STATE_ROOT", "SLOT_ROOT", "SECRET_ROOT", "LOG_ROOT", "RUN_ROOT"):
+    for name in ("STATE_ROOT", "SLOT_ROOT", "SECRET_ROOT", "LOG_ROOT", "RUN_ROOT", "BRANCH_ROOT"):
         monkeypatch.setattr(module, name, tmp_path / name.lower())
     monkeypatch.setattr(module, "HOST_MANIFEST", HOST)
     monkeypatch.setattr(module, "require_root", lambda: None)

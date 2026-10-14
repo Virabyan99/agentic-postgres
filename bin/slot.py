@@ -329,9 +329,138 @@ def revoke(host_path: Path, key: str, *, credential: Path, confirm: str) -> int:
     return EXIT_OK
 
 
+# ---------------------------------------------------------------------------
+# redeploy (Session 40, D2443)
+# ---------------------------------------------------------------------------
+
+RECONCILER_UNIT = "agentic-postgres-reconciler.service"
+REDEPLOY_SECONDS = 1800
+
+#: The registry's organisation for a key, read as the superuser in the control
+#: project's database -- never typed by the operator.
+ORGANIZATION_SQL = (
+    "SELECT organization_id FROM app.control_projects WHERE key = :'key' AND deleted_at IS NULL;"
+)
+
+
+def _run(argv: list[str], *, capture: bool = False) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        argv, stdin=subprocess.DEVNULL, capture_output=capture, text=True,
+        timeout=REDEPLOY_SECONDS, check=False,
+    )  # fmt: skip
+
+
+def reconciler_active() -> bool | None:
+    """Whether the reconciler runs: True, False, or None when unreadable."""
+    try:
+        done = _run(["systemctl", "is-active", RECONCILER_UNIT], capture=True)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    answer = done.stdout.strip()
+    if answer == "active":
+        return True
+    if answer in ("inactive", "failed", "unknown"):
+        return False
+    return None
+
+
+def registry_organization(key: str) -> str:
+    """The organisation the control registry records for `key` (D2443)."""
+    from agentic_postgres import container_exec, control_registry
+    from agentic_postgres import reconciler_dispatch as dispatch
+
+    try:
+        control = control_registry.find_control(
+            control_registry.read_all(root=STATE_ROOT), decision=True
+        )
+        container, database = control_registry.target(control.document)
+    except control_registry.OperatorError as error:
+        raise OperatorError(EXIT_UNKNOWN, str(error)) from error
+    done = container_exec.run(
+        container, "psql", "-U", "postgres", "-d", database, "-X", "-qtA", "-v", "ON_ERROR_STOP=1",
+        "-f", "-", input=dispatch.psql_input(ORGANIZATION_SQL, {"key": key}), timeout=60,
+    )  # fmt: skip
+    answer = done.stdout.strip()
+    if done.returncode != 0 or not answer:
+        raise OperatorError(
+            EXIT_UNKNOWN, f"the control registry names no organisation for {key}; adopt it first"
+        )
+    return answer
+
+
+def redeploy(host_path: Path, key: str, *, confirm: str) -> int:
+    """A slot's managed project moved to this checkout's release by the
+    reconciler's own deploy argv (D2443, ADR 0256 amended): the slot allocated
+    with a deployed document, the reconciler stopped (D2178), the deploy, the
+    doors' userlists synced, and the registry row refreshed under the
+    organisation it already records."""
+    from agentic_postgres import CURRENT_SESSION, deployed_output
+    from agentic_postgres import reconciler_dispatch as dispatch
+
+    require_root()
+    host = load_host(host_path)
+    declared(host, key)
+    if confirm != key:
+        raise OperatorError(EXIT_INPUT, f"--confirm must be exactly {key}.")
+    rows = {
+        row["key"]: row
+        for row in slot.observe(
+            host, dns=dns_reading, slot_root=SLOT_ROOT, state_root=STATE_ROOT,
+            secret_root=SECRET_ROOT,
+        )
+    }  # fmt: skip
+    if rows.get(key, {}).get("state") != "allocated":
+        raise OperatorError(
+            EXIT_REFUSED,
+            f"{key} is {rows.get(key, {}).get('state', 'not observed')}, not allocated: "
+            "only a created project is redeployed.",
+        )
+    outputs = deployed_output.deployed_path(key, root=STATE_ROOT)
+    if not outputs.is_file():
+        raise OperatorError(EXIT_REFUSED, f"{key} has no deployed document at {outputs}.")
+    active = reconciler_active()
+    if active is not False:
+        raise OperatorError(
+            EXIT_REFUSED,
+            "stop the reconciler first (D2178): sudo systemctl stop agentic-postgres-reconciler"
+            if active
+            else "whether the reconciler runs could not be read; stop it and run this again",
+        )
+    organization = registry_organization(key)
+    manifest = SLOT_ROOT / key / "manifest.yaml"
+    print(f"slot: redeploy {key} through session {CURRENT_SESSION} (organisation {organization})")
+    deployed = _run(dispatch.deploy_argv(REPO_ROOT, manifest, through_session=CURRENT_SESSION))
+    if deployed.returncode != 0:
+        print(
+            f"slot: the deploy exited {deployed.returncode}; nothing else was run", file=sys.stderr
+        )
+        return deployed.returncode
+    synced = _run(dispatch.credentials_argv(REPO_ROOT, outputs))
+    if synced.returncode != 0:
+        raise OperatorError(EXIT_UNKNOWN, f"customer-credentials sync exited {synced.returncode}")
+    control = control_registry_key()
+    adopted = _run([
+        str(REPO_ROOT / "bin" / "control.sh"), "adopt", "--project", key,
+        "--organization", organization, "--confirm", control,
+    ])  # fmt: skip
+    if adopted.returncode != 0:
+        raise OperatorError(EXIT_UNKNOWN, f"control.sh adopt exited {adopted.returncode}")
+    print(f"slot: {key} redeployed, its doors synced, its registry row refreshed")
+    return EXIT_OK
+
+
+def control_registry_key() -> str:
+    from agentic_postgres import control_registry
+
+    control = control_registry.find_control(
+        control_registry.read_all(root=STATE_ROOT), decision=True
+    )
+    return control.key
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="slot.sh", add_help=False)
-    parser.add_argument("verb", choices=("prepare", "status", "revoke"))
+    parser.add_argument("verb", choices=("prepare", "status", "revoke", "redeploy"))
     parser.add_argument("--host", type=Path, required=True)
     parser.add_argument("--slot", dest="key")
     parser.add_argument("--json", action="store_true", dest="as_json")
@@ -354,6 +483,10 @@ def main(argv: list[str] | None = None) -> int:
             if arguments.credential or arguments.confirm:
                 raise OperatorError(EXIT_INPUT, "prepare takes --host and --slot only.")
             return prepare(arguments.host, arguments.key)
+        if arguments.verb == "redeploy":
+            if arguments.credential:
+                raise OperatorError(EXIT_INPUT, "redeploy takes --host, --slot and --confirm.")
+            return redeploy(arguments.host, arguments.key, confirm=arguments.confirm)
         if arguments.credential is None:
             raise OperatorError(EXIT_INPUT, "revoke needs --operator-credential-file FILE.")
         return revoke(

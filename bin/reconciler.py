@@ -78,10 +78,13 @@ import yaml  # noqa: E402
 
 from agentic_postgres import (  # noqa: E402
     CURRENT_SESSION,
+    backup_report,
+    branch_record,
     config,
     container_exec,
     control_registry,
     deployed_output,
+    diagnosis,
     host_config,
     slot,
 )
@@ -98,6 +101,7 @@ EXIT_UNKNOWN = 6
 
 #: The roots this command reads and writes; module globals so a proof can move them.
 STATE_ROOT = deployed_output.PROJECT_STATE_ROOT
+BRANCH_ROOT = branch_record.BRANCH_ROOT
 SLOT_ROOT = slot.SLOT_ROOT
 SECRET_ROOT = DEFAULT_SECRET_ROOT
 LOG_ROOT = Path("/var/log/agentic-postgres/reconciler")
@@ -115,6 +119,10 @@ UNIT = "agentic-postgres-reconciler.service"
 #: ten minutes (D2160), so an idle host must keep it fresh.
 POLL_SECONDS = 5
 RECORD_SECONDS = 120
+#: Session 40 (ADR 0273): each live slot's backups reading, recorded this often
+#: (`backup.sh info --json` costs repository requests); the API serves one
+#: older than twice this as `could_not_determine`.
+BACKUP_RECORD_SECONDS = 900
 
 #: How long `start` waits for the control database, and how often it asks
 #: (D2348). The unit orders on Docker and the edge, never on the control
@@ -139,6 +147,10 @@ CHILD_SECONDS = {
     "docker": 60,
     # Session 39: a read of two rows, two renames and two signals.
     "customer-credentials.sh": 120,
+    # Session 40 (ADR 0271): a branch's restore, recovery and doors. Sheet E0's
+    # drill of slot3-prod took 506.7 s (D2452); twice that, rounded, and still
+    # under OPERATION_SECONDS, so the operation's bound is not raised.
+    "branch-runtime.sh": 1200,
 }
 DATABASE_SECONDS = 120
 #: `pg_dump` of a slot's customer schemas, and its upload (D2164).
@@ -323,6 +335,8 @@ class Operation:
         self.type = str(row["type"])
         self.arguments = row.get("arguments")
         self.organization_id = str(row["organization_id"])
+        #: Who asked (ADR 0272: a branch's expiry is requested for this member).
+        self.requested_by = str(row.get("requested_by") or "")
         self.project_key: str | None = row.get("project_key")
         self.steps: list[dict[str, Any]] = []
         self.current: str | None = None
@@ -372,6 +386,7 @@ class Operation:
         *,
         capture: bool = False,
         pass_fds: tuple[int, ...] = (),
+        input: str | None = None,
     ) -> subprocess.CompletedProcess:
         """One command: stdin `/dev/null`, acting for the checkout's owner,
         output appended to this step's 0600 log -- and, with `capture`, also
@@ -387,7 +402,9 @@ class Operation:
                 options: dict[str, Any] = {
                     "cwd": REPO_ROOT,
                     "env": child_environment(self.reconciler.owner),
-                    "stdin": subprocess.DEVNULL,
+                    # /dev/null, or the given input on a pipe -- a branch's two
+                    # verifiers (ADR 0271), never written to the log.
+                    **({"input": input} if input is not None else {"stdin": subprocess.DEVNULL}),
                     "timeout": timeout,
                     "check": False,
                     "text": True,
@@ -908,6 +925,106 @@ def rotate(operation: Operation) -> dict[str, Any]:
     return {"role": role}
 
 
+def _branch_result(key: str, branch: str, target: str | None) -> dict[str, Any]:
+    """The finished branch operation's members, from the branch's own record."""
+    try:
+        record = branch_record.read(branch_record.record_path(key, branch, root=BRANCH_ROOT))
+    except branch_record.UnreadableRecord as error:
+        raise Refused("could_not_determine", {"reason": str(error)[:200]}) from error
+    if record is None or record.state != "ready":
+        raise Refused(
+            "could_not_determine",
+            {"reason": "the branch has no ready record after its runtime finished"},
+        )
+    members = {
+        "branch": branch,
+        "reached_point": record.reached_point,
+        "timeline": record.timeline,
+        "pool_host": record.pool_host,
+        "direct_host": record.direct_host,
+    }
+    if target:
+        members["target_time"] = target
+    return members
+
+
+def _branch_parent(operation: Operation) -> tuple[str, dict[str, Any]]:
+    """The parent: a slot (D2438), with public endpoints, and AWAKE -- a branch
+    is restored through the parent's running database (D2219's reader)."""
+    key, document = slot_project(operation)
+    if not ((document.get("database") or {}).get("public") or {}).get("enabled"):
+        raise Refused("invalid_request", {"reason": "the project has no public endpoints"})
+    require_running(operation, document)
+    return key, document
+
+
+def _runtime(operation: Operation, argv: list[str], *, verifiers: bool) -> None:
+    """`branch-runtime.sh`: its exit 7 and 12 are the customer's refusals, every
+    other failure the operation's."""
+    done = operation.child(
+        argv,
+        input=dispatch.branch_verifiers_input(operation.arguments) if verifiers else None,
+    )
+    if done.returncode == 7:
+        raise Refused(
+            "invalid_request",
+            {
+                "reason": "the point is outside this project's restore window, or the plan "
+                "was unsafe"
+            },
+        )
+    if done.returncode == ADMISSION_REFUSED:
+        raise Refused("capacity_exhausted", {"reason": "admission"})
+    operation.require(done, "branch-runtime")
+
+
+def branch_create(operation: Operation) -> dict[str, Any]:
+    """`branch.create` and `restore.create` (ADR 0271, D2434): one runtime child."""
+    with operation.step("check"):
+        key, _ = _branch_parent(operation)
+        outputs = deployed_output.deployed_path(key, root=STATE_ROOT)
+        argv = dispatch.branch_create_argv(
+            REPO_ROOT, outputs, operation.arguments, operation=operation.id,
+            requested_by=operation.requested_by,
+        )  # fmt: skip
+    with operation.step("runtime"):
+        _runtime(operation, argv, verifiers=True)
+    with operation.step("record"):
+        operation.reconciler.record_branches()
+    return _branch_result(
+        key, operation.arguments["branch"], operation.arguments.get("target_time")
+    )
+
+
+def branch_reset(operation: Operation) -> dict[str, Any]:
+    with operation.step("check"):
+        key, _ = _branch_parent(operation)
+        outputs = deployed_output.deployed_path(key, root=STATE_ROOT)
+        argv = dispatch.branch_reset_argv(
+            REPO_ROOT, outputs, operation.arguments, operation=operation.id
+        )
+    with operation.step("runtime"):
+        _runtime(operation, argv, verifiers=True)
+    with operation.step("record"):
+        operation.reconciler.record_branches()
+    return _branch_result(
+        key, operation.arguments["branch"], operation.arguments.get("target_time")
+    )
+
+
+def branch_delete(operation: Operation) -> dict[str, Any]:
+    """A branch's deletion: a slot's, asleep or awake -- nothing of the parent
+    is read or touched (D2438)."""
+    with operation.step("check"):
+        key, _ = slot_project(operation)
+        argv = dispatch.branch_delete_argv(REPO_ROOT, key, operation.arguments["branch"])
+    with operation.step("runtime"):
+        _runtime(operation, argv, verifiers=False)
+    with operation.step("record"):
+        operation.reconciler.record_branches()
+    return {"branch": operation.arguments["branch"]}
+
+
 #: The closed table's executing half: one handler per type of `dispatch.STEPS`.
 HANDLERS: dict[str, Callable[[Operation], dict[str, Any]]] = {
     "project.create": create,
@@ -917,6 +1034,10 @@ HANDLERS: dict[str, Callable[[Operation], dict[str, Any]]] = {
     "project.export": export,
     "project.delete": delete,
     "credential.rotate": rotate,
+    "branch.create": branch_create,
+    "restore.create": branch_create,
+    "branch.reset": branch_reset,
+    "branch.delete": branch_delete,
 }
 
 
@@ -1015,6 +1136,60 @@ class Reconciler:
             say(f"the slot reading was not recorded: {error}")
             return
         say("slots " + (", ".join(f"{r['key']} {r['state']}" for r in rows) or "none declared"))
+
+    def record_branches(self) -> None:
+        """Every branch on this host as `control_record_branches` reads it (D2450);
+        an unreadable record recorded `undetermined`. A failure is reported."""
+        try:
+            found, unreadable = branch_record.records(BRANCH_ROOT)
+            payload = dispatch.branch_reading(found, unreadable)
+            self.control.call(dispatch.RECORD_BRANCHES_SQL, branches=json.dumps(payload))
+        except (OSError, ValueError, ControlError) as error:
+            say(f"the branch reading was not recorded: {error}")
+            return
+        say(
+            "branches "
+            + (", ".join(sorted(found)) or "none")
+            + (f"; {len(unreadable)} unreadable" if unreadable else "")
+        )
+
+    def request_expiries(self) -> None:
+        """ADR 0272: each ready branch past its expiry -- the control set decides,
+        and requests ONE deletion on behalf of the member who set it."""
+        try:
+            found, _ = branch_record.records(BRANCH_ROOT)
+        except OSError as error:
+            say(f"the branch records were not read for expiry: {error}")
+            return
+        now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        for key, branch in dispatch.expired_branches(found, now):
+            try:
+                requested = self.control.call(dispatch.REQUEST_EXPIRY_SQL, key=key, branch=branch)
+            except ControlError as error:
+                say(f"the expiry of {key}_{branch} was not requested: {error}")
+                continue
+            if requested:
+                say(f"{key}_{branch} expired: deletion {requested} requested (ADR 0272)")
+
+    def record_backups(self) -> None:
+        """ADR 0273: each allocated slot's backups reading, with its age."""
+        readings = []
+        for entry in host_config.declared_slots(self.host):
+            try:
+                document = _deployed(entry.key)
+            except Refused:
+                continue
+            readings.append(backups_of(entry.key, document))
+        if not readings:
+            return
+        try:
+            self.control.call(dispatch.RECORD_BACKUPS_SQL, readings=json.dumps(readings))
+        except ControlError as error:
+            say(f"the backups readings were not recorded: {error}")
+            return
+        say(
+            "backups " + ", ".join(f"{r['project_key']} {r['repository_status']}" for r in readings)
+        )
 
     def recover(self) -> int:
         """D2152: every operation still running was interrupted. Finished failed,
@@ -1121,6 +1296,66 @@ class Reconciler:
 # ---------------------------------------------------------------------------
 
 
+def _quiet(argv: list[str], timeout: int) -> subprocess.CompletedProcess | None:
+    try:
+        return subprocess.run(
+            argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout,
+            check=False,
+        )  # fmt: skip
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def backups_of(key: str, document: dict[str, Any]) -> dict[str, Any]:
+    """One slot's reading: asleep when its database is stopped; otherwise
+    `backup.sh info --json`, the archiver query and the mirror's copy record."""
+    database = document.get("database") or {}
+    container, name = str(database.get("container", "")), str(database.get("name", ""))
+    running = _quiet(dispatch.running_argv(container), 60)
+    if running is not None and running.returncode == 0 and running.stdout.strip() == "false":
+        return dispatch.backups_reading(key, info=None, archiver=None, mirror=None, sleeping=True)
+    outputs = deployed_output.deployed_path(key, root=STATE_ROOT)
+    done = _quiet(
+        [str(REPO_ROOT / "bin" / "backup.sh"), "--outputs", str(outputs), "info", "--json"], 300
+    )
+    info = None
+    if done is not None and done.returncode == 0:
+        with contextlib.suppress(ValueError):
+            info = json.loads(done.stdout)
+    archiver = None
+    read = container_exec.run(
+        container, "psql", "-U", "postgres", "-d", name, "-X", "-qtA",
+        "-F", backup_report.ARCHIVER_SEPARATOR, "-c", backup_report.ARCHIVER_QUERY, timeout=30,
+    )  # fmt: skip
+    if read.returncode == 0:
+        archiver = backup_report.parse_archiver(read.stdout)
+    return dispatch.backups_reading(
+        key, info=info, archiver=archiver, mirror=mirror_of(key, document), sleeping=False
+    )
+
+
+def mirror_of(key: str, document: dict[str, Any]) -> Any:
+    """The mirror's verdict from its copy record on disk, as `doctor` reads it
+    (D2461) -- never `info --json`'s deploy-time placeholder."""
+    if not config.backup_mirror_enabled(document):
+        return diagnosis.mirror(enabled=False, status=None, last_copied_at=None, age_days=None)
+    path = deployed_output.mirror_record_path(key, root=STATE_ROOT)
+    try:
+        record = backup_report.parse_mirror_record(path.read_text(encoding="utf-8"))
+    except OSError:
+        record = None
+    reading = backup_report.mirror_reading(enabled=True, record=record)
+    copied = reading.get("last_copied_at")
+    age = None
+    if copied:
+        with contextlib.suppress(ValueError):
+            moment = datetime.fromisoformat(str(copied).replace("Z", "+00:00"))
+            age = (datetime.now(UTC) - moment).days
+    return diagnosis.mirror(
+        enabled=True, status=reading.get("status"), last_copied_at=copied, age_days=age
+    )
+
+
 def wait_for_control(
     control: Control,
     *,
@@ -1170,12 +1405,34 @@ def start() -> Reconciler:
     if recovered:
         say(f"{recovered} interrupted operation(s) finished failed (D2152)")
     reconciler.record_slots()
+    start_branches(reconciler)
     return reconciler
+
+
+def start_branches(reconciler: Reconciler) -> None:
+    """D2439: every recorded branch back -- a branch has no unit of its own.
+    Nothing to do on a host that has never held a branch."""
+    try:
+        present = BRANCH_ROOT.is_dir()
+    except OSError as error:
+        say(f"the branch root could not be read; no branch was started: {error}")
+        return
+    if not present:
+        return
+    started = _quiet(dispatch.branch_start_argv(REPO_ROOT), 900)
+    say(
+        "branches started"
+        if started is not None and started.returncode == 0
+        else "a branch did not come back; its record says stopped (D2439)"
+    )
+    reconciler.record_branches()
 
 
 def run(*, once: bool) -> int:
     reconciler = start()
     recorded = time.monotonic()
+    # The first backups reading on the loop's first pass, then every interval.
+    backed = recorded - BACKUP_RECORD_SECONDS
     while True:
         try:
             worked = reconciler.cycle()
@@ -1187,7 +1444,12 @@ def run(*, once: bool) -> int:
             return EXIT_OK
         if time.monotonic() - recorded >= RECORD_SECONDS:
             reconciler.record_slots()
+            reconciler.record_branches()
+            reconciler.request_expiries()
             recorded = time.monotonic()
+        if time.monotonic() - backed >= BACKUP_RECORD_SECONDS:
+            reconciler.record_backups()
+            backed = time.monotonic()
         if not worked:
             time.sleep(POLL_SECONDS)
 
