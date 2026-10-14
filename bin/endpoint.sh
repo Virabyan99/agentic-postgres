@@ -31,7 +31,7 @@ usage() {
 Usage:
   bin/endpoint.sh show [--project-key KEY] [--json]
   bin/endpoint.sh credential [--project-key KEY] --role app|admin --password-file FILE [--wait] [--timeout S] [--interval S] [--json]
-  bin/endpoint.sh connect [--project-key KEY] --role app|admin --password-file FILE [-- PSQL-ARGS...]
+  bin/endpoint.sh connect [--project-key KEY] --role app|admin --password-file FILE [--branch NAME] [-- PSQL-ARGS...]
 
   show        The project's two doors -- host, port, user, database -- and a
               connection snippet per client measured through them (psql,
@@ -45,7 +45,9 @@ Usage:
   connect     psql through one door, verify-full against this machine's
               certificate authorities, the password from FILE through a
               temporary 0600 PGPASSFILE removed when psql ends. Arguments
-              after -- go to psql.
+              after -- go to psql. --branch NAME opens the branch's door
+              instead (NAME.pool. or NAME.direct.), with the password
+              bin/branch.sh wrote for it.
 
 KEY is a project key such as slot1-prod; without it, the context's project
 (bin/project.sh use). credential needs a person's session; show and connect

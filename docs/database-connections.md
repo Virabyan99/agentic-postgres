@@ -97,6 +97,15 @@ needs; neither role sees `app`, `api` or `app_private`. **Prisma's `migrate
 deploy` refuses a `public` that already holds tables it did not make** (P3005):
 run Prisma's migrations first.
 
+**A branch's names** (Session 40, ADR 0271): a branch named `dev` answers at
+`dev.pool.<domain>` and `dev.direct.<domain>`, the same two doors, the same
+roles and the same database name, with the branch's own passwords --
+`bin/branch.sh create` writes them to `DIR/KEY/dev/customer_app` and
+`customer_admin`. `bin/endpoint.sh connect --branch dev --role app|admin
+--password-file FILE` opens `psql` through one; `bin/branch.sh show` prints
+both names. The project's passwords are refused at a branch's names, and a
+branch's at the project's.
+
 ## The allocation
 
 Two ports per project, allocated together from a host range, keyed by

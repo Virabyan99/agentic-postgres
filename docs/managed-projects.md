@@ -26,6 +26,9 @@ bin/project.sh wake --project-key KEY
 bin/compute.sh set --project-key KEY --profile standard
 bin/project.sh export --project-key KEY --output shop.dump
 bin/project.sh delete --project-key KEY --confirm KEY
+bin/project.sh backups --project-key KEY
+bin/branch.sh create --project-key KEY --branch dev --password-dir ~/branches --wait
+bin/branch.sh delete --project-key KEY --branch dev --confirm dev
 ```
 
 Each write answers at once with an **operation** -- `pending`, then `running`
@@ -128,6 +131,68 @@ A sleeping project's doors refuse until it is woken. The details are in
 accepted** since Session 39's close (Reality Ledger `planned`, D2416): a rotation
 answers `409 not_available` until the doors' evidence is re-earned.
 
+## Backups
+
+Every managed project is backed up continuously: a full backup, then each
+change archived as it is written. `bin/project.sh backups --project-key KEY`
+reads what the server last recorded about them, with its age:
+
+- **a window** -- `restorable from EARLIEST to LATEST` -- the span a branch
+  can be restored to. `EARLIEST` is a second after the oldest full backup
+  finished; `LATEST` is the newest change the archive holds, so a point after
+  it is not yet restorable;
+- **sleeping** -- no new restore point is taken while the project sleeps; the
+  window ends where it went to sleep;
+- **could not be determined** (exit 6) -- no reading has been recorded, the
+  newest is older than 30 minutes, or the repository, the archiver or the
+  mirror could not be read. The reason is printed; **it is never shown as a
+  window**.
+
+The reading says the backups exist. **A branch is the test that they
+restore**: making one restores the project's own backups into a new database
+you can connect to.
+
+## Branches
+
+A **branch** is a copy of the project's database restored from its own
+backups (ADR 0271) -- to the end of the archive, or to a point inside the
+window -- with its own two passwords and its own two names,
+`<branch>.pool.<domain>` and `<branch>.direct.<domain>`. The project itself is
+never touched: a branch is a separate database, and nothing written to one
+reaches the other.
+
+```
+bin/branch.sh create --project-key KEY --branch dev --password-dir ~/branches --wait
+bin/branch.sh create --project-key KEY --branch dev --password-dir ~/branches --at 2026-10-14T09:30:00Z --wait
+bin/branch.sh list --project-key KEY
+bin/branch.sh show --project-key KEY --branch dev
+bin/endpoint.sh connect --project-key KEY --role admin --branch dev --password-file ~/branches/KEY/dev/customer_admin
+bin/branch.sh reset --project-key KEY --branch dev --password-dir ~/branches-2 --wait
+bin/branch.sh delete --project-key KEY --branch dev --confirm dev --wait
+```
+
+- **The point.** Without `--at`, the branch holds the newest change the
+  archive had when it was restored. With `--at INSTANT` (UTC,
+  `YYYY-MM-DDTHH:MM:SSZ`) it holds exactly what was committed at that instant
+  -- a restore to a point, into a branch. A point outside the window is
+  refused; `show` prints the point the restore reached.
+- **The passwords** are generated on your machine and written once, 0600, to
+  `DIR/KEY/BRANCH/customer_app` and `customer_admin` before anything is sent;
+  only their verifiers reach the server. The project's own passwords do not
+  open a branch, and a branch's do not open the project.
+- **Reset** restores the branch again -- to `--at` or the end of the archive --
+  with two new passwords (a directory that does not hold the old ones); its
+  names stay. Everything written to the branch since is lost.
+- **Expiry.** `--expires-in 2h` (15 minutes to 7 days; `15m`, `3d`) deletes the
+  branch then, on behalf of the member who set it.
+- **One branch per project.** A second is refused `branch_limit_reached`
+  before anything is recorded: delete the first.
+- **A branch is not backed up.** Deleting it, or losing the server, loses
+  what it holds. Delete needs an admin or owner; `--confirm` is its name.
+
+The branch operations are not offered until their Reality Ledger rows are
+`trial`; until then each answers `409 not_available` naming its row.
+
 ## What a refusal means
 
 | Answer | Meaning |
@@ -135,6 +200,7 @@ answers `409 not_available` until the doors' evidence is re-earned.
 | `409 capacity_exhausted` (`no_slot`) | No slot is ready on this server; nothing was recorded |
 | failed `capacity_exhausted` (`admission`) | The server has no room for that profile; nothing changed |
 | `409 conflict` | Another operation on this project, or another creation in this organisation, is in flight |
+| `409 branch_limit_reached` | The project already has its one branch, or one is being created; nothing was recorded |
 | `409 not_available` | That kind of operation is not offered yet; the answer names the Reality Ledger row |
 | `403 human_session_required` | A management key asked for something only a signed-in person may do |
 | failed `invalid_request` | The request named something the operation cannot act on (a sleeping project's export, for instance) |

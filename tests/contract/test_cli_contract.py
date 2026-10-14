@@ -108,6 +108,9 @@ SHELL_COMMANDS = (
     "bin/customer-credentials.sh",
     # Session 39 (D2353): a customer's doors -- show, credential, connect.
     "bin/endpoint.sh",
+    # Session 40 (ADR 0271, D2437): a customer's branches. Listed the run it
+    # landed (D1014), `git add`ed first (D1188).
+    "bin/branch.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/db.sh",
@@ -548,6 +551,8 @@ COMMANDS_WITH_VERBS = {
     "bin/customer-credentials.sh",
     # Session 39 (D2353): show, credential, connect -- verb-first.
     "bin/endpoint.sh",
+    # Session 40: create, list, show, reset, delete -- verb-first.
+    "bin/branch.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/dev.sh",
@@ -1294,3 +1299,34 @@ def test_no_printf_format_string_begins_with_a_dash() -> None:
         "these printf format strings begin with a dash, so bash reads them as "
         f"options and the call fails: {offenders}. Use `printf -- 'FORMAT'`"
     )
+
+
+def test_the_operator_backup_and_restore_verbs_are_not_customer_verbs() -> None:
+    """D2437: `apg backup` and `apg restore` are the operator's root commands
+    and keep that one meaning. Neither dispatches into the customer CLI; no
+    customer command -- one that execs `bin/cloud.py` -- is a family or a verb
+    named `backup` or `restore`; a customer's restore to a point is `branch
+    create --at` and the window is `project backups`. Control: the customer
+    commands are found (the scan reads something), and the two operator
+    commands are root's."""
+    customer = {}
+    for path in sorted((REPO_ROOT / "bin").glob("*.sh")):
+        text = path.read_text(encoding="utf-8")
+        found = re.search(r'bin/cloud\.py" ([a-z]+) "\$@"', text)
+        if found:
+            customer[path.name] = (found.group(1), text)
+    assert {"branch.sh", "endpoint.sh", "project.sh"} <= set(customer), sorted(customer)
+    for name, (family, text) in customer.items():
+        assert family not in ("backup", "restore"), name
+        verbs = verbs_documented_by(f"bin/{name}", text)
+        assert not {"backup", "restore"} & set(verbs), (name, verbs)
+    assert customer["branch.sh"][0] == "branch"
+    assert {"create", "list", "show", "reset", "delete"} <= set(
+        verbs_documented_by("bin/branch.sh", customer["branch.sh"][1])
+    )
+    assert "backups" in verbs_documented_by("bin/project.sh", customer["project.sh"][1])
+    for operator in ("backup.sh", "restore.sh"):
+        assert operator not in customer
+        text = (REPO_ROOT / "bin" / operator).read_text(encoding="utf-8")
+        assert "cloud.py" not in text, operator
+        assert re.search(r"\bsudo bin/" + re.escape(operator), text), operator

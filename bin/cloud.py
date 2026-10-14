@@ -1,8 +1,10 @@
 #!/usr/bin/env python
-"""`apg login|logout|context|org|project|compute|operation|endpoint`: the management API.
+"""`apg login|logout|context|org|project|compute|operation|endpoint|branch`: the
+management API.
 
 Invoked by `bin/login.sh`, `bin/logout.sh`, `bin/context.sh`, `bin/org.sh`,
-`bin/project.sh`, `bin/compute.sh`, `bin/operation.sh` and `bin/endpoint.sh`,
+`bin/project.sh`, `bin/compute.sh`, `bin/operation.sh`, `bin/endpoint.sh` and
+`bin/branch.sh`,
 each passing its family as the first argument. Everything a
 test can hold still -- the private state directory, the checked secret files,
 the context, the refresh exchange, https -- is
@@ -37,6 +39,14 @@ sent) and sends only its SCRAM-SHA-256 verifier (`agentic_postgres.scram`);
 private temporary directory, removed when psql ends, never through an argument
 or the environment.
 
+**A branch's two passwords never leave this machine either** (Session 40, ADR
+0271, D2449): `branch create|reset` generate them here, write each ONCE to
+`--password-dir D` as `D/<key>/<branch>/customer_app` and `customer_admin`
+(0600, `O_EXCL`, every directory made 0700 and chmod'ed, D2417) before
+anything is sent, and send only their verifiers. `branch create --at T` is a
+restore to a point (`restore.create`); there is no customer verb named
+`backup` or `restore` -- those are the operator's root commands (D2437).
+
 Exit codes: 0 ok; 2 usage; 3 no context, no credential, an unusable local file,
 or not https; 5 refused by the server, or the operation failed; 6 the server
 unreachable or unreadable, or an outcome that could not be determined; 7
@@ -57,6 +67,7 @@ import sys
 import tempfile
 import time
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -754,6 +765,36 @@ def project_export(arguments: argparse.Namespace) -> int:
     return cc.EXIT_OK
 
 
+def project_backups(arguments: argparse.Namespace) -> int:
+    """The project's backups and its restore window, as the server last read
+    them (ADR 0273): a window, sleeping, or -- exit 6 -- could not be
+    determined, with the reason. A reading that could not be made is never
+    printed as a window (ADR 0195)."""
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    served = current.call("GET", f"/projects/{key}/backups")
+    status = served.get("status") if isinstance(served, dict) else None
+    if status == "window":
+        lines = [
+            f"{key}: restorable from {served['earliest']} to {served['latest']}",
+            f"  last full backup {served.get('last_full_at') or '-'}; read {served['observed_at']}",
+        ]
+        if served.get("message"):
+            lines.append(f"  {served['message']}")
+        emit(served, arguments.json, lines)
+        return cc.EXIT_OK
+    if status == "sleeping":
+        emit(served, arguments.json, [f"{key}: sleeping. {served.get('message') or ''}".rstrip()])
+        return cc.EXIT_OK
+    if status == "could_not_determine":
+        reason = served.get("reason")
+        emit(
+            served, arguments.json, [f"{key}: the restore window could not be determined: {reason}"]
+        )
+        return cc.EXIT_UNREACHABLE
+    raise ClientError(cc.EXIT_UNREACHABLE, "the backups reading answered in an unreadable shape")
+
+
 # ---------------------------------------------------------------------------
 # compute
 # ---------------------------------------------------------------------------
@@ -865,15 +906,26 @@ _HOST = re.compile(r"(?=.{1,253}\Z)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{
 _IDENTIFIER = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 
 
-def _door(current: cc.Session, key: str, role: str) -> dict[str, Any]:
+def _door(current: cc.Session, key: str, role: str, branch: str | None = None) -> dict[str, Any]:
     """The door `role` opens, as the server recorded it -- each member checked,
-    because a value from a response is about to become a psql argument."""
+    because a value from a response is about to become a psql argument. A
+    BRANCH's door is the project's with the branch's own host (ADR 0271): its
+    roles and database are the restored copy's, the same names."""
     _name, door = ENDPOINT_ROLES[role]
     served = current.call("GET", f"/projects/{key}/connections")
     found = served.get(door) if isinstance(served, dict) else None
     if not isinstance(found, dict):
         raise ClientError(cc.EXIT_UNREACHABLE, "the server's answer names no such door")
     host, port = found.get("host"), found.get("port")
+    if branch is not None:
+        recorded = current.call("GET", f"/projects/{key}/branches/{_branch_name(branch)}")
+        if not isinstance(recorded, dict):
+            raise ClientError(cc.EXIT_UNREACHABLE, "the branch answered in an unreadable shape")
+        if recorded.get("state") != "ready":
+            raise ClientError(
+                cc.EXIT_PREREQUISITE, f"branch {branch} is {recorded.get('state')}, not ready"
+            )
+        host = recorded.get("pool_host" if door == "pooled" else "direct_host")
     user, database = found.get("user"), found.get("database")
     if (
         not isinstance(host, str)
@@ -960,7 +1012,7 @@ def endpoint_connect(arguments: argparse.Namespace) -> int:
     with this terminal, not an `exec`: an exec could not remove the file."""
     current = session()
     key = _project_key(current, arguments.project_key)
-    door = _door(current, key, arguments.role)
+    door = _door(current, key, arguments.role, arguments.branch)
     password = cc.read_private_file(Path(arguments.password_file)).decode("utf-8").strip()
     if not password or "\n" in password:
         raise ClientError(cc.EXIT_PREREQUISITE, f"{arguments.password_file} holds no password")
@@ -994,6 +1046,219 @@ def endpoint_connect(arguments: argparse.Namespace) -> int:
             except KeyboardInterrupt:
                 # psql's to answer (it cancels the query); this process waits on.
                 continue
+
+
+# ---------------------------------------------------------------------------
+# branch (Session 40, ADR 0271, ADR 0272, D2437, D2449)
+# ---------------------------------------------------------------------------
+
+#: A branch's two customer roles; each password is kept in a file of its name.
+BRANCH_ROLES = ("customer_app", "customer_admin")
+
+#: ADR 0272's bounds on an expiry, as the server holds them (a test holds the
+#: two equal to `services/auth-api/app/operations.py`).
+EXPIRY_BOUNDS = (15 * 60, 7 * 24 * 3600)
+
+#: The server measures an expiry from the moment it RECEIVES it, so a request
+#: for exactly the minimum arrives a little under it: at either bound the CLI
+#: keeps this far inside, and the bound it offers is one the server accepts
+#: (D2475).
+EXPIRY_MARGIN_SECONDS = 60
+
+_BRANCH = re.compile(r"[a-z][a-z0-9]{1,11}")
+_INSTANT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z")
+_DURATION = re.compile(r"([0-9]{1,6})([mhd]?)")
+_UNIT_SECONDS = {"m": 60, "h": 3600, "d": 86400, "": 3600}
+
+
+def _branch_name(text: str) -> str:
+    if not _BRANCH.fullmatch(text) or text == "main":
+        raise ClientError(
+            cc.EXIT_USAGE,
+            f"not a branch name: {text!r} (a lowercase letter, then 1-11 lowercase letters or "
+            "digits; `main` is the project itself)",
+        )
+    return text
+
+
+def _instant(text: str) -> str:
+    if not _INSTANT.fullmatch(text):
+        raise ClientError(
+            cc.EXIT_USAGE, f"not a UTC instant: {text!r} (YYYY-MM-DDTHH:MM:SS[.ffffff]Z)"
+        )
+    return text
+
+
+def _expiry(text: str, *, now: datetime | None = None) -> str:
+    """`--expires-in` (`15m`, `2h`, `7d`; a bare number is hours) as the instant
+    the server is sent, kept a minute inside either bound."""
+    match = _DURATION.fullmatch(text)
+    if not match:
+        raise ClientError(cc.EXIT_USAGE, f"not a duration: {text!r} (such as 15m, 2h or 7d)")
+    seconds = int(match.group(1)) * _UNIT_SECONDS[match.group(2)]
+    low, high = EXPIRY_BOUNDS
+    if not low <= seconds <= high:
+        raise ClientError(cc.EXIT_USAGE, "--expires-in is at least 15m and at most 7d")
+    seconds = min(max(seconds, low + EXPIRY_MARGIN_SECONDS), high - EXPIRY_MARGIN_SECONDS)
+    moment = (now or datetime.now(UTC)) + timedelta(seconds=seconds)
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _password_directory(given: str, key: str, branch: str) -> Path:
+    """`D/<key>/<branch>/`: each level created 0700 and chmod'ed, or refused
+    when it exists and is not private (D2417). D's own parent must exist."""
+    base = Path(given)
+    if not base.parent.is_dir():
+        raise ClientError(cc.EXIT_USAGE, f"{base.parent} is not a directory; nothing was requested")
+    where = base
+    for part in ("", key, branch):
+        where = where / part if part else where
+        cc.ensure_state_directory(where)
+    return where
+
+
+def _branch_request(
+    current: cc.Session,
+    arguments: argparse.Namespace,
+    key: str,
+    branch: str,
+    route: str,
+    body: dict[str, Any],
+    *,
+    what: str,
+) -> int:
+    """Two passwords generated HERE and written once, 0600, BEFORE anything is
+    sent -- so a request the server recorded always has its passwords on this
+    machine -- and only their verifiers sent (D2449). A refusal removes them; an
+    outcome that is not known keeps them and says where."""
+    where = _password_directory(arguments.password_dir, key, branch)
+    files = {role: where / role for role in BRANCH_ROLES}
+    for path in files.values():
+        if path.exists() or path.is_symlink():
+            raise ClientError(
+                cc.EXIT_USAGE,
+                f"{path} already exists; nothing was requested (a reset's new passwords need "
+                "the old ones moved away, or another --password-dir)",
+            )
+    verifiers: dict[str, str] = {}
+    try:
+        for role, path in files.items():
+            password = secrets.token_urlsafe(32)
+            cc.write_new_private_file(path, (password + "\n").encode("utf-8"))
+            verifiers[role] = scram.verifier(password)
+            del password
+    except BaseException:
+        for path in files.values():
+            path.unlink(missing_ok=True)
+        raise
+    body = {
+        **body,
+        "app_verifier": verifiers["customer_app"],
+        "admin_verifier": verifiers["customer_admin"],
+    }
+    try:
+        answer = current.call("POST", route, body)
+    except ClientError as error:
+        if error.code == cc.EXIT_REFUSED:
+            for path in files.values():
+                path.unlink(missing_ok=True)  # refused: nothing was recorded
+        else:
+            print(f"branch: whether the request was recorded is not known; the passwords it "
+                  f"would set are kept in {where}", file=sys.stderr)  # fmt: skip
+        raise
+    note = f"  the passwords are in {where} (0600); they work once the operation succeeds"
+    return _branch_follow(current, arguments, answer, what=what, note=note)
+
+
+def _branch_follow(
+    current: cc.Session,
+    arguments: argparse.Namespace,
+    answer: dict[str, Any],
+    *,
+    what: str,
+    note: str,
+) -> int:
+    if not arguments.wait:
+        _accepted(answer, arguments.json, what=what)
+        if not arguments.json:
+            print(note)
+        return cc.EXIT_OK
+    operation = answer["operation"]
+    print(f"branch: operation {operation['id']} recorded; waiting for it", file=sys.stderr)
+    final = _wait(current, str(operation["id"]), arguments.timeout, arguments.interval)
+    if final["status"] != "succeeded":
+        raise _unsuccessful(final)
+    result = {k: v for k, v in (final.get("result") or {}).items() if k != "steps"}
+    lines = [f"{what}: done", *(f"  {name:<14}  {value}" for name, value in result.items())]
+    lines.append(note.replace("they work once the operation succeeds", "they work now"))
+    emit({"operation": final["id"], **result}, arguments.json, lines)
+    return cc.EXIT_OK
+
+
+def branch_create(arguments: argparse.Namespace) -> int:
+    """A branch at the end of the archive, or -- `--at T` -- a restore to the
+    point T into a new branch (`restore.create`, D2434). The project itself is
+    never overwritten."""
+    branch = _branch_name(arguments.branch)
+    body: dict[str, Any] = {"branch": branch}
+    if arguments.at is not None:
+        body["target_time"] = _instant(arguments.at)
+    if arguments.expires_in is not None:
+        body["expires_at"] = _expiry(arguments.expires_in)
+    current = person_session()
+    key = _project_key(current, arguments.project_key)
+    route = f"/projects/{key}/restores" if arguments.at is not None else f"/projects/{key}/branches"
+    what = f"restoring {key} to {arguments.at} into {branch}" if arguments.at else (
+        f"branching {key} into {branch}")  # fmt: skip
+    return _branch_request(current, arguments, key, branch, route, body, what=what)
+
+
+def branch_reset(arguments: argparse.Namespace) -> int:
+    """The branch restored again -- to `--at T` or the end of the archive --
+    with two new passwords; its names stay. What was written to it is lost."""
+    branch = _branch_name(arguments.branch)
+    body: dict[str, Any] = {}
+    if arguments.at is not None:
+        body["target_time"] = _instant(arguments.at)
+    current = person_session()
+    key = _project_key(current, arguments.project_key)
+    route = f"/projects/{key}/branches/{branch}/reset"
+    return _branch_request(current, arguments, key, branch, route, body,
+                           what=f"resetting {key}'s {branch}")  # fmt: skip
+
+
+def branch_delete(arguments: argparse.Namespace) -> int:
+    branch = _branch_name(arguments.branch)
+    if arguments.confirm != branch:
+        raise ClientError(
+            cc.EXIT_USAGE,
+            f"--confirm must be the branch's name exactly ({branch}); nothing was sent",
+        )
+    current = person_session()
+    key = _project_key(current, arguments.project_key)
+    answer = current.call("DELETE", f"/projects/{key}/branches/{branch}")
+    note = "  a branch is not backed up: what it held is gone; its passwords open nothing"
+    return _branch_follow(current, arguments, answer, what=f"deleting {key}'s {branch}", note=note)
+
+
+def branch_list(arguments: argparse.Namespace) -> int:
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    served = current.call("GET", f"/projects/{key}/branches")
+    rows = served["branches"]
+    lines = table(rows, ("name", "state", "reached_point", "expires_at", "pool_host"))
+    emit(served, arguments.json, [*lines, f"  {served['notice']}"])
+    return cc.EXIT_OK
+
+
+def branch_show(arguments: argparse.Namespace) -> int:
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    found = current.call("GET", f"/projects/{key}/branches/{_branch_name(arguments.branch)}")
+    lines = [f"  {name:<16}  {value if value is not None else '-'}"
+             for name, value in found.items() if name != "notice"]  # fmt: skip
+    emit(found, arguments.json, [*lines, f"  {found['notice']}"])
+    return cc.EXIT_OK
 
 
 # ---------------------------------------------------------------------------
@@ -1123,6 +1388,10 @@ def parser() -> argparse.ArgumentParser:
     verb.add_argument("--project-key")
     verb.add_argument("--output", required=True)
     _waiting(verb)
+    verb = project.add_parser("backups", add_help=False)
+    verb.set_defaults(run=project_backups)
+    verb.add_argument("--project-key")
+    verb.add_argument("--json", action="store_true")
 
     compute = _verbs(families.add_parser("compute", add_help=False))
     verb = compute.add_parser("get", add_help=False)
@@ -1152,6 +1421,7 @@ def parser() -> argparse.ArgumentParser:
     verb.add_argument("--project-key")
     verb.add_argument("--role", required=True, choices=tuple(ENDPOINT_ROLES))
     verb.add_argument("--password-file", required=True)
+    verb.add_argument("--branch")
     verb.add_argument("psql", nargs=argparse.REMAINDER)
 
     operation = _verbs(families.add_parser("operation", add_help=False))
@@ -1168,6 +1438,35 @@ def parser() -> argparse.ArgumentParser:
     verb.set_defaults(run=operation_wait)
     verb.add_argument("--operation", required=True)
     _waiting(verb)
+
+    branch = _verbs(families.add_parser("branch", add_help=False))
+    for name, run in (("create", branch_create), ("reset", branch_reset)):
+        verb = branch.add_parser(name, add_help=False)
+        verb.set_defaults(run=run)
+        verb.add_argument("--project-key")
+        verb.add_argument("--branch", required=True)
+        verb.add_argument("--password-dir", required=True)
+        verb.add_argument("--at")
+        if name == "create":
+            verb.add_argument("--expires-in")
+        verb.add_argument("--wait", action="store_true")
+        _waiting(verb)
+    verb = branch.add_parser("delete", add_help=False)
+    verb.set_defaults(run=branch_delete)
+    verb.add_argument("--project-key")
+    verb.add_argument("--branch", required=True)
+    verb.add_argument("--confirm", required=True)
+    verb.add_argument("--wait", action="store_true")
+    _waiting(verb)
+    verb = branch.add_parser("list", add_help=False)
+    verb.set_defaults(run=branch_list)
+    verb.add_argument("--project-key")
+    verb.add_argument("--json", action="store_true")
+    verb = branch.add_parser("show", add_help=False)
+    verb.set_defaults(run=branch_show)
+    verb.add_argument("--project-key")
+    verb.add_argument("--branch", required=True)
+    verb.add_argument("--json", action="store_true")
     return top
 
 

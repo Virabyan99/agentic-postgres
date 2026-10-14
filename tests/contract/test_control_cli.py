@@ -2,7 +2,8 @@
 
 CTL-CLI-001 (D2066), and Session 38's verbs (D2169, D2163): `project create|
 claim|status|sleep|wake|export|delete`, `compute get|set`, `operation
-show|list|wait|cancel`. The reconciler does not run here: its half -- an
+show|list|wait|cancel`; Session 40's `branch create|list|show|reset|delete` and
+`project backups` (BR-CLI-001, D2449). The reconciler does not run here: its half -- an
 operation claimed and finished -- is written as the superuser, the way the
 reconciler writes it; the project's own `/auth/reset-password` and a provider's
 download URL are a loopback stand-in that records what reached it (`Elsewhere`).
@@ -24,7 +25,9 @@ endpoint read from the context. What the routes do is the Run 4/5 modules'.
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import importlib.util
 import json
 import os
 import stat
@@ -33,6 +36,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -40,7 +44,7 @@ from typing import Any
 import control_cluster as cc
 import pytest
 
-from agentic_postgres import REPO_ROOT
+from agentic_postgres import REPO_ROOT, scram
 from app import operations
 
 pytestmark = [pytest.mark.contract, pytest.mark.database, pytest.mark.security, pytest.mark.p0]
@@ -817,3 +821,156 @@ def test_compute_sleep_wake_and_delete_answer_with_an_operation(
     )
     status = person.run("project", "status", "--project-key", key, "--json")
     assert status.returncode == 0 and json.loads(status.stdout)["state"] == "sleeping"
+
+
+# ---------------------------------------------------------------------------
+# Session 40: branches (ADR 0271, ADR 0272, D2437, D2449)
+# ---------------------------------------------------------------------------
+
+
+def _operations_of(drive: Any, key: str) -> int:
+    return int(
+        drive.cluster.query(
+            f"SELECT count(*) FROM app.control_operations WHERE project_key = '{key}'"
+        )[0]
+    )
+
+
+def _salt(verifier: str) -> bytes:
+    """`SCRAM-SHA-256$<iterations>:<salt>$<stored>:<server>`'s salt."""
+    return base64.b64decode(verifier.split("$")[1].split(":")[1])
+
+
+def test_a_branch_password_never_leaves_the_workstation(
+    person: Person, served: Any, accepting: None
+) -> None:
+    """D2449: `branch create` writes the branch's two passwords to
+    `D/<key>/<branch>/customer_app|customer_admin` (0600; D, D/<key> and the
+    branch's directory each 0700, D2417) and sends only their verifiers -- the
+    row's arguments are the branch and the two verifiers, each one the SCRAM
+    verifier of its file's password, and no password is in any row or any
+    output. A refused request (`branch_limit_reached`) keeps no file; a file
+    that exists is never overwritten and a directory others can read is
+    refused -- neither sends anything."""
+    _, drive = served
+    _, org = _member(served, "branch-member")
+    key = "slot6-prod"
+    _adopt(drive, org, key, "https://slot6.test/api/app")
+    assert person.login("branch-member").returncode == 0
+    base = person.home / "branch-passwords"
+    made = person.run("branch", "create", "--project-key", key, "--branch", "dev",
+                      "--password-dir", str(base), "--json")  # fmt: skip
+    assert made.returncode == 0, made.stderr
+    operation = json.loads(made.stdout)["operation"]
+    where = base / key / "dev"
+    assert [_mode(d) for d in (base, base / key, where)] == [0o700] * 3
+    passwords = {}
+    for role in ("customer_app", "customer_admin"):
+        assert _mode(where / role) == 0o600
+        passwords[role] = (where / role).read_text(encoding="utf-8").strip()
+        assert len(passwords[role]) == 43
+    arguments = json.loads(
+        drive.cluster.query(
+            f"SELECT arguments::text FROM app.control_operations WHERE id = '{operation['id']}'"
+        )[0]
+    )
+    assert set(arguments) == {"branch", "app_verifier", "admin_verifier"}, arguments
+    assert arguments["branch"] == "dev"
+    for role, member in (("customer_app", "app_verifier"), ("customer_admin", "admin_verifier")):
+        verifier = arguments[member]
+        assert scram.verifier(passwords[role], salt=_salt(verifier)) == verifier, role
+    stored = drive.cluster.query(
+        "SELECT string_agg(arguments::text || coalesce(result::text, ''), '') "
+        "FROM app.control_operations"
+    )[0]
+    for password in passwords.values():
+        assert password not in stored and password not in made.stdout + made.stderr
+
+    # Refused before a row: the project's one branch is being created.
+    second = person.run("branch", "create", "--project-key", key, "--branch", "qa",
+                        "--password-dir", str(base))  # fmt: skip
+    assert second.returncode == 5 and "branch_limit_reached" in second.stderr, second.stderr
+    assert list((base / key / "qa").iterdir()) == [], "a refused request kept its passwords"
+
+    rows = _operations_of(drive, key)
+    again = person.run("branch", "create", "--project-key", key, "--branch", "dev",
+                       "--password-dir", str(base))  # fmt: skip
+    assert again.returncode == 2 and "already exists" in again.stderr, again.stderr
+    assert (where / "customer_app").read_text(encoding="utf-8").strip() == passwords["customer_app"]
+    wide = person.home / "wide"
+    wide.mkdir()
+    wide.chmod(0o755)
+    exposed = person.run("branch", "create", "--project-key", key, "--branch", "ci",
+                         "--password-dir", str(wide))  # fmt: skip
+    assert exposed.returncode == 3, exposed.stderr
+    assert not (wide / key).exists()
+    assert _operations_of(drive, key) == rows, "a local refusal sent nothing"
+
+
+def test_at_sends_a_restore(person: Person, served: Any, accepting: None) -> None:
+    """D2434: `branch create --at T` is `restore.create` with `target_time` T;
+    without `--at` it is `branch.create`. `--expires-in 15m` is an instant the
+    server ACCEPTS -- it measures from its receipt, so the CLI keeps a minute
+    inside the bound (D2475) -- and the CLI's bounds are the server's. A
+    malformed point or an expiry under the minimum sends nothing. The reads:
+    `branch list|show` print the server's record and its notice; `project
+    backups` with no reading recorded is exit 6, never a window (ADR 0195)."""
+    _, drive = served
+    _, org = _member(served, "restore-member")
+    key = "slot7-prod"
+    _adopt(drive, org, key, "https://slot7.test/api/app")
+    assert person.login("restore-member").returncode == 0
+    base = person.home / "restore-passwords"
+    point = "2026-10-14T09:30:00Z"
+    before = datetime.now(UTC)
+    restored = person.run("branch", "create", "--project-key", key, "--branch", "dev",
+                          "--password-dir", str(base), "--at", point, "--expires-in", "15m",
+                          "--json")  # fmt: skip
+    assert restored.returncode == 0, restored.stderr
+    first = json.loads(restored.stdout)["operation"]["id"]
+    kind, target, expires = drive.cluster.query(
+        "SELECT type || '|' || (arguments ->> 'target_time') || '|' || (arguments ->> "
+        f"'expires_at') FROM app.control_operations WHERE id = '{first}'"
+    )[0].split("|")
+    assert (kind, target) == ("restore.create", point)
+    ahead = datetime.fromisoformat(expires.replace("Z", "+00:00")) - before
+    assert 15 * 60 < ahead.total_seconds() <= 16 * 60 + 5, ahead
+    _finish(drive, first, "failed", "invalid_request", {"reason": "outside the window"})
+
+    plain = person.run("branch", "create", "--project-key", key, "--branch", "qa",
+                       "--password-dir", str(base), "--json")  # fmt: skip
+    assert plain.returncode == 0, plain.stderr
+    second = json.loads(plain.stdout)["operation"]["id"]
+    assert drive.cluster.query(
+        "SELECT type || '|' || (arguments ? 'target_time')::text FROM app.control_operations "
+        f"WHERE id = '{second}'"
+    ) == ["branch.create|false"]
+    _finish(drive, second, "failed", "operation_failed", {"reason": "the rig"})
+
+    rows = _operations_of(drive, key)
+    for flags in (("--at", "2026-10-14 09:30:00"), ("--expires-in", "10m")):
+        bad = person.run("branch", "create", "--project-key", key, "--branch", "ci",
+                         "--password-dir", str(base), *flags)  # fmt: skip
+        assert bad.returncode == 2, (flags, bad.stderr)
+    assert _operations_of(drive, key) == rows
+    assert not (base / key / "ci").exists(), "a usage error made a directory"
+
+    spec = importlib.util.spec_from_file_location("apg_cloud", BIN / "cloud.py")
+    assert spec is not None and spec.loader is not None
+    cloud = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cloud)
+    assert cloud.EXPIRY_BOUNDS == (operations.MIN_EXPIRY_SECONDS, operations.MAX_EXPIRY_SECONDS)
+
+    entry = {"project_key": key, "name": "dev", "state": "ready", "timeline": 2,
+             "reached_point": point, "pool_host": f"dev.pool.{key}.test",
+             "direct_host": f"dev.direct.{key}.test"}  # fmt: skip
+    drive.cluster.query(f"SELECT app.control_record_branches('{json.dumps([entry])}'::jsonb)")
+    listed = person.run("branch", "list", "--project-key", key)
+    assert listed.returncode == 0, listed.stderr
+    assert "dev.pool." in listed.stdout and "not backed up" in listed.stdout
+    shown = person.run("branch", "show", "--project-key", key, "--branch", "dev", "--json")
+    assert shown.returncode == 0, shown.stderr
+    assert json.loads(shown.stdout)["direct_host"] == f"dev.direct.{key}.test"
+    backups = person.run("project", "backups", "--project-key", key)
+    assert backups.returncode == 6, backups.stderr
+    assert "could not be determined" in backups.stdout and "restorable" not in backups.stdout

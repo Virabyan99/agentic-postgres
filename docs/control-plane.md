@@ -153,12 +153,17 @@ bin/project.sh sleep [--project-key KEY] [--json]
 bin/project.sh wake [--project-key KEY] [--json]
 bin/project.sh export [--project-key KEY] --output FILE [--timeout S] [--interval S] [--json]
 bin/project.sh delete --project-key KEY --confirm KEY [--json]
+bin/project.sh backups [--project-key KEY] [--json]
 bin/compute.sh get [--project-key KEY] [--json]
 bin/compute.sh set [--project-key KEY] --profile small|standard|large [--json]
 bin/operation.sh show --operation ID [--json]
 bin/operation.sh list [--organization ID] [--json]
 bin/operation.sh wait --operation ID [--timeout S] [--interval S] [--json]
 bin/operation.sh cancel --operation ID [--json]
+bin/branch.sh create [--project-key KEY] --branch NAME --password-dir DIR [--at INSTANT] [--expires-in DURATION] [--wait]
+bin/branch.sh list|show [--project-key KEY] [--branch NAME] [--json]
+bin/branch.sh reset [--project-key KEY] --branch NAME --password-dir DIR [--at INSTANT] [--wait]
+bin/branch.sh delete [--project-key KEY] --branch NAME --confirm NAME [--wait]
 sudo bin/control.sh adopt --project KEY --organization ORG_ID --confirm CONTROL_KEY
 sudo bin/control.sh registry [--json]
 sudo bin/control.sh totp-reset --username NAME --confirm CONTROL_KEY
@@ -168,7 +173,8 @@ Each command's `--help` is the authority. Exit codes: 0 ok; 2 usage; 3 no
 context, no credential, an unusable local file, or not https; 5 refused by the
 server (for `operation wait`, the operation failed); 6 the server could not be
 reached or read; 7 `operation wait` reached its own `--timeout` with the
-operation still running -- never read as an outcome.
+operation still running -- never read as an outcome. `project backups` exits
+6 when the window could not be determined.
 
 ## Project operations (1.16.0, 1.17.0)
 
@@ -190,6 +196,12 @@ a root unit on the host, the **reconciler**, executes it; `GET
 | `POST /v1/projects/{key}/credentials` | `credential.rotate` (since 1.17.0) | member and above, a person's session only; a project with public endpoints |
 | `GET /v1/projects/{key}/connections` | -- (a read: the doors and the snippets) | viewer and above; a key with `projects:read` |
 | `POST /v1/operations/{id}/cancel` | -- | its requester, or an admin or owner, while it is `pending` |
+| `GET /v1/projects/{key}/branches[/{branch}]` | -- (a read: each branch's point, timeline, names, expiry) | viewer and above; a key with `projects:read` |
+| `POST /v1/projects/{key}/branches` | `branch.create` (Session 40) | member and above, a person's session only |
+| `POST /v1/projects/{key}/restores` | `restore.create` (Session 40; a branch at `target_time`) | member and above, a person's session only |
+| `POST /v1/projects/{key}/branches/{branch}/reset` | `branch.reset` (Session 40) | member and above, a person's session only |
+| `DELETE /v1/projects/{key}/branches/{branch}` | `branch.delete` (Session 40) | admin and above, a person's session only |
+| `GET /v1/projects/{key}/backups` | -- (a read: the restore window, ADR 0273) | viewer and above; a key with `projects:read` |
 
 **One operation at a time**: a second write on a project, or a second creation
 in an organisation, is `409 conflict` naming the one in flight. **A creation
@@ -224,8 +236,12 @@ once and never prints it.
 
 ## What is not here
 
-- **Branches, restores and credential rotation are not accepted**: each answers
-  `409 not_available` naming its Ledger row (ADR 0254).
+- **No branch write reaches a management key** (D2468): each carries the
+  branch's own two verifiers, so it is a person's. **One branch per project**:
+  a second is `409 branch_limit_reached` before a row (D2430). A branch, a
+  missing branch and a foreign project's branch are one `404 not_found`
+  (D2451). Until their Ledger rows are `trial` the four branch writes answer
+  `409 not_available` naming the row (ADR 0254).
 - No account deletion, no email, no passkeys, no web console, no rate limit on
   `/v1/sessions` or on accepting an invitation (Argon2id's cost is the only
   throttle), no key expiry, no `apg project status` and no `/v1/ledger` --

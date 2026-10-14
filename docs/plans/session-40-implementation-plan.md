@@ -444,6 +444,12 @@ the runs add go in a second table below it, in execution order.
 | **D2473** | Run 5: `start()` runs `start --all` when a branch root exists. | On this workstation `/etc/agentic-postgres` is `0700 root`, so `BRANCH_ROOT.is_dir()` RAISED `PermissionError` (a stat under an unreadable directory) and 30 existing reconciler proofs failed at `start()`. | **`start_branches` reads the root under `try`: unreadable is SAID ("the branch root could not be read; no branch was started") and nothing is started** -- a report, never folded into "no branches" (ADR 0195); `record_branches` already records an unreadable root as one `unreadable` entry (`branch_record.records`). The three harnesses (`test_reconciler_dispatch`, `test_reconciler_claim`, `test_branch_expiry`) point `BRANCH_ROOT` at their own tmp. | On the host the reconciler is root and the root readable; the proofs no longer depend on the workstation's `/etc`. | 0195 |
 | **D2474** | Run 5 Tests: *"`test_reconciler_claim.py` (+ expiry requests, a branch's records)"* and `test_branch_expiry.py` (rig 40d's cases). | Both describe the same proofs: the reconciler's `record_branches` + `request_expiries` against a real control cluster. | **They live in `test_branch_expiry.py`** (BR-TTL-001's module, its own cluster, the four §2 names); `test_reconciler_claim.py` gains the three Session 40 functions in its executable-by-no-role set (`control_record_branches`, `control_record_backups`, `control_request_expiry`) and the tmp `BRANCH_ROOT`. | One proof, one module, the claim's own. | — |
 
+| **D2475** | Run 6: *"`create … [--expires-in HOURS]`"*; Run 7's `s40-branches.py`: *"`branch create tmp` with the minimum expiry (15 minutes, D2433)"*. | Whole hours cannot say 15 minutes. And the server measures an expiry from its RECEIPT (`control_service._expiry`: `MIN_EXPIRY_SECONDS <= expires_at - now`), so a CLI that sends exactly now + 15 min arrives under the bound and is `422` -- the battery's mutation (margin 0) made the proof fail exactly so. | **`--expires-in DURATION`**: `15m`, `2h`, `7d`, a bare number is hours; 15m to 7d or exit 2 with nothing sent; **the instant sent is kept `EXPIRY_MARGIN_SECONDS = 60` inside either bound**. `cloud.EXPIRY_BOUNDS` is held equal to `app.operations`' by `test_at_sends_a_restore`. | The minimum the CLI offers is one the server accepts; the trip's 15-minute branch is `--expires-in 15m`. | 0272 |
+| **D2476** | Run 6: *"`delete [--wait]`"*. | Every other destructive customer verb confirms by name (`project delete --confirm KEY`); a branch is not backed up, so its deletion loses everything it holds. | **`branch delete --branch NAME --confirm NAME`** -- a `--confirm` that is not the name is exit 2 with nothing sent. | One idiom for an irreversible customer verb. | -- |
+| **D2477** | D2449: *"`bin/branch.sh create\|reset --password-dir D` writes `D/<key>/<branch>/customer_app` and `…/customer_admin` (0700/0600, `O_EXCL`)"*. | A reset writes NEW passwords to the same two paths a creation already filled; `O_EXCL` refuses them. Overwriting would destroy the only copy of a password still in force until the reset succeeds. | **A reset into a directory that still holds the branch's passwords is refused exit 2 before anything is sent**, naming the file; the person moves the old ones away or names another `--password-dir`. A refused request (`EXIT_REFUSED`) removes what it wrote; an unknown outcome keeps it and says where (the `endpoint credential` rule). | No password in force is ever overwritten by a request that may yet fail. | 0271 |
+| **D2478** | Run 6: *"`bin/endpoint.sh connect` gains `--branch B` (the branch's hosts from `GET …/branches/{b}`)"*. | A branch is the parent's cluster restored, so its doors' user and database are the parent's names (`customer_app`/`customer_admin`, the parent's database); only the host differs. The offline rig's adopted projects have no doors recorded, so `/connections` cannot be served there: **`connect --branch` has no offline proof**. | **`_door(..., branch)` takes the user, database and port from the project's `/connections` and the host from the branch's record (`pool_host`/`direct_host`), refusing exit 3 unless the branch reads `ready`**, every member checked as before. Its first execution is the live sitting's: Run 7's `s40-branches.py` connects through `dev.direct.…` with this verb. | Named so the live run reads it as never executed until then (CLAUDE.md §7 question 2). | 0271 |
+| **D2479** | ADR 0273: the backups surface's three outcomes. | A customer command that printed `could_not_determine` and exited 0 would be read by a script as a window. | **`project backups` exits 6 on `could_not_determine`** (the reason printed, never `restorable …`), 0 on `window` and on `sleeping`. | A report may not fold the third outcome (ADR 0195). | 0273, 0195 |
+
 ---
 
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1099,6 +1105,35 @@ with Run 4 (D2470); CI read at Run 5's SHA.
 - Tests: `test_control_cli.py` (+2), `test_cli_contract.py` (+1),
   `test_documentation_index`, `test_session12_documented_path`. **Battery**: the
   password file written 0644, `--at` sending `branch.create`.
+
+**Done.** (2026-10-14; rows **D2475-D2479**.) `bin/cloud.py` family `branch`
+(`create [--at] [--expires-in]`, `list`, `show`, `reset [--at]`, `delete
+--confirm`, each write with `--wait`) and `project backups`; `bin/branch.sh`
+(new, dispatch into `cloud.py branch`); `project.sh` gains `backups`;
+`endpoint.sh connect --branch` (D2478: no offline proof, first run live).
+Passwords `secrets.token_urlsafe(32)`, written `O_EXCL` 0600 to
+`D/<key>/<branch>/customer_app|customer_admin` with D, D/<key> and the branch
+directory each made 0700 by `ensure_state_directory` (an existing wider one
+refused, exit 3) BEFORE anything is sent; only `scram.verifier`s sent; a refusal
+removes them, an unknown outcome keeps them (D2477). `--at` sends
+`POST /restores` (`restore.create`); `--expires-in` a duration kept a minute
+inside the bounds (D2475). Documents: `managed-projects.md` *Backups* and
+*Branches* (+ the `branch_limit_reached` row), `database-connections.md` a
+branch's names, `control-plane.md` the six routes and the commands,
+`operator-guide.md` §20 *A release move: `slot.sh redeploy`* and **§22
+Branches** (the two wildcards per slot, `branch-runtime.sh status`, the reboot,
+the 192 MiB charge, a stuck branch's `delete`). Tests: `test_control_cli.py` +2
+(`::test_a_branch_password_never_leaves_the_workstation`,
+`::test_at_sends_a_restore`, against the real control app as subprocesses),
+`test_cli_contract.py` +1
+(`::test_the_operator_backup_and_restore_verbs_are_not_customer_verbs`) and
+`bin/branch.sh` in its two lists. **Battery 5/5 killed, controls green**
+(`~/s40/run6/battery6.py`): the password file 0644; `--at` sending
+`branch.create`; no expiry margin; a refused request keeping its passwords; an
+undetermined window exiting 0. Targeted once (control_cli, cli_contract,
+documentation_index, session12_documented_path, printed_commands,
+acceptance_registry, evidence_claims, environment_gates, repository_contract):
+**1178 passed**.
 
 ### Run 7 — the trip's instruments, written and rehearsed offline
 

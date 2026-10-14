@@ -2050,6 +2050,27 @@ sudo bin/slot.sh status --host /etc/agentic-postgres/host.yaml   # KEY consumed
 
 then revoke its identity as above. A new slot is a new key.
 
+### A release move: `slot.sh redeploy`
+
+A managed project stays on the release it was created at until the operator
+moves it (D2443). With the checkout at the new release and the reconciler
+stopped:
+
+```bash
+sudo bin/reconciler.sh status                                  # idle
+sudo systemctl stop agentic-postgres-reconciler.service
+sudo bin/slot.sh redeploy --host /etc/agentic-postgres/host.yaml --slot KEY --confirm KEY
+sudo systemctl start agentic-postgres-reconciler.service
+```
+
+`redeploy` refuses (exit 5) a slot that is not `allocated`, one with no
+deployed document, and a reconciler that is running or whose state could not
+be read. It runs **the reconciler's own deploy argv** on the slot's manifest --
+the same command a creation runs -- and carries the deploy's exit (admission's
+12 included); then the doors' userlists are synced and the registry row
+refreshed with `control.sh adopt` under the organisation **the registry
+already records** -- read, never typed (exit 6 when there is none).
+
 ### A second factor, enrolled by QR
 
 An owner or admin of an organisation enrols TOTP before anything else (ADR
@@ -2156,3 +2177,49 @@ password; a customer who lost it rotates again.
 A slot's manifest has the facility, so `bin/slot.sh status` reads it `ready`
 only when **three** grey A records name this host and no AAAA exists: the
 slot's domain, `pool.<domain>` and `direct.<domain>` (§20 step 3).
+
+## 22. Branches
+
+Since Session 40 (ADR 0271-0273) a customer makes a **branch** of a managed
+project (`docs/managed-projects.md`): the reconciler runs `bin/branch-runtime.sh`
+as root, which restores the parent's own repository into the branch's own
+volume through a recovery instance with archiving off, starts the branch's
+postgres with **no repository mount and no backup network**, re-keys it
+(every platform role `NOLOGIN`, the branch's two customer verifiers), and only
+then starts its two doors and attaches the edge. A branch is its own compose
+project, `apg-<key>_<branch>`, with its state in
+`/etc/agentic-postgres/branches/<key>/<branch>/branch.json`. **A branch is not
+backed up.**
+
+**Two wildcard records per slot, made once** -- grey-cloud A records naming
+this host, no AAAA: `*.pool.<domain>` and `*.direct.<domain>`. A branch `dev`
+answers at `dev.pool.<domain>` and `dev.direct.<domain>`; a creation reads
+both names before admission and refuses when they do not resolve here. Each
+name pair has its own certificate by HTTP-01; a returning name reuses it, a
+new one spends one of the registered domain's 50 a week.
+
+**What it costs**: every branch runs the `small` profile's database settings
+and is charged `small`'s **192 MiB** at its own admission (exit 12 when it does
+not fit); `doctor capacity` and every deploy's admission add each readable
+`branch.json` on the committed line, by name, and refuse on an unreadable one.
+
+```bash
+sudo bin/branch-runtime.sh status            # every branch: its point, its timeline, its containers; exit 6 on an unreadable record
+```
+
+**A reboot**: a branch has no unit of its own. The reconciler's start runs
+`branch-runtime.sh start --all`; a branch that does not come back is recorded
+`stopped`, and the customer reads that state.
+
+**A stuck branch** -- an operation interrupted part way leaves `creating` or
+`failed` in its record -- is removed by exactly what its names derive, with
+the reconciler stopped (§20):
+
+```bash
+sudo bin/reconciler.sh status                                  # idle
+sudo systemctl stop agentic-postgres-reconciler.service
+sudo bin/branch-runtime.sh delete --parent-key KEY --branch NAME
+sudo systemctl start agentic-postgres-reconciler.service
+```
+
+Nothing of the parent is read or touched by a deletion.

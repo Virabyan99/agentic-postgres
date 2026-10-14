@@ -2,7 +2,8 @@
 #
 # Projects on the management API (ADR 0251, ADR 0256): the registry records of
 # the caller's organisations, and -- since Session 38 -- the operations that
-# create, sleep, wake, export and delete a project in a prepared slot. A write
+# create, sleep, wake, export and delete a project in a prepared slot, and --
+# since Session 40 -- its backups and restore window (ADR 0273). A write
 # answers 202 with an operation the host's reconciler executes; follow it with
 # bin/operation.sh wait. Nothing here reads a project's health.
 #
@@ -16,7 +17,7 @@
 #   3  no context, no project chosen, no credential, or an unusable file
 #   5  refused by the server (its error word is printed), or the operation failed
 #   6  the server could not be reached, answered something unreadable, or an
-#      outcome could not be determined
+#      outcome could not be determined (backups: the window could not be)
 #   7  export stopped at its own --timeout (the operation continues)
 
 set -euo pipefail
@@ -37,6 +38,7 @@ Usage:
   bin/project.sh wake [--project-key KEY] [--json]
   bin/project.sh export [--project-key KEY] --output FILE [--timeout S] [--interval S] [--json]
   bin/project.sh delete --project-key KEY --confirm KEY [--json]
+  bin/project.sh backups [--project-key KEY] [--json]
 
   list    The projects of the context's organisation (or --organization's;
           every organisation's when the context names none).
@@ -56,6 +58,10 @@ Usage:
           the archive once without following a redirect, checks its SHA-256 and
           writes it to FILE (0600, never over an existing file).
   delete  Delete the project, its containers and data; --confirm is its key.
+  backups The project's backups as the server last read them: the restore
+          window (earliest ... latest) a branch can be restored to with
+          bin/branch.sh create --at, or why it could not be read (exit 6).
+          A branch is the test that a backup restores.
 
 KEY is a project key such as slot1-prod. The endpoint and the credential come
 from the context (bin/login.sh). create, claim, export and delete need a
@@ -83,7 +89,7 @@ python_bin() {
 main() {
   if [ "$#" -eq 0 ]; then
     usage >&2
-    die 2 "a verb is required: list, use, show, status, create, claim, sleep, wake, export or delete."
+    die 2 "a verb is required: list, use, show, status, create, claim, sleep, wake, export, delete or backups."
   fi
   local argument
   for argument in "$@"; do
@@ -95,8 +101,8 @@ main() {
     esac
   done
   case "$1" in
-    list | use | show | status | create | claim | sleep | wake | export | delete) ;;
-    *) die 2 "unknown verb: $1. One of: list use show status create claim sleep wake export delete" ;;
+    list | use | show | status | create | claim | sleep | wake | export | delete | backups) ;;
+    *) die 2 "unknown verb: $1. One of: list use show status create claim sleep wake export delete backups" ;;
   esac
   exec "$(python_bin)" "${ROOT_DIR}/bin/cloud.py" project "$@"
 }
