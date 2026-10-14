@@ -1,9 +1,9 @@
 # Session 40 — Branches and restore to a branch
 
-**Status: EXECUTING since 2026-10-14. Run 1 in progress** (rigs 40a–40d done,
-ADRs 0271–0273 written, the threat list made specific; Sheet E0 with the
-operator). Rows **D2422–D2453** at planning, **D2454–D2460** added by Run 1;
-ADRs **0271–0273** written. **NEXT FREE: D2461, ADR 0274.**
+**Status: EXECUTING since 2026-10-14. Run 1 DONE** (rigs 40a–40d, Sheet E0,
+ADRs 0271–0273, the threat list); **next: Run 2.** Rows **D2422–D2453** at
+planning, **D2454–D2461** added by Run 1; ADRs **0271–0273** written. **NEXT
+FREE: D2462, ADR 0274.**
 
 The fifth session of Stage 5 (`docs/plans/stage-5-plan.md` §3, §5 *Session 40*).
 Eleven runs and **two sittings on two days**: the release on the four projects
@@ -428,6 +428,7 @@ the runs add go in a second table below it, in execution order.
 | **D2458** | D2427: *"the superuser → `PASSWORD NULL` (LOGIN kept, local trust only)"*; rig 40a's control: *"the parent's `customer_app` password … refused after"*. | The restored `pg_hba.conf` is the parent's, i.e. the image's initdb: `local all all trust`, `host all all 127.0.0.1/32 trust`, `::1/128 trust`, then `host all all all scram-sha-256`. **Attempt 2 connected over `127.0.0.1` inside the container and read the parent's password as ACCEPTED after the re-key** — trust, not a password. Attempt 3, from a peer container on the branch's network: the parent's `customer_app`, `migration_user` and superuser passwords accepted before and **refused after**; a wrong password refused before (SCRAM decides); loopback still trusts any password. | **Every re-key proof connects from a PEER container on the branch's network, never over loopback**; the loopback reading is kept as the control that would have misled. The superuser's `PASSWORD NULL` leaves the local socket and in-container loopback, which no network peer reaches. ADR 0271 states it. | A proof of a credential that connects where no credential is asked proves nothing; attempt 2 is the record of how close that came to a §9 stop. | 0271 |
 | **D2459** | D2424: the persistent phase starts with *"`restore_command` still in `postgresql.auto.conf`, harmless without `recovery.signal`"*. | **Rig 40a (e):** `postgresql.auto.conf` holds `restore_command = 'pgbackrest --stanza=… archive-get %f "%p"'`, `recovery_target_time` and `recovery_target_action = 'promote'`; no signal file; the instance started out of recovery with `archive_command` `(disabled)`. | **The re-key also runs `ALTER SYSTEM RESET restore_command`, `recovery_target_time`, `recovery_target_action`** so a branch's configuration names nothing of its parent's repository. Unmeasured here: Run 3's cluster test measures the file after it. | Inert is not absent; a later `recovery.signal` would make it a path to the repository's name. | 0271 |
 | **D2460** | D2427: *"Only then do the two customer poolers start"*. | **Rig 40c:** a userlist holding a SECOND verifier of the same password (a different salt) fails every login through SCRAM passthrough (`password authentication failed`, 0/20 clients); the verifier read back from `pg_authid` → 20/20 pooled clients answered, the direct door admitted the branch's administrator and refused the parent's password (`SASL authentication failed`). | **The branch's userlists are written by the reader `customer-credentials.py` already uses** (`VERIFIER_QUERY`, `customer_credentials.py:36-39`), from the branch's own `pg_authid`, after the re-key — never from the operation's verifier argument. | The pooler's secret must be the server's own; one reader for both doors. | 0271, 0269 |
+| **D2461** | D2435: the reconciler records `mirror_status` beside the repository and the archiver, *"the doctor's three readings"*. | **Sheet E0:** `backup.sh info --json` on `slot3-prod` printed `"mirror": {"status": "not_observed", "last_copied_at": null}` while `doctor --project slot3-prod` printed `backup mirror — last copied 2026-10-14T04:41:38Z` (ok). By design, not a fault: `info`'s `backup_state.mirror` is `MIRROR_NOT_OBSERVED` unless `with_mirror` folded the copy record in at deploy time (`backup_report.py:353-363`); the doctor's `probe_mirror` reads `mirror-state.json` off disk (`bin/doctor.py:474-498`). | **The recorded `mirror_status` is `diagnosis.mirror` over `probe_mirror`'s read of the copy record — never `info`'s `mirror` member**, which a test in Run 5 holds (a record on disk and an `info` saying `not_observed` → the recorded reading names the copy). | Two readers of one fact that answer differently; the surface must take the one that reads the fact. | 0273 |
 
 ---
 
@@ -656,6 +657,68 @@ computed, stale is unknown (D2435). **Amended**: ADR 0151 (status line: the
 `archive_mode` check now in code; a branch's persistent phase is not a drill,
 D2447), ADR 0256 (`slot.sh redeploy`; the one operation the reconciler requests,
 D2443, D2433), ADR 0186 (status: superseded for branches by 0272).
+
+**Done.** (2026-10-14; part 1 `1b67299`, this paragraph a docs commit after it;
+no CI read, documentation only.) **Rigs** in WSL `~/s40/run1/rig40/` (copied to
+the scratchpad), each with its control; every `rig40*` container, volume and
+network removed and read back 0.
+- **Rig 40a** (`rig40a.py`, three attempts kept as `rig40a-attempt{1,2}.txt`
+  and `rig40a.txt`): the project's own image built from `versions.env`'s three
+  arguments with `docker build services/postgres` (the same Dockerfile and
+  arguments `compose.sh … build postgres` passes, 19 s; no render published) —
+  PostgreSQL 18.4, pgBackRest 2.59.1; the example document with endpoints on
+  (72 bootstrap statements, 43 migrations); the product's `pgbackrest.conf` with
+  its four `repo1-s3-*` lines dropped and `repo1-type=posix`; full backup 32.2 MB
+  (57 s). (a) T1 → row 1 only, restore 11.1 s + promote 3.1 s; (b) default →
+  both rows, 12.1 + 3.2 s; (a0) the `T` form refused `[029]` (D2454 — attempt 1
+  lost every time case to it); (c2)/(c) after the last commit → `FATAL: recovery
+  ended before configured recovery target was reached` (D2456); (d) before the
+  full → `[075]` on its STOP time (D2457); (e) the persistent phase started with
+  no repository and archiving `(disabled)`, `postgresql.auto.conf` keeping
+  pgBackRest's three settings (D2459); **the repository 1,423 files unchanged
+  through (a0)–(e); control (e') 1,424, a timeline-2 segment**; (f) the re-key
+  (19 statements, 0.31 s): the parent's customer, migration and superuser
+  passwords accepted from a peer before and **refused after**, the branch's
+  verifiers accepted, `UPDATE 2` families / `UPDATE 1` credential; `'branch'`
+  refused by the enum (D2455); loopback is `trust` (D2458 — attempt 2's false
+  "accepted after"); (g) branch timeline 2 with the parent's
+  `system_identifier` and `instance_uuid`, the parent unchanged on 1.
+- **Rig 40b** (`rig40b.sh`, Session 39's Pebble digests — the registry serves
+  the same today): one order for `dev.pool`/`dev.direct`; removed and created
+  again → orders 1, serial `181af6883ca83c77` equal (**reused**); control
+  `qa.*` → order 2. Let's Encrypt's page (last updated 2026-08-05), read
+  2026-10-14: 5 per exact set / 7 days, 50 per registered domain / 7 days, 300
+  orders / account / 3 h. §9's certificate stop does not apply.
+- **Rig 40c** (inside `rig40a.py`): `postgres` at `small` 21.0 MiB idle, 24.2 MiB
+  with 20 pooled clients (20/20 answered), 28.1 MiB after; poolers 1.2–1.6 MiB
+  of 64. The 192 MiB charge is the budget, ~7× the resident reading. Userlists
+  must be read back from `pg_authid` (D2460).
+- **Rig 40d** (`rig40d.py`, Session 37's `control_cluster` + a draft `0006`): one
+  `branch.delete` per expired branch (`origin = expiry`, `requested_by` the
+  member), `NULL` on a second call and **with an open `project.sleep` (control)**,
+  `NULL` before expiry; the CHECK refuses `expiry` on `project.delete`;
+  `auth_service` is denied EXECUTE; the unique index refuses a second open row.
+
+**Sheet E0** (operator, 2026-10-14 08:18Z, `/home/op/s40-e0.sh` sha256
+`9ed449ac…`; output and the drill's evidence in WSL `~/s40/run1/`): `b0249ce`
+clean; available 5,035 MiB before, 4,941 after; `/` 11 G of 72 G; no
+`/etc/agentic-postgres/branches`; reconciler active, `NRestarts` 0. `slot3-prod`:
+last full `20261012-102807F` (2026-10-12 10:39:26Z), `latest_recoverable_time`
+2026-10-14 03:44:06Z (the newest backup's stop), 2,711 WAL archived / 0 failed,
+`repository_bytes` 5,236,768, cluster 145 MiB; doctor **12 ok before and after**;
+`info`'s mirror `not_observed` beside the doctor's `last copied 04:41:38Z`
+(D2461). **The drill** (`--target-time '2026-10-14 08:08:15+00:00'`): verified,
+achieved 08:08:14.473036 at `A/AF0008E0`, timeline 2; **restore 288.5 s,
+recovery 217.9 s, RTO 506.7 s** (pgBackRest reported 288,034 ms); nothing left
+(0 containers, 0 volumes). **D2452: 506.7 s is under `OPERATION_SECONDS` less
+300 (1,500 s), so Run 5 does NOT raise the bound**; the baseline a branch of
+`slot3-prod` is compared with in Run 10 is ~507 s plus the re-key and the doors.
+
+**Written**: ADRs 0271, 0272, 0273 (indexed); 0151, 0186, 0256 amended (status
+lines and the index agree); `docs/threat-model.md` hosted items 1, 4 and 6
+rewritten with their owed node ids and a new item **13** (*a branch reaches
+its parent*). **Rows D2454–D2461.** Targeted: `test_acceptance_registry`,
+`test_documentation_index`, `test_session12_documented_path` — 81 passed.
 
 ### Run 2 — names, the plan, the re-key, the record, the charge (`src/`)
 

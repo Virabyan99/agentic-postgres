@@ -53,7 +53,10 @@ Rig 40a (2026-10-14; ADR 0271 has the rig):
    **`app.control_record_backups`** — `SECURITY INVOKER`, granted to nobody,
    reached through `container_exec` like `control_record_slots`. The three
    statuses are the doctor's own classifiers' verdicts, computed from the same
-   probes.
+   probes — the mirror's from `probe_mirror`'s read of the copy record on disk,
+   **never** from `backup.sh info --json`'s `mirror` member, which is a
+   deploy-time placeholder: on 2026-10-14 (Sheet E0) it said `not_observed` for
+   `slot3-prod` while the copy record said `last copied 04:41:38Z` (D2461).
 2. **`earliest`** = the oldest kept backup set's **stop** time (`pgbackrest
    info`'s backup list; `summarise` gains it). **`latest`** =
    `pg_stat_archiver.last_archived_time` (the doctor's archiver query). Both are
