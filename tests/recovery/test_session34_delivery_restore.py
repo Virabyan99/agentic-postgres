@@ -40,7 +40,7 @@ from typing import Any
 import pytest
 from tests.recovery.conftest import psql
 
-from agentic_postgres import REPO_ROOT
+from agentic_postgres import REPO_ROOT, restore_drill
 
 pytestmark = [
     pytest.mark.p0,
@@ -49,7 +49,8 @@ pytestmark = [
     pytest.mark.requires_environment("APG_LIVE_HOST", "APG_PROJECT_B_OUTPUTS"),
 ]
 
-DRILL_TIMEOUT_SECONDS = 3600
+#: The drill's own promotion bound plus the restore (D2492).
+DRILL_TIMEOUT_SECONDS = restore_drill.PROMOTION_TIMEOUT_SECONDS + 1800
 SETTLE_SECONDS = 3
 
 
@@ -124,12 +125,9 @@ def test_a_restored_drill_carries_the_undelivered_deliveries(
     assert result.returncode == 0, (
         f"the drill exited {result.returncode}\n{result.stdout[-3000:]}\n{result.stderr[-3000:]}"
     )
-    documents = sorted(
-        evidence_dir.glob(f"restore-drill-{project_b['project']['key']}-*.json"),
-        key=lambda path: path.stat().st_mtime,
-    )
-    assert documents, "the drill exited 0 and wrote no evidence document"
-    evidence = json.loads(documents[-1].read_text(encoding="utf-8"))
+    own = restore_drill.drill_document(evidence_dir, result.stdout)  # never the newest (D2493)
+    assert own, "the drill exited 0 and wrote no evidence document of its own"
+    evidence = json.loads(own.read_text(encoding="utf-8"))
 
     member = (evidence.get("workflow_runs") or {}).get("deliveries")
     assert member is not None, f"the drill evidence carries no deliveries: {evidence.keys()}"

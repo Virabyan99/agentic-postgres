@@ -49,7 +49,7 @@ from typing import Any
 import pytest
 from tests.recovery.conftest import psql
 
-from agentic_postgres import REPO_ROOT, backup_report, naming
+from agentic_postgres import REPO_ROOT, backup_report, naming, restore_drill
 
 
 def _docker(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -72,9 +72,10 @@ pytestmark = [
     pytest.mark.requires_environment("APG_LIVE_HOST", "APG_PROJECT_B_OUTPUTS"),
 ]
 
-#: How long the whole drill may take. A bound, not a measurement: nothing has
-#: timed a restore of this deployment, which is what the drill is for.
-DRILL_TIMEOUT_SECONDS = 3600
+#: How long the whole drill may take: the drill's own promotion bound plus half
+#: an hour for the restore itself (202-281 s measured on beta, D2492), so the
+#: command's own refusal is what a slow recovery meets, never this kill.
+DRILL_TIMEOUT_SECONDS = restore_drill.PROMOTION_TIMEOUT_SECONDS + 1800
 
 #: The gap between each write and the recovery target.
 #:
@@ -196,11 +197,10 @@ def drill(project_b: dict[str, Any], require_root: None) -> dict[str, Any]:
     )
     elapsed = time.monotonic() - started
 
-    documents = sorted(
-        evidence_dir.glob(f"restore-drill-{project_b['project']['key']}-*.json"),
-        key=lambda path: path.stat().st_mtime,
-    )
-    evidence = json.loads(documents[-1].read_text(encoding="utf-8")) if documents else None
+    # The drill's OWN document, by the id it printed -- never the newest one in
+    # the directory, which is an earlier drill's when this one wrote none (D2493).
+    own = restore_drill.drill_document(evidence_dir, result.stdout)
+    evidence = json.loads(own.read_text(encoding="utf-8")) if own else None
 
     return {
         "owner": owner,

@@ -88,11 +88,12 @@ SMOKE_FOREIGN_OWNER = "00000000-0000-4000-8000-0000000000ff"
 
 #: How long the drill waits for a restored instance to leave recovery.
 #:
-#: A bound, not a measurement, and it is named so that it is a decision somebody
-#: can revise. Rig 8 promoted in 3.4 seconds against a 30 MB cluster with two WAL
-#: segments to replay; recovery time scales with the distance from the backup set
-#: to the target, which is why the drill records it as a measurement of its own.
-PROMOTION_TIMEOUT_SECONDS = 900
+#: Rig 8 promoted in 3.4 seconds against a 30 MB cluster with two WAL segments to
+#: replay; recovery time scales with the distance from the backup set to the
+#: target, which is why the drill records it as a measurement of its own. The
+#: bound is `restore_drill`'s, shared with `bin/restore.py` and derived from what
+#: beta measured on OVH (D2492) -- 900 s here was a choice, and a day's WAL beat it.
+PROMOTION_TIMEOUT_SECONDS = restore_drill.PROMOTION_TIMEOUT_SECONDS
 RESTORE_TIMEOUT_SECONDS = 7200
 QUICK_TIMEOUT_SECONDS = 120
 
@@ -448,10 +449,8 @@ def wait_for_promotion(plan: restore_drill.DrillPlan) -> float:
     raise OperatorError(
         EXIT_REFUSED,
         f"the restored instance did not promote within {PROMOTION_TIMEOUT_SECONDS}s. "
-        "That bound is chosen rather than measured; recovery time scales with the "
-        "distance from the backup set to the target. Its last words:\n"
-        + (logs.stdout or "")
-        + (logs.stderr or ""),
+        "Recovery time scales with the distance from the backup set to the target "
+        "(D2492). Its last words:\n" + (logs.stdout or "") + (logs.stderr or ""),
     )
 
 

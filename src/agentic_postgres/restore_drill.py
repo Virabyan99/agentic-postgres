@@ -43,6 +43,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from agentic_postgres import config, naming, runtime_override
@@ -136,6 +137,42 @@ RESTORE_EXIT_POPULATED_DIRECTORY = 40
 #: is raised before anything is written. Named so that the command can say what
 #: happened in the operator's terms rather than relaying a number.
 RESTORE_EXIT_NO_BACKUP_SET = 75
+
+#: How long a restored instance may take to leave recovery: the drill's bound and
+#: a node restore's, one definition (D2492).
+#:
+#: Recovery replays every WAL segment between the backup set and the target, and
+#: on OVH each one is fetched from the EU bucket. Measured on beta on 2026-10-14
+#: (1.18.0, the newest backup set an incremental 16-17 h before the target, after
+#: a day of four deploys and a host suite's writes): two drills promoted after
+#: 819 s and 772 s, and a third was still replaying when the old bound -- 900 s,
+#: "chosen rather than measured" -- ran out. The incremental runs nightly, so the
+#: distance reaches a whole day; the bound is over four times the slowest
+#: promotion measured. A branch has its own bound, inside the reconciler's child
+#: budget for `branch-runtime.sh` (D2495).
+PROMOTION_TIMEOUT_SECONDS = 3600
+
+#: The line a drill prints, once, before it restores (`bin/restore-test.py`).
+_DRILL_LINE = re.compile(r"^restore-test: drill (?P<id>\S+) for (?P<key>\S+)$", re.MULTILINE)
+
+
+def drill_document(directory: Path, stdout: str) -> Path | None:
+    """The evidence document THIS drill wrote, named by the id it printed, or None.
+
+    A drill prints ``restore-test: drill <id> for <key>`` before it restores and
+    writes ``restore-drill-<key>-<id>.json`` only when it finishes. A reader that
+    took the newest document in the directory read an EARLIER drill's when this
+    one wrote none (D2493): a drill that never promoted was then judged by another
+    drill's restored instance. None is the third answer -- this drill left no
+    document -- and it is never folded into somebody else's.
+    """
+    found = _DRILL_LINE.findall(stdout)
+    if len(found) != 1:
+        return None
+    drill_id, key = found[0]
+    path = directory / f"restore-drill-{key}-{drill_id}.json"
+    return path if path.is_file() else None
+
 
 #: The one shape a time target reaches pgBackRest in (D2454).
 #:
