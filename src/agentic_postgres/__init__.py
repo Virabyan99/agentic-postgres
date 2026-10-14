@@ -1133,8 +1133,8 @@ from pathlib import Path
 #: the ninth release in a row whose price the command sees only by
 #: declaration. **One leaf differs**: `template_version` 1.17.0 -> 1.18.0
 #: (6,350 -> 6,350 bytes). **ADR 0162 prices it a MINOR, and `1.18.0` is that
-#: floor exactly**: no manifest, outputs, capability, lock or secret schema
-#: moves. What an operator must KNOW the reading cannot show: a
+#: floor exactly**: no manifest, outputs, capability, lock or
+#: secret schema moves. What an operator must KNOW the reading cannot show: a
 #: branch parent's two grey wildcard records (`*.pool.<domain>`,
 #: `*.direct.<domain>`) before its first branch, the reconciler restarted
 #: after the checkout moves (D2179), and a managed project moved to the
