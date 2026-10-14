@@ -131,6 +131,26 @@ def _peer_login(
     return done.returncode == 0
 
 
+def _wait_ready(container: str, database: str, *, first_boot: bool) -> None:
+    """Ready, and not the image's first-boot TEMPORARY server: that one answers
+    `pg_isready` on the socket and then shuts down for the real start (a run of
+    this proof met `the database system is shutting down`). On a first boot the
+    entrypoint's own line marks the end of it; then two answers a second apart."""
+    for _ in range(180):
+        logs = docker("logs", container)
+        if not first_boot or "init process complete" in (logs.stdout + logs.stderr):
+            break
+        time.sleep(1)
+    answered = 0
+    for _ in range(180):
+        ready = docker("exec", container, "pg_isready", "-U", "postgres", "-d", database)
+        answered = answered + 1 if ready.returncode == 0 else 0
+        if answered >= 2:
+            return
+        time.sleep(1)
+    raise AssertionError(f"{container} never became ready")
+
+
 def _repository_files(volume: str, image: str) -> set[str]:
     done = docker(
         "run",
@@ -247,14 +267,7 @@ def life(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, Any]]:
         )  # fmt: skip
         assert started.returncode == 0, started.stderr
         created.append(("container", parent))
-        for _ in range(120):
-            if (
-                docker("exec", parent, "pg_isready", "-U", "postgres", "-d", database).returncode
-                == 0
-            ):
-                break
-            time.sleep(1)
-        time.sleep(2)
+        _wait_ready(parent, database, first_boot=True)
 
         bootstrap.psql(
             parent, database, "\n".join(bootstrap.build_statements(document, str(uuid.uuid4())))
@@ -278,7 +291,9 @@ def life(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, Any]]:
             _sql(parent, database, f"ALTER ROLE {q(roles[suffix])} PASSWORD {verifier};")
         bootstrap.apply_credential(parent, database, roles["migration_user"], migration_pw)
 
-        for verb in (("stanza-create",), ("check",), ("--type=full", "backup")):
+        # `--start-fast`: an immediate checkpoint rather than a spread one, which
+        # cost ~57 s per run and is not what this proof measures.
+        for verb in (("stanza-create",), ("check",), ("--type=full", "--start-fast", "backup")):
             done = docker("exec", parent, "pgbackrest", f"--stanza={stanza}", *verb, timeout=900)
             assert done.returncode == 0, (verb, done.stdout[-400:], done.stderr[-400:])
         # D2465, measured here: the earliest point a restore reaches. pgBackRest
@@ -412,14 +427,7 @@ def life(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, Any]]:
         seen["branch_identity"] = _sql(names.postgres_container, database, IDENTITY)
         seen["repository_unchanged"] = _repository_files(repo_volume, tag) == before
         docker("start", parent)
-        for _ in range(120):
-            if (
-                docker("exec", parent, "pg_isready", "-U", "postgres", "-d", database).returncode
-                == 0
-            ):
-                break
-            time.sleep(1)
-        time.sleep(2)
+        _wait_ready(parent, database, first_boot=False)
         seen["parent_identity"] = (parent_identity, _sql(parent, database, IDENTITY))
         seen["parent_rows"] = _sql(
             parent, database, "SELECT string_agg(id::text, ',' ORDER BY id) FROM public.marker"

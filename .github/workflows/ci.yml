@@ -41,7 +41,10 @@ jobs:
   gate:
     name: Session 1 gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 30 since Session 40 (D2467): the suite took ~14.5 of 20 minutes at
+    # 002cb4f, and the branch cluster proof (a real backup and three
+    # restores) took both suite jobs past 20 at 212904a with no failure.
+    timeout-minutes: 30
 
     steps:
       - name: Check out the tested commit
@@ -140,7 +143,7 @@ jobs:
   session-2-contract:
     name: Session 2 offline contract
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30  # D2467, as the gate's
 
     # What this job can and cannot assert is worth stating plainly. It has
     # Docker and no credentials, so it proves everything that is a property of

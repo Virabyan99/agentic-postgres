@@ -434,6 +434,7 @@ the runs add go in a second table below it, in execution order.
 | **D2464** | D2439: the reconciler's `start --all` attaches the edge to every branch after a boot. | `bin/edge-network.sh reconcile` runs after EVERY edge start (`bin/edge.sh:236, :349`) and attaches only projects' networks, read from `/var/lib/agentic-postgres/rendered/*/compose.env`; a branch has none. So recreating the edge (any edge change, 24.4 s, CLAUDE.md §9) would silently strand every branch's doors until the next boot. And `test_metrics_surface.py::test_the_attachment_registers_the_alias_on_a_proxy_that_predates_it` requires every `docker network connect` in the script to carry `--alias`. | **A branch's edge network carries the label `apg.branch.edge=true`** (`infra/branch/compose.yaml`); **`reconcile` also attaches every network bearing it**, and prints its own line (`edge-network: branches; N newly attached`, the projects' line unchanged); **`attach-network NETWORK` / `detach-network NETWORK`** accept only a network with that label (exit 9 otherwise) and register the same `apg-edge-proxy` alias as every connect. | An edge recreate is the ordinary event that would cut a branch off; a label is what a shell script can find without reading branch records. | 0271 |
 | **D2465** | D2457 / ADR 0273: `earliest` = the oldest kept set's stop. | **Measured in `test_branch_runtime_on_a_cluster` (Run 3):** the first run's point, 0.9 s after the set's recorded stop (`09:35:33` vs `09:35:33.905660`), passed the window check and was refused `[075]: unable to find backup set with stop time less than '…'`. The proof then measured the boundary: a target **0.5 s** after the recorded stop → exit **75**; **1.0 s** after → exit **0**. pgBackRest records the stop in whole seconds and selects a set only when that stop is strictly before the target at that precision. | **`backup_report.earliest_point(oldest_backup_stop)` = the stop + 1 s**; the runtime's window check uses it, and the backups surface will (ADR 0273 amended in place). `summarise` keeps the stop as read. The boundary is held by `test_the_earliest_point_is_a_second_after_the_oldest_stop`. | A window that offers its first second offers a point no restore can reach. | 0273 |
 | **D2466** | Run 3: the poolers *"exactly as `compose.yaml:739-902`"*; `${PGBOUNCER_IMAGE}` (D2422). | A host's `versions.env` is the checkout's, and the parent's poolers run the image its own deploy pulled; a branch is a copy of a RUNNING parent, as its `postgres` is the parent's running image id (D2422). The branch's poolers carry `apg.project.key` in the project's file, which readers count as the project's containers. | **The branch's poolers run the parent's running pooler's image, by id** (`docker inspect` of `customer-pool`); their labels are `apg.branch.project` / `apg.branch.name`, never `apg.project.key` / `apg.environment`; the TCP labels come from `runtime_override.customer_pooler_services` (a public name for the project's own builder). **`reset` is not re-admitted** — it replaces one charged cluster with another of the same charge — and refuses a branch that is not `ready`, `stopped` or `failed`. | The copy runs what the parent runs; a reader counting a project's containers never counts a branch's. | 0271 |
+| **D2467** | §5: Runs 2–6 push and read that commit's own CI verdict. | **CI 38545407629 on `212904a` was CANCELLED, not failed**: both suite jobs (`Session 1 gate`, `Session 2 offline contract`) reached `timeout-minutes: 20` at 97 % with every test so far passing (the job log ends in dots, then *"The operation was canceled"*). The previous green run (`002cb4f`) took 14.3 and 14.7 minutes; the branch cluster proof (an image build, a real backup, three restores, two `compose --wait`) runs in both jobs. A first local re-run of the proof also met the image's first-boot temporary server (`the database system is shutting down`). | **`timeout-minutes` 20 → 30 on the two suite jobs** (`.github/workflows/ci.yml`, commented with this row); the proof waits for the entrypoint's *"init process complete"* line and two answers before it bootstraps, and takes its full backup `--start-fast`. Nothing in the suite is skipped or marked slow. | A cap the suite has outgrown cancels a green run, and a cancelled run is not a verdict (D1057). | — |
 
 ---
 
@@ -867,6 +868,49 @@ folded into none; the window from the newest backup; the target keeping the `T`.
   order test must kill it), `delete` removing the parent's volume name (refused
   by the derivation check), the persistent service given the repository mount
   (`assert_branch_safe`), `start --all` skipping the attach.
+
+**Done.** (2026-10-14; code `212904a`, pushed together with Run 2's `4ec6362`,
+D2463 — CI below.) Built: **`infra/branch/compose.yaml`** (three services;
+`postgres` on `internal` only, one external volume, its command
+`persistent_command()` setting for setting; the two poolers copied from
+`compose.yaml`; the edge network labelled `apg.branch.edge=true`; no `ports:`);
+**`bin/branch-runtime.sh` + `.py`** (root; `create|reset|delete|start|status`;
+exit codes 0/2/3/5/6/7/12; every phase a module-level step; verifiers as JSON on
+stdin; userlists from the branch's own `pg_authid`; `delete` by derived names
+only; `start --all` records a branch that does not come back `stopped`);
+`branch_plan.compose_environment` / `compose_override`;
+`runtime_override.customer_pooler_services`; `backup_report.earliest_point`
+(D2465); **`bin/edge-network.sh` `attach-network`/`detach-network`** and
+`reconcile` over labelled branch networks (D2464). Registered in
+`test_cli_contract` (`SHELL_COMMANDS`, `PYTHON_COMMANDS`, `COMMANDS_WITH_VERBS`),
+`git add`ed at 100755 before the module ran. Tests: **`test_branch_runtime.py`**
+(the order of `create` — the record before the volume, the re-key before the
+doors —, a failure leaves `failed`, an existing branch or doorless parent refused
+before any reading, the window refusal, the admission refusal through the
+product's own `capacity_probe.read`/`decide`, `delete` names only derived
+resources, `start --all`, the compose file's contract, the doors equal the
+project's, no verifier argument); **`test_branch_runtime_on_a_cluster.py`** (5,
+Docker, the project's own image built from `versions.env`, a POSIX repository,
+~2 min): the parent's `customer_app` password accepted from a peer before the
+re-key and refused after, the branch's verifiers accepted, both doors admit the
+branch's and refuse the parent's; `migration_user` and the superuser over TCP
+refused after; three LOGIN roles left; `restore_command`/`recovery_target*` gone
+from `postgresql.auto.conf`; archiving off; the branch holds row 1 of 2, the
+parent both; the runtime's `read_window` contains the point; timeline 2 with the
+parent's `system_identifier`, the parent unchanged; **the repository's files
+unchanged across the branch's life**; `delete` left no container, volume,
+network or directory; **the boundary (D2465): stop + 0.5 s → `[075]`, stop +
+1.0 s → 0**. Targeted (20 modules, once): 1,513 passed, 2 skipped, 3 failed — the
+compose check matching its own comment, the metrics guard requiring `--alias` on
+every connect (D2464; both repaired), and the git-index mode (not yet `git
+add`ed) — then the failing modules re-run: **810 passed**. `ruff` and
+`shellcheck` clean. **Battery 6/6 killed** with controls
+(`~/s40/run3/battery3.py`): the re-key after the doors; `delete` removing the
+parent's volume; `start --all` skipping the attach; the compose `postgres` on a
+backup network; the compose `postgres` archiving; the window inside the stop's
+second. Rows **D2464–D2466**. **CI on `212904a` (38545407629) was cancelled
+at the 20-minute cap with no failure (D2467)**; the cap is 30 since the follow-up
+commit, whose own verdict is the one read below.
 
 ### Run 4 — the control plane: `0006`, the routes, the codes
 
