@@ -910,7 +910,10 @@ parent's volume; `start --all` skipping the attach; the compose `postgres` on a
 backup network; the compose `postgres` archiving; the window inside the stop's
 second. Rows **D2464–D2466**. **CI on `212904a` (38545407629) was cancelled
 at the 20-minute cap with no failure (D2467)**; the cap is 30 since the follow-up
-commit, whose own verdict is the one read below.
+commit **`b43d17e6d527c36cea08c927804ea085521cb472`: CI 38548561308 SUCCESS** —
+P0 inventory 1.1 min, Session 1 gate 16.7 min, Session 2 offline contract
+**20.5 min** (it would have been cancelled under the old cap). That verdict
+covers Runs 2 and 3 (D2463).
 
 ### Run 4 — the control plane: `0006`, the routes, the codes
 
