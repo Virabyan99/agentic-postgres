@@ -52,15 +52,26 @@ readonly EDGE_PROXY_ALIAS='apg-edge-proxy'
 
 ACTION=""
 PROJECT_KEY=""
+NETWORK=""
+
+# A branch's edge network carries this label (infra/branch/compose.yaml,
+# ADR 0271, D2464). It is how `reconcile` finds every branch after the edge
+# restarts, and the only network `attach-network` / `detach-network` name.
+readonly BRANCH_EDGE_LABEL='apg.branch.edge=true'
 
 usage() {
   cat <<'USAGE'
 Usage: bin/edge-network.sh <attach|detach|status|reconcile> [--project-key KEY]
+       bin/edge-network.sh <attach-network|detach-network> NETWORK
 
   attach     Connect the edge proxy to this project's edge network.
   detach     Disconnect it. Run before removing the network, never after.
   status     Report whether the proxy is attached. Changes nothing.
-  reconcile  Attach the proxy to every deployed project's edge network.
+  reconcile  Attach the proxy to every deployed project's edge network, and to
+             every branch's (each network labelled apg.branch.edge=true).
+  attach-network NETWORK  Connect the proxy to one BRANCH's edge network
+             (ADR 0271); refused for a network without the branch label.
+  detach-network NETWORK  Disconnect it; already detached, or absent, is done.
 
   --project-key KEY  Required for attach, detach and status.
 
@@ -118,6 +129,13 @@ is_attached() {
 # deployment would keep an endpoint with no alias, the scrape would fail to
 # resolve, and the metrics surface would serve a project's own OTLP metrics
 # while quietly carrying none of its edge ones.
+# True when NETWORK exists and carries the branch label -- the one network
+# kind the two -network actions may name.
+is_branch_network() {
+  docker network inspect --format '{{index .Labels "apg.branch.edge"}}' "$1" 2>/dev/null \
+    | grep -qx true
+}
+
 has_alias() {
   local container="$1" network="$2" alias="$3"
   docker inspect \
@@ -134,6 +152,13 @@ parse_arguments() {
         ACTION="$1"
         shift
         ;;
+      attach-network|detach-network)
+        [ -z "${ACTION}" ] || die 2 "only one action may be given."
+        [ "$#" -ge 2 ] || die 2 "$1 requires a network name."
+        ACTION="$1"
+        NETWORK="$2"
+        shift 2
+        ;;
       --project-key)
         [ "$#" -ge 2 ] || die 2 "--project-key requires a value."
         PROJECT_KEY="$2"
@@ -144,6 +169,15 @@ parse_arguments() {
   done
 
   [ -n "${ACTION}" ] || { usage >&2; die 2 "an action is required."; }
+
+  case "${ACTION}" in
+    attach-network|detach-network)
+      printf '%s' "${NETWORK}" | grep -Eq '^apg-[a-z0-9_-]{1,59}$' \
+        || die 2 "not a branch network name: ${NETWORK}"
+      [ -z "${PROJECT_KEY}" ] || die 2 "${ACTION} takes a network, not --project-key."
+      return 0
+      ;;
+  esac
 
   if [ "${ACTION}" != "reconcile" ]; then
     [ -n "${PROJECT_KEY}" ] || die 2 "${ACTION} requires --project-key."
@@ -224,6 +258,33 @@ main() {
       printf 'edge-network: detached from %s\n' "${network}"
       ;;
 
+    attach-network)
+      [ "$(id -u)" -eq 0 ] || die 3 "must run as root."
+      is_branch_network "${NETWORK}" \
+        || die 9 "${NETWORK} is not a branch edge network (no ${BRANCH_EDGE_LABEL} label)"
+      if is_attached "${container}" "${NETWORK}"; then
+        printf 'edge-network: already attached to %s\n' "${NETWORK}"
+        return 0
+      fi
+      docker network connect --alias "${EDGE_PROXY_ALIAS}" "${NETWORK}" "${container}" \
+        || die 9 "could not attach ${container} to ${NETWORK}"
+      printf 'edge-network: attached to %s\n' "${NETWORK}"
+      ;;
+
+    detach-network)
+      [ "$(id -u)" -eq 0 ] || die 3 "must run as root."
+      if ! docker network inspect "${NETWORK}" >/dev/null 2>&1 \
+        || ! is_attached "${container}" "${NETWORK}"; then
+        printf 'edge-network: already detached from %s\n' "${NETWORK}"
+        return 0
+      fi
+      is_branch_network "${NETWORK}" \
+        || die 9 "${NETWORK} is not a branch edge network (no ${BRANCH_EDGE_LABEL} label)"
+      docker network disconnect "${NETWORK}" "${container}" \
+        || die 9 "could not detach ${container} from ${NETWORK}"
+      printf 'edge-network: detached from %s\n' "${NETWORK}"
+      ;;
+
     reconcile)
       [ "$(id -u)" -eq 0 ] || die 3 "must run as root."
       # Runs after every edge start. A restarted proxy comes back attached only
@@ -265,6 +326,17 @@ main() {
       done
       printf 'edge-network: reconciled; %d newly attached, %d realiased, %d not running\n' \
         "${attached}" "${realiased}" "${skipped}"
+      # Branches (ADR 0271, D2464): every network carrying the branch label.
+      # A recreated edge would otherwise come back without any branch's door.
+      local branches=0
+      while IFS= read -r network; do
+        [ -n "${network}" ] || continue
+        is_attached "${container}" "${network}" && continue
+        docker network connect --alias "${EDGE_PROXY_ALIAS}" "${network}" "${container}" \
+          || die 9 "could not attach ${container} to ${network}"
+        branches=$((branches + 1))
+      done < <(docker network ls --filter "label=${BRANCH_EDGE_LABEL}" --format '{{.Name}}')
+      printf 'edge-network: branches; %d newly attached\n' "${branches}"
       ;;
   esac
 }

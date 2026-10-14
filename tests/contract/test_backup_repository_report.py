@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import json
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -224,6 +225,13 @@ def test_the_window_starts_at_the_oldest_backups_stop() -> None:
     assert summary["oldest_backup_stop"] == backup_report._timestamp(min(stops))
     assert summary["oldest_backup_stop"] != backup_report._timestamp(min(starts))
     assert summary["oldest_backup_stop"] != summary["latest_recoverable_time"]
+    # D2465: the earliest TARGET is a whole second after that stop (measured by
+    # test_branch_runtime_on_a_cluster::test_the_earliest_point_is_a_second_after_the_oldest_stop).
+    stop = datetime.fromtimestamp(min(stops), UTC)
+    assert backup_report.earliest_point(summary["oldest_backup_stop"]) == stop + timedelta(
+        seconds=1
+    )
+    assert backup_report.earliest_point(None) is None
     assert (
         backup_report.summarise(_load("info-no-backups.json"), "emptystanza")["oldest_backup_stop"]
         is None

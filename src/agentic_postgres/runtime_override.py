@@ -1076,6 +1076,19 @@ def _customer_pooler_services(
     }
 
 
+def customer_pooler_services(
+    *, pool_router_name: str, direct_router_name: str, userlist_directory: str
+) -> dict[str, Any]:
+    """The same two entries for a BRANCH's poolers (ADR 0271): one builder, so a
+    branch's doors carry exactly the labels a project's carry (`_customer_tcp_labels`),
+    with the branch's router names and its own userlist directory."""
+    return _customer_pooler_services(
+        pool_router_name=pool_router_name,
+        direct_router_name=direct_router_name,
+        userlist_directory=userlist_directory,
+    )
+
+
 def override_service_names(payload: bytes) -> tuple[str, ...]:
     """Every service the rendered override names.
 

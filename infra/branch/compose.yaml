@@ -1,0 +1,233 @@
+# A branch of a managed project (Session 40, ADR 0271).
+#
+# Its own Compose project -- `apg-<key>_<branch>`, from `naming.branch_names` --
+# and exactly three services: the branch's `postgres`, restored from its
+# parent's repository, and the two customer poolers that are its only doors.
+# No auth, REST, storage, MCP, docs, metrics or backup: a branch is a Postgres
+# copy at a point in time, and that is the whole of what it runs.
+#
+# Run only by `bin/branch-runtime.py` (root), with an env file and an override
+# it writes into the branch's state directory
+# (`/etc/agentic-postgres/branches/<key>/<branch>/`): the override carries the
+# two TCP routers' labels, whose KEYS hold the router names and so cannot be
+# interpolated (ADR 0013), and the userlist bind.
+#
+# What is NOT here is the property (D2426, `branch_plan.assert_branch_safe`):
+# no repository mount, no path into the parent's secret generation, no backup
+# network, archiving off with `/bin/false` as its command -- and no `ports:`.
+# `test_branch_runtime.py` holds each of those against this file, and holds the
+# database's command equal to `branch_plan.persistent_command()`.
+
+name: ${COMPOSE_PROJECT_NAME:?required}
+
+services:
+  postgres:
+    image: ${BRANCH_POSTGRES_IMAGE:?required}
+    restart: "on-failure:5"
+    user: "999:999"
+    stop_grace_period: 1m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${BRANCH_POSTGRES_MEMORY_LIMIT:?required}
+    shm_size: ${BRANCH_POSTGRES_SHM_SIZE:?required}
+    pids_limit: ${BRANCH_POSTGRES_PIDS_LIMIT:?required}
+    cpus: ${BRANCH_POSTGRES_CPUS:?required}
+    labels:
+      apg.branch.project: ${PROJECT_KEY:?required}
+      apg.branch.name: ${BRANCH_NAME:?required}
+    # `branch_plan.persistent_command()`, setting for setting. The restored
+    # data directory is promoted (no `recovery.signal`), so the image's
+    # entrypoint skips initialisation and this starts the cluster as it is.
+    command:
+      - postgres
+      - -c
+      - listen_addresses=*
+      - -c
+      - archive_mode=off
+      - -c
+      - archive_command=/bin/false
+      - -c
+      - shared_buffers=${BRANCH_SHARED_BUFFERS:?required}
+      - -c
+      - max_connections=${BRANCH_MAX_CONNECTIONS:?required}
+      - -c
+      - work_mem=${BRANCH_WORK_MEM:?required}
+      - -c
+      - maintenance_work_mem=${BRANCH_MAINTENANCE_WORK_MEM:?required}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DATABASE_NAME:?required} -q"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks:
+      - internal
+    volumes:
+      - postgres-data:/var/lib/postgresql
+
+  # The two doors, copied from `compose.yaml`'s `customer-pool` and
+  # `customer-direct` (ADR 0268, ADR 0269). `test_branch_runtime.py` holds each
+  # equal to the project's except its labels, its cluster host, its claimant
+  # and its profile. The image is the PARENT's running pooler's, by id, as the
+  # database is the parent's running image (ADR 0271).
+  customer-pool:
+    pids_limit: ${CUSTOMER_POOL_PIDS_LIMIT:?required}
+    cpus: ${CUSTOMER_POOL_CPUS:?required}
+    mem_limit: ${CUSTOMER_POOL_MEMORY_LIMIT:?required}
+    image: ${BRANCH_PGBOUNCER_IMAGE:?required}
+    restart: "on-failure:5"
+    labels:
+      apg.traefik.scope: managed
+      apg.branch.project: ${PROJECT_KEY:?required}
+      apg.branch.name: ${BRANCH_NAME:?required}
+      traefik.docker.network: ${BRANCH_EDGE_NETWORK:?required}
+    user: "70:70"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+    tmpfs:
+      - /etc/pgbouncer:rw,mode=0700,uid=70,gid=70
+      - /tmp:rw,mode=0700,uid=70,gid=70
+    environment:
+      APG_CLUSTER_HOST: postgres
+      APG_DATABASE_NAME: ${POSTGRES_DATABASE_NAME:?required}
+      APG_POOL_MODE: transaction
+      APG_POOL_CONNECTIONS: ${CUSTOMER_POOL_CONNECTIONS:?required}
+      APG_AUTH_FILE: /run/apg/customer/pool.userlist
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        set -eu;
+        umask 077;
+        printf '%s\n'
+        "[databases]"
+        "$$APG_DATABASE_NAME = host=$$APG_CLUSTER_HOST port=5432 dbname=$$APG_DATABASE_NAME"
+        ""
+        "[pgbouncer]"
+        "listen_addr = 0.0.0.0"
+        "listen_port = 6432"
+        "unix_socket_dir = /tmp"
+        "auth_type = scram-sha-256"
+        "auth_file = $$APG_AUTH_FILE"
+        "pool_mode = $$APG_POOL_MODE"
+        "default_pool_size = $$APG_POOL_CONNECTIONS"
+        "max_db_connections = $$APG_POOL_CONNECTIONS"
+        "max_client_conn = 100"
+        "max_prepared_statements = 100"
+        "track_extra_parameters = search_path"
+        "server_reset_query = DISCARD PLANS; DISCARD SEQUENCES; DISCARD TEMP; RESET ALL"
+        "server_reset_query_always = 1"
+        "ignore_startup_parameters = extra_float_digits"
+        "log_connections = 1"
+        "log_disconnections = 1"
+        > /etc/pgbouncer/pgbouncer.ini;
+        exec /usr/bin/pgbouncer /etc/pgbouncer/pgbouncer.ini
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          psql -h /tmp -p 6432 -U pgbouncer -d pgbouncer -w -X -qtA
+          -c 'SHOW CONFIG' 2>/dev/null
+          | awk -F'|' -v mode="$$APG_POOL_MODE" -v file="$$APG_AUTH_FILE" '
+              $$1 == "pool_mode" && $$2 == mode { m = 1 }
+              $$1 == "auth_file" && $$2 == file { f = 1 }
+              END { exit !(m && f) }' && test -r "$$APG_AUTH_FILE"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - internal
+      - edge
+
+  customer-direct:
+    pids_limit: ${CUSTOMER_DIRECT_PIDS_LIMIT:?required}
+    cpus: ${CUSTOMER_DIRECT_CPUS:?required}
+    mem_limit: ${CUSTOMER_DIRECT_MEMORY_LIMIT:?required}
+    image: ${BRANCH_PGBOUNCER_IMAGE:?required}
+    restart: "on-failure:5"
+    labels:
+      apg.traefik.scope: managed
+      apg.branch.project: ${PROJECT_KEY:?required}
+      apg.branch.name: ${BRANCH_NAME:?required}
+      traefik.docker.network: ${BRANCH_EDGE_NETWORK:?required}
+    user: "70:70"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+    tmpfs:
+      - /etc/pgbouncer:rw,mode=0700,uid=70,gid=70
+      - /tmp:rw,mode=0700,uid=70,gid=70
+    environment:
+      APG_CLUSTER_HOST: postgres
+      APG_DATABASE_NAME: ${POSTGRES_DATABASE_NAME:?required}
+      APG_POOL_MODE: session
+      APG_POOL_CONNECTIONS: ${CUSTOMER_DIRECT_CONNECTIONS:?required}
+      APG_AUTH_FILE: /run/apg/customer/direct.userlist
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        set -eu;
+        umask 077;
+        printf '%s\n'
+        "[databases]"
+        "$$APG_DATABASE_NAME = host=$$APG_CLUSTER_HOST port=5432 dbname=$$APG_DATABASE_NAME"
+        ""
+        "[pgbouncer]"
+        "listen_addr = 0.0.0.0"
+        "listen_port = 6432"
+        "unix_socket_dir = /tmp"
+        "auth_type = scram-sha-256"
+        "auth_file = $$APG_AUTH_FILE"
+        "pool_mode = $$APG_POOL_MODE"
+        "default_pool_size = $$APG_POOL_CONNECTIONS"
+        "max_db_connections = $$APG_POOL_CONNECTIONS"
+        "max_client_conn = 100"
+        "max_prepared_statements = 100"
+        "track_extra_parameters = search_path"
+        "server_reset_query = DISCARD PLANS; DISCARD SEQUENCES; DISCARD TEMP; RESET ALL"
+        "ignore_startup_parameters = extra_float_digits"
+        "log_connections = 1"
+        "log_disconnections = 1"
+        > /etc/pgbouncer/pgbouncer.ini;
+        exec /usr/bin/pgbouncer /etc/pgbouncer/pgbouncer.ini
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          psql -h /tmp -p 6432 -U pgbouncer -d pgbouncer -w -X -qtA
+          -c 'SHOW CONFIG' 2>/dev/null
+          | awk -F'|' -v mode="$$APG_POOL_MODE" -v file="$$APG_AUTH_FILE" '
+              $$1 == "pool_mode" && $$2 == mode { m = 1 }
+              $$1 == "auth_file" && $$2 == file { f = 1 }
+              END { exit !(m && f) }' && test -r "$$APG_AUTH_FILE"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - internal
+      - edge
+
+volumes:
+  # Created by name before the restore, removed by name by `delete` -- never by
+  # Compose (`down` runs without `-v`, D2438).
+  postgres-data:
+    external: true
+    name: ${BRANCH_VOLUME_NAME:?required}
+
+networks:
+  internal:
+    name: ${BRANCH_INTERNAL_NETWORK:?required}
+    internal: true
+  # The label is how `edge-network.sh reconcile` finds every branch's edge
+  # network after the edge restarts, and how `attach-network` refuses any
+  # network that is not a branch's (D2464).
+  edge:
+    name: ${BRANCH_EDGE_NETWORK:?required}
+    labels:
+      apg.branch.edge: "true"

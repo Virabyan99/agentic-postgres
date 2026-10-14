@@ -25,7 +25,7 @@ healthy repository for a stanza that does not exist, on every project, forever.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 #: `status.code` in `pgbackrest info --output=json`, measured (rig 6).
@@ -68,6 +68,22 @@ def _timestamp(epoch: int | None) -> str | None:
     return (
         datetime.fromtimestamp(int(epoch), UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     )
+
+
+def earliest_point(oldest_backup_stop: str | None) -> datetime | None:
+    """The earliest instant a restore can target: the oldest kept set's stop
+    PLUS ONE SECOND (Session 40, D2465, ADR 0273).
+
+    Measured in `test_branch_runtime_on_a_cluster`: pgBackRest records a set's
+    stop in whole seconds and selects a set only when its stop is strictly
+    before the target at that precision -- a target half a second after the
+    recorded stop is refused `[075]`, one a whole second after restores. None
+    when there is no backup to begin a window.
+    """
+    if not oldest_backup_stop:
+        return None
+    stop = datetime.fromisoformat(oldest_backup_stop.replace("Z", "+00:00"))
+    return stop + timedelta(seconds=1)
 
 
 def summarise(document: Any, stanza: str) -> dict[str, Any]:

@@ -42,6 +42,8 @@ __all__ = [
     "Phase",
     "assert_branch_safe",
     "build",
+    "compose_environment",
+    "compose_override",
     "persistent_command",
 ]
 
@@ -236,6 +238,70 @@ def build(
         recovery=recovery,
         persistent=persistent,
     )
+
+
+def compose_environment(
+    plan: BranchPlan, *, pgbouncer_image: str, acme_resolver_name: str
+) -> dict[str, str]:
+    """Every value `infra/branch/compose.yaml` interpolates, for this branch.
+
+    Names from :func:`naming.branch_names`; the database's settings, bounds and
+    doors from `small` (D2431) and the resource tables a project's services read
+    (`config.SERVICE_RESOURCE_DEFAULTS`, `config.SERVICE_MEMORY_LIMITS_MB`); the
+    images are the parent's RUNNING ones, by id. No secret: a branch holds none.
+    """
+    database = _database()
+    resources = compute_profiles.PROFILES[BRANCH_PROFILE]["resources"]["postgres"]
+    doors = compute_profiles.CUSTOMER_CONNECTIONS[BRANCH_PROFILE]
+    pool = config.SERVICE_RESOURCE_DEFAULTS[naming.CUSTOMER_POOL_SERVICE]
+    direct = config.SERVICE_RESOURCE_DEFAULTS[naming.CUSTOMER_DIRECT_SERVICE]
+    names = plan.names
+    memory = config.SERVICE_MEMORY_LIMITS_MB
+    return {
+        "COMPOSE_PROJECT_NAME": names.compose_project,
+        "PROJECT_KEY": plan.project_key,
+        "BRANCH_NAME": plan.branch,
+        "BRANCH_POSTGRES_IMAGE": plan.image,
+        "BRANCH_PGBOUNCER_IMAGE": pgbouncer_image,
+        "BRANCH_POSTGRES_MEMORY_LIMIT": f"{database['memory_limit_mb']}m",
+        "BRANCH_POSTGRES_SHM_SIZE": f"{database['shm_size_mb']}m",
+        "BRANCH_POSTGRES_PIDS_LIMIT": str(
+            config.SERVICE_RESOURCE_DEFAULTS["postgres"]["pids_limit"]
+        ),
+        "BRANCH_POSTGRES_CPUS": str(resources["cpus"]),
+        "BRANCH_SHARED_BUFFERS": f"{database['shared_buffers_mb']}MB",
+        "BRANCH_MAX_CONNECTIONS": str(database["max_connections"]),
+        "BRANCH_WORK_MEM": f"{database['work_mem_mb']}MB",
+        "BRANCH_MAINTENANCE_WORK_MEM": f"{database['maintenance_work_mem_mb']}MB",
+        "POSTGRES_DATABASE_NAME": plan.database,
+        "CUSTOMER_POOL_PIDS_LIMIT": str(pool["pids_limit"]),
+        "CUSTOMER_POOL_CPUS": str(pool["cpus"]),
+        "CUSTOMER_POOL_MEMORY_LIMIT": f"{memory[naming.CUSTOMER_POOL_SERVICE]}m",
+        "CUSTOMER_POOL_CONNECTIONS": str(doors["pool"]),
+        "CUSTOMER_DIRECT_PIDS_LIMIT": str(direct["pids_limit"]),
+        "CUSTOMER_DIRECT_CPUS": str(direct["cpus"]),
+        "CUSTOMER_DIRECT_MEMORY_LIMIT": f"{memory[naming.CUSTOMER_DIRECT_SERVICE]}m",
+        "CUSTOMER_DIRECT_CONNECTIONS": str(doors["direct"]),
+        "BRANCH_VOLUME_NAME": names.volume,
+        "BRANCH_INTERNAL_NETWORK": names.internal_network,
+        "BRANCH_EDGE_NETWORK": names.edge_network,
+        "CUSTOMER_POOL_HOST": plan.hosts[0],
+        "CUSTOMER_DIRECT_HOST": plan.hosts[1],
+        "ACME_RESOLVER_NAME": acme_resolver_name,
+    }
+
+
+def compose_override(plan: BranchPlan, *, userlist_directory: str) -> dict[str, Any]:
+    """The override the runtime writes beside the env file: the two TCP routers
+    -- the project's own label builder with the branch's router names (D2462) --
+    and the userlist bind from the branch's own directory."""
+    return {
+        "services": runtime_override.customer_pooler_services(
+            pool_router_name=plan.names.pool_router,
+            direct_router_name=plan.names.direct_router,
+            userlist_directory=userlist_directory,
+        )
+    }
 
 
 def _archive_settings(argv: tuple[str, ...]) -> dict[str, list[str]]:

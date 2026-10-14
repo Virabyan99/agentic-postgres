@@ -57,8 +57,13 @@ Rig 40a (2026-10-14; ADR 0271 has the rig):
    **never** from `backup.sh info --json`'s `mirror` member, which is a
    deploy-time placeholder: on 2026-10-14 (Sheet E0) it said `not_observed` for
    `slot3-prod` while the copy record said `last copied 04:41:38Z` (D2461).
-2. **`earliest`** = the oldest kept backup set's **stop** time (`pgbackrest
-   info`'s backup list; `summarise` gains it). **`latest`** =
+2. **`earliest`** = the oldest kept backup set's **stop** time **plus one
+   second** (`pgbackrest info`'s backup list; `summarise` gains the stop,
+   `backup_report.earliest_point` adds the second). Measured in Session 40's
+   Run 3 (D2465, `test_branch_runtime_on_a_cluster`): pgBackRest records a stop
+   in whole seconds and selects a set only when its stop is strictly before the
+   target at that precision -- a target 0.5 s after the recorded stop is refused
+   `[075]`, one 1.0 s after restores. **`latest`** =
    `pg_stat_archiver.last_archived_time` (the doctor's archiver query). Both are
    readings; neither is declared.
 3. **`GET /v1/projects/{key}/backups`** serves the newest reading with its

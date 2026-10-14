@@ -58,6 +58,10 @@ SHELL_COMMANDS = (
     "bin/auth-admin.sh",
     "bin/backup.sh",
     "bin/bootstrap-providers.sh",
+    # Session 40 (ADR 0271): a managed project's branch on this host --
+    # create, reset, delete, start, status. Root's, the reconciler's child.
+    # Listed the run it landed (D1014), `git add`ed first (D1188).
+    "bin/branch-runtime.sh",
     # Session 25 (ADR 0207 §2): prints a bash completion script and installs
     # nothing. Listed here the run it landed (D1014), and `git add`ed before
     # this module runs, because `test_commands_are_executable_in_the_git_index`
@@ -267,6 +271,9 @@ PYTHON_COMMANDS = (
     "bin/auth-admin.py",
     "bin/backup.py",
     "bin/bootstrap-providers.py",
+    # Session 40: the branch runtime; `branch_plan`, `branch_rekey` and
+    # `branch_record` hold everything a test holds still.
+    "bin/branch-runtime.py",
     # Session 37 Run 7 (D2066). The verbs of login/logout/context/org/project;
     # everything a test holds still is `agentic_postgres.control_client`.
     "bin/cloud.py",
@@ -521,6 +528,8 @@ def test_help_exits_zero_and_says_something(relative: str) -> None:
 COMMANDS_WITH_VERBS = {
     "bin/agent.sh",
     "bin/apg.sh",
+    # Session 40: create, reset, delete, start, status -- verb-first.
+    "bin/branch-runtime.sh",
     "bin/connect.sh",
     # Session 34: six verbs, all documented from the day the command lands.
     "bin/connector.sh",
