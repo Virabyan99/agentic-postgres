@@ -56,6 +56,17 @@
       "template": "templates/0005-control-endpoints.sql",
       "template_sha256": "d77e4ee41b6f65947a1c70d465b855ac1753f6bae50ca2df3d274a624d9b8e83",
       "version": "20261011120005"
+    },
+    {
+      "canonical_render_sha256": "f035b29380e91fc94b8f84e80dad950aed3546fe6ccd773c8d14033ea36b2345",
+      "name": "control_branches",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0006-control-branches.sql",
+      "template_sha256": "d22c99ce44d8cb1120971e17f92a572b780f4490c10e42d9c93b793708d1bbb3",
+      "version": "20261014120006"
     }
   ],
   "schema_version": 3
