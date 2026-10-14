@@ -67,6 +67,17 @@
       "template": "templates/0006-control-branches.sql",
       "template_sha256": "d22c99ce44d8cb1120971e17f92a572b780f4490c10e42d9c93b793708d1bbb3",
       "version": "20261014120006"
+    },
+    {
+      "canonical_render_sha256": "af76ad98149922e07b910d19a0cc5648d8f833baf25eb5d2181734e42b224aa4",
+      "name": "control_operation_origin",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0007-control-operation-origin.sql",
+      "template_sha256": "1aa824889b89511c56da230d4f9b0b00afc754ad02f1bfe8e59021a9bb06fc22",
+      "version": "20261014120007"
     }
   ],
   "schema_version": 3
