@@ -450,6 +450,14 @@ the runs add go in a second table below it, in execution order.
 | **D2478** | Run 6: *"`bin/endpoint.sh connect` gains `--branch B` (the branch's hosts from `GET …/branches/{b}`)"*. | A branch is the parent's cluster restored, so its doors' user and database are the parent's names (`customer_app`/`customer_admin`, the parent's database); only the host differs. The offline rig's adopted projects have no doors recorded, so `/connections` cannot be served there: **`connect --branch` has no offline proof**. | **`_door(..., branch)` takes the user, database and port from the project's `/connections` and the host from the branch's record (`pool_host`/`direct_host`), refusing exit 3 unless the branch reads `ready`**, every member checked as before. Its first execution is the live sitting's: Run 7's `s40-branches.py` connects through `dev.direct.…` with this verb. | Named so the live run reads it as never executed until then (CLAUDE.md §7 question 2). | 0271 |
 | **D2479** | ADR 0273: the backups surface's three outcomes. | A customer command that printed `could_not_determine` and exited 0 would be read by a script as a window. | **`project backups` exits 6 on `could_not_determine`** (the reason printed, never `restorable …`), 0 on `window` and on `sleeping`. | A report may not fold the third outcome (ADR 0195). | 0273, 0195 |
 
+| **D2480** | Run 10 step 2: *"the `tmp` branch expired and deleted by the reconciler (its operation's `origin` `expiry` read)"*; BR-LIVE-001 from the workstation with no SSH; Run 7: *"Commit only the `**Done.**`"*. | `control_list_operations` / `control_get_operation` (0004) return thirteen columns and not `origin` (0006 added the column, no reader); the service's operation view has no member for it. Through `/v1` alone the expiry's deletion was indistinguishable from a member's. | **Built in Run 7, a code commit before the Done** (`5d74779`, lock `09cca1f`, proposal `a7b18e5f…` `d1c4ba9`; CI 38578360796 success): **`0007-control-operation-origin.sql`** drops and re-creates both readers wider by `origin` (0004's shape; the six released migrations untouched, D912), grants them again; the repository selects it; the operation view carries `"origin"`. `test_control_branches.py::test_an_operation_read_names_its_origin` (battery 2/2: the single read naming every row `member`; the view dropping it). The proposal's two new destructive findings are 0007's two drops. | The trigger's evidence is the row's own word for who asked; inferring it from "the instrument sent none" would be a second reader of a fact the table already holds. | 0272 |
+| **D2481** | Run 7: *"Rehearse every instrument against `rehearse_lifecycle.py`'s pattern"*. | Rig 39's CA and server certificate had EXPIRED (`openssl verify`: error 10 at depth 0 and 1): the first lifecycle rehearsal stopped at its first `connect`, `certificate verify failed`. | **A Session 40 rig, `~/s40/run7/rig`**: a fresh CA and one server certificate (30 days) naming the lifecycle rehearsal's two doors and the branch rehearsal's `pool.`/`direct.slot3.rig.test` and both wildcards; rig 39's directory left as it was. | A rehearsal's certificates are part of its rig; Session 41 makes its own. | -- |
+| **D2482** | D2444: *"probes `slot4-prod`'s app route and its pool name (psql `select 1` every 2 s) from the claim through the deletion"*. | Rehearsal 1: a pool probe running `endpoint connect` shared the main sequence's CLI session; two refresh exchanges raced and the session's family was revoked (`401` on `/v1/sessions/refresh`, the next step `not logged in`). Rehearsal 3: a sample stamped at its START, begun while the door was down and answered after the wake, read the door "up" through the sleep (pool `failed 0` across a 7 s sleep). Rehearsal 2: each interval read the moment its operation finished, before a sample after its end existed, so none was ever `covered`. | **The probes hold no control-plane session** (the route a plain GET, the pool a psql straight through the door with the password file); **a sample is up only when answered within `--probe-prompt-seconds` (5)**; **every interval is read when the probes stop**. Rehearsal 4 PASSED: every interval covered by both probes, the sleep seen by both (pool 6 failed, 12 s; route 7, 14 s). | The window a customer is told about is the measurement; a probe that cannot see an outage, or that ends the session it measures beside, measures nothing. | 0258 |
+| **D2483** | ADR 0271: a branch's provenance -- the point reached -- read through `/v1`. | Two spellings of one instant: a branch's OPERATION result carries `branch.json`'s `reached_point`, which is `recover()`'s Postgres text (`2026-10-14 14:46:25.916774+00`, the branch rehearsal's reset); `GET …/branches/{b}` serves the same instant RFC 3339 from `control_branches` (`2026-10-14T14:44:23.079125+00:00`). | **Run 8 normalises it at the source** -- `branch-runtime.py`'s record writes the reached point RFC 3339, so the result and the read agree -- and its live proofs read the provenance from the branch read. Recorded here because the rehearsal measured it. | One field, one spelling (D2465's earliest point is already ISO). | 0271 |
+| **D2484** | Run 7: *"`s40-dns.sh` (the slot's three names and the two wildcards' probe names)"*, rehearsed offline. | The workstation has no `dig`: the rehearsal's every reading is `COULD NOT DETERMINE`, exit 6 -- the correct third outcome (ADR 0195) -- and `--wildcards` read five names. The GO and NO paths are the parent's (`s39-dns.sh`, run on the host in Session 39) and run on the host, which has `dig`. | **Accepted; the GO/NO paths are first exercised on the host (Run 9's Sheet P1 check).** | A reader that answers `could not determine` without its tool is the reader working. | 0195 |
+| **D2485** | Run 7: *"Prisma `migrate deploy` over `dev.direct.…`"*. | `slot3-prod` already holds the Prisma fixture's migration (Session 39's endpoints instrument ran Prisma first), so a branch is a copy in which `migrate deploy` has nothing to apply; a public schema with tables and no `_prisma_migrations` is refused P3005. | **`s40-branches.py` mounts the client image's migrations plus ONE of this run's name** and reads its table on `dev` and NOT on `main`; the rehearsal applies the fixture's migration to its parent first, as Session 39 did to `slot3-prod`. The database URLs reach the container through a 0600 `--env-file`, never an argument. | "A migration applied over the branch's direct name" is a migration that was pending there. | -- |
+| **D2486** | ADR 0272: the expiry's latency, from `expires_at` to deleted, measured (Run 11's envelope row). | The CLI's minimum is 15 minutes and the server measures from receipt (D2475): a rehearsal cannot wait for it honestly in a reasonable time. | **The branch rehearsal WARPS the expiry**: its fake reconciler moves `tmp`'s recorded `expires_at` into the past 20 s after it is ready, so `control_request_expiry` fires in seconds (its `seconds_after_expires_at` reads negative and is the rehearsal's, not a measurement). The real latency is Run 10's; `s40-branches.py` waits up to 45 minutes. | Named so no reader takes the rehearsal's number for the host's. | 0272 |
+
 ---
 
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1159,6 +1167,52 @@ names and the two wildcards' probe names). **`s40-hostyaml.py`**, **`s40-e0.sh`*
 Rehearse every instrument against `rehearse_lifecycle.py`'s pattern (the real
 control app, a fake reconciler that runs rig 40a's runtime against a posix
 repository) — nothing touches the host. Commit only the `**Done.**`.
+
+**Done.** (2026-10-14; rows **D2480-D2486**; one code change, D2480, committed
+before this record: `5d74779` + lock `09cca1f` + proposal `d1c4ba9`, CI
+38578360796 success.) WSL `~/s40/run7/` (backed up to the scratchpad `s40/run7`):
+**`s40-derive.py`** wrote twelve children from Session 39's (byte-equal to the
+host's `/home/op` copies, read first), every substitution's count asserted:
+`s40-units/free/probe-start/probe-stop/launch.sh` by renaming; **`s40-sweep.sh`**
+(+ `--branch-record-file /home/op/s40-branches.json`, the lifecycle record and
+the deleted slot moved to `s40-lifecycle.json` / `slot4-prod`, a new preflight:
+`branch-runtime.sh status` names `slot3-prod_dev ready` or exit file 94);
+**`s40-v1.sh`** (the WHOLE host suite, `-k "not after_reboot and not lifecycle and
+not branch"`, + `--live-slot-outputs`, D2448); **`s40-x0.sh`** (the whole external
+half, the same filter, the copies' commits against this checkout's HEAD, no host
+half, no merge); **`s40-after-reboot.sh`** (+ `slot3-prod_dev`'s three
+containers); **`s40-external.sh`** (+ `--branch-record-file ~/s40/branches.json`,
+the merge expecting 267 / 111 offline); **`s40-dns.sh`** (+ `--wildcards`: five
+names); **`s40-hostyaml.py`**. **`s40-lifecycle.py`** (`make-lifecycle40.py`,
+every anchor counted): Session 39's eleven operations in the same order (D2442),
++ D2444's probes (D2482) + EP-LIVE-004's four platform roles refused at both
+doors. **`s40-branches.py`** (new): one record across `live`, `--after-reboot`,
+`--delete-only`, no SSH, the order of Run 10 step 2 (D2485, D2486).
+`s40-e0.sh` stays Run 1's. **Rehearsed** (D2481): `rehearse-offline40.sh` -- the
+derivation, syntax (`bash -n`, shellcheck, py_compile, ruff), every `--help`, the
+gate flags against their parents (sweep and external +`--branch-record-file`,
+v1 +`--live-slot-outputs`, x0 -`--lifecycle-record-file`, nothing else), no host
+address typed, every refusal before anything runs; `rehearse-hostyaml40.sh` (one
+slot added, three refusals); `rehearse-dns40.sh` (D2484);
+**`rehearse_lifecycle40.py` PASSED** (rig 39a's gateway on the new CA, the real
+control app, the fake reconciler; 11 operations in order, platform roles 4 per
+door refused, every interval covered, the sleep seen by both probes, 7 secrets,
+none leaked) after three defects found and repaired (D2482);
+**`rehearse_branches40.py` PASSED** in 390 s -- a real parent (the project's
+image, the bootstrap plane, the release's migrations, a posix pgBackRest
+repository), its doors behind Traefik, the real control app, a fake reconciler
+running `branch-runtime.py`'s own phases: `tmp` deleted by `origin = expiry`;
+row 1 14:44:22.89, T1 14:44:25, row 2 14:44:31 -> `dev` at T1 held `1` (reached
+14:44:23.08), `main` `1,2`; the run's migration on `dev` only; the parent's
+passwords refused at both branch names; `qa` refused `branch_limit_reached`, no
+row, no file; the reset held `1,2`, the old password refused; after the
+"reboot" dev's pool admitted its app role; deleted, both names refused; 10
+secrets, none leaked; nothing left -- **and its control** (`S40R7_CONTROL=
+ignore-target`: a reconciler restoring to the end whatever point was asked)
+**stopped at `rows_at_T1`, exit 4**, `dev` holding `1,2`. Not rehearsed against
+anything real: the gate lines (`bin/session-40-check.sh` is Run 8's), the host
+scripts' root paths, the 15-minute expiry (D2486), `endpoint connect --branch`
+through the host's edge (D2478).
 
 ### Run 8 — the bump, the registry, the gate, the threat rows, the Ledger to `trial`, the documents
 
