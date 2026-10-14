@@ -948,6 +948,160 @@ def restore_drill_names(key: str, drill_id: str) -> RestoreDrillNames:
     )
 
 
+# --------------------------------------------------------------------------
+# Branches (Session 40, ADR 0271)
+# --------------------------------------------------------------------------
+
+#: A branch name: a lowercase letter, then one to eleven letters or digits. No
+#: hyphen and no underscore, so the name can never re-open the separator its
+#: stem is built on, and short enough that `<branch>.pool.<domain>` stays a
+#: name a person types.
+BRANCH_NAME = re.compile(r"\A[a-z][a-z0-9]{1,11}\Z")
+
+#: `main` is the project itself (ADR 0271, D2440): a branch called `main` would
+#: be a second thing answering to the name the project already has.
+RESERVED_BRANCH_NAMES = frozenset({"main"})
+
+#: A branch's TCP router and service names. Traefik's own charset for a router
+#: name, PLUS the underscore: the stem's separator must reach the router name,
+#: or a project whose key ends in `-<branch>` would derive the same router
+#: (D2462). Measured in rig 40e: Traefik 3.7 builds `apg-slot3-prod_dev-pool`
+#: from labels, issues and serves its certificate, and logs no error. These are
+#: never HTTP routers and never in :func:`project_router_names`, so the
+#: collector's scrape filter (ADR 0167), which interpolates
+#: :data:`TRAEFIK_NAME_PATTERN`, never sees one.
+BRANCH_ROUTER_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+
+def validate_branch_name(branch: str) -> str:
+    """The branch name, or :class:`NamingError` naming why it is not one."""
+    if not isinstance(branch, str) or not BRANCH_NAME.match(branch):
+        raise NamingError(
+            f"not a branch name: {branch!r} (a lowercase letter, then 1-11 lowercase "
+            "letters or digits)"
+        )
+    if branch in RESERVED_BRANCH_NAMES:
+        raise NamingError(f"{branch!r} is the project itself and cannot name a branch")
+    return branch
+
+
+@dataclass(frozen=True)
+class BranchNames:
+    """Every resource one branch owns, derived together (ADR 0271, D2423).
+
+    One set, as :class:`RestoreDrillNames` is one set: a caller that could derive
+    the volume without the containers could delete half a branch. `delete`
+    removes exactly these and nothing it did not derive (D2438).
+    """
+
+    project_key: str
+    branch: str
+    stem: str
+    compose_project: str
+    volume: str
+    edge_network: str
+    internal_network: str
+    postgres_container: str
+    pool_container: str
+    direct_container: str
+    restore_container: str
+    recovery_container: str
+    pool_router: str
+    direct_router: str
+
+    def all_resources(self) -> tuple[str, ...]:
+        """Every Docker name above -- containers, the volume, the networks."""
+        return (
+            self.postgres_container,
+            self.pool_container,
+            self.direct_container,
+            self.restore_container,
+            self.recovery_container,
+            self.volume,
+            self.edge_network,
+            self.internal_network,
+        )
+
+
+def _branch_router_name(value: str, *, context: str) -> str:
+    result = truncate(value, limit=COMPOSE_NAME_MAX, context=context, separator="-")
+    return _validated(
+        result,
+        pattern=BRANCH_ROUTER_NAME_PATTERN,
+        limit=COMPOSE_NAME_MAX,
+        what=f"branch router name ({context})",
+    )
+
+
+def branch_names(key: str, branch: str) -> BranchNames:
+    """Every name of one branch, from the stem **`apg-<key>_<branch>`** (D2423).
+
+    **The underscore is the whole argument.** A project key is `slug-env` and may
+    hold a hyphen anywhere (`config._SLUG`, `config._ENVIRONMENT`), so a stem
+    `apg-<key>-br-<branch>` is a legal PROJECT's stem for the key `<key>-br-
+    <branch>`. A key never holds `_`; a branch name never holds `_` or `-`
+    (:data:`BRANCH_NAME`). So a branch stem equals no project's
+    (`apg-<key>`) and no drill's (`apg-<key>-restore-<id>`) by construction,
+    and `test_branch_naming` holds that over generated keys.
+
+    Docker volume, network, container and Compose project names accept `_`;
+    Traefik router names do too (rig 40e), through their own validator.
+    Every name is truncated with a fingerprint like every other name here.
+    """
+    validate_branch_name(branch)
+    stem = f"apg-{key}_{branch}"
+    return BranchNames(
+        project_key=key,
+        branch=branch,
+        stem=stem,
+        compose_project=compose_name(stem, context="compose_project_branch"),
+        volume=compose_name(f"{stem}-postgres", context="compose_volume_branch_postgres"),
+        edge_network=compose_name(f"{stem}-edge", context="compose_network_branch_edge"),
+        internal_network=compose_name(
+            f"{stem}-internal", context="compose_network_branch_internal"
+        ),
+        postgres_container=compose_name(
+            f"{stem}-postgres-1", context="compose_container_branch_postgres"
+        ),
+        pool_container=compose_name(
+            f"{stem}-{CUSTOMER_POOL_SERVICE}-1", context="compose_container_branch_customer_pool"
+        ),
+        direct_container=compose_name(
+            f"{stem}-{CUSTOMER_DIRECT_SERVICE}-1",
+            context="compose_container_branch_customer_direct",
+        ),
+        restore_container=compose_name(
+            f"{stem}-pgbackrest", context="compose_container_branch_pgbackrest"
+        ),
+        recovery_container=compose_name(
+            f"{stem}-recovery", context="compose_container_branch_recovery"
+        ),
+        pool_router=_branch_router_name(
+            f"{stem}-customer-pool", context="traefik_router_branch_customer_pool"
+        ),
+        direct_router=_branch_router_name(
+            f"{stem}-customer-direct", context="traefik_router_branch_customer_direct"
+        ),
+    )
+
+
+def branch_endpoint_hosts(domain: str, branch: str) -> tuple[str, str]:
+    """`(<branch>.pool.<domain>, <branch>.direct.<domain>)` (ADR 0271, D2428).
+
+    Below the project's own two names, reached through the two grey wildcards
+    the operator creates once per slot (`*.pool.<domain>`, `*.direct.<domain>`).
+    Refused past DNS's 253 like :func:`endpoint_hosts`: a truncated hostname is
+    a different hostname.
+    """
+    validate_branch_name(branch)
+    pool, direct = endpoint_hosts(domain)
+    hosts = (f"{branch}.{pool}", f"{branch}.{direct}")
+    for host in hosts:
+        if len(host) > 253:
+            raise NamingError(f"branch endpoint host exceeds 253 characters: {host!r}")
+    return hosts
+
+
 #: The jurisdictions Cloudflare documents for R2, and the only values
 #: `storage.jurisdiction` admits.
 #:

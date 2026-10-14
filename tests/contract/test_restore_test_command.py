@@ -59,6 +59,9 @@ COMPOSE_PROJECT = "apg-fixture-alpha-dev"
 STANZA = "fixture-alpha-dev"
 GENERATION = "/var/lib/agentic-postgres/secrets/fixture-alpha-dev/20260825T000000Z-abcd"
 
+#: The drill instance's command line, as `bin/restore-test.py` passes it (D2447).
+INSTANCE = restore_drill.instance_command()
+
 
 # ---------------------------------------------------------------------------
 # The command's contract, without a daemon
@@ -238,14 +241,18 @@ def _plan(**overrides: Any) -> restore_drill.DrillPlan:
 def test_a_correct_plan_is_accepted() -> None:
     """The subject arm. On its own it proves nothing; see the four below."""
     plan = _plan()
-    restore_drill.assert_disposable(plan, restore_drill.restore_arguments(plan, "2026-01-01"))
+    restore_drill.assert_disposable(
+        plan, restore_drill.restore_arguments(plan, "2026-01-01"), instance=INSTANCE
+    )
 
 
 def test_a_drill_volume_equal_to_the_live_volume_is_refused() -> None:
     """The control D523 asks for: a deliberately wrong derivation must be caught."""
     plan = _plan(names=naming.RestoreDrillNames(LIVE_VOLUME, "c", "r"))
     with pytest.raises(restore_drill.DisposabilityError, match="live data volume"):
-        restore_drill.assert_disposable(plan, restore_drill.restore_arguments(plan, "2026-01-01"))
+        restore_drill.assert_disposable(
+            plan, restore_drill.restore_arguments(plan, "2026-01-01"), instance=INSTANCE
+        )
 
 
 def test_a_drill_volume_the_live_container_already_mounts_is_refused() -> None:
@@ -253,7 +260,9 @@ def test_a_drill_volume_the_live_container_already_mounts_is_refused() -> None:
     borrowed = f"{GENERATION}/postgres/x"
     plan = _plan(names=naming.RestoreDrillNames(borrowed, "c", "r"))
     with pytest.raises(restore_drill.DisposabilityError, match="already mounted"):
-        restore_drill.assert_disposable(plan, restore_drill.restore_arguments(plan, "2026-01-01"))
+        restore_drill.assert_disposable(
+            plan, restore_drill.restore_arguments(plan, "2026-01-01"), instance=INSTANCE
+        )
 
 
 def test_a_mount_naming_the_live_volume_is_refused() -> None:
@@ -266,7 +275,9 @@ def test_a_mount_naming_the_live_volume_is_refused() -> None:
         )
     )
     with pytest.raises(restore_drill.DisposabilityError, match="live data volume"):
-        restore_drill.assert_disposable(plan, restore_drill.restore_arguments(plan, "2026-01-01"))
+        restore_drill.assert_disposable(
+            plan, restore_drill.restore_arguments(plan, "2026-01-01"), instance=INSTANCE
+        )
 
 
 def test_a_writable_inherited_mount_is_refused() -> None:
@@ -286,7 +297,9 @@ def test_a_writable_inherited_mount_is_refused() -> None:
         )
     )
     with pytest.raises(restore_drill.DisposabilityError, match="writable"):
-        restore_drill.assert_disposable(plan, restore_drill.restore_arguments(plan, "2026-01-01"))
+        restore_drill.assert_disposable(
+            plan, restore_drill.restore_arguments(plan, "2026-01-01"), instance=INSTANCE
+        )
 
 
 def test_delta_on_the_argument_vector_is_refused() -> None:
@@ -294,7 +307,7 @@ def test_delta_on_the_argument_vector_is_refused() -> None:
     plan = _plan()
     arguments = (*restore_drill.restore_arguments(plan, "2026-01-01"), "--delta")
     with pytest.raises(restore_drill.DisposabilityError, match="--delta"):
-        restore_drill.assert_disposable(plan, arguments)
+        restore_drill.assert_disposable(plan, arguments, instance=INSTANCE)
 
 
 def test_the_restore_argument_vector_carries_no_delta_and_overrides_the_log_level() -> None:
@@ -326,6 +339,58 @@ def test_the_drill_instance_turns_archiving_off() -> None:
     """A promoted restore is on timeline 2 and must not push it into the stanza."""
     assert restore_drill.archive_mode_is_off(restore_drill.instance_command())
     assert not restore_drill.archive_mode_is_off(("postgres", "-c", "archive_mode=on"))
+
+
+@pytest.mark.parametrize(
+    "instance",
+    [
+        ("postgres",),
+        ("postgres", "-c", "archive_mode=on"),
+        ("postgres", "-c", "archive_mode=off", "-c", "archive_mode=always"),
+    ],
+)
+def test_assert_disposable_refuses_archiving(instance: tuple[str, ...]) -> None:
+    """ADR 0151 §5 said the check covered the instance's archiving; until Session
+    40 it did not (D2447). An instance command that does not turn archiving off
+    -- or turns it off and on again -- is refused before anything starts, and the
+    command `bin/restore-test.py` really runs is accepted (the control).
+
+    Goes red if: the archive check is removed from `assert_disposable`, or
+    accepts a command that names `archive_mode=off` beside another value."""
+    plan = _plan()
+    arguments = restore_drill.restore_arguments(plan, "2026-01-01")
+    restore_drill.assert_disposable(plan, arguments, instance=restore_drill.instance_command())
+    with pytest.raises(restore_drill.DisposabilityError, match="archiving off"):
+        restore_drill.assert_disposable(plan, arguments, instance=instance)
+
+
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [
+        ("2026-10-14T08:04:56.104356+00:00", "2026-10-14 08:04:56.104356+00:00"),
+        ("2026-10-14T08:04:56Z", "2026-10-14 08:04:56.000000+00:00"),
+        ("2026-10-14 08:08:15+00:00", "2026-10-14 08:08:15.000000+00:00"),
+        ("2026-10-14 10:08:15+02:00", "2026-10-14 08:08:15.000000+00:00"),
+    ],
+)
+def test_a_target_reaches_pgbackrest_in_its_one_form(given: str, expected: str) -> None:
+    """D2454, measured in rig 40a: pgBackRest 2.59.1 refuses the ISO `T` form of
+    a time target `[029]` before writing anything. Every spelling with an offset
+    becomes the space form, in UTC; one with no offset is refused (pgBackRest
+    would read it as the server's local time), and so is a non-timestamp."""
+    assert restore_drill.pgbackrest_target(given) == expected
+    assert restore_drill.PGBACKREST_TARGET.match(expected)
+    for bad in ("2026-10-14 08:08:15", "2026-10-14", "yesterday", ""):
+        with pytest.raises(restore_drill.DrillError):
+            restore_drill.pgbackrest_target(bad)
+
+
+def test_the_drill_refuses_a_target_without_an_offset_before_anything_runs() -> None:
+    """The parser applies the one form: `--target-time` without an offset is
+    exit 2, refused by argparse, with no daemon involved."""
+    result = run(RESTORE_TEST_PY, "--project-dir", ".", "--target-time", "2026-10-14 08:08:15")
+    assert result.returncode == 2, result.stderr
+    assert "no timezone" in result.stderr, result.stderr
 
 
 def test_the_data_mount_is_the_drill_volume_at_the_images_own_volume_path() -> None:

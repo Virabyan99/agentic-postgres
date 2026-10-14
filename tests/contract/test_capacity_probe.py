@@ -17,7 +17,13 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, capacity_probe, capacity_reading
+from agentic_postgres import (
+    REPO_ROOT,
+    branch_plan,
+    branch_record,
+    capacity_probe,
+    capacity_reading,
+)
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -91,3 +97,87 @@ def test_the_candidate_slot_is_not_named_prepared(tmp_path: Path) -> None:
     reading, _ = capacity_probe.read(HOST, root, runner=_runner, exclude=SLOT)
     assert reading.prepared == () and reading.unreadable == {}, reading
     assert json.dumps(reading.committed) == "{}"
+
+
+# ---------------------------------------------------------------------------
+# Branches are committed (Session 40, ADR 0271, D2431)
+# ---------------------------------------------------------------------------
+
+
+def _branch(tmp_path: Path, branch: str = "dev", **changes: Any) -> Path:
+    """One `branch.json` beside the project root, as `branch-runtime` writes it."""
+    values: dict[str, Any] = {
+        "project_key": "slot3-prod",
+        "branch": branch,
+        "state": "ready",
+        "operation": "0a7b6f5e-0000-4000-8000-000000000040",
+        "requested_point": None,
+        "reached_point": "2026-10-14 08:04:58.393241+00",
+        "timeline": 2,
+        "parent_commit": "b0249ce5667610a45746c6cec89c3eb38457ed70",
+        "pool_host": f"{branch}.pool.slot3.agenticpostgresql.com",
+        "direct_host": f"{branch}.direct.slot3.agenticpostgresql.com",
+        "expires_at": None,
+        "expires_for": None,
+        "unreclaimable_mb": branch_plan.BRANCH_UNRECLAIMABLE_MB,
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:10:00Z",
+    }
+    values.update(changes)
+    path = branch_record.record_path("slot3-prod", branch, root=tmp_path / "branches")
+    branch_record.write(path, branch_record.Record(**values))
+    return path
+
+
+def test_a_branch_is_committed(tmp_path: Path) -> None:
+    """A recorded branch adds its 192 MiB to the committed total and is NAMED on
+    the committed line -- `slot3-prod_dev (branch) 192` -- without being counted
+    as a project. A reset's own branch (`exclude_branch`) is the request, not a
+    neighbour. With no branch root at all, nothing is added (the control).
+
+    Goes red if: the probe stops reading branch records, a branch is summed as
+    zero, or a branch is counted among the projects."""
+    root = _state(tmp_path)
+    reading, _ = capacity_probe.read(HOST, root, runner=_runner)
+    assert reading.branches == {} and reading.unreadable == {}, reading
+    assert reading.committed_total_mb == 0
+
+    path = _branch(tmp_path)
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    reading, _ = capacity_probe.read(HOST, root, runner=_runner)
+    assert reading.branches == {"slot3-prod_dev": 192}, reading.branches
+    assert reading.committed == {} and reading.unreadable == {}, reading
+    assert reading.committed_total_mb == 192
+    line = _committed_line(reading)
+    assert line.startswith("192 MiB across 0 project(s)"), line
+    assert "slot3-prod_dev (branch) 192" in line, line
+
+    excluded, _ = capacity_probe.read(HOST, root, runner=_runner, exclude_branch="slot3-prod_dev")
+    assert excluded.branches == {} and excluded.committed_total_mb == 0
+
+
+@pytest.mark.parametrize(
+    "damage",
+    ["not json", "a member missing", "an unknown state", "a branch directory with no record"],
+)
+def test_an_unreadable_branch_is_undetermined(tmp_path: Path, damage: str) -> None:
+    """ADR 0195: a branch record that cannot be read is a claim this command
+    cannot sum, so it is `unreadable` and `decide` refuses -- never a branch
+    charged nothing. A readable neighbour in the same root is still summed.
+
+    Goes red if: an unreadable record is folded into "no branch"."""
+    root = _state(tmp_path)
+    _branch(tmp_path, "qa")
+    path = branch_record.record_path("slot3-prod", "dev", root=tmp_path / "branches")
+    path.parent.mkdir(parents=True)
+    if damage == "not json":
+        path.write_text("{", encoding="utf-8")
+    elif damage == "a member missing":
+        path.write_text(json.dumps({"schema_version": 1, "branch": "dev"}), encoding="utf-8")
+    elif damage == "an unknown state":
+        good = json.loads(_branch(tmp_path / "x").read_text(encoding="utf-8"))
+        path.write_text(json.dumps({**good, "state": "running"}), encoding="utf-8")
+    reading, _ = capacity_probe.read(HOST, root, runner=_runner)
+    assert "slot3-prod_dev" in reading.unreadable, reading.unreadable
+    assert reading.branches == {"slot3-prod_qa": 192}, reading.branches
+    assert "undetermined" in _committed_line(reading)

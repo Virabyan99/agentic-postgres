@@ -207,6 +207,29 @@ def test_the_latest_recoverable_time_is_the_newest_backup_of_any_type() -> None:
     )
 
 
+def test_the_window_starts_at_the_oldest_backups_stop() -> None:
+    """D2457, measured in rig 40a: a target before the only full backup is refused
+    `[075]: unable to find backup set with stop time less than ...`, so the
+    earliest point a restore reaches is the oldest kept set's STOP time -- not
+    its start, and not the newest set's. The backups surface's window starts
+    here (ADR 0273). Listed newest first to prove it is chosen, not taken.
+
+    Goes red if: the reading takes the oldest set's start, or the newest set."""
+    document = _load("info-full-and-incr.json")
+    document[0]["backup"] = list(reversed(document[0]["backup"]))
+    summary = backup_report.summarise(document, "rigstanza")
+    stops = [b["timestamp"]["stop"] for b in document[0]["backup"]]
+    starts = [b["timestamp"]["start"] for b in document[0]["backup"]]
+    assert len(stops) >= 2
+    assert summary["oldest_backup_stop"] == backup_report._timestamp(min(stops))
+    assert summary["oldest_backup_stop"] != backup_report._timestamp(min(starts))
+    assert summary["oldest_backup_stop"] != summary["latest_recoverable_time"]
+    assert (
+        backup_report.summarise(_load("info-no-backups.json"), "emptystanza")["oldest_backup_stop"]
+        is None
+    )
+
+
 def test_a_timestamp_matches_the_documents_own_pattern() -> None:
     """The schema's `timestamp` is `...THH:MM:SSZ`, and pgBackRest reports epochs.
 

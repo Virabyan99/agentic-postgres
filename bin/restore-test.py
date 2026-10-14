@@ -776,6 +776,16 @@ def smoke_checks(
 # ---------------------------------------------------------------------------
 
 
+def _target_time(value: str) -> str:
+    """`--target-time`, rendered in the one form pgBackRest's backup-set selection
+    parses (D2454: the ISO `T` form is refused `[029]`). An instant without an
+    offset is refused here, exit 2, rather than read as the server's local time."""
+    try:
+        return restore_drill.pgbackrest_target(value)
+    except restore_drill.DrillError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="restore-test",
@@ -793,7 +803,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--target-time",
         required=True,
-        help="the recovery target, as a timestamp PostgreSQL parses (ISO 8601 with an offset)",
+        type=_target_time,
+        help=(
+            "the recovery target: an instant WITH an offset, '2026-10-14 08:00:00+00:00' "
+            "or '2026-10-14T08:00:00Z'; it reaches pgBackRest as YYYY-MM-DD HH:MM:SS.ffffff"
+            "+00:00, the one form it accepts (D2454)"
+        ),
     )
     parser.add_argument(
         "--smoke-owner-id",
@@ -840,7 +855,9 @@ def drill(arguments: argparse.Namespace) -> int:
 
     # Before anything is created, and it raises rather than warns.
     try:
-        restore_drill.assert_disposable(plan, restore_argv)
+        restore_drill.assert_disposable(
+            plan, restore_argv, instance=restore_drill.instance_command()
+        )
     except restore_drill.DisposabilityError as error:
         raise OperatorError(EXIT_UNSAFE, str(error)) from error
 

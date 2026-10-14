@@ -36,6 +36,7 @@ from typing import Any, Protocol
 
 from agentic_postgres import (
     bootstrap_state,
+    branch_record,
     capacity_reading,
     config,
     deployed_output,
@@ -249,8 +250,18 @@ def read(
     exclude: str | None = None,
     declared_override: Callable[[host_config.Declared | None], host_config.Declared | None]
     | None = None,
+    branch_root: Path | None = None,
+    exclude_branch: str | None = None,
 ) -> tuple[Reading, str]:
     """The whole reading. Returns ``(reading, ceilings_reason)``.
+
+    **Branches are committed too** (ADR 0271, D2431). Every readable
+    `branch.json` under ``branch_root`` -- by default the `branches` directory
+    beside ``root`` (`/etc/agentic-postgres/branches` on a host, a test's own
+    temporary directory in a proof) -- adds its recorded charge to
+    `Reading.branches`; an unreadable one is in `Reading.unreadable` and
+    `decide` refuses on it, as on an unreadable project. ``exclude_branch``
+    (`<key>_<branch>`) is a reset's own branch: the request, not a neighbour.
 
     `ceilings_reason` is carried separately because it is the one figure whose
     failure is a report line rather than an input to any rule -- keeping it out
@@ -340,6 +351,18 @@ def read(
     # The candidate's own document is never a reason to refuse the candidate.
     unreadable.pop(exclude, None)
 
+    branch_records, unreadable_branches = branch_record.records(
+        root.parent / "branches" if branch_root is None else branch_root
+    )
+    branches = {
+        name: record.unreclaimable_mb
+        for name, record in branch_records.items()
+        if name != exclude_branch
+    }
+    unreadable.update(
+        {name: why for name, why in unreadable_branches.items() if name != exclude_branch}
+    )
+
     ceilings, unbounded, ceilings_reason = read_ceilings(runner)
     ceilings = _ceilings_by_project_key(ceilings, keys)
 
@@ -356,5 +379,6 @@ def read(
         unbounded=unbounded,
         docker_root_measured_at=measured_at,
         prepared=tuple(prepared),
+        branches=branches,
     )
     return reading, ceilings_reason

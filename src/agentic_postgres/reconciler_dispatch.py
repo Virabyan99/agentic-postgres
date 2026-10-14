@@ -74,8 +74,9 @@ __all__ = [
 ]
 
 #: Type -> its steps, in order, each with the progress recorded when it starts
-#: (ADR 0256 §8: 10/30/40/60/70/90, 100 at the finish). The six executed types,
-#: no other -- `EXECUTED_TYPES`, a test holds the two equal.
+#: (ADR 0256 §8: 10/30/40/60/70/90, 100 at the finish). Every executed type
+#: (seven since Session 39), no other -- `EXECUTED_TYPES`, a test holds the two
+#: equal (D2447 corrected the count).
 STEPS: dict[str, tuple[tuple[str, int], ...]] = {
     "project.create": (
         ("allocate", 10),

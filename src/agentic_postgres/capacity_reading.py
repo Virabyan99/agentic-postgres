@@ -170,10 +170,22 @@ class Reading:
     #: nothing and are NAMED on the committed line rather than left out, so a
     #: reader of a decision sees every directory the state root holds.
     prepared: tuple[str, ...] = ()
+    #: Every recorded branch's charge, keyed `<key>_<branch>` (ADR 0271, D2431):
+    #: a cluster that is not a project and is committed all the same. Kept out
+    #: of ``committed`` because every reader of that one counts PROJECTS; summed
+    #: into the total and named on both committed lines. An unreadable branch
+    #: record is in ``unreadable``, never here as zero.
+    branches: dict[str, int] = dataclasses.field(default_factory=dict)
 
     @property
     def committed_total_mb(self) -> int:
-        return sum(self.committed.values())
+        return sum(self.committed.values()) + sum(self.branches.values())
+
+    def branches_text(self) -> str:
+        """`; slot3-prod_dev (branch) 192` per branch, for the committed lines."""
+        return "".join(
+            f"; {name} (branch) {charge}" for name, charge in sorted(self.branches.items())
+        )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -445,6 +457,7 @@ def decide(
                 "committed",
                 f"{committed} MiB across {len(reading.committed)} project(s): "
                 + (", ".join(f"{k} {v}" for k, v in sorted(reading.committed.items())) or "none")
+                + reading.branches_text()
                 + "".join(f"; {key} prepared, commits nothing" for key in sorted(reading.prepared)),
             ),
             ("requested", f"{candidate_unreclaimable_mb} MiB for {candidate_key}"),

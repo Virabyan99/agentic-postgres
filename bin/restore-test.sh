@@ -44,7 +44,10 @@ usage() {
 Usage:
   sudo bin/restore-test.sh --target-time ISO8601 --project-dir DIR
 
-  --target-time ISO8601  Point-in-time recovery target.
+  --target-time ISO8601  Point-in-time recovery target, WITH an offset:
+                         '2026-10-14 08:00:00+00:00' or '2026-10-14T08:00:00Z'.
+                         It reaches pgBackRest as YYYY-MM-DD HH:MM:SS.ffffff+00:00,
+                         the one form pgBackRest accepts for a target.
   --project-dir DIR      Generated project directory to read the stanza from.
 
 Contract, and the reason this command exists separately from any restore

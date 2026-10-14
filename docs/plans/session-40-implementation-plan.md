@@ -429,6 +429,8 @@ the runs add go in a second table below it, in execution order.
 | **D2459** | D2424: the persistent phase starts with *"`restore_command` still in `postgresql.auto.conf`, harmless without `recovery.signal`"*. | **Rig 40a (e):** `postgresql.auto.conf` holds `restore_command = 'pgbackrest --stanza=… archive-get %f "%p"'`, `recovery_target_time` and `recovery_target_action = 'promote'`; no signal file; the instance started out of recovery with `archive_command` `(disabled)`. | **The re-key also runs `ALTER SYSTEM RESET restore_command`, `recovery_target_time`, `recovery_target_action`** so a branch's configuration names nothing of its parent's repository. Unmeasured here: Run 3's cluster test measures the file after it. | Inert is not absent; a later `recovery.signal` would make it a path to the repository's name. | 0271 |
 | **D2460** | D2427: *"Only then do the two customer poolers start"*. | **Rig 40c:** a userlist holding a SECOND verifier of the same password (a different salt) fails every login through SCRAM passthrough (`password authentication failed`, 0/20 clients); the verifier read back from `pg_authid` → 20/20 pooled clients answered, the direct door admitted the branch's administrator and refused the parent's password (`SASL authentication failed`). | **The branch's userlists are written by the reader `customer-credentials.py` already uses** (`VERIFIER_QUERY`, `customer_credentials.py:36-39`), from the branch's own `pg_authid`, after the re-key — never from the operation's verifier argument. | The pooler's secret must be the server's own; one reader for both doors. | 0271, 0269 |
 | **D2461** | D2435: the reconciler records `mirror_status` beside the repository and the archiver, *"the doctor's three readings"*. | **Sheet E0:** `backup.sh info --json` on `slot3-prod` printed `"mirror": {"status": "not_observed", "last_copied_at": null}` while `doctor --project slot3-prod` printed `backup mirror — last copied 2026-10-14T04:41:38Z` (ok). By design, not a fault: `info`'s `backup_state.mirror` is `MIRROR_NOT_OBSERVED` unless `with_mirror` folded the copy record in at deploy time (`backup_report.py:353-363`); the doctor's `probe_mirror` reads `mirror-state.json` off disk (`bin/doctor.py:474-498`). | **The recorded `mirror_status` is `diagnosis.mirror` over `probe_mirror`'s read of the copy record — never `info`'s `mirror` member**, which a test in Run 5 holds (a record on disk and an `info` saying `not_observed` → the recorded reading names the copy). | Two readers of one fact that answer differently; the surface must take the one that reads the fact. | 0273 |
+| **D2462** | D2423: TCP routers `…-customer-pool` / `…-customer-direct` from the stem `apg-<key>_<branch>`, *"every one through `compose_name`"*. | Router names go through `traefik_name`, whose `TRAEFIK_NAME_PATTERN` is `^[a-z0-9][a-z0-9-]*$` (`naming.py:161`) — **no `_`** — and a slug may hold `-` anywhere (`config._SLUG`), so no separator a key cannot hold exists in that charset. **Rig 40e** (rig 40b with the router and service names `apg-slot3-prod_dev-pool`/`-direct`): Traefik 3.7 built both TCP routers from labels, issued one certificate (Pebble order 1), served it, reused it on return, logged no ERR; control `qa.*` (hyphens) → order 2. | **`naming.BRANCH_ROUTER_NAME_PATTERN = ^[a-z0-9][a-z0-9_-]*$`** and a private `_branch_router_name` (truncate + validate); branch routers are `apg-<key>_<branch>-customer-pool/-direct`. `TRAEFIK_NAME_PATTERN` is unchanged: the collector's scrape filter (ADR 0167) interpolates it and never sees a branch router (TCP, never in `project_router_names`). | A router name that drops the separator would let `slot3-prod` + `dev` and a project `slot3-prod-dev` derive one router. | 0271 |
+| **D2463** | §5: Runs 2–6 *"each pushes and reads that commit's own CI verdict"*; Run 2's list includes `test_repository_contract`. | `test_no_module_is_imported_only_by_its_own_tests` (D204) refuses a `src/` module with no product importer and has no exemption list; Run 2's `branch_plan` and `branch_rekey` have none until Run 3's `bin/branch-runtime.py` (`branch_record` already has `capacity_probe`). At Run 2's commit the guard names exactly `['branch_plan', 'branch_rekey']`. | **Run 2 is committed and NOT pushed alone; it is pushed with Run 3, and CI is read at Run 3's SHA.** No exemption is added — that would weaken a guard to suit a schedule. | The guard is right: a module nothing calls is a feature that does not exist; the cost is one CI read for two runs. | — |
 
 ---
 
@@ -758,6 +760,51 @@ its parent*). **Rows D2454–D2461.** Targeted: `test_acceptance_registry`,
   network, `archive_mode` dropped from the recovery command, the re-key skipping
   `migration_user`, a branch charge 0, `oldest_backup_start` = the newest; each
   with a control the mutation cannot reach.
+
+**Done.** (2026-10-14; committed, **not pushed alone** — D2463: pushed with
+Run 3, CI read at Run 3's SHA.) **Rig 40e** first (D2462): Traefik 3.7 accepts
+`_` in TCP router names. Built: `naming.BRANCH_NAME`, `RESERVED_BRANCH_NAMES`,
+`validate_branch_name`, `BranchNames` (+`all_resources`), `branch_names` (stem
+`apg-<key>_<branch>`; the postgres container spelled `…-postgres-1` as the
+project's own, `naming.py:1398`, there is no service constant),
+`branch_endpoint_hosts`, `BRANCH_ROUTER_NAME_PATTERN`;
+**`src/agentic_postgres/branch_plan.py`** (`Phase`, `BranchPlan`, `build`,
+`persistent_command`, `assert_branch_safe`, `BRANCH_PROFILE = "small"`,
+`BRANCH_UNRECLAIMABLE_MB` computed = 192); **`branch_rekey.py`** (`statements` —
+`'administrative'`, D2455 —, `psql_input` reusing `reconciler_dispatch.psql_input`,
+`reset_statements`, D2459); **`branch_record.py`** (`BRANCH_ROOT`, `Record`,
+`read` three outcomes, `records`, atomic 0600 `write`, `STATES` adds `failed`);
+`restore_drill`: **`pgbackrest_target`** + `PGBACKREST_TARGET` (D2454),
+`restore_argv` (`--type=default` with no target, as rig 40a ran it),
+**`assert_disposable(..., instance=)`** with the archive check (D2447);
+`bin/restore-test.py`/`.sh` and `bin/restore.py`: `--target-time` parsed into
+pgBackRest's form, no offset → exit 2 (ruling: the formatter sits at both
+parsers and in `branch_plan`, not inside `restore_arguments`, whose tests pass
+date-only strings); `capacity_reading.Reading.branches` (summed into the total,
+named on `decide`'s and the doctor's committed lines — every reader of
+`Reading.committed` grepped first: `decide`, `diagnosis` capacity, and
+`capacity_probe.read`'s three callers `deploy-project.py:2398`, `doctor.py:927`,
+`admit.py:162`, none of which changes); `capacity_probe.read(branch_root=,
+exclude_branch=)`, default `root.parent / "branches"`; `backup_report.summarise`
+gains **`oldest_backup_stop`** (D2457; the plan's `oldest_backup_start` is
+superseded); `reconciler_dispatch`'s comment (D2447). Tests: new
+`test_branch_naming.py` (7 + parametrized; the collision property over 8
+adversarial keys and every legal one of 300 generated), `test_branch_plan.py`
+(4 + 12 unsafe variants), `test_branch_rekey.py` (3); `test_capacity_probe.py`
++2, `test_restore_test_command.py` +3 (`test_assert_disposable_refuses_archiving`,
+`test_a_target_reaches_pgbackrest_in_its_one_form`,
+`test_the_drill_refuses_a_target_without_an_offset_before_anything_runs`) and its
+six existing `assert_disposable` calls given `instance=`;
+**`test_backup_repository_report.py`** +1 (the plan's `test_backup_report.py`
+does not exist; the tree wins). Targeted (17 modules, once): **1,410 passed, 1
+failed — `test_no_module_is_imported_only_by_its_own_tests` naming exactly
+`branch_plan`, `branch_rekey` (D2463)**. `ruff format` / `ruff check` clean.
+**Battery 9/9 killed**, each with a control green in the same invocation,
+anchors pre-flighted, files restored and `cmp`'d (`~/s40/run2/battery.py`):
+the stem's `_` → `-`; the persistent phase on the backup network; the safety
+check's network test removed; `assert_disposable`'s archive check removed; the
+re-key skipping `migration_user`; a branch charged 0; an unreadable branch
+folded into none; the window from the newest backup; the target keeping the `T`.
 
 ### Run 3 — `bin/branch-runtime.sh` and the branch's compose file
 

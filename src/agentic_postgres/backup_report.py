@@ -107,6 +107,7 @@ def summarise(document: Any, stanza: str) -> dict[str, Any]:
     # publish the OLDEST backup as the newest.
     newest_full = max(fulls, key=lambda b: (b.get("timestamp") or {}).get("stop", 0), default=None)
     newest_any = max(backups, key=lambda b: (b.get("timestamp") or {}).get("stop", 0), default=None)
+    oldest_any = min(backups, key=lambda b: (b.get("timestamp") or {}).get("stop", 0), default=None)
 
     return {
         "status_code": code,
@@ -128,6 +129,12 @@ def summarise(document: Any, stanza: str) -> dict[str, Any]:
         "latest_recoverable_time": _timestamp(
             ((newest_any or {}).get("timestamp") or {}).get("stop")
         ),
+        # Session 40 (ADR 0273, D2457): the EARLIEST instant a restore can reach
+        # is the oldest kept set's STOP time, not its start -- pgBackRest picks
+        # a set whose stop precedes the target, and refuses one no set precedes
+        # with `[075]: unable to find backup set with stop time less than ...`
+        # (measured in rig 40a). The backups surface's window starts here.
+        "oldest_backup_stop": _timestamp(((oldest_any or {}).get("timestamp") or {}).get("stop")),
         # Present so a caller can say WHICH backup failed rather than only that
         # the repository is unhappy. pgBackRest sets it per backup.
         "backup_errors": [b.get("label") for b in backups if b.get("error")],

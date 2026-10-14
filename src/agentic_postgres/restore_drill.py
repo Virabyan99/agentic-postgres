@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from agentic_postgres import config, naming, runtime_override
@@ -50,6 +50,7 @@ from agentic_postgres import config, naming, runtime_override
 __all__ = [
     "FORBIDDEN_RESTORE_FLAGS",
     "PGBACKREST_ENVIRONMENT_PREFIX",
+    "PGBACKREST_TARGET",
     "RESTORE_EXIT_NO_BACKUP_SET",
     "RESTORE_EXIT_POPULATED_DIRECTORY",
     "RESTORE_LOG_LEVEL",
@@ -68,8 +69,10 @@ __all__ = [
     "instant",
     "live_mount_sources",
     "parse_backup_set",
+    "pgbackrest_target",
     "required_container_paths",
     "restore_arguments",
+    "restore_argv",
 ]
 
 
@@ -133,6 +136,49 @@ RESTORE_EXIT_POPULATED_DIRECTORY = 40
 #: is raised before anything is written. Named so that the command can say what
 #: happened in the operator's terms rather than relaying a number.
 RESTORE_EXIT_NO_BACKUP_SET = 75
+
+#: The one shape a time target reaches pgBackRest in (D2454).
+#:
+#: Measured in rig 40a on pgBackRest 2.59.1: the ISO `T` form of an instant is
+#: refused before anything is written -- `ERROR: [029]: automatic backup set
+#: selection cannot be performed with provided time '2026-10-14T08:04:56.104356
+#: +00:00'`, *"time format must be YYYY-MM-DD HH:MM:SS with optional msec and
+#: optional timezone"*. PostgreSQL parses both forms; pgBackRest's backup-set
+#: selection parses only this one, so the product writes only this one.
+PGBACKREST_TARGET = re.compile(r"\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6}\+00:00\Z")
+
+
+def pgbackrest_target(value: str | datetime) -> str:
+    """An instant as pgBackRest's time target: `YYYY-MM-DD HH:MM:SS.ffffff+00:00`.
+
+    Accepts a timezone-aware `datetime`, or a string in either ISO spelling (a
+    `T` or a space, `Z` or an offset). **A value without a timezone is refused**:
+    pgBackRest reads one as the server's local time, and a drill or a branch
+    aimed at an instant somebody else's clock decides is not aimed at all.
+    """
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if text.endswith(("Z", "z")):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            raise DrillError(
+                f"not a timestamp: {value!r} (give an ISO 8601 instant with an offset, "
+                "for example 2026-10-14 08:00:00+00:00)"
+            ) from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise DrillError(
+            f"the timestamp {value!r} has no timezone; pgBackRest would read it as "
+            "the server's local time. Give an offset, for example +00:00."
+        )
+    rendered = parsed.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S.%f") + "+00:00"
+    if not PGBACKREST_TARGET.match(rendered):  # a year outside 0001-9999 is the one way
+        raise DrillError(f"the timestamp {value!r} cannot be written as a pgBackRest target")
+    return rendered
+
 
 #: The line pgBackRest prints, at info level, naming the set it chose.
 #:
@@ -411,7 +457,12 @@ def build_plan(
     )
 
 
-def assert_disposable(plan: DrillPlan, arguments: tuple[str, ...] | list[str]) -> None:
+def assert_disposable(
+    plan: DrillPlan,
+    arguments: tuple[str, ...] | list[str],
+    *,
+    instance: tuple[str, ...] | list[str],
+) -> None:
     """Refuse a plan that could reach anything that is not the drill's (ADR 0151 §5).
 
     **This runs in the product path, on every invocation, before any `docker`
@@ -427,7 +478,21 @@ def assert_disposable(plan: DrillPlan, arguments: tuple[str, ...] | list[str]) -
     derivation is deliberately wrong. An assertion that only ever sees correct
     input is D509's shape: *a control that cannot fail for the reason it is
     watching for is not a control.*
+
+    ``instance`` is the command line the drill instance will run. **§5 of ADR
+    0151 always said this check covered it, and until Session 40 the code did
+    not** (D2447): the property lived only in a test of `instance_command()`.
+    A promoted restore is on a new timeline, and an instance that archived would
+    push it into the project's own stanza (rig 40a's control did exactly that).
     """
+    if not archive_mode_is_off(instance) or any(
+        part.startswith("archive_mode=") and part != "archive_mode=off" for part in instance
+    ):
+        raise DisposabilityError(
+            "the drill instance's command line does not turn archiving off "
+            f"({' '.join(instance)!r}). A promoted restore would push its new timeline "
+            "into the project's repository. Nothing is started."
+        )
     if plan.names.volume == plan.live_volume:
         raise DisposabilityError(
             f"the drill volume derived to {plan.names.volume!r}, which is the live "
@@ -490,14 +555,19 @@ def restore_arguments(plan: DrillPlan, target_time: str) -> tuple[str, ...]:
     restored instance" requires. Without it the instance pauses at the target and
     a smoke check would be reading a cluster in recovery.
     """
-    return (
-        f"--stanza={plan.stanza}",
-        f"--log-level-console={RESTORE_LOG_LEVEL}",
-        "restore",
-        "--type=time",
-        f"--target={target_time}",
-        "--target-action=promote",
-    )
+    return restore_argv(plan.stanza, target_time)
+
+
+def restore_argv(stanza: str, target_time: str | None) -> tuple[str, ...]:
+    """The restore's argument vector for a stanza: to a time, or -- with no
+    target -- to the end of the archive (`--type=default`, ADR 0271; a branch
+    created with no point). `--target-action` is refused by pgBackRest without
+    a `--type` that names a target (D1011), so the default form carries neither.
+    """
+    common = (f"--stanza={stanza}", f"--log-level-console={RESTORE_LOG_LEVEL}", "restore")
+    if target_time is None:
+        return (*common, "--type=default")
+    return (*common, "--type=time", f"--target={target_time}", "--target-action=promote")
 
 
 def instance_command() -> tuple[str, ...]:

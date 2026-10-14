@@ -920,8 +920,12 @@ def capacity_report(reading: Any) -> tuple[Check, ...]:
                 OK,
                 f"{reading.committed_total_mb} MiB claimed across "
                 f"{len(reading.committed)} project(s)"
+                + reading.branches_text()
                 + "".join(f"; {key} prepared, commits nothing" for key in sorted(reading.prepared)),
-                _pairs(**dict(sorted(reading.committed.items()))),
+                _pairs(
+                    **dict(sorted(reading.committed.items())),
+                    **{f"{name} (branch)": mb for name, mb in sorted(reading.branches.items())},
+                ),
             )
         )
 

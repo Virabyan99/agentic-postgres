@@ -453,6 +453,15 @@ def write_state_file(path: Path, plan: node_restore.RestorePlan) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _target_time(value: str) -> str:
+    """`--target-time` in the one form pgBackRest's backup-set selection parses
+    (D2454: the ISO `T` form is refused `[029]`); no offset is refused, exit 2."""
+    try:
+        return restore_drill.pgbackrest_target(value)
+    except restore_drill.DrillError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="restore", description=__doc__, add_help=True)
     parser.add_argument("--outputs", type=Path, required=True, help="the kit's deployed document")
@@ -461,7 +470,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--from", dest="source", choices=node_restore.SOURCES, required=True)
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--latest", action="store_true")
-    target.add_argument("--target-time", metavar="ISO8601")
+    target.add_argument(
+        "--target-time",
+        metavar="ISO8601",
+        type=_target_time,
+        help="an instant WITH an offset; it reaches pgBackRest as YYYY-MM-DD HH:MM:SS.ffffff+00:00",
+    )
     parser.add_argument("--session", type=int, default=CURRENT_SESSION)
     parser.add_argument("--evidence-dir", type=Path, default=REPO_ROOT / "evidence")
     parser.add_argument("--secret-root", type=Path, default=Path(SECRET_ROOT))
