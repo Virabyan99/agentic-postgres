@@ -439,6 +439,11 @@ the runs add go in a second table below it, in execution order.
 | **D2469** | D2430: *"`OPERATION_ERROR_CODES` (`errors.py:234`) is a closed list a test holds … widened by exactly that code"*. | `OPERATION_ERROR_CODES` is the set of a FINISHED operation's `error_code`, held equal to `control_operations.error_code`'s CHECK (`test_operation_types.py::test_the_error_codes_are_one_closed_list`); `branch_limit_reached` is refused BEFORE any row exists — like `capacity_exhausted {reason: no_slot}` and `conflict`, which are `CONTROL_STATUS` words. `control_repository._refusal` maps `AP409: <word>` to `ControlRefused(word)` exactly when the word is in `CONTROL_STATUS`. | **`errors.BRANCH_LIMIT_REACHED` joins `CONTROL_STATUS` (409)**; `OPERATION_ERROR_CODES` and the CHECK stay five. No finished operation can carry it. | Two closed lists answer different questions; widening the wrong one would let a row record a refusal no row ever had. | 0271 |
 | **D2470** | §5: Runs 2–6 each push and read their own CI. | `EXECUTED_TYPES` is held equal to the newest `control_request_operation`'s allow-list (`test_operation_types.py`) AND to `reconciler_dispatch.STEPS` (`test_reconciler_dispatch.py::test_the_closed_table_is_the_executed_types`); the control set's allow-list (Run 4) and the reconciler's steps (Run 5) must therefore move together. At Run 4's commits that one test fails, naming exactly the four branch types. | **Run 4 is committed and NOT pushed alone; it is pushed with Run 5 and CI read at Run 5's SHA** (D2463's rule). No test is relaxed. | Three readers of one closed set: the set moves in one push. | — |
 
+| **D2471** | Run 5: `STEPS` for `create` *"`admit 10, restore 20, recover 60, rekey 80, doors 90, record 95`; the runtime prints `step <name>` lines the handler maps to progress"*; BR-DISPATCH-001's *"steps `admit, restore, recover, rekey, doors, record` for create"*. | Run 3's `bin/branch-runtime.py` prints no `step` lines: its phases are internal to ONE child, and how far it got is what it writes to `branch.json` (`creating` before the restore, `failed` part way, `ready` at the end). A handler cannot map progress from a child's output without streaming it, which `Operation.child` does not do for any type. | **One runtime child per branch operation: `check 10, runtime 20, record 95`** (`branch.delete`: `runtime 30`). An interrupted branch operation finishes `failed interrupted {"step": "runtime"}` (D2152's reader, unchanged) and the record says which phase; `delete` cleans up either state (D2438). BR-DISPATCH-001's text is corrected at Run 8 to these steps. | Progress inside a 10-minute child is a nicety; a second reader of the runtime's phases (the handler parsing its log) is a second copy of a list the runtime owns. | — |
+| **D2472** | BR-DISPATCH-001 names `test_reconciler_dispatch.py::test_every_accepted_type_has_one_handler` *"(existing, its table widened)"* and *"the window checked before the restore"*. | The existing proof is `::test_the_closed_table_is_the_executed_types` (`:623`); no test of the first name exists. The window is decided INSIDE `branch-runtime.sh` before its restore phase (exit 7; Run 3's `test_branch_runtime.py::test_a_point_outside_the_window_is_refused_before_anything_persists`); the reconciler cannot read it earlier without a second window reader. | **The tree's name is kept and widened** (the four branch types present, `restore.create` sharing `branch.create`'s handler); Run 8 registers `::test_the_closed_table_is_the_executed_types`. `::test_a_point_outside_the_window_is_refused_before_the_restore` proves the dispatch half: a restore whose runtime exits 7 is `invalid_request` with no branch recorded. | Renaming a registered proof to match a plan's sentence moves a node id for nothing. | — |
+| **D2473** | Run 5: `start()` runs `start --all` when a branch root exists. | On this workstation `/etc/agentic-postgres` is `0700 root`, so `BRANCH_ROOT.is_dir()` RAISED `PermissionError` (a stat under an unreadable directory) and 30 existing reconciler proofs failed at `start()`. | **`start_branches` reads the root under `try`: unreadable is SAID ("the branch root could not be read; no branch was started") and nothing is started** -- a report, never folded into "no branches" (ADR 0195); `record_branches` already records an unreadable root as one `unreadable` entry (`branch_record.records`). The three harnesses (`test_reconciler_dispatch`, `test_reconciler_claim`, `test_branch_expiry`) point `BRANCH_ROOT` at their own tmp. | On the host the reconciler is root and the root readable; the proofs no longer depend on the workstation's `/etc`. | 0195 |
+| **D2474** | Run 5 Tests: *"`test_reconciler_claim.py` (+ expiry requests, a branch's records)"* and `test_branch_expiry.py` (rig 40d's cases). | Both describe the same proofs: the reconciler's `record_branches` + `request_expiries` against a real control cluster. | **They live in `test_branch_expiry.py`** (BR-TTL-001's module, its own cluster, the four §2 names); `test_reconciler_claim.py` gains the three Session 40 functions in its executable-by-no-role set (`control_record_branches`, `control_record_backups`, `control_request_expiry`) and the tmp `BRANCH_ROOT`. | One proof, one module, the claim's own. | — |
+
 ---
 
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1033,6 +1038,43 @@ privileges: the assertion now names the function) — both killed after. Rows
   `test_slot_command.py` (+3). **Battery**: the handler accepting a sleeping parent,
   the expiry request without `origin`, `redeploy` while the reconciler is active,
   `start()` not calling `start --all`.
+
+**Done.** (2026-10-14; rows **D2471-D2474**.) `bin/reconciler.py`: handlers
+`branch_create` (also `restore.create`), `branch_reset`, `branch_delete` --
+`slot_project`, the parent's doors and `require_running` (create/restore/reset;
+`delete` reads nothing of the parent, D2438), ONE `branch-runtime.sh` child with
+the verifiers as JSON on stdin (`Operation.child(input=...)`), its exit 7 ->
+`invalid_request`, 12 -> `capacity_exhausted`, else `operation_failed`; the
+result from the branch's own `branch.json` (`ready`, or `could_not_determine`);
+`record_branches()` after each and every `RECORD_SECONDS`, `request_expiries()`
+every `RECORD_SECONDS`, `record_backups()` every `BACKUP_RECORD_SECONDS = 900`
+(first on the loop's first pass; `backup.sh info --json`, the archiver query,
+the mirror's copy record, per allocated slot); `start()` runs `start --all` when
+a branch root exists, then records (D2439, D2473); `CHILD_SECONDS
+["branch-runtime.sh"] = 1200` (E0's 506.7 s x 2, rounded up; under
+`OPERATION_SECONDS` 1800, not raised). `reconciler_dispatch.py`: `STEPS` for the
+four types (D2471), `COMMANDS` + `branch-runtime.sh`, the argv builders, the
+record/backups/expiry SQL, `branch_reading` (an unreadable record is
+`undetermined`), `expired_branches`, `backups_reading`; the `:77-78` comment
+corrected (eleven). `bin/slot.py redeploy` + `slot.sh`: allocated slot with a
+deployed document, `--confirm KEY`, refused while the reconciler is active or
+unreadable (exit 5), the reconciler's own `deploy_argv` through
+`CURRENT_SESSION` (its exit carried, admission's 12 included), the doors synced,
+`control.sh adopt` under the organisation READ from the registry (exit 6 when
+none). Tests: `test_reconciler_dispatch.py` +5 (`::test_a_branch_create_is_argv_only`,
+`::test_a_branch_of_a_sleeping_parent_is_refused`,
+`::test_a_point_outside_the_window_is_refused_before_the_restore`,
+`::test_a_restore_carries_its_point_and_a_reset_reuses_the_branch`,
+`::test_start_brings_every_recorded_branch_back`; the closed-table proof
+widened, D2472), `test_branch_expiry.py` (new, 4, on `control_cluster`, D2474),
+`test_slot_command.py` +3, `test_reconciler_claim.py` (the no-role set +3).
+**Battery 5/5 killed, every control green, every file `cmp`-restored**
+(`~/s40/run5/battery5.py`): a sleeping parent branched; the expiry's row
+`origin = member`; `redeploy` beside an active reconciler; `start()` without
+`start --all`; the verifiers off stdin. Targeted once (dispatch, claim, slot,
+expiry, cli_contract, repository_contract, acceptance_registry,
+evidence_claims, environment_gates, operation_types): **1222 passed**. Pushed
+with Run 4 (D2470); CI read at Run 5's SHA.
 
 ### Run 6 — the customer CLI and the documents
 
