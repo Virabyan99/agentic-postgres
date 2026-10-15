@@ -1312,6 +1312,41 @@ does not leave `slot3-prod`'s doors and certificate as they were, or if V1 or
 X0 fails for a reason other than the filtered live proofs' absence — **repair on
 day 1, move the commit, redeploy, run V1/X0 again** (D2448).
 
+**Done.** (2026-10-14/15; rows **D2492-D2498**; two repairs, `94d2354` and
+`8cc3440`, each CI-green before it shipped -- 38642542654, 38702322840.) **Day 1
+(2026-10-14, at `6d57a5a`)**: P1 by the operator (slot3's two wildcards, slot4's
+three records, the B2 mirror and every token; the two R2 buckets created by the
+agent through the Cloudflare API at the operator's request, EEUR, Standard);
+`s40-dns.sh` GO for slot3's five names and slot4's three; R1 `minor`/`ok` x3
+(control-prod's set 5 -> 7, proposal `a7b18e5f`); R2a-c and **R2d -- `slot.sh
+redeploy`'s first live run: admitted, both poolers synced, adopted under the
+registry's own organisation, the three door certificates byte-identical**; A1
+agrees x4; H1 (candidates in `/home/op/s40-h1/`, D2496); RC1 (`slot4-prod
+declared`); SL1 (4 resources; the console opened to the operator's address and
+closed, D2496), SL2 (29 files), SL3 (`slot4-prod ready`), K1. **V1 exit 6 in 77
+min** -- `documented_path` (expected), the admission proof (no rehearsal at the
+commit: Sheet RA was missing again, D2494), beta's PITR drill past the 900 s
+promotion bound (D2492; the drills that promoted took 819 / 772 s) and a fixture
+that read another drill's document (D2493). **X0 PASSED: 40 passed, 0 failed,
+4 min 56 s.** **Day 2 (2026-10-15)**: repair 1 (`94d2354`) shipped and the four
+redeployed; **V1b (targeted, the operator's choice) failed in 67 s on a defect
+V1 could not see** -- every database container ran on an image id the
+containerd store no longer had (D2497; V1's order had recreated beta's first,
+D2498); rig 40f measured it, repair 2 (`8cc3440`) shipped and the four
+redeployed again, A1 agrees x4 + `slot4-prod prepared (slot)`, the reconciler
+idle at `8cc3440` (`slot4-prod ready`), RA at the commit
+(`...-admission-refused-202610150830a71b`), K1' (kit
+`kit-2026-10-15-s40-8cc3440`, four copies at `8cc3440`). **V1b at `8cc3440`:
+17 passed, 0 failed, 22:52** -- the three beta drills promoted in 257 / 229 /
+220 s (restore 195-201 s, RTO 416-458 s, the set 5 h old) and the admission
+proof read the rehearsal. **Measured**, each of the three redeploy passes: a
+project's own auth/mcp/storage away 3.8-7.7 s (bound <= 11.4 s), rest and docs
+never, no neighbour lost a sample, control-prod's mcp 6.7-7.3 s; slot3's door
+certificates unchanged through all three `slot.sh redeploy` runs. X0 was not
+re-run at `8cc3440`: neither repair touches an external proof's path (the drill
+and the branch runtime are host-side), and Run 10's external half runs at this
+commit anyway. **Run 10 starts at `8cc3440`.**
+
 ### Run 10 — sitting 2 (day 2): the re-earning, the branches, the reboot, the sweep, the tag
 
 1. **The lifecycle on `slot4-prod`** (`s40-lifecycle.py`, the probe on alpha,
