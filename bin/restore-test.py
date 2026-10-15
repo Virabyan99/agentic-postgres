@@ -841,6 +841,9 @@ def drill(arguments: argparse.Namespace) -> int:
 
     drill_id = new_drill_id()
     try:
+        # The container's own image by an id that RESOLVES -- after a new
+        # commit's deploy its creation id may not (D2497).
+        inspect = {**inspect, "Image": restore_drill.runnable_image(inspect, docker)}
         plan = restore_drill.build_plan(
             document=document,
             inspect=inspect,

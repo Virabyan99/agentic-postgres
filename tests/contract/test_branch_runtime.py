@@ -116,6 +116,13 @@ def recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, list
     monkeypatch.setattr(runtime, "load_document", lambda path: _document())
     monkeypatch.setattr(runtime, "load_host", lambda path: {"edge": {"acme_resolver_name": "le"}})
     monkeypatch.setattr(runtime, "inspect_running", lambda container, what: _inspect())
+    # Resolving the parent's image reads the daemon (D2497); its three answers are
+    # test_runnable_image.py's. Here it answers "the container's own id".
+    monkeypatch.setattr(
+        runtime.restore_drill,
+        "runnable_image",
+        lambda inspect, docker: (calls.append("image"), inspect["Image"])[1],
+    )
     monkeypatch.setattr(runtime, "check_dns", lambda plan, host: calls.append("dns"))
     window = (datetime(2026, 10, 12, 10, 39, tzinfo=UTC), datetime(2026, 10, 14, 8, 0, tzinfo=UTC))
     monkeypatch.setattr(
@@ -156,7 +163,7 @@ def test_the_poolers_start_after_the_rekey(recorded: tuple[Any, list[str]]) -> N
     runtime, calls = recorded
     assert runtime.command_create(_arguments()) == 0
     assert calls == [
-        "dns", "window", "admit", "record:creating", "create_volume", "restore", "recover",
+        "image", "dns", "window", "admit", "record:creating", "create_volume", "restore", "recover",
         "write_compose_state", "persist", "rekey", "write_userlists", "open_doors", "attach",
         "record:ready",
     ], calls  # fmt: skip

@@ -273,3 +273,16 @@ target in the ISO `T` form is refused `[029]` (*"time format must be YYYY-MM-DD
 HH:MM:SS …"*) before anything is written. `docs/backup-operations.md`'s example
 uses the space form and works; the drill's `--help`, which says *"ISO 8601 with
 an offset"*, is corrected in Run 2.
+
+**The image, by an id that resolves** (D2497, measured in rig 40f on Docker
+29.5.2 with the containerd image store). "Inherited from the container" meant
+`inspect["Image"]`, the index the container was created from. On this store
+every build of `apg-<key>-postgres` moves the tag to a new index -- its
+attestation manifest differs -- and the old index stops resolving, while the
+platform image inside is byte-identical; a deploy that changes nothing in the
+database does not recreate it. So the drill and a branch now run
+`restore_drill.runnable_image`: the container's own id when it resolves; else
+the tag's current index ONLY when its platform manifest is the digest the
+container records (`ImageManifestDescriptor`) -- the same image, by content;
+else a refusal. The inheritance this ADR decided is unchanged; the NAME it is
+reached by is what moved.

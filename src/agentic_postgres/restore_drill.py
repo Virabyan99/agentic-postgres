@@ -40,7 +40,9 @@ the same function on a cluster that never recovered  **NULL** -- the free contro
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -154,6 +156,69 @@ PROMOTION_TIMEOUT_SECONDS = 3600
 
 #: The line a drill prints, once, before it restores (`bin/restore-test.py`).
 _DRILL_LINE = re.compile(r"^restore-test: drill (?P<id>\S+) for (?P<key>\S+)$", re.MULTILINE)
+
+
+def runnable_image(inspect: dict[str, Any], docker: Callable[..., Any]) -> str:
+    """The image a drill or a branch runs: the database container's OWN, by an id that resolves.
+
+    On the containerd image store every build of ``apg-<key>-postgres`` moves the
+    tag to a new INDEX id -- its attestation manifest differs each time -- and
+    the index the running container was created from stops resolving, while the
+    platform image inside is byte-identical (rig 40f, D2497). A deploy that
+    changes nothing in the database does not recreate it, so after any new
+    commit's deploy ``inspect["Image"]`` named an image Docker no longer has, and
+    every drill and every branch failed ``No such image``.
+
+    Three answers. The container's own id, when it still resolves. Otherwise the
+    tag's current index id -- ONLY when that index's platform manifest is the one
+    the container records (``ImageManifestDescriptor``), which is the same image
+    content by digest. Otherwise a refusal: a restore by any other image is not
+    a restore by the cluster's own, and an unreadable reading is said, not
+    guessed. ``docker`` is the caller's runner: ``docker(*argv)`` returning a
+    completed process.
+    """
+    image = str(inspect.get("Image") or "")
+    if not image:
+        raise DrillError("the database container reports no image id")
+    if docker("image", "inspect", "-f", "{{.Id}}", image).returncode == 0:
+        return image
+    descriptor = inspect.get("ImageManifestDescriptor") or {}
+    platform = str(descriptor.get("digest") or "")
+    target = descriptor.get("platform") or {}
+    os_name, architecture = target.get("os"), target.get("architecture")
+    tag = str((inspect.get("Config") or {}).get("Image") or "")
+    if not platform or not tag or not os_name or not architecture:
+        raise DrillError(
+            f"the image {image[:19]} the database container runs no longer exists, and the "
+            "container records no platform manifest to find its content by (D2497)"
+        )
+    index = docker("image", "inspect", "-f", "{{.Id}}", tag)
+    index_id = index.stdout.strip() if index.returncode == 0 else ""
+    if not index_id:
+        raise DrillError(
+            f"the image {image[:19]} the database container runs no longer exists, and its "
+            f"tag {tag} names no image (D2497)"
+        )
+    found = docker(
+        "image", "inspect", "--platform", f"{os_name}/{architecture}",
+        "-f", "{{json .Descriptor}}", index_id,
+    )  # fmt: skip
+    try:
+        digest = json.loads(found.stdout).get("digest") if found.returncode == 0 else None
+    except (ValueError, AttributeError):
+        digest = None
+    if not digest:
+        raise DrillError(
+            f"the platform manifest of {tag} ({index_id[:19]}) could not be read, so whether it "
+            "is the image the database container runs could not be determined (D2497)"
+        )
+    if digest != platform:
+        raise DrillError(
+            f"the image the database container runs ({platform[:19]}) is no longer what {tag} "
+            f"names ({digest[:19]}): a restore by it would not be a restore by the cluster's "
+            "own image. Recreate the database container (redeploy) first (D2497)"
+        )
+    return index_id
 
 
 def drill_document(directory: Path, stdout: str) -> Path | None:

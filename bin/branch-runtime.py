@@ -169,6 +169,16 @@ def load_host(path: Path) -> dict[str, Any]:
         raise OperatorError(EXIT_INPUT, f"the host manifest is refused: {error}") from None
 
 
+def runnable(inspect: dict[str, Any]) -> dict[str, Any]:
+    """The parent's inspect with `Image` an id that RESOLVES: its own, or its tag's when that
+    holds the same platform image (D2497). After a new commit's deploy the database
+    container's creation id may name an image Docker no longer has."""
+    try:
+        return {**inspect, "Image": restore_drill.runnable_image(inspect, docker)}
+    except restore_drill.DrillError as error:
+        raise OperatorError(EXIT_REFUSED, str(error)) from None
+
+
 def inspect_running(container: str, what: str) -> dict[str, Any]:
     """`docker inspect` of a container that must be RUNNING (D2438: a sleeping
     parent's containers are stopped, and a restore through one was never measured)."""
@@ -699,7 +709,9 @@ def command_create(arguments: argparse.Namespace) -> int:
     document = load_document(arguments.parent_outputs)
     host = load_host(arguments.host)
     refuse(document, arguments.branch)
-    inspect = inspect_running(str(document["database"]["container"]), "the parent's database")
+    inspect = runnable(
+        inspect_running(str(document["database"]["container"]), "the parent's database")
+    )
     pooler = inspect_running(
         naming.customer_pooler_containers(str(document["project"]["key"]))[0], "the parent's pooler"
     )
@@ -761,7 +773,9 @@ def command_reset(arguments: argparse.Namespace) -> int:
             f"{key}_{arguments.branch} cannot be reset: "
             + ("it does not exist" if current is None else f"it is {current.state}"),
         )
-    inspect = inspect_running(str(document["database"]["container"]), "the parent's database")
+    inspect = runnable(
+        inspect_running(str(document["database"]["container"]), "the parent's database")
+    )
     pooler = inspect_running(naming.customer_pooler_containers(key)[0], "the parent's pooler")
     plan = build_plan(document, inspect, arguments.branch, arguments.target_time)
     check_window(plan.target, read_window(document))
