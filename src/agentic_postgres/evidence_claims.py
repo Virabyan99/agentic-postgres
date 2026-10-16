@@ -431,6 +431,30 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "backups_surface",
         "branch_cli",
         "slot_redeploy",
+        # Session 41 (ADR 0274-0276). TEN, each a property of a CHECKOUT: the
+        # backups reading over the producer's real output (`backups_reading_
+        # repaired`); a branch started from its recorded content
+        # (`branch_start_repaired`) and `ready` only once its door answers
+        # (`branch_door_ready`); the plans enforced before an operation exists
+        # and served (`plan_entitlements`, `plan_api`); the customer's
+        # commands (`plan_usage_cli`); the usage sampler and its document
+        # (`usage_sampler`, `usage_api`); the idle trigger (`idle_trigger`);
+        # and the notifications (`notifications`).
+        #
+        # The session's other SEVEN are deliberately not here: six are read
+        # from the workstation (EXTERNAL) -- the third re-earning, the plans,
+        # usage, idle sleep and notifications on a new slot, and the kept
+        # slot's branches -- and one is the branch on the host.
+        "backups_reading_repaired",
+        "branch_start_repaired",
+        "branch_door_ready",
+        "plan_entitlements",
+        "plan_api",
+        "plan_usage_cli",
+        "usage_sampler",
+        "usage_api",
+        "idle_trigger",
+        "notifications",
     }
 )
 
@@ -870,6 +894,29 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "branch_host_live": ("BR-LIVE-002",),
     "lifecycle_reearned_live": ("LIFE-LIVE-004",),
     "endpoints_reearned_live": ("EP-LIVE-004",),
+    # Session 41 (ADR 0274-0276). SEVENTEEN claims, landing with the constant
+    # (D690): ten offline, six external and one host, each requirement its own
+    # claim (ADR 0089). The session's subject: two repairs (D2501, D2504), plans
+    # enforced before an operation exists, usage as a recorded sample, a
+    # notification where an operation ends, and idle sleep as a trigger -- and
+    # the managed project's life re-earned a third time on a new slot.
+    "backups_reading_repaired": ("BR-BACKUP-002",),
+    "branch_start_repaired": ("BR-START-001",),
+    "branch_door_ready": ("BR-DOOR-001",),
+    "plan_entitlements": ("PLAN-ENT-001",),
+    "plan_api": ("PLAN-API-001",),
+    "plan_usage_cli": ("PLAN-CLI-001",),
+    "usage_sampler": ("USE-SAMPLE-001",),
+    "usage_api": ("USE-API-001",),
+    "idle_trigger": ("USE-IDLE-001",),
+    "notifications": ("USE-NOTIFY-001",),
+    "lifecycle_third_trial_live": ("LIFE-LIVE-005",),
+    "plans_live": ("PLAN-LIVE-001",),
+    "usage_live": ("USE-LIVE-001",),
+    "idle_sleep_live": ("USE-LIVE-002",),
+    "notifications_live": ("USE-LIVE-003",),
+    "branch_retrial_live": ("BR-LIVE-003",),
+    "branch_host_retrial_live": ("BR-LIVE-004",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

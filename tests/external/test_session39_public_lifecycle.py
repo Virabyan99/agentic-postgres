@@ -73,7 +73,9 @@ ROTATED = ("customer_app", "customer_admin", "customer_app")
 def record39(record: dict[str, Any]) -> dict[str, Any]:
     # D2442: Session 40's record has these members and these eleven operations
     # too, so 39's claim re-runs against the newest record, asserting all of it.
-    assert record["session"] in (39, 40), f"a Session {record['session']} record, not 39's or 40's"
+    assert record["session"] in (39, 40, 41), (
+        f"a Session {record['session']} record, not 39's, 40's or 41's"
+    )
     assert isinstance(record.get("doors"), dict), "the record names no doors"
     return record
 
@@ -197,7 +199,10 @@ def test_the_second_creation_was_refused_without_a_row(
     second = record39["observations"]["second_create"]
     assert (second["exit"], second["no_slot"]) == (5, True), second
     assert second["creations_before"] == second["creations_after"], second
-    organization = probe["organization_id"]
+    # The organisation the lifecycle RAN in (D2550): the probe's for Sessions
+    # 39-40's records, Session 41's own for its (the probe's answers
+    # `plan_limit_reached`, ADR 0274).
+    organization = record39["organization_id"]
     status, body = recorder.json("POST", f"{endpoint}/projects", {
         "organization": organization, "name": "Lifecycle s39 again", "profile": "small",
         "admin_username": "again.admin", "handoff_sha256": "0" * 64,

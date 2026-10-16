@@ -77,9 +77,9 @@ LIFECYCLE = (
 LIFECYCLE_TYPES = frozenset(kind for kind, _ in LIFECYCLE)
 
 #: The sessions whose lifecycle records these proofs read (D2343, D2362):
-#: Session 39 re-runs them against its own record, and Session 40 against its
-#: re-earning slot's (D2442).
-RECORD_SESSIONS = frozenset({38, 39, 40})
+#: Session 39 re-runs them against its own record, Session 40 against its
+#: re-earning slot's (D2442), and Session 41 against its third (D2518).
+RECORD_SESSIONS = frozenset({38, 39, 40, 41})
 
 #: The edge's answer for a host or path no router serves (rig 38b: 19 bytes).
 EDGE_404 = b"404 page not found"
@@ -305,7 +305,11 @@ def test_the_second_creation_was_refused_without_a_row(
     second = record["observations"]["second_create"]
     assert (second["exit"], second["no_slot"]) == (5, True), second
     assert second["creations_before"] == second["creations_after"], second
-    organization = probe["organization_id"]
+    # The organisation the lifecycle RAN in (D2550): the probe's for Sessions
+    # 38-40's records; Session 41's runs in its own, because the probe's holds
+    # slot3-prod and answers `plan_limit_reached` (ADR 0274), not this proof's
+    # `capacity_exhausted`.
+    organization = record["organization_id"]
     status, body = recorder.json("POST", f"{endpoint}/projects", {
         "organization": organization, "name": "Lifecycle s38 again", "profile": "small",
         "admin_username": "again.admin", "handoff_sha256": "0" * 64,

@@ -6304,7 +6304,7 @@
   test_nodeids:
     - tests/contract/test_reality_ledger.py::test_every_operation_type_names_a_ledger_row_and_is_accepted_iff_its_row_is_reachable
     - tests/contract/test_operation_types.py::test_the_type_table_is_closed
-    - tests/contract/test_operation_types.py::test_only_credential_rotate_is_accepted_and_the_eleven_are_executed
+    - tests/contract/test_operation_types.py::test_exactly_the_eleven_executed_types_are_accepted
     - tests/contract/test_operation_types.py::test_a_type_not_accepted_is_refused_not_available_before_its_body
   description: >-
     `operations.py`'s type table is closed and every type names an
@@ -6317,8 +6317,10 @@
     (D2415, D2416); Session 40's bump accepts all eleven -- the seven
     re-trialed on a new slot (D2442) and the four branch types (ADR 0271) --
     and its close accepts `credential.rotate` alone, its row `beta`, the ten
-    others refused with their rows `planned` (D2500, D2501, D2504); a
-    write route whose type is not accepted answers `409 not_available` naming
+    others refused with their rows `planned` (D2500, D2501, D2504); Session
+    41's bump accepts all eleven again -- the six re-trialed a third time on a
+    new slot (D2518) and the four branch types with D2501 and D2504 repaired;
+    a write route whose type is not accepted answers `409 not_available` naming
     its row before the project or the body is read, and writes no row (ADR
     0254, D2054, D2170).
 
@@ -6656,7 +6658,9 @@
     ready, and the reconciler refuses `no_slot` with nothing taken; the API
     answers `capacity_exhausted {reason: no_slot}` before a row is written
     when there is no reading, no ready slot, or a reading older than ten
-    minutes; nothing in Session 38 produces `plan_limit_reached`.
+    minutes; nothing in Session 38 produces `plan_limit_reached` -- since
+    Session 41 the entitlement's readers alone produce it, before the slot is
+    read (ADR 0274, D2549).
 
 - id: LIFE-SLEEP-001
   priority: P0
@@ -7444,3 +7448,309 @@
     password and admitted the new, both names refused while it slept, and the
     superuser and the slot's platform roles refused at both doors.
 
+# Session 41 (ADR 0274-0276)
+- id: BR-BACKUP-002
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/contract/test_backups_reading_from_the_producer.py::test_the_window_comes_from_the_producers_real_output
+    - tests/contract/test_backups_reading_from_the_producer.py::test_every_key_the_reading_takes_is_printed
+    - tests/contract/test_backups_reading_from_the_producer.py::test_a_failing_repository_is_a_problem_not_unknown
+    - tests/contract/test_backups_reading_from_the_producer.py::test_a_sleeping_slot_is_read_without_raising
+  description: >-
+    **The backups reading from the producer** (D2501, D2512, ADR 0273): the
+    reconciler's reading is computed from what the producer itself prints --
+    `bin/backup.sh usage --json`'s block over slot3-prod's REAL `pgbackrest
+    info` -- never a hand-shaped dict: `earliest` is the oldest backup's stop
+    plus a second; every key the reading takes is a key the producer prints; a
+    failing repository reads `problem`, not unknown; and a sleeping slot is read
+    without raising (D2541).
+
+- id: BR-START-001
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/contract/test_branch_start.py::test_a_start_resolves_the_image_from_the_tag_and_digest
+    - tests/contract/test_branch_start.py::test_changed_content_is_refused_with_a_reason
+    - tests/contract/test_branch_start.py::test_the_reason_is_recorded
+    - tests/contract/test_branch_start.py::test_a_branch_made_before_1_19_0_is_refused_with_its_reason
+    - tests/contract/test_branch_start.py::test_image_for_reads_the_platform_manifest_not_the_index
+    - tests/contract/test_reconciler_dispatch.py::test_the_branch_start_keeps_its_output
+    - tests/contract/test_diagnostic_surface.py::test_containers_lists_branches
+  description: >-
+    **A branch starts from its recorded content** (D2504, D2513, ADR 0271 as
+    amended): every start resolves the branch's image from the parent's tag and
+    the platform manifest digest recorded at creation -- never an index id a
+    rebuild orphans; changed content, or a record made before 1.19.0, is refused
+    with its reason and the branch recorded `stopped`; the reconciler keeps the
+    start's whole output in a 0600 log; and `apg-diag containers` lists a
+    branch's containers under its own section (D2514).
+
+- id: BR-DOOR-001
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/contract/test_branch_door.py::test_ready_waits_for_both_names
+    - tests/contract/test_branch_door.py::test_a_door_not_issued_in_time_is_pending_with_a_reason
+    - tests/contract/test_branch_door.py::test_each_reading_is_one_of_three_outcomes
+    - tests/contract/test_branch_door.py::test_no_connection_is_unknown_not_pending
+    - tests/contract/test_restore_promotion_bound.py::test_a_branch_promotion_bound_sits_inside_its_reconciler_budget
+  description: >-
+    **`ready` means the door answers** (D2503, D2515): a branch is written
+    `ready` only after both of its names verify through the edge -- or with
+    `door: pending` and the reason after `DOOR_SECONDS`, `unknown` when no check
+    could run; each reading is one of three outcomes (ADR 0195); and the
+    branch's budget sits inside its type's operation bound (D2516).
+
+- id: PLAN-ENT-001
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/contract/test_plans.py::test_the_sql_limits_are_the_release_table
+    - tests/contract/test_plans.py::test_the_entitlement_is_read_before_the_slot
+    - tests/contract/test_plans.py::test_each_refusal_comes_from_its_own_reader
+    - tests/contract/test_plans.py::test_two_concurrent_creates_leave_one_row
+    - tests/contract/test_plans.py::test_the_branch_limit_reads_the_plan
+    - tests/contract/test_plans.py::test_a_project_beyond_the_plan_is_refused_before_a_row
+    - tests/contract/test_plans.py::test_a_lock_that_locks_nothing_is_refused
+    - tests/contract/test_plans.py::test_the_lock_is_held_across_the_count_by_one_transaction
+    - tests/contract/test_control_projects.py::test_plan_limit_reached_is_produced_only_by_the_entitlement_readers
+  description: >-
+    **Plans are enforced before an operation exists** (ADR 0274, D2519, D2521):
+    the release table `plans.PLANS` and the control set's
+    `app.control_plan_limits` agree; the entitlement is read before the slot, so
+    `plan_limit_reached` and `capacity_exhausted` each come from their own
+    reader with the other green; the count is held under the organisation's row
+    lock by one transaction, so two concurrent creations leave one row (D2538);
+    `branch_limit_reached` reads the plan; and the word `plan_limit_reached`
+    occurs only in the entitlement readers.
+
+- id: PLAN-API-001
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/contract/test_plans.py::test_the_plans_route_says_what_is_enforced
+    - tests/contract/test_plans.py::test_premium_is_unavailable_and_interest_is_one_row
+    - tests/contract/test_plans.py::test_no_route_writes_a_plan_or_a_limit
+    - tests/contract/test_plans.py::test_interest_is_a_persons_request_once
+    - tests/contract/test_plans.py::test_no_role_but_the_owner_writes_a_plan_or_a_limit
+  description: >-
+    **The plans as a customer reads them** (ADR 0274, D2522): `/v1/plans` and
+    `/v1/organizations/{organization}/plan` serve both plans with every
+    entitlement, whether it is enforced and by which reader, and the beta
+    sentence; Premium is `unavailable_during_beta`; *Notify me* is a person's
+    request, recorded once per organisation and plan; and no route -- and no
+    role but the set's owner -- writes a plan or a limit.
+
+- id: PLAN-CLI-001
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/contract/test_control_cli.py::test_plan_usage_and_notifications_dispatch_to_the_customer_cli
+    - tests/contract/test_control_cli.py::test_idle_sleep_names_the_backup_consequence
+    - tests/contract/test_cli_contract.py::test_the_usage_verb_is_the_customers_and_the_reading_is_the_operators
+  description: >-
+    **The customer's commands** (D2528, D2534): `apg plan list|show|notify-me`,
+    `apg usage show` (a figure not read said, never a zero; no sample is exit
+    6), `apg notifications list` and `apg project idle-sleep`, whose output says
+    what sleeping does to the backups; `apg usage` is the customer's command and
+    `sudo bin/doctor.sh usage` (the flag `bin/doctor.py --reading usage`) stays
+    the operator's.
+
+- id: USE-SAMPLE-001
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/contract/test_usage_sampler.py::test_each_figure_is_read_or_named_unread
+    - tests/contract/test_usage_sampler.py::test_a_sleeping_project_is_sampled_as_sleeping
+    - tests/contract/test_usage_sampler.py::test_calls_are_counted_from_durable_rows
+    - tests/contract/test_usage_sampler.py::test_a_customer_backend_is_activity
+    - tests/contract/test_usage_sampler.py::test_the_activity_reader_reads_only_the_customer_roles
+    - tests/contract/test_usage_sampler.py::test_the_sample_interval_is_the_one_the_idle_rule_counts
+    - tests/contract/test_usage_sampler.py::test_a_limit_notice_passes_at_80_percent
+    - tests/contract/test_usage_sampler.py::test_the_sampler_never_reads_the_per_process_series
+    - tests/contract/test_control_usage.py::test_no_role_but_the_reconciler_writes_a_sample
+    - tests/contract/test_reconciler_dispatch.py::test_the_reconciler_asks_the_control_set_only_these
+  description: >-
+    **Usage is a recorded sample** (ADR 0275, D2523): the reconciler samples
+    every slot every 300 s through the doctor's own container reads; a figure
+    not read is `NULL` and named, never a zero; a sleeping project's sample says
+    so; agent calls and workflow runs are counted from durable rows since the
+    previous sample, never from the per-process series; a customer backend is
+    activity; the limit notice passes at 80% of a shown limit; only
+    `app.control_record_usage`, granted to nobody, writes a sample; and the
+    control functions the root actor calls are a closed set (D2547).
+
+- id: USE-API-001
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/contract/test_control_usage.py::test_a_counter_reset_is_read_not_subtracted
+    - tests/contract/test_control_usage.py::test_seconds_come_from_the_history
+    - tests/contract/test_control_usage.py::test_an_empty_window_is_not_zero
+    - tests/contract/test_control_usage.py::test_a_foreign_and_a_missing_project_answer_alike
+    - tests/contract/test_control_usage.py::test_each_gauge_is_its_newest_read_value
+    - tests/contract/test_control_usage.py::test_the_usage_route_says_when_it_could_not_determine
+    - tests/contract/test_control_usage.py::test_the_usage_routes_answer_a_foreign_and_a_missing_project_alike
+  description: >-
+    **The usage document** (ADR 0275): a counter's increases summed with its
+    resets read, never subtracted (D553); samples expected against present; each
+    gauge its newest READ value; active and sleeping seconds from the operation
+    history; a window with no sample `could_not_determine`, never zeros; and a
+    foreign and a missing project answer alike.
+
+- id: USE-IDLE-001
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/contract/test_idle_sleep.py::test_a_quiet_window_requests_one_sleep
+    - tests/contract/test_idle_sleep.py::test_a_missing_sample_is_not_idle
+    - tests/contract/test_idle_sleep.py::test_a_recent_wake_restarts_the_window
+    - tests/contract/test_idle_sleep.py::test_the_request_names_the_member_who_set_it
+    - tests/contract/test_idle_sleep.py::test_idle_is_only_a_sleep
+    - tests/contract/test_idle_sleep.py::test_no_customer_backend_is_quiet
+    - tests/contract/test_idle_sleep.py::test_an_unread_sample_is_not_idle
+    - tests/contract/test_idle_sleep.py::test_a_moved_counter_is_not_idle
+    - tests/contract/test_idle_sleep.py::test_no_role_but_the_reconciler_requests_an_idle_sleep
+    - tests/contract/test_idle_sleep.py::test_the_setting_route_says_what_sleeping_does_to_backups
+    - tests/contract/test_idle_sleep.py::test_the_setting_is_not_offered_while_the_sleep_is_not_accepted
+    - tests/contract/test_reconciler_dispatch.py::test_the_usage_pass_asks_only_for_awake_slots
+    - tests/contract/test_reconciler_dispatch.py::test_no_idle_sleep_is_asked_for_while_the_sleep_is_not_accepted
+    - tests/contract/test_reality_ledger.py::test_the_idle_sleep_row_is_reachable_iff_its_sleep_is_accepted
+  description: >-
+    **Idle sleep is a trigger** (ADR 0276, D2525): the setting takes 15, 30 or
+    60 minutes or never and says what sleeping does to the backups (D2534); the
+    control set inserts ONE `project.sleep` with `origin = idle`, on behalf of
+    the member who set it, only over a window of samples all present, awake,
+    read and quiet -- no customer backend is quiet (D2539), a missing or unread
+    sample, a moved counter, an open operation or a recent wake defer it; the
+    origin CHECK refuses `idle` on any other type; the reconciler asks only for
+    awake slots; and idle sleep is offered -- at the route and by the reconciler
+    -- only while `project.sleep` is accepted, its Ledger row held to that
+    (D2548).
+
+- id: USE-NOTIFY-001
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/contract/test_notifications.py::test_a_finished_operation_writes_one_notification
+    - tests/contract/test_notifications.py::test_no_template_carries_a_result_member
+    - tests/contract/test_notifications.py::test_the_finish_body_is_unchanged_but_for_the_insert
+    - tests/contract/test_notifications.py::test_a_limit_notice_is_daily
+    - tests/contract/test_notifications.py::test_a_foreign_organization_reads_nothing
+    - tests/contract/test_notifications.py::test_the_notifications_route_lists_its_own_organizations
+  description: >-
+    **A notification is written where an operation ends** (ADR 0275, D2526):
+    every finished operation writes ONE notification inside
+    `control_finish_operation`'s own transaction from a fixed template that
+    interpolates no result member; the finish body is 0004's plus the insert; a
+    limit notice is written at most once a day; and a foreign organisation reads
+    nothing.
+
+- id: LIFE-LIVE-005
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/external/test_session41_reearning.py::test_every_accepted_type_ran_on_the_slot
+    - tests/external/test_session41_reearning.py::test_the_resizes_followed_the_admission_reading
+    - tests/external/test_session41_reearning.py::test_the_export_holds_the_three_customer_schemas
+    - tests/external/test_session41_reearning.py::test_both_routes_were_probed_through_every_window
+    - tests/external/test_session41_reearning.py::test_the_second_creation_after_the_deletion_was_refused_by_capacity
+    - tests/external/test_session41_reearning.py::test_this_module_uses_no_ssh
+  description: >-
+    **The managed project's life, re-earned a third time** (D2518): Session 41's
+    lifecycle on a NEW slot, `slot5-prod`, at the deployed commit, in a NEW
+    organisation, read back through `/v1` with no SSH: every accepted type ran
+    in Sessions 38-40's order, the resizes decided by their own admission
+    readings, the export holds `app`, `api` and `public`, the slot's own route
+    AND its pooled name covered every window (D2500), and the organisation's
+    second creation after the deletion was refused `capacity_exhausted`
+    `{no_slot}` with no row.
+
+- id: PLAN-LIVE-001
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/external/test_session41_reearning.py::test_the_plans_were_read
+    - tests/external/test_session41_reearning.py::test_the_second_project_was_refused_by_the_plan_while_a_slot_was_ready
+    - tests/external/test_session41_reearning.py::test_interest_was_recorded_once
+  description: >-
+    **The plans on the deployment** (ADR 0274): through `/v1` with no SSH, both
+    plans read; the probe organisation, holding `slot3-prod`, refused
+    `plan_limit_reached` with no row and no file while a slot was ready -- the
+    next creation was accepted into it; Premium's interest recorded once.
+
+- id: USE-LIVE-001
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/external/test_session41_reearning.py::test_the_slots_usage_was_read
+    - tests/external/test_session41_reearning.py::test_the_organizations_usage_holds_the_slot
+  description: >-
+    **The slot's usage, read while it lived** (ADR 0275): samples recorded, its
+    database's size read, its requests answered below 400 counted, every figure
+    read or counted as not read; its organisation's usage lists it alone.
+
+- id: USE-LIVE-002
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/external/test_session41_reearning.py::test_the_idle_slot_was_put_to_sleep_by_the_reconciler
+    - tests/external/test_session41_reearning.py::test_the_idle_sleep_closed_both_doors
+  description: >-
+    **Idle sleep on the deployment** (ADR 0276): `slot5-prod` set to 15 minutes
+    with its probes stopped; the reconciler asked and the control set inserted
+    ONE `project.sleep` with `origin = idle` on behalf of the setter, within the
+    minutes plus two intervals; both names refused while it slept; then woken by
+    a member.
+
+- id: USE-LIVE-003
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/external/test_session41_reearning.py::test_every_finished_operation_was_notified
+    - tests/external/test_session41_reearning.py::test_no_notification_carries_a_secret
+  description: >-
+    **The lifecycle organisation's notifications** (ADR 0275): exactly one per
+    finished operation, the idle sleep's naming its cause; no notification holds
+    a URL, an export's hash or size, an operation's id or a door's host.
+
+- id: BR-LIVE-003
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/external/test_session41_branches.py::test_the_backups_surface_reads_a_window
+    - tests/external/test_session41_branches.py::test_an_expired_branch_was_deleted_by_the_reconciler
+    - tests/external/test_session41_branches.py::test_the_branch_holds_the_point_before_the_change
+    - tests/external/test_session41_branches.py::test_ready_meant_the_door_answered
+    - tests/external/test_session41_branches.py::test_a_migration_reached_the_branch_through_its_direct_name
+    - tests/external/test_session41_branches.py::test_the_parents_password_opens_no_branch_door
+    - tests/external/test_session41_branches.py::test_the_second_branch_was_refused_before_a_row
+    - tests/external/test_session41_branches.py::test_a_deleted_branch_has_no_door
+    - tests/external/test_session41_branches.py::test_this_module_uses_no_ssh
+  description: >-
+    **A customer's branches, re-trialed** (ADR 0271-0273, D2501, D2503): from
+    the workstation with no SSH, on `slot3-prod`: the backups surface reads a
+    window; an expiring branch deleted by the reconciler's own request; a branch
+    at a point holds the first row and not the second; migrated over its direct
+    name; the parent's password refused; `ready` reached with `door: ready` and
+    the door answering at the first attempt, after the creation, the reset and
+    the reboot; a second branch refused `branch_limit_reached` within the
+    record's whole window (D2506); deleted, its names refused.
+
+- id: BR-LIVE-004
+  priority: P0
+  target_session: 41
+  test_nodeids:
+    - tests/deployment/test_session41_branch_host.py::test_the_branch_is_bounded_and_configured_not_to_archive
+    - tests/deployment/test_session41_branch_host.py::test_the_branch_is_charged
+    - tests/deployment/test_session41_branch_host.py::test_the_parent_was_untouched
+    - tests/deployment/test_session41_branch_host.py::test_the_branch_came_back_by_itself_after_the_reboot
+    - tests/deployment/test_session41_branch_host.py::test_the_diagnosis_account_sees_the_branch
+    - tests/deployment/test_session41_branch_host.py::test_a_deleted_branch_left_nothing
+  description: >-
+    **The branch on the machine, re-trialed** (ADR 0271, D2504, D2505): bounded,
+    its configured archive command `/bin/false` with archiving off, charged, the
+    parent untouched; **back by itself after the reboot** -- nothing reset it
+    after the boot -- running the content its record's tag and digest resolve
+    to; listed by `apg-diag containers`; nothing left after the deletion.

@@ -8,12 +8,12 @@ it keeps. The routes and the roles are in [the control plane](control-plane.md);
 the operator's half -- slots, the reconciler, revocation -- is the
 [operator guide](operator-guide.md) §20.
 
-**Since Session 40's close only setting a database credential is open**
-(Reality Ledger `beta`). Every operation here was offered on the 1.18.0 trip
-(`trial`, ADR 0261); the project operations and the branch operations are
-`planned` again, so each answers `409 not_available` naming its row until a
-later trip re-earns it. [The Reality Ledger](reality-ledger.md) says why for
-each.
+**Every operation here is being verified** (Reality Ledger status `trial`, ADR
+0261) since Session 41's bump: offered on the 1.19.0 trip, the project
+operations re-earned a third time on a new slot (D2518) and the branch
+operations with D2501 and D2504 repaired, each moved to `beta` or back to
+`planned` by the session's close. Setting a database credential is `beta`.
+[The Reality Ledger](reality-ledger.md) says so for each.
 
 Since Session 41 (ADR 0274-0276) an organisation also has a **plan**, each
 project a **usage** record, the organisation **notifications**, and a project
@@ -235,9 +235,9 @@ bin/branch.sh delete --project-key KEY --branch dev --confirm dev --wait
 - **A branch is not backed up.** Deleting it, or losing the server, loses
   what it holds. Delete needs an admin or owner; `--confirm` is its name.
 
-The branch operations were offered on the 1.18.0 trip (Reality Ledger
-`trial`, ADR 0261) and are `planned` again since Session 40's close: each
-answers `409 not_available` until a later trip re-earns it (D2501, D2504).
+The branch operations are being verified (Reality Ledger `trial`, ADR 0261):
+offered on the 1.19.0 trip with D2501 and D2504 repaired, and moved to `beta`
+or back to `planned` by the session's close.
 
 ## Plans
 

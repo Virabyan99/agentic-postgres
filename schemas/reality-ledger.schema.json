@@ -124,8 +124,8 @@
             "null"
           ],
           "minimum": 36,
-          "maximum": 42,
-          "description": "The Stage 5 session that builds it, or null when no Stage 5 session does."
+          "maximum": 43,
+          "description": "The Stage 5 session that builds it, or null when no Stage 5 session does. Stage 5 ends at Session 43 since the operator's split of 2026-10-16 (D2510, D2552)."
         }
       }
     }

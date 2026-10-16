@@ -1142,7 +1142,68 @@ from pathlib import Path
 #: trip** confirms the class against a DEPLOYMENT: `upgrade plan` on every
 #: project, with the same declaration, before the first 1.18.0 deploy -- and
 #: a `major` there is a stop condition.
-CURRENT_SESSION = 40
+#:
+#: **Session 41 moves it to 41, all-or-nothing again** (D690): SEVENTEEN
+#: requirements and seventeen claims -- `CLAIMS` 267 -> 284 and `OFFLINE_CLAIMS`
+#: 111 -> 121, counted from the tuples (D1628) -- ten declared offline, six
+#: EXTERNAL and one host, every offline half written in the run that built its
+#: piece (Runs 2-7) and every live half here. Two families join the registry:
+#: `PLAN`, plans and entitlements, and `USE`, usage samples, notifications and
+#: idle sleep. The external claims are the managed project's life re-earned a
+#: third time on a NEW slot in a NEW organisation, the plans and their refusal,
+#: the slot's usage, its idle sleep and its notifications, all through `/v1` and
+#: the public names alone, and the branches of the kept slot with the backups
+#: surface reading a window; the host claim is the branch back BY ITSELF after
+#: the reboot, listed by the diagnosis account.
+#:
+#: **The session's subject is two repairs and the control plane's half of the
+#: brief.** The repairs: the reconciler's backups reading computed from the
+#: producer's own printed block (D2501, Run 2), and a branch's database image
+#: resolved from its recorded tag and content digest at EVERY start, `ready`
+#: written only once its door answers (D2504, D2503, Run 3). ADR 0274: plans
+#: are a release table enforced before an operation exists -- Free one project
+#: per organisation, one branch, every profile; the plan's refusal read
+#: before the slot. ADR 0275: usage is a sample the reconciler records every
+#: 300 s, a figure not read named and never a zero, and a notification is
+#: written in the transaction that finishes an operation. ADR 0276: idle sleep
+#: is a trigger -- opt-in, 15, 30 or 60 minutes, decided by the control set from
+#: the samples, offered only while sleeping is (D2548).
+#:
+#: **No released migration** -- the plans, the samples, the notifications and
+#: idle sleep are the control set's `0008`. **No outputs, manifest, host,
+#: capability, lock or secret schema moves** (outputs stay v22, the project
+#: manifest 11). Sixteen Ledger rows are `trial` (ADR 0261), so the eleven
+#: executed types are accepted again.
+#:
+#: **`VERSION` moves to `1.19.0`.** What moved: the control mode's seven plan,
+#: usage, notification and idle-sleep routes in `services/auth-api`, so the
+#: image moves and a deploy recreates `auth`, `storage` and `mcp`; the
+#: reconciler's usage pass, its idle request, its limit notices and its kept
+#: branch-start output (`bin/reconciler.py`, a restart of the unit);
+#: `bin/branch-runtime.py`'s image identity and door; `bin/backup.py usage`;
+#: `bin/apg-diag.sh`'s branch listing (re-installed by hand, Sheet PV); the
+#: control set's `0008`; `bin/plan.sh`, `bin/usage.sh`, `bin/notifications.sh`
+#: and `bin/project.sh idle-sleep`.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig: a git
+#: worktree at `8cc3440`, the commit that IS deployed, and a `tar`-piped copy of
+#: this working tree, both rendering the INSTALLED tree's `project.example.yaml`.
+#: With `--also api_operation_added`: `bump minor`, **`requires minor`**,
+#: verdict `ok`, `changes [api_operation_added]`, `reasons []`,
+#: `operator_digests_moved []`. Without the declaration: `requires patch` --
+#: the tenth release in a row whose price the command sees only by
+#: declaration. **One leaf differs**: `template_version` 1.18.0 -> 1.19.0
+#: (6,350 -> 6,350 bytes). **ADR 0162 prices it a MINOR, and `1.19.0` is that
+#: floor exactly**: no manifest, outputs, capability, lock or
+#: secret schema moves. What an operator must KNOW the reading cannot show: the
+#: control project's eighth migration applied by its own deploy, the
+#: reconciler restarted after the checkout moves (D2179), `apg-diag`
+#: re-installed by hand, and a managed project moved to the release by
+#: `slot.sh redeploy` with the reconciler stopped (D2443). **The trip**
+#: confirms the class against a DEPLOYMENT: `upgrade plan` on every project,
+#: with the same declaration, before the first 1.19.0 deploy -- and a `major`
+#: there is a stop condition.
+CURRENT_SESSION = 41
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

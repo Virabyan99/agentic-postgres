@@ -378,13 +378,15 @@ def test_the_backups_route_serves_the_recorded_window(drive: Any) -> None:
 def test_a_branch_write_is_not_available_while_its_row_is_unreachable(
     drive: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ADR 0254: with the branch types unaccepted -- the product's own state
-    since Session 40's close, the rows `planned` again (D2508) -- a creation
-    answers `409 not_available` naming `branches` and a restore naming
-    `restore_to_branch`, before the body is read, nothing recorded. The
-    control, the types accepted as a `trial` row leaves them: the same
-    nonsense body is READ and refused `400 malformed_request`, still recording
-    nothing."""
+    """ADR 0254: with the branch types unaccepted -- this proof's own world
+    (D2490's shape): Session 40's close left the rows `planned` (D2508) and
+    Session 41's bump makes them `trial` again -- a creation answers `409
+    not_available` naming `branches` and a restore naming `restore_to_branch`,
+    before the body is read, nothing recorded. The control, the types accepted
+    as a `trial` row leaves them: the same nonsense body is READ and refused
+    `400 malformed_request`, still recording nothing."""
+    branch_types = {"branch.create", "branch.reset", "branch.delete", "restore.create"}
+    monkeypatch.setattr(operations, "ACCEPTED_TYPES", operations.ACCEPTED_TYPES - branch_types)
     org = _org(drive, "planned")
     key, member = org["project"], org["tokens"]["member"]
     cases = (("branches", "branches"), ("restores", "restore_to_branch"))

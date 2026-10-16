@@ -307,13 +307,20 @@ def test_the_setting_route_says_what_sleeping_does_to_backups(drive: Any, accept
     assert (off.status_code, off.json()["idle_sleep_minutes"]) == (200, None)
 
 
-def test_the_setting_is_not_offered_while_the_sleep_is_not_accepted(drive: Any) -> None:
+def test_the_setting_is_not_offered_while_the_sleep_is_not_accepted(
+    drive: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """D2548 (ADR 0247, ADR 0254): a setting is not an operation, so
     `require_accepted` never sees it -- and an idle project would otherwise be
-    slept by a type the Ledger refuses a person. With the release's own
-    `ACCEPTED_TYPES` the route answers `409 not_available` naming `idle_sleep`,
-    for 15 minutes and for never alike, and nothing is stored. The control:
-    the same member reads the project (`200`), so the refusal is the gate's."""
+    slept by a type the Ledger refuses a person. With `project.sleep` NOT
+    accepted -- this proof's own world, since Session 41's bump accepts it
+    (D2490's shape) -- the route answers `409 not_available` naming
+    `idle_sleep`, for 15 minutes and for never alike, and nothing is stored.
+    The control: the same member reads the project (`200`), so the refusal is
+    the gate's."""
+    monkeypatch.setattr(
+        operations, "ACCEPTED_TYPES", operations.ACCEPTED_TYPES - {operations.IDLE_SLEEP_TYPE}
+    )
     assert operations.IDLE_SLEEP_TYPE not in operations.ACCEPTED_TYPES
     people = _people(drive, "offered")
     key, member = people["project"], people["tokens"]["member"]

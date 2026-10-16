@@ -101,12 +101,26 @@ MAX_EXPIRY_SECONDS: Final = 7 * 86400
 BACKUP_RECORD_SECONDS: Final = 900
 
 #: The types the control mode accepts. Equal, by the guard, to the types whose
-#: ledger row accepts: since Session 40's close, `credential.rotate` alone --
-#: `direct_endpoint` is `beta` (endpoints_reearned_live passed); the six
-#: managed-project rows and the branch rows are `planned` again (D2500, D2501,
-#: D2504). Written out, never derived from `EXECUTED_TYPES` -- building a type
-#: is not the decision to accept it.
-ACCEPTED_TYPES: Final[frozenset[str]] = frozenset({"credential.rotate"})
+#: ledger row accepts: ALL ELEVEN since Session 41's bump -- the six
+#: managed-project types re-trialed a third time on a new slot (D2518), the four
+#: branch types re-trialed with D2501 and D2504 repaired, and `credential.rotate`,
+#: whose row `direct_endpoint` is `beta`. Written out, never derived from
+#: `EXECUTED_TYPES` -- building a type is not the decision to accept it.
+ACCEPTED_TYPES: Final[frozenset[str]] = frozenset(
+    {
+        "project.create",
+        "project.delete",
+        "project.sleep",
+        "project.wake",
+        "project.resize",
+        "project.export",
+        "credential.rotate",
+        "branch.create",
+        "branch.reset",
+        "branch.delete",
+        "restore.create",
+    }
+)
 
 #: Idle sleep acts through the type a person's sleep uses (ADR 0276), so it is
 #: offered only while that type is accepted: the setting answers `not_available`

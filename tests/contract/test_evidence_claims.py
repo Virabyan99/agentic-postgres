@@ -1270,6 +1270,23 @@ CLAIM_INTRODUCED_IN = {
     "branch_host_live": 40,
     "lifecycle_reearned_live": 40,
     "endpoints_reearned_live": 40,
+    "backups_reading_repaired": 41,
+    "branch_start_repaired": 41,
+    "branch_door_ready": 41,
+    "plan_entitlements": 41,
+    "plan_api": 41,
+    "plan_usage_cli": 41,
+    "usage_sampler": 41,
+    "usage_api": 41,
+    "idle_trigger": 41,
+    "notifications": 41,
+    "lifecycle_third_trial_live": 41,
+    "plans_live": 41,
+    "usage_live": 41,
+    "idle_sleep_live": 41,
+    "notifications_live": 41,
+    "branch_retrial_live": 41,
+    "branch_host_retrial_live": 41,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

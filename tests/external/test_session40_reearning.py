@@ -41,6 +41,8 @@ from tests.external.test_session38_public_lifecycle import (  # noqa: F401 -- fi
     recorder,
 )
 
+from agentic_postgres import slot
+
 pytestmark = [
     pytest.mark.p0,
     pytest.mark.security,
@@ -75,8 +77,11 @@ PROBED = ("sleep", "wake", "resize_standard", "resize_large")
 
 @pytest.fixture(scope="module")
 def record40(record: dict[str, Any]) -> dict[str, Any]:
-    assert record["session"] == 40, f"a Session {record['session']} record, not 40's"
-    assert record.get("project_key") == "slot4-prod", record.get("project_key")
+    """Session 40's record, or Session 41's third re-earning (D2518): a NEW slot
+    either way -- a slot's key, never the kept `slot3-prod`."""
+    assert record["session"] in (40, 41), f"a Session {record['session']} record, not 40's or 41's"
+    key = str(record.get("project_key"))
+    assert slot.SLOT_KEY.fullmatch(key) and key != "slot3-prod", key
     assert isinstance(record.get("doors"), dict), "the record names no doors"
     return record
 
@@ -166,7 +171,10 @@ def test_the_second_creation_was_refused_without_a_row(
     second = record40["observations"]["second_create"]
     assert (second["exit"], second["no_slot"]) == (5, True), second
     assert second["creations_before"] == second["creations_after"], second
-    organization = probe["organization_id"]
+    # The organisation the lifecycle RAN in (D2550): the probe's for Session
+    # 40's record, Session 41's own for its (the probe's answers
+    # `plan_limit_reached`, ADR 0274).
+    organization = record40["organization_id"]
     status, body = recorder.json("POST", f"{endpoint}/projects", {
         "organization": organization, "name": "Lifecycle s40 again", "profile": "small",
         "admin_username": "again.admin", "handoff_sha256": "0" * 64,

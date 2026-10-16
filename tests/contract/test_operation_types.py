@@ -105,20 +105,19 @@ THE_EXECUTED_ELEVEN = THE_EXECUTED_SEVEN | {
 }
 
 
-def test_only_credential_rotate_is_accepted_and_the_eleven_are_executed() -> None:
-    """The exact-set form at Session 40's close (ADR 0261 authorises it; renamed
-    from `test_exactly_the_eleven_executed_types_are_accepted`, D1119): every
-    type in the table is built and executed, and exactly one is accepted --
-    `credential.rotate`, whose row is `beta` on the tagged evidence; the six
-    managed-project types and the four branch types are refused, their rows
-    `planned` again (D2500, D2501, D2504) -- and a type outside the table is
-    never accepted. The ledger half (accepted iff the row is reachable) is
-    `test_reality_ledger`'s."""
-    assert operations.ACCEPTED_TYPES == {"credential.rotate"}
+def test_exactly_the_eleven_executed_types_are_accepted() -> None:
+    """The exact-set form at Session 41's bump (ADR 0261 authorises it; renamed
+    from `test_only_credential_rotate_is_accepted_and_the_eleven_are_executed`,
+    D1119): every type in the table is built and executed, and every one is
+    accepted -- the six managed-project types re-trialed a third time on a new
+    slot (D2518), the four branch types re-trialed with D2501 and D2504
+    repaired, `credential.rotate` with its row `beta` -- and a type outside the
+    table is never accepted. The ledger half (accepted iff the row is
+    reachable) is `test_reality_ledger`'s."""
+    assert operations.ACCEPTED_TYPES == THE_ELEVEN
     assert operations.EXECUTED_TYPES == THE_EXECUTED_ELEVEN == THE_ELEVEN
     assert THE_EXECUTED_SEVEN < THE_ELEVEN
-    assert service_operations.is_accepted("credential.rotate")
-    assert not any(service_operations.is_accepted(t) for t in THE_ELEVEN - {"credential.rotate"})
+    assert all(service_operations.is_accepted(t) for t in THE_ELEVEN)
     assert not service_operations.is_accepted("project.rename")
 
 

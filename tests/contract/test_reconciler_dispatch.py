@@ -1469,12 +1469,17 @@ def test_the_reconciler_asks_the_control_set_only_these() -> None:
     }, sorted(called)  # fmt: skip
 
 
-def test_no_idle_sleep_is_asked_for_while_the_sleep_is_not_accepted(host: Host) -> None:
+def test_no_idle_sleep_is_asked_for_while_the_sleep_is_not_accepted(
+    host: Host, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """D2548: the control set's request function cannot read the Ledger, so
-    the reconciler is the door -- with the release's own `ACCEPTED_TYPES`,
-    which do not hold `project.sleep` while its row is `planned`, an AWAKE slot
-    is sampled and its notices are read, and no idle sleep is asked for. The
-    control: the sample itself is recorded, so the pass ran."""
+    the reconciler is the door -- with `project.sleep` NOT accepted (this
+    proof's own world, since Session 41's bump accepts it; D2490's shape), an
+    AWAKE slot is sampled and its notices are read, and no idle sleep is asked
+    for. The control: the sample itself is recorded, so the pass ran."""
+    monkeypatch.setattr(
+        operations, "ACCEPTED_TYPES", operations.ACCEPTED_TYPES - {operations.IDLE_SLEEP_TYPE}
+    )
     assert operations.IDLE_SLEEP_TYPE not in operations.ACCEPTED_TYPES
     host.children.deployed("small")
     reconciler = host.module.start()
