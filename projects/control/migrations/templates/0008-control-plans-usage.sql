@@ -101,13 +101,15 @@ CREATE POLICY control_projects_idle_sleep ON app.control_projects
 
 ALTER TABLE app.control_operations DROP CONSTRAINT control_operations_origin_check;
 ALTER TABLE app.control_operations DROP CONSTRAINT control_operations_expiry_deletes_a_branch;
+-- Each requested kind keeps a constraint of its own, so a refusal names the
+-- kind it refused: 0006's `expiry` one, recreated with the same name and
+-- meaning (an expiry only deletes a branch), and `idle`'s beside it.
 ALTER TABLE app.control_operations
   ADD CONSTRAINT control_operations_origin_check CHECK (origin IN ('member', 'expiry', 'idle')),
-  ADD CONSTRAINT control_operations_origin_matches_its_type CHECK (
-    origin = 'member'
-    OR (origin = 'expiry' AND type = 'branch.delete')
-    OR (origin = 'idle' AND type = 'project.sleep')
-  );
+  ADD CONSTRAINT control_operations_expiry_deletes_a_branch
+    CHECK (origin <> 'expiry' OR type = 'branch.delete'),
+  ADD CONSTRAINT control_operations_idle_sleeps_a_project
+    CHECK (origin <> 'idle' OR type = 'project.sleep');
 
 -- ---------------------------------------------------------------------------
 -- A branch's reason and door (ADR 0271 as amended, D2514, D2515)

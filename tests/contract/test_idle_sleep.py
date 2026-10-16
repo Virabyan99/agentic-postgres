@@ -204,7 +204,9 @@ def test_idle_is_only_a_sleep(project: Project) -> None:
         f"requested_by, arguments, origin) VALUES ('{project.org}', '{project.key}', "
         f"'project.wake', 'pending', '{project.member}', '{{}}', 'idle')"
     )
-    assert refused.returncode != 0 and "origin_matches_its_type" in refused.stderr, refused
+    assert (
+        refused.returncode != 0 and "control_operations_idle_sleeps_a_project" in refused.stderr
+    ), refused
     assert "AP422" in project.cluster.refused(
         f"SELECT app.control_set_idle_sleep('{project.member}', '{project.key}', 5)"
     )
