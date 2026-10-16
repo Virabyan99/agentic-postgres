@@ -3,7 +3,8 @@
 # Projects on the management API (ADR 0251, ADR 0256): the registry records of
 # the caller's organisations, and -- since Session 38 -- the operations that
 # create, sleep, wake, export and delete a project in a prepared slot, and --
-# since Session 40 -- its backups and restore window (ADR 0273). A write
+# since Session 40 -- its backups and restore window (ADR 0273), and -- since
+# Session 41 -- whether it sleeps after it has been idle (ADR 0276). A write
 # answers 202 with an operation the host's reconciler executes; follow it with
 # bin/operation.sh wait. Nothing here reads a project's health.
 #
@@ -39,6 +40,7 @@ Usage:
   bin/project.sh export [--project-key KEY] --output FILE [--timeout S] [--interval S] [--json]
   bin/project.sh delete --project-key KEY --confirm KEY [--json]
   bin/project.sh backups [--project-key KEY] [--json]
+  bin/project.sh idle-sleep [--project-key KEY] --minutes 15|30|60|never [--json]
 
   list    The projects of the context's organisation (or --organization's;
           every organisation's when the context names none).
@@ -62,10 +64,18 @@ Usage:
           window (earliest ... latest) a branch can be restored to with
           bin/branch.sh create --at, or why it could not be read (exit 6).
           A branch is the test that a backup restores.
+  idle-sleep
+          Put the project to sleep after MINUTES with no request answered
+          below 400 and no connection by its own database roles, read from
+          the server's five-minute samples (a sample missing or unread keeps
+          it awake); never turns it off (the default). While it sleeps, its
+          backups stop: its last restore point is the moment it went to
+          sleep. Wake it with bin/project.sh wake.
 
 KEY is a project key such as slot1-prod. The endpoint and the credential come
 from the context (bin/login.sh). create, claim, export and delete need a
-person's session; sleep and wake also accept a key holding projects:write.
+person's session; sleep, wake and idle-sleep also accept a key holding
+projects:write.
 USAGE
 }
 
@@ -89,7 +99,7 @@ python_bin() {
 main() {
   if [ "$#" -eq 0 ]; then
     usage >&2
-    die 2 "a verb is required: list, use, show, status, create, claim, sleep, wake, export, delete or backups."
+    die 2 "a verb is required: list, use, show, status, create, claim, sleep, wake, export, delete, backups or idle-sleep."
   fi
   local argument
   for argument in "$@"; do
@@ -101,8 +111,8 @@ main() {
     esac
   done
   case "$1" in
-    list | use | show | status | create | claim | sleep | wake | export | delete | backups) ;;
-    *) die 2 "unknown verb: $1. One of: list use show status create claim sleep wake export delete backups" ;;
+    list | use | show | status | create | claim | sleep | wake | export | delete | backups | idle-sleep) ;;
+    *) die 2 "unknown verb: $1. One of: list use show status create claim sleep wake export delete backups idle-sleep" ;;
   esac
   exec "$(python_bin)" "${ROOT_DIR}/bin/cloud.py" project "$@"
 }

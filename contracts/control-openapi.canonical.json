@@ -3227,7 +3227,7 @@
     },
     "/v1/projects/{key}/idle-sleep": {
       "put": {
-        "description": "Member and above, or a key holding `projects:write`. `minutes` 15, 30 or 60, or null for never (the default). Idle is no request answered below 400 and no connection by the project's own database roles for the whole window, read from the samples; a sample missing or unread keeps the project awake. While it sleeps, its backups stop: its last restore point is the moment it went to sleep. Wake it by request.",
+        "description": "Member and above, or a key holding `projects:write`. `minutes` 15, 30 or 60, or null for never (the default). Idle is no request answered below 400 and no connection by the project's own database roles for the whole window, read from the samples; a sample missing or unread keeps the project awake. While it sleeps, its backups stop: its last restore point is the moment it went to sleep. Wake it by request. Refused `not_available` naming `idle_sleep` while the sleep it would request is not offered.",
         "operationId": "set_idle_sleep_v1_projects__key__idle_sleep_put",
         "parameters": [
           {
@@ -3322,6 +3322,16 @@
               }
             },
             "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAvailableResponse"
+                }
+              }
+            },
+            "description": "`not_available`, with the ledger row that says why: the operation is not offered yet, and nothing is recorded. Or `conflict` (ConflictResponse), with the id of the operation already holding the project."
           }
         },
         "summary": "Put a project to sleep after it has been idle"

@@ -1,10 +1,10 @@
 #!/usr/bin/env python
-"""`apg login|logout|context|org|project|compute|operation|endpoint|branch`: the
-management API.
+"""`apg login|logout|context|org|project|compute|operation|endpoint|branch|plan|
+usage|notifications`: the management API.
 
 Invoked by `bin/login.sh`, `bin/logout.sh`, `bin/context.sh`, `bin/org.sh`,
-`bin/project.sh`, `bin/compute.sh`, `bin/operation.sh`, `bin/endpoint.sh` and
-`bin/branch.sh`,
+`bin/project.sh`, `bin/compute.sh`, `bin/operation.sh`, `bin/endpoint.sh`,
+`bin/branch.sh`, `bin/plan.sh`, `bin/usage.sh` and `bin/notifications.sh`,
 each passing its family as the first argument. Everything a
 test can hold still -- the private state directory, the checked secret files,
 the context, the refresh exchange, https -- is
@@ -47,6 +47,13 @@ anything is sent, and send only their verifiers. `branch create --at T` is a
 restore to a point (`restore.create`); there is no customer verb named
 `backup` or `restore` -- those are the operator's root commands (D2437).
 
+**A figure that was not read is said, never printed as zero** (Session 41, ADR
+0275, ADR 0195): `usage show` prints each figure's newest reading or *not read
+in this window*, and a window with no sample exits 6 with the reason. `usage`
+is the customer's word; the operator's reading of the node is `sudo
+bin/doctor.sh usage --project KEY` and keeps that meaning (D2528). `project
+idle-sleep` prints what sleeping does to the project's backups (D2534).
+
 Exit codes: 0 ok; 2 usage; 3 no context, no credential, an unusable local file,
 or not https; 5 refused by the server, or the operation failed; 6 the server
 unreachable or unreadable, or an outcome that could not be determined; 7
@@ -75,7 +82,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from agentic_postgres import control_client as cc  # noqa: E402
-from agentic_postgres import scram  # noqa: E402
+from agentic_postgres import plans, scram  # noqa: E402
 from agentic_postgres.control_client import ClientError  # noqa: E402
 
 ROLES = ("owner", "admin", "member", "viewer")
@@ -797,6 +804,24 @@ def project_backups(arguments: argparse.Namespace) -> int:
     raise ClientError(cc.EXIT_UNREACHABLE, "the backups reading answered in an unreadable shape")
 
 
+#: `--minutes` -> the request's value: 15, 30 or 60 minutes of quiet, or never
+#: (ADR 0276; the request's schema validates them too).
+IDLE_MINUTES = {"15": 15, "30": 30, "60": 60, "never": None}
+
+
+def project_idle_sleep(arguments: argparse.Namespace) -> int:
+    """The setting, and -- in the server's own sentence -- what sleeping does
+    to the project's backups (D2534)."""
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    minutes = IDLE_MINUTES[arguments.minutes]
+    answer = current.call("PUT", f"/projects/{key}/idle-sleep", {"minutes": minutes})
+    shown = (f"{key}: idle sleep after {minutes} minutes of quiet" if minutes is not None
+             else f"{key}: idle sleep is off")  # fmt: skip
+    emit(answer, arguments.json, [shown, f"  {answer.get('note') or ''}".rstrip()])
+    return cc.EXIT_OK
+
+
 # ---------------------------------------------------------------------------
 # compute
 # ---------------------------------------------------------------------------
@@ -1264,6 +1289,147 @@ def branch_show(arguments: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# plan, usage, notifications (Session 41, ADR 0274, ADR 0275)
+# ---------------------------------------------------------------------------
+
+#: The plans a person may ask to be told about: every plan the release table
+#: does not make active (`plans.PLANS`, ADR 0274).
+INTEREST_PLANS = tuple(name for name in plans.PLAN_NAMES if plans.PLANS[name].status != "active")
+
+
+def _entitlement_rows(document: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for entitlement in document["entitlements"]:
+        value = entitlement["value"]
+        rows.append({
+            "name": entitlement["name"],
+            "value": ",".join(value) if isinstance(value, list) else
+                     ("not recorded" if value is None else value),
+            "unit": entitlement.get("unit"),
+            "enforced": "enforced" if entitlement["enforced"] else "shown, not enforced",
+            "reader": entitlement.get("reader"),
+        })  # fmt: skip
+    return rows
+
+
+ENTITLEMENT_COLUMNS = ("name", "value", "unit", "enforced", "reader")
+
+
+def _plan_lines(document: dict[str, Any]) -> list[str]:
+    return [f"{document['plan']} ({document['status']})",
+            *table(_entitlement_rows(document), ENTITLEMENT_COLUMNS)]  # fmt: skip
+
+
+def plan_list(arguments: argparse.Namespace) -> int:
+    served = session().call("GET", "/plans")
+    lines = [line for document in served["plans"] for line in _plan_lines(document)]
+    emit(served, arguments.json, [*lines, served["note"]])
+    return cc.EXIT_OK
+
+
+def plan_show(arguments: argparse.Namespace) -> int:
+    current = session()
+    org = current_organization(current, arguments.organization)
+    served = current.call("GET", f"/organizations/{org}/plan")
+    held = served["projects_active"]
+    lines = [
+        f"organisation {org}: plan {served['plan']} ({served['status']})",
+        f"  projects held {held['held']} of {held['limit']} (a sleeping project holds its slot)",
+        *table(_entitlement_rows(served), ENTITLEMENT_COLUMNS),
+        f"  told about: {', '.join(served['interest']) or 'none asked'}",
+        served["note"],
+    ]
+    emit(served, arguments.json, lines)
+    return cc.EXIT_OK
+
+
+def plan_notify_me(arguments: argparse.Namespace) -> int:
+    current = person_session()
+    org = current_organization(current, arguments.organization)
+    served = current.call("POST", f"/organizations/{org}/plan-interest", {"plan": arguments.plan})
+    said = "recorded" if served["recorded"] else "already recorded; nothing changed"
+    emit(served, arguments.json, [f"{arguments.plan} for organisation {org}: {said}",
+                                  f"  {served['note']}"])  # fmt: skip
+    return cc.EXIT_OK
+
+
+#: The gauges a sample reads, in the order printed (ADR 0275).
+USAGE_FIGURES = (
+    "database_bytes", "repository_bytes", "branch_count", "branch_bytes", "customer_connections",
+)  # fmt: skip
+NOT_READ = "not read in this window"
+
+
+def _usage_lines(document: dict[str, Any]) -> list[str]:
+    """One project's usage as printed: each figure read or said not read -- a
+    NULL is never a zero (ADR 0195)."""
+    key = document.get("project_key")
+    if document.get("status") == "could_not_determine":
+        return [f"{key}: usage could not be determined: {document.get('reason')}"]
+    window, samples = document["window"], document["samples"]
+    lines = [
+        f"{key}: usage from {window['from']} to {window['to']} (plan {document.get('plan')})",
+        f"  {'samples':<21}  {samples['present']} recorded of {samples['expected']} expected",
+    ]
+    figures = document.get("figures") or {}
+    for name in USAGE_FIGURES:
+        figure = figures.get(name) or {}
+        if figure.get("latest") is None:
+            text = NOT_READ
+        else:
+            text = f"{figure['latest']} at {figure['latest_at']}, window maximum {figure['max']}"
+        if figure.get("unread_samples"):
+            text += f"; not read in {figure['unread_samples']} sample(s)"
+        lines.append(f"  {name:<21}  {text}")
+    requests = document.get("requests")
+    counted = NOT_READ
+    if requests is not None:
+        counted = (f"{requests['increase']} answered below 400 "
+                   f"({requests['resets']} counter reset(s))")  # fmt: skip
+    lines.append(f"  {'requests':<21}  {counted}")
+    for name in ("agent_calls", "workflow_runs"):
+        value = document.get(name)
+        lines.append(f"  {name:<21}  " + (NOT_READ if value is None else
+                     f"{value}, summed over the samples that counted them"))  # fmt: skip
+    lines.append(f"  {'active / asleep':<21}  {document.get('active_seconds')} s / "
+                 f"{document.get('sleeping_seconds')} s")  # fmt: skip
+    for limit in document.get("entitlements") or []:
+        enforced = "enforced" if limit["enforced"] else "shown, not enforced during the beta"
+        lines.append(f"  {limit['name']:<21}  {limit['value']} against {limit['against']} "
+                     f"({enforced})")  # fmt: skip
+    return lines
+
+
+def usage_show(arguments: argparse.Namespace) -> int:
+    """Exit 6 when any project's usage could not be determined: a report may
+    not fold the third outcome into the other two (ADR 0195)."""
+    current = session()
+    if arguments.organization is not None:
+        org = organization_id(arguments.organization)
+        served = current.call("GET", f"/organizations/{org}/usage?hours={arguments.hours}")
+        documents = served["projects"]
+        lines = [line for document in documents for line in _usage_lines(document)]
+        emit(served, arguments.json, lines or [f"organisation {org}: no project in this window"])
+    else:
+        key = _project_key(current, arguments.project_key)
+        served = current.call("GET", f"/projects/{key}/usage?hours={arguments.hours}")
+        documents = [served]
+        emit(served, arguments.json, _usage_lines(served))
+    if any(document.get("status") == "could_not_determine" for document in documents):
+        return cc.EXIT_UNREACHABLE
+    return cc.EXIT_OK
+
+
+def notifications_list(arguments: argparse.Namespace) -> int:
+    current = session()
+    org = current_organization(current, arguments.organization)
+    served = current.call("GET", f"/organizations/{org}/notifications?limit={arguments.limit}")
+    rows = served["notifications"]
+    emit(served, arguments.json, table(rows, ("created_at", "project", "kind", "text")))
+    return cc.EXIT_OK
+
+
+# ---------------------------------------------------------------------------
 # The parser
 # ---------------------------------------------------------------------------
 
@@ -1394,6 +1560,11 @@ def parser() -> argparse.ArgumentParser:
     verb.set_defaults(run=project_backups)
     verb.add_argument("--project-key")
     verb.add_argument("--json", action="store_true")
+    verb = project.add_parser("idle-sleep", add_help=False)
+    verb.set_defaults(run=project_idle_sleep)
+    verb.add_argument("--project-key")
+    verb.add_argument("--minutes", required=True, choices=tuple(IDLE_MINUTES))
+    verb.add_argument("--json", action="store_true")
 
     compute = _verbs(families.add_parser("compute", add_help=False))
     verb = compute.add_parser("get", add_help=False)
@@ -1469,6 +1640,36 @@ def parser() -> argparse.ArgumentParser:
     verb.add_argument("--project-key")
     verb.add_argument("--branch", required=True)
     verb.add_argument("--json", action="store_true")
+
+    plan = _verbs(families.add_parser("plan", add_help=False))
+    verb = plan.add_parser("list", add_help=False)
+    verb.set_defaults(run=plan_list)
+    verb.add_argument("--json", action="store_true")
+    verb = plan.add_parser("show", add_help=False)
+    verb.set_defaults(run=plan_show)
+    verb.add_argument("--organization")
+    verb.add_argument("--json", action="store_true")
+    verb = plan.add_parser("notify-me", add_help=False)
+    verb.set_defaults(run=plan_notify_me)
+    verb.add_argument("--organization")
+    verb.add_argument("--plan", choices=INTEREST_PLANS, default=INTEREST_PLANS[0])
+    verb.add_argument("--json", action="store_true")
+
+    usage = _verbs(families.add_parser("usage", add_help=False))
+    verb = usage.add_parser("show", add_help=False)
+    verb.set_defaults(run=usage_show)
+    whose = verb.add_mutually_exclusive_group()
+    whose.add_argument("--project-key")
+    whose.add_argument("--organization")
+    verb.add_argument("--hours", type=_at_most(720), default=24)
+    verb.add_argument("--json", action="store_true")
+
+    notifications = _verbs(families.add_parser("notifications", add_help=False))
+    verb = notifications.add_parser("list", add_help=False)
+    verb.set_defaults(run=notifications_list)
+    verb.add_argument("--organization")
+    verb.add_argument("--limit", type=_at_most(200), default=50)
+    verb.add_argument("--json", action="store_true")
     return top
 
 
@@ -1477,6 +1678,19 @@ def _seconds(text: str) -> int:
     if value < 1:
         raise argparse.ArgumentTypeError("at least 1")
     return value
+
+
+def _at_most(maximum: int) -> Any:
+    """1 to `maximum`, the route's own bound, refused here before anything is
+    sent (`/v1`'s `hours` 720, `limit` 200)."""
+
+    def bounded(text: str) -> int:
+        value = _seconds(text)
+        if value > maximum:
+            raise argparse.ArgumentTypeError(f"at most {maximum}")
+        return value
+
+    return bounded
 
 
 def _waiting(verb: argparse.ArgumentParser) -> None:

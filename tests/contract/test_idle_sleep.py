@@ -21,6 +21,8 @@ from typing import Any
 import control_cluster as cc
 import pytest
 
+from app import operations
+
 pytestmark = [pytest.mark.contract, pytest.mark.database, pytest.mark.security, pytest.mark.p0]
 
 QUIET = (840, 540, 240, 10)  # seconds ago: a full 15-minute window at 300 s
@@ -272,7 +274,17 @@ def test_no_role_but_the_reconciler_requests_an_idle_sleep(cluster: cc.ControlCl
 # ---------------------------------------------------------------------------
 
 
-def test_the_setting_route_says_what_sleeping_does_to_backups(drive: Any) -> None:
+@pytest.fixture
+def accepting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sleep an idle request inserts accepted, for this proof only: the
+    control mode runs in this process, so the module the route reads is the
+    one patched (D2548)."""
+    monkeypatch.setattr(
+        operations, "ACCEPTED_TYPES", operations.ACCEPTED_TYPES | {operations.IDLE_SLEEP_TYPE}
+    )
+
+
+def test_the_setting_route_says_what_sleeping_does_to_backups(drive: Any, accepting: None) -> None:
     """`PUT /v1/projects/{key}/idle-sleep`: a member sets 15 and the answer says
     the backups stop while it sleeps (D2534); null turns it off; 5 minutes is
     refused; a viewer is refused; the setting names the member who set it."""
@@ -293,3 +305,28 @@ def test_the_setting_route_says_what_sleeping_does_to_backups(drive: Any) -> Non
                       body={"minutes": 30}).status_code == 403  # fmt: skip
     off = drive.call("PUT", path, token=member, body={"minutes": None})
     assert (off.status_code, off.json()["idle_sleep_minutes"]) == (200, None)
+
+
+def test_the_setting_is_not_offered_while_the_sleep_is_not_accepted(drive: Any) -> None:
+    """D2548 (ADR 0247, ADR 0254): a setting is not an operation, so
+    `require_accepted` never sees it -- and an idle project would otherwise be
+    slept by a type the Ledger refuses a person. With the release's own
+    `ACCEPTED_TYPES` the route answers `409 not_available` naming `idle_sleep`,
+    for 15 minutes and for never alike, and nothing is stored. The control:
+    the same member reads the project (`200`), so the refusal is the gate's."""
+    assert operations.IDLE_SLEEP_TYPE not in operations.ACCEPTED_TYPES
+    people = _people(drive, "offered")
+    key, member = people["project"], people["tokens"]["member"]
+    for minutes in (15, None):
+        refused = drive.call("PUT", f"/v1/projects/{key}/idle-sleep", token=member,
+                             body={"minutes": minutes})  # fmt: skip
+        assert refused.status_code == 409, refused.text
+        assert (refused.json()["error"], refused.json()["ledger_row"]) == (
+            "not_available",
+            operations.IDLE_SLEEP_ROW,
+        ), refused.text
+    assert drive.cluster.query(
+        "SELECT coalesce(idle_sleep_minutes::text, 'never') FROM app.control_projects "
+        f"WHERE key = '{key}'"
+    ) == ["never"]
+    assert drive.call("GET", f"/v1/projects/{key}", token=member).status_code == 200

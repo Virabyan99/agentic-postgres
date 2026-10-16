@@ -1384,17 +1384,19 @@ async def get_project_usage(request: Request, key: str) -> Response:
             "connection by the project's own database roles for the whole window, read from "
             "the samples; a sample missing or unread keeps the project awake. While it "
             "sleeps, its backups stop: its last restore point is the moment it went to sleep. "
-            "Wake it by request."
+            "Wake it by request. Refused `not_available` naming `idle_sleep` while the sleep "
+            "it would request is not offered."
         ),
         request_model=IdleSleepRequest,
     ),
     responses={200: openapi_docs.ok("The setting, and what sleeping does to backups."),
                400: openapi_docs.MALFORMED, 401: openapi_docs.UNAUTHENTICATED,
-               403: FACTOR_GATE, 404: NOT_YOURS},
+               403: FACTOR_GATE, 404: NOT_YOURS, 409: NOT_OFFERED},
 )  # fmt: skip
 async def set_idle_sleep(request: Request, key: str) -> Response:
     async def run() -> Response:
         caller = await _caller(request)
+        ControlService.require_idle_sleep_offered()
         payload = await _body(request, IdleSleepRequest)
         assert isinstance(payload, IdleSleepRequest)
         return JSONResponse(await _service(request).set_idle_sleep(caller, key, payload.minutes))

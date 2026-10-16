@@ -115,7 +115,7 @@ there is no `forget` verb.
 
 ## The commands
 
-All five keep their state in `${XDG_CONFIG_HOME:-$HOME/.config}/apg/` -- a
+Every one of them keeps its state in `${XDG_CONFIG_HOME:-$HOME/.config}/apg/` -- a
 0700 directory of 0600 files; a symlink, another owner's file or a wider mode
 is refused, never repaired. A secret enters only from a 0600 file whose mode is
 checked, or a terminal prompt, and leaves only to `--output FILE` or a
@@ -154,6 +154,7 @@ bin/project.sh wake [--project-key KEY] [--json]
 bin/project.sh export [--project-key KEY] --output FILE [--timeout S] [--interval S] [--json]
 bin/project.sh delete --project-key KEY --confirm KEY [--json]
 bin/project.sh backups [--project-key KEY] [--json]
+bin/project.sh idle-sleep [--project-key KEY] --minutes 15|30|60|never [--json]
 bin/compute.sh get [--project-key KEY] [--json]
 bin/compute.sh set [--project-key KEY] --profile small|standard|large [--json]
 bin/operation.sh show --operation ID [--json]
@@ -164,6 +165,11 @@ bin/branch.sh create [--project-key KEY] --branch NAME --password-dir DIR [--at 
 bin/branch.sh list|show [--project-key KEY] [--branch NAME] [--json]
 bin/branch.sh reset [--project-key KEY] --branch NAME --password-dir DIR [--at INSTANT] [--wait]
 bin/branch.sh delete [--project-key KEY] --branch NAME --confirm NAME [--wait]
+bin/plan.sh list [--json]
+bin/plan.sh show [--organization ID] [--json]
+bin/plan.sh notify-me [--organization ID] [--plan premium] [--json]
+bin/usage.sh show [--project-key KEY | --organization ID] [--hours N] [--json]
+bin/notifications.sh list [--organization ID] [--limit N] [--json]
 sudo bin/control.sh adopt --project KEY --organization ORG_ID --confirm CONTROL_KEY
 sudo bin/control.sh registry [--json]
 sudo bin/control.sh totp-reset --username NAME --confirm CONTROL_KEY
@@ -174,7 +180,10 @@ context, no credential, an unusable local file, or not https; 5 refused by the
 server (for `operation wait`, the operation failed); 6 the server could not be
 reached or read; 7 `operation wait` reached its own `--timeout` with the
 operation still running -- never read as an outcome. `project backups` exits
-6 when the window could not be determined.
+6 when the window could not be determined, and `usage show` when a project's
+usage could not be (no sample in the window). `bin/usage.sh` is the customer's;
+`sudo bin/doctor.sh usage --project KEY` is the operator's reading of the node
+and keeps that meaning (D2528).
 
 ## Project operations (1.16.0, 1.17.0)
 
@@ -208,7 +217,12 @@ in an organisation, is `409 conflict` naming the one in flight. **A creation
 with no ready slot** -- or a slot reading older than ten minutes -- is `409
 capacity_exhausted {reason: no_slot}` before anything is recorded; one the
 server has no room for fails `capacity_exhausted {reason: admission}` before
-anything is rendered. No code in 1.16.0 produces `plan_limit_reached`.
+anything is rendered. **The plan is read before the slot** (Session 41, ADR
+0274): an organisation already holding its plan's `projects_active` -- Free's
+one, a sleeping project included -- is `409 plan_limit_reached` with no row,
+under the organisation's own lock so two concurrent creations leave one; only
+an organisation within its plan is ever told `capacity_exhausted`. A branch
+past the plan's `branches_total` is `409 branch_limit_reached`, the same way.
 
 **Since Session 40's close only `credential.rotate` is accepted**: its row,
 `direct_endpoint`, is `beta` -- `endpoints_reearned_live` passed on the tagged
@@ -235,11 +249,40 @@ of a succeeded export carries `download_url`, valid at most 900 seconds; no
 later read, other reader or list carries it. `bin/project.sh export` fetches it
 once and never prints it.
 
+## Plans, usage and notifications (Session 41)
+
+ADR 0274-0276. Four reads, one person's write, and one setting; none records
+an operation.
+
+| Route | What | Who |
+|---|---|---|
+| `GET /v1/plans` | Both plans: each entitlement's value, whether it is enforced, and by which reader; the beta sentence | any account; a key with `organizations:read` |
+| `GET /v1/organizations/{organization}/plan` | The organisation's plan, its projects held against `projects_active`, the plans it asked about | viewer and above; a key with `organizations:read` |
+| `POST /v1/organizations/{organization}/plan-interest` | *Notify me* (`{"plan": "premium"}`): one row per organisation and plan, `recorded` true once | member and above, a person's session only |
+| `GET /v1/organizations/{organization}/usage?hours=N` | Every project's usage document, a deleted one for the part of the window it lived | viewer and above; a key with `projects:read` |
+| `GET /v1/projects/{key}/usage?hours=N` | One project's: samples expected and present, each figure's newest reading, the window's maximum and unread count, requests across resets, agent calls, workflow runs, active and sleeping seconds; `could_not_determine` with no sample | viewer and above; a key with `projects:read` |
+| `GET /v1/organizations/{organization}/notifications?limit=N` | Newest first: one per finished operation, and the daily 80% notice of a shown limit | viewer and above; a key with `organizations:read` |
+| `PUT /v1/projects/{key}/idle-sleep` | `{"minutes": 15 \| 30 \| 60 \| null}`; the answer says the backups stop while it sleeps | member and above; a key with `projects:write` |
+
+`hours` is 1 to 720 (default 24) and `limit` 1 to 200 (default 50); anything
+else is `422`. **No route writes a plan, a limit or a usage sample**: the plan
+is root's (an organisation is on Free), the limits are the release's
+(`app.control_plan_limits`, held equal to `plans.PLANS` by a test), and the
+samples are the reconciler's, through a function granted to nobody (D2533).
+
+**Idle sleep is offered only while sleeping is** (D2548): the setting answers
+`409 not_available` naming `idle_sleep` while `project.sleep` is not accepted,
+and the reconciler asks the control set for an idle sleep only then. With it
+on, `app.control_request_idle_sleep` inserts ONE `project.sleep` (`origin`
+`idle`, on behalf of the member who set the minutes) only over a window of
+samples all present, awake, read and quiet.
+
 ## What is not here
 
 - **No branch write reaches a management key** (D2468): each carries the
-  branch's own two verifiers, so it is a person's. **One branch per project**:
-  a second is `409 branch_limit_reached` before a row (D2430). A branch, a
+  branch's own two verifiers, so it is a person's. **One branch per project
+  on Free** (`branches_total`, ADR 0274): a second is `409
+  branch_limit_reached` before a row (D2430). A branch, a
   missing branch and a foreign project's branch are one `404 not_found`
   (D2451). While their Ledger rows are `planned` (since Session 40's close)
   the four branch writes answer `409 not_available` naming the row (ADR 0254).

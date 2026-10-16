@@ -108,6 +108,14 @@ BACKUP_RECORD_SECONDS: Final = 900
 #: is not the decision to accept it.
 ACCEPTED_TYPES: Final[frozenset[str]] = frozenset({"credential.rotate"})
 
+#: Idle sleep acts through the type a person's sleep uses (ADR 0276), so it is
+#: offered only while that type is accepted: the setting answers `not_available`
+#: naming the concept's own row, and the reconciler asks the control set for an
+#: idle sleep only then (D2548). `test_reality_ledger` holds the row reachable
+#: exactly when the type is accepted.
+IDLE_SLEEP_TYPE: Final = "project.sleep"
+IDLE_SLEEP_ROW: Final = "idle_sleep"
+
 #: The JSON Schema every operation's `{type, arguments}` validates against,
 #: relative to the repository: read by the reconciler before dispatch, and
 #: mirrored by `models.py`'s request models, which a test holds equal (D2154).

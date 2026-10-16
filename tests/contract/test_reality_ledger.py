@@ -261,3 +261,20 @@ def test_no_console_exists_yet() -> None:
         "services/console exists: Session 42's guard (every console control maps "
         "to a ledger row) must replace this assertion"
     )
+
+
+def test_the_idle_sleep_row_is_reachable_iff_its_sleep_is_accepted(ledger: dict) -> None:
+    """D2548: idle sleep is a setting whose effect is a `project.sleep`, so the
+    one check both of its doors make -- the type accepted -- is faithful to the
+    concept only while the `idle_sleep` row is reachable exactly when that type
+    is accepted. A row moved without the type, or the type accepted while the
+    row is planned, fails here."""
+    rows = {row["id"]: row for row in ledger["rows"]}
+    row = rows[operations.IDLE_SLEEP_ROW]
+    reachable = row["status"] in operations.ACCEPTING_STATUSES
+    accepted = operations.IDLE_SLEEP_TYPE in operations.ACCEPTED_TYPES
+    assert reachable == accepted, (
+        f"idle_sleep is {row['status']} and {operations.IDLE_SLEEP_TYPE} is "
+        f"{'accepted' if accepted else 'refused'}: one moved without the other"
+    )
+    assert operations.OPERATION_TYPES[operations.IDLE_SLEEP_TYPE] in rows

@@ -15,6 +15,12 @@ the operator's half -- slots, the reconciler, revocation -- is the
 later trip re-earns it. [The Reality Ledger](reality-ledger.md) says why for
 each.
 
+Since Session 41 (ADR 0274-0276) an organisation also has a **plan**, each
+project a **usage** record, the organisation **notifications**, and a project
+can be set to **sleep when idle**. Plans, usage and notifications are reads;
+idle sleep is offered only while sleeping is (`409 not_available` naming
+`idle_sleep` otherwise).
+
 ## The life of a project
 
 ```
@@ -30,6 +36,10 @@ bin/project.sh delete --project-key KEY --confirm KEY
 bin/project.sh backups --project-key KEY
 bin/branch.sh create --project-key KEY --branch dev --password-dir ~/branches --wait
 bin/branch.sh delete --project-key KEY --branch dev --confirm dev
+bin/plan.sh show
+bin/usage.sh show --project-key KEY
+bin/notifications.sh list
+bin/project.sh idle-sleep --project-key KEY --minutes 30
 ```
 
 Each write answers at once with an **operation** -- `pending`, then `running`
@@ -55,8 +65,11 @@ project's key is the slot's (`slot1-prod`); the name you give is a display
 name. **When no slot is ready the creation is refused `capacity_exhausted`
 (`no_slot`) before anything is recorded**, and when the server has no room for
 the profile you asked for it fails `capacity_exhausted` (`admission`) before
-anything is built. In this beta the server holds one slot, so a second
-creation is refused.
+anything is built. **Your plan is read first** (ADR 0274): Free holds one
+project per organisation -- a sleeping project holds its place -- so a second
+creation in the same organisation is refused `plan_limit_reached`, before the
+slot is read and before anything is recorded. An organisation within its plan
+is then told `capacity_exhausted` when the server has no slot for it.
 
 **The first administrator is yours alone** (ADR 0260). `create` writes a
 random token to `${XDG_CONFIG_HOME:-$HOME/.config}/apg/handoffs/` (0600) before
@@ -84,6 +97,28 @@ starts the same containers. **While a project sleeps, its addresses answer
 Waking takes as long as the project's services take to become healthy; the
 answer is the operation's, and the project is reachable when it reads
 `succeeded`.
+
+## Idle sleep
+
+```
+bin/project.sh idle-sleep --project-key KEY --minutes 15|30|60|never
+```
+
+Off unless you turn it on (ADR 0276). With it on, the server puts the project
+to sleep after that many minutes **idle**: no request answered below `400` and
+no connection by the project's own database roles (`customer_app`,
+`customer_admin`) for the whole window, read from the usage samples the server
+records every five minutes. **A sample missing or not read keeps the project
+awake** -- the server never guesses that a project is idle -- and so does a
+wake or any other operation inside the window. The sleep is recorded on behalf
+of the member who set the minutes, and its notification says it was idle.
+
+**While it sleeps, its backups stop: its last restore point is the moment it
+went to sleep.** It wakes only when someone asks (`bin/project.sh wake`); a
+connection does not wake it. `never` turns it off. A viewer cannot change the
+setting; a management key holding `projects:write` can. While sleeping itself
+is not offered (Reality Ledger `planned`), the setting answers `409
+not_available` naming `idle_sleep`, and nothing is stored.
 
 ## Changing the size
 
@@ -186,8 +221,17 @@ bin/branch.sh delete --project-key KEY --branch dev --confirm dev --wait
   names stay. Everything written to the branch since is lost.
 - **Expiry.** `--expires-in 2h` (15 minutes to 7 days; `15m`, `3d`) deletes the
   branch then, on behalf of the member who set it.
-- **One branch per project.** A second is refused `branch_limit_reached`
-  before anything is recorded: delete the first.
+- **One branch per project on Free** (the plan's `branches_total`). A second
+  is refused `branch_limit_reached` before anything is recorded: delete the
+  first.
+- **Ready, and its door.** `show` prints `door`: `ready` once both of the
+  branch's names answer through the server's edge with a certificate the
+  server's system trust store verifies; `pending` when the certificate was not yet
+  issued three minutes after the restore finished -- the branch is restored,
+  and its names answer once the certificate arrives; `unknown` for a branch
+  recorded before Session 41. `reason` names why the branch last failed or
+  stopped -- a restore that did not finish, a start refused because its image
+  changed -- and is empty otherwise.
 - **A branch is not backed up.** Deleting it, or losing the server, loses
   what it holds. Delete needs an admin or owner; `--confirm` is its name.
 
@@ -195,15 +239,83 @@ The branch operations were offered on the 1.18.0 trip (Reality Ledger
 `trial`, ADR 0261) and are `planned` again since Session 40's close: each
 answers `409 not_available` until a later trip re-earns it (D2501, D2504).
 
+## Plans
+
+```
+bin/plan.sh list
+bin/plan.sh show [--organization ID]
+bin/plan.sh notify-me [--organization ID]
+```
+
+**Every organisation is on Free during the beta** (ADR 0274). `list` prints
+both plans and each entitlement with whether the server **enforces** it or only
+**shows** it:
+
+| Entitlement | Free | Enforced |
+|---|---|---|
+| `projects_active` | 1 per organisation | yes -- `plan_limit_reached` before anything is recorded |
+| `branches_total` | 1 per project | yes -- `branch_limit_reached` before anything is recorded |
+| `compute_profiles` | `small`, `standard`, `large` | yes -- the request names one of them |
+| `storage_gb` | 5 | no -- shown against the database's size |
+| `agent_calls_per_day` | 10,000 | no -- shown against the agent calls counted |
+| `backup_retention` | two weekly full backups and the changes between them | yes -- by the project's own backup configuration |
+
+Premium is defined and `unavailable_during_beta`: `notify-me` records that
+your organisation asked, once however often you ask. Nothing is charged, and
+nothing moves an organisation onto it. `show` prints your plan, the projects
+you hold against `projects_active`, and the plans you asked about.
+
+## Usage
+
+```
+bin/usage.sh show [--project-key KEY | --organization ID] [--hours N]
+```
+
+The server records one **sample** of every project every five minutes (ADR
+0275). `show` reads the last `N` hours (1 to 720, default 24): how many
+samples were expected and how many were recorded; each figure's newest reading
+and the window's maximum -- the database's size, the backup repository's size,
+the branches and their size, the connections by your own roles; the requests
+answered below `400`, counted across counter resets; agent calls and workflow
+runs, counted from their own records; and the seconds active and asleep, from
+the project's history. The shown limits are printed beside the figures they
+are read against.
+
+- **A figure that could not be read is said** (*not read in this window*, and
+  in how many samples), **never printed as `0`**. A sleeping project's samples
+  read nothing and say it slept.
+- **A window with no sample** -- a project the server has not sampled yet --
+  could not be determined: the reason is printed and the command exits `6`.
+- Agent calls and workflow runs are summed over the samples that counted them.
+
+`usage` here is yours. `sudo bin/doctor.sh usage` is the operator's reading of
+how much of the server one project uses, on the host, and means something
+else.
+
+## Notifications
+
+```
+bin/notifications.sh list [--organization ID] [--limit N]
+```
+
+One notification for every finished operation -- its type, its project, how it
+ended (a failure's error code), and, when the server requested it, why (the
+branch expired; the project was idle, and its backups stop) -- and, at most
+once a day, a notice when a project passes 80% of a shown limit
+(`storage_gb`, `agent_calls_per_day`). Newest first, in the API only: nothing
+is mailed and there is no read state. A notification never carries a
+credential, an address or a result value.
+
 ## What a refusal means
 
 | Answer | Meaning |
 |---|---|
+| `409 plan_limit_reached` | The organisation already holds its plan's projects (Free: one); nothing was recorded |
 | `409 capacity_exhausted` (`no_slot`) | No slot is ready on this server; nothing was recorded |
 | failed `capacity_exhausted` (`admission`) | The server has no room for that profile; nothing changed |
 | `409 conflict` | Another operation on this project, or another creation in this organisation, is in flight |
-| `409 branch_limit_reached` | The project already has its one branch, or one is being created; nothing was recorded |
-| `409 not_available` | That kind of operation is not offered yet; the answer names the Reality Ledger row |
+| `409 branch_limit_reached` | The project already has its plan's branches (Free: one), or one is being created; nothing was recorded |
+| `409 not_available` | That kind of operation, or idle sleep, is not offered yet; the answer names the Reality Ledger row |
 | `403 human_session_required` | A management key asked for something only a signed-in person may do |
 | failed `invalid_request` | The request named something the operation cannot act on (a sleeping project's export, for instance) |
 | failed `operation_failed` / `interrupted` / `could_not_determine` | The server could not finish it; the operation names the step, and the operator reads why |

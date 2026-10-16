@@ -111,6 +111,11 @@ SHELL_COMMANDS = (
     # Session 40 (ADR 0271, D2437): a customer's branches. Listed the run it
     # landed (D1014), `git add`ed first (D1188).
     "bin/branch.sh",
+    # Session 41 (ADR 0274, ADR 0275, D2528): a customer's plan, usage and
+    # notifications. Listed the run they landed (D1014), `git add`ed first.
+    "bin/plan.sh",
+    "bin/usage.sh",
+    "bin/notifications.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/db.sh",
@@ -557,6 +562,10 @@ COMMANDS_WITH_VERBS = {
     "bin/endpoint.sh",
     # Session 40: create, list, show, reset, delete -- verb-first.
     "bin/branch.sh",
+    # Session 41: list/show/notify-me, show, list -- verb-first.
+    "bin/plan.sh",
+    "bin/usage.sh",
+    "bin/notifications.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/dev.sh",
@@ -1334,3 +1343,42 @@ def test_the_operator_backup_and_restore_verbs_are_not_customer_verbs() -> None:
         text = (REPO_ROOT / "bin" / operator).read_text(encoding="utf-8")
         assert "cloud.py" not in text, operator
         assert re.search(r"\bsudo bin/" + re.escape(operator), text), operator
+
+
+def test_the_usage_verb_is_the_customers_and_the_reading_is_the_operators() -> None:
+    """D2528 (threat #7's confusion, D2437's lesson): `apg usage` is the
+    customer's -- `bin/usage.sh`, a shim into the customer CLI's `usage`
+    family, reading the management API with `--project-key`, no root. The
+    operator's reading of how much of the node one project uses keeps its own
+    name and meaning in both spellings: the verb `sudo bin/doctor.sh usage
+    --project KEY` and the flag it maps to, `bin/doctor.py --reading usage`;
+    neither reaches the customer CLI. `plan` and `notifications` are customer
+    commands too, and none of the three is named `backup` or `restore`.
+    Control: `apg usage --help` IS `bin/usage.sh --help` (the dispatcher
+    resolves by construction), and the doctor's help documents the verb."""
+    bin_dir = REPO_ROOT / "bin"
+    for name, family in (("usage.sh", "usage"), ("plan.sh", "plan"),
+                         ("notifications.sh", "notifications")):  # fmt: skip
+        text = (bin_dir / name).read_text(encoding="utf-8")
+        assert f'bin/cloud.py" {family} "$@"' in text, name
+        assert "sudo bin/" + name not in text, name
+        assert not {"backup", "restore"} & set(verbs_documented_by(f"bin/{name}", text)), name
+    customer = run(str(bin_dir / "usage.sh"), "--help")
+    assert customer.returncode == 0
+    assert run(str(bin_dir / "apg.sh"), "usage", "--help").stdout == customer.stdout
+    assert verbs_documented_by("bin/usage.sh", customer.stdout) == ("show",)
+    assert "--project-key KEY" in customer.stdout
+    assert not re.search(r"--project[ \t]+(FILE|KEY)", customer.stdout), customer.stdout
+    # The header names the operator's command, so a reader finds the other one.
+    assert "sudo bin/doctor.sh usage --project KEY" in (bin_dir / "usage.sh").read_text()
+
+    doctor = (bin_dir / "doctor.sh").read_text(encoding="utf-8")
+    operator = run(str(bin_dir / "doctor.sh"), "--help")
+    assert operator.returncode == 0
+    assert re.search(r"sudo bin/doctor\.sh usage --project", operator.stdout), operator.stdout
+    assert "capacity|usage) reading=" in doctor
+    assert 'bin/doctor.py" --reading "${verb}"' in doctor
+    assert "cloud.py" not in doctor
+    python = (bin_dir / "doctor.py").read_text(encoding="utf-8")
+    assert re.search(r'"--reading", choices=\([^)]*"usage"', python)
+    assert "cloud.py" not in python

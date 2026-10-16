@@ -118,7 +118,9 @@ and **dropped by `sudo`** unless `--preserve-env=APG_PROJECT` is passed.
   `/usr/local/bin/apg-diag` is installed by hand, so a release that changes the
   script changes the host only when it is re-installed. What the `auth` log
   holds is uvicorn's lines and every warning: the per-request line is not
-  printed (D1918).
+  printed (D1918). Since Session 41 `containers` lists every branch too, each
+  under `-- <key>_<branch> (branch)`, its compose project read from the
+  branch's own `branch.env` (D2514) -- re-install the copy to see them.
 
 **Transport is `git bundle` + `scp` under a name derived from the commit**
 (D504), never a GitHub credential on the host. The sequence is
@@ -1999,6 +2001,35 @@ is dirty** (D2179) -- move the checkout only with the unit stopped. An
 operation a crash interrupted is finished `failed interrupted` when the unit
 starts again, **never resumed**; an interrupted creation quarantines its slot.
 
+**Since Session 41 it also samples every deployed slot every 300 s** (ADR
+0275): the database's and the repository's size, the branches, the customer
+roles' connections, the requests answered below 400, agent calls and workflow
+runs -- each figure read through the project's own containers the way `doctor
+usage` reads it, or recorded as not read with the reason. It never asks the
+per-process agent series. After each sample it asks the control set whether
+an AWAKE slot has been idle for its customer's minutes, **and only while the
+release accepts `project.sleep`** (D2548), then writes the daily 80% notices of
+Free's shown limits. An idle sleep is an ordinary `project.sleep` with `origin`
+`idle`, requested on behalf of the member who set the minutes.
+
+### Who asked for Premium
+
+*Notify me* writes one row per organisation and plan to the control project's
+`app.control_plan_interest`; no route lists them across organisations and no
+command of this product reads them. Read them as root, through the control
+project's database container, with the names derived from its deployed
+document -- never typed:
+
+```bash
+DOC=/etc/agentic-postgres/projects/control-prod/outputs.json
+sudo docker exec -i "$(sudo jq -r '.database.container' "$DOC")" \
+  psql -U postgres -d "$(sudo jq -r '.database.name' "$DOC")" -X -c \
+  "SELECT o.name, i.plan, i.requested_at FROM app.control_plan_interest i JOIN app.control_organizations o ON o.id = i.organization_id ORDER BY i.requested_at"
+```
+
+It is a read. Nothing moves an organisation onto a plan: `plan` on
+`app.control_organizations` is root's to change, and the beta changes none.
+
 **The rule that keeps an operator and the reconciler apart is a rule, not a
 lock** (D2178). Before any sheet that deploys, retires, restores or reboots:
 
@@ -2209,7 +2240,22 @@ sudo bin/branch-runtime.sh status            # every branch: its point, its time
 
 **A reboot**: a branch has no unit of its own. The reconciler's start runs
 `branch-runtime.sh start --all`; a branch that does not come back is recorded
-`stopped`, and the customer reads that state.
+`stopped` with its `reason`, and the customer reads both. Since Session 41
+(D2504's repair) each start resolves the branch's image from the tag and
+content digest its record holds -- never an image id a rebuild orphaned -- and
+refuses, with the reason, when that content changed. **The start's whole
+output is kept** in `/var/log/agentic-postgres/reconciler/branch-start-<UTC>.log`
+(0600); the journal holds its last line and the log's path:
+
+```bash
+sudo journalctl -u agentic-postgres-reconciler.service | grep -E 'branches started|did not come back'
+sudo ls -t /var/log/agentic-postgres/reconciler/ | grep '^branch-start-' | head -1
+ssh -i ~/.ssh/apg_agent_ed25519 apg-agent@<host> sudo apg-diag containers   # a branch's containers, under (branch)
+```
+
+A branch is `ready` only once both of its names verify through the edge, or
+with `door: pending` and the reason three minutes after the restore finished
+(the certificate not yet issued; D2515).
 
 **A stuck branch** -- an operation interrupted part way leaves `creating` or
 `failed` in its record -- is removed by exactly what its names derive, with

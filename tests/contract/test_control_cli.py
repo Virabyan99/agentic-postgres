@@ -3,7 +3,9 @@
 CTL-CLI-001 (D2066), and Session 38's verbs (D2169, D2163): `project create|
 claim|status|sleep|wake|export|delete`, `compute get|set`, `operation
 show|list|wait|cancel`; Session 40's `branch create|list|show|reset|delete` and
-`project backups` (BR-CLI-001, D2449). The reconciler does not run here: its half -- an
+`project backups` (BR-CLI-001, D2449); Session 41's `plan list|show|notify-me`, `usage
+show`, `notifications list` and `project idle-sleep` (PLAN-CLI-001, D2528, D2534). The
+reconciler does not run here: its half -- an
 operation claimed and finished -- is written as the superuser, the way the
 reconciler writes it; the project's own `/auth/reset-password` and a provider's
 download URL are a loopback stand-in that records what reached it (`Elsewhere`).
@@ -45,7 +47,7 @@ import control_cluster as cc
 import pytest
 
 from agentic_postgres import REPO_ROOT, scram
-from app import operations
+from app import control_service, operations
 
 pytestmark = [pytest.mark.contract, pytest.mark.database, pytest.mark.security, pytest.mark.p0]
 
@@ -985,3 +987,128 @@ def test_at_sends_a_restore(person: Person, served: Any, accepting: None) -> Non
     backups = person.run("project", "backups", "--project-key", key)
     assert backups.returncode == 6, backups.stderr
     assert "could not be determined" in backups.stdout and "restorable" not in backups.stdout
+
+
+# ---------------------------------------------------------------------------
+# Session 41: plans, usage, notifications, idle sleep (ADR 0274-0276, D2528, D2534)
+# ---------------------------------------------------------------------------
+
+
+def _sample(drive: Any, key: str, **figures: Any) -> None:
+    """One usage sample, written as the reconciler writes it (D2533)."""
+    sample = {"project_key": key, "state": "active", **figures}
+    payload = json.dumps([sample]).replace("'", "''")
+    assert drive.cluster.query(f"SELECT app.control_record_usage('{payload}'::jsonb)") == ["1"]
+
+
+def test_plan_usage_and_notifications_dispatch_to_the_customer_cli(
+    person: Person, served: Any, accepting: None
+) -> None:
+    """PLAN-CLI-001: `plan list|show|notify-me`, `usage show` and `notifications
+    list` print what `/v1` serves. Interest is one record however often it is
+    asked; a project with no sample is exit 6 and never a zero; a figure not
+    read is said ("not read"), never printed as 0; a finished operation is a
+    notification. The bounds and the plan choice are refused before anything
+    is sent (exit 2). The control: the same project with a sample answers 0."""
+    _, drive = served
+    _, org = _member(served, "plan-member")
+    key = "slot8-prod"
+    _adopt(drive, org, key, "https://slot8.test/api/app")
+    assert person.login("plan-member").returncode == 0
+
+    listed = person.run("plan", "list", "--json")
+    assert listed.returncode == 0, listed.stderr
+    document = json.loads(listed.stdout)
+    assert [(p["plan"], p["status"]) for p in document["plans"]] == [
+        ("free", "active"), ("premium", "unavailable_during_beta")
+    ]  # fmt: skip
+    text = person.run("plan", "list")
+    assert text.returncode == 0 and "shown, not enforced" in text.stdout, text.stderr
+    assert document["note"] in text.stdout
+
+    shown = person.run("plan", "show", "--organization", org, "--json")
+    assert shown.returncode == 0, shown.stderr
+    plan = json.loads(shown.stdout)
+    assert (plan["plan"], plan["projects_active"]) == ("free", {"held": 1, "limit": 1})
+    assert plan["interest"] == []
+    first = person.run("plan", "notify-me", "--organization", org, "--json")
+    assert first.returncode == 0 and json.loads(first.stdout)["recorded"] is True, first.stderr
+    again = person.run("plan", "notify-me", "--organization", org)
+    assert again.returncode == 0 and "already recorded" in again.stdout, again.stderr
+    assert drive.cluster.query(
+        f"SELECT count(*) FROM app.control_plan_interest WHERE organization_id = '{org}'"
+    ) == ["1"]
+    told = person.run("plan", "show", "--organization", org)
+    assert "told about: premium" in told.stdout, told.stdout
+
+    unsampled = person.run("usage", "show", "--project-key", key)
+    assert unsampled.returncode == 6, unsampled.stderr
+    assert "could not be determined" in unsampled.stdout
+    _sample(drive, key, database_bytes=1048576, repository_bytes=None,
+            unread=["repository_bytes"], reason="the backup repository could not be read",
+            requests_counter=10, agent_calls=3, workflow_runs=0)  # fmt: skip
+    sampled = person.run("usage", "show", "--project-key", key)
+    assert sampled.returncode == 0, sampled.stderr
+    lines = {line.split()[0]: line for line in sampled.stdout.splitlines() if line.startswith("  ")}
+    assert lines["database_bytes"].split()[1] == "1048576", lines["database_bytes"]
+    # The reading itself is the sentence -- not a number with a note after it.
+    reading = lines["repository_bytes"].split(None, 1)[1]
+    assert reading == "not read in this window; not read in 1 sample(s)", reading
+    assert lines["agent_calls"].split()[1] == "3,", lines["agent_calls"]
+    assert "storage_gb" in lines and "not enforced" in lines["storage_gb"]
+    whole = person.run("usage", "show", "--organization", org, "--json")
+    assert whole.returncode == 0, whole.stderr
+    assert [p["project_key"] for p in json.loads(whole.stdout)["projects"]] == [key]
+
+    slept = person.run("project", "sleep", "--project-key", key, "--json")
+    assert slept.returncode == 0, slept.stderr
+    _finish(drive, json.loads(slept.stdout)["operation"]["id"], "succeeded", result={})
+    notified = person.run("notifications", "list", "--organization", org, "--json")
+    assert notified.returncode == 0, notified.stderr
+    rows = json.loads(notified.stdout)["notifications"]
+    assert [(r["project"], r["kind"]) for r in rows] == [(key, "operation_succeeded")], rows
+    printed = person.run("notifications", "list", "--organization", org)
+    assert f"project.sleep on {key} succeeded" in printed.stdout, printed.stdout
+
+    for refused in (("usage", "show", "--project-key", key, "--hours", "721"),
+                    ("notifications", "list", "--organization", org, "--limit", "0"),
+                    ("plan", "notify-me", "--organization", org, "--plan", "free")):  # fmt: skip
+        answer = person.run(*refused)
+        assert answer.returncode == 2, (refused, answer.stderr)
+
+
+def test_idle_sleep_names_the_backup_consequence(
+    person: Person, served: Any, accepting: None
+) -> None:
+    """D2534: `project idle-sleep` records the setting and prints, in the
+    server's own sentence, that a sleeping project's backups stop and its last
+    restore point is the moment it went to sleep. A value the route does not
+    take is refused before anything is sent; `never` turns it off. The
+    control: the sentence printed IS the route's (`IDLE_SLEEP_NOTE`)."""
+    _, drive = served
+    _, org = _member(served, "idle-member")
+    key = "slot9-prod"
+    _adopt(drive, org, key, "https://slot9.test/api/app")
+    assert person.login("idle-member").returncode == 0
+
+    def stored() -> list[str]:
+        return drive.cluster.query(
+            "SELECT coalesce(idle_sleep_minutes::text, 'never') FROM app.control_projects "
+            f"WHERE key = '{key}'"
+        )
+
+    assert stored() == ["never"]
+    set_ = person.run("project", "idle-sleep", "--project-key", key, "--minutes", "15")
+    assert set_.returncode == 0, set_.stderr
+    assert f"{key}: idle sleep after 15 minutes" in set_.stdout
+    sentence = "its backups stop: its last restore point is the moment it went to sleep"
+    assert sentence in set_.stdout.lower(), set_.stdout
+    assert control_service.IDLE_SLEEP_NOTE in set_.stdout
+    assert stored() == ["15"]
+    wrong = person.run("project", "idle-sleep", "--project-key", key, "--minutes", "5")
+    assert wrong.returncode == 2, wrong.stderr
+    assert stored() == ["15"]
+    off = person.run("project", "idle-sleep", "--project-key", key, "--minutes", "never", "--json")
+    assert off.returncode == 0, off.stderr
+    assert json.loads(off.stdout)["idle_sleep_minutes"] is None
+    assert stored() == ["never"]

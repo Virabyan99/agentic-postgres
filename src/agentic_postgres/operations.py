@@ -25,6 +25,8 @@ ACCEPTED_TYPES: frozenset[str] = _operations.ACCEPTED_TYPES
 EXECUTED_TYPES: frozenset[str] = _operations.EXECUTED_TYPES
 RESULT_MEMBERS: dict[str, frozenset[str]] = _operations.RESULT_MEMBERS
 ARGUMENT_SCHEMA_PATH: str = _operations.ARGUMENT_SCHEMA_PATH
+IDLE_SLEEP_TYPE: str = _operations.IDLE_SLEEP_TYPE
+IDLE_SLEEP_ROW: str = _operations.IDLE_SLEEP_ROW
 
 #: The ledger statuses under which a concept may be acted on (ADR 0247), with
 #: `trial` -- reachable while its evidence is collected -- since ADR 0261.
@@ -35,6 +37,8 @@ __all__ = [
     "ACCEPTING_STATUSES",
     "ARGUMENT_SCHEMA_PATH",
     "EXECUTED_TYPES",
+    "IDLE_SLEEP_ROW",
+    "IDLE_SLEEP_TYPE",
     "OPERATION_TYPES",
     "RESULT_MEMBERS",
     "accepted",

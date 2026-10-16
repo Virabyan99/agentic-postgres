@@ -1417,10 +1417,17 @@ def test_the_branch_start_keeps_its_output(host: Host, capsys: pytest.CaptureFix
     assert back and "door ready" in back[0], back
 
 
-def test_the_usage_pass_asks_only_for_awake_slots(host: Host) -> None:
+def test_the_usage_pass_asks_only_for_awake_slots(
+    host: Host, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """ADR 0275, ADR 0276: one sample per deployed slot to
     `control_record_usage`, then the idle request for the slot -- awake. Asleep
-    (its container reads `false`): sampled as sleeping, and NOT asked."""
+    (its container reads `false`): sampled as sleeping, and NOT asked. The
+    sleep an idle request inserts is accepted here, for this proof only (the
+    next proof is the release's own answer, D2548)."""
+    monkeypatch.setattr(
+        operations, "ACCEPTED_TYPES", operations.ACCEPTED_TYPES | {operations.IDLE_SLEEP_TYPE}
+    )
     host.children.deployed("small")
     reconciler = host.module.start()
     host.database.calls.clear()
@@ -1460,3 +1467,20 @@ def test_the_reconciler_asks_the_control_set_only_these() -> None:
         # Session 41 (ADR 0275, ADR 0276).
         "control_record_usage", "control_request_idle_sleep", "control_record_limit_notice",
     }, sorted(called)  # fmt: skip
+
+
+def test_no_idle_sleep_is_asked_for_while_the_sleep_is_not_accepted(host: Host) -> None:
+    """D2548: the control set's request function cannot read the Ledger, so
+    the reconciler is the door -- with the release's own `ACCEPTED_TYPES`,
+    which do not hold `project.sleep` while its row is `planned`, an AWAKE slot
+    is sampled and its notices are read, and no idle sleep is asked for. The
+    control: the sample itself is recorded, so the pass ran."""
+    assert operations.IDLE_SLEEP_TYPE not in operations.ACCEPTED_TYPES
+    host.children.deployed("small")
+    reconciler = host.module.start()
+    host.database.calls.clear()
+    reconciler.record_usage()
+    (recorded,) = host.database.named("control_record_usage")
+    (sample,) = json.loads(recorded["samples"])
+    assert (sample["project_key"], sample["state"]) == (KEY, "active")
+    assert host.database.named("control_request_idle_sleep") == []

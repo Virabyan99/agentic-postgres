@@ -654,6 +654,16 @@ class ControlService:
                 errors.NOT_AVAILABLE, ledger_row=operations.OPERATION_TYPES[operation_type]
             )
 
+    @staticmethod
+    def require_idle_sleep_offered() -> None:
+        """`not_available` naming `idle_sleep` while the sleep it would request
+        is not accepted (D2548) -- before the body is read, as
+        `require_accepted`. A setting is not an operation, so that gate never
+        sees it; without this one an idle project would be slept by a type the
+        Ledger refuses a person."""
+        if not operations.is_accepted(operations.IDLE_SLEEP_TYPE):
+            raise errors.ControlRefused(errors.NOT_AVAILABLE, ledger_row=operations.IDLE_SLEEP_ROW)
+
     async def create_project(
         self,
         caller: ControlPrincipal,

@@ -87,6 +87,7 @@ from agentic_postgres import (  # noqa: E402
     diagnosis,
     host_config,
     naming,
+    operations,
     plans,
     runtime_override,
     slot,
@@ -1226,8 +1227,11 @@ class Reconciler:
         each AWAKE slot -- the control set asked whether it is idle, then the
         shown limits' notices. A sleeping slot is sampled as sleeping and never
         asked: its last operation was a sleep, and the request is the control
-        set's to refuse, never this loop's to guess."""
+        set's to refuse, never this loop's to guess. **No slot is asked while
+        the release does not accept the sleep an idle request inserts** (D2548):
+        the control set's function cannot read the Ledger, so this is the door."""
         samples, awake, notices = [], [], []
+        offered = operations.IDLE_SLEEP_TYPE in operations.ACCEPTED_TYPES
         for entry in host_config.declared_slots(self.host):
             try:
                 document = _deployed(entry.key)
@@ -1242,7 +1246,8 @@ class Reconciler:
                 self.usage_since[entry.key] = since
             samples.append(sample)
             if sample["state"] == "active":
-                awake.append(entry.key)
+                if offered:
+                    awake.append(entry.key)
                 plan = plans.DEFAULT_PLAN
                 notices += [(entry.key, e) for e in dispatch.limit_notices(sample, today, plan)]
         if not samples:
