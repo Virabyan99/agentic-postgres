@@ -3,7 +3,7 @@
   "capability_contract_sha256": {
     "not_applicable": "the manifest declares no capabilities"
   },
-  "declared_at": "2026-10-16T14:29:01Z",
+  "declared_at": "2026-10-16T15:14:49Z",
   "declared_by": "claude-opus-5-5 Session 41 executor",
   "destructive": [
     {
@@ -73,7 +73,7 @@
     "exit": 0,
     "from_empty": true,
     "migrations_applied": 47,
-    "seconds": 12.2
+    "seconds": 12.1
   },
   "harness": {
     "not_applicable": "the manifest declares no capabilities"
@@ -126,7 +126,7 @@
       }
     ]
   },
-  "set_digest": "cbbb11755fa97f611a26ef10279df20981e548b405b7edbfe189e27b7b1dea2b",
+  "set_digest": "bba027211a3d2cb3547dffb718569ab8401a10df003107ae2d6f2dbabe972850",
   "surface": {
     "functions": [],
     "views": []
