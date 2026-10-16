@@ -203,6 +203,14 @@ RECORD_SLOTS_SQL = "SELECT app.control_record_slots(:'slots'::jsonb);"
 RECORD_BRANCHES_SQL = "SELECT app.control_record_branches(:'branches'::jsonb);"
 RECORD_BACKUPS_SQL = "SELECT app.control_record_backups(:'readings'::jsonb);"
 REQUEST_EXPIRY_SQL = "SELECT coalesce(app.control_request_expiry(:'key', :'branch')::text, '');"
+#: Session 41 (ADR 0275, ADR 0276, D2531): the three calls the closed set gains
+#: -- a usage sample per slot, an idle project's sleep, a shown limit's notice;
+#: each granted to nobody, each deciding in the control database.
+RECORD_USAGE_SQL = "SELECT app.control_record_usage(:'samples'::jsonb);"
+REQUEST_IDLE_SLEEP_SQL = "SELECT coalesce(app.control_request_idle_sleep(:'key')::text, '');"
+RECORD_LIMIT_NOTICE_SQL = (
+    "SELECT coalesce(app.control_record_limit_notice(:'key', :'entitlement')::text, '');"
+)
 ADOPT_SQL = (
     "SELECT app.control_adopt_project(:'key', :'organization'::uuid, :'slug', :'environment', "
     ":'domain', :'template_version', :'source_commit', nullif(:'region', ''), :'profile', "
@@ -586,6 +594,9 @@ def branch_reading(found: dict[str, Any], unreadable: dict[str, str]) -> list[di
                 "expires_at": record.expires_at,
                 "expires_for": record.expires_for,
                 "created_at": record.created_at,
+                # Session 41 (D2514, D2515; the control set's 0008 columns).
+                "reason": record.reason,
+                "door": record.door,
             }
         )
     for name in unreadable:
@@ -666,3 +677,79 @@ def backup_report_instant(value: str | None) -> str | None:
 
     parsed = restore_drill.instant(value)
     return parsed.isoformat() if parsed else None
+
+
+# ---------------------------------------------------------------------------
+# Usage samples (Session 41, ADR 0275) -- pure: the readings in, the sample out
+# ---------------------------------------------------------------------------
+
+#: Every figure a sample carries, in `app.control_usage_samples`' order.
+USAGE_FIGURES: tuple[str, ...] = (
+    "database_bytes",
+    "repository_bytes",
+    "branch_count",
+    "branch_bytes",
+    "customer_connections",
+    "requests_counter",
+    "agent_calls",
+    "workflow_runs",
+    "last_customer_activity",
+)
+
+#: Said for every figure of a sleeping project: its containers are stopped.
+SLEEPING_REASON = "the project sleeps"
+
+#: A shown limit passed at this fraction writes one notice a day (ADR 0275).
+LIMIT_NOTICE_FRACTION = 0.8
+
+
+def usage_sample(
+    key: str, *, sleeping: bool, readings: dict[str, tuple[Any, str]]
+) -> dict[str, Any]:
+    """One project's sample for `control_record_usage` (ADR 0275).
+
+    `readings` maps a figure to `(value, reason)`, as `usage_reading` returns
+    them. **A figure is unread when its value is None WITH a reason**: it is
+    then NULL and named in `unread` -- never a zero (ADR 0195). A None with NO
+    reason is a reading of "none present" (the customer roles' backends at
+    rest, Sheet E0, D2539): NULL and not unread. A figure absent from
+    `readings` is unread, named. A sleeping project's containers are stopped:
+    every figure unread, the reason said once.
+    """
+    if sleeping:
+        return {"project_key": key, "state": "sleeping",
+                **dict.fromkeys(USAGE_FIGURES), "unread": list(USAGE_FIGURES),
+                "reason": SLEEPING_REASON}  # fmt: skip
+    sample: dict[str, Any] = {"project_key": key, "state": "active"}
+    unread: list[str] = []
+    reasons: list[str] = []
+    for figure in USAGE_FIGURES:
+        value, reason = readings.get(figure, (None, "not read"))
+        sample[figure] = value
+        if value is None and reason:
+            unread.append(figure)
+            reasons.append(f"{figure}: {reason}")
+    sample["unread"] = unread
+    sample["reason"] = "; ".join(reasons)[:300] or None
+    return sample
+
+
+def limit_notices(sample: dict[str, Any], agent_calls_today: int | None, plan: str) -> list[str]:
+    """The shown, not-enforced entitlements a sample has passed 80% of (ADR
+    0275): `storage_gb` against the database's bytes, `agent_calls_per_day`
+    against the UTC day's agent calls. A figure not read passes nothing. The
+    control set writes at most one notice per entitlement a day."""
+    from agentic_postgres import plans
+
+    entitlements = plans.PLANS[plan].entitlements
+    passed: list[str] = []
+    storage = entitlements["storage_gb"].value
+    database = sample.get("database_bytes")
+    if isinstance(database, int) and isinstance(storage, int):
+        if database >= LIMIT_NOTICE_FRACTION * storage * 10**9:
+            passed.append("storage_gb")
+    calls = entitlements["agent_calls_per_day"].value
+    if isinstance(agent_calls_today, int) and isinstance(calls, int):
+        if agent_calls_today >= LIMIT_NOTICE_FRACTION * calls:
+            passed.append("agent_calls_per_day")
+    return passed

@@ -86,7 +86,11 @@ from agentic_postgres import (  # noqa: E402
     deployed_output,
     diagnosis,
     host_config,
+    naming,
+    plans,
+    runtime_override,
     slot,
+    usage_reading,
 )
 from agentic_postgres import reconciler_dispatch as dispatch  # noqa: E402
 from agentic_postgres.config import ManifestError  # noqa: E402
@@ -123,6 +127,13 @@ RECORD_SECONDS = 120
 #: (`backup.sh info --json` costs repository requests); the API serves one
 #: older than twice this as `could_not_determine`.
 BACKUP_RECORD_SECONDS = 900
+#: Session 41 (ADR 0275): each live slot's usage sample, this often; the
+#: control set's idle rule counts its window in samples of this interval
+#: (0008: `ceil(minutes * 60 / 300.0)`), and a test holds the two equal.
+USAGE_SAMPLE_SECONDS = 300
+#: A cached `backup.sh usage --json` older than this is not the repository's
+#: size: two backups passes (ADR 0273's interval).
+USAGE_BLOCK_MAX_AGE = 2 * BACKUP_RECORD_SECONDS
 
 #: How long `start` waits for the control database, and how often it asks
 #: (D2348). The unit orders on Docker and the edge, never on the control
@@ -1073,6 +1084,11 @@ class Reconciler:
         self.owner = owner
         self.baseline = baseline
         self.worker = f"{socket.gethostname()}:{os.getpid()}"
+        #: Session 41: each slot's newest `usage --json` block, from the backups
+        #: pass (its repository bytes), with the moment it was read.
+        self.usage_blocks: dict[str, tuple[float, dict[str, Any]]] = {}
+        #: Each slot's previous sample, as its own database printed `now()`.
+        self.usage_since: dict[str, str] = {}
 
     # -- files ----------------------------------------------------------------
 
@@ -1193,7 +1209,7 @@ class Reconciler:
                 document = _deployed(entry.key)
             except Refused:
                 continue
-            readings.append(backups_of(entry.key, document))
+            readings.append(backups_of(entry.key, document, usage_sink=self.usage_blocks))
         if not readings:
             return
         try:
@@ -1204,6 +1220,47 @@ class Reconciler:
         say(
             "backups " + ", ".join(f"{r['project_key']} {r['repository_status']}" for r in readings)
         )
+
+    def record_usage(self) -> None:
+        """ADR 0275, ADR 0276: one usage sample per deployed slot, then -- for
+        each AWAKE slot -- the control set asked whether it is idle, then the
+        shown limits' notices. A sleeping slot is sampled as sleeping and never
+        asked: its last operation was a sleep, and the request is the control
+        set's to refuse, never this loop's to guess."""
+        samples, awake, notices = [], [], []
+        for entry in host_config.declared_slots(self.host):
+            try:
+                document = _deployed(entry.key)
+            except Refused:
+                continue
+            block = self.usage_blocks.get(entry.key)
+            sample, since, today = usage_of(
+                entry.key, document, self.usage_since.get(entry.key),
+                block[1] if block and time.monotonic() - block[0] <= USAGE_BLOCK_MAX_AGE else None,
+            )  # fmt: skip
+            if since is not None:
+                self.usage_since[entry.key] = since
+            samples.append(sample)
+            if sample["state"] == "active":
+                awake.append(entry.key)
+                plan = plans.DEFAULT_PLAN
+                notices += [(entry.key, e) for e in dispatch.limit_notices(sample, today, plan)]
+        if not samples:
+            return
+        try:
+            self.control.call(dispatch.RECORD_USAGE_SQL, samples=json.dumps(samples))
+            for key in awake:
+                requested = self.control.call(dispatch.REQUEST_IDLE_SLEEP_SQL, key=key)
+                if requested:
+                    say(f"{key} was idle: the control set requested its sleep ({requested})")
+            for key, entitlement in notices:
+                self.control.call(
+                    dispatch.RECORD_LIMIT_NOTICE_SQL, key=key, entitlement=entitlement
+                )
+        except ControlError as error:
+            say(f"the usage pass was not recorded: {error}")
+            return
+        say("usage " + ", ".join(f"{s['project_key']} {s['state']}" for s in samples))
 
     def recover(self) -> int:
         """D2152: every operation still running was interrupted. Finished failed,
@@ -1320,7 +1377,9 @@ def _quiet(argv: list[str], timeout: int) -> subprocess.CompletedProcess | None:
         return None
 
 
-def backups_of(key: str, document: dict[str, Any]) -> dict[str, Any]:
+def backups_of(
+    key: str, document: dict[str, Any], *, usage_sink: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """One slot's reading: asleep when its database is stopped; otherwise
     `backup.sh info --json` (the repository's status), `backup.sh usage --json`
     (the window's oldest stop, D2540), the archiver query and the mirror's copy
@@ -1339,6 +1398,10 @@ def backups_of(key: str, document: dict[str, Any]) -> dict[str, Any]:
     # `problem` rather than folding into could-not-read (D2512).
     info = _json_of(_quiet([*backup, "info", "--json"], 300), backup_report.INFO_FAILING_EXIT)
     usage = _json_of(_quiet([*backup, "usage", "--json"], 300))
+    if usage is not None and usage_sink is not None:
+        # The usage sampler's repository bytes (ADR 0275): read here, once per
+        # backups pass, rather than a second repository read every 300 s.
+        usage_sink[key] = (time.monotonic(), usage)
     archiver = None
     read = container_exec.run(
         container, "psql", "-U", "postgres", "-d", name, "-X", "-qtA",
@@ -1362,6 +1425,82 @@ def _json_of(done: subprocess.CompletedProcess | None, *also: int) -> dict[str, 
     except ValueError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def usage_of(
+    key: str, document: dict[str, Any], since: str | None, usage_block: dict[str, Any] | None
+) -> tuple[dict[str, Any], str | None, int | None]:
+    """One slot's sample (ADR 0275), every figure read as `doctor usage` reads
+    it (`usage_reading`): `(sample, the database's now() as the next since,
+    the UTC day's agent calls)`. A figure that cannot be read is NULL, named."""
+    database = document.get("database") or {}
+    container, name = str(database.get("container", "")), str(database.get("name", ""))
+    running = _quiet(dispatch.running_argv(container), 60)
+    if running is not None and running.returncode == 0 and running.stdout.strip() == "false":
+        return dispatch.usage_sample(key, sleeping=True, readings={}), None, None
+    readings: dict[str, tuple[Any, str]] = {}
+    readings["database_bytes"] = usage_reading.cluster_int(
+        container, name, "SELECT pg_database_size(current_database())"
+    )
+    total = (usage_block or {}).get("repository_bytes")
+    readings["repository_bytes"] = (
+        (total, "") if isinstance(total, int)
+        else (None, "the repository's size was not read in the last two backups passes")
+    )  # fmt: skip
+    roles = naming.database_roles(naming.sql_key(key))
+    activity, why = usage_reading.cluster_fields(
+        container,
+        name,
+        usage_reading.activity_sql((roles["customer_app"], roles["customer_admin"])),
+    )
+    if activity is None or len(activity) != 2 or not activity[0].isdigit():
+        readings["customer_connections"] = (None, why or "the backends were not readable")
+        readings["last_customer_activity"] = (None, why or "the backends were not readable")
+    else:
+        readings["customer_connections"] = (int(activity[0]), "")
+        # Empty: no customer backend at all -- quiet, read (D2539).
+        readings["last_customer_activity"] = (activity[1] or None, "")
+    readings["requests_counter"] = usage_reading.store_value(
+        key, usage_reading.REQUESTS_BELOW_400_QUERY,
+        empty="the store holds no request answered below 400",
+    )  # fmt: skip
+    counts, why = usage_reading.cluster_fields(
+        container, name, usage_reading.durable_counts_sql(since)
+    )
+    today: int | None = None
+    next_since: str | None = None
+    if counts is None or len(counts) != 4:
+        readings["agent_calls"] = readings["workflow_runs"] = (None, why or "not readable")
+    else:
+        for figure, value in (("agent_calls", counts[0]), ("workflow_runs", counts[1])):
+            readings[figure] = (
+                (int(value), "") if value.isdigit()
+                else (None, "counted from the next sample (the first after a start)")
+            )  # fmt: skip
+        today = int(counts[2]) if counts[2].isdigit() else None
+        next_since = counts[3] if usage_reading.INSTANT.match(counts[3]) else None
+    readings.update(_branch_usage(key))
+    return dispatch.usage_sample(key, sleeping=False, readings=readings), next_since, today
+
+
+def _branch_usage(key: str) -> dict[str, tuple[Any, str]]:
+    """The project's branches: how many are recorded, and the bytes of their
+    data directories measured inside each branch's own database container."""
+    found, unreadable = branch_record.records(BRANCH_ROOT)
+    if any(name.startswith(f"{key}_") for name in unreadable):
+        why = "a branch record could not be read"
+        return {"branch_count": (None, why), "branch_bytes": (None, why)}
+    mine = [r for r in found.values() if r.project_key == key and r.state != "deleting"]
+    total = 0
+    for record in mine:
+        names = naming.branch_names(record.project_key, record.branch)
+        kilobytes, why = usage_reading.directory_kb(
+            names.postgres_container, runtime_override.POSTGRES_PGDATA
+        )
+        if kilobytes is None:
+            return {"branch_count": (len(mine), ""), "branch_bytes": (None, why)}
+        total += kilobytes * 1024
+    return {"branch_count": (len(mine), ""), "branch_bytes": (total, "")}
 
 
 def mirror_of(key: str, document: dict[str, Any]) -> Any:
@@ -1498,8 +1637,10 @@ def _logged(argv: list[str], timeout: int, log: Path) -> Logged:
 def run(*, once: bool) -> int:
     reconciler = start()
     recorded = time.monotonic()
-    # The first backups reading on the loop's first pass, then every interval.
+    # The first backups reading on the loop's first pass, then every interval;
+    # the first usage sample after it (its repository bytes come from it).
     backed = recorded - BACKUP_RECORD_SECONDS
+    sampled = recorded - USAGE_SAMPLE_SECONDS
     while True:
         try:
             worked = reconciler.cycle()
@@ -1517,6 +1658,9 @@ def run(*, once: bool) -> int:
         if time.monotonic() - backed >= BACKUP_RECORD_SECONDS:
             reconciler.record_backups()
             backed = time.monotonic()
+        if time.monotonic() - sampled >= USAGE_SAMPLE_SECONDS:
+            reconciler.record_usage()
+            sampled = time.monotonic()
         if not worked:
             time.sleep(POLL_SECONDS)
 

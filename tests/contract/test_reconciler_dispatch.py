@@ -1415,3 +1415,48 @@ def test_the_branch_start_keeps_its_output(host: Host, capsys: pytest.CaptureFix
     host.module.start()
     back = [entry for entry in capsys.readouterr().out.splitlines() if "branches started" in entry]
     assert back and "door ready" in back[0], back
+
+
+def test_the_usage_pass_asks_only_for_awake_slots(host: Host) -> None:
+    """ADR 0275, ADR 0276: one sample per deployed slot to
+    `control_record_usage`, then the idle request for the slot -- awake. Asleep
+    (its container reads `false`): sampled as sleeping, and NOT asked."""
+    host.children.deployed("small")
+    reconciler = host.module.start()
+    host.database.calls.clear()
+    reconciler.record_usage()
+    (recorded,) = host.database.named("control_record_usage")
+    (sample,) = json.loads(recorded["samples"])
+    assert (sample["project_key"], sample["state"]) == (KEY, "active")
+    assert host.database.named("control_request_idle_sleep") == [{"key": KEY}]
+
+    host.children.running = "false"
+    host.database.calls.clear()
+    reconciler.record_usage()
+    (recorded,) = host.database.named("control_record_usage")
+    (sample,) = json.loads(recorded["samples"])
+    assert (sample["state"], sample["reason"]) == ("sleeping", "the project sleeps")
+    assert host.database.named("control_request_idle_sleep") == []
+
+
+def test_the_reconciler_asks_the_control_set_only_these() -> None:
+    """D2531: the closed set of control functions the root actor calls, read
+    from every statement `reconciler_dispatch` holds -- it widens only by name.
+    Session 41 adds exactly three: the usage sample, an idle project's sleep,
+    a shown limit's notice."""
+    import re
+
+    called = {
+        name
+        for value in vars(reconciler_dispatch).values()
+        if isinstance(value, str)
+        for name in re.findall(r"app\.(control_[a-z_]+)\(", value)
+    }
+    assert called == {
+        "control_claim_operation", "control_advance_operation", "control_finish_operation",
+        "control_mark_deleted", "control_interrupted_operations", "control_record_slots",
+        "control_record_branches", "control_record_backups", "control_request_expiry",
+        "control_adopt_project",
+        # Session 41 (ADR 0275, ADR 0276).
+        "control_record_usage", "control_request_idle_sleep", "control_record_limit_notice",
+    }, sorted(called)  # fmt: skip

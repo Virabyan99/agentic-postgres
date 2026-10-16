@@ -29,7 +29,6 @@ import json
 import re
 import subprocess
 import sys
-import urllib.parse
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,7 +45,7 @@ from agentic_postgres import (
     capacity_probe,
     capacity_reading,
     config,
-    container_exec,
+    container_exec,  # noqa: F401 -- tests patch doctor.container_exec.run, usage_reading's
     deployed_output,
     diagnosis,
     fleet,
@@ -57,6 +56,7 @@ from agentic_postgres import (
     runtime_override,
     secret_age,
     secrets_contract,
+    usage_reading,
 )
 
 EXIT_INPUT = 2
@@ -962,65 +962,7 @@ STORE_EMPTY_REASONS = {
 }
 
 
-def probe_store(
-    project_key: str, query: str, *, empty: str = "the store holds no such series yet"
-) -> tuple[int | None, str]:
-    """One instant query against THIS project's store. `(value, reason)`.
-
-    **Read through the container, because the store is routed nowhere** (ADR
-    0168). It sits on `edge` only and publishes no port, so the only way in is
-    its own network namespace -- which is exactly how the Session 14 proof
-    already reads it, and the product's path is created from the proof's here
-    rather than the other way round (D1582, D1114).
-
-    The container name is DERIVED from the project key and the service
-    constant, never assembled from a document field (ADR 0002).
-
-    **Every series that comes back must name the project that was asked
-    about.** The collector labels each one with `project` (ADR 0223), so a
-    reply carrying another project's label means this reading reached the
-    wrong store -- question 3 of the handoff's §7 -- and that is `unknown`
-    with a reason rather than a number.
-    """
-    container = f"apg-{project_key}-{runtime_override.STORE_SERVICE}-1"
-    url = (
-        f"http://127.0.0.1:{runtime_override.STORE_PORT}/api/v1/query"
-        f"?query={urllib.parse.quote(query)}"
-    )
-    try:
-        answered = container_exec.run(
-            container, "wget", "-q", "-Y", "off", "-O", "-", url, timeout=20
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None, "the store could not be reached in its own container"
-    if answered.returncode != 0:
-        return None, "the store did not answer the query"
-
-    try:
-        payload = json.loads(answered.stdout)
-    except ValueError:
-        return None, "the store's answer was not JSON"
-    if payload.get("status") != "success":
-        return None, "the store reported the query unsuccessful"
-
-    results = ((payload.get("data") or {}).get("result")) or []
-    if not results:
-        # Truthfully zero is NOT this case: a `sum()` over no series returns
-        # an empty result, and so does a query for a metric that has never
-        # existed. The two are indistinguishable from here, so the honest
-        # answer is that nothing was measured. The sentence is the figure's
-        # own (`STORE_EMPTY_REASONS`, D1712).
-        return None, empty
-
-    for series in results:
-        labelled = (series.get("metric") or {}).get("project")
-        if labelled is not None and labelled != project_key:
-            return None, "the store answered for another project"
-
-    try:
-        return int(float(results[0]["value"][1])), ""
-    except (KeyError, IndexError, TypeError, ValueError):
-        return None, "the store's answer did not carry a number"
+probe_store = usage_reading.store_value
 
 
 def _figure(value: int | None, reason: str) -> capacity_reading.Figure:
@@ -1029,53 +971,13 @@ def _figure(value: int | None, reason: str) -> capacity_reading.Figure:
     return capacity_reading.Figure.measured(value)
 
 
-def _cluster_int(container: str, database: str, statement: str) -> tuple[int | None, str]:
-    """One `psql` round trip returning one integer, parsed before it is used.
-
-    Parsed into a value BEFORE any `diagnosis.*` call, never inside one: `int`
-    could not leak text either way, but *no `.stdout` appears in a
-    `diagnosis.*` call* is a rule a scan can check and a reader can apply
-    without judgement (ADR 0159).
-    """
-    try:
-        answered = container_exec.run(
-            container,
-            "psql",
-            "-U",
-            "postgres",
-            "-d",
-            database,
-            "-X",
-            "-qtA",
-            "-c",
-            statement,
-            timeout=20,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None, "the cluster could not be reached"
-    if answered.returncode != 0:
-        return None, "the cluster did not answer"
-    try:
-        return int(answered.stdout.strip()), ""
-    except ValueError:
-        return None, "the cluster's answer was not an integer"
+#: Session 41 (ADR 0275, D979): the container reads `doctor usage` and the
+#: reconciler's usage sampler share live in `usage_reading`; these names stay
+#: so every reader here is unchanged.
+_cluster_int = usage_reading.cluster_int
 
 
-def _directory_kb(container: str, path: str) -> tuple[int | None, str]:
-    """`du -sk` inside the cluster's own container."""
-    try:
-        answered = container_exec.run(container, "du", "-sk", path, user="postgres", timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return None, f"{path} could not be measured in the container"
-    if answered.returncode != 0:
-        return None, f"du reported no size for {path}"
-    head = answered.stdout.strip().split()
-    if not head:
-        return None, f"du printed nothing for {path}"
-    try:
-        return int(head[0]), ""
-    except ValueError:
-        return None, f"du's first field for {path} was not an integer"
+_directory_kb = usage_reading.directory_kb
 
 
 def probe_usage(
