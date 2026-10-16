@@ -729,6 +729,20 @@ class BranchLimitReachedResponse(BaseModel):
     error: Literal["branch_limit_reached"]
 
 
+class PlanInterestRequest(_Strict):
+    """`POST /v1/organizations/{organization}/plan-interest`: *Notify me* for a
+    plan unavailable during the beta (D2522)."""
+
+    plan: Literal["premium"]
+
+
+class IdleSleepRequest(_Strict):
+    """`PUT /v1/projects/{key}/idle-sleep`: minutes of quiet before the project
+    is put to sleep -- 15, 30 or 60 -- or null for never (ADR 0276)."""
+
+    minutes: Literal[15, 30, 60] | None
+
+
 class OperationAcceptedResponse(BaseModel):
     """`202`: the operation recorded, `pending`; follow it at `/v1/operations/{id}`."""
 

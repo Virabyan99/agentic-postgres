@@ -47,6 +47,7 @@ from app.models import (
     CreateProjectRequest,
     CreateRestoreRequest,
     FactorEnrolmentResponse,
+    IdleSleepRequest,
     InvitationResponse,
     KeyResponse,
     LogoutRequest,
@@ -54,6 +55,7 @@ from app.models import (
     MintKeyRequest,
     NotAvailableResponse,
     OperationAcceptedResponse,
+    PlanInterestRequest,
     RefreshRequest,
     ResetBranchRequest,
     ResizeProjectRequest,
@@ -747,8 +749,11 @@ async def _write(
     responses={202: ACCEPTED, 400: openapi_docs.MALFORMED, 401: openapi_docs.UNAUTHENTICATED,
                403: FACTOR_GATE, 404: NOT_A_MEMBER,
                409: {"model": CapacityExhaustedResponse,
-                     "description": "`capacity_exhausted` with `reason: no_slot`; or "
-                                    "`conflict` naming the creation in flight; or "
+                     "description": "`plan_limit_reached` (with `entitlement`, `limit`, `plan`, "
+                                    "`message`): the "
+                                    "organisation's plan allows no further project -- read "
+                                    "FIRST; then `capacity_exhausted` with `reason: no_slot`; "
+                                    "or `conflict` naming the creation in flight; or "
                                     "`not_available` naming the ledger row."}},
 )  # fmt: skip
 async def create_project(request: Request) -> Response:
@@ -1196,5 +1201,202 @@ async def cancel_operation(request: Request, operation: str) -> Response:
         caller = await _caller(request)
         cancelled = await _service(request).cancel_operation(caller, _uuid(operation))
         return JSONResponse({"operation": cancelled})
+
+    return await _guard(run)
+
+
+# ---------------------------------------------------------------------------
+# Session 41: plans, usage, notifications and idle sleep (ADR 0274-0276)
+# ---------------------------------------------------------------------------
+
+HOURS_QUERY = openapi_docs.query_parameter(
+    "hours",
+    schema={"type": "integer", "minimum": 1, "maximum": 720, "default": 24},
+    description="The window, in hours back from now: 1 to 720 (default 24).",
+)
+LIMIT_QUERY = openapi_docs.query_parameter(
+    "limit",
+    schema={"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+    description="How many, newest first: 1 to 200 (default 50).",
+)
+
+
+def _bounded(request: Request, name: str, *, default: int, maximum: int) -> int:
+    """One bounded integer from the query string, or its default; nothing else
+    may be named (`strict_query`)."""
+    named = _query(request, (name,)).get(name)
+    if named is None:
+        return default
+    try:
+        return strict_query.as_bounded_int(name, named, minimum=1, maximum=maximum)
+    except strict_query.InvalidQuery as exc:
+        raise errors.InvalidRequest(str(exc)) from exc
+
+
+@router.get(
+    "/plans",
+    openapi_extra=openapi_docs.described(
+        summary="The plans and their entitlements",
+        description=(
+            "Any account, or a key holding `organizations:read`. Free is every organisation's "
+            "plan during the beta; Premium is defined and `unavailable_during_beta`. Each "
+            "entitlement says whether it is enforced and by which reader: `projects_active`, "
+            "`branches_total` and `compute_profiles` by this plane before anything is "
+            "recorded; `storage_gb` and `agent_calls_per_day` are shown against usage and not "
+            "enforced during the beta."
+        ),
+    ),
+    responses={200: openapi_docs.ok("Both plans."), 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE},
+)  # fmt: skip
+async def list_plans(request: Request) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        return JSONResponse(await _service(request).list_plans(caller))
+
+    return await _guard(run)
+
+
+@router.get(
+    "/organizations/{organization}/plan",
+    openapi_extra=openapi_docs.described(
+        summary="An organisation's plan and what it holds of it",
+        description=(
+            "Any member, or a key holding `organizations:read`: the plan, its entitlements, "
+            "the projects held against `projects_active` (a sleeping project holds its slot), "
+            "and the plans the organisation asked to be told about."
+        ),
+    ),
+    responses={200: openapi_docs.ok("The plan."), 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_A_MEMBER},
+)  # fmt: skip
+async def get_organization_plan(request: Request, organization: str) -> Response:
+    async def run() -> Response:
+        caller, org = await _member(request, organization)
+        return JSONResponse(await _service(request).organization_plan(caller, org))
+
+    return await _guard(run)
+
+
+@router.post(
+    "/organizations/{organization}/plan-interest",
+    openapi_extra=openapi_docs.described(
+        summary="Notify me: record that the organisation wants a plan not yet available",
+        description=(
+            "Member and above, a person only. One record per organisation and plan; asking "
+            "again changes nothing. Nothing is charged, and nothing moves the organisation onto "
+            "the plan."
+        ),
+        request_model=PlanInterestRequest,
+    ),
+    responses={200: openapi_docs.ok("Whether this request recorded it."),
+               400: openapi_docs.MALFORMED, 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_A_MEMBER},
+)  # fmt: skip
+async def register_plan_interest(request: Request, organization: str) -> Response:
+    async def run() -> Response:
+        caller, org = await _member(request, organization)
+        payload = await _body(request, PlanInterestRequest)
+        assert isinstance(payload, PlanInterestRequest)
+        return JSONResponse(await _service(request).register_interest(caller, org, payload.plan))
+
+    return await _guard(run)
+
+
+@router.get(
+    "/organizations/{organization}/usage",
+    openapi_extra=openapi_docs.described(
+        summary="An organisation's usage, per project",
+        description=(
+            "Any member, or a key holding `projects:read`. Each project's document is the "
+            "project route's; a deleted project is listed for the part of the window it lived."
+        ),
+        query_parameters=[HOURS_QUERY],
+    ),
+    responses={200: openapi_docs.ok("The usage."), 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_A_MEMBER, 422: openapi_docs.INVALID},
+)  # fmt: skip
+async def get_organization_usage(request: Request, organization: str) -> Response:
+    async def run() -> Response:
+        caller, org = await _member(request, organization)
+        hours = _bounded(request, "hours", default=24, maximum=720)
+        return JSONResponse(await _service(request).organization_usage(caller, org, hours))
+
+    return await _guard(run)
+
+
+@router.get(
+    "/organizations/{organization}/notifications",
+    openapi_extra=openapi_docs.described(
+        summary="An organisation's notifications, newest first",
+        description=(
+            "Any member, or a key holding `organizations:read`. One per finished operation -- "
+            "its type, its project, how it ended and why it was requested -- and the daily "
+            "notice of a shown limit passed at 80%. In-app only; no read state."
+        ),
+        query_parameters=[LIMIT_QUERY],
+    ),
+    responses={200: openapi_docs.ok("The notifications."), 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_A_MEMBER, 422: openapi_docs.INVALID},
+)  # fmt: skip
+async def list_notifications(request: Request, organization: str) -> Response:
+    async def run() -> Response:
+        caller, org = await _member(request, organization)
+        limit = _bounded(request, "limit", default=50, maximum=200)
+        return JSONResponse(await _service(request).notifications(caller, org, limit))
+
+    return await _guard(run)
+
+
+@router.get(
+    "/projects/{key}/usage",
+    openapi_extra=openapi_docs.described(
+        summary="A project's usage over a window",
+        description=(
+            "Viewer and above, or a key holding `projects:read`. Computed from the samples "
+            "the server recorded every five minutes: how many it expected and found, each "
+            "figure's newest reading, the requests counted across resets, agent calls and "
+            "workflow runs, active and sleeping seconds from the project's history. A figure "
+            "not read is null and counted, never zero; a window with no sample is "
+            "`could_not_determine`."
+        ),
+        query_parameters=[HOURS_QUERY],
+    ),
+    responses={200: openapi_docs.ok("The usage."), 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_YOURS, 422: openapi_docs.INVALID},
+)  # fmt: skip
+async def get_project_usage(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        hours = _bounded(request, "hours", default=24, maximum=720)
+        return JSONResponse(await _service(request).project_usage(caller, key, hours))
+
+    return await _guard(run)
+
+
+@router.put(
+    "/projects/{key}/idle-sleep",
+    openapi_extra=openapi_docs.described(
+        summary="Put a project to sleep after it has been idle",
+        description=(
+            "Member and above, or a key holding `projects:write`. `minutes` 15, 30 or 60, or "
+            "null for never (the default). Idle is no request answered below 400 and no "
+            "connection by the project's own database roles for the whole window, read from "
+            "the samples; a sample missing or unread keeps the project awake. While it "
+            "sleeps, its backups stop: its last restore point is the moment it went to sleep. "
+            "Wake it by request."
+        ),
+        request_model=IdleSleepRequest,
+    ),
+    responses={200: openapi_docs.ok("The setting, and what sleeping does to backups."),
+               400: openapi_docs.MALFORMED, 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_YOURS},
+)  # fmt: skip
+async def set_idle_sleep(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        payload = await _body(request, IdleSleepRequest)
+        assert isinstance(payload, IdleSleepRequest)
+        return JSONResponse(await _service(request).set_idle_sleep(caller, key, payload.minutes))
 
     return await _guard(run)

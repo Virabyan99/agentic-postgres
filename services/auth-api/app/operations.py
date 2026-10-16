@@ -84,11 +84,10 @@ EXECUTED_TYPES: Final[frozenset[str]] = frozenset(
     }
 )
 
-#: One live branch per project (the operator, 2026-10-14; ADR 0271, D2430): a
+#: Session 40's `BRANCHES_PER_PROJECT = 1` (D2430) is the plan's
+#: `branches_total` since Session 41 (`app.plans`, ADR 0274): the number a
 #: second `branch.create` or `restore.create` is refused `branch_limit_reached`
-#: before any row exists. A constant, not a plan: Session 41's entitlements own
-#: `branches_total`.
-BRANCHES_PER_PROJECT: Final = 1
+#: at, before any row exists.
 
 #: A branch's `expires_at` lies between these, counted from the request (ADR
 #: 0272): long enough to outlive the branch's own creation, short enough that a

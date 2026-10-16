@@ -65,6 +65,7 @@ from app import (
     errors,
     one_time_tokens,
     operations,
+    plans,
     refresh_sessions,
     totp,
 )
@@ -132,8 +133,28 @@ SLEEPING_MESSAGE = (
 #: A branch's reader members (D2450): its point, its timeline, its names, its expiry.
 BRANCH_MEMBERS = (
     "name", "state", "requested_point", "reached_point", "timeline", "pool_host",
-    "direct_host", "expires_at", "created_at", "observed_at",
+    "direct_host", "expires_at", "created_at", "observed_at", "reason", "door",
 )  # fmt: skip
+
+#: Session 41 (ADR 0274, D2521): what `plan_limit_reached` says. Never a value
+#: the caller sent; the number is the plan's.
+PLAN_LIMIT_MESSAGE = (
+    "This organization's {plan} plan allows {limit} project(s); delete one first. "
+    "No resources were created."
+)
+
+#: Session 41 (ADR 0276, D2534): said wherever idle sleep is set -- a setting
+#: that stops the backups must say so when it is set.
+IDLE_SLEEP_NOTE = (
+    "While it sleeps, its backups stop: its last restore point is the moment it went to "
+    "sleep. Wake it with apg project wake."
+)
+
+#: Session 41 (ADR 0275): a usage window with no sample is not zeros.
+NO_SAMPLE_REASON = "no usage sample was recorded in this window"
+
+#: The read-not-enforced entitlements and the usage figure each is read against.
+READ_AGAINST = {"storage_gb": "database_bytes", "agent_calls_per_day": "agent_calls"}
 
 #: Said on every branch read (D2441): a copy that looked backed up would be a
 #: surface claiming more than the node does.
@@ -645,12 +666,25 @@ class ControlService:
     ) -> dict[str, Any]:
         """Request `project.create` (D2165: member and above, a person only).
 
-        The slot reading is taken BEFORE the row: with no `ready` slot, or a
-        reading older than ten minutes, the answer is `capacity_exhausted
-        {reason: no_slot}` and nothing is written (D2160). The handoff token
-        itself never arrives -- only its SHA-256 (ADR 0260).
+        **Two readers, one order** (D2521, ADR 0274): the organisation's plan
+        FIRST -- with its `projects_active` held, `plan_limit_reached` and
+        nothing written -- and only then the slot reading: with no `ready` slot,
+        or a reading older than ten minutes, `capacity_exhausted {reason:
+        no_slot}` and nothing written (D2160). Neither code comes from the
+        other's reader; the control set checks the plan again under the
+        organisation's row lock. The handoff token itself never arrives -- only
+        its SHA-256 (ADR 0260).
         """
         self.require_role(caller, organization, control_roles.PROJECT_WRITES["create_project"])
+        plan, limit, held = await self._projects_held(caller, organization)
+        if held >= limit:
+            raise errors.ControlRefused(
+                errors.PLAN_LIMIT_REACHED,
+                entitlement="projects_active",
+                limit=limit,
+                plan=plan,
+                message=PLAN_LIMIT_MESSAGE.format(plan=plan.capitalize(), limit=limit),
+            )
         reading = await self.repository.ready_slots(caller.user_id)
         observed = reading["observed"]
         if observed is None or reading["ready_slots"] < 1:
@@ -668,6 +702,29 @@ class ControlService:
             "handoff_sha256": handoff_sha256,
         }
         return await self._request(caller, organization, None, "project.create", arguments)
+
+    async def _plan_of(self, caller: ControlPrincipal, organization: UUID) -> str:
+        row = await self.repository.organization_plan(caller.user_id, organization)
+        return str(row["plan"]) if row and row.get("plan") else plans.DEFAULT_PLAN
+
+    async def _projects_held(
+        self, caller: ControlPrincipal, organization: UUID
+    ) -> tuple[str, int, int]:
+        """`(plan, projects_active, held)`: the organisation's projects not
+        deleted -- a sleeping one holds its slot -- plus its open creations, as
+        the control set counts them (ADR 0274)."""
+        row = await self.repository.organization_plan(caller.user_id, organization)
+        plan = str(row["plan"]) if row and row.get("plan") else plans.DEFAULT_PLAN
+        limit = plans.PLANS[plan].entitlements["projects_active"].value
+        assert isinstance(limit, int)
+        projects = int(row["projects_active"]) if row else 0
+        history = await self.repository.list_operations(caller.user_id, organization)
+        creating = sum(
+            1 for o in history
+            if o["type"] == "project.create" and o["status"] in ("pending", "running")
+            and o.get("project_key") is None
+        )  # fmt: skip
+        return plan, limit, projects + creating
 
     async def write_project(
         self, caller: ControlPrincipal, route: str, key: str, arguments: dict[str, Any]
@@ -763,6 +820,89 @@ class ControlService:
             {"role": role, "verifier": verifier},
         )
 
+    # -- Session 41: plans, usage, notifications, idle sleep (ADR 0274-0276) ----
+
+    async def list_plans(self, caller: ControlPrincipal) -> dict[str, Any]:
+        """Both plans and every entitlement: its value, whether it is enforced and
+        by which reader (ADR 0274). The two numbers SQL enforces are read from
+        the control set itself, so the page shows what is enforced."""
+        enforced = {
+            (str(r["plan"]), str(r["entitlement"])): int(r["value"])
+            for r in await self.repository.list_plans(caller.user_id)
+        }
+        return {"plans": [_plan_document(name, enforced) for name in plans.PLAN_NAMES],
+                "note": plans.BETA_SENTENCE}  # fmt: skip
+
+    async def organization_plan(self, caller: ControlPrincipal, org: UUID) -> dict[str, Any]:
+        self.require_role(caller, org, "viewer")
+        row = await self.repository.organization_plan(caller.user_id, org)
+        if row is None:
+            raise errors.ControlRefused(errors.NOT_FOUND)
+        plan, limit, held = await self._projects_held(caller, org)
+        enforced = {
+            (str(r["plan"]), str(r["entitlement"])): int(r["value"])
+            for r in await self.repository.list_plans(caller.user_id)
+        }
+        return {
+            "organization": str(org),
+            **_plan_document(plan, enforced),
+            "projects_active": {"held": held, "limit": limit},
+            "interest": list(row["interest"] or []),
+            "note": plans.BETA_SENTENCE,
+        }
+
+    async def register_interest(
+        self, caller: ControlPrincipal, org: UUID, plan: str
+    ) -> dict[str, Any]:
+        """*Notify me* (D2522): one row per organisation and plan, member and above."""
+        self.require_role(caller, org, control_roles.SETTING_WRITES["register_plan_interest"])
+        created = await self.repository.register_interest(caller.user_id, org, plan)
+        return {
+            "organization": str(org),
+            "plan": plan,
+            "recorded": created,
+            "note": f"{plan.capitalize()} is not available during the beta; we recorded that "
+                    "you asked. Nothing is charged.",
+        }  # fmt: skip
+
+    async def set_idle_sleep(
+        self, caller: ControlPrincipal, key: str, minutes: int | None
+    ) -> dict[str, Any]:
+        """A project's idle-sleep minutes, or never (ADR 0276), member and above;
+        the answer says what sleeping does to its backups (D2534)."""
+        row = await self._live_project(caller, key)
+        self.require_role(
+            caller, row["organization_id"], control_roles.SETTING_WRITES["set_idle_sleep"]
+        )
+        await self.repository.set_idle_sleep(caller.user_id, key, minutes)
+        note = IDLE_SLEEP_NOTE if minutes is not None else "Idle sleep is off."
+        return {"project": key, "idle_sleep_minutes": minutes, "note": note}
+
+    async def project_usage(self, caller: ControlPrincipal, key: str, hours: int) -> dict[str, Any]:
+        row = await self._live_project(caller, key)
+        self.require_role(caller, row["organization_id"], "viewer")
+        plan = await self._plan_of(caller, row["organization_id"])
+        return _usage(await self.repository.project_usage(caller.user_id, key, hours), plan)
+
+    async def organization_usage(
+        self, caller: ControlPrincipal, org: UUID, hours: int
+    ) -> dict[str, Any]:
+        self.require_role(caller, org, "viewer")
+        plan = await self._plan_of(caller, org)
+        document = await self.repository.organization_usage(caller.user_id, org, hours)
+        return {**document, "projects": [_usage(p, plan) for p in document["projects"]]}
+
+    async def notifications(
+        self, caller: ControlPrincipal, org: UUID, limit: int
+    ) -> dict[str, Any]:
+        self.require_role(caller, org, "viewer")
+        rows = await self.repository.list_notifications(caller.user_id, org, limit)
+        return {"organization": str(org), "notifications": [
+            {"id": str(r["id"]), "project": r["project_key"], "kind": r["kind"],
+             "text": r["text"], "created_at": _iso(r["created_at"])}
+            for r in rows
+        ]}  # fmt: skip
+
     # -- Session 40: branches and the backups surface (ADR 0271, ADR 0273) ------
 
     async def _live_project(self, caller: ControlPrincipal, key: str) -> dict[str, Any]:
@@ -841,7 +981,11 @@ class ControlService:
                 if o["type"] in ("branch.create", "restore.create")
                 and o["status"] in ("pending", "running")
             ]  # fmt: skip
-            if len(live) + len(creating) >= operations.BRANCHES_PER_PROJECT:
+            # `branches_total` is the plan's (ADR 0274; D2430's number until 1.19.0).
+            plan = await self._plan_of(caller, organization)
+            allowed = plans.PLANS[plan].entitlements["branches_total"].value
+            assert isinstance(allowed, int)
+            if len(live) + len(creating) >= allowed:
                 raise errors.ControlRefused(errors.BRANCH_LIMIT_REACHED)
         else:
             if await self.repository.get_branch(caller.user_id, key, arguments["branch"]) is None:
@@ -930,6 +1074,36 @@ class ControlService:
 
 def _iso(value: Any) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _plan_document(name: str, enforced: dict[tuple[str, str], int]) -> dict[str, Any]:
+    """One plan as `/v1/plans` serves it: each entitlement's value, unit, whether
+    it is enforced and by which reader; the SQL-enforced numbers as the control
+    set holds them (a missing row is said, never defaulted)."""
+    plan = plans.PLANS[name]
+    entitlements = []
+    for entitlement, spec in plan.entitlements.items():
+        value: Any = list(spec.value) if isinstance(spec.value, tuple) else spec.value
+        if entitlement in plans.ENFORCED_IN_SQL:
+            value = enforced.get((name, entitlement))
+        entitlements.append({"name": entitlement, "value": value, "unit": spec.unit,
+                             "enforced": spec.enforced, "reader": spec.reader})  # fmt: skip
+    return {"plan": name, "status": plan.status, "entitlements": entitlements}
+
+
+def _usage(document: dict[str, Any], plan: str) -> dict[str, Any]:
+    """The control set's usage document with its status: `could_not_determine`
+    when no sample was recorded in the window -- never zeros (ADR 0275) -- and
+    each read-not-enforced entitlement beside the figure it is read against."""
+    present = (document.get("samples") or {}).get("present") or 0
+    status = ({"status": "could_not_determine", "reason": NO_SAMPLE_REASON}
+              if present == 0 else {"status": "read"})  # fmt: skip
+    limits = [
+        {"name": name, "value": plans.PLANS[plan].entitlements[name].value,
+         "enforced": plans.PLANS[plan].entitlements[name].enforced, "against": figure}
+        for name, figure in READ_AGAINST.items()
+    ]  # fmt: skip
+    return {**document, **status, "plan": plan, "entitlements": limits}
 
 
 def _branch(row: dict[str, Any]) -> dict[str, Any]:

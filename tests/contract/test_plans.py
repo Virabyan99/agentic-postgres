@@ -19,6 +19,7 @@ first's id. With the lock it waits for the first and is refused by the plan.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 import time
@@ -29,18 +30,32 @@ from typing import Any
 import control_cluster as cc
 import pytest
 
-from app import plans
+from app import control_routes, operations, plans
 
 pytestmark = [pytest.mark.contract, pytest.mark.database, pytest.mark.security, pytest.mark.p0]
 
 
 @pytest.fixture(scope="module")
-def cluster() -> Iterator[cc.ControlCluster]:
+def drive(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
+    """One control cluster and the control mode over it (Run 5's routes)."""
     try:
         with cc.control_cluster() as started:
-            yield started
+            with cc.control_app(started, tmp_path_factory.mktemp("control-plans")) as driver:
+                yield driver
     except RuntimeError as error:
         pytest.skip(str(error))
+
+
+@pytest.fixture(scope="module")
+def cluster(drive: Any) -> cc.ControlCluster:
+    return drive.cluster
+
+
+@pytest.fixture
+def accepting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every executed type accepted, for this proof only (the gate's own proof is
+    test_operation_types')."""
+    monkeypatch.setattr(operations, "ACCEPTED_TYPES", operations.EXECUTED_TYPES)
 
 
 def _organization(cluster: cc.ControlCluster, role: str = "owner") -> tuple[str, str]:
@@ -328,3 +343,146 @@ def test_the_lock_is_held_across_the_count_by_one_transaction(cluster: cc.Contro
     )
     holder.wait(timeout=30)
     assert probe.returncode != 0 and "could not obtain lock" in probe.stderr, probe
+
+
+# ---------------------------------------------------------------------------
+# The routes (Run 5): the order of the two readers, and what the plans say
+# ---------------------------------------------------------------------------
+
+HANDOFF = "0" * 63 + "1"
+
+
+def _people(drive: Any, label: str, *, project: bool) -> dict[str, Any]:
+    tag = f"{label}-{uuid.uuid4().hex[:6]}"
+    people: dict[str, Any] = {"tokens": {}, "users": {}}
+    owner = drive.account(f"{tag}-owner")
+    people["users"]["owner"] = owner
+    people["id"] = drive.organization(owner, tag)
+    people["tokens"]["owner"] = drive.token(f"{tag}-owner", drive.enable_factor(owner))
+    for role in ("member", "viewer"):
+        user = drive.account(f"{tag}-{role}")
+        drive.member(people["id"], user, role)
+        people["users"][role] = user
+        people["tokens"][role] = drive.token(f"{tag}-{role}")
+    people["project"] = _adopt(drive.cluster, people["id"]) if project else None
+    return people
+
+
+def _slots(drive: Any, state: str) -> None:
+    reading = [{"key": "slot5-prod", "state": state, "region_id": "eu-hel-1"}]
+    drive.cluster.query("DELETE FROM app.control_slots")
+    drive.cluster.query(f"SELECT app.control_record_slots('{json.dumps(reading)}'::jsonb)")
+
+
+def _create(drive: Any, people: dict[str, Any]) -> Any:
+    body = {"organization": people["id"], "name": "Second", "profile": "small",
+            "admin_username": "second.admin", "handoff_sha256": HANDOFF}  # fmt: skip
+    return drive.call("POST", "/v1/projects", token=people["tokens"]["member"], body=body)
+
+
+def test_the_entitlement_is_read_before_the_slot(drive: Any, accepting: None) -> None:
+    """D2521's order: a Free organisation holding its one project, on a server
+    with NO ready slot, is refused by the PLAN -- both refusals would apply, and
+    the plan's answers. Nothing is recorded."""
+    full = _people(drive, "order", project=True)
+    _slots(drive, "consumed")
+    refused = _create(drive, full)
+    assert refused.status_code == 409, refused.text
+    body = refused.json()
+    assert body == {
+        "error": "plan_limit_reached", "entitlement": "projects_active", "limit": 1,
+        "plan": "free",
+        "message": "This organization's Free plan allows 1 project(s); delete one first. "
+                   "No resources were created.",
+    }, body  # fmt: skip
+    assert _rows(drive.cluster, full["id"]) == 0
+
+
+def test_each_refusal_comes_from_its_own_reader(drive: Any, accepting: None) -> None:
+    """Each code with the other reader held green (D1954): the plan full and a
+    slot ready -> `plan_limit_reached`; the plan empty and no slot ready ->
+    `capacity_exhausted {reason: no_slot}`. Neither body carries the other's
+    members."""
+    full = _people(drive, "plan", project=True)
+    empty = _people(drive, "capacity", project=False)
+    _slots(drive, "ready")
+    by_plan = _create(drive, full)
+    _slots(drive, "consumed")
+    by_capacity = _create(drive, empty)
+    assert (by_plan.status_code, by_plan.json()["error"]) == (409, "plan_limit_reached")
+    assert "reason" not in by_plan.json()
+    assert (by_capacity.status_code, by_capacity.json()["error"], by_capacity.json()["reason"]) == (
+        409, "capacity_exhausted", "no_slot",
+    )  # fmt: skip
+    assert "entitlement" not in by_capacity.json()
+    assert _rows(drive.cluster, full["id"]) == 0 and _rows(drive.cluster, empty["id"]) == 0
+    # Control: the empty organisation with a slot ready is recorded.
+    _slots(drive, "ready")
+    assert _create(drive, empty).status_code == 202
+
+
+def test_the_plans_route_says_what_is_enforced(drive: Any) -> None:
+    """`/v1/plans`: both plans, every entitlement of the release table with
+    `enforced` and its reader, the SQL-enforced numbers as the control set
+    holds them, Premium `unavailable_during_beta`, and the beta sentence. The
+    organisation's plan names what it holds against `projects_active`."""
+    people = _people(drive, "read", project=True)
+    served = drive.call("GET", "/v1/plans", token=people["tokens"]["viewer"])
+    assert served.status_code == 200, served.text
+    document = served.json()
+    assert document["note"] == plans.BETA_SENTENCE
+    assert [p["plan"] for p in document["plans"]] == list(plans.PLAN_NAMES)
+    for served_plan in document["plans"]:
+        table = plans.PLANS[served_plan["plan"]]
+        assert served_plan["status"] == table.status
+        assert [e["name"] for e in served_plan["entitlements"]] == list(table.entitlements)
+        for entitlement in served_plan["entitlements"]:
+            spec = table.entitlements[entitlement["name"]]
+            assert (entitlement["enforced"], entitlement["reader"]) == (spec.enforced, spec.reader)
+            value = list(spec.value) if isinstance(spec.value, tuple) else spec.value
+            assert entitlement["value"] == value, entitlement
+    by_name = {e["name"]: e for e in document["plans"][0]["entitlements"]}
+    assert by_name["storage_gb"]["enforced"] is False
+    assert by_name["agent_calls_per_day"]["enforced"] is False
+    mine = drive.call("GET", f"/v1/organizations/{people['id']}/plan",
+                      token=people["tokens"]["viewer"])  # fmt: skip
+    assert mine.status_code == 200, mine.text
+    assert (mine.json()["plan"], mine.json()["projects_active"]) == (
+        "free", {"held": 1, "limit": 1},
+    )  # fmt: skip
+    stranger = _people(drive, "stranger", project=False)
+    foreign = drive.call("GET", f"/v1/organizations/{people['id']}/plan",
+                         token=stranger["tokens"]["viewer"])  # fmt: skip
+    assert (foreign.status_code, foreign.json()["error"]) == (404, "not_found")
+
+
+def test_interest_is_a_persons_request_once(drive: Any) -> None:
+    """*Notify me* through the route: a member records it once; asked again it
+    says so; a viewer is refused; a key cannot ask (human session only)."""
+    people = _people(drive, "notify", project=False)
+    path = f"/v1/organizations/{people['id']}/plan-interest"
+    first = drive.call("POST", path, token=people["tokens"]["member"], body={"plan": "premium"})
+    again = drive.call("POST", path, token=people["tokens"]["member"], body={"plan": "premium"})
+    assert (first.status_code, first.json()["recorded"]) == (200, True), first.text
+    assert (again.status_code, again.json()["recorded"]) == (200, False), again.text
+    assert "Nothing is charged" in first.json()["note"]
+    assert drive.call("POST", path, token=people["tokens"]["viewer"],
+                      body={"plan": "premium"}).status_code == 403  # fmt: skip
+    assert drive.call("POST", path, token=people["tokens"]["member"],
+                      body={"plan": "free"}).status_code == 400  # fmt: skip
+    assert "register_plan_interest" not in control_routes.control_roles.KEY_SCOPES
+
+
+def test_no_route_writes_a_plan_or_a_limit() -> None:
+    """D2533: of every route the control mode serves, the only write that names a
+    plan is *Notify me*'s POST; nothing PUTs, PATCHes or DELETEs a plan or a
+    limit, and the role table has no entry that would."""
+    writes = [
+        (sorted(route.methods), route.path)
+        for route in control_routes.router.routes
+        if "plan" in route.path and set(route.methods) & {"POST", "PUT", "PATCH", "DELETE"}
+    ]
+    assert writes == [(["POST"], "/v1/organizations/{organization}/plan-interest")], writes
+    assert all("plan" not in name or name in ("list_plans", "get_organization_plan",
+                                               "register_plan_interest")
+               for name in control_routes.control_roles.MATRIX)  # fmt: skip

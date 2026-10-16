@@ -233,6 +233,13 @@ CONFLICT: Final = "conflict"
 #: `OPERATION_ERROR_CODES` (D2469). Distinct from `capacity_exhausted`, which a
 #: branch's own admission produces (D2431); neither reader produces the other.
 BRANCH_LIMIT_REACHED: Final = "branch_limit_reached"
+#: Session 41 (ADR 0274, D2521): the organisation's plan allows no further
+#: project -- answered before any row, first by `create_project`'s reading of
+#: the plan and again by the control set under the organisation's row lock
+#: (`AP409: plan_limit_reached`). An HTTP refusal, never an operation's outcome
+#: (D2469's rule), read BEFORE the slot: neither it nor `capacity_exhausted`
+#: is produced by the other's reader.
+PLAN_LIMIT_REACHED: Final = "plan_limit_reached"
 
 #: How a FINISHED operation failed -- its `error_code`, never an HTTP refusal.
 #: The control set's `control_operations.error_code` CHECK lists exactly these
@@ -264,6 +271,7 @@ CONTROL_STATUS: Final[dict[str, int]] = {
     CAPACITY_EXHAUSTED: 409,
     CONFLICT: 409,
     BRANCH_LIMIT_REACHED: 409,
+    PLAN_LIMIT_REACHED: 409,
 }
 
 
@@ -271,7 +279,7 @@ class ControlRefused(Exception):
     """One fixed refusal of the management API: a word, its status, and at most
     the members `not_available` names. Never a value a caller sent."""
 
-    def __init__(self, word: str, *, status: int | None = None, **extra: str) -> None:
+    def __init__(self, word: str, *, status: int | None = None, **extra: str | int) -> None:
         super().__init__(word)
         self.word = word
         self.status = CONTROL_STATUS[word] if status is None else status

@@ -53,8 +53,10 @@ def accepting(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(operations, "ACCEPTED_TYPES", operations.EXECUTED_TYPES)
 
 
-def _org(drive: Any, label: str) -> dict[str, Any]:
-    """An organisation with one person per role and a project adopted into it."""
+def _org(drive: Any, label: str, *, project: bool = True) -> dict[str, Any]:
+    """An organisation with one person per role and, unless `project` is False, a
+    project adopted into it. Since Session 41 a Free organisation holds one
+    project (ADR 0274), so a proof that CREATES asks for one without."""
     people: dict[str, Any] = {"ids": {}, "tokens": {}}
     tag = f"{label}-{uuid.uuid4().hex[:6]}"
     owner = drive.account(f"{tag}-owner")
@@ -67,7 +69,7 @@ def _org(drive: Any, label: str) -> dict[str, Any]:
         people["ids"][role] = user
         seed = drive.enable_factor(user) if role == "admin" else None
         people["tokens"][role] = drive.token(f"{tag}-{role}", seed)
-    people["project"] = _adopt(drive, people["id"])
+    people["project"] = _adopt(drive, people["id"]) if project else None
     return people
 
 
@@ -119,8 +121,10 @@ def _finish_all(drive: Any) -> None:
 
 def test_no_ready_slot_refuses_before_a_row(drive: Any, accepting: None) -> None:
     """D2160: `capacity_exhausted {reason: no_slot}` with nothing recorded --
-    no reading, no ready slot, or a reading older than ten minutes."""
-    org = _org(drive, "noslot")
+    no reading, no ready slot, or a reading older than ten minutes. The
+    organisation holds no project, so its plan is green and the slot reading is
+    the one that answers (D2521)."""
+    org = _org(drive, "noslot", project=False)
     member = org["tokens"]["member"]
     drive.cluster.query("DELETE FROM app.control_slots")
     before = _count(drive)
@@ -166,6 +170,12 @@ def test_one_operation_at_a_time(drive: Any, accepting: None) -> None:
     itself refuses a second non-terminal row, which is what holds under a race."""
     org = _org(drive, "serial")
     member = org["tokens"]["member"]
+    # On Free a second creation in flight is the PLAN's refusal (ADR 0274); on
+    # Premium (three projects) it reaches D2166's serialisation, which is what
+    # this proof reads. The plan is root's to set; no route writes it.
+    drive.cluster.query(
+        f"UPDATE app.control_organizations SET plan = 'premium' WHERE id = '{org['id']}'"
+    )
     _slots(drive)
     first = _create(drive, member, org["id"]).json()["operation"]["id"]
     again = _create(drive, org["tokens"]["admin"], org["id"], name="Another")
@@ -390,12 +400,36 @@ def test_a_deleted_project_takes_no_more_writes(drive: Any, accepting: None) -> 
     assert kept["deleted_at"] is not None
 
 
-def test_no_string_produces_plan_limit_reached() -> None:
-    """D2160: no entitlement code exists in Session 38."""
-    for root in ("services", "src", "bin"):
+#: Session 41 (ADR 0274, D2521): the files that may name `plan_limit_reached`
+#: -- the word, its two readers (the service before the slot, the control set
+#: under the organisation's lock), the route's documentation, the snapshot the
+#: route is reviewed by, and the set's manifest describing 0008. No other
+#: producer may appear.
+PLAN_LIMIT_PRODUCERS = frozenset({
+    "services/auth-api/app/errors.py",
+    "services/auth-api/app/control_service.py",
+    "services/auth-api/app/control_routes.py",
+    "projects/control/migrations/templates/0008-control-plans-usage.sql",
+    "projects/control/migrations/manifest.json",
+    "contracts/control-openapi.canonical.json",
+})  # fmt: skip
+
+
+def test_plan_limit_reached_is_produced_only_by_the_entitlement_readers() -> None:
+    """Replaces D2160's `test_no_string_produces_plan_limit_reached` (ADR 0274
+    authorises it): the word existed nowhere in Session 38; since Session 41
+    it exists in exactly the entitlement readers and their contract -- a new
+    producer (a second reader the order does not govern) fails here."""
+    found = set()
+    for root in ("services", "src", "bin", "projects", "contracts"):
         for path in (cc.REPO_ROOT / root).rglob("*"):
-            if path.is_file() and path.suffix in {".py", ".sh", ".sql", ".json", ".yaml"}:
-                assert "plan_limit_reached" not in path.read_text(encoding="utf-8"), path
+            if "__pycache__" in path.parts or not path.is_file():
+                continue
+            if path.suffix in {".py", ".sh", ".sql", ".json", ".yaml"} and (
+                "plan_limit_reached" in path.read_text(encoding="utf-8")
+            ):
+                found.add(path.relative_to(cc.REPO_ROOT).as_posix())
+    assert found == PLAN_LIMIT_PRODUCERS, sorted(found ^ PLAN_LIMIT_PRODUCERS)
 
 
 def test_every_write_route_has_a_role_and_a_type() -> None:
@@ -412,4 +446,8 @@ def test_every_write_route_has_a_role_and_a_type() -> None:
         "sleep_project",
         "wake_project",
         "resize_project",
+        # Session 41 (ADR 0276, D2525): the idle-sleep SETTING -- it changes when
+        # a project sleeps, as sleep_project does; not an operation, so it is in
+        # control_roles.SETTING_WRITES rather than PROJECT_WRITES.
+        "set_idle_sleep",
     }

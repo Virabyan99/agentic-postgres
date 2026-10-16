@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from typing import Any
 
 import control_cluster as cc
 import pytest
@@ -26,12 +27,41 @@ QUIET = (840, 540, 240, 10)  # seconds ago: a full 15-minute window at 300 s
 
 
 @pytest.fixture(scope="module")
-def cluster() -> Iterator[cc.ControlCluster]:
+def drive(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
+    """One control cluster and the control mode over it (Run 5's routes)."""
     try:
         with cc.control_cluster() as started:
-            yield started
+            with cc.control_app(started, tmp_path_factory.mktemp("control-idle")) as driver:
+                yield driver
     except RuntimeError as error:
         pytest.skip(str(error))
+
+
+@pytest.fixture(scope="module")
+def cluster(drive: Any) -> cc.ControlCluster:
+    return drive.cluster
+
+
+def _people(drive: Any, label: str) -> dict[str, Any]:
+    """A route caller's organisation: an owner, a member, a viewer, their tokens,
+    and one adopted project."""
+    tag = f"{label}-{uuid.uuid4().hex[:6]}"
+    people: dict[str, Any] = {"tokens": {}, "users": {}}
+    owner = drive.account(f"{tag}-owner")
+    people["id"] = drive.organization(owner, tag)
+    people["tokens"]["owner"] = drive.token(f"{tag}-owner", drive.enable_factor(owner))
+    for role in ("member", "viewer"):
+        user = drive.account(f"{tag}-{role}")
+        drive.member(people["id"], user, role)
+        people["users"][role] = user
+        people["tokens"][role] = drive.token(f"{tag}-{role}")
+    key = f"r{uuid.uuid4().hex[:8]}-prod"
+    drive.cluster.query(
+        f"SELECT app.control_adopt_project('{key}', '{people['id']}', '{key[:9]}', 'prod', "
+        f"'{key}.test', '1.19.0', 'abc')"
+    )
+    people["project"] = key
+    return people
 
 
 class Project:
@@ -235,3 +265,31 @@ def test_no_role_but_the_reconciler_requests_an_idle_sleep(cluster: cc.ControlCl
         "'app.control_request_idle_sleep(text)', 'EXECUTE')"
     )
     assert held == "f"
+
+
+# ---------------------------------------------------------------------------
+# The route (Run 5)
+# ---------------------------------------------------------------------------
+
+
+def test_the_setting_route_says_what_sleeping_does_to_backups(drive: Any) -> None:
+    """`PUT /v1/projects/{key}/idle-sleep`: a member sets 15 and the answer says
+    the backups stop while it sleeps (D2534); null turns it off; 5 minutes is
+    refused; a viewer is refused; the setting names the member who set it."""
+    people = _people(drive, "setting")
+    path = f"/v1/projects/{people['project']}/idle-sleep"
+    member = people["tokens"]["member"]
+    set_ = drive.call("PUT", path, token=member, body={"minutes": 15})
+    assert set_.status_code == 200, set_.text
+    assert set_.json()["idle_sleep_minutes"] == 15
+    assert "its backups stop" in set_.json()["note"]
+    (row,) = drive.cluster.query(
+        "SELECT idle_sleep_minutes || '|' || idle_sleep_set_by FROM app.control_projects "
+        f"WHERE key = '{people['project']}'"
+    )
+    assert row == f"15|{people['users']['member']}", row
+    assert drive.call("PUT", path, token=member, body={"minutes": 5}).status_code == 400
+    assert drive.call("PUT", path, token=people["tokens"]["viewer"],
+                      body={"minutes": 30}).status_code == 403  # fmt: skip
+    off = drive.call("PUT", path, token=member, body={"minutes": None})
+    assert (off.status_code, off.json()["idle_sleep_minutes"]) == (200, None)

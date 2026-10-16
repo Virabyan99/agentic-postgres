@@ -6647,7 +6647,7 @@
     - tests/contract/test_reconciler_dispatch.py::test_admission_refusal_is_capacity_exhausted_and_creates_nothing
     - tests/contract/test_reconciler_dispatch.py::test_no_ready_slot_is_capacity_exhausted_no_slot
     - tests/contract/test_control_projects.py::test_no_ready_slot_refuses_before_a_row
-    - tests/contract/test_control_projects.py::test_no_string_produces_plan_limit_reached
+    - tests/contract/test_control_projects.py::test_plan_limit_reached_is_produced_only_by_the_entitlement_readers
   description: >-
     Capacity refusals, from two readers under one code (D2160): admission's
     exit 12, read after the slot is taken and BEFORE anything is rendered, is

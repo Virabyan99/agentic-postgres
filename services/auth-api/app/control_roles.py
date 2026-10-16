@@ -100,6 +100,25 @@ MATRIX: Final[dict[str, str]] = {
     "create_restore": ACCOUNT,
     "reset_branch": ACCOUNT,
     "delete_branch": ACCOUNT,
+    # Session 41 (ADR 0274-0276): the plans any account reads; an
+    # organisation's plan, usage and notifications any member; *Notify me*
+    # and a project's idle-sleep setting member and above (SETTING_WRITES).
+    "list_plans": ACCOUNT,
+    "get_organization_plan": "viewer",
+    "register_plan_interest": "viewer",
+    "get_organization_usage": "viewer",
+    "list_notifications": "viewer",
+    "get_project_usage": ACCOUNT,
+    "set_idle_sleep": ACCOUNT,
+}
+
+#: Session 41: the two writes that are SETTINGS, not operations -- no row of
+#: `control_operations`, so not in PROJECT_WRITES (whose every entry requests
+#: an executed type, `test_every_write_route_has_a_role_and_a_type`) -- and the
+#: role each needs. The control set checks the same ranks again.
+SETTING_WRITES: Final[dict[str, str]] = {
+    "register_plan_interest": "member",
+    "set_idle_sleep": "member",
 }
 
 #: Session 38's writes (D2165, ADR 0256) -> the role they need in the
@@ -197,6 +216,17 @@ KEY_SCOPES: Final[dict[str, str]] = {
     "list_branches": "projects:read",
     "get_branch": "projects:read",
     "get_backups": "projects:read",
+    # Session 41 (ADR 0274-0276): plans, an organisation's plan and its
+    # notifications are reads of the organisation; usage a read of its
+    # projects; the idle-sleep setting a project write -- it changes when a
+    # project sleeps, as `sleep_project` does. *Notify me* is NOT here: a
+    # person asks.
+    "list_plans": "organizations:read",
+    "get_organization_plan": "organizations:read",
+    "list_notifications": "organizations:read",
+    "get_organization_usage": "projects:read",
+    "get_project_usage": "projects:read",
+    "set_idle_sleep": "projects:write",
 }
 
 

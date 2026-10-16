@@ -32,12 +32,43 @@ SECRET_URL = "https://exports.example.test/slot-x/dump.sql.gz?X-Amz-Signature=de
 
 
 @pytest.fixture(scope="module")
-def cluster() -> Iterator[cc.ControlCluster]:
+def drive(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
+    """One control cluster and the control mode over it (Run 5's routes)."""
     try:
         with cc.control_cluster() as started:
-            yield started
+            with cc.control_app(
+                started, tmp_path_factory.mktemp("control-notifications")
+            ) as driver:
+                yield driver
     except RuntimeError as error:
         pytest.skip(str(error))
+
+
+@pytest.fixture(scope="module")
+def cluster(drive: Any) -> cc.ControlCluster:
+    return drive.cluster
+
+
+def _people(drive: Any, label: str) -> dict[str, Any]:
+    """A route caller's organisation: an owner, a member, a viewer, their tokens,
+    and one adopted project."""
+    tag = f"{label}-{uuid.uuid4().hex[:6]}"
+    people: dict[str, Any] = {"tokens": {}, "users": {}}
+    owner = drive.account(f"{tag}-owner")
+    people["id"] = drive.organization(owner, tag)
+    people["tokens"]["owner"] = drive.token(f"{tag}-owner", drive.enable_factor(owner))
+    for role in ("member", "viewer"):
+        user = drive.account(f"{tag}-{role}")
+        drive.member(people["id"], user, role)
+        people["users"][role] = user
+        people["tokens"][role] = drive.token(f"{tag}-{role}")
+    key = f"r{uuid.uuid4().hex[:8]}-prod"
+    drive.cluster.query(
+        f"SELECT app.control_adopt_project('{key}', '{people['id']}', '{key[:9]}', 'prod', "
+        f"'{key}.test', '1.19.0', 'abc')"
+    )
+    people["project"] = key
+    return people
 
 
 class Org:
@@ -209,3 +240,34 @@ def test_a_foreign_organization_reads_nothing(cluster: cc.ControlCluster) -> Non
     )
     assert "AP404: not_found" in foreign and "AP404: not_found" in missing, (foreign, missing)
     assert mine.notifications() == []
+
+
+# ---------------------------------------------------------------------------
+# The route (Run 5)
+# ---------------------------------------------------------------------------
+
+
+def test_the_notifications_route_lists_its_own_organizations(drive: Any) -> None:
+    """`GET /v1/organizations/{organization}/notifications`: a viewer reads the
+    organisation's newest first; a foreign organisation is `not_found`; the
+    limit is bounded."""
+    people, stranger = _people(drive, "notified"), _people(drive, "stranger")
+    for kind in ("project.sleep", "project.wake"):
+        op = drive.cluster.query(
+            "INSERT INTO app.control_operations (organization_id, project_key, type, status, "
+            "requested_by, arguments, started_at, claimed_by, attempt) VALUES "
+            f"('{people['id']}', '{people['project']}', '{kind}', 'running', "
+            f"'{people['users']['member']}', '{{}}', now(), 'proof', 1) RETURNING id"
+        )[0]
+        drive.cluster.query(f"SELECT app.control_finish_operation('{op}', 'succeeded', NULL, NULL)")
+    path = f"/v1/organizations/{people['id']}/notifications"
+    listed = drive.call("GET", path + "?limit=10", token=people["tokens"]["viewer"])
+    assert listed.status_code == 200, listed.text
+    texts = [n["text"] for n in listed.json()["notifications"]]
+    assert texts == [f"project.wake on {people['project']} succeeded",
+                     f"project.sleep on {people['project']} succeeded"], texts  # fmt: skip
+    foreign = drive.call("GET", path, token=stranger["tokens"]["viewer"])
+    assert (foreign.status_code, foreign.json()["error"]) == (404, "not_found")
+    assert (
+        drive.call("GET", path + "?limit=201", token=people["tokens"]["viewer"]).status_code == 422
+    )

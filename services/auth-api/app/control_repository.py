@@ -322,7 +322,7 @@ class ControlRepository:
 
     _BRANCH = (
         "SELECT name, state, requested_point, reached_point, timeline, pool_host, "
-        "direct_host, expires_at, created_at, observed_at FROM "
+        "direct_host, expires_at, created_at, observed_at, reason, door FROM "
     )
 
     async def list_branches(self, user: UUID, key: str) -> list[dict[str, Any]]:
@@ -336,6 +336,65 @@ class ControlRepository:
         """One live branch; a missing one is the same `not_found` (D2451)."""
         return await self._one(
             user, self._BRANCH + "app.control_get_branch(%s, %s, %s)", (user, key, branch)
+        )
+
+    # -- plans, usage, notifications, idle sleep (Session 41, ADR 0274-0276) ---
+
+    async def list_plans(self, user: UUID) -> list[dict[str, Any]]:
+        """The limits SQL enforces, per plan -- the twin the route checks."""
+        return await self._rows(
+            user, "SELECT plan, entitlement, value FROM app.control_list_plans(%s)", (user,)
+        )
+
+    async def organization_plan(self, user: UUID, organization: UUID) -> dict[str, Any] | None:
+        """The organisation's plan, its projects as `projects_active` counts
+        them, and the plans it asked to be told about; viewer and above."""
+        return await self._one(
+            user,
+            "SELECT plan, projects_active, interest FROM app.control_get_org_plan(%s, %s)",
+            (user, organization),
+        )
+
+    async def register_interest(self, user: UUID, organization: UUID, plan: str) -> bool:
+        """*Notify me*: True when this request recorded the organisation's row."""
+        row = await self._one(
+            user,
+            "SELECT app.control_register_interest(%s, %s, %s) AS created",
+            (user, organization, plan),
+        )
+        return bool(row and row["created"])
+
+    async def set_idle_sleep(self, user: UUID, key: str, minutes: int | None) -> None:
+        await self._rows(
+            user, "SELECT app.control_set_idle_sleep(%s, %s, %s)", (user, key, minutes)
+        )
+
+    async def project_usage(self, user: UUID, key: str, hours: int) -> dict[str, Any]:
+        row = await self._one(
+            user, "SELECT app.control_project_usage(%s, %s, %s) AS usage", (user, key, hours)
+        )
+        assert row is not None
+        return row["usage"]
+
+    async def organization_usage(
+        self, user: UUID, organization: UUID, hours: int
+    ) -> dict[str, Any]:
+        row = await self._one(
+            user,
+            "SELECT app.control_org_usage(%s, %s, %s) AS usage",
+            (user, organization, hours),
+        )
+        assert row is not None
+        return row["usage"]
+
+    async def list_notifications(
+        self, user: UUID, organization: UUID, limit: int
+    ) -> list[dict[str, Any]]:
+        return await self._rows(
+            user,
+            "SELECT id, project_key, kind, text, created_at "
+            "FROM app.control_list_notifications(%s, %s, %s)",
+            (user, organization, limit),
         )
 
     async def get_backups(self, user: UUID, key: str) -> dict[str, Any] | None:

@@ -26,12 +26,41 @@ pytestmark = [pytest.mark.contract, pytest.mark.database, pytest.mark.security, 
 
 
 @pytest.fixture(scope="module")
-def cluster() -> Iterator[cc.ControlCluster]:
+def drive(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
+    """One control cluster and the control mode over it (Run 5's routes)."""
     try:
         with cc.control_cluster() as started:
-            yield started
+            with cc.control_app(started, tmp_path_factory.mktemp("control-usage")) as driver:
+                yield driver
     except RuntimeError as error:
         pytest.skip(str(error))
+
+
+@pytest.fixture(scope="module")
+def cluster(drive: Any) -> cc.ControlCluster:
+    return drive.cluster
+
+
+def _people(drive: Any, label: str) -> dict[str, Any]:
+    """A route caller's organisation: an owner, a member, a viewer, their tokens,
+    and one adopted project."""
+    tag = f"{label}-{uuid.uuid4().hex[:6]}"
+    people: dict[str, Any] = {"tokens": {}, "users": {}}
+    owner = drive.account(f"{tag}-owner")
+    people["id"] = drive.organization(owner, tag)
+    people["tokens"]["owner"] = drive.token(f"{tag}-owner", drive.enable_factor(owner))
+    for role in ("member", "viewer"):
+        user = drive.account(f"{tag}-{role}")
+        drive.member(people["id"], user, role)
+        people["users"][role] = user
+        people["tokens"][role] = drive.token(f"{tag}-{role}")
+    key = f"r{uuid.uuid4().hex[:8]}-prod"
+    drive.cluster.query(
+        f"SELECT app.control_adopt_project('{key}', '{people['id']}', '{key[:9]}', 'prod', "
+        f"'{key}.test', '1.19.0', 'abc')"
+    )
+    people["project"] = key
+    return people
 
 
 class Project:
@@ -194,3 +223,54 @@ def test_a_foreign_and_a_missing_project_answer_alike(cluster: cc.ControlCluster
     assert "AP404" in cluster.refused(
         f"SELECT app.control_org_usage('{mine.user}', '{theirs.org}', 24)"
     )
+
+
+# ---------------------------------------------------------------------------
+# The routes (Run 5)
+# ---------------------------------------------------------------------------
+
+
+def test_the_usage_route_says_when_it_could_not_determine(drive: Any) -> None:
+    """`GET /v1/projects/{key}/usage`: a window with no sample is
+    `could_not_determine` with its reason -- never zeros; with a sample it is
+    `read`, and each shown limit names the figure it is read against and that it
+    is not enforced."""
+    people = _people(drive, "usage")
+    path = f"/v1/projects/{people['project']}/usage"
+    empty = drive.call("GET", path + "?hours=2", token=people["tokens"]["viewer"])
+    assert empty.status_code == 200, empty.text
+    assert (empty.json()["status"], empty.json()["reason"]) == (
+        "could_not_determine", "no usage sample was recorded in this window",
+    )  # fmt: skip
+    drive.cluster.query(
+        "INSERT INTO app.control_usage_samples (project_key, observed_at, state, database_bytes) "
+        f"VALUES ('{people['project']}', now() - interval '5 minutes', 'active', 4242)"
+    )
+    read = drive.call("GET", path, token=people["tokens"]["viewer"]).json()
+    assert read["status"] == "read" and read["figures"]["database_bytes"]["latest"] == 4242
+    shown = {e["name"]: e for e in read["entitlements"]}
+    assert shown["storage_gb"] == {"name": "storage_gb", "value": 5, "enforced": False,
+                                   "against": "database_bytes"}  # fmt: skip
+    assert shown["agent_calls_per_day"]["enforced"] is False
+    organization = drive.call(
+        "GET", f"/v1/organizations/{people['id']}/usage", token=people["tokens"]["viewer"]
+    )
+    assert organization.status_code == 200, organization.text
+    assert [p["project_key"] for p in organization.json()["projects"]] == [people["project"]]
+
+
+def test_the_usage_routes_answer_a_foreign_and_a_missing_project_alike(drive: Any) -> None:
+    """Through the route: another organisation's project and a missing one are
+    one `not_found`; a window outside 1..720 hours, a non-number and an unknown
+    parameter are each refused before anything is read."""
+    mine, theirs = _people(drive, "mine"), _people(drive, "theirs")
+    token = mine["tokens"]["viewer"]
+    foreign = drive.call("GET", f"/v1/projects/{theirs['project']}/usage", token=token)
+    missing = drive.call("GET", "/v1/projects/nope-prod/usage", token=token)
+    assert (foreign.status_code, foreign.json()) == (missing.status_code, missing.json())
+    assert foreign.status_code == 404 and foreign.json()["error"] == "not_found"
+    for query in ("hours=0", "hours=721", "hours=ten", "hours=2&days=1"):
+        refused = drive.call("GET", f"/v1/projects/{mine['project']}/usage?{query}", token=token)
+        assert refused.status_code == 422, (query, refused.text)
+    assert drive.call("GET", f"/v1/organizations/{theirs['id']}/usage",
+                      token=token).status_code == 404  # fmt: skip

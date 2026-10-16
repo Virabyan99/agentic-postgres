@@ -1662,6 +1662,352 @@
         "summary": "Change a member's role"
       }
     },
+    "/v1/organizations/{organization}/notifications": {
+      "get": {
+        "description": "Any member, or a key holding `organizations:read`. One per finished operation -- its type, its project, how it ended and why it was requested -- and the daily notice of a shown limit passed at 80%. In-app only; no read state.",
+        "operationId": "list_notifications_v1_organizations__organization__notifications_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "title": "Organization",
+              "type": "string"
+            }
+          },
+          {
+            "description": "How many, newest first: 1 to 200 (default 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The notifications."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "An organisation's notifications, newest first"
+      }
+    },
+    "/v1/organizations/{organization}/plan": {
+      "get": {
+        "description": "Any member, or a key holding `organizations:read`: the plan, its entitlements, the projects held against `projects_active` (a sleeping project holds its slot), and the plans the organisation asked to be told about.",
+        "operationId": "get_organization_plan_v1_organizations__organization__plan_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "title": "Organization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The plan."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          }
+        },
+        "summary": "An organisation's plan and what it holds of it"
+      }
+    },
+    "/v1/organizations/{organization}/plan-interest": {
+      "post": {
+        "description": "Member and above, a person only. One record per organisation and plan; asking again changes nothing. Nothing is charged, and nothing moves the organisation onto the plan.",
+        "operationId": "register_plan_interest_v1_organizations__organization__plan_interest_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "title": "Organization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "`POST /v1/organizations/{organization}/plan-interest`: *Notify me* for a\nplan unavailable during the beta (D2522).",
+                "properties": {
+                  "plan": {
+                    "const": "premium",
+                    "title": "Plan",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "plan"
+                ],
+                "title": "PlanInterestRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Whether this request recorded it."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          }
+        },
+        "summary": "Notify me: record that the organisation wants a plan not yet available"
+      }
+    },
+    "/v1/organizations/{organization}/usage": {
+      "get": {
+        "description": "Any member, or a key holding `projects:read`. Each project's document is the project route's; a deleted project is listed for the part of the window it lived.",
+        "operationId": "get_organization_usage_v1_organizations__organization__usage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "title": "Organization",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The window, in hours back from now: 1 to 720 (default 24).",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 720,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The usage."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the organisation does not exist, or the caller is not a member of it -- one answer for both, so an id says nothing about whether it exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "An organisation's usage, per project"
+      }
+    },
+    "/v1/plans": {
+      "get": {
+        "description": "Any account, or a key holding `organizations:read`. Free is every organisation's plan during the beta; Premium is defined and `unavailable_during_beta`. Each entitlement says whether it is enforced and by which reader: `projects_active`, `branches_total` and `compute_profiles` by this plane before anything is recorded; `storage_gb` and `agent_calls_per_day` are shown against usage and not enforced during the beta.",
+        "operationId": "list_plans_v1_plans_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Both plans."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          }
+        },
+        "summary": "The plans and their entitlements"
+      }
+    },
     "/v1/projects": {
       "get": {
         "description": "The registry: projects the operator adopted from their deployed documents. A key sees its own organisation's only.",
@@ -1843,7 +2189,7 @@
                 }
               }
             },
-            "description": "`capacity_exhausted` with `reason: no_slot`; or `conflict` naming the creation in flight; or `not_available` naming the ledger row."
+            "description": "`plan_limit_reached` (with `entitlement`, `limit`, `plan`, `message`): the organisation's plan allows no further project -- read FIRST; then `capacity_exhausted` with `reason: no_slot`; or `conflict` naming the creation in flight; or `not_available` naming the ledger row."
           }
         },
         "summary": "Create a project in a prepared slot"
@@ -2879,6 +3225,108 @@
         "summary": "Export a project's data"
       }
     },
+    "/v1/projects/{key}/idle-sleep": {
+      "put": {
+        "description": "Member and above, or a key holding `projects:write`. `minutes` 15, 30 or 60, or null for never (the default). Idle is no request answered below 400 and no connection by the project's own database roles for the whole window, read from the samples; a sample missing or unread keeps the project awake. While it sleeps, its backups stop: its last restore point is the moment it went to sleep. Wake it by request.",
+        "operationId": "set_idle_sleep_v1_projects__key__idle_sleep_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "`PUT /v1/projects/{key}/idle-sleep`: minutes of quiet before the project\nis put to sleep -- 15, 30 or 60 -- or null for never (ADR 0276).",
+                "properties": {
+                  "minutes": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          15,
+                          30,
+                          60
+                        ],
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Minutes"
+                  }
+                },
+                "required": [
+                  "minutes"
+                ],
+                "title": "IdleSleepRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The setting, and what sleeping does to backups."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          }
+        },
+        "summary": "Put a project to sleep after it has been idle"
+      }
+    },
     "/v1/projects/{key}/restores": {
       "post": {
         "description": "Member and above, a person only. A branch at `target_time`, which must be inside the window `GET /v1/projects/{key}/backups` serves; otherwise as a branch's creation. The project itself is never overwritten.",
@@ -3090,6 +3538,86 @@
           }
         },
         "summary": "Put a project to sleep"
+      }
+    },
+    "/v1/projects/{key}/usage": {
+      "get": {
+        "description": "Viewer and above, or a key holding `projects:read`. Computed from the samples the server recorded every five minutes: how many it expected and found, each figure's newest reading, the requests counted across resets, agent calls and workflow runs, active and sleeping seconds from the project's history. A figure not read is null and counted, never zero; a window with no sample is `could_not_determine`.",
+        "operationId": "get_project_usage_v1_projects__key__usage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The window, in hours back from now: 1 to 720 (default 24).",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 720,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The usage."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "A project's usage over a window"
       }
     },
     "/v1/projects/{key}/wake": {
