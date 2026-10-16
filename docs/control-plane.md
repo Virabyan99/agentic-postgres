@@ -210,12 +210,12 @@ capacity_exhausted {reason: no_slot}` before anything is recorded; one the
 server has no room for fails `capacity_exhausted {reason: admission}` before
 anything is rendered. No code in 1.16.0 produces `plan_limit_reached`.
 
-**All eleven executed types are accepted since Session 40's bump**: the
-seven's rows -- the six and `credential.rotate`'s `direct_endpoint` -- are
-`trial` (ADR 0261) again, re-earned on a new slot (D2442), and the four branch
-types' rows are `trial` for the first time (ADR 0271). Each is being verified
-on the 1.18.0 trip; a type whose row is not reachable answers `409
-not_available` naming the row.
+**Since Session 40's close only `credential.rotate` is accepted**: its row,
+`direct_endpoint`, is `beta` -- `endpoints_reearned_live` passed on the tagged
+evidence. The six managed-project types and the four branch types were offered
+on the 1.18.0 trip (`trial`, ADR 0261) and their rows are `planned` again --
+`lifecycle_reearned_live`, `branch_live` and `branch_host_live` did not pass
+(D2500, D2501, D2504) -- so each answers `409 not_available` naming its row.
 
 **Only the alpha, beta and control projects are the operator's**: the
 reconciler acts on declared slots alone, and a write naming an adopted project
@@ -241,8 +241,8 @@ once and never prints it.
   branch's own two verifiers, so it is a person's. **One branch per project**:
   a second is `409 branch_limit_reached` before a row (D2430). A branch, a
   missing branch and a foreign project's branch are one `404 not_found`
-  (D2451). Until their Ledger rows are `trial` the four branch writes answer
-  `409 not_available` naming the row (ADR 0254).
+  (D2451). While their Ledger rows are `planned` (since Session 40's close)
+  the four branch writes answer `409 not_available` naming the row (ADR 0254).
 - No account deletion, no email, no passkeys, no web console, no rate limit on
   `/v1/sessions` or on accepting an invitation (Argon2id's cost is the only
   throttle), no key expiry, no `apg project status` and no `/v1/ledger` --

@@ -38,36 +38,37 @@ shape those take.
 ## Status — read this first
 
 ```
-STAGE 5 IS EXECUTING. SESSION 39 CLOSED 2026-10-12: 1.17.0 -- the public
-                Postgres endpoints -- deployed on four projects on OVH (the
-                customer's slot3-prod among them), swept, merged and TAGGED on
-                b0249ce (D1425). docs/plans/session-39-implementation-plan.md
-                is its record; docs/scope-closure.md §32 what it closed, left
-                and hands Session 40. This plan was written 2026-10-03 at
-                42bf306.
+STAGE 5 IS EXECUTING. SESSION 40 CLOSED 2026-10-16: 1.18.0 -- branches and
+                restore to a branch -- deployed on four projects on OVH,
+                swept, merged and TAGGED on 8cc3440 (D1425).
+                docs/plans/session-40-implementation-plan.md is its record;
+                docs/scope-closure.md §33 what it closed, left and hands
+                Session 41. This plan was written 2026-10-03 at 42bf306.
 DIRECTION       HOSTED (D1946). Session 36 paid the preconditions; Session 37
                 built the control plane (ADRs 0251-0255); Session 38 managed
                 projects (ADRs 0256-0261) and the move (ADRs 0262-0267);
-                Session 39 the public endpoints (ADRs 0268-0270).
-SESSIONS        36-42 (D1945). 36, 37, 38, 39 DONE; 40 (branches and restore
-                to a branch) NEXT, unplanned. Idle sleep deferred to 41
-                (D2147). Next free: D2422, ADR 0271.
-CURRENT_SESSION 39. Moves 40 -> 42, all-or-nothing per session (D690).
-template_version 1.17.0. host.yaml schema 4. Outputs v22, project manifest 11,
-                capability manifest 4, lock 4, project lock 3, api-surface 2.
+                Session 39 the public endpoints (ADRs 0268-0270); Session 40
+                branches (ADRs 0271-0273).
+SESSIONS        36-42 (D1945). 36, 37, 38, 39, 40 DONE; 41 (ClickStack, usage,
+                plans, idle sleep) NEXT, unplanned. Next free: D2510, ADR 0274.
+CURRENT_SESSION 40. Moves 41 -> 42, all-or-nothing per session (D690).
+template_version 1.18.0. host.yaml schema 4. Outputs v22, project manifest 11,
+                capability manifest 4, lock 4, project lock 3, api-surface 2,
+                control set 7.
 POSTGRESQL      18.4 STAYS -- the operator, 2026-10-03 (D1947). Measured that
                 day on Docker Hub: postgres 19beta4 is the newest 19 tag; no
                 19rc, no 19 GA, no pgvector pg19 image.
 HOST            OVH VPS US-East (Reston VA), apg-ovh-01, 15.204.231.45 -- the
                 move of 2026-10-08..10 (D2223, D2251): 4 vCPU, 7,745 MiB, no
                 swap. alpha-dev, beta-dev, control-prod and slot3-prod (the
-                one live customer project) at 1.17.0 on b0249ce; slot1-prod
-                and slot2-prod CONSUMED (no slot free; the next is a NEW
-                slot4-prod, D2415). The edge publishes 80, 443 and 5432. A
-                reboot brings all six units back by themselves in ~102 s. The
-                Hetzner CX23 holds the stopped copies until M7's X1/X2 (not
-                before 2026-10-12 ~21:30Z). Secrets: a self-hosted Infisical
-                (ADR 0262).
+                one live customer project, no branch) at 1.18.0 on 8cc3440;
+                slot1-, slot2- and slot4-prod CONSUMED and revoked (no slot
+                free; the next lifecycle needs a NEW slot). The edge publishes
+                80, 443 and 5432. A reboot brings all six units back by
+                themselves in ~79-102 s -- but not a branch (D2504). The
+                Hetzner CX23 holds the stopped copies until M7's X1/X2
+                (allowed since 2026-10-12 ~21:30Z, not run). Secrets: a
+                self-hosted Infisical (ADR 0262).
 CONTROL PLANE   PYTHON, DOGFOODED -- the operator, 2026-10-03 (D1950): the
                 control plane is a project the product itself deploys, with
                 its own migration set and the existing auth service. No
@@ -76,25 +77,29 @@ ACCOUNTS        INVITE-ONLY -- the operator, 2026-10-03 (D1951). No public signu
 OBSERVABILITY   ClickStack ADDED, bounded, on-host -- the operator, 2026-10-03,
                 reversing D1519 for Stage 5 (D1964). The per-project collector
                 and Prometheus stay; one source per customer-visible metric.
-EVIDENCE        evidence/session-39.json: 253 claims, 248 passed, 5 failed --
-                documented_path (D1935); lifecycle_operations_live,
-                lifecycle_project_door_live, lifecycle_retrial_live (D2415:
-                the record pinned to a commit the trip left);
-                public_endpoints_live (D2416: a proof's KeyError, repaired at
-                the close). Ledger: accounts, organizations, api_keys,
-                cli_remote, management_api `beta`; the six managed-project
-                rows, pooled_endpoint and direct_endpoint `planned`, target 40;
-                no operation type accepted in main.
-ADRs            270, next free 0271.   migrations 39.   requirements 346.
-                claims 253, 101 declared offline.
+EVIDENCE        evidence/session-40.json: 267 claims, 263 passed, 4 failed --
+                documented_path (D1935); lifecycle_reearned_live (D2500: the
+                instrument's pooled-name probe died); branch_live (D2501: the
+                backups surface reads a field backup.sh does not print -- a
+                product defect; D2506 a proof's window); branch_host_live
+                (D2504: a branch pins an image id a rebuild orphans and does
+                not come back after a reboot -- a product defect; D2505 a
+                proof's expected value). Ledger: accounts, organizations,
+                api_keys, cli_remote, management_api, pooled_endpoint,
+                direct_endpoint and postgresql `beta`; the six
+                managed-project rows, branches, restore_to_branch and
+                backups_and_pitr `planned`, target 41; credential.rotate is
+                the one operation type accepted in main (D2508).
+ADRs            273, next free 0274.   migrations 39.   requirements 360.
+                claims 267, 111 declared offline.
 divergences     D1-D1944 in earlier plans; D1945-D1984 here; D1985-D2041 in
                 Session 36's; D2042-D2144 in Session 37's; D2145-D2324 in
                 Session 38's and its migration plan's; D2325-D2421 in Session
-                39's. **Next free: D2422.**
+                39's; D2422-D2509 in Session 40's. **Next free: D2510.**
 ```
 
 **Every number in §0 onward was measured on 2026-10-03 at `42bf306`**, or says
-whose it is. **The Status block above is re-read at each session's close.** (Re-read and rewritten at Session 39's close, 2026-10-12.)
+whose it is. **The Status block above is re-read at each session's close.** (Re-read and rewritten at Session 40's close, 2026-10-16.)
 
 ---
 

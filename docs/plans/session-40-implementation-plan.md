@@ -1,9 +1,10 @@
 # Session 40 — Branches and restore to a branch
 
-**Status: EXECUTING since 2026-10-14. Run 1 DONE** (rigs 40a–40d, Sheet E0,
-ADRs 0271–0273, the threat list); **next: Run 2.** Rows **D2422–D2453** at
-planning, **D2454–D2461** added by Run 1; ADRs **0271–0273** written. **NEXT
-FREE: D2462, ADR 0274.**
+**Status: COMPLETE 2026-10-16.** Runs 1–11 DONE: **1.18.0 deployed on four
+projects, swept, merged and TAGGED on `8cc3440`**; evidence 267 claims, 263
+passed, 4 failed (§5 Run 10); the Ledger moved from it (D2508); scope closure
+§33. Rows **D2422–D2453** at planning, **D2454–D2509** added by the runs; ADRs
+**0271–0273** written. **NEXT FREE: D2510, ADR 0274.**
 
 The fifth session of Stage 5 (`docs/plans/stage-5-plan.md` §3, §5 *Session 40*).
 Eleven runs and **two sittings on two days**: the release on the four projects
@@ -479,6 +480,9 @@ the runs add go in a second table below it, in execution order.
 | **D2504** | Run 10 step 3: `slot3-prod_dev`'s containers back by the reconciler's `start --all` after B1 (D2439). | **After the reboot `start --all` failed**: `branch.env` pins `BRANCH_POSTGRES_IMAGE` (`src/agentic_postgres/branch_plan.py:264`) to the index id `restore_drill.runnable_image` resolved at the create (D2497); the boot's rebuild of the parent's image orphaned it, so compose tried to PULL `sha256:...`. The record went `stopped` (21:57:35Z, pool exit 3). The reconciler discards the child's output (`_quiet`, `bin/reconciler.py:1422`), so the reason reached no log (an ADR 0195 gap), and `apg-diag containers` cannot see a branch's containers. BR-LIVE-002 `test_the_branch_came_back_after_the_reboot` fails, so **`branch_host_live` is `failed`**. `s40-branches.py --reset-after-reboot` (one product `branch reset dev`, `0595c7ad`, 405.9 s) made `dev` ready for the sweep, both rows back. | **Carried to 41**: the image is resolved when a branch STARTS (`runnable_image`), never pinned as an id; the child's output is kept; `apg-diag` sees branch containers. | D2497's repair resolved at the right moment for a drill and the wrong one for anything started later. | 0151, 0271 |
 | **D2505** | The host proof: a branch archives nothing (`test_the_branch_is_bounded_and_unreachable_from_the_repository`). | `SHOW archive_mode` read `off`; `SHOW archive_command` read **`(disabled)`**, not `/bin/false` (`tests/deployment/test_session40_branch_host.py:156`): PostgreSQL's show hook prints `(disabled)` whenever archiving is not active, whatever the setting. Every isolation assertion before it passed (running, bounded, the networks, no repository or secret mount). The second failing node of `branch_host_live`. | **Carried to 41**: the proof reads the configured command from the branch's own configuration, beside `archive_mode off`. | An expected value never read from the thing it describes. | -- |
 | **D2506** | The external proof `test_the_second_branch_was_refused_before_a_row`: the creations between the record's `started_at` and `live_at` are exactly the record's two. | The refusal held (exit 5, `branch_limit_reached`, operations 9 → 9, no file kept); the window did not: `started_at` is attempt 5's (21:01:37Z) and `tmp`'s create (`0b50f987`, 10:22:41Z) was adopted from an earlier attempt (D2502), so the list inside the window held only `dev`'s (`657f3aed`) (`tests/external/test_session40_branches.py:220`). The second failing node of `branch_live`. **The 1.18.0 tag message calls the missed create `dev`'s; it was `tmp`'s** -- the tag is not moved. | **Carried to 41**: a continued record keeps the first attempt's start (or the proof reads its window from the operations the record names). | A resumed record's start is the resume's. | -- |
+| **D2507** | Session 39's note on the resize row: *"The constant follows the newest release's larger step, rounded up"* (D2419). | 1.18.0's resize deploy steps took 60.7 s and 63.9 s (operations `04bb6046`, `aa13fd34`); the slot's app route saw at most 10.0 s of failed samples through each; the pooled name was not read (D2500). | **`RESIZE_WINDOW_SECONDS` stays 84** (1.17.0's 83.5 s, rounded up): it is still an upper bound on 1.18.0's step, and the customer's number moves only when the database side of the window is read. The Session 40 envelope rows record both readings. | A constant moved down on half a reading is a promise made on half the evidence. | -- |
+| **D2508** | §5 Run 11: *"each `trial` row → `beta` if every named claim reads `passed` … else → `planned` with its types removed from `ACCEPTED_TYPES`"*. | On the tagged evidence `endpoints_reearned_live` passed; `lifecycle_reearned_live`, `branch_live` and `branch_host_live` failed -- though every lifecycle operation and every branch operation succeeded on the trip. The failures are one instrument defect (D2500), two product defects (D2501, D2504) and two proof defects (D2505, D2506). | **Applied as written**: `pooled_endpoint`, `direct_endpoint` and `postgresql` → `beta`; the six managed-project rows, `branches`, `restore_to_branch` and `backups_and_pitr` → `planned`, target 41, their customer text as before Session 40's bump, controls emptied; `ACCEPTED_TYPES` = `{credential.rotate}`; CTL-OPS-001's exact-set proof renamed `test_only_credential_rotate_is_accepted_and_the_eleven_are_executed` (D1119); `control-plane.md` and `managed-projects.md` say so. The host's 1.18.0 still accepts the eleven, with no slot free. | The Ledger answers whether the evidence passed, not whether the operation worked. | 0261 |
+| **D2509** | §5 Run 11: *"memory with a branch live"* in the envelope. | No reading of the host's memory was taken while `dev` was ready -- `s40-branches.py` records none -- and `dev` was deleted after the sweep. | **An `UNMEASURED` row**, beside rig 40c's resident reading; the windows' `UNMEASURED` row narrowed to the pooled name (D2500), the app route's readings moved into the envelope (D2444). | A measurement nobody scheduled is a measurement nobody took. | -- |
 
 ---
 
@@ -1533,6 +1537,22 @@ binding (D2325); a plaintext peer holds a socket for the read deadline (D2326).
 - **Recovery time grows with the WAL since the last backup** (D2492/D2495): a drill or a restore of a busy day replays for 13+ min from the EU buckets; a BRANCH of such a parent meets the reconciler's 1,200 s child budget and fails. A fresh incremental before a branch, US buckets, or a larger budget -- priced for 41, not taken.
 - **The reconciler now records backups every 900 s** — R2 requests per slot per
   day the envelope should price when slots multiply.
+
+**Created at the trip and the close (Runs 10–11):**
+
+- **Two product defects deployed in 1.18.0**: the backups surface always reads
+  `could_not_determine` (D2501), and a branch does not come back after a reboot
+  (D2504) -- the reconciler also discards the failing child's output, and
+  `apg-diag containers` cannot see a branch's containers. Each is repaired
+  before its rows return to `trial`.
+- **Nine Ledger rows refused on defects, not on operations** (D2508): only
+  `credential.rotate` is accepted in `main`; the host's 1.18.0 accepts the
+  eleven with no slot free. The next re-earning is the third, on a NEW slot.
+- **`ready` does not wait for a branch's door certificate** (D2503).
+- **The 1.18.0 tag message calls the create the `qa` proof missed `dev`'s**; it
+  was `tmp`'s (D2506). The tag is not moved.
+- **`slot1-`, `slot2-` and `slot4-prod` are consumed and revoked**; their
+  buckets and repositories are kept (ADR 0187).
 
 ---
 

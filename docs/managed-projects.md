@@ -8,10 +8,12 @@ it keeps. The routes and the roles are in [the control plane](control-plane.md);
 the operator's half -- slots, the reconciler, revocation -- is the
 [operator guide](operator-guide.md) §20.
 
-**Every operation here is being verified** (Reality Ledger status `trial`, ADR
-0261): offered on the 1.18.0 trip, re-earned on a new slot (D2442), and moved to
-`beta` or back to `planned` by the session's close, which
-[the Reality Ledger](reality-ledger.md) says for each.
+**Since Session 40's close only setting a database credential is open**
+(Reality Ledger `beta`). Every operation here was offered on the 1.18.0 trip
+(`trial`, ADR 0261); the project operations and the branch operations are
+`planned` again, so each answers `409 not_available` naming its row until a
+later trip re-earns it. [The Reality Ledger](reality-ledger.md) says why for
+each.
 
 ## The life of a project
 
@@ -126,8 +128,9 @@ your machine and sends only its verifier; nobody else ever holds it, and a
 lost password is replaced by rotating again. `bin/endpoint.sh show` prints
 the doors and a snippet per client; `bin/endpoint.sh connect` opens `psql`.
 A sleeping project's doors refuse until it is woken. The details are in
-[database connections](database-connections.md). **Setting a credential is being
-verified** (Reality Ledger `trial`): re-earned on a new slot's names (D2442).
+[database connections](database-connections.md). **Setting a credential is in
+beta** (Reality Ledger `beta`): re-earned on a new slot's names on the 1.18.0
+trip (D2442).
 
 ## Backups
 
@@ -188,9 +191,9 @@ bin/branch.sh delete --project-key KEY --branch dev --confirm dev --wait
 - **A branch is not backed up.** Deleting it, or losing the server, loses
   what it holds. Delete needs an admin or owner; `--confirm` is its name.
 
-The branch operations are being verified (Reality Ledger `trial`, ADR 0261):
-offered on the 1.18.0 trip, and moved to `beta` or back to `planned` by the
-session's close.
+The branch operations were offered on the 1.18.0 trip (Reality Ledger
+`trial`, ADR 0261) and are `planned` again since Session 40's close: each
+answers `409 not_available` until a later trip re-earns it (D2501, D2504).
 
 ## What a refusal means
 

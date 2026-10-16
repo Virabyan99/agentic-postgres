@@ -378,21 +378,16 @@ def test_the_backups_route_serves_the_recorded_window(drive: Any) -> None:
 def test_a_branch_write_is_not_available_while_its_row_is_unreachable(
     drive: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ADR 0254: with the branch types unaccepted -- as a row moved back to
-    `planned` leaves them -- a creation answers `409 not_available` naming
-    `branches` and a restore naming `restore_to_branch`, before the body is
-    read, nothing recorded. The control, the product's own state since Session
-    40's bump (the rows `trial`): the same nonsense body is READ and refused
-    `400 malformed_request`, still recording nothing."""
+    """ADR 0254: with the branch types unaccepted -- the product's own state
+    since Session 40's close, the rows `planned` again (D2508) -- a creation
+    answers `409 not_available` naming `branches` and a restore naming
+    `restore_to_branch`, before the body is read, nothing recorded. The
+    control, the types accepted as a `trial` row leaves them: the same
+    nonsense body is READ and refused `400 malformed_request`, still recording
+    nothing."""
     org = _org(drive, "planned")
     key, member = org["project"], org["tokens"]["member"]
     cases = (("branches", "branches"), ("restores", "restore_to_branch"))
-    for path, _row in cases:
-        read = drive.call("POST", f"/v1/projects/{key}/{path}", token=member,
-                          body={"nonsense": secrets.token_hex(4)})  # fmt: skip
-        assert (read.status_code, read.json()) == (400, {"error": "malformed_request"}), path
-    branch_types = {"branch.create", "branch.reset", "branch.delete", "restore.create"}
-    monkeypatch.setattr(operations, "ACCEPTED_TYPES", operations.EXECUTED_TYPES - branch_types)
     for path, row in cases:
         answer = drive.call("POST", f"/v1/projects/{key}/{path}", token=member,
                             body={"nonsense": secrets.token_hex(4)})  # fmt: skip
@@ -400,4 +395,9 @@ def test_a_branch_write_is_not_available_while_its_row_is_unreachable(
             409,
             {"error": "not_available", "ledger_row": row},
         ), answer.text
+    monkeypatch.setattr(operations, "ACCEPTED_TYPES", operations.EXECUTED_TYPES)
+    for path, _row in cases:
+        read = drive.call("POST", f"/v1/projects/{key}/{path}", token=member,
+                          body={"nonsense": secrets.token_hex(4)})  # fmt: skip
+        assert (read.status_code, read.json()) == (400, {"error": "malformed_request"}), path
     assert _rows(drive, key) == 0

@@ -1528,3 +1528,61 @@ re-registered, so the claims wait for a new slot.
 3. **A managed project's release move** (D2418), before the next one.
 4. **The OVH upgrade** (D2342) and §10's smaller rows.
 
+## 33. What Session 40 closed, what it left, and what Session 41 inherits
+
+**Session 40 is branches and restore to a branch.** Eleven runs,
+`D2422`–`D2509`, ADRs 0271–0273. **`1.18.0` is deployed on four projects —
+alpha, beta, control-prod and the customer's `slot3-prod`, moved by the
+product's own verb for the first time (`slot.sh redeploy`) — swept, merged and
+tagged on `8cc3440`** (D1425), after two repairs on day 1: a shared promotion
+bound for the drills (D2492) and an image the containerd store had orphaned
+under every running database (D2497). The lifecycle was re-earned on a NEW
+`slot4-prod` and the branches run on `slot3-prod`, all at the one commit. The
+merged evidence reads **267 claims: 263 passed, 4 failed** — `documented_path`
+by decision (D1935), `lifecycle_reearned_live` (D2500), `branch_live` (D2501,
+D2506) and `branch_host_live` (D2504, D2505).
+
+**The sentence this session would most want carried forward: a value
+resolved once is a value that goes stale.** D2497's repair resolved the
+parent's image when the drill or the branch was made — right for a drill that
+ends, wrong for a branch that must start again after a reboot (D2504). And the
+backups surface was proved against the shape its reader wanted, not the shape
+its producer prints (D2501).
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **Branches and restore to a branch** (stage plan §5 *Session 40*) | **Built, deployed and run on production:** a branch is its own compose project restored from the parent's repository, archiving off, re-keyed before its names open (ADR 0271); an expiry the reconciler requests on the member's behalf (ADR 0272); a backups surface (ADR 0273). On `slot3-prod`: `tmp` expired by the reconciler 57.8 s after `expires_at`; `dev` restored to a point held the first marked row and not the second, migrated over its own direct name, the parent's passwords refused, a second branch refused `branch_limit_reached`, reset back to both rows, then deleted with its names refusing. |
+| **The re-earning, the pooled and direct names** (D2442) | `endpoints_reearned_live` passed: `pooled_endpoint`, `direct_endpoint` and `postgresql` are `beta`, `credential.rotate` accepted. |
+| **A managed project's release move** (D2418) | `slot.sh redeploy` moved `slot3-prod` to the new commit three times, the door certificates byte-identical each time. |
+| **The slot's own app route through the windows** (D2324, D2444) | Probed for the first time: a resize 10.0 s, the wake 16.0 s, the sleep 89.7 s (asleep by design). |
+| **D2405 live** | `slot.sh revoke` removed `slot4-prod`'s directory itself at Sheet SL4. |
+| **D2492, D2497** | The drills share one promotion bound (3,600 s); a drill and a branch run their container's own image by an id that resolves (`restore_drill.runnable_image`). |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **Nine Ledger rows `planned`, only `credential.rotate` accepted in `main`** (D2508) | The six managed-project rows named `lifecycle_reearned_live`, the three branch rows `branch_live`; both `failed`. Every lifecycle operation and every branch operation ran as planned on the trip. The deployed 1.18.0 still accepts the eleven types, with no slot free. |
+| **D2501 (product)** — the backups surface always reads `could_not_determine` | The reconciler hands the reading `backup.sh info --json`'s raw output, and the reading takes `oldest_backup_stop`, which only `backup_report`'s summary carries. |
+| **D2504 (product)** — a branch does not come back after a reboot | `branch.env` pins the parent's image as an index id the boot's rebuild orphans; the reconciler discards the child's output, and `apg-diag` cannot see a branch's containers. |
+| **D2500, D2505, D2506** | The instrument's pooled-name probe died (repaired in the instrument); a proof expects `/bin/false` where PostgreSQL shows `(disabled)`; a proof's window starts at a resumed record's start. |
+| **The pooled name through the windows; the host's memory with a branch live** | `UNMEASURED` (D2500, D2509). |
+| **D2503** — `ready` does not wait for the door's certificate | Recorded. |
+| **D2495** — a branch's create and reset sit within ~100 s of the reconciler's 1,200 s child budget | Priced for 41, not taken. |
+| **The OVH upgrade** (D2342) | Owed before Session 41's trip. |
+| **Hetzner** (M7 X1/X2) | Allowed since 2026-10-12 ~21:30Z; not run. |
+| `documented_path` | **`failed` by decision** (D1935). |
+
+### What Session 41 inherits, in order
+
+1. **The two product repairs, D2501 and D2504**, with proofs that read the
+   producer's real output and a branch restarted after a rebuild — then the
+   three proof and instrument defects (D2500, D2505, D2506).
+2. **The re-earning, a third time**: a NEW slot (`slot5-prod`), the nine rows
+   back to `trial` at the bump, the lifecycle, the branches, the sweep and the
+   external half at ONE commit; the pooled name read through every window and
+   the host's memory read with a branch live.
+3. **ClickStack, usage, plans and idle sleep** (stage plan §5 *Session 41*).
+4. **The OVH upgrade** (D2342) and §10's smaller rows.

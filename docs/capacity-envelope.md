@@ -927,6 +927,103 @@ Sampled under:
 
 Session 38's three-project cold start: 100 s, the reconciler restarted once.
 
+### A drill on slot3-prod, the branch parent, before any branch (Sheet E0)
+
+**the repository 5,236,768 bytes, the cluster 145 MiB, 2,711 WAL archived / 0 failed, the last full 2026-10-12 10:39:26Z; a restore to a target time verified (achieved 08:08:14.473036, timeline 2): restore 288.5 s, recovery 217.9 s, RTO 506.7 s; available 5,035 MiB before, 4,941 after; doctor 12 ok before and after**
+
+Sampled under:
+
+- the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 vCPU, no swap
+- 1.17.0 at b0249ce, 2026-10-14 08:18Z, four projects deployed
+- /home/op/s40-e0.sh as root (sha256 9ed449ac...): the readings, then one disposable drill (`--target-time '2026-10-14 08:08:15+00:00'`), nothing left
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The baseline a branch of slot3-prod is read against (D2452): 506.7 s is under OPERATION_SECONDS less 300, so the bound was not raised.
+
+### Provisioning a managed project at 1.18.0 (project.create, end to end)
+
+**slot4-prod 1,243.8 s from the operation's creation to succeeded; steps allocate 0.8, admit 0.8, deploy-1 70.4, admin 1.5, ports 1.6, deploy-2 44.3, unit 0.8, backup 1,117.2, registry 0.2 s**
+
+Sampled under:
+
+- the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 vCPU, no swap
+- 1.18.0 at 8cc3440, 2026-10-15, operation 3bc297e3, profile small
+- ~/s40/run7/s40-lifecycle.py from the workstation as the probe owner, through the product's own CLI; timed from the operation row (created_at..finished_at), because the instrument resumed inside the create after a transport blip (D2499)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The first full backup is ~90% of it (1.17.0: 1,217.4 s, backup 1,051.9 s).
+
+### The lifecycle's other operations at 1.18.0, on slot4-prod
+
+**credential.rotate x3 3.2-6.2 s (steps check 0.0, alter 0.1-0.2, sync 0.5-0.6 s; the old password refused, exit 2); sleep 38.9 s (stop 30.9 s); wake 21.6 s (start 14.6 s), the first answer 18.1 s after it; resize small -> standard 67.2 s and standard -> large 70.2 s (deploy 60.7 / 63.9 s; admission read 304 and 840 MB against 4,428 MB safe available, both admitted); export 2.5 / 3.7 s (40,276 bytes; the URL 403 after its expiry); delete 19.3 s (retire 15.1 s); the second create refused no_slot with creations 8 -> 8**
+
+Sampled under:
+
+- the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 vCPU, no swap
+- 1.18.0 at 8cc3440, 2026-10-15 09:25-09:54Z
+- ~/s40/run7/s40-lifecycle.py, each operation's created/finished and steps read back through /v1 (D2171), the admission reading from result (D2362)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+RESIZE_WINDOW_SECONDS stays 84 (1.17.0's larger step, rounded up): 1.18.0's steps are under it, and the slot's pooled name was not read through them (D2500).
+
+### The resize and sleep windows as the slot's own app route saw them (D2444): the longest run of failed samples
+
+**resize small -> standard 10.0 s (9 of 61 samples failed), standard -> large 10.0 s (5 of 63); sleep 89.7 s (39 of 41: the slot is asleep by design); wake 16.0 s (12 of 40); every window covered; the four neighbours lost no sample**
+
+Sampled under:
+
+- the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 vCPU, no swap
+- 1.18.0 at 8cc3440, 2026-10-15, slot4-prod
+- s40-lifecycle.py's route probe from the workstation, holding no control-plane session: GET <app>/auth/me every 2 s, up only if answered within 5 s and not 404/502/503/504; a window is the operation's started_at to finished_at plus 60 s, the longest run measured start to start (one period of resolution)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The pooled name's probe died after 4 samples (D2500), so the database side of these windows stays UNMEASURED.
+
+### A branch's operations on slot3-prod at 1.18.0 (ADR 0271, ADR 0272)
+
+**branch.create at the end (tmp) 635.1 s; restore.create at a point (dev, timeline 2) 1,100.0 s; branch.reset 1,091.0 s, and 405.9 s after the reboot; branch.delete 5.0 s (dev) and 7.9 s (tmp, requested by the reconciler 57.8 s after expires_at, origin expiry); each door answered on its first attempt, 4.5-6.4 s after ready**
+
+Sampled under:
+
+- the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 vCPU, no swap
+- 1.18.0 at 8cc3440, 2026-10-15 and -16, the parent slot3-prod (145 MiB, a quiet parent: E0's drill RTO 506.7 s)
+- ~/s40/run7/s40-branches.py from the workstation as the probe owner, through the product's own CLI; each operation's created_at..finished_at read back through /v1
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+A create at a point and a reset sit within ~100 s of the reconciler's 1,200 s child budget (D2495). What the after-reboot reset saved was not read.
+
+### A branch's memory, in the rig (rig 40c, D2431)
+
+**the branch's postgres at small 21.0 MiB idle, 24.2 MiB with 20 pooled clients (20/20 answered), 28.1 MiB after; each pooler 1.2-1.6 MiB of its 64; the 192 MiB charge is the budget, ~7x the resident reading**
+
+Sampled under:
+
+- the 8 GB development machine, WSL2, 2026-10-14 (Run 1), NOT the deployment host
+- ~/s40/run1/rig40/rig40a.py: the project's own image built from versions.env at the small profile's limits, with two PgBouncers
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The host's memory with a branch live was not read (UNMEASURED).
+
+### A cold start with four projects and a branch on OVH (B1)
+
+**the edge, four project units and the reconciler each active and started by the boot itself, NRestarts 0 on all six, active from boot+79-99 s, 42 healthy; the branch did NOT come back: the reconciler's start --all failed and its record read stopped (D2504)**
+
+Sampled under:
+
+- the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 vCPU, no swap
+- booted 2026-10-15 21:55:26Z at 8cc3440, slot3-prod_dev ready before it
+- read as op before the sweep ('started by the boot' as D2140 reads it)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+branch.env pins the parent's image as an index id the boot's rebuild orphaned, so compose tried to pull it; one reset made the branch ready again.
+
 ---
 
 ## What was not measured, and why
@@ -936,11 +1033,17 @@ run reads as an envelope of the whole system — which is the dishonest
 reporting this claim is most exposed to, arriving as a document that looks
 complete rather than as a claim that is false.
 
-### The resize and sleep windows as the slot's own routes see them (D2171)
+### The resize and sleep windows as the slot's pooled name sees them (D2171, D2444)
 
-The probe was started on the three projects before the creation, and the slot's document is root's until Sheet K2 copies it -- the instrument timed each operation and sampled only after it ended. The resize row is the deploy step, an upper bound. Session 39's lifecycle (1.17.0) did not probe the slot either.
+Session 40's lifecycle (1.18.0) probed the slot's app route through every window -- its row above -- but the pooled name's probe thread died on an uncaught timeout after 4 samples, before the first sleep (D2500): the database side of the windows was not read. Sessions 38 and 39 did not probe the slot at all.
 
-*Unblocked by: a probe target added for the slot's routes once its document is copied, before the first resize (the next lifecycle, on slot4-prod).*
+*Unblocked by: the next lifecycle on a new slot, with the instrument's repaired probe (a sample that could not be taken is a failed sample).*
+
+### The host's memory with a branch live (D2431)
+
+No reading of the host's available memory was taken while slot3-prod's branch was ready: the instrument recorded none, and the branch was deleted after the sweep. Rig 40c's resident reading (its row above) stands beside the 192 MiB charge.
+
+*Unblocked by: a `free -m` and a doctor capacity reading in the next branch's trip.*
 
 ### Alpha-dev's 1.15.0 deploy window, per class (Session 37 R2a)
 

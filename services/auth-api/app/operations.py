@@ -14,8 +14,12 @@ moves them to `trial` again, with `direct_endpoint`** (`credential.rotate`'s
 row), so the seven executed types were accepted on the commit its trip deployed
 (1.17.0); **its close (Run 12) returned all seven rows to `planned`** --
 `lifecycle_retrial_live` and `public_endpoints_live` failed on the tagged
-evidence (D2415, D2416) -- so no type is accepted until a later sitting re-earns
-them. This
+evidence (D2415, D2416). **Session 40's Run 8 moved all eleven rows to `trial`;
+its close (Run 11) read the tagged evidence**: `endpoints_reearned_live` passed,
+so `direct_endpoint` is `beta` and `credential.rotate` stays accepted;
+`lifecycle_reearned_live`, `branch_live` and `branch_host_live` failed (D2500,
+D2501, D2504-D2506), so the six managed-project types and the four branch types
+are refused until a later sitting re-earns them. This
 image cannot read the ledger file -- it is not in the build context, and a
 running service deciding what exists from a document would make a document its
 authority -- so the set is written here and
@@ -98,25 +102,12 @@ MAX_EXPIRY_SECONDS: Final = 7 * 86400
 BACKUP_RECORD_SECONDS: Final = 900
 
 #: The types the control mode accepts. Equal, by the guard, to the types whose
-#: ledger row accepts: ALL ELEVEN since Session 40's bump -- the six
-#: managed-project types and `credential.rotate` re-trialed on a new slot (D2442),
-#: the four branch types trialed (ADR 0271). Written out, never derived from
-#: `EXECUTED_TYPES` -- building a type is not the decision to accept it.
-ACCEPTED_TYPES: Final[frozenset[str]] = frozenset(
-    {
-        "project.create",
-        "project.delete",
-        "project.sleep",
-        "project.wake",
-        "project.resize",
-        "project.export",
-        "credential.rotate",
-        "branch.create",
-        "branch.reset",
-        "branch.delete",
-        "restore.create",
-    }
-)
+#: ledger row accepts: since Session 40's close, `credential.rotate` alone --
+#: `direct_endpoint` is `beta` (endpoints_reearned_live passed); the six
+#: managed-project rows and the branch rows are `planned` again (D2500, D2501,
+#: D2504). Written out, never derived from `EXECUTED_TYPES` -- building a type
+#: is not the decision to accept it.
+ACCEPTED_TYPES: Final[frozenset[str]] = frozenset({"credential.rotate"})
 
 #: The JSON Schema every operation's `{type, arguments}` validates against,
 #: relative to the repository: read by the reconciler before dispatch, and
