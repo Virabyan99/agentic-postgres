@@ -112,6 +112,24 @@ def test_a_branch_promotion_bound_sits_inside_its_reconciler_budget() -> None:
         f"branch-runtime's promotion bound {bound.value} s does not fit its reconciler "
         f"child budget {budget['branch-runtime.sh']} s"
     )
+    # Session 41 (D2516): the child budget sits inside each branch type's OWN
+    # operation bound, and the CLI's `--wait` default outlasts the longest one.
+    reconciler = _module_assignments(BIN / "reconciler.py")
+    by_type = reconciler["OPERATION_SECONDS_BY_TYPE"]
+    assert isinstance(by_type, ast.Dict)
+    bounds = {
+        key.value: value.value
+        for key, value in zip(by_type.keys, by_type.values, strict=True)
+        if isinstance(key, ast.Constant) and isinstance(value, ast.Constant)
+    }
+    assert set(bounds) == {"branch.create", "restore.create", "branch.reset"}, bounds
+    for kind, seconds in bounds.items():
+        assert budget["branch-runtime.sh"] < seconds, (
+            f"{kind}: branch-runtime's child budget {budget['branch-runtime.sh']} s does not fit "
+            f"the operation's {seconds} s"
+        )
+    wait = _module_assignments(BIN / "cloud.py")["WAIT_SECONDS"]
+    assert isinstance(wait, ast.Constant) and wait.value > max(bounds.values()), wait
 
 
 def test_every_drill_proof_outlasts_the_drill_and_reads_its_own_document() -> None:

@@ -29,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, branch_record, naming, slot
+from agentic_postgres import REPO_ROOT, branch_plan, branch_record, naming, slot
 
 pytestmark = [
     pytest.mark.p0,
@@ -153,7 +153,16 @@ def test_the_branch_is_bounded_and_unreachable_from_the_repository(
             )
     database = parent["database"]["name"]
     assert _sql(names.postgres_container, database, "SHOW archive_mode") == "off"
-    assert _sql(names.postgres_container, database, "SHOW archive_command") == "/bin/false"
+    # D2505: with archiving off PostgreSQL SHOWs `(disabled)` for the command,
+    # whatever was configured (measured on the trip). So the CONFIGURED command
+    # is read where it is set -- the container's own argv -- and held to
+    # `branch_plan.persistent_command()`'s two archive settings.
+    assert _sql(names.postgres_container, database, "SHOW archive_command") == "(disabled)"
+    command = list((_inspect("container", names.postgres_container) or {})["Config"]["Cmd"])
+    configured = {command[i + 1] for i, word in enumerate(command[:-1]) if word == "-c"}
+    archive = {s for s in branch_plan.persistent_command() if s.startswith("archive_")}
+    assert archive == {"archive_mode=off", "archive_command=/bin/false"}, archive
+    assert archive <= configured, (archive, command)
 
 
 def test_the_branch_is_charged(

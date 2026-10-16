@@ -213,6 +213,8 @@ class Children:
         self.doors: dict[str, Any] | None = None
         #: Where a `branch-runtime.sh` create or reset leaves its record (Session 40).
         self.branch_root: Path | None = None
+        #: What `branch-runtime.sh start --all` prints (Session 41, D2514).
+        self.branch_start_output = ""
 
     @staticmethod
     def label(argv: list[str]) -> str:
@@ -252,6 +254,8 @@ class Children:
             out = self.running + "\n"
         elif label == "docker ps":
             out = STORAGE + "\n"
+        elif label == "branch start":
+            out = self.branch_start_output
         code = self.codes.get(label, 0)
         if label in ("branch create", "branch reset") and code == 0:
             self.branched(argv)
@@ -1379,3 +1383,35 @@ def test_start_brings_every_recorded_branch_back(host: Host) -> None:
     assert started["argv"][1:] == ["start", "--all"]
     assert started["stdin"] is subprocess.DEVNULL
     assert host.database.named("control_record_branches")
+
+
+def test_the_branch_start_keeps_its_output(host: Host, capsys: pytest.CaptureFixture[str]) -> None:
+    """D2514: `start --all`'s whole output goes to a 0600 log under the
+    reconciler's log root and its LAST line reaches the journal -- before, the
+    child's output was discarded and "a branch did not come back" carried no
+    reason. Control: a start that came back says so, with its own last line."""
+    host.module.BRANCH_ROOT.mkdir(mode=0o700)
+    host.children.codes["branch start"] = 6
+    host.children.branch_start_output = (
+        "  slot3-prod_dev: did not come back: the parent's image changed since this branch "
+        "was made (sha256:2794179a0000 -> sha256:7cbc07f10000); reset the branch\n"
+    )
+    capsys.readouterr()
+    host.module.start()
+    said = capsys.readouterr().out
+    line = [entry for entry in said.splitlines() if "did not come back" in entry]
+    assert len(line) == 1, said
+    assert "(exit 6)" in line[0] and "the parent's image changed" in line[0], line
+    logs = sorted(host.module.LOG_ROOT.glob("branch-start-*.log"))
+    assert len(logs) == 1, logs
+    assert oct(logs[0].stat().st_mode & 0o777) == "0o600"
+    assert "reset the branch" in logs[0].read_text("utf-8")
+    assert str(logs[0]) in line[0], "the journal line names the log it came from"
+
+    host.children.codes["branch start"] = 0
+    host.children.branch_start_output = (
+        "  slot3-prod_dev: started from sha256:82700cbc1ab9, door ready\n"
+    )
+    host.module.start()
+    back = [entry for entry in capsys.readouterr().out.splitlines() if "branches started" in entry]
+    assert back and "door ready" in back[0], back

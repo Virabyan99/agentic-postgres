@@ -34,7 +34,7 @@ Usage:
   show    One operation: its type, project, status, step, progress, result.
   list    The context's organisation's operations (or --organization's), newest first.
   wait    Read the operation every --interval seconds (5) until it is finished,
-          for at most --timeout seconds (2400).
+          for at most --timeout seconds (3900).
   cancel  Cancel an operation still pending: its requester, or an admin or owner.
 USAGE
 }

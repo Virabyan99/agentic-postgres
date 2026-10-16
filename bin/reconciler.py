@@ -69,7 +69,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -135,6 +135,15 @@ CONTROL_RETRY_SECONDS = 10
 #: An operation's bound, and each child's own (ADR 0256 §8). A child that
 #: outlives its bound leaves its step's outcome unknown: `could_not_determine`.
 OPERATION_SECONDS = 30 * 60
+#: Session 41 (D2516): the three branch types' own bound. A branch at a point
+#: took 1,100 s and a reset 1,091 s against a 1,200 s child budget (Session
+#: 40, D2495) -- a 100 s margin on a restore whose time grows with the parent's
+#: repository chain. Every other type keeps OPERATION_SECONDS.
+OPERATION_SECONDS_BY_TYPE = {
+    "branch.create": 3600,
+    "restore.create": 3600,
+    "branch.reset": 3600,
+}
 CHILD_SECONDS = {
     "admit.sh": 120,
     "deploy.sh": 900,
@@ -147,10 +156,11 @@ CHILD_SECONDS = {
     "docker": 60,
     # Session 39: a read of two rows, two renames and two signals.
     "customer-credentials.sh": 120,
-    # Session 40 (ADR 0271): a branch's restore, recovery and doors. Sheet E0's
-    # drill of slot3-prod took 506.7 s (D2452); twice that, rounded, and still
-    # under OPERATION_SECONDS, so the operation's bound is not raised.
-    "branch-runtime.sh": 1200,
+    # Session 40 (ADR 0271): a branch's restore, recovery and doors -- 1,200 s,
+    # which the trip's 1,100 s branch at a point nearly met (D2495). Session 41
+    # (D2516): 3,300 s, inside its types' 3,600 s operation bound with 300 s for
+    # the steps around it.
+    "branch-runtime.sh": 3300,
 }
 DATABASE_SECONDS = 120
 #: `pg_dump` of a slot's customer schemas, and its upload (D2164).
@@ -340,7 +350,8 @@ class Operation:
         self.project_key: str | None = row.get("project_key")
         self.steps: list[dict[str, Any]] = []
         self.current: str | None = None
-        self.deadline = time.monotonic() + OPERATION_SECONDS
+        self.bound = OPERATION_SECONDS_BY_TYPE.get(self.type, OPERATION_SECONDS)
+        self.deadline = time.monotonic() + self.bound
         #: The slot a creation took, and the manifest bytes it was prepared with.
         self.allocated: str | None = None
         self.original_manifest: bytes | None = None
@@ -377,7 +388,10 @@ class Operation:
     def remaining(self, bound: float) -> float:
         left = self.deadline - time.monotonic()
         if left <= 0:
-            raise Refused("could_not_determine", {"reason": "the operation's 30 minutes ran out"})
+            raise Refused(
+                "could_not_determine",
+                {"reason": f"the operation's {int(self.bound // 60)} minutes ran out"},
+            )
         return min(bound, left)
 
     def child(
@@ -1435,13 +1449,50 @@ def start_branches(reconciler: Reconciler) -> None:
         return
     if not present:
         return
-    started = _quiet(dispatch.branch_start_argv(REPO_ROOT), 900)
+    log = reconciler.log_path("branch-start", datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))
+    last = _logged(dispatch.branch_start_argv(REPO_ROOT), BRANCH_START_SECONDS, log)
     say(
-        "branches started"
-        if started is not None and started.returncode == 0
-        else "a branch did not come back; its record says stopped (D2439)"
+        ("branches started" if last.code == 0 else "a branch did not come back")
+        + f" (exit {last.code}): {last.line} -- {log}"
     )
     reconciler.record_branches()
+
+
+#: `branch-runtime start --all`'s bound: each branch's compose up (300 s) and
+#: its door (180 s, D2515), for the few branches a slot's plan allows.
+BRANCH_START_SECONDS = 900
+
+
+class Logged(NamedTuple):
+    # A NamedTuple, not a dataclass: tests load this file by path, unregistered.
+    code: int | str
+    line: str
+
+
+def _logged(argv: list[str], timeout: int, log: Path) -> Logged:
+    """One child at start, its whole output appended to a 0600 log and its last
+    line returned (D2514): `_quiet` kept nothing, so a branch that did not come
+    back was a fixed sentence with no reason. branch-runtime prints names,
+    states and Docker's error text, never a verifier (`_tail` redacts them)."""
+    descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(descriptor, "a", encoding="utf-8") as handle:
+        handle.write(f"== {datetime.now(UTC).isoformat(timespec='seconds')} {' '.join(argv)}\n")
+        handle.flush()
+        try:
+            done = subprocess.run(
+                argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                timeout=timeout, check=False,
+            )  # fmt: skip
+        except subprocess.TimeoutExpired:
+            handle.write(f"== did not finish within {timeout} s\n")
+            return Logged("timeout", f"did not finish within {timeout} s")
+        except OSError as error:
+            handle.write(f"== could not run: {error}\n")
+            return Logged("unrun", f"could not run: {error}")
+        output = (done.stdout or "") + (done.stderr or "")
+        handle.write(output + f"== exit {done.returncode}\n")
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    return Logged(done.returncode, lines[-1] if lines else "(no output)")
 
 
 def run(*, once: bool) -> int:

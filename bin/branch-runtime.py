@@ -26,7 +26,13 @@ It holds no secret of its own, has no systemd unit and publishes no port.
     userlists  read back from the branch's own `pg_authid` (D2460)
     doors      the two customer poolers
     attach     the edge proxy joins the branch's edge network
-    ready      `branch.json` `ready`, with the point reached and the timeline
+    door       both names verify through the edge, or `door: pending` with the
+               reason after 180 s (D2515)
+    ready      `branch.json` `ready`, with the point reached, the timeline and
+               the door
+
+Every `compose up` -- the persistent phase and every `start` -- resolves the
+image from the record's tag and platform digest first (D2513).
 
 Exit codes:
   0  done; or every branch's state determined
@@ -60,6 +66,7 @@ import yaml  # noqa: E402
 
 from agentic_postgres import (  # noqa: E402
     backup_report,
+    branch_door,
     branch_plan,
     branch_record,
     branch_rekey,
@@ -96,7 +103,11 @@ POOLER_GID: int | None = customer_credentials.POOLER_GID
 QUICK_SECONDS = 60
 COMPOSE_SECONDS = 300
 RESTORE_SECONDS = 7200
-PROMOTION_SECONDS = 900
+#: Session 41 (D2516): a branch at a point took 1,100 s and a reset 1,091 s
+#: against Session 40's 1,200 s child budget (D2495); the budget is now 3,300 s
+#: inside a 3,600 s operation, and the promotion's own bound sits under both
+#: (`test_restore_promotion_bound.py`).
+PROMOTION_SECONDS = 2400
 
 #: PostgreSQL's words when recovery ran out of WAL before the target (rig 40a).
 _TARGET_NOT_REACHED = "recovery ended before configured recovery target was reached"
@@ -167,6 +178,53 @@ def load_host(path: Path) -> dict[str, Any]:
         return host_config.load_host_manifest(path)
     except (OSError, ValueError) as error:
         raise OperatorError(EXIT_INPUT, f"the host manifest is refused: {error}") from None
+
+
+def identity_of(inspect: dict[str, Any]) -> dict[str, str]:
+    """The parent image's tag, platform digest and platform, for the record: how
+    every later start finds this content again after a rebuild (D2513). Read from
+    the parent's RAW inspect -- the container's own record of what it runs."""
+    try:
+        tag, digest, platform = restore_drill.image_identity(inspect)
+    except restore_drill.DrillError as error:
+        raise OperatorError(EXIT_REFUSED, str(error)) from None
+    return {"image_tag": tag, "image_digest": digest, "image_platform": platform}
+
+
+def pin_image(directory: Path, current: branch_record.Record) -> str:
+    """Resolve the branch's image by its recorded tag and digest and write the id
+    into `branch.env` -- before EVERY `compose up` (D2513). A branch.env that does
+    not name the image once is not one this runtime wrote."""
+    if not current.has_image_identity:
+        raise OperatorError(EXIT_REFUSED, branch_record.MADE_BEFORE_IMAGE_IDENTITY)
+    assert current.image_tag and current.image_digest and current.image_platform
+    try:
+        image = restore_drill.image_for(
+            current.image_tag, current.image_digest, current.image_platform, docker
+        )
+    except restore_drill.DrillError as error:
+        raise OperatorError(EXIT_REFUSED, str(error)) from None
+    path = directory / "branch.env"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise OperatorError(EXIT_UNKNOWN, f"{path} could not be read: {error.strerror}") from None
+    prefix = "BRANCH_POSTGRES_IMAGE="
+    if sum(line.startswith(prefix) for line in lines) != 1:
+        raise OperatorError(EXIT_UNKNOWN, f"{path} does not name the branch's image exactly once")
+    pinned = (f"{prefix}{image}" if line.startswith(prefix) else line for line in lines)
+    _write_private(path, "".join(f"{line}\n" for line in pinned))
+    return image
+
+
+def await_door(hosts: tuple[str, str]) -> tuple[str, str | None]:
+    """Both names verified through the edge, or the door's state and why (D2515)."""
+    context = branch_door.client_context()
+    door, reason = branch_door.wait(
+        hosts, probe=lambda host: branch_door.check(host, context=context)
+    )
+    say(f"door: {door}" + (f" -- {reason}" if reason else f", {hosts[0]} and {hosts[1]} verify"))
+    return door, reason
 
 
 def runnable(inspect: dict[str, Any]) -> dict[str, Any]:
@@ -687,18 +745,37 @@ def read_verifiers() -> dict[str, str]:
 
 
 def _build_life(
-    plan: branch_plan.BranchPlan, verifiers: dict[str, str], *, pgbouncer_image: str, resolver: str
-) -> tuple[str | None, int | None]:
-    """restore -> recover -> persist -> rekey -> userlists -> doors -> attach."""
+    plan: branch_plan.BranchPlan,
+    verifiers: dict[str, str],
+    current: branch_record.Record,
+    *,
+    pgbouncer_image: str,
+    resolver: str,
+) -> dict[str, Any]:
+    """restore -> recover -> persist -> rekey -> userlists -> doors -> attach ->
+    door; what `ready` records. The persistent phase's image is resolved from the
+    record's tag and digest like every later start's (D2513)."""
     restore(plan)
     reached, timeline, _ = recover(plan)
     write_compose_state(plan, pgbouncer_image=pgbouncer_image, acme_resolver_name=resolver)
+    pin_image(
+        branch_record.branch_directory(plan.project_key, plan.branch, root=BRANCH_ROOT), current
+    )
     persist(plan)
     rekey(plan, verifiers)
     write_userlists(plan)
     open_doors(plan)
     attach(plan.names)
-    return reached, timeline
+    door, reason = await_door(plan.hosts)
+    return {"reached_point": reached, "timeline": timeline, "door": door, "reason": reason}
+
+
+def _failure(error: BaseException) -> str:
+    """The one line a failed create or reset records (D2514): an OperatorError's
+    own text (verifiers already redacted by `_tail`), else only the type."""
+    if isinstance(error, OperatorError):
+        return _VERIFIER_TEXT.sub("SCRAM-SHA-256$<redacted>", str(error))[:300]
+    return f"interrupted: {type(error).__name__}"
 
 
 def command_create(arguments: argparse.Namespace) -> int:
@@ -709,9 +786,9 @@ def command_create(arguments: argparse.Namespace) -> int:
     document = load_document(arguments.parent_outputs)
     host = load_host(arguments.host)
     refuse(document, arguments.branch)
-    inspect = runnable(
-        inspect_running(str(document["database"]["container"]), "the parent's database")
-    )
+    raw = inspect_running(str(document["database"]["container"]), "the parent's database")
+    identity = identity_of(raw)
+    inspect = runnable(raw)
     pooler = inspect_running(
         naming.customer_pooler_containers(str(document["project"]["key"]))[0], "the parent's pooler"
     )
@@ -719,25 +796,31 @@ def command_create(arguments: argparse.Namespace) -> int:
     check_dns(plan, host)
     check_window(plan.target, read_window(document))
     admit(plan, arguments.host)
-    record(
+    created = record(
         plan,
         state="creating",
         operation=arguments.operation,
         parent_commit=document.get("source_commit"),
         expires_at=arguments.expires_at,
         expires_for=arguments.expires_for,
+        door=None,
+        reason=None,
+        **identity,
     )
     try:
         create_volume(plan)
-        reached, timeline = _build_life(
-            plan, verifiers, pgbouncer_image=str(pooler.get("Image") or ""),
+        reached = _build_life(
+            plan, verifiers, created, pgbouncer_image=str(pooler.get("Image") or ""),
             resolver=str(host["edge"]["acme_resolver_name"]),
         )  # fmt: skip
-    except BaseException:
-        record(plan, state="failed")
+    except BaseException as error:
+        record(plan, state="failed", reason=_failure(error))
         raise
-    record(plan, state="ready", reached_point=reached, timeline=timeline)
-    say(f"{plan.names.stem.removeprefix('apg-')}: ready at {reached}, timeline {timeline}")
+    record(plan, state="ready", **reached)
+    say(
+        f"{plan.names.stem.removeprefix('apg-')}: ready at {reached['reached_point']}, "
+        f"timeline {reached['timeline']}, door {reached['door']}"
+    )
     return EXIT_OK
 
 
@@ -773,13 +856,15 @@ def command_reset(arguments: argparse.Namespace) -> int:
             f"{key}_{arguments.branch} cannot be reset: "
             + ("it does not exist" if current is None else f"it is {current.state}"),
         )
-    inspect = runnable(
-        inspect_running(str(document["database"]["container"]), "the parent's database")
-    )
+    raw = inspect_running(str(document["database"]["container"]), "the parent's database")
+    # A reset records the parent's image AS IT IS NOW: it is how a branch made
+    # before 1.19.0, or one whose parent's image changed, comes back (D2513).
+    identity = identity_of(raw)
+    inspect = runnable(raw)
     pooler = inspect_running(naming.customer_pooler_containers(key)[0], "the parent's pooler")
     plan = build_plan(document, inspect, arguments.branch, arguments.target_time)
     check_window(plan.target, read_window(document))
-    record(
+    resetting = record(
         plan,
         state="creating",
         operation=arguments.operation,
@@ -787,20 +872,26 @@ def command_reset(arguments: argparse.Namespace) -> int:
         reached_point=None,
         timeline=None,
         parent_commit=document.get("source_commit"),
+        door=None,
+        reason=None,
+        **identity,
     )
     try:
         _remove_runtime(plan.names)
         docker("volume", "rm", plan.names.volume, timeout=120)
         create_volume(plan)
-        reached, timeline = _build_life(
-            plan, verifiers, pgbouncer_image=str(pooler.get("Image") or ""),
+        reached = _build_life(
+            plan, verifiers, resetting, pgbouncer_image=str(pooler.get("Image") or ""),
             resolver=str(host["edge"]["acme_resolver_name"]),
         )  # fmt: skip
-    except BaseException:
-        record(plan, state="failed")
+    except BaseException as error:
+        record(plan, state="failed", reason=_failure(error))
         raise
-    record(plan, state="ready", reached_point=reached, timeline=timeline)
-    say(f"{plan.names.stem.removeprefix('apg-')}: reset to {reached}, timeline {timeline}")
+    record(plan, state="ready", **reached)
+    say(
+        f"{plan.names.stem.removeprefix('apg-')}: reset to {reached['reached_point']}, "
+        f"timeline {reached['timeline']}, door {reached['door']}"
+    )
     return EXIT_OK
 
 
@@ -854,8 +945,26 @@ def _plan_from_record(current: branch_record.Record) -> naming.BranchNames:
     return naming.branch_names(current.project_key, current.branch)
 
 
+def _rewrite(directory: Path, current: branch_record.Record, **changes: Any) -> None:
+    """The record again, with `changes` and a new `updated_at`."""
+    members = {m: getattr(current, m) for m in current.__dataclass_fields__}
+    members.pop("schema_version", None)
+    branch_record.write(
+        directory / branch_record.RECORD_FILENAME,
+        branch_record.Record(**{**members, **changes, "updated_at": now()}),
+    )
+
+
 def command_start(arguments: argparse.Namespace) -> int:
-    """Bring every recorded branch back -- after a reboot, by the reconciler (D2439)."""
+    """Bring every recorded branch back -- after a reboot, by the reconciler (D2439).
+
+    Each start resolves the branch's image afresh from its recorded tag and
+    platform digest and rewrites `branch.env` before `compose up` (D2513): the
+    boot's rebuild of the parent's image orphans the index id a branch was made
+    from, and an id pinned at creation made compose try to pull it (D2504). A
+    branch whose image cannot be found, or whose parent's image content changed,
+    is recorded `stopped` with the reason -- never started from another image.
+    """
     require_root()
     found, unreadable = branch_record.records(BRANCH_ROOT)
     failed = 0
@@ -870,43 +979,26 @@ def command_start(arguments: argparse.Namespace) -> int:
         directory = branch_record.branch_directory(
             current.project_key, current.branch, root=BRANCH_ROOT
         )
-        done = docker(
-            "compose", "-p", names.compose_project,
-            "--env-file", str(directory / "branch.env"),
-            "-f", str(COMPOSE_FILE), "-f", str(directory / "compose.override.yaml"),
-            "up", "-d", "--wait",
-            timeout=COMPOSE_SECONDS,
-        )  # fmt: skip
         try:
+            image = pin_image(directory, current)
+            done = docker(
+                "compose", "-p", names.compose_project,
+                "--env-file", str(directory / "branch.env"),
+                "-f", str(COMPOSE_FILE), "-f", str(directory / "compose.override.yaml"),
+                "up", "-d", "--wait",
+                timeout=COMPOSE_SECONDS,
+            )  # fmt: skip
             if done.returncode != 0:
                 raise OperatorError(EXIT_UNKNOWN, _tail(done.stderr))
             attach(names)
         except OperatorError as error:
-            branch_record.write(
-                directory / branch_record.RECORD_FILENAME,
-                branch_record.Record(
-                    **{
-                        **{m: getattr(current, m) for m in current.__dataclass_fields__},
-                        "state": "stopped",
-                        "updated_at": now(),
-                    }
-                ),
-            )
+            _rewrite(directory, current, state="stopped", reason=_failure(error))
             print(f"  {name}: did not come back: {error}")
             failed += 1
             continue
-        if current.state != "ready":
-            branch_record.write(
-                directory / branch_record.RECORD_FILENAME,
-                branch_record.Record(
-                    **{
-                        **{m: getattr(current, m) for m in current.__dataclass_fields__},
-                        "state": "ready",
-                        "updated_at": now(),
-                    }
-                ),
-            )
-        print(f"  {name}: started")
+        door, reason = await_door((current.pool_host, current.direct_host))
+        _rewrite(directory, current, state="ready", door=door, reason=reason)
+        print(f"  {name}: started from {image[:19]}, door {door}")
     return EXIT_UNKNOWN if failed else EXIT_OK
 
 
@@ -928,6 +1020,7 @@ def command_status(arguments: argparse.Namespace) -> int:
         rows.append({"branch": name, "state": current.state, "reached_point": current.reached_point,
                      "timeline": current.timeline, "pool_host": current.pool_host,
                      "direct_host": current.direct_host, "expires_at": current.expires_at,
+                     "door": current.door, "reason": current.reason,
                      "containers": containers})  # fmt: skip
     for name, why in sorted(unreadable.items()):
         rows.append({"branch": name, "state": "undetermined", "why": why})
@@ -938,8 +1031,9 @@ def command_status(arguments: argparse.Namespace) -> int:
             print("branch-runtime: no branches on this host")
         for row in rows:
             detail = row.get("why") or (
-                f"reached {row['reached_point']}, timeline {row['timeline']}, "
+                f"reached {row['reached_point']}, timeline {row['timeline']}, door {row['door']}, "
                 f"containers {row['containers'] if row['containers'] is not None else 'unreadable'}"
+                + (f"; {row['reason']}" if row["reason"] else "")
             )
             print(f"  {row['branch']}: {row['state']} -- {detail}")
     return EXIT_UNKNOWN if unreadable else EXIT_OK

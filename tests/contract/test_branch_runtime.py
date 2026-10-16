@@ -42,6 +42,8 @@ KEY = "slot3-prod"
 DOMAIN = "slot3.agenticpostgresql.com"
 HOST = REPO_ROOT / "host.example.yaml"
 COMPOSE = REPO_ROOT / "infra" / "branch" / "compose.yaml"
+IMAGE_TAG = f"apg-{KEY}-postgres:latest"
+PLATFORM_DIGEST = "sha256:" + "9" * 64
 VERIFIERS = {
     "customer_app": "SCRAM-SHA-256$4096:" + "A" * 22 + "==$" + "B" * 43 + "=:" + "C" * 43 + "=",
     "customer_admin": "SCRAM-SHA-256$4096:" + "D" * 22 + "==$" + "E" * 43 + "=:" + "F" * 43 + "=",
@@ -68,8 +70,12 @@ def _inspect() -> dict[str, Any]:
          "Destination": p, "RW": False}
         for p in restore_drill.required_container_paths(contract)
     ]  # fmt: skip
+    # A real container's own record of its image (D2513): the tag it was made
+    # from and the platform manifest of the content it runs.
+    descriptor = {"digest": PLATFORM_DIGEST, "platform": {"os": "linux", "architecture": "amd64"}}
     return {"Name": f"/apg-{KEY}-postgres-1", "Image": "sha256:" + "8" * 64, "Mounts": mounts,
-            "Config": {"Env": []}, "State": {"Running": True}}  # fmt: skip
+            "Config": {"Env": [], "Image": IMAGE_TAG}, "State": {"Running": True},
+            "ImageManifestDescriptor": descriptor}  # fmt: skip
 
 
 def _document() -> dict[str, Any]:
@@ -148,6 +154,14 @@ def recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, list
     )
     monkeypatch.setattr(runtime, "rekey", lambda plan, verifiers: calls.append("rekey"))
     monkeypatch.setattr(runtime, "attach", lambda names: calls.append("attach"))
+    monkeypatch.setattr(
+        runtime,
+        "pin_image",
+        lambda directory, current: (calls.append("pin_image"), "sha256:" + "6" * 64)[1],
+    )
+    monkeypatch.setattr(
+        runtime, "await_door", lambda hosts: (calls.append("door"), ("ready", None))[1]
+    )
     return runtime, calls
 
 
@@ -164,10 +178,14 @@ def test_the_poolers_start_after_the_rekey(recorded: tuple[Any, list[str]]) -> N
     assert runtime.command_create(_arguments()) == 0
     assert calls == [
         "image", "dns", "window", "admit", "record:creating", "create_volume", "restore", "recover",
-        "write_compose_state", "persist", "rekey", "write_userlists", "open_doors", "attach",
-        "record:ready",
+        "write_compose_state", "pin_image", "persist", "rekey", "write_userlists", "open_doors",
+        "attach", "door", "record:ready",
     ], calls  # fmt: skip
     assert calls.index("rekey") < calls.index("open_doors") < calls.index("attach")
+    # D2515: `ready` only after the door; D2513: the image pinned before the
+    # persistent phase's compose up, from the identity the record carries.
+    assert calls.index("door") < calls.index("record:ready")
+    assert calls.index("pin_image") < calls.index("persist")
     record = branch_record.read(branch_record.record_path(KEY, "dev", root=runtime.BRANCH_ROOT))
     assert record is not None and record.state == "ready"
     # D2483: psql's spelling of the reached point is written RFC 3339.
@@ -175,6 +193,10 @@ def test_the_poolers_start_after_the_rekey(recorded: tuple[Any, list[str]]) -> N
     assert record.parent_commit == "b0249ce5667610a45746c6cec89c3eb38457ed70"
     assert record.unreclaimable_mb == 192
     assert (record.pool_host, record.direct_host) == (f"dev.pool.{DOMAIN}", f"dev.direct.{DOMAIN}")
+    assert (record.image_tag, record.image_digest, record.image_platform) == (
+        IMAGE_TAG, PLATFORM_DIGEST, "linux/amd64",
+    )  # fmt: skip
+    assert (record.door, record.reason) == ("ready", None)
 
 
 def test_a_failure_after_the_record_leaves_it_failed(
@@ -194,6 +216,8 @@ def test_a_failure_after_the_record_leaves_it_failed(
     assert calls[-1] == "record:failed", calls
     record = branch_record.read(branch_record.record_path(KEY, "dev", root=runtime.BRANCH_ROOT))
     assert record is not None and record.state == "failed"
+    # D2514: the failure's own line is recorded, so a reader can say why.
+    assert record.reason == "the branch's postgres did not start", record.reason
 
 
 def test_an_existing_branch_or_a_doorless_parent_is_refused_before_anything(
@@ -241,6 +265,7 @@ def _write_branches(root: Path, count: int) -> None:
                 pool_host=f"{name}.pool.{DOMAIN}", direct_host=f"{name}.direct.{DOMAIN}",
                 expires_at=None, expires_for=None, unreclaimable_mb=192,
                 created_at="2026-10-14T08:00:00Z", updated_at="2026-10-14T08:00:00Z",
+                image_tag=IMAGE_TAG, image_digest=PLATFORM_DIGEST, image_platform="linux/amd64",
             ),
         )  # fmt: skip
 
@@ -364,6 +389,9 @@ def test_start_all_records_a_branch_that_did_not_come_back(
     _write_branches(tmp_path / "branches", 2)
     attached: list[str] = []
     monkeypatch.setattr(runtime, "attach", lambda names: attached.append(names.branch))
+    # The image's resolution is test_branch_start.py's; here every start finds it.
+    monkeypatch.setattr(runtime, "pin_image", lambda directory, current: "sha256:" + "6" * 64)
+    monkeypatch.setattr(runtime, "await_door", lambda hosts: ("ready", None))
 
     def docker(*arguments: str, timeout: float = 60) -> subprocess.CompletedProcess:
         failing = "apg-slot3-prod_br1" in arguments

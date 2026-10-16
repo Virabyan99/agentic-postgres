@@ -221,6 +221,61 @@ def runnable_image(inspect: dict[str, Any], docker: Callable[..., Any]) -> str:
     return index_id
 
 
+def image_identity(inspect: dict[str, Any]) -> tuple[str, str, str]:
+    """`(tag, platform digest, "os/architecture")` of a container's image: what a
+    branch records at creation so every later start can find the same content
+    by digest (Session 41, D2513). `DrillError` when the container records
+    none of it -- a container created before the containerd store, or not by
+    Compose -- because a branch made without it could never be started again."""
+    descriptor = inspect.get("ImageManifestDescriptor") or {}
+    target = descriptor.get("platform") or {}
+    tag = str((inspect.get("Config") or {}).get("Image") or "")
+    digest = str(descriptor.get("digest") or "")
+    os_name, architecture = target.get("os"), target.get("architecture")
+    if not tag or not digest or not os_name or not architecture:
+        raise DrillError(
+            "the parent's database container records no image tag and platform manifest, so a "
+            "branch of it could not find its image again after a rebuild (D2513)"
+        )
+    return tag, digest, f"{os_name}/{architecture}"
+
+
+def image_for(tag: str, digest: str, platform: str, docker: Callable[..., Any]) -> str:
+    """The image a branch STARTS from: `tag`'s current index id, iff its
+    `platform` manifest is `digest` (Session 41, D2513, ADR 0271).
+
+    A branch used to pin the index id it was created from; the parent's next
+    rebuild moved the tag to a new index and the old id stopped resolving, so the
+    branch never came back after a reboot (D2504). The content digest survives a
+    rebuild of unchanged content and the tag follows it -- rig 41c: an unchanged
+    rebuild kept `sha256:2794179a…`, one changed layer moved it. Two refusals and
+    the third answer (ADR 0195): the tag names nothing, or names other content
+    -- `DrillError`; the manifest could not be read -- `DrillError` saying so.
+    """
+    index = docker("image", "inspect", "-f", "{{.Id}}", tag)
+    index_id = index.stdout.strip() if index.returncode == 0 else ""
+    if not index_id:
+        raise DrillError(f"the parent's image tag {tag} names no image here; reset the branch")
+    found = docker(
+        "image", "inspect", "--platform", platform, "-f", "{{json .Descriptor}}", index_id
+    )  # fmt: skip
+    try:
+        current = json.loads(found.stdout).get("digest") if found.returncode == 0 else None
+    except (ValueError, AttributeError):
+        current = None
+    if not current:
+        raise DrillError(
+            f"the platform manifest of {tag} ({index_id[:19]}) could not be read, so whether it "
+            "is the image this branch was made with could not be determined"
+        )
+    if current != digest:
+        raise DrillError(
+            f"the parent's image changed since this branch was made ({digest[:19]} -> "
+            f"{current[:19]}); reset the branch"
+        )
+    return index_id
+
+
 def drill_document(directory: Path, stdout: str) -> Path | None:
     """The evidence document THIS drill wrote, named by the id it printed, or None.
 

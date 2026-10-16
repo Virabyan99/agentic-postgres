@@ -272,17 +272,20 @@ rows 3 s apart.
 - `restore-test.py --help`'s *"ISO 8601 with an offset"* misleads (D2454): Run 2
   corrects the text and makes the drill render the space form too.
 
-## Amendment (Session 41, Run 1, D2513-D2516, D2537)
+## Amendment (Session 41, Runs 1 and 3, D2513-D2516, D2537, D2542)
 
 Four repairs of what Session 40's trip found (D2495, D2503, D2504).
 
 1. **The image is resolved at every start, never pinned as an id** (D2513).
-   `branch.json` records the parent's image TAG (`Config.Image`) and the
-   platform manifest digest the branch was made with
-   (`ImageManifestDescriptor.digest`). Every start -- `start`, `start --all`,
-   and the persistent phase of `create` and `reset` -- resolves the image
-   through `restore_drill.image_for(tag, digest)`: the tag's current index id
-   iff its `--platform` manifest digest equals the recorded one; otherwise
+   `branch.json` (schema 2) records the parent's image TAG (`Config.Image`),
+   the platform manifest digest the branch was made with
+   (`ImageManifestDescriptor.digest`) and that manifest's platform
+   (`os/architecture`, never typed), read from the parent's raw inspect by
+   `restore_drill.image_identity`. Every start -- `start`, `start --all`, and
+   the persistent phase of `create` and `reset` -- resolves the image through
+   `restore_drill.image_for(tag, digest, platform)` and rewrites `branch.env`
+   before `compose up`: the tag's current index id iff its `--platform`
+   manifest digest equals the recorded one; otherwise
    **refused with a reason** (*"the parent's image changed since this branch was
    made; reset the branch"*) and the record `stopped` with it; an unreadable
    manifest is said (ADR 0195). It needs the parent's tag, not the parent's
@@ -292,13 +295,17 @@ Four repairs of what Session 40's trip found (D2495, D2503, D2504).
    resolving, and the platform digest stayed `sha256:2794179a…`; `image_for`
    chose the new index and `docker run` of it started. **Control:** a rebuild
    with `RUN true` appended changed the platform digest (`sha256:7cbc07f1…`)
-   and was refused with the reason.
+   and was refused with the reason. **A version 1 record** (1.18.0's, which
+   pinned the id) is still read -- capacity charges it, the reconciler lists it
+   -- and a start refuses it, *"this branch was made before 1.19.0 and records
+   no image identity; reset it"*; a reset records the identity afresh.
 2. **The child's output is kept and the reason recorded** (D2514). The
    reconciler runs `branch-runtime.sh start --all` through the 0600 step-log
    path its operations use and logs the child's last line; `branch.json` gains
    `reason` (the last failure's one line, cleared on `ready`), recorded into
-   `app.control_branches.reason` and served on the branch's route.
-   `apg-diag containers` lists each branch's containers.
+   `app.control_branches.reason` by the control set's `0008` (Run 4) and served
+   on the branch's route. `apg-diag containers` lists each branch's containers
+   by the Compose project its `branch.env` names, checked before use.
 3. **`ready` waits for the door** (D2515, D2537). After `attach`,
    `branch-runtime` opens PostgreSQL's `SSLRequest` to the edge on
    `127.0.0.1:5432` for each branch name, expects `S`, then TLS with SNI = the
@@ -316,10 +323,15 @@ Four repairs of what Session 40's trip found (D2495, D2503, D2504).
    reason (*"the door's certificate is not issued yet"*); **`door: "unknown"`
    only when the check could not run** -- no connection, no `S`, or a TLS
    failure of any other kind. 180 s is 60 times the rig's 3.0 s and well above
-   the trip's 4.5 s (D2503); it stays.
+   the trip's 4.5 s (D2503); it stays. **On the host** (D2542), the
+   interpreter the runtime runs (uv CPython 3.12.13, OpenSSL 3.5.7) found the
+   system store through `capath=/etc/ssl/certs`, verified both of `slot3-prod`'s
+   names, and read the no-router name's EOF as `ssl.SSLEOFError` -- `pending`.
+   The check is `agentic_postgres.branch_door`.
 4. **A larger budget for the three branch types** (D2516):
    `OPERATION_SECONDS_BY_TYPE = {branch.create, restore.create, branch.reset:
    3600}` (every other type keeps 1,800), `CHILD_SECONDS["branch-runtime.sh"] =
-   3300`, `PROMOTION_SECONDS = 2400`; the guard reads child < the type's
-   operation bound. Not taken: a forced incremental before a branch (it touches
+   3300`, `PROMOTION_SECONDS = 2400`, and the customer CLI's `--wait` default
+   3,900 s (it was 2,400, below the new bound); the guard holds promotion <
+   child < each type's operation bound < the CLI's wait. Not taken: a forced incremental before a branch (it touches
    the parent's repository) and a bucket move (a provider act).

@@ -466,3 +466,69 @@ def test_the_rule_is_two_effective_lines() -> None:
         "Defaults:apg-agent    env_reset",
         "apg-agent ALL=(root) NOPASSWD: /usr/local/bin/apg-diag",
     ], effective
+
+
+# ---------------------------------------------------------------------------
+# A branch is visible to the diagnosis account (Session 41, D2504, D2514)
+# ---------------------------------------------------------------------------
+
+FAKE_DOCKER = """#!/usr/bin/env bash
+# `docker ps -a --filter label=com.docker.compose.project=P ...`: P's three containers.
+project=""
+for argument in "$@"; do
+  case "$argument" in label=com.docker.compose.project=*) project="${argument#*=}";; esac
+done
+[ "$1" = "ps" ] && [ -n "$project" ] || exit 1
+printf '%s\\tUp 2 minutes (healthy)\\t%s-internal\\n' \\
+  "$project-postgres-1" "$project" "$project-customer-pool-1" "$project" \\
+  "$project-customer-direct-1" "$project"
+"""
+
+
+def test_containers_lists_branches(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """`containers` lists each branch's containers under `-- <key>_<branch>
+    (branch)`, by the Compose project its runtime wrote into `branch.env` --
+    which a reboot's `start --all` failure left invisible before (D2504). A
+    `branch.env` whose project fails the check is said, never used (control)."""
+    projects, branches, bin_dir = tmp_path / "projects", tmp_path / "branches", tmp_path / "bin"
+    projects.mkdir()
+    bin_dir.mkdir()
+    for branch, project in (("dev", "apg-slot3-prod_dev"), ("qa", "apg-slot3-prod_qa;rm -rf /")):
+        directory = branches / "slot3-prod" / branch
+        directory.mkdir(parents=True)
+        (directory / "branch.json").write_text("{}\n", encoding="utf-8")
+        (directory / "branch.env").write_text(
+            f"COMPOSE_PROJECT_NAME={project}\nBRANCH_POSTGRES_IMAGE=sha256:abc\n", encoding="utf-8"
+        )
+    docker = bin_dir / "docker"
+    docker.write_text(FAKE_DOCKER, encoding="utf-8")
+    docker.chmod(0o755)
+    script = SCRIPT.read_text(encoding="utf-8")
+    for old, new in (
+        (
+            'readonly PROJECT_ROOT="/etc/agentic-postgres/projects"',
+            f'readonly PROJECT_ROOT="{projects}"',
+        ),
+        (
+            'readonly BRANCH_ROOT="/etc/agentic-postgres/branches"',
+            f'readonly BRANCH_ROOT="{branches}"',
+        ),
+        ('\nmain "$@"\n', "\n"),
+    ):
+        assert script.count(old) == 1, old
+        script = script.replace(old, new)
+    copy = tmp_path / "apg-diag.sh"
+    copy.write_text(script, encoding="utf-8")
+    done = subprocess.run(
+        ["bash", "-c", f". {copy}; verb_containers"],
+        capture_output=True, text=True, check=False,
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin"},
+    )  # fmt: skip
+    assert done.returncode == 0, done.stderr
+    out = done.stdout
+    assert "-- slot3-prod_dev (branch)" in out, out
+    for container in ("postgres", "customer-pool", "customer-direct"):
+        assert f"apg-slot3-prod_dev-{container}-1" in out, out
+    assert "-- slot3-prod_qa (branch)" in out
+    assert "its compose project could not be read from branch.env" in out
+    assert "rm -rf" not in out and "apg-slot3-prod_qa" not in out

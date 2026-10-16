@@ -1,8 +1,8 @@
 # Session 41 — The repairs, the third re-earning, plans, usage, notifications and idle sleep
 
-**Status: EXECUTING — Runs 1–2 DONE 2026-10-16.** Rows **D2510–D2535** at
+**Status: EXECUTING — Runs 1–3 DONE 2026-10-16.** Rows **D2510–D2535** at
 planning; the runs add theirs after them (Run 1: D2536–D2539; Run 2:
-D2540–D2541). ADRs **0274–0276** written. **NEXT FREE: D2542, ADR 0277.**
+D2540–D2541; Run 3: D2542). ADRs **0274–0276** written. **NEXT FREE: D2543, ADR 0277.**
 
 The sixth session of Stage 5 — **and the first one the operator split**
 (D2510): the stage plan's *Session 41* brief (`docs/plans/stage-5-plan.md`
@@ -496,7 +496,7 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2534** | ADR 0259: *"a sleeping project's archiver is stopped, so its restore point is its sleep time"*. | An idle sleep stops a customer's archiver without a person asking at that moment. | **Said where the customer sets it**: the `idle-sleep` route's answer, `apg project idle-sleep`'s output, the `idle_sleep` row and the notification each say *"while it sleeps, its backups stop: its last restore point is the moment it went to sleep"*. No change to sleep itself. | A setting that changes the backup guarantee must say so when it is set. | **0276** |
 | **D2535** | CLAUDE.md §2: *"M7: Sheets X1/X2 (retire Hetzner) ALLOWED since 2026-10-12 ~21:30Z and NOT YET RUN"*; Session 40 §10's created items. | The old host's three projects stopped (the way back). Session 40 §10 also created: branch certificates accumulate in `acme.json`; the parent's user hashes copied into a branch; the backups recording's R2 requests. | **Not this plan's**: M7's sheets stay in `docs/plans/session-38-migration-plan.md` and may run on any day outside this trip's sittings; this plan's sheets never name the old host. The three Session 40 items are carried in §10 untouched. | Two trips' sheets interleaved is D1510's failure in waiting. | — |
 
-**Rows the runs add** (execution order; next free D2542):
+**Rows the runs add** (execution order; next free D2543):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -506,6 +506,7 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2539** | D2525's signal (b): *"`last_customer_activity` (the latest `backend_start`/`state_change` of any backend whose role is one of the project's two customer roles …)"*; rig 41d's draft required `last_customer_activity IS NOT NULL` in every sample; Run 1's E0 text: *"ONE `curl` … to `slot3-prod`'s app route"*. | **Sheet E0** (2026-10-16 10:37–11:09Z, `slot3-prod` at `8cc3440`, `/home/op/s41-e0.txt`, copied to WSL `~/s41/e0/` 0600): the edge counter's sub-400 part **8 → 8 → 8** at T0, T0+15 and T0+30 min with no traffic (all eight on `apg-slot3-prod-health@docker`); the customer roles held **no backend** at all three reads. The one `curl` to `/api/app` answered **404** (no root handler), so it could not show a sub-400 request moving the counter: **one more GET, to `/api/rest/`, answered 200**, sent before the fourth read (11:08:06Z). Fourth read: `code=200` 9 (`rest` +1), `code=404` 1 (`app`); one `customer_app` backend, `idle`, `backend_start` 11:07:53.19, `state_change` 11:07:53.20 — the `psql`'s instant, unmoved 97 s later although the transaction-mode pooler kept the server connection (`server_reset_query_always = 1` stamps it at release, `compose.yaml:792-793`; no `min_pool_size`, so no server connection opens without a client). | **No stop** (§9: neither the sub-400 count nor a customer `state_change` moved with no client). **"No customer backend" is quiet, not unread**: a sample records `last_customer_activity` as the latest instant over the customer roles' PRESENT backends, `NULL` when there are none, and only a failed `pg_stat_activity` read puts it in `unread`; `control_request_idle_sleep` treats `NULL`-and-read as older than the window. Rig 41d's `IS NOT NULL` would have kept every idle project awake — Run 4 writes the test (`test_idle_sleep.py`: a window of samples with no customer backend sleeps). **What a sample can miss**: a query whose backend closes before the next sample. PgBouncer's default `server_idle_timeout` (600 s, not set in `compose.yaml`) keeps it beyond the 300 s interval — **not measured here; Run 8's rehearsal reads the backend gone and the sample after it**. A `doctor --project` run's `route health` request crosses the edge as a 200 (the health router's 8 earlier requests are such reads): an operator's doctor keeps a project awake for a window — the safe direction; not excluded. | The two signals measured at rest and moved by a control; the third answer (*not read*) kept separate from *none present*. | **0276** |
 | **D2540** | D2512 / Run 2 step 1: *"`backup_state` returns two more keys, `oldest_backup_stop` and `repository_bytes`"*; §2 BR-BACKUP-002: *"every key the reading takes from `info` is a key `backup_state` returns"*. | **`backup.sh info --json` IS the deployed document's `backup_state` block**: the deploy publishes it verbatim (`bin/deploy-project.py:1752-1761`, `with_archiver(summary, …)`), `schemas/outputs.schema.json` `$defs.backupState` is `additionalProperties: false` with eight members, and **`test_backup_repository_report.py::test_repository_bytes_is_not_published_in_the_deployed_document`** (passing) holds `repository_bytes` out of it. `bin/backup.sh:19-23` says so: *"a member added there would land in outputs.json and be refused by the schema"*; `usage --json` exists for exactly that reason and `doctor usage` reads it (`doctor.py:1138-1158`, D1591, D1614). The plan's step would have been an outputs schema bump (§9: no outputs change) or the weakening of a passing test (§9's stop). | **The tree wins: `backup_state` is unchanged.** `usage --json` prints **`backup_report.usage_block(summary, stanza)`** = `{stanza, repository_bytes, oldest_backup_stop}` (one function, so the proof calls the producer and `bin/backup.py verb_usage` prints it); `reconciler_dispatch.backups_reading` gains `usage` and reads `oldest_backup_stop` from it; `backups_of` runs `info --json` (status, last full) **and** `usage --json` (the window) — two children per slot every 900 s, each one `pgbackrest info` (~2 s on E0). `info`'s failing exit is **`backup_report.INFO_FAILING_EXIT = 6`**, used by `verb_info` (both returns) and by the reconciler's parse (`_json_of(…, INFO_FAILING_EXIT)`), never retyped. The class guard holds the keys read from `info` ⊆ `backup_state`'s and from `usage` ⊆ `usage_block`'s, and asserts `oldest_backup_stop` stays out of the deployed block. **Run 9 writes BR-BACKUP-002's text as "every key the reading takes from a printed block is a key its producer returns"** and adds the sleeping proof (D2541). Usage samples (ADR 0275, Run 6) read `repository_bytes` from the same `usage --json`. ADR 0273's amendment and ADR 0275 corrected. | Where the shape is made was the right idea; which shape is the deployed document's is the tree's, and it had already answered. | **0273** amended |
 | **D2541** | — (found by Run 2's proof). ADR 0273: *"a sleeping project's reading says `sleeping`"*. | `backups_of`'s sleeping branch calls `backups_reading(…, mirror=None, sleeping=True)` (`bin/reconciler.py:1316` at `e89ac85`); `backups_reading` built its reasons as `[c.detail for c in (repository, archived, mirror) if _status(c) != "ok"]` — `_status(None)` is `"unknown"`, so it took **`None.detail`: `AttributeError`**, raised out of `record_backups` (no `except` for it, `reconciler.py:1174-1192`) and out of `run()` (`:1446-1468`) — **the reconciler process exits on every backups pass while any slot sleeps**. Deployed in 1.18.0. Never reached on a trip: Session 40's sleeps lasted 38.9 s and the pass runs every 900 s (`NRestarts=0` on the host, E0). Session 41's idle sleep (ADR 0276) holds a slot asleep for minutes — it would have killed the reconciler mid-trip, and systemd's restart would have interrupted any running operation (D2152). | **`backups_reading` skips an absent check** (`if c is not None and _status(c) != "ok"`); a sleeping reading's `mirror_status` is `unknown` with no reason line from it. **Proof**: `test_backups_reading_from_the_producer.py::test_a_sleeping_slot_is_read_without_raising` drives `backups_of`'s own branch (the container reads `false`), asserts `sleeping`, no window, `mirror_status` `unknown`, and that no backup child was asked. Battery mutation (d) restores the old line → that test FAILS (and the three window tests with it: they pass no mirror either). | A report that raised instead of saying *unknown* is ADR 0195's failure in its loudest form, and a reconciler loop that dies on a reading is the second principal stopping on its own instrument. | **0273** amended |
+| **D2542** | Run 3 steps 1–6: *"`image_for(tag, digest, docker)` … `--platform linux/amd64`"*; *"`branch.json` gains `image_tag`, `image_digest`, `reason`, `door`"*; *"`SERVICES` gains the two customer poolers for the `containers` view only"*; the door's trust is *"the system store"* (unmeasured on the host). | **Measured on the host** (2026-10-16, as `op`, `/home/op/agentic-postgres/.venv/bin/python` = uv CPython **3.12.13 / OpenSSL 3.5.7**, the interpreter `branch-runtime.sh` runs; `ssl.get_default_verify_paths()` → `capath='/etc/ssl/certs'`, `cafile=None`): the draft door check over `127.0.0.1:5432` → `pool.slot3…` and `direct.slot3…` **`ready`** (ALPN `postgresql`, Let's Encrypt chain verified, notAfter 2027-01-10); `nothing.slot3…` (no router) → `[SSL: UNEXPECTED_EOF_WHILE_READING]`; **the committed `branch_door.check` on the host** → `('ready', '')` and `('pending', 'the edge holds no certificate for nothing.slot3.agenticpostgresql.com yet')` — the EOF arrives as `ssl.SSLEOFError` (WSL `~/s41/run3/door-host.py`, `door-host.txt`). `branch_record` was a closed member set at `schema_version` 1 (`_problem`: missing/extra refused). `branch_reading` (`reconciler_dispatch.py:567-596`) names its payload's keys one by one. `containers` never reads `SERVICES` (only `labels`/`logs` do). `bin/cloud.py` `WAIT_SECONDS = 2400` (`:93`), below a 3,600 s branch bound; `bin/operation.sh:37` prints it. A `@dataclass` in `bin/reconciler.py` breaks every test that loads it by path unregistered (`dataclasses` reads `sys.modules[__module__]`). | **(1)** `image_for(tag, digest, platform, docker)` takes the platform the container recorded, so **`branch.json` also records `image_platform`** (`ImageManifestDescriptor.platform` as `os/architecture`) — never a typed `linux/amd64`; `restore_drill.image_identity(inspect)` reads the three from the parent's RAW inspect. **(2)** `branch_record` **schema 2** with five added members (`image_tag`, `image_digest`, `image_platform`, `door`, `reason`); **version 1 is still READ** (its five None) so capacity charges and the reconciler lists a branch 1.18.0 made, and a start refuses it with *"this branch was made before 1.19.0 and records no image identity; reset it"* — reset records the parent's identity afresh. **(3)** `reason`/`door` stay in `branch.json` and the runtime's `status` until Run 4's `0008` adds their columns (the payload names its keys; nothing new reaches `control_record_branches` in Run 3). **(4)** `SERVICES` unchanged (the `containers` view lists by Compose project, not by service); `containers` reads each branch's `COMPOSE_PROJECT_NAME` from its `branch.env` and checks it against `^apg-[a-z0-9-]+_[a-z][a-z0-9]{1,11}$` before use. **(5)** `WAIT_SECONDS = 3900` (and `operation.sh`'s usage line), held above every type bound by `test_a_branch_promotion_bound_sits_inside_its_reconciler_budget`. **(6)** The start log's result is a `NamedTuple`. **(7)** `PROMOTION_SECONDS = 2400 < CHILD_SECONDS["branch-runtime.sh"] = 3300 < OPERATION_SECONDS_BY_TYPE = 3600 < WAIT_SECONDS = 3900`; `RESTORE_SECONDS` 7,200 stays above the child budget as it was (the child's bound binds first; unchanged, recorded). | The trust store and the EOF class were the two third-party facts the door rests on; both read on the host with its own interpreter before the code depended on them. | **0271** amended |
 
 ---
 
@@ -875,7 +876,8 @@ test; **control** `earliest_point` +2 s → the window test and
 expectation of mine was wrong at first (mutation (a) also fails the exit
 tests, which read the window too) — corrected, nothing in the product moved.
 **Targeted once**: the 13 modules above plus `test_cli_contract` — **1,318
-passed**. ruff clean.
+passed**. ruff clean. **Code `eab8d9b79404f2e306ea4b9dbcff6c30c8586593`, CI run
+38894677679 `contract` SUCCESS** (11:34–11:55Z, read by full SHA).
 
 ### Run 3 — D2504 repaired, the door, the budget, the diagnosis (`src/`, `bin/`)
 
@@ -925,6 +927,61 @@ fail.
 the `apg-diag` module, `test_cli_contract`, `test_repository_contract`, the
 sweep-selector guard, `test_environment_gates`, `test_acceptance_registry`,
 `test_evidence_claims`. Commit, push, read CI.
+
+**Done.** 2026-10-16. Row **D2542** (measured on the host first: the runtime's
+own interpreter — uv CPython 3.12.13, OpenSSL 3.5.7 — finds the system store at
+`capath=/etc/ssl/certs`; the draft and then the committed `branch_door.check`
+read `pool.slot3…`/`direct.slot3…` `ready` and a no-router name `pending` via
+`ssl.SSLEOFError`; the rulings: `image_platform` recorded beside the tag and
+digest, `branch_record` schema 2 that still READS version 1, `SERVICES`
+unchanged, `WAIT_SECONDS` 3,900, `reason`/`door` held in `branch.json` until
+Run 4's columns). Code: `restore_drill.image_identity` + `image_for(tag,
+digest, platform, docker)`; `branch_record` schema 2 (`image_tag`,
+`image_digest`, `image_platform`, `door`, `reason`; `READABLE_VERSIONS` (1, 2),
+`MADE_BEFORE_IMAGE_IDENTITY`, `DOOR_STATES`); new `src/agentic_postgres/branch_door.py`
+(`check`, `wait`, `client_context`, `DOOR_SECONDS` 180, interval 5 s);
+`bin/branch-runtime.py`: `identity_of`, `pin_image` (before the persistent
+phase's and every start's `compose up`), `await_door` after `attach`,
+`_failure` → `reason` on `failed`/`stopped`, `command_start` rewritten
+(`stopped` + reason on a missing identity, a changed image or a compose
+refusal; `ready` + door otherwise), `status` shows door and reason,
+`PROMOTION_SECONDS` 2,400; `bin/reconciler.py`: `OPERATION_SECONDS_BY_TYPE`
+(the three branch types 3,600), `CHILD_SECONDS["branch-runtime.sh"]` 3,300, the
+deadline and its reason per type, `start_branches` through `_logged` (0600
+`branch-start-<utc>.log`, the last line journalled); `bin/cloud.py`
+`WAIT_SECONDS` 3,900 (+ `bin/operation.sh`'s usage line); `bin/apg-diag.sh`
+`containers` lists `-- <key>_<branch> (branch)` by `branch.env`'s checked
+Compose project. **D2505/D2506 in the Session 40 modules**:
+`test_session40_branch_host.py` reads the configured `-c archive_*` argv
+against `branch_plan.persistent_command()` and `SHOW archive_command =
+(disabled)`; `test_session40_branches.py`'s refusal window starts at
+`window_started_at`, else `started_at` (collect-only: 13 collected).
+**Print audit** (step 5): 25 output sites in `bin/branch-runtime.py` — names,
+states, instants, digests, admission lines and Docker's text through `_tail`
+(verifiers redacted); none carries a secret. **Tests**: new
+`tests/contract/test_branch_start.py` (5: the start resolves the new index over
+a rig-41c-shaped daemon and `branch.env` names it at `up`; changed content
+refused with no compose call; the reason recorded and cleared; a version 1
+record read and refused; `image_for`'s answers, never the index descriptor) and
+`tests/contract/test_branch_door.py` (8: the five readings, no connection,
+`ready` only when both names verify, `pending`/`unknown` at the bound);
+`test_branch_runtime.py` stricter (the create order now `… write_compose_state,
+pin_image, persist … attach, door, record:ready`; the identity, `door` and the
+failure's `reason` asserted); `test_reconciler_dispatch.py::test_the_branch_start_keeps_its_output`;
+`test_diagnostic_surface.py::test_containers_lists_branches` (the real
+`verb_containers` over a tmp root and a fake `docker`; control: an unchecked
+project name is said and never reaches Docker);
+`test_restore_promotion_bound` stricter (promotion < child < each type's bound
+< the CLI's wait). **Battery** `~/s41/run3/battery3.py` **7/7, every kill a
+`FAILED`**: (a) no env rewrite → the start test; (b) `image_for` without
+`--platform` (the index digest) → the start and `image_for` tests; (c1) `ready`
+without the door → the create-order test; (c2) `wait` on ANY name → the
+both-names test; (d) the start's output not logged → the output test; (e) EOF
+read as `unknown` → that reading's case; (f) a version 1 record guessed → the
+version 1 test; **control** (the pooler image's handling) → all green; files
+restored byte-equal. **Targeted once**: the plan's list plus
+`test_capacity_probe`, `test_branch_expiry`, `test_container_selectors` and
+Run 2's module — **1,290 passed** (3 min 29 s). ruff clean.
 
 ### Run 4 — plans and the control set's `0008` (`services/`, `projects/control/`)
 
@@ -1411,7 +1468,11 @@ sudo bin/control.sh registry                     # ... slot5-prod prepared (slot
 ### Sheet PV — `apg-diag` reinstalled (Run 10)
 
 ```
-#   Run 3 wrote the exact install line here, read from the command that installs it (D2514).
+cd /home/op/agentic-postgres
+sudo install -m 0755 -o root -g root bin/apg-diag.sh /usr/local/bin/apg-diag
+#   (read by Run 3 from infra/host/apg-agent.sudoers:5 -- the documented install; nothing
+#    else installs it, docs/operator-guide.md:118 "installed by hand", D2514)
+sudo cmp bin/apg-diag.sh /usr/local/bin/apg-diag && echo "apg-diag is the checkout's"
 #   Then the agent reads, as apg-agent: sudo apg-diag containers   (no branch yet: no branch section)
 ```
 

@@ -30,6 +30,9 @@ from agentic_postgres import naming
 
 __all__ = [
     "BRANCH_ROOT",
+    "DOOR_STATES",
+    "MADE_BEFORE_IMAGE_IDENTITY",
+    "READABLE_VERSIONS",
     "RECORD_FILENAME",
     "SCHEMA_VERSION",
     "STATES",
@@ -48,7 +51,24 @@ __all__ = [
 BRANCH_ROOT = Path("/etc/agentic-postgres/branches")
 
 RECORD_FILENAME = "branch.json"
-SCHEMA_VERSION = 1
+#: 2 since Session 41 (D2513-D2515): the image's tag, platform digest and
+#: platform, the door's state and the last failure's reason. A version 1
+#: record -- written by 1.18.0 -- is still READ (capacity charges it, the
+#: reconciler lists it), its five members None; a start refuses it with a
+#: reason rather than guessing its image (:data:`MADE_BEFORE_IMAGE_IDENTITY`).
+SCHEMA_VERSION = 2
+READABLE_VERSIONS: tuple[int, ...] = (1, 2)
+
+#: Why a start refuses a version 1 record: it never recorded how to find its
+#: image after a rebuild (D2504), and a guessed image is not the branch's.
+MADE_BEFORE_IMAGE_IDENTITY = (
+    "this branch was made before 1.19.0 and records no image identity; reset it"
+)
+
+#: `door`: both names verified through the edge; the edge answered and a name
+#: did not verify within the bound; or the check could not run (ADR 0195,
+#: D2515, D2537).
+DOOR_STATES: tuple[str, ...] = ("ready", "pending", "unknown")
 
 #: The states the runtime writes. `creating` is written BEFORE the restore, so a
 #: crash leaves a record a reader can see (and charge, and a delete can clean
@@ -75,7 +95,15 @@ _MEMBERS: tuple[str, ...] = (
     "unreclaimable_mb",
     "created_at",
     "updated_at",
+    # Version 2 (Session 41).
+    "image_tag",
+    "image_digest",
+    "image_platform",
+    "door",
+    "reason",
 )
+#: The members a version 1 record lacks, read as None.
+_ADDED_IN_2: tuple[str, ...] = ("image_tag", "image_digest", "image_platform", "door", "reason")
 
 
 class UnreadableRecord(Exception):
@@ -91,7 +119,11 @@ class Record:
     ``unreclaimable_mb`` is the charge admission summed when it admitted the
     branch -- `small`'s database budget, whatever the parent's profile (D2431).
     ``expires_for`` is the member whose operation set ``expires_at``; both or
-    neither (ADR 0272).
+    neither (ADR 0272). ``image_tag``, ``image_digest`` and ``image_platform``
+    are how every start finds the branch's image again (D2513) -- all three or
+    none; ``door`` is one of :data:`DOOR_STATES` or None before the first
+    ``ready``; ``reason`` is the last failure's one line, None once ``ready``
+    (D2514).
     """
 
     project_key: str
@@ -109,7 +141,16 @@ class Record:
     unreclaimable_mb: int
     created_at: str
     updated_at: str
+    image_tag: str | None = None
+    image_digest: str | None = None
+    image_platform: str | None = None
+    door: str | None = None
+    reason: str | None = None
     schema_version: int = SCHEMA_VERSION
+
+    @property
+    def has_image_identity(self) -> bool:
+        return bool(self.image_tag and self.image_digest and self.image_platform)
 
     def __post_init__(self) -> None:
         problem = _problem(asdict(self))
@@ -124,12 +165,26 @@ def _problem(data: dict[str, Any]) -> str | None:
     """Why ``data`` is not a record, or None. Every member, every type."""
     if not isinstance(data, dict):
         return "the record is not a JSON object"
-    missing = sorted(set(_MEMBERS) - set(data))
-    extra = sorted(set(data) - set(_MEMBERS))
+    version = data.get("schema_version")
+    if isinstance(version, bool) or version not in READABLE_VERSIONS:
+        return f"schema_version {version!r}, this release reads {list(READABLE_VERSIONS)}"
+    expected = set(_MEMBERS) - (set(_ADDED_IN_2) if version == 1 else set())
+    missing = sorted(expected - set(data))
+    extra = sorted(set(data) - expected)
     if missing or extra:
         return f"the record's members differ: missing {missing}, unexpected {extra}"
-    if data["schema_version"] != SCHEMA_VERSION:
-        return f"schema_version {data['schema_version']!r}, this release reads {SCHEMA_VERSION}"
+    if version == 1:
+        # Read as a version 2 record that has none of the five (D2513).
+        data = {**data, **dict.fromkeys(_ADDED_IN_2)}
+    identity = [data["image_tag"], data["image_digest"], data["image_platform"]]
+    if any(value is not None for value in identity) and not all(
+        isinstance(value, str) and value for value in identity
+    ):
+        return "image_tag, image_digest and image_platform are set together or not at all"
+    if data["door"] is not None and data["door"] not in DOOR_STATES:
+        return f"door {data['door']!r} is not one of {list(DOOR_STATES)}"
+    if data["reason"] is not None and not isinstance(data["reason"], str):
+        return "reason is neither null nor a string"
     try:
         naming.validate_branch_name(data["branch"])
     except (naming.NamingError, TypeError) as error:

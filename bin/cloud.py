@@ -88,9 +88,11 @@ PROFILES = ("small", "standard", "large")
 EXIT_TIMEOUT = 7
 
 #: How often `wait` reads the operation, and how long it waits by default: a
-#: creation takes minutes (D2184).
+#: creation takes minutes (D2184). Session 41 (D2516): past the longest
+#: operation bound -- a branch's 3,600 s (`bin/reconciler.py`
+#: OPERATION_SECONDS_BY_TYPE, held below this by test_restore_promotion_bound).
 POLL_SECONDS = 5
-WAIT_SECONDS = 2400
+WAIT_SECONDS = 3900
 
 #: The terminal states, and the one that is a success.
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})

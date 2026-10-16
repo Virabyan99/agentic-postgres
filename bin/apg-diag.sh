@@ -53,6 +53,10 @@ set +x
 set -euo pipefail
 
 readonly PROJECT_ROOT="/etc/agentic-postgres/projects"
+# Session 41 (D2514): a branch's state. A branch has no deployed document, so
+# `containers` reads each branch's Compose project from the env file its
+# runtime wrote (images, limits and names; a branch holds no secret, ADR 0271).
+readonly BRANCH_ROOT="/etc/agentic-postgres/branches"
 readonly SECRET_ROOT="/var/lib/agentic-postgres/secrets"
 readonly EDGE_CONTAINER="apg-edge-traefik-1"
 
@@ -210,6 +214,29 @@ verb_containers() {
       continue
     fi
     docker ps -a --filter "label=com.docker.compose.project=${project}" \
+      --format '{{.Names}}\t{{.Status}}\t{{.Networks}}' \
+      | while IFS=$'\t' read -r name status networks; do
+          printf '%-34s %-26s %s\n' "${name}" "${status}" "${networks}"
+        done
+  done
+
+  # Each branch (Session 41, D2514): before this, `containers` iterated projects
+  # only, and a branch that did not come back after a reboot was invisible to
+  # the diagnosis account (D2504). The Compose project name is the runtime's
+  # own (`naming.branch_names`), read back, and checked before it is used.
+  local record branch_dir branch_project
+  for record in "${BRANCH_ROOT}"/*/*/branch.json; do
+    [ -f "${record}" ] || continue
+    branch_dir="$(dirname "${record}")"
+    printf '\n-- %s_%s (branch)\n' \
+      "$(basename "$(dirname "${branch_dir}")")" "$(basename "${branch_dir}")"
+    branch_project="$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "${branch_dir}/branch.env" 2>/dev/null \
+      | head -1 || true)"
+    if ! printf '%s' "${branch_project}" | grep -Eq '^apg-[a-z0-9-]+_[a-z][a-z0-9]{1,11}$'; then
+      printf '   (its compose project could not be read from branch.env)\n'
+      continue
+    fi
+    docker ps -a --filter "label=com.docker.compose.project=${branch_project}" \
       --format '{{.Names}}\t{{.Status}}\t{{.Networks}}' \
       | while IFS=$'\t' read -r name status networks; do
           printf '%-34s %-26s %s\n' "${name}" "${status}" "${networks}"

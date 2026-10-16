@@ -210,7 +210,10 @@ def test_the_second_branch_was_refused_before_a_row(
         "GET", f"{endpoint}/operations?organization={organization}", None, owner
     )
     assert status == 200, status
-    start, end = instant(branches["started_at"]), instant(branches["live_at"])
+    # D2506: the window starts at the FIRST attempt's start -- a resumed or
+    # `--continue-live` record moves `started_at` past a creation it adopted.
+    first = branches.get("window_started_at") or branches["started_at"]
+    start, end = instant(first), instant(branches["live_at"])
     during = sorted(row["id"] for row in listed["operations"]
                     if row.get("project_key") == PARENT
                     and row["type"] in ("branch.create", "restore.create")
