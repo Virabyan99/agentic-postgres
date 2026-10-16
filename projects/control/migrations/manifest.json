@@ -82,6 +82,16 @@
         "auth_service"
       ],
       "description": "An operation read names its origin (Session 40; ADR 0272, D2480): control_list_operations and control_get_operation, dropped and re-created wider by control_operations.origin (0006) -- member, or expiry for the one branch.delete control_request_expiry writes -- and granted to the identity service again, so a customer reads through /v1 whether a branch's deletion was its expiry's or a member's."
+    },
+    {
+      "version": "20261016120008",
+      "name": "control_plans_usage",
+      "template": "templates/0008-control-plans-usage.sql",
+      "placeholders": [
+        "object_owner",
+        "auth_service"
+      ],
+      "description": "Plans, usage, notifications and idle sleep (Session 41; ADR 0274, ADR 0275, ADR 0276): control_organizations.plan and control_plan_limits, the SQL twin of services/auth-api/app/plans.py; control_request_operation replaced with the same signature -- projects_active and branches_total checked under the organisation's row lock, reachable through a lock-only UPDATE policy because a definer's FOR UPDATE under FORCE row security locked nothing without one (rig 41d, D2538), AP409 plan_limit_reached / branch_limit_reached before any row; control_plan_interest (Notify me, one row per organisation and plan); control_usage_samples, written by control_record_usage (granted to nobody) and read through control_usage_document by control_project_usage and control_org_usage; control_notifications, written in control_finish_operation's own transaction from a fixed template (0004's body plus one marked block) and by control_record_limit_notice (granted to nobody, one a day); control_projects.idle_sleep_minutes set by control_set_idle_sleep, and control_request_idle_sleep (granted to nobody) inserting one project.sleep with origin idle over a full quiet window -- no customer backend is quiet, an unread sample is not (D2539); the origin CHECK widened; control_branches.reason and door, recorded by control_record_branches and served by control_list_branches and control_get_branch, dropped and created again wider."
     }
   ]
 }

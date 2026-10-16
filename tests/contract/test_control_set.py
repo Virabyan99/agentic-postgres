@@ -44,6 +44,12 @@ TABLES = {
     # host's branches and of each project's backups.
     "control_branches",
     "control_backup_readings",
+    # Session 41 (ADR 0274-0276): the plans' SQL twin, Notify me, usage samples
+    # and notifications.
+    "control_plan_limits",
+    "control_plan_interest",
+    "control_usage_samples",
+    "control_notifications",
 }
 #: Every function the identity service may execute, and no other (ADR 0251).
 GRANTED = {
@@ -86,6 +92,15 @@ GRANTED = {
     "control_list_branches",
     "control_get_branch",
     "control_get_backups",
+    # Session 41 (D2533): plans and interest, the idle-sleep setting, usage and
+    # notifications -- each calling control_require_role.
+    "control_list_plans",
+    "control_get_org_plan",
+    "control_register_interest",
+    "control_set_idle_sleep",
+    "control_project_usage",
+    "control_org_usage",
+    "control_list_notifications",
 }
 #: Root's, never granted: the operator's three through `bin/control.sh`
 #: (D2068) and the reconciler's (D2093, D2151).
@@ -104,6 +119,11 @@ OPERATOR = {
     "control_record_branches",
     "control_record_backups",
     "control_request_expiry",
+    # Session 41 (D2531): the usage sample, an idle project's sleep and the
+    # daily limit notice -- granted to nobody.
+    "control_record_usage",
+    "control_request_idle_sleep",
+    "control_record_limit_notice",
 }
 #: The helpers that run only inside the functions above.
 HELPERS = {
@@ -113,6 +133,8 @@ HELPERS = {
     "control_result_members",
     # Session 40: the project a branch reader resolves first (D2451).
     "control_project_organization",
+    # Session 41: the usage document the two usage readers compute (ADR 0275).
+    "control_usage_document",
 }
 
 
@@ -336,7 +358,7 @@ def test_the_control_example_renders_as_the_control_plane() -> None:
         assert outputs["control"] == {"enabled": True}
         assert outputs["routes"]["control"] == "https://fixture-control-dev.test/api/v1"
         assert outputs["migrations"]["project_set"]["root"] == "projects/control"
-        assert outputs["migrations"]["project_set"]["count"] == 7  # Session 40: 0006, 0007
+        assert outputs["migrations"]["project_set"]["count"] == 8  # Session 41: 0008
         assert outputs["storage"]["enabled"] is False
         values = dict(
             line.split("=", 1)
@@ -347,7 +369,7 @@ def test_the_control_example_renders_as_the_control_plane() -> None:
         assert values["CONTROL_ROUTE_PATH"] == "/api/v1"
         assert values["API_CONTROL_PATH"] == "/api"
         rendered_set = sorted(p.name for p in (directory / "migrations-project").glob("*.sql"))
-        assert len(rendered_set) == 7, rendered_set  # Session 40: 0006, 0007
+        assert len(rendered_set) == 8, rendered_set  # Session 41: 0008
     finally:
         # CLAUDE.md §1: a proof that renders deletes what it published.
         shutil.rmtree(directory, ignore_errors=True)

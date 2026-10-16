@@ -981,7 +981,9 @@ read as `unknown` → that reading's case; (f) a version 1 record guessed → th
 version 1 test; **control** (the pooler image's handling) → all green; files
 restored byte-equal. **Targeted once**: the plan's list plus
 `test_capacity_probe`, `test_branch_expiry`, `test_container_selectors` and
-Run 2's module — **1,290 passed** (3 min 29 s). ruff clean.
+Run 2's module — **1,290 passed** (3 min 29 s). ruff clean. **Code
+`77af733fd984c45238593962069841a54d844f19`, CI run 38904957367 `contract`
+SUCCESS** (13:03–13:25Z, read by full SHA).
 
 ### Run 4 — plans and the control set's `0008` (`services/`, `projects/control/`)
 
