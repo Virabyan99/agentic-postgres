@@ -80,14 +80,14 @@
       "version": "20261014120007"
     },
     {
-      "canonical_render_sha256": "042ae383903f2046c0d8db211f35fb57b65744b5e0ab2a80e16b3e9f1777c5c8",
+      "canonical_render_sha256": "ce41331a869b3d930b0e3bbac22a0d195bd8c2fab87cfcc8093d2219a20f1793",
       "name": "control_plans_usage",
       "placeholders": [
         "auth_service",
         "object_owner"
       ],
       "template": "templates/0008-control-plans-usage.sql",
-      "template_sha256": "a6908ca4c5a1dae900999f53e77a31cc1dad9e7059253842ca4e54bfd8bce56f",
+      "template_sha256": "0b90ceaf949004495ab9bc251d5a7a0b43a3b6c51e65feba855502d92e32d44e",
       "version": "20261016120008"
     }
   ],
