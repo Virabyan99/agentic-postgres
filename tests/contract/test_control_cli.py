@@ -146,6 +146,15 @@ def _member(served: Any, username: str) -> tuple[str, str]:
     return user, org
 
 
+def _premium(served: Any, org: str) -> None:
+    """Session 41 (ADR 0274): a Free organisation holds one project, so a proof
+    that makes a second creation in one organisation -- to read D2166's
+    serialisation, or a reused key's two creations -- puts it on Premium. The
+    plan is root's to set; no route writes it."""
+    _, drive = served
+    drive.cluster.query(f"UPDATE app.control_organizations SET plan = 'premium' WHERE id = '{org}'")
+
+
 def test_the_state_directory_is_private(person: Person, served: Any) -> None:
     """A login creates `$HOME/.config/apg` 0700 holding `context.json` and
     `session.json` 0600; the session holds the refresh token alone and nothing
@@ -571,7 +580,8 @@ def test_only_the_hash_reaches_the_control_plane(
     and sends its SHA-256 alone -- the control plane's row carries the hash and
     nothing of the token, and no output prints it."""
     _, drive = served
-    _member(served, "hash-member")
+    _, org = _member(served, "hash-member")
+    _premium(served, org)
     _ready_slot(drive)
     assert person.login("hash-member").returncode == 0
     operation, token = _created(person)
@@ -644,6 +654,7 @@ def test_the_claim_picks_the_creation_whose_token_is_held(
     the count; neither presents anything to the project."""
     _, drive = served
     _, org = _member(served, "reuse-member")
+    _premium(served, org)
     assert person.login("reuse-member").returncode == 0
     key = "slot1-prod"
     elsewhere = project_address
