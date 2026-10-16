@@ -78,6 +78,17 @@
       "template": "templates/0007-control-operation-origin.sql",
       "template_sha256": "1aa824889b89511c56da230d4f9b0b00afc754ad02f1bfe8e59021a9bb06fc22",
       "version": "20261014120007"
+    },
+    {
+      "canonical_render_sha256": "042ae383903f2046c0d8db211f35fb57b65744b5e0ab2a80e16b3e9f1777c5c8",
+      "name": "control_plans_usage",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0008-control-plans-usage.sql",
+      "template_sha256": "a6908ca4c5a1dae900999f53e77a31cc1dad9e7059253842ca4e54bfd8bce56f",
+      "version": "20261016120008"
     }
   ],
   "schema_version": 3
