@@ -1,6 +1,6 @@
 # 0271 — A branch is its own three-service cluster, restored from its parent and re-keyed before its doors open
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by Session 41 (the image resolved at start, the door, the reason, the budget; D2513-D2516, D2537)
 - **Date:** 2026-10-14
 - **Session:** 40, Run 1 (`docs/plans/session-40-implementation-plan.md`,
   D2422–D2432, D2434, D2436–D2441, D2449–D2451, and Run 1's rows D2454–D2460;
@@ -271,3 +271,55 @@ rows 3 s apart.
   baseline (D2452).
 - `restore-test.py --help`'s *"ISO 8601 with an offset"* misleads (D2454): Run 2
   corrects the text and makes the drill render the space form too.
+
+## Amendment (Session 41, Run 1, D2513-D2516, D2537)
+
+Four repairs of what Session 40's trip found (D2495, D2503, D2504).
+
+1. **The image is resolved at every start, never pinned as an id** (D2513).
+   `branch.json` records the parent's image TAG (`Config.Image`) and the
+   platform manifest digest the branch was made with
+   (`ImageManifestDescriptor.digest`). Every start -- `start`, `start --all`,
+   and the persistent phase of `create` and `reset` -- resolves the image
+   through `restore_drill.image_for(tag, digest)`: the tag's current index id
+   iff its `--platform` manifest digest equals the recorded one; otherwise
+   **refused with a reason** (*"the parent's image changed since this branch was
+   made; reset the branch"*) and the record `stopped` with it; an unreadable
+   manifest is said (ADR 0195). It needs the parent's tag, not the parent's
+   running container. **Rig 41c** (2026-10-16, Docker 29.5.2, containerd store,
+   the real `services/postgres/Dockerfile`): a rebuild of unchanged content
+   moved the index id (`d677c532…` -> `82700cbc…`), the old id stopped
+   resolving, and the platform digest stayed `sha256:2794179a…`; `image_for`
+   chose the new index and `docker run` of it started. **Control:** a rebuild
+   with `RUN true` appended changed the platform digest (`sha256:7cbc07f1…`)
+   and was refused with the reason.
+2. **The child's output is kept and the reason recorded** (D2514). The
+   reconciler runs `branch-runtime.sh start --all` through the 0600 step-log
+   path its operations use and logs the child's last line; `branch.json` gains
+   `reason` (the last failure's one line, cleared on `ready`), recorded into
+   `app.control_branches.reason` and served on the branch's route.
+   `apg-diag containers` lists each branch's containers.
+3. **`ready` waits for the door** (D2515, D2537). After `attach`,
+   `branch-runtime` opens PostgreSQL's `SSLRequest` to the edge on
+   `127.0.0.1:5432` for each branch name, expects `S`, then TLS with SNI = the
+   name and ALPN `postgresql`, verifying the chain against the system store and
+   the name, every 5 s for up to `DOOR_SECONDS = 180`. Both verified -> `ready`,
+   `door: "ready"`. **Rig 41b** (2026-10-16, Pebble, Traefik v3.7 with the
+   edge's `sniStrict` `postgres` options): both names verified **3.0 s** after
+   their containers were created; **before** the certificate was issued the
+   edge did NOT serve a default certificate -- with `sniStrict` it closed the
+   handshake (`UNEXPECTED_EOF_WHILE_READING`), exactly as it does for a name
+   with no router (the control, which never verified in 60 s); a check against
+   the wrong root read `unable to get local issuer certificate`. So **after the
+   `S`, an EOF in the handshake and a verification failure both mean the door is
+   not open yet** -> at the bound, `ready` with `door: "pending"` and the
+   reason (*"the door's certificate is not issued yet"*); **`door: "unknown"`
+   only when the check could not run** -- no connection, no `S`, or a TLS
+   failure of any other kind. 180 s is 60 times the rig's 3.0 s and well above
+   the trip's 4.5 s (D2503); it stays.
+4. **A larger budget for the three branch types** (D2516):
+   `OPERATION_SECONDS_BY_TYPE = {branch.create, restore.create, branch.reset:
+   3600}` (every other type keeps 1,800), `CHILD_SECONDS["branch-runtime.sh"] =
+   3300`, `PROMOTION_SECONDS = 2400`; the guard reads child < the type's
+   operation bound. Not taken: a forced incremental before a branch (it touches
+   the parent's repository) and a bucket move (a provider act).

@@ -212,14 +212,39 @@ technically bounded in this beta"* (D1971).
 4. **Project-creation and branch-creation exhaustion** (Sessions 40, 41). A
    member creates projects or branches until the node or the slots run out.
    Session 38's half -- capacity, from two readers under one code, and the
-   serialisation -- is `THR-LIFE-EXHAUSTION` in the table. Owed: the
-   entitlement half (`plan_limit_reached` before an operation exists, a limit
-   enforced under concurrency, Session 41). **The branch half** (Session 40)
-   is `THR-BR-EXHAUSTION` in the table since Run 8.
-5. **Plan-limit bypass and usage tampering** (Session 41). A caller raises its
-   own limits, creates concurrently past a limit, or writes its own usage.
-   Owed: a limit enforced under concurrency; no customer surface writes a usage
-   sample or an entitlement.
+   serialisation -- is `THR-LIFE-EXHAUSTION` in the table. **The branch half**
+   (Session 40) is `THR-BR-EXHAUSTION` in the table since Run 8. **The
+   entitlement half** (Session 41, ADR 0274, D2521): the Free plan's
+   `projects_active` (1 per organisation) and `branches_total` (1 per project)
+   are checked BEFORE the slot reading and before an operation row exists, by
+   the service and again by `app.control_request_operation` under a lock on the
+   organisation's row. Owed: the entitlement read before the slot
+   (`tests/contract/test_plans.py::test_the_entitlement_is_read_before_the_slot`);
+   each refusal produced by its own reader with the other held green
+   (`test_plans.py::test_each_refusal_comes_from_its_own_reader`); the branch
+   limit read from the plan
+   (`test_plans.py::test_the_branch_limit_reads_the_plan`); the word
+   `plan_limit_reached` produced only by the entitlement readers
+   (`tests/contract/test_control_projects.py::test_plan_limit_reached_is_produced_only_by_the_entitlement_readers`).
+   Moves into the table with item 5 as `THR-PLAN-BYPASS` in Session 41's Run 9.
+5. **Plan-limit bypass and usage tampering** (Session 41, ADRs 0274, 0275). A
+   caller raises its own limits, creates concurrently past a limit, writes its
+   own usage, records interest or notifications for another organisation, or
+   sets another project's idle sleep. Owed, as two rows in Session 41's Run 9:
+   **`THR-PLAN-BYPASS`** -- two concurrent creations in one organisation leave
+   one row
+   (`tests/contract/test_plans.py::test_two_concurrent_creates_leave_one_row`);
+   no route writes a plan or a limit
+   (`test_plans.py::test_no_route_writes_a_plan_or_a_limit`); the SQL limits
+   are the release table
+   (`test_plans.py::test_the_sql_limits_are_the_release_table`).
+   **`THR-USE-TAMPER`** -- no role but the reconciler's writes a usage sample
+   (`tests/contract/test_control_usage.py::test_no_role_but_the_reconciler_writes_a_sample`;
+   `control_record_usage`, `control_request_idle_sleep` and
+   `control_record_limit_notice` are granted to nobody); interest is one row per
+   organisation and plan, written only for the caller's own organisation
+   (`test_plans.py::test_premium_is_unavailable_and_interest_is_one_row`); a
+   member's idle-sleep setting writes only its own project's row.
 6. **Restore abuse** (Session 40, ADR 0271, ADR 0273). A restore aimed at
    another project's repository, at a recovery point outside the window, or at
    the parent's live volume. **In the table as `THR-BR-RESTORE`** since Session
@@ -238,7 +263,8 @@ technically bounded in this beta"* (D1971).
     connector used to reach another project, an internal address, or the
     node's own services. Owed: the connector planes' existing refusals hold for
     a customer's definitions, and an endpoint stays the manifest's.
-9. **Observability poisoning and ClickStack exhaustion** (Session 41). A
+9. **Observability poisoning and ClickStack exhaustion** (Session 42 since
+    the operator's split of 2026-10-16, D2510; it was Session 41's). A
     customer writes log lines or query text that forge another project's
     telemetry, or floods the telemetry store until the node's own readings
     fail. Owed: every series and line names its project from the platform, not
@@ -259,7 +285,16 @@ technically bounded in this beta"* (D1971).
     and every leaf of a built deployed document is classified offline
     (`test_isolation_leaves_offline.py::test_every_leaf_of_a_built_deployed_document_is_classified`).
     **Session 39's** -- the doors' names and roles, the userlists and the
-    snippets -- is `THR-EP-ISOLATION`.
+    snippets -- is `THR-EP-ISOLATION`. **Session 41's** -- usage figures and
+    notifications (ADR 0275) -- moves into the table as **`THR-USE-LEAK`** in
+    its Run 9: a foreign organisation's usage and notifications answer like a
+    missing one
+    (`tests/contract/test_control_usage.py::test_a_foreign_and_a_missing_project_answer_alike`;
+    `tests/contract/test_notifications.py::test_a_foreign_organization_reads_nothing`);
+    no notification text carries a URL, a key or a result member -- each is a
+    fixed template of the type, the project key, the origin and the error code
+    (`test_notifications.py::test_no_template_carries_a_result_member`;
+    live, `tests/external/test_session41_reearning.py::test_no_notification_carries_a_secret`).
 11. **TOTP seed disclosure** (Session 37, ADR 0252). A dump of the control
     project's database, or a backup read with its cipher pass, reveals every
     enrolled second-factor seed, so the factor stops being a second factor for
@@ -273,6 +308,22 @@ technically bounded in this beta"* (D1971).
 12. **The public door admits a platform credential** (Session 39, ADR 0269).
     A platform role's password presented at 5432 from the internet. **In the
     table as `THR-EP-DOOR`** since Session 39's Run 9.
+13. **A trigger acts on a stale or forged sample** (Session 41, ADR 0276,
+    D2525). Idle sleep is the second operation the reconciler requests by
+    itself: a missing, late, unread or customer-written usage sample would put
+    a busy project to sleep (its archiver stopped with it, D2534) or keep an
+    idle one awake. The decision is the control database's, over the recorded
+    samples, and fails closed. Owed, as **`THR-USE-IDLE`** in Session 41's Run
+    9: a missing sample is not idle
+    (`tests/contract/test_idle_sleep.py::test_a_missing_sample_is_not_idle`);
+    a recent wake restarts the window
+    (`test_idle_sleep.py::test_a_recent_wake_restarts_the_window`); the request
+    names the member who set the setting and is `origin = idle` on a
+    `project.sleep` only
+    (`test_idle_sleep.py::test_the_request_names_the_member_who_set_it`,
+    `test_idle_sleep.py::test_idle_is_only_a_sleep`); no role but the
+    reconciler's writes a sample
+    (`tests/contract/test_control_usage.py::test_no_role_but_the_reconciler_writes_a_sample`).
 13. **A branch reaches its parent** (Session 40, ADR 0271, D2424, D2426,
     D2427). A branch writes the parent's backup repository, or opens the
     parent's data with the parent's credentials. **In the table as

@@ -1,6 +1,6 @@
 # 0256 — The reconciler, and the operations it executes
 
-- **Status:** Accepted; its unit-ordering sentence corrected by Session 39 (D2348, D2355); amended by Session 40 (`slot.sh redeploy`, D2443; the one operation the reconciler requests, ADR 0272)
+- **Status:** Accepted; its unit-ordering sentence corrected by Session 39 (D2348, D2355); amended by Session 40 (`slot.sh redeploy`, D2443; the one operation the reconciler requests, ADR 0272); amended by Session 41 (the second operation it requests, ADR 0276)
 - **Date:** 2026-10-07
 - **Session:** 38, Run 1 (D2151–D2154, D2159–D2160, D2165–D2168, D2173,
   D2178–D2179, D2184, D2188; rig rows D2189, D2191)
@@ -220,3 +220,15 @@ deployed document, refuses while `agentic-postgres-reconciler` is active
 sync`, then adopts under the organisation the control registry records for K
 (never typed). Admission's exit 12 is carried. Session 39's Sheet D4 did these
 three steps by hand (D2418); its first live run is Session 40's Sheet R2d.
+
+## Amendment (Session 41, Run 1, D2525, D2531)
+
+The reconciler requests **two** kinds of operation, each through its own
+function granted to nobody and each only with no operation of the key open: an
+expired branch's deletion (`control_request_expiry`, `origin = 'expiry'`, ADR
+0272) and an idle project's sleep (`control_request_idle_sleep`, `origin =
+'idle'`, ADR 0276), the latter attributed to the member who set the project's
+idle-sleep setting. Every other operation is still created by `/api/v1` alone.
+The closed set of SQL the reconciler runs widens by exactly three calls --
+`control_record_usage`, `control_request_idle_sleep`,
+`control_record_limit_notice` (ADR 0275, 0276).

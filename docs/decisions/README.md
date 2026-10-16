@@ -249,7 +249,7 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0183](0183-a-profile-narrows-the-compiled-contract-and-never-widens-it.md) | A profile narrows the compiled contract and never widens it | 16 | Accepted |
 | [0184](0184-an-adversarial-case-is-derived-from-the-contract-and-carries-no-reason.md) | An adversarial case is derived from the contract and carries no reason | 16 | Accepted |
 | [0185](0185-an-operators-read-over-the-hosts-own-documents-is-not-a-cross-project-catalog.md) | An operator's read over the host's own documents is not a cross-project catalog | 17 | Accepted, superseded in part by 0251 |
-| [0186](0186-permanent-is-what-every-earlier-manifest-meant-and-expiry-is-a-fact-an-operator-reads.md) | Permanent is what every earlier manifest meant, and expiry is a fact an operator reads | 17 | Accepted, superseded for branches only by 0272 |
+| [0186](0186-permanent-is-what-every-earlier-manifest-meant-and-expiry-is-a-fact-an-operator-reads.md) | Permanent is what every earlier manifest meant, and expiry is a fact an operator reads | 17 | Accepted, superseded for branches only by 0272 and for idle sleep only by 0276 |
 | [0187](0187-a-retirement-removes-what-its-key-derives-and-never-a-backup.md) | A retirement removes what its key derives and its state records, on this host, and never a backup | 17 | Accepted |
 | [0188](0188-the-secondary-repository-is-a-mirror-of-the-primary-at-a-second-provider.md) | The secondary repository is a mirror of the primary, at a second provider, under the primary's key | 18 | Accepted, its client superseded by 0264 |
 | [0189](0189-a-replacement-host-is-built-from-a-kit-that-names-every-secret-and-holds-none.md) | A replacement host is built from a kit that names every secret and holds none, and the bootstrap adopts by recorded id | 18 | Accepted |
@@ -319,7 +319,7 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0253](0253-management-api-keys-the-v1-contract-and-the-clis-state.md) | Management API keys, the `/v1` contract and the CLI's state | 37 | Accepted |
 | [0254](0254-an-operation-type-is-accepted-only-when-its-ledger-row-is-available-or-beta.md) | An operation type is accepted only when its Ledger row is `available` or `beta`; a row's status moves with its evidence | 37 | Accepted, amended by 0261 |
 | [0255](0255-a-providers-rate-limit-is-waited-out-within-a-budget.md) | A provider's rate limit is waited out, within a budget | 37 | Accepted |
-| [0256](0256-the-reconciler-and-the-operations-it-executes.md) | The reconciler, and the operations it executes | 38 | Accepted, its unit-ordering sentence corrected in Session 39, amended in Session 40 |
+| [0256](0256-the-reconciler-and-the-operations-it-executes.md) | The reconciler, and the operations it executes | 38 | Accepted, its unit-ordering sentence corrected in Session 39, amended in Sessions 40 and 41 |
 | [0257](0257-slots-the-region-and-one-infisical-identity-per-project.md) | Slots, the region, and one Infisical identity per project | 38 | Accepted, amended in Session 39 (a prepared slot's readers, three records) |
 | [0258](0258-compute-profiles-and-resize.md) | Compute profiles, and a resize that says what it has measured | 38 | Accepted |
 | [0259](0259-sleep-is-compose-stop-wake-is-compose-start-and-export-is-a-900-second-url.md) | Sleep is `compose stop`, wake is `compose start`, and an export is a 900-second URL | 38 | Accepted, the export's schemas widened by Session 39 |
@@ -334,6 +334,9 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0268](0268-the-public-postgres-port-is-an-edge-entrypoint-routed-by-name-to-customer-poolers.md) | The public Postgres port is an edge entrypoint, routed by name to customer poolers | 39 | Accepted |
 | [0269](0269-customer-roles-and-their-credentials-by-verifier.md) | Customer roles, and their credentials by verifier | 39 | Accepted |
 | [0270](0270-a-refusal-proof-proves-the-decision-not-the-refusal.md) | A refusal proof proves the decision, not the refusal | 39 | Accepted |
-| [0271](0271-a-branch-is-its-own-three-service-cluster-restored-from-its-parent-and-re-keyed-before-its-doors-open.md) | A branch is its own three-service cluster, restored from its parent and re-keyed before its doors open | 40 | Accepted |
-| [0272](0272-a-branchs-expiry-is-a-trigger.md) | A branch's expiry is a trigger | 40 | Accepted |
-| [0273](0273-the-backups-surface-is-a-recorded-reading-with-its-age.md) | The backups surface is a recorded reading with its age | 40 | Accepted |
+| [0271](0271-a-branch-is-its-own-three-service-cluster-restored-from-its-parent-and-re-keyed-before-its-doors-open.md) | A branch is its own three-service cluster, restored from its parent and re-keyed before its doors open | 40 | Accepted, amended in Session 41 |
+| [0272](0272-a-branchs-expiry-is-a-trigger.md) | A branch's expiry is a trigger | 40 | Accepted, amended in Session 41 |
+| [0273](0273-the-backups-surface-is-a-recorded-reading-with-its-age.md) | The backups surface is a recorded reading with its age | 40 | Accepted, amended in Session 41 |
+| [0274](0274-plans-are-a-release-table-enforced-before-an-operation-exists.md) | Plans are a release table, enforced before an operation exists | 41 | Accepted |
+| [0275](0275-usage-is-a-recorded-sample-and-a-notification-is-written-where-an-operation-ends.md) | Usage is a recorded sample, and a notification is written where an operation ends | 41 | Accepted |
+| [0276](0276-idle-sleep-is-a-trigger.md) | Idle sleep is a trigger | 41 | Accepted |

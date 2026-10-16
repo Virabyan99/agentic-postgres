@@ -1,8 +1,8 @@
 # Session 41 — The repairs, the third re-earning, plans, usage, notifications and idle sleep
 
-**Status: PLANNED 2026-10-16.** No run started. Rows **D2510–D2535** at
-planning; the runs add theirs after them. ADRs **0274–0276** reserved. **NEXT
-FREE after this table: D2536, ADR 0277.**
+**Status: EXECUTING — Run 1 DONE 2026-10-16.** Rows **D2510–D2535** at
+planning; the runs add theirs after them (Run 1: D2536–D2539). ADRs
+**0274–0276** written. **NEXT FREE: D2540, ADR 0277.**
 
 The sixth session of Stage 5 — **and the first one the operator split**
 (D2510): the stage plan's *Session 41* brief (`docs/plans/stage-5-plan.md`
@@ -496,10 +496,14 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2534** | ADR 0259: *"a sleeping project's archiver is stopped, so its restore point is its sleep time"*. | An idle sleep stops a customer's archiver without a person asking at that moment. | **Said where the customer sets it**: the `idle-sleep` route's answer, `apg project idle-sleep`'s output, the `idle_sleep` row and the notification each say *"while it sleeps, its backups stop: its last restore point is the moment it went to sleep"*. No change to sleep itself. | A setting that changes the backup guarantee must say so when it is set. | **0276** |
 | **D2535** | CLAUDE.md §2: *"M7: Sheets X1/X2 (retire Hetzner) ALLOWED since 2026-10-12 ~21:30Z and NOT YET RUN"*; Session 40 §10's created items. | The old host's three projects stopped (the way back). Session 40 §10 also created: branch certificates accumulate in `acme.json`; the parent's user hashes copied into a branch; the backups recording's R2 requests. | **Not this plan's**: M7's sheets stay in `docs/plans/session-38-migration-plan.md` and may run on any day outside this trip's sittings; this plan's sheets never name the old host. The three Session 40 items are carried in §10 untouched. | Two trips' sheets interleaved is D1510's failure in waiting. | — |
 
-**Rows the runs add** (execution order; next free D2536):
+**Rows the runs add** (execution order; next free D2540):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
+| **D2536** | Run 1's Sheet E0 text: *"`sudo bin/doctor.sh --project slot3-prod --reading usage`"*; D2528: *"`bin/doctor.sh --reading usage` is the operator's"*. | `bin/doctor.sh` (at `8cc3440` and `e89ac85`) takes the reading as a VERB in first position — `sudo bin/doctor.sh usage --project <key> [--json]` (`:75`) — and maps it to `bin/doctor.py --reading usage` (`:178-193`); `--reading` is the Python side's flag, not the shell's. | **`s41-e0.py` runs `bin/doctor.sh usage --project slot3-prod`** (read from `--help`, as the appendix requires). D2528's test (`test_the_usage_verb_is_the_customers_and_the_reading_is_the_operators`) names the operator's reading as **`doctor.sh usage`** (the verb) / `doctor.py --reading usage` (the flag) — Run 7 writes it against both spellings. | A sheet line is read from the command's own usage block, never from a plan's paraphrase. | — |
+| **D2537** | D2515 / Run 1 rig 41b: *"(1) before the router's certificate is issued → verification fails (Traefik's default certificate)"*; *"An error the check cannot classify → `door: "unknown"`"*. | **Rig 41b** (2026-10-16, WSL `~/s41/run1/rig41/rig41b.sh`, `rig41b.txt`; Pebble and challtestsrv at rig 40b's digests, Traefik `v3.7@sha256:9c3b91d5…`, Python 3.14.4 / OpenSSL 3.5.5): from the containers' creation, both names answered the `SSLRequest` with `S` and then **the edge closed the TLS handshake** (`[SSL: UNEXPECTED_EOF_WHILE_READING]`) — **no default certificate is served under the `postgres` options' `sniStrict: true`**; at **+3.0 s** both names verified against Pebble's issuing root (one order, one certificate). Against the wrong root (minica): `pending … unable to get local issuer certificate`. **Control** (a name with no router): the same EOF for 60 s, never verified. | **After the `S`, an EOF in the handshake and a verification failure both read *pending*** (*"the door's certificate is not issued yet"*) — the edge answered and the door is not open; **`unknown` only when the check could not run** (no connection, no `S`, any other TLS failure). The check cannot tell *no certificate yet* from *no router* (both EOF): for a branch the router is attached before the check starts, so `pending` at the bound is said with that reason. `DOOR_SECONDS = 180` stays (60× the rig's 3.0 s; the trip's 4.5 s, D2503). ADR 0271's amendment says so. | The measured shape of *not yet*, not the expected one; folding it into *unknown* would report a reading as a failure to read. | **0271** amended |
+| **D2538** | D2521: *"0008's `app.control_request_operation` takes `SELECT … FROM app.control_organizations WHERE id = … FOR UPDATE` before counting"*. | `0001-control-identity.sql:152-163` gives `app.control_organizations` a SELECT and an INSERT policy (`TO object_owner`) and **no UPDATE policy**; the table FORCEs row level security (`:119-120`). **Rig 41d** (2026-10-16, `~/s41/run1/rig41/rig41d.py`, `rig41d.txt`, control set `0001`–`0007` + a draft `0008`): **without an UPDATE policy the definer's `SELECT … FOR UPDATE` returned NO row** — the draft's `IF NOT FOUND` raised `AP500: the organisation row was not locked` on every request; unchecked, the count would have run unlocked, silently. **With a lock-only policy** (`FOR UPDATE TO object_owner USING (id::text = current_setting('app.control_org', true)) WITH CHECK (false)`): the second of two creations in one organisation **waited 3.2 s** on the row, then `AP409: plan_limit_reached` — one row; **control**: two organisations, two rows, no wait (0.1 s). Also measured: `control_request_idle_sleep` inserted ONE `project.sleep` `origin = idle` `requested_by` the setter over a full quiet window (−840/−540/−240/−10 s), `NULL` with the −540 s sample missing; `idle` on a `project.wake` refused by the CHECK; a finish wrote ONE notification, a rolled-back finish none. | **`0008` adds the lock-only policy** `control_organizations_lock` and the function **raises if the row was not locked** (a decision fails closed, ADR 0195) — Run 4 writes both, with a test that a scoped UPDATE through the policy is refused (`WITH CHECK (false)`, not measured by the rig: its unscoped UPDATE matched no row). **A pending creation counts** toward `projects_active`: with Free's 1, a second creation while the first is open answers `plan_limit_reached` where 1.18.0 answered `409 conflict {operation}` (D2166's unique index stays, the guard under the guard). ADR 0274 records both. | A lock that locks nothing is the fold this project keeps finding — a value that looked enforced and was not; the rig is why it is a policy now and not a surprise on the host. | **0274** |
+| **D2539** | D2525's signal (b): *"`last_customer_activity` (the latest `backend_start`/`state_change` of any backend whose role is one of the project's two customer roles …)"*; rig 41d's draft required `last_customer_activity IS NOT NULL` in every sample; Run 1's E0 text: *"ONE `curl` … to `slot3-prod`'s app route"*. | **Sheet E0** (2026-10-16 10:37–11:09Z, `slot3-prod` at `8cc3440`, `/home/op/s41-e0.txt`, copied to WSL `~/s41/e0/` 0600): the edge counter's sub-400 part **8 → 8 → 8** at T0, T0+15 and T0+30 min with no traffic (all eight on `apg-slot3-prod-health@docker`); the customer roles held **no backend** at all three reads. The one `curl` to `/api/app` answered **404** (no root handler), so it could not show a sub-400 request moving the counter: **one more GET, to `/api/rest/`, answered 200**, sent before the fourth read (11:08:06Z). Fourth read: `code=200` 9 (`rest` +1), `code=404` 1 (`app`); one `customer_app` backend, `idle`, `backend_start` 11:07:53.19, `state_change` 11:07:53.20 — the `psql`'s instant, unmoved 97 s later although the transaction-mode pooler kept the server connection (`server_reset_query_always = 1` stamps it at release, `compose.yaml:792-793`; no `min_pool_size`, so no server connection opens without a client). | **No stop** (§9: neither the sub-400 count nor a customer `state_change` moved with no client). **"No customer backend" is quiet, not unread**: a sample records `last_customer_activity` as the latest instant over the customer roles' PRESENT backends, `NULL` when there are none, and only a failed `pg_stat_activity` read puts it in `unread`; `control_request_idle_sleep` treats `NULL`-and-read as older than the window. Rig 41d's `IS NOT NULL` would have kept every idle project awake — Run 4 writes the test (`test_idle_sleep.py`: a window of samples with no customer backend sleeps). **What a sample can miss**: a query whose backend closes before the next sample. PgBouncer's default `server_idle_timeout` (600 s, not set in `compose.yaml`) keeps it beyond the 300 s interval — **not measured here; Run 8's rehearsal reads the backend gone and the sample after it**. A `doctor --project` run's `route health` request crosses the edge as a 200 (the health router's 8 earlier requests are such reads): an operator's doctor keeps a project awake for a window — the safe direction; not excluded. | The two signals measured at rest and moved by a control; the third answer (*not read*) kept separate from *none present*. | **0276** |
 
 ---
 
@@ -744,6 +748,55 @@ section holding the moved Builds/Must not/Measures/Closes text verbatim from
 *Session 41* (ClickStack, `pg_stat_statements`, Query Insights, monitoring, the
 observability `THR-*` rows, `every_service_bounded_live` re-run), §7's table.
 **Do not rewrite anything else in the stage plan.**
+
+**Done.** 2026-10-16, documentation only (no CI read). Rows **D2536–D2539**.
+Rigs in WSL `~/s41/run1/rig41/` (copied to the scratchpad), each cleaned up
+(0 `rig41` containers, networks, volumes, images left):
+**Rig 41b** (`rig41b.sh`/`rig41b.txt`): both branch names verified through
+Traefik's `postgres` entrypoint **3.0 s** after their containers were created;
+before issuance the edge **closed the handshake** (`sniStrict`, no default
+certificate) — the same EOF as the control's name with no router, which never
+verified in 60 s; the wrong root read `unable to get local issuer certificate`
+→ EOF-after-`S` reads *pending* (D2537); `DOOR_SECONDS` 180 stays.
+**Rig 41c** (`rig41c.py`/`rig41c.txt`, Docker 29.5.2, containerd store, the
+real `services/postgres/Dockerfile`): platform digests **1** `sha256:2794179a…`
+(the container's, recorded at create), **2** `sha256:2794179a…` (after an
+unchanged rebuild: the index id moved `d677c532…` → `82700cbc…`, the old id no
+longer resolves), **3** `sha256:7cbc07f1…` (after `RUN true`); the draft
+`image_for` chose the new index and `docker run` of it started; the control was
+refused *"the parent's image changed since this branch was made … reset the
+branch"*. As planned.
+**Rig 41d** (`rig41d.py`, `rig41d_0008.sql`, `rig41d.txt`): the organisation
+row's `FOR UPDATE` locks NOTHING without an UPDATE policy (D2538); with a
+lock-only policy the second creation waited **3.2 s** then `plan_limit_reached`,
+one row; control two organisations, two rows, 0.1 s. The idle request: one
+`project.sleep` `origin = idle` attributed to the setter; control (a sample
+missing) none; `idle` on a `project.wake` refused. The finish: one
+notification; control (rolled back) none.
+**Sheet E0** (`/home/op/s41-e0.sh` sha256 `6f8c9e79…`, `s41-e0.py`
+`48c88f0e…`; transcript and the four JSON files in WSL `~/s41/e0/` 0600, read
+whole — pgBackRest prints the cipher's NAME only, no secret): `free -m`
+available **5,129 MiB**; `backup.sh info --json` exit 0, 352 bytes, keys
+`last_full_backup_at, last_full_backup_label, latest_recoverable_time, mirror,
+stanza_created, status, wal_archived_count, wal_failed_count` — **no
+`oldest_backup_stop`** (D2501 confirmed on the producer's real output); the raw
+`pgbackrest info` (read_window's argv) exit 0, 3,032 bytes, one full
+`20261012-102807F` (stop 1791801566 = 2026-10-12T10:39:26Z) and four
+incrementals, repository 4,407,456 bytes — Run 2's fixture; the printed block's
+`mirror: not_observed` is by design (the reading takes the mirror from the copy
+record, D2461). The idle signals (D2539): sub-400 **8/8/8** over 30 quiet
+minutes, no customer backend; after the control (`/api/app` 404, `/api/rest/`
+200, one `psql`) `200`: 9, `404`: 1, one idle `customer_app` backend stamped at
+the query — **no stop**. `doctor --project slot3-prod` **12 ok**; `doctor usage`
+3 ok, 1 unknown (`tool_calls_total`, the per-process series, D1643; database
+10,548,927 bytes, repository 6,398,256); reconciler active, `NRestarts=0`;
+`/etc/agentic-postgres/branches/` empty.
+**Documents**: `docs/threat-model.md` items 4, 5 and 10 made specific by node id,
+9 re-labelled Session 42, **13** added (a trigger on a stale or forged sample);
+**ADRs 0274, 0275, 0276** written and indexed; **0186, 0256, 0271, 0272, 0273**
+amended (status lines and index cells); `docs/plans/stage-5-plan.md` split as
+D2510 says (Status `SESSIONS`, §3's table and ordering 4, §5 *Session 41*'s
+amendment, a new *Session 42*, *Session 43* renumbered, §7's table).
 
 ### Run 2 — D2501 repaired: the backups reading from the producer (`src/`, `bin/`)
 

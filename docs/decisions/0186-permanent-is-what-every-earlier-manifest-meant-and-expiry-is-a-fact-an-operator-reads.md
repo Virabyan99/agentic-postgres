@@ -1,6 +1,6 @@
 # 0186 — Permanent is what every earlier manifest meant, and expiry is a fact an operator reads
 
-- **Status:** accepted; its *expiry is a fact an operator reads, never a trigger* superseded for branches only by ADR 0272
+- **Status:** accepted; its *expiry is a fact an operator reads, never a trigger* superseded for branches only by ADR 0272, and for a project's idle-sleep setting only by ADR 0276
 - **Date:** 2026-09-04
 - **Session:** 17, Run 3 (`FLEET-LIFE-001`, `FLEET-EXPIRE-001`, D949, D951)
 - **Related:** **ADR 0177** (a field is forbidden below the version that
@@ -106,3 +106,13 @@ the control database to request the branch's deletion on behalf of the member
 who set it (ADR 0272). What expires is a copy restored from the parent's
 repository; the parent, its repository and its cipher pass are untouched. For
 a **project** this ADR stands word for word, and D713 remains the reason.
+
+## Superseded in part (Session 41, ADR 0276)
+
+**For a project's idle-sleep setting only** (`idle_sleep_minutes`, opt-in,
+default never), the reconciler asks the control database to request the
+project's sleep on behalf of the member who set it, and only over a window of
+recorded samples that are all present and quiet (ADR 0276). Sleep keeps the
+project's data, repository and cipher pass; it is undone by a wake. A
+project's `expires_at` still acts on nothing: this ADR stands for it word for
+word, and D713 remains the reason.

@@ -1,6 +1,6 @@
 # 0273 — The backups surface is a recorded reading with its age
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by Session 41 (the reading from the producer's printed block, D2512)
 - **Date:** 2026-10-14
 - **Session:** 40, Run 1 (`docs/plans/session-40-implementation-plan.md`, D2435,
   and Run 1's rows D2456, D2457)
@@ -86,3 +86,19 @@ Rig 40a (2026-10-14; ADR 0271 has the rig):
   (Session 41 inherits it).
 - The window is checked before a restore (ADR 0271); the restore's own
   refusals remain the second line, and they name the bound they met.
+
+## Amendment (Session 41, Run 1, D2512)
+
+**The reconciler's reading was always `could_not_determine`** (D2501): it
+handed `backups_reading` the PRINTED block of `bin/backup.sh info --json` --
+`backup_report.backup_state(summary, archiver)` -- and read
+`oldest_backup_stop` from it, a key only `summarise` returns. The repair is
+where the shape is made: **`backup_state` gains `oldest_backup_stop` and
+`repository_bytes`** (both from the summary it already holds; usage reads the
+second, ADR 0275), additive to a block every reader indexes by key. The
+reconciler parses the printed block on exit 0 **and** on `EXIT_REFUSED` (a
+`failing` repository is a `problem`, never folded into *unknown*), and passes no
+reading only when the output does not parse. The proof feeds `backups_reading`
+the producer's own functions over **`slot3-prod`'s real `pgbackrest info`**
+(captured by Session 41's Sheet E0) and a class guard asserts every key the
+reading takes is a key `backup_state` returns.

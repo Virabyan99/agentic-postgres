@@ -1,6 +1,6 @@
 # 0272 — A branch's expiry is a trigger
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by Session 41 (a second requested kind, ADR 0276)
 - **Date:** 2026-10-14
 - **Session:** 40, Run 1 (`docs/plans/session-40-implementation-plan.md`, D2433;
   the operator's answer of 2026-10-14)
@@ -107,3 +107,14 @@ set it.**
   the row; the deletion is attributed to who chose it, not to who is there now.
 - If a future session wants a project's expiry to act, this ADR is not the
   precedent: D713 is.
+
+## Amendment (Session 41, ADR 0276)
+
+*"The reconciler requests exactly one kind of operation"* becomes **two**: an
+idle project's `project.sleep`, `origin = 'idle'`, through
+`app.control_request_idle_sleep` beside `app.control_request_expiry` -- same
+shape, granted to nobody, at most one row and only with no operation of the key
+open. The origin CHECK becomes `origin IN ('member', 'expiry', 'idle')` with
+`expiry` only on a `branch.delete` and `idle` only on a `project.sleep` (rig
+41d: `idle` on a `project.wake` refused). This ADR's last sentence stands: a
+project's `expires_at` is still never a trigger.

@@ -49,8 +49,12 @@ DIRECTION       HOSTED (D1946). Session 36 paid the preconditions; Session 37
                 projects (ADRs 0256-0261) and the move (ADRs 0262-0267);
                 Session 39 the public endpoints (ADRs 0268-0270); Session 40
                 branches (ADRs 0271-0273).
-SESSIONS        36-42 (D1945). 36, 37, 38, 39, 40 DONE; 41 (ClickStack, usage,
-                plans, idle sleep) NEXT, unplanned. Next free: D2510, ADR 0274.
+SESSIONS        36-43 (D1945, D2510). 36, 37, 38, 39, 40 DONE; 41 (the repairs,
+                the re-earning, plans, usage, notifications, idle sleep) PLANNED
+                (docs/plans/session-41-implementation-plan.md); 42 (ClickStack,
+                insights, monitoring; the OVH upgrade first) and 43 (the
+                console, the journey, the release) unplanned. Next free: see
+                Session 41's plan (D2510-D2535 and its Run rows taken).
 CURRENT_SESSION 40. Moves 41 -> 42, all-or-nothing per session (D690).
 template_version 1.18.0. host.yaml schema 4. Outputs v22, project manifest 11,
                 capability manifest 4, lock 4, project lock 3, api-surface 2,
@@ -414,8 +418,9 @@ so is the failure mode CLAUDE.md §7 names.**
 | **38 — Managed projects** | §9, §10, §14–§17, §28 (execution), §46, §47, §57 steps 4–6/26–28/30 | The reconciler; slots; `project.create\|delete\|sleep\|wake\|resize\|export`; capacity as `capacity_exhausted`; states and domain errors; compute profiles (manifest 9); region (host schema 4); the creator as the project's first admin; ends on the host with a project created, slept, woken, resized, exported and deleted from the workstation with no SSH |
 | **39 — Connection endpoints** | §11–§13, §57 steps 7–10 | The gateway rig first (Traefik's Postgres routing, TLS, SNI, certificates, wake-on-connect); the Postgres entrypoint; `customer_app` / `customer_admin`; `credential.rotate`; Connect snippets from metadata; the four driver fixtures over TLS; the isolation matrix extended to the listener; external-mode scans; ends on the host with `psql` and Prisma connected through both URLs |
 | **40 — Branches and restore to a branch** | §18–§23, §57 steps 12–14/17–18/29 | `naming.branch_names`; `branch.create\|reset\|delete` from the parent's repository at a target time; the re-key; branch TTL; protection; the backups surface; test restore as an operation; ends on the host with a branch from a point in time, migrated, inspected and deleted, the parent untouched |
-| **41 — Telemetry, insights, usage and plans** | §24, §25, §32–§39, §44, §45, §53 (ClickStack), §56, §57 steps 15–16/21 | ClickStack bounded; `pg_stat_statements` and Query Insights; curated monitoring; usage sampling; Free/Premium and entitlements as `plan_limit_reached`; notifications; ends on the host with an entitlement refusal and a capacity refusal side by side |
-| **42 — The console, the journey, and the Stage 5 release** | §9, §26, §40–§43 (surfaces), §48, §54–§58, Appendix C | The console over `/api/v1`; Studio forwarders for workflows and connectors; the support bundle; `apg control status`; the executable journey; **the person's walk arranged**; the bump; `session-42-check.sh`; `docs/stage-6-decision-report.md` |
+| **41 — The repairs, the re-earning, plans, usage, notifications and idle sleep** (split 2026-10-16, D2510) | §44, §45, §56, §57 steps 16/21 | Session 40's two product repairs (D2501, D2504); the third re-earning on a new slot; usage sampling; Free/Premium and entitlements as `plan_limit_reached`; notifications; idle sleep; ends on the host with an entitlement refusal and a capacity refusal side by side |
+| **42 — Telemetry, Query Insights and monitoring** (moved from 41, D2510) | §24, §25, §32–§39, §53 (ClickStack), §57 step 15 | The OVH upgrade first (D2511); ClickStack bounded; `pg_stat_statements` and Query Insights; curated monitoring |
+| **43 — The console, the journey, and the Stage 5 release** (was 42, D2510) | §9, §26, §40–§43 (surfaces), §48, §54–§58, Appendix C | The console over `/api/v1`; Studio forwarders for workflows and connectors; the support bundle; `apg control status`; the executable journey; **the person's walk arranged**; the bump; `session-42-check.sh`; `docs/stage-6-decision-report.md` |
 | *(cut, with the reason in §1)* | §21 promotion (D1962), in-place restore for customers (D1963), the SQL editor (D1969), temporary support grants (D1971), §53's optional technologies and PostgreSQL 19 (D1947, D1980), billing (D1967), a management SDK (D1952) | — |
 | *(`planned` in the Ledger)* | passkeys, email, wake-on-connect if 39's rig refuses it, storage quotas, egress/provider/embedding metering, autoscaling, HA, multi-region, SLA | — |
 
@@ -428,8 +433,9 @@ so is the failure mode CLAUDE.md §7 names.**
    claims from it.
 3. **38 before 39 and 40.** A customer's endpoint and a branch are created by
    operations; a branch is charged by admission through the reconciler.
-4. **41 before 42.** The console shows usage, insights and plans; the journey
-   needs an entitlement refusal to exist.
+4. **41 and 42 before 43** (was *41 before 42*, D2510). The console shows
+   usage, insights and plans; the journey needs an entitlement refusal to
+   exist.
 
 **39 and 40 are independent** and could swap; 39 is first because a branch's
 endpoints are 39's mechanism and Session 40's proof connects to a branch.
@@ -751,6 +757,23 @@ repository size on the new host (the envelope row the specification asks to be
 
 ### Session 41 — Telemetry, insights, usage and plans
 
+> **Amended 2026-10-16 (D2510).** The operator split this session. Session 41
+> keeps usage (D1966), plans and entitlements (D1967, D1954's entitlement
+> half), notifications (D1968), the `THR-*` rows for plan-limit bypass and
+> usage tampering, and idle sleep (D1956's trigger half, deferred here by
+> D2147) -- and, before them, the two product repairs Session 40 shipped
+> (D2501, D2504) and a third re-earning on a new slot.
+> **ClickStack, `pg_stat_statements`, Query Insights, monitoring and the
+> observability `THR-*` rows moved to a new Session 42** (below), whose first
+> sitting is the OVH upgrade (D2511); the console, the journey and the Stage 5
+> release are **Session 43**. Two sentences below no longer hold as written:
+> *"the agent quota written on agents"* is not built -- `agent_calls_per_day`
+> is read, not enforced, because the control plane holds no path to a
+> project's agents (D2520, ADR 0274); *"with the limit raised for the test"*
+> is met by a second organisation, with no override verb (D2521). The text
+> below is kept as it was planned on 2026-10-03;
+> `docs/plans/session-41-implementation-plan.md` is the plan.
+
 **Builds.** **First run: the `THR-*` rows** (plan-limit bypass, usage
 tampering, observability poisoning, ClickStack exhaustion) **and ClickStack's
 footprint measured** on the new host with a control load. **ClickStack**
@@ -791,7 +814,49 @@ refusals with each other held green.
 
 **Proposed families.** `INS-*`, `USE-*`, `PLAN-*`.
 
-### Session 42 — The console, the journey, and the Stage 5 release
+### Session 42 — Telemetry, Query Insights and monitoring
+
+> **Added 2026-10-16 (D2510)**, from Session 41's text as planned on
+> 2026-10-03; the sentences below are that text's, moved verbatim. **Its first
+> sitting is the OVH upgrade** (D2511): ClickStack is the first thing that does
+> not fit the node, and Session 41's Sheet M1 is the baseline it is compared
+> against.
+
+**Builds.** **First run: the `THR-*` rows** (observability poisoning,
+ClickStack exhaustion) **and ClickStack's footprint measured** on the new host
+with a control load. **ClickStack** (D1964): `infra/telemetry/compose.yaml`,
+images by digest, bounded, unrouted, TTLs, admission-charged; each
+collector's logs pipeline (D1918's lines) and OTLP export to it.
+**`pg_stat_statements`** (D1965): the `-c` flag, the extension in
+`extensions`, one restart per project in the session's deploy (the window
+recorded); Query Insights through `/api/v1/projects/{id}/insights` with
+normalised text; history sampled into ClickHouse; *"Create tuning proposal"*
+as a pointer to `migrate propose`. **Monitoring**: a curated signal list, each
+naming its source. **Ends on the new host**: Query Insights read after a known
+workload; HyperDX reached by the operator's SSH forward and by nothing else.
+
+**Already true, so do not rebuild it.** The collector and Prometheus, `doctor
+usage`, admission -- and, from Session 41, the usage samples (DB time is the
+figure they leave *not read* until `pg_stat_statements` loads).
+
+**Must not.** Route ClickStack or HyperDX, or export telemetry off the host.
+Put a caller value, a key, a URL or literal query constants in a series, a log
+line or an insight (the canary). Show a recommendation with a confidence.
+Let one store answer a question the other already answers.
+
+**Measures.** ClickStack's memory and CPU under the control load; the
+`pg_stat_statements` restart window per project.
+
+**Closes.** D1964, D1965.
+
+**Proposed family.** `INS-*`.
+
+### Session 43 — The console, the journey, and the Stage 5 release
+
+> **Renumbered 2026-10-16 (D2510); it was Session 42.** The text is kept as
+> written: every *42* in it -- `CURRENT_SESSION` 42, `session-42-check.sh`
+> derived from 41's, `evidence/session-42.json` -- reads *43* (and *42's*
+> gate for *41's*).
 
 **Builds.** **The console** (D1969): static files under `services/console/`,
 served by the control project's router, calling `/api/v1` only, the
@@ -883,8 +948,9 @@ the wrong door (CLAUDE.md §7 question 3).
 | 38 | new `LIFE-*`, `OPN-*` (the reconciler's dispatch offline; every operation live, external) | **Yes** |
 | 39 | new `EP-*`; `project_isolation` re-run with the listener; the four DBX driver claims re-pointed | **Yes** |
 | 40 | new `BR-*` (naming and the re-key offline in a rig; the branch live) | **Yes** |
-| 41 | new `INS-*`, `USE-*`, `PLAN-*`; `every_service_bounded_live` re-run with ClickStack | **Yes** |
-| 42 | new `CON-*`, `JRN-*`; `documented_path`; every Stage 5 claim in every mode | **Yes** — the release trip |
+| 41 | new `USE-*`, `PLAN-*`, `BR-*` (the repairs); the managed-project, branch and backup claims re-earned on a new slot (D2510) | **Yes** |
+| 42 | new `INS-*`; `every_service_bounded_live` re-run with ClickStack (moved from 41, D2510) | **Yes** — after the OVH upgrade |
+| 43 | new `CON-*`, `JRN-*`; `documented_path`; every Stage 5 claim in every mode (was 42, D2510) | **Yes** — the release trip |
 
 **Three things Stage 5 adds to the model:**
 
