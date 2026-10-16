@@ -171,6 +171,31 @@ def summarise(document: Any, stanza: str) -> dict[str, Any]:
     }
 
 
+#: The exit `bin/backup.py info` gives a `failing` repository, its block still
+#: printed (Session 41, D2512). Named here because the reconciler reads that
+#: block and cannot import a `bin/` command (ADR 0093): a reader that parsed
+#: only exit 0 folded every failing repository into *could not be read*.
+INFO_FAILING_EXIT = 6
+
+
+def usage_block(summary: dict[str, Any], stanza: str) -> dict[str, Any]:
+    """What `bin/backup.sh usage --json` prints: the repository's figures that
+    the deployed document does NOT carry (D1591, D1614, D2540).
+
+    `info --json` IS the deployed document's `backup_state` block -- the deploy
+    publishes it verbatim and the schema closes it -- so a figure a reader
+    needs beyond that block is printed here. `repository_bytes` for `doctor
+    usage` (ADR 0221) and the usage sampler (ADR 0275); **`oldest_backup_stop`
+    for the backups surface's window** (ADR 0273 as amended by Session 41: the
+    reconciler read it from `info --json`, which never printed it, D2501).
+    """
+    return {
+        "stanza": stanza,
+        "repository_bytes": summary.get("repository_bytes"),
+        "oldest_backup_stop": summary.get("oldest_backup_stop"),
+    }
+
+
 def _repository_delta_total(backups: list[dict[str, Any]]) -> int | None:
     """The sum of every backup's repository delta, or `None`.
 

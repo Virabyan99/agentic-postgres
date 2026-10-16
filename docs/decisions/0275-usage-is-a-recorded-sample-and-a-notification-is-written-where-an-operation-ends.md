@@ -67,8 +67,9 @@ with one control request; its readings are recorded in the plan's Run 1
    300`**, through `app.control_record_usage(p_samples jsonb)` — `SECURITY
    INVOKER`, **granted to nobody**, a key whitelist like
    `control_record_backups`. Each figure is read through `container_exec` as
-   `doctor usage` reads it; the repository bytes from the backups reading
-   (ADR 0273 as amended by D2512). **A figure that cannot be read is `NULL` and
+   `doctor usage` reads it; the repository bytes from `backup.sh usage
+   --json`, the block the backups reading also takes its window from (ADR 0273
+   as amended, D2540). **A figure that cannot be read is `NULL` and
    named in `unread`**; a sleeping project's sample is `state = sleeping` with
    every container figure unread, *"the project sleeps"*.
 3. **Not metered in Session 41:** DB time (needs `pg_stat_statements`, Session

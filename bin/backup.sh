@@ -21,6 +21,8 @@
 #                  because `info --json` IS the deployed document's block and
 #                  the deploy consumes it verbatim -- a member added there
 #                  would land in outputs.json and be refused by the schema.
+#                  --json also prints the oldest kept backup's stop, where the
+#                  restore window begins (the reconciler's reading, D2540).
 #   expire         Apply the retention policy. Retention is NOT restated on the
 #                  command line: it is repo1-retention-full in the rendered
 #                  config, and pgBackRest applies it from there (D495, D463).

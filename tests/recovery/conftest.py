@@ -9,12 +9,15 @@ something (D264).
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from typing import Any
 
 import pytest
 from tests.deployment.conftest import load_deployed
+
+from agentic_postgres import restore_drill
 
 
 @pytest.fixture(scope="session")
@@ -68,3 +71,27 @@ def psql(document: dict[str, Any], statement: str, *, user: str = "postgres") ->
     )
     assert result.returncode == 0, f"{statement}\n{result.stderr.strip()}"
     return result.stdout.strip()
+
+
+def require_a_runnable_image(document: dict[str, Any]) -> str:
+    """The image the drill will run, resolved BEFORE the drill (D2498, D2517).
+
+    A drill whose database container's image no longer resolves fails inside
+    `restore-test.sh` as a failed restore (D2497); read first, the same refusal
+    names the image instead. `restore_drill.runnable_image` is the drill's own
+    chooser, so this asks exactly the question the drill will.
+    """
+
+    def docker(*argv: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["docker", *argv], stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            check=False, timeout=60,
+        )  # fmt: skip
+
+    container = document["database"]["container"]
+    inspected = docker("inspect", container)
+    assert inspected.returncode == 0, f"the database container {container} could not be inspected"
+    try:
+        return restore_drill.runnable_image(json.loads(inspected.stdout)[0], docker)
+    except restore_drill.DrillError as error:
+        pytest.fail(f"the drill's image does not resolve: {error}")

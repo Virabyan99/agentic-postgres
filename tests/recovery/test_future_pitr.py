@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.recovery.conftest import psql
+from tests.recovery.conftest import psql, require_a_runnable_image
 
 from agentic_postgres import REPO_ROOT, backup_report, naming, restore_drill
 
@@ -176,6 +176,9 @@ def drill(project_b: dict[str, Any], require_root: None) -> dict[str, Any]:
     )
     _wal_switch(project_b)
 
+    # D2498: the image the drill will run, resolved first -- a refusal here
+    # names the image rather than reading as a failed restore.
+    require_a_runnable_image(project_b)
     evidence_dir = Path(os.environ.get("APG_EVIDENCE_DIR", REPO_ROOT / "evidence"))
     started = time.monotonic()
     result = subprocess.run(

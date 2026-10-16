@@ -1308,20 +1308,23 @@ def _quiet(argv: list[str], timeout: int) -> subprocess.CompletedProcess | None:
 
 def backups_of(key: str, document: dict[str, Any]) -> dict[str, Any]:
     """One slot's reading: asleep when its database is stopped; otherwise
-    `backup.sh info --json`, the archiver query and the mirror's copy record."""
+    `backup.sh info --json` (the repository's status), `backup.sh usage --json`
+    (the window's oldest stop, D2540), the archiver query and the mirror's copy
+    record."""
     database = document.get("database") or {}
     container, name = str(database.get("container", "")), str(database.get("name", ""))
     running = _quiet(dispatch.running_argv(container), 60)
     if running is not None and running.returncode == 0 and running.stdout.strip() == "false":
-        return dispatch.backups_reading(key, info=None, archiver=None, mirror=None, sleeping=True)
+        return dispatch.backups_reading(
+            key, info=None, usage=None, archiver=None, mirror=None, sleeping=True
+        )
     outputs = deployed_output.deployed_path(key, root=STATE_ROOT)
-    done = _quiet(
-        [str(REPO_ROOT / "bin" / "backup.sh"), "--outputs", str(outputs), "info", "--json"], 300
-    )
-    info = None
-    if done is not None and done.returncode == 0:
-        with contextlib.suppress(ValueError):
-            info = json.loads(done.stdout)
+    backup = [str(REPO_ROOT / "bin" / "backup.sh"), "--outputs", str(outputs)]
+    # `info` prints its block for a FAILING repository too, exiting
+    # INFO_FAILING_EXIT: parsed on that exit as on 0, a failing repository reads
+    # `problem` rather than folding into could-not-read (D2512).
+    info = _json_of(_quiet([*backup, "info", "--json"], 300), backup_report.INFO_FAILING_EXIT)
+    usage = _json_of(_quiet([*backup, "usage", "--json"], 300))
     archiver = None
     read = container_exec.run(
         container, "psql", "-U", "postgres", "-d", name, "-X", "-qtA",
@@ -1330,8 +1333,21 @@ def backups_of(key: str, document: dict[str, Any]) -> dict[str, Any]:
     if read.returncode == 0:
         archiver = backup_report.parse_archiver(read.stdout)
     return dispatch.backups_reading(
-        key, info=info, archiver=archiver, mirror=mirror_of(key, document), sleeping=False
-    )
+        key, info=info, usage=usage, archiver=archiver, mirror=mirror_of(key, document),
+        sleeping=False,
+    )  # fmt: skip
+
+
+def _json_of(done: subprocess.CompletedProcess | None, *also: int) -> dict[str, Any] | None:
+    """A child's printed JSON object on exit 0 (or one of `also`), else None:
+    None means the reading was not taken, never that it said nothing."""
+    if done is None or done.returncode not in (0, *also):
+        return None
+    try:
+        parsed = json.loads(done.stdout)
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def mirror_of(key: str, document: dict[str, Any]) -> Any:

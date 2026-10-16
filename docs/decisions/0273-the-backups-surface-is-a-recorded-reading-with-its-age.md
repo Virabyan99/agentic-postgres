@@ -87,18 +87,35 @@ Rig 40a (2026-10-14; ADR 0271 has the rig):
 - The window is checked before a restore (ADR 0271); the restore's own
   refusals remain the second line, and they name the bound they met.
 
-## Amendment (Session 41, Run 1, D2512)
+## Amendment (Session 41, Runs 1–2, D2512, D2540, D2541)
 
 **The reconciler's reading was always `could_not_determine`** (D2501): it
 handed `backups_reading` the PRINTED block of `bin/backup.sh info --json` --
 `backup_report.backup_state(summary, archiver)` -- and read
-`oldest_backup_stop` from it, a key only `summarise` returns. The repair is
-where the shape is made: **`backup_state` gains `oldest_backup_stop` and
-`repository_bytes`** (both from the summary it already holds; usage reads the
-second, ADR 0275), additive to a block every reader indexes by key. The
-reconciler parses the printed block on exit 0 **and** on `EXIT_REFUSED` (a
-`failing` repository is a `problem`, never folded into *unknown*), and passes no
-reading only when the output does not parse. The proof feeds `backups_reading`
-the producer's own functions over **`slot3-prod`'s real `pgbackrest info`**
-(captured by Session 41's Sheet E0) and a class guard asserts every key the
-reading takes is a key `backup_state` returns.
+`oldest_backup_stop` from it, a key only `summarise` returns.
+
+**The window's start is read from `backup.sh usage --json`, not from `info`**
+(D2540). Session 41's plan said `backup_state` would gain the key; it cannot:
+`info --json` IS the deployed document's `backup_state` block, the deploy
+publishes it verbatim and the schema closes it (`additionalProperties: false`,
+eight members), and `test_repository_bytes_is_not_published_in_the_deployed_document`
+holds a repository figure out of it -- the reason `usage --json` exists (D1591,
+D1614). So `usage --json` prints **`backup_report.usage_block(summary, stanza)`**
+-- `stanza`, `repository_bytes`, **`oldest_backup_stop`** -- and the reconciler
+asks `info --json` for the repository's status and `usage --json` for the
+window, two children per slot every 900 s. It parses `info`'s block on exit 0
+**and** on `backup_report.INFO_FAILING_EXIT` (a `failing` repository is a
+`problem`, never folded into *unknown*), and takes no reading only when a child
+printed no JSON object.
+
+**A sleeping slot no longer raises** (D2541): its reading passes no mirror,
+and the reasons line took `.detail` of `None` -- an `AttributeError` out of
+`record_backups` and out of the reconciler's loop on every backups pass while
+any slot slept.
+
+The proof (`tests/contract/test_backups_reading_from_the_producer.py`) feeds
+`backups_reading` the producers' own functions over **`slot3-prod`'s real
+`pgbackrest info`** (Session 41's Sheet E0,
+`tests/fixtures/pgbackrest/info-slot3-prod-2026-10.json`) through JSON, and a
+class guard holds every key the reading takes from `info` and from `usage` to
+the keys `backup_state` and `usage_block` return.

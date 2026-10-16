@@ -438,7 +438,10 @@ def verb_usage(arguments: argparse.Namespace) -> int:
     total = summary.get("repository_bytes")
 
     if arguments.json:
-        print(json.dumps({"stanza": stanza, "repository_bytes": total}, indent=2, sort_keys=True))
+        # `backup_report.usage_block`, so the reconciler's window and this
+        # print are one shape (D2540): it reads `oldest_backup_stop` from here.
+        block = backup_report.usage_block(summary, stanza)
+        print(json.dumps(block, indent=2, sort_keys=True))
         return 0
 
     if total is None:
@@ -468,7 +471,9 @@ def verb_info(arguments: argparse.Namespace) -> int:
         # deploy writes into `outputs.json`, so an operator can see the document
         # before it exists rather than diffing it afterwards.
         print(json.dumps(state, indent=2, sort_keys=True))
-        return 0 if status != backup_report.STATUS_FAILING else EXIT_REFUSED
+        # The block IS printed for a failing repository, and the reconciler
+        # parses it on this exit too (D2512), so the value is backup_report's.
+        return 0 if status != backup_report.STATUS_FAILING else backup_report.INFO_FAILING_EXIT
 
     result = pgbackrest(container, stanza, "info")
     _relay(result)
@@ -494,7 +499,7 @@ def verb_info(arguments: argparse.Namespace) -> int:
                 "  (a non-zero failed count on a healthy archiver is expected: the counter "
                 "is cumulative and every project fails to archive until its stanza exists)"
             )
-    return 0 if status != backup_report.STATUS_FAILING else EXIT_REFUSED
+    return 0 if status != backup_report.STATUS_FAILING else backup_report.INFO_FAILING_EXIT
 
 
 def verb_expire(arguments: argparse.Namespace) -> int:

@@ -613,6 +613,7 @@ def backups_reading(
     key: str,
     *,
     info: dict[str, Any] | None,
+    usage: dict[str, Any] | None,
     archiver: dict[str, Any] | None,
     mirror: Any,
     sleeping: bool,
@@ -620,7 +621,13 @@ def backups_reading(
     """One project's backups reading for `control_record_backups` (ADR 0273):
     the doctor's own classifiers over `backup.sh info --json` and the archiver
     query, the mirror's from the copy record (D2461), the window's bounds -- the
-    oldest stop plus a second (D2465) and the last archived time (D2456)."""
+    oldest stop plus a second (D2465) and the last archived time (D2456).
+
+    **The oldest stop is read from `backup.sh usage --json`** (D2501, D2540):
+    `info --json` is the deployed document's closed `backup_state` block and
+    never carried it, so reading it there made every window `could_not_determine`.
+    Every key read here from `info` or `usage` is a key its producer prints --
+    `tests/contract/test_backups_reading_from_the_producer.py` holds that."""
     from agentic_postgres import backup_report, diagnosis
 
     repository = diagnosis.repository(
@@ -631,9 +638,15 @@ def backups_reading(
         failing=None if archiver is None else backup_report.archiving_is_failing(archiver),
         last_archived_time=(archiver or {}).get("last_archived_time"),
     )
-    earliest = backup_report.earliest_point((info or {}).get("oldest_backup_stop"))
+    earliest = backup_report.earliest_point((usage or {}).get("oldest_backup_stop"))
     latest = backup_report_instant((archiver or {}).get("last_archived_time"))
-    reasons = [c.detail for c in (repository, archived, mirror) if _status(c) != "ok"]
+    # `mirror` is None when nothing read it -- a sleeping slot's reading, and
+    # any project without a copy record reader. Its status is then `unknown`
+    # and it has no detail to give; before Session 41 this line took `.detail`
+    # of None, so a sleeping slot raised out of the reconciler's loop (D2541).
+    reasons = [
+        c.detail for c in (repository, archived, mirror) if c is not None and _status(c) != "ok"
+    ]
     return {
         "project_key": key,
         "repository_status": _status(repository),
