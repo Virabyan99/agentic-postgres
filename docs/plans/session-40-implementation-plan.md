@@ -1435,6 +1435,32 @@ directory gone by the verb itself (D2405 live). **NEXT FREE: D2507.**
   rewritten for Session 41's planner (copy it to the scratchpad first); this
   plan's `Status:` COMPLETE.
 
+**Done.** (2026-10-16; code `7c2078d`, CI 38878437973 SUCCESS; rows **D2507-D2509**;
+this paragraph a docs commit after it.) **The Ledger from the tagged evidence**
+(D2508, applied as written): `endpoints_reearned_live` passed -- `pooled_endpoint`,
+`direct_endpoint` and `postgresql` are `beta`; `lifecycle_reearned_live`,
+`branch_live` and `branch_host_live` failed -- the six managed-project rows,
+`branches`, `restore_to_branch` and `backups_and_pitr` are `planned`, target 41;
+`ACCEPTED_TYPES` = `{credential.rotate}`, CTL-OPS-001's proof renamed
+`test_only_credential_rotate_is_accepted_and_the_eleven_are_executed`, the branch
+not-available proof reading the product's own state as the refusal;
+`control-plane.md` and `managed-projects.md` say so. **`capacity.ENVELOPE`'s
+Session 40 section**, seven rows: E0's drill (RTO 506.7 s, the repository
+5,236,768 bytes), slot4's create (1,243.8 s) and its other operations, **the
+windows as the slot's own app route saw them** (resize 10.0 s, wake 16.0 s,
+sleep 89.7 s -- D2444's half measured), a branch's operations (create at the end
+635.1 s, at a point 1,100.0 s, reset 1,091.0 s, delete 5.0 s, the expiry 57.8 s
+after `expires_at`), rig 40c's memory, the cold start where the branch did not
+come back; `UNMEASURED` narrowed to the pooled name (D2500) and joined by the
+host's memory with a branch live (D2509); `RESIZE_WINDOW_SECONDS` stays 84
+(D2507). Scope closure **§33**, the stage plan's Status block, §10's created
+items, this plan's Status COMPLETE. **Battery** 4/4 killed, control green.
+Targeted once: 1,166 passed / 2 failed (a rig row naming no machine; the branch
+proof's control was the old product state), both repaired, 26 passed; the docs
+guards 93 passed. **`bin/session-01-check.sh` PASSED on `7c2078d`: 7,831
+passed, 3 skipped, 0 failed.** No host step: the host stays at `8cc3440`, the
+tagged 1.18.0, which still accepts the eleven types with no slot free.
+
 ---
 
 ## 7. Evidence and claims
