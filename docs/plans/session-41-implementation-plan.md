@@ -1,8 +1,9 @@
 # Session 41 — The repairs, the third re-earning, plans, usage, notifications and idle sleep
 
-**Status: EXECUTING — Runs 1–3 DONE 2026-10-16.** Rows **D2510–D2535** at
-planning; the runs add theirs after them (Run 1: D2536–D2539; Run 2:
-D2540–D2541; Run 3: D2542). ADRs **0274–0276** written. **NEXT FREE: D2543, ADR 0277.**
+**Status: EXECUTING — Runs 1–3 DONE 2026-10-16; Run 4 committed, pushed with
+Run 5.** Rows **D2510–D2535** at planning; the runs add theirs after them (Run
+1: D2536–D2539; Run 2: D2540–D2541; Run 3: D2542; Run 4: D2543–D2544). ADRs
+**0274–0276** written. **NEXT FREE: D2545, ADR 0277.**
 
 The sixth session of Stage 5 — **and the first one the operator split**
 (D2510): the stage plan's *Session 41* brief (`docs/plans/stage-5-plan.md`
@@ -496,7 +497,7 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2534** | ADR 0259: *"a sleeping project's archiver is stopped, so its restore point is its sleep time"*. | An idle sleep stops a customer's archiver without a person asking at that moment. | **Said where the customer sets it**: the `idle-sleep` route's answer, `apg project idle-sleep`'s output, the `idle_sleep` row and the notification each say *"while it sleeps, its backups stop: its last restore point is the moment it went to sleep"*. No change to sleep itself. | A setting that changes the backup guarantee must say so when it is set. | **0276** |
 | **D2535** | CLAUDE.md §2: *"M7: Sheets X1/X2 (retire Hetzner) ALLOWED since 2026-10-12 ~21:30Z and NOT YET RUN"*; Session 40 §10's created items. | The old host's three projects stopped (the way back). Session 40 §10 also created: branch certificates accumulate in `acme.json`; the parent's user hashes copied into a branch; the backups recording's R2 requests. | **Not this plan's**: M7's sheets stay in `docs/plans/session-38-migration-plan.md` and may run on any day outside this trip's sittings; this plan's sheets never name the old host. The three Session 40 items are carried in §10 untouched. | Two trips' sheets interleaved is D1510's failure in waiting. | — |
 
-**Rows the runs add** (execution order; next free D2543):
+**Rows the runs add** (execution order; next free D2545):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -507,6 +508,8 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2540** | D2512 / Run 2 step 1: *"`backup_state` returns two more keys, `oldest_backup_stop` and `repository_bytes`"*; §2 BR-BACKUP-002: *"every key the reading takes from `info` is a key `backup_state` returns"*. | **`backup.sh info --json` IS the deployed document's `backup_state` block**: the deploy publishes it verbatim (`bin/deploy-project.py:1752-1761`, `with_archiver(summary, …)`), `schemas/outputs.schema.json` `$defs.backupState` is `additionalProperties: false` with eight members, and **`test_backup_repository_report.py::test_repository_bytes_is_not_published_in_the_deployed_document`** (passing) holds `repository_bytes` out of it. `bin/backup.sh:19-23` says so: *"a member added there would land in outputs.json and be refused by the schema"*; `usage --json` exists for exactly that reason and `doctor usage` reads it (`doctor.py:1138-1158`, D1591, D1614). The plan's step would have been an outputs schema bump (§9: no outputs change) or the weakening of a passing test (§9's stop). | **The tree wins: `backup_state` is unchanged.** `usage --json` prints **`backup_report.usage_block(summary, stanza)`** = `{stanza, repository_bytes, oldest_backup_stop}` (one function, so the proof calls the producer and `bin/backup.py verb_usage` prints it); `reconciler_dispatch.backups_reading` gains `usage` and reads `oldest_backup_stop` from it; `backups_of` runs `info --json` (status, last full) **and** `usage --json` (the window) — two children per slot every 900 s, each one `pgbackrest info` (~2 s on E0). `info`'s failing exit is **`backup_report.INFO_FAILING_EXIT = 6`**, used by `verb_info` (both returns) and by the reconciler's parse (`_json_of(…, INFO_FAILING_EXIT)`), never retyped. The class guard holds the keys read from `info` ⊆ `backup_state`'s and from `usage` ⊆ `usage_block`'s, and asserts `oldest_backup_stop` stays out of the deployed block. **Run 9 writes BR-BACKUP-002's text as "every key the reading takes from a printed block is a key its producer returns"** and adds the sleeping proof (D2541). Usage samples (ADR 0275, Run 6) read `repository_bytes` from the same `usage --json`. ADR 0273's amendment and ADR 0275 corrected. | Where the shape is made was the right idea; which shape is the deployed document's is the tree's, and it had already answered. | **0273** amended |
 | **D2541** | — (found by Run 2's proof). ADR 0273: *"a sleeping project's reading says `sleeping`"*. | `backups_of`'s sleeping branch calls `backups_reading(…, mirror=None, sleeping=True)` (`bin/reconciler.py:1316` at `e89ac85`); `backups_reading` built its reasons as `[c.detail for c in (repository, archived, mirror) if _status(c) != "ok"]` — `_status(None)` is `"unknown"`, so it took **`None.detail`: `AttributeError`**, raised out of `record_backups` (no `except` for it, `reconciler.py:1174-1192`) and out of `run()` (`:1446-1468`) — **the reconciler process exits on every backups pass while any slot sleeps**. Deployed in 1.18.0. Never reached on a trip: Session 40's sleeps lasted 38.9 s and the pass runs every 900 s (`NRestarts=0` on the host, E0). Session 41's idle sleep (ADR 0276) holds a slot asleep for minutes — it would have killed the reconciler mid-trip, and systemd's restart would have interrupted any running operation (D2152). | **`backups_reading` skips an absent check** (`if c is not None and _status(c) != "ok"`); a sleeping reading's `mirror_status` is `unknown` with no reason line from it. **Proof**: `test_backups_reading_from_the_producer.py::test_a_sleeping_slot_is_read_without_raising` drives `backups_of`'s own branch (the container reads `false`), asserts `sleeping`, no window, `mirror_status` `unknown`, and that no backup child was asked. Battery mutation (d) restores the old line → that test FAILS (and the three window tests with it: they pass no mirror either). | A report that raised instead of saying *unknown* is ADR 0195's failure in its loudest form, and a reconciler loop that dies on a reading is the second principal stopping on its own instrument. | **0273** amended |
 | **D2542** | Run 3 steps 1–6: *"`image_for(tag, digest, docker)` … `--platform linux/amd64`"*; *"`branch.json` gains `image_tag`, `image_digest`, `reason`, `door`"*; *"`SERVICES` gains the two customer poolers for the `containers` view only"*; the door's trust is *"the system store"* (unmeasured on the host). | **Measured on the host** (2026-10-16, as `op`, `/home/op/agentic-postgres/.venv/bin/python` = uv CPython **3.12.13 / OpenSSL 3.5.7**, the interpreter `branch-runtime.sh` runs; `ssl.get_default_verify_paths()` → `capath='/etc/ssl/certs'`, `cafile=None`): the draft door check over `127.0.0.1:5432` → `pool.slot3…` and `direct.slot3…` **`ready`** (ALPN `postgresql`, Let's Encrypt chain verified, notAfter 2027-01-10); `nothing.slot3…` (no router) → `[SSL: UNEXPECTED_EOF_WHILE_READING]`; **the committed `branch_door.check` on the host** → `('ready', '')` and `('pending', 'the edge holds no certificate for nothing.slot3.agenticpostgresql.com yet')` — the EOF arrives as `ssl.SSLEOFError` (WSL `~/s41/run3/door-host.py`, `door-host.txt`). `branch_record` was a closed member set at `schema_version` 1 (`_problem`: missing/extra refused). `branch_reading` (`reconciler_dispatch.py:567-596`) names its payload's keys one by one. `containers` never reads `SERVICES` (only `labels`/`logs` do). `bin/cloud.py` `WAIT_SECONDS = 2400` (`:93`), below a 3,600 s branch bound; `bin/operation.sh:37` prints it. A `@dataclass` in `bin/reconciler.py` breaks every test that loads it by path unregistered (`dataclasses` reads `sys.modules[__module__]`). | **(1)** `image_for(tag, digest, platform, docker)` takes the platform the container recorded, so **`branch.json` also records `image_platform`** (`ImageManifestDescriptor.platform` as `os/architecture`) — never a typed `linux/amd64`; `restore_drill.image_identity(inspect)` reads the three from the parent's RAW inspect. **(2)** `branch_record` **schema 2** with five added members (`image_tag`, `image_digest`, `image_platform`, `door`, `reason`); **version 1 is still READ** (its five None) so capacity charges and the reconciler lists a branch 1.18.0 made, and a start refuses it with *"this branch was made before 1.19.0 and records no image identity; reset it"* — reset records the parent's identity afresh. **(3)** `reason`/`door` stay in `branch.json` and the runtime's `status` until Run 4's `0008` adds their columns (the payload names its keys; nothing new reaches `control_record_branches` in Run 3). **(4)** `SERVICES` unchanged (the `containers` view lists by Compose project, not by service); `containers` reads each branch's `COMPOSE_PROJECT_NAME` from its `branch.env` and checks it against `^apg-[a-z0-9-]+_[a-z][a-z0-9]{1,11}$` before use. **(5)** `WAIT_SECONDS = 3900` (and `operation.sh`'s usage line), held above every type bound by `test_a_branch_promotion_bound_sits_inside_its_reconciler_budget`. **(6)** The start log's result is a `NamedTuple`. **(7)** `PROMOTION_SECONDS = 2400 < CHILD_SECONDS["branch-runtime.sh"] = 3300 < OPERATION_SECONDS_BY_TYPE = 3600 < WAIT_SECONDS = 3900`; `RESTORE_SECONDS` 7,200 stays above the child budget as it was (the child's bound binds first; unchanged, recorded). | The trust store and the EOF class were the two third-party facts the door rests on; both read on the host with its own interpreter before the code depended on them. | **0271** amended |
+| **D2543** | Run 4: *"`services/auth-api/app/plans.py` and `src/agentic_postgres/plans.py`"*; the battery: *"(a) drop the `FOR UPDATE` → the concurrency test FAILS (two rows); (b) the idle function without the sample-count check → `test_a_missing_sample_is_not_idle` FAILS"*; targeted *"`test_control_operations` (grep its name)"*; 0008 *"the origin CHECK widened"*. | **(1)** `test_repository_contract::test_no_module_is_imported_only_by_its_own_tests` refuses a `src/` module nothing in `bin/` or `src/` imports, and nothing would import `src/agentic_postgres/plans.py` in Run 4. **(2)** D2166's unique index already holds an organisation to ONE open creation: without the lock a second concurrent creation still leaves one row (answered `conflict` with the first's id). **(3)** Battery round 1: `test_the_lock_is_held_across_the_count_by_one_transaction` PASSED with `FOR UPDATE` removed -- its `FOR UPDATE NOWAIT` probe met the `FOR KEY SHARE` lock the operation row's foreign key takes on the organisation. **(4)** The sample-count check is implied by the window's start, end and contiguity checks. **(5)** No `test_control_operations.py` exists; the operations proofs are `test_control_states` and `test_control_connections`. **(6)** 0008's first draft folded `control_operations_expiry_deletes_a_branch` into one combined constraint; two passing proofs read the refusal's constraint NAME (`test_control_branches::test_an_expiry_is_bounded_and_only_an_expiry_requests_without_a_member`, `test_branch_expiry::test_a_project_expiry_is_still_never_a_trigger`). **(7)** Two service proofs in `test_control_projects` (`test_no_ready_slot_refuses_before_a_row`, `test_one_operation_at_a_time`) create in an organisation `_org` gave a project: on Free the plan's limit now answers first, and the service maps `plan_limit_reached` only in Run 5. | **(1)** No `src/agentic_postgres/plans.py` in Run 4: the twin test imports `app.plans` (the control tests' habit); the re-export lands with its first caller, if Run 7's CLI needs one. **(2)** The concurrency proof asserts the CODE (`plan_limit_reached`) and that the second request WAITED (> 2 s), with one row; a third test reads the lock held across the count. **(3)** The probe is `FOR NO KEY UPDATE NOWAIT` (conflicts with `FOR UPDATE`, not with a foreign key's `KEY SHARE`); round 2 kills mutation (a) on both lock tests. **(4)** Mutation (b) as written is recorded as an expected SURVIVOR (a redundant belt, D493); the battery adds (b1) the contiguity check removed, killed by `test_a_missing_sample_is_not_idle`. **(5)** The two modules run in its place. **(6)** Each requested kind keeps its own constraint: `control_operations_expiry_deletes_a_branch` recreated with the same name and meaning (`origin <> 'expiry' OR type = 'branch.delete'`) and `control_operations_idle_sleeps_a_project` beside it. **(7)** **Runs 4 and 5 are pushed together and CI is read at Run 5's SHA** (the plan's own rule, D2463's shape): Run 5 maps the code in the service and gives those two proofs an organisation with no project for the capacity and serialisation paths (D2521: the capacity path is reached by a second organisation, never an override). | A guard that refuses an orphan is the thing to obey, not to route round; a lock proof must name the lock it proves; a refusal's name is part of its contract. | **0274** |
+| **D2544** | ADR 0243: the proposal names every destructive statement of the set (`migrations.destructive_findings`, D1862); ADR 0198: the lint reads each template's statements through `sql_surface.statements`. | `sql_surface.statements` strips `--` comments **without regard to string literals**. 0008's first draft held `--` inside six literals (five `COMMENT ON … IS '…'` texts and the idle-sleep notification's template); the stripper cut each one's closing quote, the quote parity flipped, and every later reader read the rest of the file as inside a string: `propose` named **neither of 0008's two `DROP FUNCTION`s** (10 findings where 12 were due, measured: the swallowing literal began at the `control_record_branches` comment and ended inside `control_list_branches`'s body). The lint reads the same text, so its checks over that span read a string too. A parity reading over every template after `statements()` (an ODD count of `'` = a literal the reader may have lost) flags **18 of 51** -- 16 release templates (`0002`, `0008`-`0014`, `0016`, `0017`, `0024`, `0025`, `0027`, `0029`, `0032`, `0034`) and the control set's `0001` and `0006` -- **a heuristic, not a proof that any statement is hidden** (an odd count can come from a legitimate escape). | **0008's literals hold no `--`** (plain punctuation); re-proposed, the reader names all four of 0008's destructive statements. **The reader is not changed in Run 4**: a quote-aware comment stripper is a change to the lint every project set passes through (ADR 0198) and to the release surface reader, and it belongs to its own run with a test that fails on today's reader (a literal holding `--` before a `DROP`) and a pass over the 18 flagged templates. **Recorded in §10 as created; the operator decides when.** | The lint and the destructive findings are the review's eyes on a set; a reader that loses a quote is blind from there to the end of the file, and it said nothing. | 0198, 0243 |
 
 ---
 
@@ -1031,6 +1034,69 @@ change to `control_record_slots`' comment → none fail.
 `test_environment_gates`. **Not pushed alone if** a test couples to Run 5's
 routes (D2463's shape) — then push Runs 4+5 together and read CI at Run 5's SHA.
 
+**Done.** 2026-10-16 — **committed, NOT pushed: it couples to Run 5** (D2543
+(7)); Runs 4 and 5 go out together and CI is read at Run 5's SHA. Rows
+**D2543** (the rulings) and **D2544** (the lint's reader loses a literal that
+holds `--`). Commits: `11b86bc` (the code), `4ecf8f4` (lock), `1f534b4` (no
+`--` in 0008's literals, D2544), `8af6239` (lock), `ba04673` (proposal
+`cbbb1175`), `cbf9ab5` (the expiry constraint kept by name, idle's beside it),
+`306342c` (lock re-frozen, 8 migrations, `follows_release_version`
+20261003120039 computed, `verify-lock` agrees), `e32e470` (**proposal
+`bba02721`**, replacing `cbbb1175`: lint passed, **47 migrations applied from
+empty as `migration_user`**, surface empty, 12 destructive findings — 0008's
+four: `control_operations_origin_check`, `control_operations_expiry_deletes_a_branch`,
+`control_list_branches`, `control_get_branch`). Code:
+`services/auth-api/app/plans.py` (D2519's table; `ENFORCED_IN_SQL`,
+`BETA_SENTENCE`); `projects/control/migrations/templates/0008-control-plans-usage.sql`
++ its `manifest.json` entry (`20261016120008`, `control_plans_usage`): the
+plan column, `control_plan_limits` (seeded 1/1, 3/3), the lock-only
+`control_organizations_lock` policy, `control_request_operation` re-created
+(the entitlement under the lock, raising `AP500` when it locked nothing),
+`control_plan_interest`, `idle_sleep_minutes`/`idle_sleep_set_by` and
+`control_projects_idle_sleep`, the origin constraints (one per kind),
+`control_branches.reason`/`door`, `control_usage_samples`,
+`control_notifications` (+ the daily limit-notice index),
+`control_finish_operation` (0004's body + one marked block),
+`control_record_branches` re-created, `control_list_branches`/`control_get_branch`
+dropped and recreated wider; new: `control_record_usage`,
+`control_request_idle_sleep`, `control_record_limit_notice` (granted to
+nobody), `control_usage_document` (helper), `control_list_plans`,
+`control_get_org_plan`, `control_register_interest`, `control_set_idle_sleep`,
+`control_project_usage`, `control_org_usage`, `control_list_notifications`
+(definer, granted to the identity service). **Tests** (all against a real
+control cluster): `tests/contract/test_plans.py` (8: the twin, refused before
+a row, two concurrent creations → one row + `plan_limit_reached` after a
+> 2 s wait with a two-organisation control, the lock policy refuses an UPDATE
+and a dropped policy is refused, the branch limit from the plan, interest one
+row, no writer of a plan, the lock held across the count), `test_idle_sleep.py`
+(9: a quiet window, no customer backend is quiet (D2539) with a busy control,
+a missing sample, an unread sample, a moved counter, a recent wake, the
+member named, idle only a sleep and the setting's values and roles, granted to
+nobody), `test_notifications.py` (5: one per finish and none rolled back,
+no result member or secret URL in a template (dynamic + static), the body diff
+against 0004, the daily limit notice, a foreign organisation), `test_control_usage.py`
+(6: granted to nobody, a counter reset, a gauge's newest read value, seconds
+from the history, an empty window is not zero, foreign and missing alike);
+`test_control_set.py`'s closed lists widened by exactly 0008's four tables and
+eleven functions, its rendered-set count 7 → 8. **Battery** `~/s41/run4/battery4.py`
+(output `battery4b.txt`) **PASSED round 2**: (a) the lock dropped → both lock
+tests FAILED; (b1) no contiguity → the missing-sample test; (b2) no count
+check → SURVIVED, as predicted (D2543 (4)); (c) a template with `p_result` →
+the template and one-per-finish tests; (d) Free's limit seeded 2 → the twin,
+the beyond-the-plan and the concurrency tests; (e) no backend read as busy →
+the no-backend, quiet and missing tests; (f) unread ignored → the unread test;
+(g) the notification block removed → the template and one-per-finish tests;
+**control** (`control_record_slots`' comment in 0004) → all green; files
+restored byte-equal. Round 1 found the lock probe weak (D2543 (3)). **Targeted**
+(the plan's list with D2543 (5)'s two modules, plus `test_control_set`,
+`test_project_migration_sets`, `test_change_proposal`, `test_proposal_gate`,
+`test_migrations`, `test_auth_service_shape`, `test_reconciler_dispatch`,
+`test_evidence_claims`, `test_acceptance_registry`): 735 passed, 4 failed —
+two repaired (D2543 (6)) and re-run green with the lock and proposal modules
+(188 passed); **the two left are D2543 (7)'s, Run 5's to repair**. A first
+attempt was stopped by the harness for low memory while idle; re-run in the
+foreground.
+
 ### Run 5 — the routes, the service, the codes (`services/auth-api/`)
 
 **Read first**: `services/auth-api/app/control_service.py:600-1000`;
@@ -1347,6 +1413,13 @@ message's slip (D2506).
   probe account.
 - **`slot1-`, `slot2-`, `slot4-` and `slot5-prod` are consumed** after this trip;
   the next lifecycle needs `slot6-prod`.
+- **The lint's SQL reader loses a literal that holds `--`** (D2544, Run 4):
+  `sql_surface.statements` strips comments without regard to quotes, so every
+  reader after such a literal -- the lint, the destructive findings, the
+  surface -- reads the rest of the file as a string. 0008 avoids it; 18 of 51
+  templates have an odd quote count after the reader (a heuristic). A
+  quote-aware reader, with a failing test first, is owed; the operator decides
+  when.
 
 ---
 
