@@ -324,7 +324,7 @@ BEGIN
 END;
 $$;
 COMMENT ON FUNCTION app.control_request_operation(uuid, uuid, text, text, jsonb) IS
-  'Records a member''s request: the role, then -- under the organisation''s row lock -- the plan''s projects_active and branches_total (AP409 plan_limit_reached / branch_limit_reached before any row, ADR 0274, D2521, D2538), the branch rules of 0006, one open operation per project and one open creation per organisation (D2166).';
+  'Records a member''s request: the role, then, under the organisation''s row lock, the plan''s projects_active and branches_total (AP409 plan_limit_reached / branch_limit_reached before any row, ADR 0274, D2521, D2538), the branch rules of 0006, one open operation per project and one open creation per organisation (D2166).';
 
 -- ---------------------------------------------------------------------------
 -- The finish, with its notification (ADR 0275); same signature
@@ -397,7 +397,7 @@ BEGIN
            WHEN p_status = 'failed' THEN ' (' || p_error_code || ')'
            WHEN v_origin = 'idle' THEN ' (requested because it was idle for '
              || coalesce(v_minutes::text, 'its set') || ' minutes; while it sleeps its backups '
-             || 'stop -- wake it with apg project wake)'
+             || 'stop; wake it with apg project wake)'
            WHEN v_origin = 'expiry' THEN ' (requested because the branch expired)'
            ELSE ''
          END
@@ -406,7 +406,7 @@ BEGIN
 END;
 $$;
 COMMENT ON FUNCTION app.control_finish_operation(uuid, text, text, jsonb, text) IS
-  'Finishes a RUNNING operation: succeeded, or failed with an error code; a result member its type does not declare is refused, and only a succeeded export may carry a secret (D2151, D2164) -- and writes ONE notification in the same transaction from a fixed template (ADR 0275). Granted to nobody.';
+  'Finishes a RUNNING operation: succeeded, or failed with an error code; a result member its type does not declare is refused, and only a succeeded export may carry a secret (D2151, D2164); and writes ONE notification in the same transaction from a fixed template (ADR 0275). Granted to nobody.';
 
 -- ---------------------------------------------------------------------------
 -- The branch reading, with reason and door (D2514, D2515); same signature
@@ -629,7 +629,7 @@ BEGIN
 END;
 $$;
 COMMENT ON FUNCTION app.control_request_idle_sleep(text) IS
-  'An idle project''s sleep, ONE row, on behalf of the member who set its idle-sleep minutes, origin idle -- only over a window of samples all present, awake, read and quiet; NULL and nothing otherwise, and while any operation for the project is open (ADR 0276, rig 41d, D2539). Granted to nobody.';
+  'An idle project''s sleep, ONE row, on behalf of the member who set its idle-sleep minutes, origin idle, only over a window of samples all present, awake, read and quiet; NULL and nothing otherwise, and while any operation for the project is open (ADR 0276, rig 41d, D2539). Granted to nobody.';
 
 CREATE FUNCTION app.control_record_limit_notice(p_project text, p_entitlement text) RETURNS uuid
   LANGUAGE plpgsql SECURITY INVOKER
@@ -680,7 +680,7 @@ BEGIN
 END;
 $$;
 COMMENT ON FUNCTION app.control_list_plans(uuid) IS
-  'The limits SQL enforces, per plan -- the twin of services/auth-api/app/plans.py (ADR 0274). Any account.';
+  'The limits SQL enforces, per plan: the twin of services/auth-api/app/plans.py (ADR 0274). Any account.';
 
 CREATE FUNCTION app.control_get_org_plan(p_user uuid, p_org uuid)
   RETURNS TABLE (plan text, projects_active integer, interest text[])
@@ -905,7 +905,7 @@ BEGIN
 END;
 $$;
 COMMENT ON FUNCTION app.control_org_usage(uuid, uuid, integer) IS
-  'An organisation''s projects'' usage over the last 1..720 hours -- every project live in the window, a deleted one included -- viewer and above (ADR 0275).';
+  'An organisation''s projects'' usage over the last 1..720 hours (every project live in the window, a deleted one included), viewer and above (ADR 0275).';
 
 CREATE FUNCTION app.control_list_notifications(p_user uuid, p_org uuid, p_limit integer)
   RETURNS TABLE (id uuid, project_key text, kind text, text varchar, created_at timestamptz)

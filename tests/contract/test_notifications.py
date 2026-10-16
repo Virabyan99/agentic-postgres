@@ -106,7 +106,7 @@ def test_a_finished_operation_writes_one_notification(cluster: cc.ControlCluster
         f"operation_succeeded|{org.key}|project.sleep on {org.key} succeeded",
         f"operation_failed|{org.key}|project.wake on {org.key} failed (operation_failed)",
         f"idle_sleep|{org.key}|project.sleep on {org.key} succeeded (requested because it was "
-        "idle for 15 minutes; while it sleeps its backups stop -- wake it with apg project wake)",
+        "idle for 15 minutes; while it sleeps its backups stop; wake it with apg project wake)",
         f"branch_expired|{org.key}|branch.delete on {org.key} succeeded (requested because the "
         "branch expired)",
     ]), listed  # fmt: skip
