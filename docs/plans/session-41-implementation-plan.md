@@ -1448,6 +1448,34 @@ not name, if R2d leaves `slot3-prod`'s doors or certificate different, or if V1
 or X0 fails for a reason other than the filtered live proofs' absence — **repair
 on day 1, move the commit, redeploy, run RA, V1 and X0 again** (D2448).
 
+**Done.** (2026-10-17, sitting 1, the deployed commit **`601a0ea`**.) The
+checkout moved `8cc3440` -> `af694c6` (FETCH_HEAD confirmed, no dependency file
+moved, five renders at 1.19.0); **R1** `minor` requires `minor` on all three
+(`api_operation_added`; control's set 7 -> 8, lock `bba02721`). **R2a-d** at
+`af694c6`, every exit 0: a new commit's deploy took the project's own auth /
+storage / mcp away 5.6-7.7 s (control's mcp 11.9 s), rest and docs nothing, the
+neighbours no sample; 0008 applied (99.6 ms); `slot3-prod`'s three door
+certificates byte-identical across `slot.sh redeploy`. **A1** agrees x4 + the
+three deleted. **H1** `slot5-prod` declared in both copies (the product's loader:
+five slots); `s41-dns.sh` after it, GO (D2555); the two R2 buckets created by the
+agent through the Cloudflare API at the operator's request (D2555). **RC1** idle,
+its slot line naming `slot5-prod declared`. **SL1-SL3**: prepared (`small`), 4
+resources, the six operator values entered with 443 opened and closed (read
+closed: filtered from the workstation, 22 the control), 29 files in generation
+`689eec8e`, `slot5-prod ready`, `prepared (slot)`. **PV** read `apg-diag
+containers` exit 4, ended at the prepared slot (**D2556**): repaired at
+`601a0ea` by the operator's choice (CI 39023093950 SUCCESS), then **R2a-d again**
+at `601a0ea` (exit 0 each; the same windows, 5.6-11.3 s, the neighbours nothing;
+the certificates still byte-identical), A1 (source_commit `601a0ea` x4), RC1 idle,
+PV again: exit 0, `slot5-prod` SAID. **RA** admitted as declared (0), refused
+with the reserve (12). **K1** `kit-2026-10-17-s41` (18 artifacts, release
+`601a0ea`) copied to WSL `~/dr-kits/`; the four op copies at `601a0ea`. **V1**
+399 passed, 8 skipped, **1 failed -- `documented_path` only** (D1935, the walk
+deferred), 8,179 deselected, 44 min 28 s, exit 6. **X0** 40 passed, 31 skipped
+(7 `APG_PUBLIC_IPV6`; 9 + 15 the re-earning modules' absent lifecycle record),
+0 failed, exit 0, 4 min 37 s. No stop fired; Run 11 deploys nothing new (the
+deploy, the sweep and the tag stay on `601a0ea`, D1425).
+
 ### Run 11 — sitting 2 (day 2): the re-earning, the branches, the reboot, the sweep, the tag
 
 1. **The lifecycle** (`s41-lifecycle.py`; probes on alpha, beta, control,
