@@ -208,7 +208,11 @@ verb_containers() {
     [ -d "${directory}" ] || continue
     key="$(basename "${directory}")"
     printf '\n-- %s\n' "${key}"
-    project="$(compose_project_for "${key}" 2>/dev/null || true)"
+    # In its own subshell: `die` EXITS, and an exit inside `$(f || true)` ends
+    # the substitution before `|| true` runs -- under `set -e` the assignment
+    # then ended the whole listing at the first stopped or merely prepared
+    # project, and every project and branch after it went unlisted (D2556).
+    project="$( (compose_project_for "${key}") 2>/dev/null || true)"
     if [ -z "${project}" ]; then
       printf '   (no running cluster container; the project may be stopped)\n'
       continue

@@ -532,3 +532,83 @@ def test_containers_lists_branches(tmp_path) -> None:  # type: ignore[no-untyped
     assert "-- slot3-prod_qa (branch)" in out
     assert "its compose project could not be read from branch.env" in out
     assert "rm -rf" not in out and "apg-slot3-prod_qa" not in out
+
+
+FAKE_DOCKER_PROJECTS = """#!/usr/bin/env bash
+# `docker inspect C --format ...`: the Compose project of a RUNNING cluster only;
+# `docker ps -a --filter label=com.docker.compose.project=P ...`: P's containers.
+if [ "$1" = "inspect" ]; then
+  case "$2" in
+    apg-alpha-dev-postgres-1) echo apg-alpha-dev ;;
+    apg-zeta-dev-postgres-1) echo apg-zeta-dev ;;
+    *) exit 1 ;;
+  esac
+  exit 0
+fi
+project=""
+for argument in "$@"; do
+  case "$argument" in label=com.docker.compose.project=*) project="${argument#*=}";; esac
+done
+[ "$1" = "ps" ] && [ -n "$project" ] || exit 1
+printf '%s\\tUp 2 minutes (healthy)\\t%s-internal\\n' "$project-postgres-1" "$project"
+"""
+
+
+def test_a_stopped_project_does_not_end_the_listing(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """D2556: a project whose cluster is not running -- stopped (its document
+    names a container the daemon does not run) or merely prepared (a slot's
+    directory with no document yet) -- is SAID, and the listing goes on to the
+    projects and the branch after it. It ended at the first such project
+    before, exit 4, because `die` exited inside `$(... || true)`; a running
+    project before it (alpha-dev) is listed either way (control)."""
+    projects, branches, bin_dir = tmp_path / "projects", tmp_path / "branches", tmp_path / "bin"
+    bin_dir.mkdir()
+    for key in ("alpha-dev", "slot4-prod", "zeta-dev"):
+        (projects / key).mkdir(parents=True)
+        (projects / key / "outputs.json").write_text(
+            f'{{"database": {{"container": "apg-{key}-postgres-1"}}}}\n', encoding="utf-8"
+        )
+    (projects / "slot5-prod").mkdir()
+    (projects / "slot5-prod" / "bootstrap-state.json").write_text("{}\n", encoding="utf-8")
+    directory = branches / "slot3-prod" / "dev"
+    directory.mkdir(parents=True)
+    (directory / "branch.json").write_text("{}\n", encoding="utf-8")
+    (directory / "branch.env").write_text(
+        "COMPOSE_PROJECT_NAME=apg-slot3-prod_dev\n", encoding="utf-8"
+    )
+    docker = bin_dir / "docker"
+    docker.write_text(FAKE_DOCKER_PROJECTS, encoding="utf-8")
+    docker.chmod(0o755)
+    script = SCRIPT.read_text(encoding="utf-8")
+    for old, new in (
+        (
+            'readonly PROJECT_ROOT="/etc/agentic-postgres/projects"',
+            f'readonly PROJECT_ROOT="{projects}"',
+        ),
+        (
+            'readonly BRANCH_ROOT="/etc/agentic-postgres/branches"',
+            f'readonly BRANCH_ROOT="{branches}"',
+        ),
+        ('\nmain "$@"\n', "\n"),
+    ):
+        assert script.count(old) == 1, old
+        script = script.replace(old, new)
+    copy = tmp_path / "apg-diag.sh"
+    copy.write_text(script, encoding="utf-8")
+    done = subprocess.run(
+        ["bash", "-c", f". {copy}; verb_containers"],
+        capture_output=True, text=True, check=False,
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin"},
+    )  # fmt: skip
+    out = done.stdout
+    assert "apg-alpha-dev-postgres-1" in out, out
+    assert done.returncode == 0, (done.returncode, out, done.stderr)
+    sections = re.split(r"\n-- ", out)
+    said = {s.split("\n", 1)[0]: s for s in sections[1:]}
+    assert list(said) == [
+        "alpha-dev", "slot4-prod", "slot5-prod", "zeta-dev", "slot3-prod_dev (branch)"
+    ], out  # fmt: skip
+    for key in ("slot4-prod", "slot5-prod"):
+        assert "(no running cluster container; the project may be stopped)" in said[key], out
+    assert "apg-zeta-dev-postgres-1" in said["zeta-dev"], out
+    assert "apg-slot3-prod_dev-postgres-1" in said["slot3-prod_dev (branch)"], out
