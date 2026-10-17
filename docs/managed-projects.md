@@ -8,18 +8,20 @@ it keeps. The routes and the roles are in [the control plane](control-plane.md);
 the operator's half -- slots, the reconciler, revocation -- is the
 [operator guide](operator-guide.md) §20.
 
-**Every operation here is being verified** (Reality Ledger status `trial`, ADR
-0261) since Session 41's bump: offered on the 1.19.0 trip, the project
-operations re-earned a third time on a new slot (D2518) and the branch
-operations with D2501 and D2504 repaired, each moved to `beta` or back to
-`planned` by the session's close. Setting a database credential is `beta`.
-[The Reality Ledger](reality-ledger.md) says so for each.
+**Since Session 41's close the branch operations and setting a database
+credential are open** (Reality Ledger `beta`). The project operations were
+offered on the 1.19.0 trip (`trial`, ADR 0261) a third time and are `planned`
+again (D2557), so each answers `409 not_available` naming its row until a
+later trip re-earns it -- and idle sleep with them, since it acts through a
+sleep (D2548, D2560). [The Reality Ledger](reality-ledger.md) says why for
+each.
 
 Since Session 41 (ADR 0274-0276) an organisation also has a **plan**, each
 project a **usage** record, the organisation **notifications**, and a project
-can be set to **sleep when idle**. Plans, usage and notifications are reads;
-idle sleep is offered only while sleeping is (`409 not_available` naming
-`idle_sleep` otherwise).
+can be set to **sleep when idle**. Plans, usage and notifications are reads --
+plans and usage `beta`, notifications `planned` again (D2557); idle sleep is
+offered only while sleeping is (`409 not_available` naming `idle_sleep`
+otherwise, as since Session 41's close).
 
 ## The life of a project
 
@@ -235,9 +237,10 @@ bin/branch.sh delete --project-key KEY --branch dev --confirm dev --wait
 - **A branch is not backed up.** Deleting it, or losing the server, loses
   what it holds. Delete needs an admin or owner; `--confirm` is its name.
 
-The branch operations are being verified (Reality Ledger `trial`, ADR 0261):
-offered on the 1.19.0 trip with D2501 and D2504 repaired, and moved to `beta`
-or back to `planned` by the session's close.
+The branch operations are `beta` since Session 41's close: offered on the
+1.19.0 trip with D2501 and D2504 repaired, and re-earned there -- the backups
+window, the expiry, a point, the reset, the reboot (branch_retrial_live,
+branch_host_retrial_live).
 
 ## Plans
 

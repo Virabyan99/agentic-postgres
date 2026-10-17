@@ -224,12 +224,13 @@ under the organisation's own lock so two concurrent creations leave one; only
 an organisation within its plan is ever told `capacity_exhausted`. A branch
 past the plan's `branches_total` is `409 branch_limit_reached`, the same way.
 
-**All eleven executed types are accepted since Session 41's bump**: the six
-managed-project types' rows are `trial` (ADR 0261) a third time, re-earned on a
-new slot in a new organisation (D2518); the four branch types' rows are `trial`
-with D2501 and D2504 repaired; `credential.rotate`'s `direct_endpoint` is
-`beta`. Each `trial` row is being verified on the 1.19.0 trip; a type whose row
-is not reachable answers `409 not_available` naming the row.
+**Five types are accepted since Session 41's close**: the four branch types --
+`branches` and `restore_to_branch` are `beta`, re-earned on the 1.19.0 trip
+with D2501 and D2504 repaired -- and `credential.rotate`, whose
+`direct_endpoint` is `beta`. The six managed-project types were offered on that
+trip (`trial`, ADR 0261) a third time and are `planned` again: their lifecycle
+claim failed on the tagged evidence (D2557). A type whose row is not reachable
+answers `409 not_available` naming the row.
 
 **Only the alpha, beta and control projects are the operator's**: the
 reconciler acts on declared slots alone, and a write naming an adopted project
@@ -285,8 +286,8 @@ samples all present, awake, read and quiet.
   branch_limit_reached` before a row (D2430). A branch, a
   missing branch and a foreign project's branch are one `404 not_found`
   (D2451). A branch write answers `409 not_available` naming its row whenever
-  that row is not reachable (ADR 0254); since Session 41's bump the four are
-  `trial`.
+  that row is not reachable (ADR 0254); since Session 41's close the four are
+  `beta`.
 - No account deletion, no email, no passkeys, no web console, no rate limit on
   `/v1/sessions` or on accepting an invitation (Argon2id's cost is the only
   throttle), no key expiry, no `apg project status` and no `/v1/ledger` --

@@ -1024,6 +1024,104 @@ Sampled under:
 
 branch.env pins the parent's image as an index id the boot's rebuild orphaned, so compose tried to pull it; one reset made the branch ready again.
 
+### A new commit's deploy at 1.19.0, per project (R2a-R2d, twice)
+
+**each project's own auth, storage and mcp unanswered 5.6-11.3 s (control-prod's mcp 6.9-11.9 s), rest and docs never; the neighbours lost no sample; slot3-prod's door certificates byte-identical across slot.sh redeploy, both rounds**
+
+Sampled under:
+
+- the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 vCPU, no swap
+- af694c6 then 601a0ea (the commit moved for D2556), 2026-10-17 09:05-10:29Z
+- /home/op/s35-r10-probe.py through the edge, 8 req/s, one label per sheet; the certificates read with openssl s_client from the workstation
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The same shape as 1.17.0 and 1.18.0 (D2034): a new commit recreates the three.
+
+### Provisioning a managed project at 1.19.0 (project.create, end to end)
+
+**slot5-prod 1,715.2 s from the request to succeeded (the row 1,709.6 s); steps allocate 1.0, admit 0.7, deploy-1 69.8, admin 1.7, ports 1.6, deploy-2 44.0, unit 0.9, backup 1,588.1 s; 4,459 MiB available with the slot (FITS)**
+
+Sampled under:
+
+- the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 vCPU, no swap
+- 1.19.0 at 601a0ea, 2026-10-17 11:42-12:10Z, operation 44e33232, profile small
+- ~/s41/run8/s41-lifecycle.py from the workstation as the probe owner, in its own organisation lifecycle-s41, through the product's own CLI
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The first full backup is 93% of it, and 471 s longer than 1.18.0's (1,117.2 s): read, not explained.
+
+### The lifecycle's other operations at 1.19.0, on slot5-prod
+
+**credential.rotate x3 1.3-1.4 s (check 0.0, alter 0.2, sync 0.5 s); sleep 15.8 s (stop 11.0 s); wake 20.2 s (start 14.3 s), the first answer 16.8 s after it; resize small -> standard 66.5 s and standard -> large 65.4 s (deploy 64.7 / 63.7 s; admission read 304 and 840 MB against 4,428 MB safe available, both admitted); export 2.0 / 1.9 s (40,286 bytes; the URL 200 at once, 403 after its 900 s); delete 16.2 s (retire 15.3 s); the second create refused no_slot, creations 1 -> 1**
+
+Sampled under:
+
+- the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 vCPU, no swap
+- 1.19.0 at 601a0ea, 2026-10-17 12:10-13:29Z
+- s41-lifecycle.py, each operation's created/finished and steps read back through /v1; the first export failed on a mis-entered credential and the run resumed at it (D2557)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+RESIZE_WINDOW_SECONDS stays 84: both resizes' deploy steps are under it.
+
+### Idle sleep: from the setting to the sleep (ADR 0276)
+
+**set to 15 minutes at 13:07:12Z with the slot's probes paused; the reconciler's project.sleep (origin idle) requested 1,121.4 s later (18.7 min, within the 1,620 s bound), asleep 21.1 s after that; both names refused while it slept**
+
+Sampled under:
+
+- the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 vCPU, no swap
+- 1.19.0 at 601a0ea, 2026-10-17, slot5-prod, the reconciler's 300 s sampler
+- s41-lifecycle.py's idle step; the operation read back through /v1
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+15 minutes of quiet samples, then the next pass: the request lands between 15 and 25 minutes after the last activity by design.
+
+### A branch's operations on slot3-prod at 1.19.0
+
+**branch.create at the end (tmp) 718.1 s (runtime 717.3); restore.create at a point (dev, timeline 2) 645.5 s; branch.reset 628.2 s; branch.delete 2.9 s (tmp, requested by the reconciler 22.3 s after expires_at, origin expiry) and 3.3 s (dev); each door answered its FIRST connect at ready (D2503)**
+
+Sampled under:
+
+- the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 vCPU, no swap
+- 1.19.0 at 601a0ea, 2026-10-17, the parent slot3-prod
+- ~/s41/run8/s41-branches.py from the workstation as the probe owner, through the product's own CLI; created_at..finished_at read back through /v1
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+A create at a point and a reset are 455-472 s faster than 1.18.0's.
+
+### The host's memory with a branch live (Sheet M1, D2509)
+
+**4,884 MiB available (free -m; doctor capacity 4,875 of 7,745), the branch charged 192 MiB of 1,296 committed; its three containers 24.3 MiB (postgres, of 512) + 1.5 + 3.0 MiB (the poolers, of 64)**
+
+Sampled under:
+
+- the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 vCPU, no swap
+- 1.19.0 at 601a0ea, 2026-10-17 ~14:35Z, slot3-prod_dev ready, four projects
+- the operator's free -m, doctor capacity and docker stats --no-stream
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The charge is ~6.6x the resident reading (rig 40c: ~7x).
+
+### A cold start with four projects and a branch on OVH (B1, 1.19.0)
+
+**the edge, alpha-dev, control-prod, slot3-prod and the reconciler started by the boot itself, active by boot+79-89 s; beta-dev's unit FAILED at boot+89 s (its edge reconcile lost a race with control-prod's, D2558) and was started by the operator; the branch came back BY ITSELF and apg-diag listed it (D2504 repaired)**
+
+Sampled under:
+
+- the 7,745 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 4 vCPU, no swap
+- booted 2026-10-17 14:44:11Z at 601a0ea, slot3-prod_dev ready before it
+- read as op before the sweep (s41-units.sh, D2140)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 40's boot did not lose the race; whether one does is timing.
+
 ---
 
 ## What was not measured, and why
@@ -1035,15 +1133,15 @@ complete rather than as a claim that is false.
 
 ### The resize and sleep windows as the slot's pooled name sees them (D2171, D2444)
 
-Session 40's lifecycle (1.18.0) probed the slot's app route through every window -- its row above -- but the pooled name's probe thread died on an uncaught timeout after 4 samples, before the first sleep (D2500): the database side of the windows was not read. Sessions 38 and 39 did not probe the slot at all.
+Session 40's lifecycle (1.18.0) probed the slot's app route through every window -- its row above -- but the pooled name's probe thread died after 4 samples (D2500). Session 41's (1.19.0) probed both through every window, but its first attempt stopped at the export, before the samples were written, and the run resumed after the windows: none of the four was read (D2557). Sessions 38 and 39 did not probe the slot at all.
 
-*Unblocked by: the next lifecycle on a new slot, with the instrument's repaired probe (a sample that could not be taken is a failed sample).*
+*Unblocked by: the next lifecycle on a new slot, run through without a stop (or an instrument that writes its samples as it takes them).*
 
-### The host's memory with a branch live (D2431)
+### A usage pass's duration (ADR 0275)
 
-No reading of the host's available memory was taken while slot3-prod's branch was ready: the instrument recorded none, and the branch was deleted after the sweep. Rig 40c's resident reading (its row above) stands beside the 192 MiB charge.
+The reconciler logs one line at a pass's END ('usage <key> <state>, ...') and none at its start, and no step records it: Session 41's trip had no reading to take.
 
-*Unblocked by: a `free -m` and a doctor capacity reading in the next branch's trip.*
+*Unblocked by: a pass's start and end recorded by the reconciler, or a timed rig.*
 
 ### Alpha-dev's 1.15.0 deploy window, per class (Session 37 R2a)
 

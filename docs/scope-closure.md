@@ -1586,3 +1586,61 @@ its producer prints (D2501).
    the host's memory read with a branch live.
 3. **ClickStack, usage, plans and idle sleep** (stage plan §5 *Session 41*).
 4. **The OVH upgrade** (D2342) and §10's smaller rows.
+
+## 34. What Session 41 closed, what it left, and what Session 42 inherits
+
+**Session 41 is the repairs, the third re-earning, plans, usage, notifications
+and idle sleep** -- the first session of the operator's split (D2510). Twelve
+runs, `D2510`–`D2560`, ADRs 0274–0276. **`1.19.0` is deployed on four projects
+-- alpha, beta, control-prod and `slot3-prod`, moved by `slot.sh redeploy` --
+swept, merged and tagged on `601a0ea`** (D1425), after one repair on day 1:
+`apg-diag containers` ended at a prepared or stopped project (D2556). The
+lifecycle ran on a NEW `slot5-prod` in its own organisation and the branches on
+`slot3-prod`, at the one commit. The merged evidence reads **284 claims: 280
+passed, 4 failed** -- `documented_path` by decision (D1935), and
+`lifecycle_reearned_live`, `lifecycle_third_trial_live` and `notifications_live`
+from one incident (D2557).
+
+**The sentence this session would most want carried forward: a record that
+keeps its readings in memory until the end loses them at the first stop.** The
+lifecycle's first export failed on a mis-entered credential; the probe samples
+of four windows lived only in the instrument's memory, and the operator chose
+the record's integrity -- resume at the export, repeat nothing -- over its
+completeness.
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **D2501 -- the backups surface** | Repaired (Run 2) and read live: a window on `slot3-prod`, `branch_retrial_live` passed. `backups_and_pitr` is `beta`. |
+| **D2504 -- a branch after a reboot** | Repaired (Run 3): the image resolved by tag and platform digest at every start; `dev` came back BY ITSELF after B1 and `apg-diag` lists it (`branch_host_retrial_live` passed). `branches` and `restore_to_branch` are `beta`; the four branch types accepted. |
+| **D2503 -- `ready` before the door** | Each door answered its first connect at `ready`, after the create and after the reset. |
+| **Plans and usage** (ADRs 0274, 0275) | Free and Premium read; the probe organisation's second project refused `plan_limit_reached` with no row; usage read for the slot and the organisation; `usage`, `plan_free`, `plan_premium` are `beta`. |
+| **Idle sleep built and run** (ADR 0276) | The reconciler requested `slot5-prod`'s sleep 18.7 min after it went quiet (`idle_sleep_live` passed) -- but its row is `planned` with `sleep` (D2560). |
+| **The host's memory with a branch live** (D2509) | 4,884 MiB available, the branch charged 192 MiB and using ~29: the `UNMEASURED` row is out. |
+| **D2556** | `apg-diag containers` says a stopped project and goes on (Run 10). |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **The six managed-project rows, `idle_sleep` and `notifications` `planned`, target 42** (D2557, D2560) | `lifecycle_third_trial_live` and `notifications_live` failed: the four probed windows were lost with the first attempt, and the failed export's notification stood beside the eleven. Every lifecycle operation ran at the tagged commit. The deployed 1.19.0 accepts the eleven types; `main` accepts five. |
+| **D2558 (product)** -- the edge's attach races at boot | beta-dev's unit failed at the trip's boot; started by the operator. |
+| **D2559** -- the upload's provider code dropped | The reconciler keeps only the exit code. |
+| **The pooled name through the windows; a usage pass's duration** | `UNMEASURED`. |
+| **D2544** -- the lint's reader and a `--` in a literal | Owed; the operator decides when. |
+| **The OVH upgrade** (D2342) | Session 42's first sitting (D2511). |
+| **Hetzner** (M7 X1/X2) | Allowed since 2026-10-12 ~21:30Z; not run. |
+| `documented_path` | **`failed` by decision** (D1935). |
+
+### What Session 42 inherits, in order
+
+1. **D2558's repair** (the edge attach, re-read after a failed connect) and
+   D2559's -- before the next boot that matters.
+2. **The OVH upgrade** (D2511), its first sitting.
+3. **ClickStack, `pg_stat_statements`, Query Insights, monitoring** (the stage
+   plan's split, D2510).
+4. **The re-earning, a fourth time**, on a NEW `slot6-prod`, when a session
+   carries it: the managed-project rows, `idle_sleep` and `notifications`.
+5. §10's smaller rows of Session 41's plan.
+

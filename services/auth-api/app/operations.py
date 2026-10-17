@@ -19,7 +19,12 @@ its close (Run 11) read the tagged evidence**: `endpoints_reearned_live` passed,
 so `direct_endpoint` is `beta` and `credential.rotate` stays accepted;
 `lifecycle_reearned_live`, `branch_live` and `branch_host_live` failed (D2500,
 D2501, D2504-D2506), so the six managed-project types and the four branch types
-are refused until a later sitting re-earns them. This
+are refused until a later sitting re-earns them. **Session 41's Run 9 moved all
+eleven rows to `trial` again; its close (Run 12) read the tagged evidence**:
+`branch_retrial_live` and `branch_host_retrial_live` passed, so `branches` and
+`restore_to_branch` are `beta` and the four branch types are accepted;
+`lifecycle_third_trial_live` failed (D2557), so the six managed-project types
+are refused again until a later sitting re-earns them on a new slot. This
 image cannot read the ledger file -- it is not in the build context, and a
 running service deciding what exists from a document would make a document its
 authority -- so the set is written here and
@@ -101,19 +106,14 @@ MAX_EXPIRY_SECONDS: Final = 7 * 86400
 BACKUP_RECORD_SECONDS: Final = 900
 
 #: The types the control mode accepts. Equal, by the guard, to the types whose
-#: ledger row accepts: ALL ELEVEN since Session 41's bump -- the six
-#: managed-project types re-trialed a third time on a new slot (D2518), the four
-#: branch types re-trialed with D2501 and D2504 repaired, and `credential.rotate`,
-#: whose row `direct_endpoint` is `beta`. Written out, never derived from
+#: ledger row accepts: since Session 41's close, `credential.rotate` (its row
+#: `direct_endpoint` is `beta`) and the four branch types (`branches` and
+#: `restore_to_branch` are `beta`, D2501 and D2504 repaired and re-earned live);
+#: the six managed-project types are refused again -- their re-trial's lifecycle
+#: claim failed on the tagged evidence (D2557). Written out, never derived from
 #: `EXECUTED_TYPES` -- building a type is not the decision to accept it.
 ACCEPTED_TYPES: Final[frozenset[str]] = frozenset(
     {
-        "project.create",
-        "project.delete",
-        "project.sleep",
-        "project.wake",
-        "project.resize",
-        "project.export",
         "credential.rotate",
         "branch.create",
         "branch.reset",

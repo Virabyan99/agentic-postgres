@@ -1,11 +1,10 @@
 # Session 41 — The repairs, the third re-earning, plans, usage, notifications and idle sleep
 
-**Status: EXECUTING — Runs 1–9 DONE 2026-10-16/17 (Runs 4 and 5 pushed together;
-Run 9 the bump to 1.19.0). NEXT: Run 10, sitting 1 on the host.**
-Rows **D2510–D2535** at planning; the runs add theirs after them (Run 1:
-D2536–D2539; Run 2: D2540–D2541; Run 3: D2542; Run 4: D2543–D2544; Run 5:
-D2545–D2546; Run 6: D2547; Run 7: D2548–D2549; Run 8: D2550–D2551; Run 9:
-D2552–D2553). ADRs **0274–0276** written. **NEXT FREE: D2554, ADR 0277.**
+**Status: COMPLETE — closed 2026-10-17.** 1.19.0 deployed on four projects,
+swept, merged and TAGGED on `601a0ea` (Runs 10-11); the close (Run 12) moved the
+Ledger from the tagged evidence (284 claims, 280 passed). Rows **D2510–D2535**
+at planning; the runs added **D2536–D2560**. ADRs **0274–0276** written.
+**NEXT FREE: D2561, ADR 0277.**
 
 The sixth session of Stage 5 — **and the first one the operator split**
 (D2510): the stage plan's *Session 41* brief (`docs/plans/stage-5-plan.md`
@@ -499,7 +498,7 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2534** | ADR 0259: *"a sleeping project's archiver is stopped, so its restore point is its sleep time"*. | An idle sleep stops a customer's archiver without a person asking at that moment. | **Said where the customer sets it**: the `idle-sleep` route's answer, `apg project idle-sleep`'s output, the `idle_sleep` row and the notification each say *"while it sleeps, its backups stop: its last restore point is the moment it went to sleep"*. No change to sleep itself. | A setting that changes the backup guarantee must say so when it is set. | **0276** |
 | **D2535** | CLAUDE.md §2: *"M7: Sheets X1/X2 (retire Hetzner) ALLOWED since 2026-10-12 ~21:30Z and NOT YET RUN"*; Session 40 §10's created items. | The old host's three projects stopped (the way back). Session 40 §10 also created: branch certificates accumulate in `acme.json`; the parent's user hashes copied into a branch; the backups recording's R2 requests. | **Not this plan's**: M7's sheets stay in `docs/plans/session-38-migration-plan.md` and may run on any day outside this trip's sittings; this plan's sheets never name the old host. The three Session 40 items are carried in §10 untouched. | Two trips' sheets interleaved is D1510's failure in waiting. | — |
 
-**Rows the runs add** (execution order; next free D2560):
+**Rows the runs add** (execution order; next free D2561):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -527,6 +526,7 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2557** | Run 11 step 1: *"steps 0-1 and the lifecycle as Run 8 wrote them"*; §7: every claim passed but `documented_path`. | slot5-prod's first export (`d5cf840d`) **failed** -- `the upload exited 5`: inside the storage container every R2 call answered `SignatureDoesNotMatch` (403). Operator input: SL1's `/storage/APG_R2_SECRET_ACCESS_KEY` held the ACCESS KEY ID (read by `s41-r2shape.py`, yes/no only: the id 32 hex, the secret not 64 hex, the two identical). The operator replaced the token and the pair; re-materialized (`ec97de4b`), `slot.sh redeploy` -- and the container STILL mounted `c45d84e0` (401: the deleted token's id): a deploy runs `compose up` without `--force-recreate`, D253, documented (`session-11-operator-guide` step 5); `project-runtime.sh down` + redeploy mounted `01b68bea`, every call `ok`. The instrument had stopped at the export (exit 4) with eight operations recorded -- and the four probed windows (sleep, wake, both resizes) only in memory, written at `stop_probes`, never reached. | **The operator, 2026-10-17: resume AT the export.** `s41-lifecycle.py --resume-at-export --prior-failed-export d5cf840d` (`~/s41/run11/make-resume41.py`, every anchor counted; the original `s41-lifecycle.py.before-d2557`): no claim, nothing before step 5 repeated, the probes restarted, the failed export read through the product into its OWN member `failed_exports`. Exit 0: the eleven exactly, in order; the second creation refused `no_slot`. **Cost, accepted:** the four windows are unmeasured -- `lifecycle_third_trial_live` (`test_both_routes_were_probed_through_every_window`) and `lifecycle_reearned_live` (Session 40's `test_the_slots_own_route_was_probed_through_each_resize`) FAILED; `notifications_live` FAILED because the failed export's `operation_failed` notification -- the product right -- is not one of the eleven the proof counts. The envelope's pooled-name `UNMEASURED` row stays. | A record that keeps its readings in memory until the end loses them at the first stop; the resume chose the record's integrity over its completeness, and says so. | -- |
 | **D2558** | Run 11 step 3: *"A1' -> B1 (the reboot) -> the after-reboot read (`s41-after-reboot.sh` for the six units)"*; Session 40's B1: all six started by the boot. | **beta-dev's unit FAILED at boot+89 s** (2026-10-17 14:45:27Z): its `ExecStartPost` `edge reconcile` raced control-prod's -- Docker answered *"endpoint with name apg-edge-traefik-1 already exists in network apg-control-prod-edge"*, `bin/edge-network.sh` `die 9`s on that `docker network connect` (`could not attach`), systemd failed the unit and `ExecStopPost` took beta down (volumes kept). `edge-network.sh` checks `is_attached`, then connects: four sites (attach, attach-network, reconcile x2) treat the wanted state reached by another unit as a failure. Five units came back by themselves; Session 40's boot did not lose the race. | **The operator: start beta, repair later.** `systemctl start agentic-postgres-project@beta-dev` -> active, routes 200/200/401; the boot recorded as it happened. **Owed** (after the tag): after a failed connect, re-read `is_attached` and `has_alias` and succeed if both hold -- a test with a fake docker that attaches between the check and the connect, a battery. dev came back by itself (D2504 repaired) either way. | A check-then-act on shared state is a race when two units act; the reader of 'already done' must not call it failure. | -- |
 | **D2559** | ADR 0195 for the reconciler's export: *"a reader has three outcomes ... the third reported"*. | `bin/reconciler.py` `export`: `export_upload` prints `export_upload: <StorageError>` (the operation and the provider's CODE, never a target) to stderr, and the reconciler keeps only `the upload exited 5` -- the code that named the cause (`SignatureDoesNotMatch`) reached nobody; the diagnosis needed a root script in the container (`s41-r2diag.py`). Also Run 11's order: the external half was first run BEFORE `s41-branches.py --delete-only` (the plan: S1 -> delete-only -> external); the branch modules ERRORed on `phase: live` (15); delete-only, then the external half and the merge again (the first transcript kept in `~/s41/run11/external-1/`). | **Owed**: the upload's error line carried into the refusal's `reason` (it names no target by construction, ADR 0259). The order: corrected in the run; the merged evidence is the second run's. | A failure whose cause is printed and then dropped is reported as a bare exit code. | -- |
+| **D2560** | Run 12: *"each `trial` row → `beta` if every named claim reads `passed` in `evidence/session-41.json`, else → `planned` target 42"*. | `idle_sleep`'s two claims PASSED (`idle_sleep_live`, `idle_trigger`), but `sleep`'s row goes to `planned` (`lifecycle_third_trial_live` failed, D2557), so `project.sleep` leaves `ACCEPTED_TYPES`; D2548 (the operator's repair) offers idle sleep at both doors only while that type is accepted, and `test_the_idle_sleep_row_is_reachable_iff_its_sleep_is_accepted` holds the row reachable exactly then. `beta` for `idle_sleep` would be a row with no reachable control. | **`idle_sleep` → `planned` target 42 with `sleep`** (the tree wins; the rule's letter loses): its `today` says both claims passed and why it is planned. The close: six rows `beta` (`branches`, `restore_to_branch`, `backups_and_pitr`, `usage`, `plan_free`, `plan_premium`), eight `planned` (the six managed-project rows, `idle_sleep`, `notifications`); `ACCEPTED_TYPES` = `credential.rotate` + the four branch types. | A concept that acts through another is as open as the one it acts through. | -- |
 
 ---
 
@@ -1549,6 +1549,29 @@ identity revoked, its directory gone, `consumed`. Owed: D2558's repair, D2559's.
   rewritten for Session 42's planner (copy it to the scratchpad first); this
   plan's `Status:` COMPLETE.
 
+**Done.** (2026-10-17.) **The Ledger from the tagged evidence**
+(`evidence/session-41.json`, 280/284 at `601a0ea`): `branches`,
+`restore_to_branch`, `backups_and_pitr`, `usage`, `plan_free` and `plan_premium`
+→ `beta` ("Being verified." dropped); the six managed-project rows and
+`notifications` → `planned` target 42 (D2557), `idle_sleep` with them though its
+claims passed (**D2560**) -- pre-trial customer text and controls from `b07cde7`,
+evidence `[]`, `today` saying why; no `trial` row remains. `ACCEPTED_TYPES` =
+`credential.rotate` + the four branch types; CTL-OPS-001's exact-set proof renamed
+`test_credential_rotate_and_the_branch_types_are_accepted_and_the_eleven_are_executed`
+(D1119, the registry with it). **`capacity.ENVELOPE`**, a *Session 41* section:
+a new commit's deploy, slot5-prod's create (1,715.2 s, backup 1,588.1 s) and its
+other operations, idle sleep's latency (1,121.4 s to the request, 21.1 s to
+asleep), the branch operations at 1.19.0, **the host's memory with a branch live
+(4,884 MiB; D2509's `UNMEASURED` row OUT)**, the cold start (D2558); the pooled-name
+windows stay `UNMEASURED` (reason now D2557) and a usage pass's duration is a new
+`UNMEASURED` row (the reconciler logs only its end). control-plane.md and
+managed-projects.md say what the close decided. Battery 4/4 killed, control green
+(a lifecycle type accepted, a branch type dropped, `idle_sleep` beta with `sleep`
+planned, a managed row back at `trial`); its first run SURVIVED twice on an anchor
+that matched `EXECUTED_TYPES` first -- re-anchored on `ACCEPTED_TYPES`' own opening,
+a non-unique anchor fatal (D269). Targeted modules once: 227 + 54 passed (the
+matrix regenerated).
+
 ---
 
 ## 7. Evidence and claims
@@ -1665,6 +1688,17 @@ message's slip (D2506).
   probe account.
 - **`slot1-`, `slot2-`, `slot4-` and `slot5-prod` are consumed** after this trip;
   the next lifecycle needs `slot6-prod`.
+- **D2558 -- `bin/edge-network.sh` treats "already attached" as a failure** when
+  two units attach the edge at once: beta-dev's unit failed at the trip's boot.
+  The repair (re-read after a failed connect, a test with a racing fake docker)
+  is owed first.
+- **D2559 -- the reconciler drops the upload's provider code**, keeping only
+  `the upload exited 5`; carrying `export_upload`'s line into the refusal is owed.
+- **The managed-project rows, `idle_sleep` and `notifications` are `planned` a
+  fourth time** (D2557, D2560): their next trial needs `slot6-prod` and a
+  lifecycle that runs through, or an instrument that writes its samples as it
+  takes them.
+- **A usage pass's duration is not recorded** (`UNMEASURED`).
 - **The lint's SQL reader loses a literal that holds `--`** (D2544, Run 4):
   `sql_surface.statements` strips comments without regard to quotes, so every
   reader after such a literal -- the lint, the destructive findings, the

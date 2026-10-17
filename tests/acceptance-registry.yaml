@@ -6304,7 +6304,7 @@
   test_nodeids:
     - tests/contract/test_reality_ledger.py::test_every_operation_type_names_a_ledger_row_and_is_accepted_iff_its_row_is_reachable
     - tests/contract/test_operation_types.py::test_the_type_table_is_closed
-    - tests/contract/test_operation_types.py::test_exactly_the_eleven_executed_types_are_accepted
+    - tests/contract/test_operation_types.py::test_credential_rotate_and_the_branch_types_are_accepted_and_the_eleven_are_executed
     - tests/contract/test_operation_types.py::test_a_type_not_accepted_is_refused_not_available_before_its_body
   description: >-
     `operations.py`'s type table is closed and every type names an
@@ -6320,7 +6320,9 @@
     others refused with their rows `planned` (D2500, D2501, D2504); Session
     41's bump accepts all eleven again -- the six re-trialed a third time on a
     new slot (D2518) and the four branch types with D2501 and D2504 repaired;
-    a write route whose type is not accepted answers `409 not_available` naming
+    and its close accepts `credential.rotate` and the four branch types, their
+    rows `beta`, the six managed-project types refused with their rows
+    `planned` again (D2557); a write route whose type is not accepted answers `409 not_available` naming
     its row before the project or the body is read, and writes no row (ADR
     0254, D2054, D2170).
 
