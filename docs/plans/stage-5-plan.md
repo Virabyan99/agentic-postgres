@@ -59,7 +59,9 @@ SESSIONS        36-45 (D1945, D2510, D2591-D2593). 36-41 DONE; 42 PLANNED
                 browser SQL editor, the customer's own credential through a
                 relay that holds none -- D2592) and 45 (the journey, the
                 person's walk, the Stage 5 release -- D2593) unplanned.
-                Next free: D2594 (Session 42's plan).
+                Session 43's three choices decided (D2594 PyPI from CI,
+                D2595 the console's cookie, D2596 no third-party script).
+                Next free: D2597 (Session 42's plan).
 CURRENT_SESSION 41. Moves 41 -> 42, all-or-nothing per session (D690).
 template_version 1.19.0. host.yaml schema 4. Outputs v22, project manifest 11,
                 capability manifest 4, lock 4, project lock 3, api-surface 2,
@@ -909,9 +911,12 @@ against the tree:
 4. **Onboarding in the browser** — the link opens the console: set a username
    and password, **scan the TOTP QR rendered in the page** from the enrolment
    answer, confirm one code, logged in — through the existing `/v1` routes the
-   CLI already uses (accept, TOTP enrol and confirm, sessions). How the console
-   holds its session (memory, or an `HttpOnly`, `SameSite=Strict` cookie with a
-   CSRF rule) is that plan's decision and an ADR.
+   CLI already uses (accept, TOTP enrol and confirm, sessions). **Decided
+   (D2595)**: the console is served from `control.agenticpostgresql.com`, the
+   origin of `/v1`, and holds its session in an `HttpOnly`, `Secure`,
+   `SameSite=Strict` cookie, every write also checking `Origin`; never page
+   memory, never `localStorage`; the CLI keeps its bearer token. That plan
+   writes the ADR.
 5. **The console** — every customer page over `/api/v1` only: Overview,
    **Connect** (the pooled and direct strings, a credential shown once, `psql`
    and the fixture-proved snippets), **Branches**, **Backups and restore
@@ -926,22 +931,26 @@ against the tree:
    `bin/cloud.py` (`login`, `org`, `project`, `compute`, `operation`,
    `endpoint`, `branch`, `plan`, `usage`, `notifications`, `insights`,
    `monitoring`) packaged as a distribution with its own entry point,
-   installed by `uv tool install` or `pip`, needing no clone. Where it is
-   published (PyPI under a name the operator claims, or a wheel on the
-   repository's releases) is the operator's decision in that plan.
+   installed by `uv tool install` or `pip`, needing no clone. **Decided
+   (D2594)**: published to **PyPI** by a GitHub Actions job using trusted
+   publishing (no stored token, nothing on the VPS), only from a tagged commit
+   whose CI passed; **the operator claims the name before Session 43 runs**.
 
 **Must not (added).** A console page for a row the Ledger marks `planned`; a
 console that holds a credential opening a project's data (unchanged — 44 is
 the customer's own credential); a site claim the Ledger does not back; a form
-that stores a visitor's personal data; a third-party script or tracker on the
-site or the console without an operator decision recorded.
+that stores a visitor's personal data; **a third-party script of any kind in
+the console, or a tracker on the site** (D2596: the console serves only its
+own files under a strict Content-Security-Policy; the site reads traffic from
+Cloudflare Pages' own numbers, with Cloudflare Web Analytics only if the
+operator later asks; fonts and images self-hosted).
 
 **Measures (added).** The console's first paint against the host; the path
 from an invitation link to a working connection string, timed through a real
 browser (the plan decides how it drives one); the site's build reproducible
 from a commit.
 
-**Closes (amended).** D1969's console half, D1970, D2591.
+**Closes (amended).** D1969's console half, D1970, D2591, D2594, D2595, D2596.
 
 **The old text, kept as written:**
 
