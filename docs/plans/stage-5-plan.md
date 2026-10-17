@@ -50,10 +50,16 @@ DIRECTION       HOSTED (D1946). Session 36 paid the preconditions; Session 37
                 Session 39 the public endpoints (ADRs 0268-0270); Session 40
                 branches (ADRs 0271-0273); Session 41 plans, usage and
                 notifications, idle sleep (ADRs 0274-0276).
-SESSIONS        36-43 (D1945, D2510). 36-41 DONE; 42 (ClickStack, insights,
-                monitoring; the OVH upgrade first; D2558's repair before any
-                boot that matters) and 43 (the console, the journey, the
-                release) unplanned. Next free: D2561 (Session 41's plan).
+SESSIONS        36-45 (D1945, D2510, D2591-D2593). 36-41 DONE; 42 PLANNED
+                (docs/plans/session-42-implementation-plan.md: the OVH upgrade
+                first, ClickStack, insights, monitoring, the fourth
+                re-earning); 43 (WEB-FIRST: the public site, hosted customer
+                docs and quickstart, invitation links and onboarding in the
+                browser, the console, the packaged CLI -- D2591), 44 (the
+                browser SQL editor, the customer's own credential through a
+                relay that holds none -- D2592) and 45 (the journey, the
+                person's walk, the Stage 5 release -- D2593) unplanned.
+                Next free: D2594 (Session 42's plan).
 CURRENT_SESSION 41. Moves 41 -> 42, all-or-nothing per session (D690).
 template_version 1.19.0. host.yaml schema 4. Outputs v22, project manifest 11,
                 capability manifest 4, lock 4, project lock 3, api-surface 2,
@@ -421,8 +427,10 @@ so is the failure mode CLAUDE.md §7 names.**
 | **40 — Branches and restore to a branch** | §18–§23, §57 steps 12–14/17–18/29 | `naming.branch_names`; `branch.create\|reset\|delete` from the parent's repository at a target time; the re-key; branch TTL; protection; the backups surface; test restore as an operation; ends on the host with a branch from a point in time, migrated, inspected and deleted, the parent untouched |
 | **41 — The repairs, the re-earning, plans, usage, notifications and idle sleep** (split 2026-10-16, D2510) | §44, §45, §56, §57 steps 16/21 | Session 40's two product repairs (D2501, D2504); the third re-earning on a new slot; usage sampling; Free/Premium and entitlements as `plan_limit_reached`; notifications; idle sleep; ends on the host with an entitlement refusal and a capacity refusal side by side |
 | **42 — Telemetry, Query Insights and monitoring** (moved from 41, D2510) | §24, §25, §32–§39, §53 (ClickStack), §57 step 15 | The OVH upgrade first (D2511); ClickStack bounded; `pg_stat_statements` and Query Insights; curated monitoring |
-| **43 — The console, the journey, and the Stage 5 release** (was 42, D2510) | §9, §26, §40–§43 (surfaces), §48, §54–§58, Appendix C | The console over `/api/v1`; Studio forwarders for workflows and connectors; the support bundle; `apg control status`; the executable journey; **the person's walk arranged**; the bump; `session-42-check.sh`; `docs/stage-6-decision-report.md` |
-| *(cut, with the reason in §1)* | §21 promotion (D1962), in-place restore for customers (D1963), the SQL editor (D1969), temporary support grants (D1971), §53's optional technologies and PostgreSQL 19 (D1947, D1980), billing (D1967), a management SDK (D1952) | — |
+| **43 — The website, onboarding in the browser, and the console** (was 42's first half; web-first since D2591) | §9, §26, §27–§31 (the customer's path), §35, §40–§43 (surfaces), §54–§56 | The public site (landing, hosted customer docs, quickstart, pricing, *request an invitation*) on Cloudflare Pages, off the production host; the invitation as a link; accept, password and TOTP in the browser; the console over `/api/v1` with every customer page; Studio forwarders for workflows and connectors; the customer CLI packaged (`uv tool install` / `pip`), no clone |
+| **44 — The browser SQL editor** (D2592) | §26 (the SQL tab), §54 (navigation) | The customer's own database client in the browser: the customer's own credential held only in the page, a WebSocket relay at the edge that holds none and reaches only that project's public names; ADR 0246's sentence amended; the Ledger's `sql_editor` row out of `not_offered` |
+| **45 — The journey, the walk, and the Stage 5 release** (was 42's second half; D2593) | §48, §57, §58, Appendix C | The support bundle; `apg control status` and the node-loss runbook for the control project; the executable journey, web-first; **the person's walk arranged, through the website**; the bump; `session-45-check.sh`; `docs/stage-6-decision-report.md` |
+| *(cut, with the reason in §1)* | §21 promotion (D1962), in-place restore for customers (D1963), temporary support grants (D1971), §53's optional technologies and PostgreSQL 19 (D1947, D1980), billing (D1967), a management SDK (D1952). *(The SQL editor, cut by D1969, is Session 44's since D2592.)* | — |
 | *(`planned` in the Ledger)* | passkeys, email, wake-on-connect if 39's rig refuses it, storage quotas, egress/provider/embedding metering, autoscaling, HA, multi-region, SLA | — |
 
 **Four orderings are forced and the rest is preference.**
@@ -437,6 +445,9 @@ so is the failure mode CLAUDE.md §7 names.**
 4. **41 and 42 before 43** (was *41 before 42*, D2510). The console shows
    usage, insights and plans; the journey needs an entitlement refusal to
    exist.
+5. **43 before 44 before 45** (D2591–D2593). The SQL editor is a console page;
+   the journey, the walk and the release read everything the stage built, the
+   editor included.
 
 **39 and 40 are independent** and could swap; 39 is first because a branch's
 endpoints are 39's mechanism and Session 40's proof connects to a branch.
@@ -852,12 +863,87 @@ Let one store answer a question the other already answers.
 
 **Proposed family.** `INS-*`.
 
-### Session 43 — The console, the journey, and the Stage 5 release
+### Session 43 — The website, onboarding in the browser, and the console
 
-> **Renumbered 2026-10-16 (D2510); it was Session 42.** The text is kept as
-> written: every *42* in it -- `CURRENT_SESSION` 42, `session-42-check.sh`
-> derived from 41's, `evidence/session-42.json` -- reads *43* (and *42's*
-> gate for *41's*).
+> **Amended 2026-10-18 (D2591, D2593): web-first, and split.** The operator
+> asked how a real customer finds the product, reads its documentation and
+> gets started; measured that day, the answer was *only through a terminal and
+> a clone of the repository* — the domain's apex answered nothing, the
+> documentation is Markdown inside the repository beside sixty operator
+> documents, the invitation is a file, and `apg` is the repository's `bin/`
+> scripts. **Session 43 is now the web-first customer path** (below, *Builds
+> as amended*). **The second half of the old text — the support bundle, `apg
+> control status`, the node-loss runbook, the executable journey, the
+> person's walk, the bump, the release and the Stage 6 report — is Session
+> 45's** (D2593), after **Session 44, the browser SQL editor** (D2592). The
+> old text below is kept as written; where it says *42* it reads *43* (D2510),
+> and its release half reads *45*.
+
+**Builds as amended (D2591)** — the six points the operator accepted on
+2026-10-18, each a run's worth or less, each priced by Session 43's own plan
+against the tree:
+
+1. **A public site** — a landing page, the **hosted customer documentation**,
+   a **quickstart**, the **pricing page** (spec §35's beta sentence and §56's
+   shape, its numbers read from `plans.PLANS` at build time, never typed) and
+   ***request an invitation*** (a `mailto:` to the operator's address — no
+   form, no stored personal data, because there is no email system, D1951).
+   Static files built from the repository (a `site/` directory and a build
+   script) and published to **Cloudflare Pages** on the apex and `www` —
+   **off the production host**, so the site shares nothing with a project and
+   a site outage touches no customer. **Every product claim on the site is
+   generated from or checked against the Reality Ledger** (a guard: a feature
+   the site names is a row `beta` or `available`; §59's words only with
+   evidence). The plan decides — and records as an ADR — that a Pages custom
+   domain is a Cloudflare-hosted record, which the grey-cloud rule (made for
+   the host's ACME and its Postgres port) does not cover.
+2. **Customer documentation separated from the operator's** — a curated set
+   (getting started, connecting, branches, backups and restore points, plans
+   and usage, Query Insights and monitoring, the CLI) published by the site;
+   the operator's documents stay in the repository. The person's walk (45)
+   reads only the published set.
+3. **The invitation is a link** — the token shown once to the inviter is
+   printed and displayed as a console URL carrying the token in its
+   **fragment** (`…/accept#<token>`), so no server, proxy or log ever receives
+   it; the operator still sends it by their own email.
+4. **Onboarding in the browser** — the link opens the console: set a username
+   and password, **scan the TOTP QR rendered in the page** from the enrolment
+   answer, confirm one code, logged in — through the existing `/v1` routes the
+   CLI already uses (accept, TOTP enrol and confirm, sessions). How the console
+   holds its session (memory, or an `HttpOnly`, `SameSite=Strict` cookie with a
+   CSRF rule) is that plan's decision and an ADR.
+5. **The console** — every customer page over `/api/v1` only: Overview,
+   **Connect** (the pooled and direct strings, a credential shown once, `psql`
+   and the fixture-proved snippets), **Branches**, **Backups and restore
+   points**, **Usage**, **Query Insights**, **Monitoring**, **Plan** (Premium
+   with *Notify me*), **Notifications**, **Settings** (organisation, members,
+   invitations, API keys, idle sleep, compute size, export, delete) — with the
+   old text's project data views through that project's Studio forwarders. The
+   target, measured by Session 45's walk: **a stranger holding an invitation
+   link reaches a working connection string in the browser, with no
+   terminal.**
+6. **The CLI becomes optional and installable** — the customer families of
+   `bin/cloud.py` (`login`, `org`, `project`, `compute`, `operation`,
+   `endpoint`, `branch`, `plan`, `usage`, `notifications`, `insights`,
+   `monitoring`) packaged as a distribution with its own entry point,
+   installed by `uv tool install` or `pip`, needing no clone. Where it is
+   published (PyPI under a name the operator claims, or a wheel on the
+   repository's releases) is the operator's decision in that plan.
+
+**Must not (added).** A console page for a row the Ledger marks `planned`; a
+console that holds a credential opening a project's data (unchanged — 44 is
+the customer's own credential); a site claim the Ledger does not back; a form
+that stores a visitor's personal data; a third-party script or tracker on the
+site or the console without an operator decision recorded.
+
+**Measures (added).** The console's first paint against the host; the path
+from an invitation link to a working connection string, timed through a real
+browser (the plan decides how it drives one); the site's build reproducible
+from a commit.
+
+**Closes (amended).** D1969's console half, D1970, D2591.
+
+**The old text, kept as written:**
 
 **Builds.** **The console** (D1969): static files under `services/console/`,
 served by the control project's router, calling `/api/v1` only, the
@@ -893,6 +979,96 @@ second half.
 
 **Proposed families.** `CON-*`, `JRN-*`, `REL-*` extended, `DX-*` extended.
 
+### Session 44 — The browser SQL editor
+
+> **Added 2026-10-18 (D2592).** The operator decided the SQL editor is built in
+> Stage 5, as its own session, reversing D1969's cut **in the one shape the
+> invariants admit** — the shape the Ledger's `sql_editor` row already names as
+> its `eventual`: *"A browser SQL editor acting as the person, never a shared
+> credential."*
+
+**Why it was cut, and what changes.** D1969 refused a SQL tab because the usual
+design — the browser posts SQL to `/api/v1` and the server runs it — needs the
+control plane to hold a credential that opens every project's data, and makes
+it a pipe for arbitrary SQL (ADR 0246: *the control plane holds nothing that
+opens a project's data plane*; *a product surface runs no SQL*). ADR 0246 also
+says *"a customer's own client, with the customer's own database credential,
+may"*. **The editor is that client, running in the customer's browser**: the
+page holds the customer's own database password in memory only; the browser
+speaks PostgreSQL's protocol over a WebSocket to **a relay at the edge that
+authenticates nothing, holds no credential and connects only to that
+project's own public names**; PostgreSQL decides what the person may do —
+their role's grants, row-level security, `statement_timeout`, `CONNECTION
+LIMIT` — exactly as for `psql`. The control plane stays out of the path.
+
+**Builds.** **First run: the `THR-*` rows** (the relay as an open proxy; a
+credential exposed in the page; exhaustion of the relay or the project's
+connection budget) **and the rig**: a WebSocket-to-TCP relay in front of the
+edge's Postgres entrypoint with its control; whether the browser driver can
+keep **PostgreSQL's own TLS inside the WebSocket**, so the relay sees only
+ciphertext (measured, never assumed — if it cannot, the plan says what the
+relay can read and the ADR decides); the browser driver pinned. **An ADR
+amending ADR 0246's sentence** to *"no product surface runs SQL on the
+platform's side or holds a credential that opens a project's data; the console
+may host the customer's own client, which speaks with the customer's own
+credential through a relay that holds none"*. **The relay**: its own bounded
+service, routed by name to one project's pooled or direct name and nowhere
+else, a per-project connection ceiling inside ADR 0070's budget, idle and
+total time limits, no payload logged (the canary). **The editor page** in the
+console: a strict Content-Security-Policy, no third-party script, the
+password never written to storage, result rows and bytes capped, a sleeping
+project answered *asleep* before any connection. **The Ledger's `sql_editor`
+row** out of `not_offered` to `trial` with its claims.
+
+**Already true, so do not rebuild it.** The public Postgres entrypoint with TLS
+and SNI routing (Session 39); the customer roles and their grants; the
+connection budget; `statement_timeout` per role.
+
+**Must not.** Run a statement on the platform's side; store, log or forward
+the customer's credential; relay to any host that is not the project's own
+public name; lift a customer role's grants or timeouts for the editor;
+present the editor for a project the Ledger does not offer it on.
+
+**Measures.** The relay's memory and connections under a control load; a
+query's time through the editor against the same query through `psql`; the
+project's connection count during an editor session against ADR 0070's
+budget.
+
+**Closes.** D1969's SQL-tab half, D2592.
+
+**Proposed family.** `SQL-*` (the plan decides it against the registry).
+
+### Session 45 — The journey, the walk, and the Stage 5 release
+
+> **Added 2026-10-18 (D2593)** — the second half of the old Session 43 text
+> (above), moved: the support bundle (D1971), `apg control status` (D1984) and
+> the node-loss runbook updated for the control project, **the executable
+> journey** (D1981) in external mode, **the person's walk**, every gate, the
+> bump, `scope-closure.md` re-audited row by row, the Ledger re-read against
+> the evidence, `evidence/session-45.json` from a host trip, and
+> **`docs/stage-6-decision-report.md`**.
+
+**What changes with the web-first path.** The journey and the walk start where
+a stranger starts: **the public site and an invitation link**, never a clone.
+The walker holds only the link and the site's URL; the success criterion is a
+working connection string reached in the browser, then the stage's other
+steps (a branch, a restore point, usage, insights, the SQL editor) through
+the console. `documented_path` is closed only by that person's record (D1935,
+D1981); a shorter finding list is not a pass. **Budget a second walker** if
+the first records more than D1935's eleven steps (§10).
+
+**Must not.** Close `documented_path` on the author's walk or a shorter list;
+use a §59 word without evidence; write the decision report before the
+evidence document exists.
+
+**Measures.** The journey's steps; the walk's record; every gate in every mode
+the evidence needs.
+
+**Closes.** D1971, D1981 (if the walk is clean), D1984, D1979's second half,
+D2593.
+
+**Proposed families.** `JRN-*`, `REL-*` extended, `DX-*` extended.
+
 ---
 
 ## 6. What Stage 5 does not build
@@ -908,7 +1084,10 @@ with its row:**
 - **PostgreSQL 19** (D1947), **`pg_ivm`, `pg_cron`, `pgroll`, Valkey, local
   inference, snapshot storage, a same-host replica** (D1980).
 - **Branch promotion** (D1962) and **in-place restore for a customer** (D1963).
-- **A SQL editor in the console** (D1969).
+- ~~**A SQL editor in the console** (D1969).~~ **Built by Session 44 since
+  D2592**, as the customer's own client in the browser through a relay that
+  holds no credential; a SQL editor that runs statements on the platform's
+  side stays cut.
 - **Temporary support grants** (D1971) — replaced by a sentence that is true.
 - **Public signup and email** (D1951); **passkeys** (`planned`).
 - **Billing in any form** — checkout, invoices, cards, tax, credits (D1967).
@@ -951,7 +1130,9 @@ the wrong door (CLAUDE.md §7 question 3).
 | 40 | new `BR-*` (naming and the re-key offline in a rig; the branch live) | **Yes** |
 | 41 | new `USE-*`, `PLAN-*`, `BR-*` (the repairs); the managed-project, branch and backup claims re-earned on a new slot (D2510) | **Yes** |
 | 42 | new `INS-*`; `every_service_bounded_live` re-run with ClickStack (moved from 41, D2510) | **Yes** — after the OVH upgrade |
-| 43 | new `CON-*`, `JRN-*`; `documented_path`; every Stage 5 claim in every mode (was 42, D2510) | **Yes** — the release trip |
+| 43 | new `CON-*`; the site's Ledger guard; onboarding in the browser; the packaged CLI (D2591) | **Yes** — the console on the host; the site on Cloudflare Pages |
+| 44 | new `SQL-*`; the relay's refusals; the editor as the customer's own client (D2592) | **Yes** |
+| 45 | new `JRN-*`; `documented_path`; every Stage 5 claim in every mode (was 43's second half, D2593) | **Yes** — the release trip |
 
 **Three things Stage 5 adds to the model:**
 
@@ -980,7 +1161,7 @@ accident.
 | PostgreSQL is the final authorization authority | RLS, FORCE, the pre-request hook | The control project's tables (37); the customer roles (39) |
 | A project's identities are derived once, in `naming` | ADR 0002 | Slots, branches, endpoint hostnames (38, 39, 40) |
 | An agent cannot run SQL | No input accepts one | Unchanged; a customer role is not an agent (39) |
-| **A product surface runs no SQL** | ADR 0246; the console and Studio forward named operations | The console (42); Query Insights shows text, never runs it (41) |
+| **A product surface runs no SQL** | ADR 0246; the console and Studio forward named operations | The console (43); Query Insights shows text, never runs it (42); **the SQL editor (44) runs nothing on the platform's side: the customer's own client, the customer's own credential, a relay that holds none (D2592; ADR 0246's sentence amended there)** |
 | **The control plane holds nothing that opens a project's data or admin plane** | ADR 0246; the creator bootstrapped as the project's own admin, secret shown once | 37, 38, 42 |
 | **The reconciler runs only a closed set of typed operations** | A type enum, a JSON Schema per type, argv never a string, no listener | 38, 40 |
 | **A capacity refusal and an entitlement refusal are different codes from different readers** | `capacity_exhausted` from exit 12; `plan_limit_reached` from the control plane | 38, 41 |
@@ -1031,7 +1212,9 @@ and the doctor's `pooler could not be asked`.
   session);
 - a number from the specification would be used where a reading of the new
   host is owed (36, 38, 41);
-- a SQL box would be added to any product surface (42);
+- a SQL box would be added to any product surface (42) — **since D2592: a
+  SQL editor that runs a statement on the platform's side, or a relay or page
+  that stores, logs or forwards the customer's credential (44)**;
 - the old host would be retired before the new one's sweep has been read (36);
 - a currently-passing test would be weakened to make a new one pass;
 - a Stage 1–4 claim goes red and the tidy fix is on the proof's side;
