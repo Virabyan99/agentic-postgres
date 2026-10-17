@@ -1570,7 +1570,12 @@ managed-projects.md say what the close decided. Battery 4/4 killed, control gree
 planned, a managed row back at `trial`); its first run SURVIVED twice on an anchor
 that matched `EXECUTED_TYPES` first -- re-anchored on `ACCEPTED_TYPES`' own opening,
 a non-unique anchor fatal (D269). Targeted modules once: 227 + 54 passed (the
-matrix regenerated).
+matrix regenerated). **The close's commit `59117b5`**: `bin/session-01-check.sh`
+on a clean tree, in the operator's sixteen shards (D2554) -- steps 1-3 and 5-7
+passed, the suite **7,974 = 7,971 passed + 3 skipped, 0 failed, 0 errors** (the
+selection's collected count exactly), step 8's evidence written, exit 0; **CI
+39055054912 SUCCESS** (P0 inventory, the Session 1 gate, the Session 2 offline
+contract). Session 41 is closed.
 
 ---
 
