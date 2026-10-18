@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -534,6 +535,50 @@ def test_containers_lists_branches(tmp_path) -> None:  # type: ignore[no-untyped
     assert "rm -rf" not in out and "apg-slot3-prod_qa" not in out
 
 
+def _containers_with(tmp_path: Path, fake_docker: str) -> str:
+    """`verb_containers` over empty project and branch roots, with this docker."""
+    projects, branches, bin_dir = tmp_path / "projects", tmp_path / "branches", tmp_path / "bin"
+    for directory in (projects, branches, bin_dir):
+        directory.mkdir(parents=True)
+    (bin_dir / "docker").write_text(fake_docker, encoding="utf-8")
+    (bin_dir / "docker").chmod(0o755)
+    script = SCRIPT.read_text(encoding="utf-8")
+    for old, new in (
+        (
+            'readonly PROJECT_ROOT="/etc/agentic-postgres/projects"',
+            f'readonly PROJECT_ROOT="{projects}"',
+        ),
+        (
+            'readonly BRANCH_ROOT="/etc/agentic-postgres/branches"',
+            f'readonly BRANCH_ROOT="{branches}"',
+        ),
+        ('\nmain "$@"\n', "\n"),
+    ):
+        assert script.count(old) == 1, old
+        script = script.replace(old, new)
+    copy = tmp_path / "apg-diag.sh"
+    copy.write_text(script, encoding="utf-8")
+    done = subprocess.run(
+        ["bash", "-c", f". {copy}; verb_containers"],
+        capture_output=True, text=True, check=False, env={"PATH": f"{bin_dir}:/usr/bin:/bin"},
+    )  # fmt: skip
+    assert done.returncode == 0, done.stderr
+    return done.stdout
+
+
+def test_containers_lists_the_telemetry_plane(tmp_path: Path) -> None:
+    """Session 42 (ADR 0277): `containers` lists the plane under `--
+    apg-telemetry (platform)` by its fixed compose project; **control**: with
+    no such container it says the plane is not installed rather than leaving
+    the section out."""
+    out = _containers_with(tmp_path / "up", FAKE_DOCKER)
+    assert "-- apg-telemetry (platform)" in out, out
+    assert "apg-telemetry-postgres-1" in out, out
+    empty = _containers_with(tmp_path / "absent", "#!/usr/bin/env bash\nexit 0\n")
+    assert "-- apg-telemetry (platform)" in empty
+    assert "the telemetry plane is not installed" in empty, empty
+
+
 FAKE_DOCKER_PROJECTS = """#!/usr/bin/env bash
 # `docker inspect C --format ...`: the Compose project of a RUNNING cluster only;
 # `docker ps -a --filter label=com.docker.compose.project=P ...`: P's containers.
@@ -605,8 +650,10 @@ def test_a_stopped_project_does_not_end_the_listing(tmp_path) -> None:  # type: 
     assert done.returncode == 0, (done.returncode, out, done.stderr)
     sections = re.split(r"\n-- ", out)
     said = {s.split("\n", 1)[0]: s for s in sections[1:]}
+    # The telemetry plane's section closes the listing since Session 42 (ADR 0277).
     assert list(said) == [
-        "alpha-dev", "slot4-prod", "slot5-prod", "zeta-dev", "slot3-prod_dev (branch)"
+        "alpha-dev", "slot4-prod", "slot5-prod", "zeta-dev", "slot3-prod_dev (branch)",
+        "apg-telemetry (platform)",
     ], out  # fmt: skip
     for key in ("slot4-prod", "slot5-prod"):
         assert "(no running cluster container; the project may be stopped)" in said[key], out

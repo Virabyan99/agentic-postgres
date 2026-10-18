@@ -38,6 +38,8 @@ UNITS = (
     "agentic-postgres-docker-firewall.service",
     "agentic-postgres-edge.service",
     "agentic-postgres-project@.service",
+    # Session 42 (ADR 0277): the telemetry plane.
+    "agentic-postgres-telemetry.service",
 )
 #: Launchers that resolve an installed release and exec a script inside it.
 #:
@@ -57,6 +59,8 @@ LAUNCHERS = (
     "agentic-postgres-project",
     "agentic-postgres-firewall",
     "agentic-postgres-database-access",
+    # Session 42 (ADR 0277): resolves the edge state's release, runs telemetry.sh.
+    "agentic-postgres-telemetry",
 )
 
 #: The files that ship *inside* a release and are reached only through a
@@ -351,6 +355,21 @@ def test_the_edge_unit_never_removes_volumes_on_stop() -> None:
     text = unit_text("agentic-postgres-edge.service")
     assert "ExecStop=/usr/local/libexec/agentic-postgres/edge down" in text
     assert "-v" not in text.split("ExecStop=")[1].splitlines()[0]
+
+
+def test_the_telemetry_unit_waits_for_docker_and_no_project_waits_for_it() -> None:
+    """Session 42 (ADR 0277, D2574): the plane's unit orders after Docker and
+    the firewall and after nothing of a project's; no project unit orders
+    after it, so a project never waits for telemetry; its stop is `down`,
+    never `down -v`."""
+    text = unit_text("agentic-postgres-telemetry.service")
+    assert "Requires=docker.service agentic-postgres-docker-firewall.service" in text
+    assert "agentic-postgres-project" not in text and "agentic-postgres-edge" not in text
+    assert "ExecStart=/usr/local/libexec/agentic-postgres/telemetry up" in text
+    assert "ExecStop=/usr/local/libexec/agentic-postgres/telemetry down" in text
+    assert "-v" not in text.split("ExecStop=")[1].splitlines()[0]
+    for unit in sorted(SYSTEMD.glob("agentic-postgres-project*.service")):
+        assert "telemetry" not in unit.read_text(encoding="utf-8"), unit.name
 
 
 def test_the_project_unit_materializes_before_starting() -> None:

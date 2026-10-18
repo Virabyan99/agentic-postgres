@@ -41,6 +41,7 @@ from agentic_postgres import (
     config,
     deployed_output,
     host_config,
+    telemetry_plane,
 )
 from agentic_postgres.capacity_reading import Figure, Reading
 
@@ -252,8 +253,18 @@ def read(
     | None = None,
     branch_root: Path | None = None,
     exclude_branch: str | None = None,
+    telemetry_root: Path | None = None,
+    exclude_platform: bool = False,
 ) -> tuple[Reading, str]:
     """The whole reading. Returns ``(reading, ceilings_reason)``.
+
+    **The telemetry plane is committed too** (Session 42, ADR 0277). Its state
+    file under ``telemetry_root`` -- by default the `telemetry` directory beside
+    ``root`` (`/etc/agentic-postgres/telemetry` on a host) -- adds its charge at
+    its ceilings to `Reading.platform`; present and unreadable is in
+    `Reading.unreadable`; absent charges nothing. ``exclude_platform`` is the
+    plane deciding about itself (`telemetry.py admit`): the request, not a
+    neighbour.
 
     **Branches are committed too** (ADR 0271, D2431). Every readable
     `branch.json` under ``branch_root`` -- by default the `branches` directory
@@ -363,6 +374,16 @@ def read(
         {name: why for name, why in unreadable_branches.items() if name != exclude_branch}
     )
 
+    platform: dict[str, int] = {}
+    if not exclude_platform:
+        charge, why = telemetry_plane.read_charge(
+            root.parent / "telemetry" if telemetry_root is None else telemetry_root
+        )
+        if charge is not None:
+            platform[telemetry_plane.CHARGE_KEY] = charge
+        elif why is not None:
+            unreadable[f"{telemetry_plane.CHARGE_KEY} (platform)"] = why
+
     ceilings, unbounded, ceilings_reason = read_ceilings(runner)
     ceilings = _ceilings_by_project_key(ceilings, keys)
 
@@ -380,5 +401,6 @@ def read(
         docker_root_measured_at=measured_at,
         prepared=tuple(prepared),
         branches=branches,
+        platform=platform,
     )
     return reading, ceilings_reason

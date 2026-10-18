@@ -203,6 +203,31 @@ def test_the_edge_plane_is_bounded() -> None:
         assert found == expected, f"{name}: {found} != ADR 0244's {expected}"
 
 
+#: ADR 0244's rule over rig 42a's case 5 peaks (100 lines/s for 30 minutes;
+#: ADR 0277): memory max(4 x peak rounded up to 32 MiB, 64), pids max(4 x
+#: peak, 64), one core each. Sheet E1 re-reads the peaks on the host.
+TELEMETRY_LIMITS = {
+    "clickhouse": {"mem_limit": "1152m", "pids_limit": 740, "cpus": "1.0"},
+    "hyperdx": {"mem_limit": "1696m", "pids_limit": 216, "cpus": "1.0"},
+    "mongo": {"mem_limit": "448m", "pids_limit": 260, "cpus": "1.0"},
+    "gateway": {"mem_limit": "224m", "pids_limit": 64, "cpus": "1.0"},
+}
+
+
+def test_the_telemetry_plane_is_bounded() -> None:
+    """The telemetry plane (Session 42, ADR 0277) carries the exact limits ADR
+    0244's rule gives from rig 42a's peaks, every service a long-running one,
+    every image by lock variable, and no `ports` -- the edge's twin."""
+    plane = yaml.safe_load((REPO_ROOT / "infra" / "telemetry" / "compose.yaml").read_text("utf-8"))
+    services = plane["services"]
+    assert set(services) == set(TELEMETRY_LIMITS), sorted(services)
+    for name, expected in TELEMETRY_LIMITS.items():
+        found = {key: services[name].get(key) for key in expected}
+        assert found == expected, f"{name}: {found} != ADR 0244's {expected}"
+        assert services[name]["restart"] == "unless-stopped", name
+        assert services[name]["image"].startswith("${") and "ports" not in services[name], name
+
+
 def _long_running(model: dict) -> set[str]:
     """The services that run for as long as the project does, by the FILE'S OWN
     restart policy -- not a list, so a new long-running service lands here."""

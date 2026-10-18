@@ -167,6 +167,16 @@ images:
   # evaluating would leave every rule quiet, which is what a healthy deployment
   # looks like.
   PROMETHEUS_IMAGE: docker.io/prom/prometheus:v3.7.3
+  # The telemetry plane (Session 42, ADR 0277): ClickStack's three services
+  # from its release `@hyperdx/app@2.41.0` (2026-10-13), each by an EXACT tag
+  # -- ClickStack's own compose names `clickhouse-server:26.8-alpine` and the
+  # HyperDX image by its major `2`, both moving. Rig 42a measured these three
+  # digests (ADR 0277); the gateway is OTEL_COLLECTOR_IMAGE above, not
+  # ClickStack's OpAMP-supervised collector (D2573). Added with
+  # `--update --add-images` (D2609) so no locked image moved with them.
+  CLICKHOUSE_IMAGE: docker.io/clickhouse/clickhouse-server:26.8.30.8-alpine
+  HYPERDX_IMAGE: docker.io/hyperdx/hyperdx:2.41.0
+  MONGO_IMAGE: docker.io/library/mongo:5.0.32-focal
 
 # Minimum versions required for a *feature*, not for an image.
 #

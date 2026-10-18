@@ -176,15 +176,29 @@ class Reading:
     #: into the total and named on both committed lines. An unreadable branch
     #: record is in ``unreadable``, never here as zero.
     branches: dict[str, int] = dataclasses.field(default_factory=dict)
+    #: A platform component's charge at its CEILINGS, keyed by its compose
+    #: project (Session 42, ADR 0277: the telemetry plane, `apg-telemetry`).
+    #: Kept out of ``committed`` for the reason ``branches`` is -- every reader
+    #: of that one counts projects -- summed into the total and named on both
+    #: committed lines. An unreadable state file is in ``unreadable``.
+    platform: dict[str, int] = dataclasses.field(default_factory=dict)
 
     @property
     def committed_total_mb(self) -> int:
-        return sum(self.committed.values()) + sum(self.branches.values())
+        return (
+            sum(self.committed.values()) + sum(self.branches.values()) + sum(self.platform.values())
+        )
 
     def branches_text(self) -> str:
         """`; slot3-prod_dev (branch) 192` per branch, for the committed lines."""
         return "".join(
             f"; {name} (branch) {charge}" for name, charge in sorted(self.branches.items())
+        )
+
+    def platform_text(self) -> str:
+        """`; apg-telemetry (platform) 3520` per platform charge (ADR 0277)."""
+        return "".join(
+            f"; {name} (platform) {charge}" for name, charge in sorted(self.platform.items())
         )
 
 
@@ -458,6 +472,7 @@ def decide(
                 f"{committed} MiB across {len(reading.committed)} project(s): "
                 + (", ".join(f"{k} {v}" for k, v in sorted(reading.committed.items())) or "none")
                 + reading.branches_text()
+                + reading.platform_text()
                 + "".join(f"; {key} prepared, commits nothing" for key in sorted(reading.prepared)),
             ),
             ("requested", f"{candidate_unreclaimable_mb} MiB for {candidate_key}"),

@@ -28,7 +28,7 @@ readonly LOCK="${ROOT_DIR}/versions.env"
 
 usage() {
   cat <<'USAGE'
-Usage: bin/lock-versions.sh (--update [--packages-only] | --check | --help)
+Usage: bin/lock-versions.sh (--update [--packages-only | --add-images] | --check | --help)
 
   --update   Resolve every image in versions.in.yaml to an immutable digest
              for the declared target platform and rewrite versions.env.
@@ -37,6 +37,11 @@ Usage: bin/lock-versions.sh (--update [--packages-only] | --check | --help)
              --packages-only  Resolve the `packages:` entries and carry every
              image digest through from the existing versions.env unchanged.
              Needs no Docker and does not re-resolve a tag.
+
+             --add-images  As --packages-only, and also resolve every image
+             that versions.env does not hold yet. An image already locked is
+             carried forward byte for byte; only a NEW name is resolved.
+             Needs Docker Buildx for the new ones.
 
   --check    Verify versions.env is well formed, complete, and in sync with
              versions.in.yaml. Makes no network call. Modifies nothing.
@@ -59,6 +64,13 @@ It carries a digest forward only when versions.in.yaml still names the same
 tagged reference. An image whose candidate has been edited cannot be carried
 forward -- the old digest would then describe something nobody asked for -- and
 that is a blocking condition rather than a silent re-resolve.
+
+Why --add-images exists (Session 42, D2609). Adding the telemetry plane's three
+images by a plain --update would have re-resolved all four moving tags --
+measured on 2026-10-18, every one of them had moved since the lock of
+2026-10-09 -- and shipped an unmeasured PostgreSQL, Traefik and base-image
+upgrade inside a run about telemetry. A new name has no old digest that could
+lie, so resolving it is the one re-resolve that couples nothing.
 USAGE
 }
 
@@ -96,6 +108,8 @@ update() {
   # requiring buildx for it would make the narrow command harder to run than
   # the wide one.
   if [ "${packages_only}" != "yes" ]; then
+    [ "${packages_only}" != "add" ] || [ -f "$LOCK" ] \
+      || die 2 "--add-images carries image digests forward from versions.env, which does not exist."
     command -v docker >/dev/null 2>&1 || die 3 "docker is not installed."
     docker buildx version >/dev/null 2>&1 \
       || die 3 "docker buildx is unavailable; --update cannot resolve digests."
@@ -121,7 +135,10 @@ from pathlib import Path
 import yaml
 
 candidates_path, lock_path = Path(sys.argv[1]), Path(sys.argv[2])
-packages_only = sys.argv[3] == "yes"
+# "yes" = --packages-only; "add" = --add-images: carry every locked image, and
+# resolve only the names the lock does not hold (D2609).
+packages_only = sys.argv[3] in ("yes", "add")
+add_images = sys.argv[3] == "add"
 spec = yaml.safe_load(candidates_path.read_text(encoding="utf-8"))
 platform = spec["target_platform"]
 
@@ -168,7 +185,9 @@ for name, reference in sorted(spec["images"].items()):
         # that blocks rather than falling back to a re-resolve, which would
         # reintroduce exactly the coupling this flag exists to remove.
         previous = locked.get(name)
-        if previous is None:
+        if previous is None and add_images:
+            print(f"  new      {name} -> resolving {reference}", file=sys.stderr)
+        elif previous is None:
             blocked.append(f"{name}: absent from versions.env; --packages-only cannot carry it forward")
         elif previous.rsplit("@", 1)[0] != reference:
             blocked.append(
@@ -178,7 +197,8 @@ for name, reference in sorted(spec["images"].items()):
         else:
             print(f"  carried  {name} -> {previous.rsplit('@', 1)[-1]}", file=sys.stderr)
             lines.append(f"{name}={previous}")
-        continue
+        if not (previous is None and add_images):
+            continue
 
     proc = subprocess.run(
         ["docker", "buildx", "imagetools", "inspect", reference,
@@ -601,6 +621,7 @@ main() {
       case "${2:-}" in
         "") update no ;;
         --packages-only) update yes ;;
+        --add-images) update add ;;
         *) usage >&2; die 2 "unknown argument: $2" ;;
       esac
       ;;

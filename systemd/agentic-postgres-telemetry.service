@@ -1,0 +1,27 @@
+[Unit]
+Description=Agentic Postgres telemetry plane (ClickStack, bounded, unrouted)
+Documentation=file:/opt/agentic-postgres/releases/current/docs/decisions/0277-the-telemetry-plane-is-clickstack-bounded-on-the-host-and-fed-by-the-projects-own-collectors.md
+
+# Docker and the firewall, nothing of a project's: a project never waits for
+# this plane, and no project unit orders after it (ADR 0277, D2574).
+After=network-online.target docker.service agentic-postgres-docker-firewall.service
+Wants=network-online.target
+Requires=docker.service agentic-postgres-docker-firewall.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# The launcher, not a script in a checkout (the edge unit's reason). `up` asks
+# admission first and exits 12 when the plane does not fit; the unit then
+# fails, which is the outcome wanted: an operator reads why in the journal.
+ExecStart=/usr/local/libexec/agentic-postgres/telemetry up
+
+# `down`, never `down -v`: bin/compose.sh refuses --volumes in telemetry mode.
+ExecStop=/usr/local/libexec/agentic-postgres/telemetry down
+
+TimeoutStartSec=300
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

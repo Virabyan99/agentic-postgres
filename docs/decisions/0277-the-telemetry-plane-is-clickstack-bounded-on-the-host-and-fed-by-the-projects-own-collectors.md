@@ -116,8 +116,12 @@ pinned `otel/opentelemetry-collector-contrib:0.159.0`, which carries the
    `/etc/agentic-postgres/telemetry/state.json`, which `capacity_probe` adds to
    `committed`. A store whose use follows its load has no unreclaimable figure
    to declare; its ceiling is what keeps it from being admitted twice.
-7. **No password, one secret.** ClickHouse's `gateway` (create and insert on
-   `otel`; the exact grants Run 4 measures, D2603) and `reader` (`SELECT` on
+7. **No password, one secret.** ClickHouse's `gateway` (**`CREATE DATABASE`,
+   `CREATE TABLE` and `INSERT` on `otel.*`, no `SELECT`** -- Run 4 measured that
+   the exporter's `create_schema` issues `CREATE DATABASE` even when the
+   database exists, and that without the grant the whole gateway exits at
+   start; so the gateway restarts on failure and waits for ClickHouse to be
+   healthy, D2603) and `reader` (`SELECT` on
    `otel`, `readonly = 2`) are admitted only from the telemetry network's subnet
    — the store is reachable by two containers, and a password would be a secret
    with nothing to keep out. MongoDB listens only on the internal network.

@@ -266,6 +266,9 @@ SHELL_COMMANDS = (
     # (D1014), and `git add`ed before this file was run (D1188).
     "bin/storage-admin.sh",
     "bin/studio.sh",
+    # Session 42 (ADR 0277): the telemetry plane -- up (admission first, exit
+    # 12), down, status. Root. Listed the run it landed (D1014).
+    "bin/telemetry.sh",
     "bin/upgrade.sh",
     # Session 32 (ADR 0228, ADR 0229): a project's workflows -- scaffold one,
     # compile them against the project's lock, and start, read or stop a run.
@@ -350,6 +353,9 @@ PYTHON_COMMANDS = (
     "bin/slot.py",
     "bin/storage-admin.py",
     "bin/studio.py",
+    # Session 42 (ADR 0277): the plane's admission, ClickHouse's users, the
+    # state file; `telemetry_plane` holds what a test holds still.
+    "bin/telemetry.py",
     "bin/upgrade.py",
     # Session 32 (ADR 0228). Two verbs answered in this checkout -- `init` and
     # `validate`, both pure reads -- and four declared with real help that

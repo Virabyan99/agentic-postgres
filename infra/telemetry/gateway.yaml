@@ -1,0 +1,53 @@
+# The telemetry plane's gateway (Session 42, ADR 0277): the projects' pinned
+# contrib collector with its `clickhouse` exporter. Receives OTLP from the
+# projects' `metrics` collectors on `apg-telemetry-ingest` -- which already
+# stamped `project` from their own renders -- and writes `otel.otel_logs` as
+# ClickHouse's `gateway` user (no password: admitted by the telemetry network's
+# subnet). Logs only. Nothing in here varies by host, so it is a file, not a
+# render.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Beneath the container's 224m, as every collector here (ADR 0165).
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 176
+    spike_limit_mib: 44
+  batch:
+    timeout: 5s
+    send_batch_size: 5000
+
+exporters:
+  clickhouse:
+    endpoint: tcp://clickhouse:9000?dial_timeout=10s
+    database: otel
+    username: gateway
+    password: ""
+    # Issues CREATE DATABASE and CREATE TABLE at every start; the gateway user
+    # holds exactly those and INSERT on otel.* (D2603).
+    create_schema: true
+    logs_table_name: otel_logs
+    # The retention: ClickHouse drops whole parts older than 7 days.
+    ttl: 168h
+    timeout: 10s
+    sending_queue:
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 300s
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [clickhouse]

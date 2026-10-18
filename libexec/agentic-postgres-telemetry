@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#
+# Stable root-owned launcher for the telemetry plane (Session 42, ADR 0277).
+# Installed at /usr/local/libexec/agentic-postgres/telemetry.
+#
+# The edge launcher's indirection, unchanged in shape: resolve the installed
+# release recorded in root-owned edge state, prove it looks like a release, and
+# exec the bin/telemetry.sh inside it -- never a script in an operator's
+# working tree (runbook §4.2).
+#
+# Exit codes: 2 invalid input, 3 missing prerequisite; otherwise telemetry.sh's
+# own (9 the plane could not be brought up or down, 12 admission refused).
+
+set -euo pipefail
+
+readonly EDGE_STATE="/etc/agentic-postgres/edge-state.json"
+readonly HOST_MANIFEST="/etc/agentic-postgres/host.yaml"
+readonly RELEASE_ROOT="/opt/agentic-postgres/releases"
+
+die() {
+  local code="$1"
+  shift
+  printf 'agentic-postgres-telemetry: %s\n' "$*" >&2
+  exit "$code"
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: /usr/local/libexec/agentic-postgres/telemetry <up|down|status>
+
+Resolves the installed release recorded in /etc/agentic-postgres/edge-state.json
+and runs that release's bin/telemetry.sh. Not intended for direct operator use;
+systemd invokes it. Operators use bin/telemetry.sh from a checkout.
+USAGE
+}
+
+main() {
+  case "${1-}" in
+    --help|-h) usage; return 0 ;;
+    up|down|status) ;;
+    "") usage >&2; die 2 "a subcommand is required." ;;
+    *) usage >&2; die 2 "unknown subcommand: $1" ;;
+  esac
+
+  local action="$1"
+
+  [ "$(id -u)" -eq 0 ] || die 3 "must run as root."
+
+  [ -f "${EDGE_STATE}" ] || die 3 "missing ${EDGE_STATE}; run bin/provision-host.sh --apply first."
+  [ -L "${EDGE_STATE}" ] && die 2 "${EDGE_STATE} is a symlink, which is not accepted."
+  [ -f "${HOST_MANIFEST}" ] || die 3 "missing ${HOST_MANIFEST}."
+  [ -L "${HOST_MANIFEST}" ] && die 2 "${HOST_MANIFEST} is a symlink, which is not accepted."
+
+  command -v jq >/dev/null 2>&1 || die 3 "jq is not installed."
+
+  local commit release
+  commit="$(jq -r '.installed_release_commit // empty' "${EDGE_STATE}")"
+  [ -n "${commit}" ] || die 3 "${EDGE_STATE} records no installed release commit."
+  case "${commit}" in
+    *[!0-9a-f]* | "") die 2 "recorded release commit is not a hexadecimal commit: ${commit}" ;;
+  esac
+  [ "${#commit}" -eq 40 ] || die 2 "recorded release commit is not 40 characters: ${commit}"
+
+  release="${RELEASE_ROOT}/${commit}"
+  [ -d "${release}" ] || die 3 "installed release is missing: ${release}"
+  [ -L "${release}" ] && die 2 "installed release path is a symlink: ${release}"
+
+  local script="${release}/bin/telemetry.sh"
+  [ -x "${script}" ] || die 3 "installed release has no executable bin/telemetry.sh: ${script}"
+
+  local owner
+  owner="$(stat -c '%U' "${release}")"
+  [ "${owner}" = "root" ] || die 2 "installed release is owned by ${owner}, expected root."
+
+  exec "${script}" --host "${HOST_MANIFEST}" "${action}"
+}
+
+main "$@"

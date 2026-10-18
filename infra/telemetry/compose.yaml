@@ -1,0 +1,162 @@
+# The telemetry plane (Session 42, ADR 0277): ClickStack, bounded on the host.
+#
+# One per host, beside the edge and independent of every project. It holds
+# D1918's lines for the operator and nothing a customer reads: ClickHouse
+# stores them (7 days), HyperDX is the operator's UI over them with its own
+# login, MongoDB is HyperDX's own state, and the gateway is the SAME pinned
+# contrib collector every project runs, with its `clickhouse` exporter --
+# never ClickStack's OpAMP-supervised collector, whose pipeline the UI would
+# own (D2573).
+#
+# No published port and no router label on anything here (ADR 0277, threat item
+# 15). The operator reaches HyperDX by an SSH forward to its address on
+# `apg-telemetry-ui`, which `bin/telemetry.sh status` prints.
+#
+# Every network is EXTERNAL: `bin/telemetry.sh up` ensures them first, and a
+# project's runtime ensures the ingest network too, so a project never waits for
+# this plane (D2574). The paths under /etc/agentic-postgres/telemetry are
+# written by `telemetry.sh up` before this model starts.
+#
+# Invoke only through `bin/compose.sh --telemetry` (or `bin/telemetry.sh`):
+# calling `docker compose` directly lets inherited environment variables win
+# over --env-file.
+
+name: apg-telemetry
+
+services:
+  clickhouse:
+    image: ${CLICKHOUSE_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    restart: unless-stopped
+    # ADR 0244 from rig 42a's case 5 (100 lines/s, 30 min; ADR 0277): peak 285
+    # MiB / 185 pids -> 4x each, rounded up to 32 MiB. Sheet E1 re-reads them.
+    mem_limit: 1152m
+    pids_limit: 740
+    cpus: "1.0"
+    environment:
+      # The entrypoint must not write a `default` user of its own: the users
+      # are the mounted file's, admitted by the telemetry network's subnet.
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - type: bind
+        source: ./clickhouse/config.xml
+        target: /etc/clickhouse-server/config.d/apg.xml
+        read_only: true
+      - type: bind
+        source: /etc/agentic-postgres/telemetry/clickhouse-users.xml
+        target: /etc/clickhouse-server/users.d/apg.xml
+        read_only: true
+      - clickhouse-data:/var/lib/clickhouse
+    networks: [telemetry]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8123/ping | grep -q Ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  mongo:
+    image: ${MONGO_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    restart: unless-stopped
+    command: ["--wiredTigerCacheSizeGB", "0.25", "--bind_ip_all"]
+    # ADR 0244 from case 5: peak 107 MiB / 65 pids.
+    mem_limit: 448m
+    pids_limit: 260
+    cpus: "1.0"
+    volumes:
+      - mongo-data:/data/db
+    networks: [telemetry]
+    healthcheck:
+      test: ["CMD", "mongo", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  gateway:
+    image: ${OTEL_COLLECTOR_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    # A failed exporter start exits the whole collector (Run 4: without its
+    # grant, "cannot start pipelines"), so it restarts, and it waits for a
+    # healthy store first (D2603).
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/gateway.yaml"]
+    # ADR 0244 from case 5: peak 52.4 MiB / 8 pids (docker stats; the image has
+    # no shell to read its cgroup) -> 224 MiB, the pids floor.
+    mem_limit: 224m
+    pids_limit: 64
+    cpus: "1.0"
+    volumes:
+      - type: bind
+        source: ./gateway.yaml
+        target: /etc/otelcol/gateway.yaml
+        read_only: true
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks: [ingest, telemetry]
+
+  hyperdx:
+    image: ${HYPERDX_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    restart: unless-stopped
+    # D2578/D2600: the session secret from a file the image's user (uid 1000)
+    # can read, exported by this two-line wrapper -- never in this file, never
+    # in `docker inspect`'s Env. The rest is the image's own entrypoint.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - EXPRESS_SESSION_SECRET="$$(cat /run/apg/hyperdx-session)" exec sh /etc/local/entry.sh
+    # ADR 0244 from case 5: peak 420 MiB / 54 pids.
+    mem_limit: 1696m
+    pids_limit: 216
+    cpus: "1.0"
+    environment:
+      MONGO_URI: mongodb://mongo:27017/hyperdx
+      # The operator's forward lands on localhost:18080; HyperDX's session
+      # cookie is Domain=localhost (D2602).
+      FRONTEND_URL: http://localhost:18080
+      HYPERDX_APP_URL: http://localhost
+      HYPERDX_APP_PORT: "8080"
+      HYPERDX_API_PORT: "8000"
+      HYPERDX_LOG_LEVEL: info
+      SERVER_URL: http://127.0.0.1:8000
+      # D2601: the image phones home by default and the UI bridge has egress.
+      USAGE_STATS_ENABLED: "false"
+      OTEL_SDK_DISABLED: "true"
+    volumes:
+      - type: bind
+        source: /etc/agentic-postgres/telemetry/hyperdx-session
+        target: /run/apg/hyperdx-session
+        read_only: true
+    depends_on:
+      mongo:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    networks: [telemetry, ui]
+
+networks:
+  # internal: the gateway and every project's `metrics` collector -- nothing
+  # else. Only a collector stamps `project`, so only a collector may send.
+  ingest:
+    name: apg-telemetry-ingest
+    external: true
+  # internal: the four services.
+  telemetry:
+    name: apg-telemetry
+    external: true
+  # A plain bridge holding HyperDX alone: the host's route for the operator's
+  # SSH forward. Nothing publishes it.
+  ui:
+    name: apg-telemetry-ui
+    external: true
+
+volumes:
+  clickhouse-data:
+  mongo-data:

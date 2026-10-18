@@ -246,6 +246,21 @@ verb_containers() {
           printf '%-34s %-26s %s\n' "${name}" "${status}" "${networks}"
         done
   done
+
+  # The telemetry plane (Session 42, ADR 0277): one per host, a fixed compose
+  # project. Said when absent rather than omitted, so "not installed" reads
+  # differently from "the listing forgot it".
+  printf '\n-- apg-telemetry (platform)\n'
+  local plane
+  plane="$(docker ps -a --filter 'label=com.docker.compose.project=apg-telemetry' \
+    --format '{{.Names}}\t{{.Status}}\t{{.Networks}}')"
+  if [ -z "${plane}" ]; then
+    printf '   (no container; the telemetry plane is not installed or was removed)\n'
+  else
+    printf '%s\n' "${plane}" | while IFS=$'\t' read -r name status networks; do
+      printf '%-34s %-26s %s\n' "${name}" "${status}" "${networks}"
+    done
+  fi
 }
 
 verb_labels() {

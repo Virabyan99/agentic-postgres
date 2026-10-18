@@ -23,6 +23,8 @@
 #   sudo bin/compose.sh <generated-project-dir> --runtime <subcommand> [...]
 #   bin/compose.sh --edge --host <host.yaml> [compose arguments...]
 #   sudo bin/compose.sh --edge --host <host.yaml> --runtime <subcommand> [...]
+#   bin/compose.sh --telemetry [compose arguments...]
+#   sudo bin/compose.sh --telemetry --runtime <subcommand> [...]
 #
 # Exit codes (runbook §2 convention):
 #   0   success (or Compose's own status)
@@ -42,6 +44,9 @@ readonly ROOT_DIR
 readonly LOCK_ENV="${ROOT_DIR}/versions.env"
 readonly PROJECT_MODEL="${ROOT_DIR}/compose.yaml"
 readonly EDGE_MODEL="${ROOT_DIR}/infra/edge/compose.yaml"
+readonly TELEMETRY_MODEL="${ROOT_DIR}/infra/telemetry/compose.yaml"
+# The plane's compose project: one per host, the model's own `name:` (ADR 0277).
+readonly TELEMETRY_PROJECT="apg-telemetry"
 
 # Subcommands that create or start a container. Refused unless --runtime is
 # given AND the caller is root. The first eight are unchanged from Session 1;
@@ -117,6 +122,7 @@ readonly OVERRIDE_REQUIRED="up restart run"
 
 RUNTIME=0
 EDGE=0
+TELEMETRY=0
 HOST_MANIFEST=""
 PROJECT_DIR=""
 TEMP_ENV=""
@@ -136,12 +142,16 @@ Usage:
   sudo bin/compose.sh <generated-project-dir> --runtime <subcommand> [...]
   bin/compose.sh --edge --host <host.yaml> [compose arguments...]
   sudo bin/compose.sh --edge --host <host.yaml> --runtime <subcommand> [...]
+  bin/compose.sh --telemetry [compose arguments...]
+  sudo bin/compose.sh --telemetry --runtime <subcommand> [...]
 
   <generated-project-dir>  A directory produced by ./deploy.sh --render-only,
                            containing compose.env.
   --edge                   Operate on the shared host edge plane
                            (infra/edge/compose.yaml) instead of a project.
   --host FILE              Required with --edge. The host manifest.
+  --telemetry              Operate on the host's telemetry plane
+                           (infra/telemetry/compose.yaml, ADR 0277).
   --runtime                Permit container-starting subcommands. Requires root.
 
 Examples:
@@ -273,6 +283,7 @@ parse_arguments() {
     case "$1" in
       --help|-h) usage; exit 0 ;;
       --edge) EDGE=1; shift ;;
+      --telemetry) TELEMETRY=1; shift ;;
       --runtime) RUNTIME=1; shift ;;
       --host)
         [ "$#" -ge 2 ] || die 2 "--host requires a file path."
@@ -282,7 +293,8 @@ parse_arguments() {
     esac
   done
 
-  if [ "${EDGE}" -eq 0 ]; then
+  [ "${EDGE}" -eq 0 ] || [ "${TELEMETRY}" -eq 0 ] || die 2 "--edge and --telemetry are two scopes; give one."
+  if [ "${EDGE}" -eq 0 ] && [ "${TELEMETRY}" -eq 0 ]; then
     if [ "$#" -lt 1 ]; then
       usage >&2
       die 2 "a generated project directory is required."
@@ -328,6 +340,16 @@ configure_edge_scope() {
 
   PROJECT_NAME="$(read_var "${TEMP_ENV}" EDGE_STACK_NAME)"
   [ -n "${PROJECT_NAME}" ] || die 2 "EDGE_STACK_NAME could not be derived."
+}
+
+# The telemetry plane (ADR 0277): its model and its fixed project name. It has
+# no environment of its own -- its images come from the lock, its paths and
+# names are the model's literals -- so the lock is its only env file.
+configure_telemetry_scope() {
+  [ -f "${TELEMETRY_MODEL}" ] || die 3 "missing ${TELEMETRY_MODEL}"
+  MODEL="${TELEMETRY_MODEL}"
+  MODEL_FILE_ARGS=(--file "${MODEL}")
+  PROJECT_NAME="${TELEMETRY_PROJECT}"
 }
 
 configure_project_scope() {
@@ -440,6 +462,8 @@ main() {
 
   if [ "${EDGE}" -eq 1 ]; then
     configure_edge_scope
+  elif [ "${TELEMETRY}" -eq 1 ]; then
+    configure_telemetry_scope
   else
     configure_project_scope
   fi
@@ -469,7 +493,8 @@ main() {
     # router labels. Missing it here must fail loudly rather than start a
     # container that --wait reports healthy and the edge 404s on. Checked only
     # in project scope -- --edge has no override.
-    if [ "${EDGE}" -eq 0 ] && in_list "${subcommand}" "${OVERRIDE_REQUIRED}"; then
+    if [ "${EDGE}" -eq 0 ] && [ "${TELEMETRY}" -eq 0 ] \
+      && in_list "${subcommand}" "${OVERRIDE_REQUIRED}"; then
       [ -f "${OVERRIDE_PATH}" ] \
         || die 3 "no runtime override for ${PROJECT_KEY} at ${OVERRIDE_PATH}; the project is unroutable without it."
       # Same rule, same reason. Without the grant surface every service starts
@@ -506,6 +531,9 @@ main() {
         if [ "${EDGE}" -eq 1 ]; then
           die 2 "--volumes is refused in edge mode; it endangers ACME state."
         fi
+        if [ "${TELEMETRY}" -eq 1 ]; then
+          die 2 "--volumes is refused in telemetry mode; its volumes are the operator's saved searches and lines."
+        fi
         die 2 "--volumes is refused in project mode; it would destroy the database volume."
         ;;
     esac
@@ -516,7 +544,7 @@ main() {
       || die 3 "the Docker daemon is unreachable, which '${subcommand}' requires. ('config' does not.)"
   fi
 
-  if [ "${RUNTIME}" -eq 1 ] && [ "${EDGE}" -eq 0 ] \
+  if [ "${RUNTIME}" -eq 1 ] && [ "${EDGE}" -eq 0 ] && [ "${TELEMETRY}" -eq 0 ] \
     && in_list "${subcommand}" "${VALIDATES_SECRETS}"; then
     assert_secret_sources_are_project_scoped "${PROJECT_KEY}"
   fi

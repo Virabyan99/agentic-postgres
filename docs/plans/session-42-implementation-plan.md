@@ -3,14 +3,14 @@
 **Status: EXECUTING since 2026-10-18.** Run 1 **in part** (the rigs 42a,
 42b, 42c; ADRs 0277, 0278, 0279; the threat list) -- **sitting U blocked: OVH
 out of stock in US-EAST-VA-2 (D2598)**; the operator chose to continue the
-code runs and retry; U0-U3, E0 and E1 complete Run 1 before Run 10. **Run 2
-done.** Rows **D2561–D2590** at planning,
+code runs and retry; U0-U3, E0 and E1 complete Run 1 before Run 10. **Runs 2,
+3 and 4 done.** Rows **D2561–D2590** at planning,
 **D2591–D2596** added 2026-10-18 (the operator's amendment of Sessions
 43–45: web-first, the browser SQL editor, the split, and three of Session
 43's choices — recorded here because this plan holds the next free numbers;
-none changes a run of this session), **D2597–D2607** by the runs. ADRs
+none changes a run of this session), **D2597–D2612** by the runs. ADRs
 **0277–0279** written (0277's limits re-read by E1).
-**NEXT FREE: D2608, ADR 0280.**
+**NEXT FREE: D2613, ADR 0280.**
 
 The seventh session of Stage 5 and the second half of the operator's split
 (D2510): the stage plan's *Session 42* brief (`docs/plans/stage-5-plan.md` §5
@@ -476,7 +476,7 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2595** | D2591 point 4: *"How the console holds its session (memory, or an `HttpOnly`, `SameSite=Strict` cookie with a CSRF rule) is that plan's decision and an ADR."* | The CLI holds a bearer token from `/v1/sessions`; the console does not exist. Session 44's editor will hold a customer's database password in a page (D2592). | **The operator, 2026-10-18: a cookie on the API's own origin.** The console is served from **`control.agenticpostgresql.com`**, the origin of `/v1` (no CORS, no cross-site cookie); the session is an **`HttpOnly`, `Secure`, `SameSite=Strict` cookie** set by the session route for the console, its lifetime the existing session's, login still requiring the TOTP code; **every write also checks `Origin`** (or a header only the console's own pages send) as the CSRF rule. **Not** page memory (a re-login and a TOTP code on every refresh), **not** `localStorage` (readable by any script on the page). The CLI and API keys keep bearer tokens, unchanged. | No script on the page can read the session, which matters most on the page that will hold a database password. | ADR (Session 43) |
 | **D2596** | D2591, *Must not (added)*: *"a third-party script or tracker on the site or the console without an operator decision recorded."* | Neither the site nor the console exists. | **The operator, 2026-10-18.** **The console: no third-party script, ever** — no analytics, widget or CDN library; every asset served from our own files under a strict Content-Security-Policy (a test reads the CSP and every `<script src>`). **The public site: no tracker**; traffic read from Cloudflare Pages' own numbers, which need nothing on the page; **Cloudflare Web Analytics** (cookieless, built into Pages) only if the operator later asks for more; fonts and images self-hosted, no external CDN. No Google Analytics, no ad tracker, no cookie banner needed. | The page that holds a customer's password runs only our code; a product sold on care with data does not hand its visitors to a third party. | ADR (Session 43) |
 
-**Rows the runs add** (execution order; **next free D2608**):
+**Rows the runs add** (execution order; **next free D2613**):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -491,6 +491,11 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2605** | D2576: ClickHouse bounded by `max_server_memory_usage` and the logs table's TTL. | ClickHouse's default server config keeps its own system log tables (`query_log`, `trace_log`, `metric_log`, `text_log`, `part_log`, ... ) with no TTL of ours -- disk the plane's TTL does not bound -- and sizes `mark_cache_size` at 5 GiB by default. | **The plane's `config.d` file also removes the system log tables and sets `mark_cache_size` 256 MiB, `index_mark_cache_size` 64 MiB, `uncompressed_cache_size` 0** (rig 42a ran so); `test_telemetry_plane.py::test_the_store_has_a_ceiling_and_a_ttl` reads them. | A store bounded in its customer table and unbounded in its own is not bounded. | 0277 |
 | **D2606** | D2565: *"A new lint or destructive finding in an APPLIED release or control migration is §9's stop."* | The quote-aware reader (Run 2) changed `statements()` for **27 of 51 templates** and found **seven real `DROP FUNCTION`s the old reader hid** behind a `--` inside a `COMMENT ON ... IS '...'` literal: release `0025` (`app_private.auth_lookup_agent`, `app_private.auth_rotate_agent_secret`; the cut at its line 57), `0028` (`api.agent_audit_begin`; line 112), control `0004` (`app.control_get_operation`, `app.control_get_project`, `app.control_list_operations`, `app.control_list_projects`; line 144). The lint and the published surface: **unchanged** for the release, control and example sets; the example set's findings unchanged. The only reader of the findings is `bin/migrate.py propose` (a project set's proposal); no test re-derives a committed proposal's list. | **The operator, 2026-10-18: proceed.** Nothing is amended (D912); the six committed control proposals keep the lists they recorded (what their reviewer saw); Run 6's `0009` proposal will name the four `0004` drops its predecessors did not. | A finding that was always true and was hidden by the reader is the defect D2544 named, not a new one. | -- |
 | **D2607** | Run 2's battery (e): *"`''` escape handling removed -> the guard FAILED on a template that holds `''`"*. | Closing a literal and reopening it at once reads exactly as an escaped quote does, for a reader that only removes comments -- so the mutation could not fail any test (D493, uninformative). | **The scanner has no `''` case** (its docstring says why); battery (e) became *the identifier state removed* (`test_a_comment_after_a_literal_is_dropped` FAILED). | Untestable code is removed, not kept with a mutation that cannot see it. | -- |
+| **D2608** | D2577: *"`capacity_probe.read` adds `committed["apg-telemetry"] = charge_mb` when the file exists"*. | `Reading.committed` is read by every caller as PROJECTS (`len(reading.committed)` "project(s)"); Session 40 put the branches' charge in its own member for exactly that reason (`capacity_reading.py`, *"Kept out of `committed` because every reader of that one counts PROJECTS"*), read from `root.parent / "branches"`. | **The tree's precedent**: `Reading.platform` (keyed `apg-telemetry`), summed into `committed_total_mb`, named on both committed lines (`; apg-telemetry (platform) 3520`, `capacity_reading.decide` and `diagnosis`'s doctor line, JSON pairs too), read from `root.parent / "telemetry" / "state.json"` by `telemetry_plane.read_charge`; `exclude_platform=True` is the plane deciding about itself. | A charge that is not a project's does not change what "N project(s)" counts. | 0277 |
+| **D2609** | D2573: the three images *"recorded in `versions.env` as `CLICKHOUSE_IMAGE`, `HYPERDX_IMAGE`, `MONGO_IMAGE`"*. | `versions.env` is GENERATED by `bin/lock-versions.sh --update` from `versions.in.yaml`; a plain `--update` re-resolves every image, and **all four moving tags had moved** since the lock of 2026-10-09 (measured 2026-10-18: `pgvector:pg18`, `traefik:v3.7`, `python:3.12-slim`, `node:22-alpine` -- an unmeasured PostgreSQL among them, D238's hazard). `--packages-only` refuses an image absent from the lock. ClickStack's own compose names `clickhouse-server:26.8-alpine` and HyperDX's major `2` -- both moving. | **`lock-versions.sh --update --add-images`**: carries every locked digest byte for byte and resolves only names the lock does not hold. The three images by EXACT tag: `clickhouse-server:26.8.30.8-alpine` (the same index digest rig 42a ran, `2ad32242…`), `hyperdx:2.41.0`, `mongo:5.0.32-focal`. `versions.env` gained exactly three lines; `--check` current. | A new name has no old digest that could lie; resolving it is the one re-resolve that couples nothing. | 0277, 0083 |
+| **D2610** | Run 4: *"`rendering.build_gateway_config()` (the gateway's collector config ... rendered into `/etc/agentic-postgres/telemetry/`)"*. | Nothing in the gateway's configuration varies by host or project (receiver ports, the store's service name, database, user, TTL, queue). | **A committed file, `infra/telemetry/gateway.yaml`**, mounted read-only from the model's directory like ClickHouse's `config.d` file; `test_telemetry_plane.py::test_the_gateway_is_the_pinned_collector` reads it. Only the users file is rendered (the subnet is Docker's). | A render of constants is a second place for the same text. | 0277 |
+| **D2611** | Run 4: *"`bin/telemetry.sh` (... `compose up -d --wait` ...)"*. | Every model in the tree is invoked through `bin/compose.sh` (the edge's header: *"Calling `docker compose` directly lets inherited environment variables win over --env-file"*), whose allowlist, root gate and `--volumes` refusal are tested. | **`bin/compose.sh --telemetry`**: the model `infra/telemetry/compose.yaml`, the fixed project `apg-telemetry`, the lock as the only env file; container-starting verbs need `--runtime` and root; **`--volumes` refused** (the operator's saved searches and up to 7 days of lines); `--edge` and `--telemetry` together refused. `telemetry.sh` calls it. | One wrapper for every model is one set of refusals. | 0277 |
+| **D2612** | -- (found by Run 4's own test). | The first `test_the_plane_is_refused_when_it_does_not_fit` run on this workstation, where `/etc/agentic-postgres` exists 0700 root: `bin/telemetry.py admit` **crashed with exit 1** -- `Path.exists()` raises `PermissionError` (pathlib swallows only not-found errors) -- instead of refusing. | **`telemetry_plane.read_charge` treats an unreadable state file as UNREADABLE** (`decide` refuses on it) and `admit` treats an unreadable `is_file` as not-installed wording only; an unprivileged `admit` now prints `committed undetermined: ... Permission denied` and refuses. | A decision fails closed; a crash is neither outcome (ADR 0195). | 0195 |
 
 ---
 
@@ -966,7 +971,12 @@ tests whose fake catalog did not know the new questions (taught a healthy
 cluster's answers, before its generic `pg_extension` answer that the schema
 question also matches) and the ADR index's status for 0277 (the guard takes
 `Accepted, …`, not a parenthesis); the two modules re-run: **58 passed**. ADR
-0277 written meanwhile from case 5 (Run 1's `Done`).
+0277 written meanwhile from case 5 (Run 1's `Done`). Committed as **358cd42**;
+**CI 39103028583: failure** -- `test_branch_plan.py::test_the_persistent_service_cannot_reach_the_repository`
+(1 failed, 7,989 passed): it pins a branch's persistent settings one by one
+and reads the plan's `argv`, so the grep for `persistent_command` did not find
+it (D979's lesson, again). Fixed forward in **1e975d8** (the exact equality
+gains the five settings as literals; 15/15).
 
 ### Run 4 — the telemetry plane (`infra/telemetry/`, `bin/`, `systemd/`, `libexec/`, `src/`)
 
@@ -1005,6 +1015,57 @@ the `exit 12` path skipped in `up` → FAILED; **control**:
 `test_cli_contract`, `test_diagnostic_surface`, `test_host_infrastructure`,
 `test_repository_contract` if `src/` gained a module, `test_acceptance_registry`,
 `test_environment_gates`, the sweep-selector guard. Commit, push, CI by SHA.
+
+**Done, 2026-10-18 (the limits from rig 42a's case 5; E1 re-reads them --
+D2598).** Measured first (`~/s42/run4/grants.sh`, `grants-d.sh`; contrib 0.159.0
+against ClickHouse 26.8.30.8): the exporter's `create_schema` issues `CREATE
+DATABASE` at every start, so with `INSERT` alone, or `CREATE TABLE` + `INSERT`
+over a pre-created database, **the whole gateway exits** (*"cannot start
+pipelines: failed to start "clickhouse" exporter: ... necessary to have the
+grant CREATE DATABASE ON otel.\*"*); `CREATE DATABASE` + `CREATE TABLE` +
+`INSERT` (no `SELECT`) wrote 5/5 rows, as did the four-grant control (**D2603
+resolved**: ADR 0277 item 7). Then (`~/s42/run4/drift.sh`): every moving tag had
+moved since the lock (**D2609**) -- `lock-versions.sh --update --add-images`
+written, the three images added by exact tag, `versions.env` +3 lines, `--check`
+current. Built: `infra/telemetry/compose.yaml` (four services, the limits by ADR
+0244's rule from case 5, `restart: unless-stopped`, three external networks,
+HyperDX's wrapper, `USAGE_STATS_ENABLED "false"`, `OTEL_SDK_DISABLED "true"`),
+`infra/telemetry/gateway.yaml` (**D2610**), `infra/telemetry/clickhouse/config.xml`
+(`max_server_memory_usage` 966,367,641 = 80 % of 1152m; system logs removed);
+`src/agentic_postgres/telemetry_plane.py` (names, `charge_mb` = **3,520**, the
+users file, the state file and its reader); `Reading.platform` in
+`capacity_reading`, read by `capacity_probe.read`, named by `decide` and the
+doctor (**D2608**); `bin/telemetry.py` (`admit`, `render-users`, `write-state`,
+`charge`); `bin/telemetry.sh` (`up`: admission first, the three networks through
+`bin/lib/telemetry-network.sh`'s ensure-with-re-read, the secret once `0440
+root:1000`, the users for the real subnet, the state file, `compose.sh
+--telemetry --runtime up -d --wait`; `down` keeps volumes and networks and
+removes the charge; `status`); `bin/compose.sh --telemetry` (**D2611**);
+`libexec/agentic-postgres-telemetry`; `systemd/agentic-postgres-telemetry.service`
+(installed by `provision-host.sh`'s existing globs -- no change); `apg-diag
+containers`'s `-- apg-telemetry (platform)` section. Offline checks: the model
+renders through `compose.sh --telemetry config` with no `ports`; `-v`, a
+two-scope call and an `up` without `--runtime` refused; `up` as non-root exit 3.
+Tests: `test_telemetry_plane.py` (7), `test_telemetry_admission.py` (4; the
+last runs the real `telemetry.sh up` with a fake `docker` and `id` and reads
+exit 12 before any network), `test_process_limits::test_the_telemetry_plane_is_bounded`,
+`test_host_infrastructure` (the unit and launcher registered; the unit orders
+after nothing of a project's), `test_diagnostic_surface::test_containers_lists_the_telemetry_plane`,
+`test_cli_contract` (`telemetry.sh`, `telemetry.py`). The admission test found
+**D2612** (an unprivileged `admit` crashed on EACCES; fixed: unreadable, refused).
+**Battery** (`~/s42/run4/battery4.py`): **5 of 5 killed** -- (a) a `mem_limit`
+dropped, (b) a port added to HyperDX, (c) the charge dropped from
+`capacity_probe`, (d) the exit-12 path skipped in `up`, (e) the network re-read
+removed -- each target FAILED, control `test_the_edge_plane_is_bounded` PASSED,
+every file restored `cmp`-equal. **Targeted** (once; 16 named modules plus every
+module that reads `decide(`, `capacity_probe`, `capacity_reading`,
+`platform_text` or `committed_total`): **1,769 passed, 2 failed** -- the new
+diagnostic test's helper (`mkdir` without `parents`) and
+`test_a_stopped_project_does_not_end_the_listing`, which pins the listing's
+section headers exactly (now ending with the plane's, a stricter list); ruff's
+nine findings fixed (a file name flagged as a password, two `ElementTree` parses
+of the repository's own files, a missing import, five long lines); the three
+touched modules re-run: **66 passed**.
 
 ### Run 5 — the logs: the collectors' pipeline and the services' export
 
