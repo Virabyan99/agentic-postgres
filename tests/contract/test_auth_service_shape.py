@@ -18,6 +18,7 @@ import pytest
 import yaml
 
 from agentic_postgres import REPO_ROOT, auth_profile, config, rendering
+from app import log_setup
 from app import main as main_module
 from app import settings as settings_module
 
@@ -323,9 +324,14 @@ def test_the_compose_service_supplies_every_setting_the_service_requires(
     added here rather than to either declaration. It is genuinely required: the
     entrypoint is `--factory app.main:create_app`, called with no arguments, so
     this variable is the only thing deciding which router is mounted.
+
+    `APG_OTLP_LOGS_ENDPOINT` (Session 42, ADR 0277, D2575) is the same shape:
+    read by `create_app`'s first call, `log_setup.configure_logging`, never by
+    `settings.load`, and optional -- unset means no export. It is named from
+    `log_setup` here, so the declaration and this list cannot drift apart.
     """
     supplied = set(compose_model["services"][service]["environment"])
-    required = set(declared) | {"APP_MODE"}
+    required = set(declared) | {"APP_MODE", log_setup.OTLP_ENDPOINT_VARIABLE}
 
     assert required - supplied == set(), (
         f"the service requires {sorted(required - supplied)} for `{service}`, which "
@@ -354,7 +360,11 @@ def test_the_auth_mode_reads_no_new_variable(compose_model: dict[str, Any]) -> N
     all but name.
     """
     supplied = set(compose_model["services"]["auth"]["environment"])
-    assert supplied == set(settings_module.REQUIRED_VARIABLES) | {"APP_MODE"}
+    # Session 42 (ADR 0277): the one variable the telemetry export added, read
+    # by `log_setup` at `create_app`, beside APP_MODE -- named, never inferred.
+    assert supplied == set(settings_module.REQUIRED_VARIABLES) | {
+        "APP_MODE", log_setup.OTLP_ENDPOINT_VARIABLE,
+    }  # fmt: skip
 
     for relative in (
         "app/workflow_worker.py",

@@ -593,6 +593,97 @@ def test_two_projects_get_two_labels() -> None:
     assert "project: beta-dev" not in alpha
 
 
+# ---------------------------------------------------------------------------
+# Session 42 (ADR 0277, D2574, D2604): the logs pipeline
+# ---------------------------------------------------------------------------
+
+
+def _collector(key: str = "beta-dev") -> dict:
+    return yaml.safe_load(
+        rendering.build_otel_config(naming.project_router_names(key.split("-")[0]), DOMAIN, key)
+    )
+
+
+def test_the_logs_pipeline_stamps_the_project() -> None:
+    """Every log record leaving a project's collector names the project the
+    RENDER knows, by `upsert` -- a payload that claimed another project is
+    overwritten (rig 42a: `project=other` arrived as `beta-dev`; an `insert`
+    would have kept the forgery). The stamp runs before the batch; the
+    metrics pipeline is exactly what it was before Session 42."""
+    config = _collector("beta-dev")
+    stamp = config["processors"]["resource/project"]["attributes"]
+    assert stamp == [{"key": "project", "value": "beta-dev", "action": "upsert"}]
+    pipelines = config["service"]["pipelines"]
+    assert set(pipelines) == {"metrics", "logs"}
+    assert pipelines["logs"] == {
+        "receivers": ["otlp"],
+        "processors": ["memory_limiter", "resource/project", "batch"],
+        "exporters": ["otlp_http/gateway"],
+    }
+    assert pipelines["metrics"] == {
+        "receivers": ["otlp", "prometheus"],
+        "processors": ["memory_limiter", "batch"],
+        "exporters": ["prometheus"],
+    }
+    alpha = _collector("alpha-dev")["processors"]["resource/project"]["attributes"][0]
+    assert alpha["value"] == "alpha-dev"
+
+
+def test_the_export_queue_is_bounded() -> None:
+    """The exporter to the plane is bounded in memory and in time: 1,000
+    queued batches, 60 s of retries, then dropped -- behind the collector's
+    own `memory_limiter` (rig 42a case 7: the gateway stopped ten minutes, the
+    collector stayed at 66 of 192 MiB and kept serving its scrape). It goes to
+    the gateway's explicit alias on the host, named `otlp_http` (contrib
+    0.159 deprecates `otlphttp`, D2604); no other exporter is added."""
+    from agentic_postgres import telemetry_plane
+
+    exporters = _collector()["exporters"]
+    assert set(exporters) == {"prometheus", "otlp_http/gateway"}
+    gateway = exporters["otlp_http/gateway"]
+    assert gateway["endpoint"] == telemetry_plane.GATEWAY_OTLP_HTTP
+    assert gateway["endpoint"] == "http://apg-telemetry-gateway:4318"
+    assert gateway["sending_queue"] == {"queue_size": 1000}
+    assert gateway["retry_on_failure"] == {"enabled": True, "max_elapsed_time": "60s"}
+
+
+def test_the_collector_joins_the_ingest_network_and_the_runtime_ensures_it() -> None:
+    """`metrics` -- and no other project service -- joins the host's telemetry
+    ingest network, external, by the name `telemetry_plane` holds; the three
+    services that run `create_app` send their lines to it; the plane's
+    gateway answers there by the alias the collector sends to; and
+    `project-runtime.sh` ensures the network immediately before EVERY compose
+    `up` and `start` (an external network Compose will not create)."""
+    from agentic_postgres import telemetry_plane
+
+    model = yaml.safe_load((REPO_ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    assert model["networks"]["telemetry-ingest"] == {
+        "name": telemetry_plane.INGEST_NETWORK, "external": True,
+    }  # fmt: skip
+    joined = [
+        name for name, service in model["services"].items()
+        if "telemetry-ingest" in (service.get("networks") or [])
+    ]  # fmt: skip
+    assert joined == ["metrics"], joined
+    for service in ("auth", "storage", "mcp"):
+        environment = model["services"][service]["environment"]
+        # `.get`, never a subscript: a subscripted `APG_` key reads as an
+        # environment gate to test_environment_gates (D2381).
+        assert environment.get("APG_OTLP_LOGS_ENDPOINT") == "http://metrics:4318/v1/logs", service
+    plane = yaml.safe_load((REPO_ROOT / "infra/telemetry/compose.yaml").read_text(encoding="utf-8"))
+    aliases = plane["services"]["gateway"]["networks"]["ingest"]["aliases"]
+    assert aliases == [telemetry_plane.GATEWAY_ALIAS]
+    runtime = (REPO_ROOT / "bin" / "project-runtime.sh").read_text(encoding="utf-8").splitlines()
+    starts = [
+        i for i, line in enumerate(runtime)
+        if "bin/compose.sh" in line
+        and any(word in line + runtime[i + 1] for word in ("up -d", "start --wait"))
+    ]  # fmt: skip
+    assert len(starts) == 3, starts
+    for index in starts:
+        assert runtime[index - 1].strip() == "ensure_ingest", runtime[index - 1]
+
+
 def test_configure_with_an_endpoint_creates_both_instruments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

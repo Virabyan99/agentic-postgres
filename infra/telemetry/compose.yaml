@@ -99,7 +99,12 @@ services:
     depends_on:
       clickhouse:
         condition: service_healthy
-    networks: [ingest, telemetry]
+    networks:
+      # The projects' collectors send to this alias (telemetry_plane.GATEWAY_ALIAS),
+      # never to the generic service name.
+      ingest:
+        aliases: [apg-telemetry-gateway]
+      telemetry: {}
 
   hyperdx:
     image: ${HYPERDX_IMAGE:?required}

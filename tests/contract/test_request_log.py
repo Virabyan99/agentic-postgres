@@ -38,7 +38,9 @@ def _strip() -> None:
     for name in log_setup.LOGGERS:
         logger = logging.getLogger(name)
         for handler in list(logger.handlers):
-            if getattr(handler, log_setup.MARKER, False):
+            if getattr(handler, log_setup.MARKER, False) or getattr(
+                handler, log_setup.OTLP_MARKER, False
+            ):
                 logger.removeHandler(handler)
         logger.propagate = True
         logger.setLevel(logging.NOTSET)
@@ -143,3 +145,79 @@ def test_no_line_is_printed_twice(
     assert len(_request_lines(out)) == 1, out
     captured = [r for r in caplog.records if r.getMessage().startswith("apg.http.request ")]
     assert len(captured) == 1, "the request record did not propagate to the root logger"
+
+
+# ---------------------------------------------------------------------------
+# Session 42 (ADR 0277, D2575, D2613): the same lines exported over OTLP
+# ---------------------------------------------------------------------------
+
+
+def _otlp_handler() -> Any:
+    (handler,) = [
+        h for h in logging.getLogger("apg").handlers if getattr(h, log_setup.OTLP_MARKER, False)
+    ]
+    return handler
+
+
+def test_the_exported_record_is_the_line_and_nothing_else() -> None:
+    """With `APG_OTLP_LOGS_ENDPOINT` set, each line is also exported -- its
+    body the message alone and its level, NO attribute, and nothing of the
+    exception, the stack or the `extra` a caller attached: a planted token in
+    the exception, a planted value in `extra`, and the word `Traceback` are
+    absent from the exported record. Installed once (idempotent), beside the
+    stdout handler, never instead of it."""
+    from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
+
+    exporter = InMemoryLogRecordExporter()
+    environ = {"APG_OTLP_LOGS_ENDPOINT": "http://metrics:4318/v1/logs", "APP_MODE": "auth"}
+    log_setup.configure_logging(environ, exporter=exporter)
+    log_setup.configure_logging(environ, exporter=exporter)
+    for name in log_setup.LOGGERS:
+        handlers = logging.getLogger(name).handlers
+        assert sum(bool(getattr(h, log_setup.OTLP_MARKER, False)) for h in handlers) == 1, name
+        assert sum(bool(getattr(h, log_setup.MARKER, False)) for h in handlers) == 1, name
+    line = 'apg.http.request {"route": "/api/rest/items", "status": 200}'
+    try:
+        raise ValueError(PLANTED_TOKEN)
+    except ValueError:
+        logging.getLogger("apg.http").info(
+            line, exc_info=True, stack_info=True, extra={"caller": PLANTED_QUERY}
+        )
+    _otlp_handler()._provider.force_flush()
+    (exported,) = exporter.get_finished_logs()
+    record = getattr(exported, "log_record", exported)
+    assert record.body == line
+    assert record.severity_text == "INFO"
+    assert dict(record.attributes or {}) == {}
+    everything = repr(exported) + repr(record.body) + repr(dict(record.attributes or {}))
+    for planted in (PLANTED_TOKEN, PLANTED_QUERY, "Traceback", "stack_info"):
+        assert planted not in everything, planted
+
+
+def test_a_slow_exporter_does_not_block_a_request() -> None:
+    """The handler queues; the batch processor exports from its own thread.
+    With an exporter that takes half a second per call, 500 lines are logged
+    in well under one export's time -- a request never waits for the plane
+    (ADR 0277's invariant: optional detail never destabilises the service)."""
+    import time
+
+    from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
+
+    class Slow(InMemoryLogRecordExporter):
+        delay = 0.5
+
+        def export(self, batch: Any) -> Any:
+            time.sleep(self.delay)
+            return super().export(batch)
+
+    exporter = Slow()
+    log_setup.configure_logging(
+        {"APG_OTLP_LOGS_ENDPOINT": "http://metrics:4318/v1/logs"}, exporter=exporter
+    )
+    started = time.perf_counter()
+    for index in range(500):
+        logging.getLogger("apg.http").info('apg.http.request {"n": %d}', index)
+    elapsed = time.perf_counter() - started
+    exporter.delay = 0
+    _otlp_handler()._provider.shutdown()
+    assert elapsed < 0.4, f"500 lines took {elapsed:.3f} s against a 0.5 s exporter"

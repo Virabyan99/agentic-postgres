@@ -1314,6 +1314,11 @@ services:
     # off the host (ADR 0147). Session 14 does not add a second.
     networks:
       - edge
+      # Session 42 (ADR 0277, D2574): the host's telemetry ingest network --
+      # this collector and the plane's gateway, nothing else. External, and
+      # ensured by bin/project-runtime.sh before every up/start, so a project
+      # never waits for the plane (bin/lib/telemetry-network.sh).
+      - telemetry-ingest
 
 
   # Session 14 Run 5's metrics store (ADR 0168), and the thing that EVALUATES a
@@ -1514,6 +1519,10 @@ services:
       # so a render that forgot it fails `compose config` instead of starting
       # the auth plane by default.
       APP_MODE: ${AUTH_APP_MODE:?required}
+      # Session 42 (ADR 0277, D2575): D1918's lines also exported over OTLP
+      # to this project's own collector -- the message only, bounded, never
+      # blocking a request (app/log_setup.py).
+      APG_OTLP_LOGS_ENDPOINT: http://metrics:4318/v1/logs
       APG_PROJECT_KEY: ${PROJECT_KEY:?required}
       APG_PROJECT_ENVIRONMENT: ${PROJECT_ENVIRONMENT:?required}
       # The project's JWT identity, and the same two variables PostgREST's
@@ -1830,6 +1839,10 @@ services:
       # reason applied to behaviour: an image that picked a mode by omission
       # would start the wrong service with a correct-looking configuration.
       APP_MODE: storage
+      # Session 42 (ADR 0277, D2575): D1918's lines also exported over OTLP
+      # to this project's own collector -- the message only, bounded, never
+      # blocking a request (app/log_setup.py).
+      APG_OTLP_LOGS_ENDPOINT: http://metrics:4318/v1/logs
       APG_PROJECT_KEY: ${PROJECT_KEY:?required}
       APG_PROJECT_ENVIRONMENT: ${PROJECT_ENVIRONMENT:?required}
       # Storage is a second surface of the application API and shares its
@@ -1963,6 +1976,10 @@ services:
     mem_limit: ${MCP_MEMORY_LIMIT:?required}
     environment:
       APP_MODE: mcp
+      # Session 42 (ADR 0277, D2575): D1918's lines also exported over OTLP
+      # to this project's own collector -- the message only, bounded, never
+      # blocking a request (app/log_setup.py).
+      APG_OTLP_LOGS_ENDPOINT: http://metrics:4318/v1/logs
       APG_PROJECT_KEY: ${PROJECT_KEY:?required}
       APG_PROJECT_ENVIRONMENT: ${PROJECT_ENVIRONMENT:?required}
       # It verifies the tokens `auth` issues, so it shares the issuer and the
@@ -2074,6 +2091,12 @@ networks:
   # compromised postgres container can reach the internet. It could not before.
   backup:
     name: ${BACKUP_NETWORK_NAME:?required}
+  # Session 42 (ADR 0277): one per HOST, shared by every project's collector
+  # and the plane's gateway -- not a project identity, so a literal, held
+  # equal to telemetry_plane.INGEST_NETWORK by a test.
+  telemetry-ingest:
+    name: apg-telemetry-ingest
+    external: true
 
 volumes:
   postgres-data:

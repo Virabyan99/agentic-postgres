@@ -45,6 +45,19 @@ readonly PROJECT_STATE_ROOT="/etc/agentic-postgres/projects"
 readonly PROJECT_RENDERED_ROOT="/var/lib/agentic-postgres/rendered"
 readonly PROJECT_KEY_PATTERN='^[a-z][a-z0-9-]{4,47}$'
 
+# Session 42 (ADR 0277, D2574): a project's collector joins the host's telemetry
+# ingest network, an EXTERNAL network Compose will not create -- so it is
+# ensured here before every up and start, with the re-read after a create
+# lost to another unit (D2563). The plane need not be installed: a collector
+# whose gateway is absent drops its lines after 60 s and serves on.
+# shellcheck source=bin/lib/telemetry-network.sh
+. "${ROOT_DIR}/bin/lib/telemetry-network.sh"
+
+ensure_ingest() {
+  ensure_telemetry_network apg-telemetry-ingest yes \
+    || die 9 "the telemetry ingest network could not be ensured (ADR 0277)."
+}
+
 ACTION=""
 PROJECT_KEY=""
 HOST_MANIFEST=""
@@ -310,6 +323,7 @@ main() {
       [ "${#services[@]}" -gt 0 ] \
         || die 2 "--defer would hold back every service this deployment runs."
 
+      ensure_ingest
       "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" \
         up -d --build --wait "${services[@]}" \
         || die 9 "the project did not become healthy."
@@ -362,6 +376,7 @@ main() {
       local -a profiles=()
       mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}" "${rendered}")
 
+      ensure_ingest
       "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" up -d --build --wait \
         || die 9 "the deferred services did not become healthy."
 
@@ -423,6 +438,7 @@ main() {
       local -a profiles=()
       mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}" "${rendered}")
 
+      ensure_ingest
       "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" \
         start --wait --wait-timeout 120 \
         || die 9 "the project did not become healthy."

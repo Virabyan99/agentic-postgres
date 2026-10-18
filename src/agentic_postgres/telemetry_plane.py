@@ -51,6 +51,12 @@ UI_NETWORK = "apg-telemetry-ui"
 #: somebody else's, and `ensure` refuses rather than adopting it.
 NETWORK_LABEL = "apg.network"
 
+#: The gateway's name on the ingest network: an explicit alias in the plane's
+#: model, so a project's collector reaches exactly it and never whatever else
+#: answers to the generic service name `gateway` (Session 42 Run 5).
+GATEWAY_ALIAS = "apg-telemetry-gateway"
+GATEWAY_OTLP_HTTP = f"http://{GATEWAY_ALIAS}:4318"
+
 #: The key the charge is recorded under in `Reading.platform`.
 CHARGE_KEY = COMPOSE_PROJECT
 
@@ -170,6 +176,8 @@ __all__ = [
     "CHARGE_KEY",
     "COMPOSE_PATH",
     "COMPOSE_PROJECT",
+    "GATEWAY_ALIAS",
+    "GATEWAY_OTLP_HTTP",
     "INGEST_NETWORK",
     "NETWORKS",
     "NETWORK_LABEL",

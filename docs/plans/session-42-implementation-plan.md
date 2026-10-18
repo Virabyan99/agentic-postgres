@@ -4,13 +4,13 @@
 42b, 42c; ADRs 0277, 0278, 0279; the threat list) -- **sitting U blocked: OVH
 out of stock in US-EAST-VA-2 (D2598)**; the operator chose to continue the
 code runs and retry; U0-U3, E0 and E1 complete Run 1 before Run 10. **Runs 2,
-3 and 4 done.** Rows **D2561–D2590** at planning,
+3, 4 and 5 done.** Rows **D2561–D2590** at planning,
 **D2591–D2596** added 2026-10-18 (the operator's amendment of Sessions
 43–45: web-first, the browser SQL editor, the split, and three of Session
 43's choices — recorded here because this plan holds the next free numbers;
-none changes a run of this session), **D2597–D2612** by the runs. ADRs
+none changes a run of this session), **D2597–D2616** by the runs. ADRs
 **0277–0279** written (0277's limits re-read by E1).
-**NEXT FREE: D2613, ADR 0280.**
+**NEXT FREE: D2617, ADR 0280.**
 
 The seventh session of Stage 5 and the second half of the operator's split
 (D2510): the stage plan's *Session 42* brief (`docs/plans/stage-5-plan.md` §5
@@ -476,7 +476,7 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2595** | D2591 point 4: *"How the console holds its session (memory, or an `HttpOnly`, `SameSite=Strict` cookie with a CSRF rule) is that plan's decision and an ADR."* | The CLI holds a bearer token from `/v1/sessions`; the console does not exist. Session 44's editor will hold a customer's database password in a page (D2592). | **The operator, 2026-10-18: a cookie on the API's own origin.** The console is served from **`control.agenticpostgresql.com`**, the origin of `/v1` (no CORS, no cross-site cookie); the session is an **`HttpOnly`, `Secure`, `SameSite=Strict` cookie** set by the session route for the console, its lifetime the existing session's, login still requiring the TOTP code; **every write also checks `Origin`** (or a header only the console's own pages send) as the CSRF rule. **Not** page memory (a re-login and a TOTP code on every refresh), **not** `localStorage` (readable by any script on the page). The CLI and API keys keep bearer tokens, unchanged. | No script on the page can read the session, which matters most on the page that will hold a database password. | ADR (Session 43) |
 | **D2596** | D2591, *Must not (added)*: *"a third-party script or tracker on the site or the console without an operator decision recorded."* | Neither the site nor the console exists. | **The operator, 2026-10-18.** **The console: no third-party script, ever** — no analytics, widget or CDN library; every asset served from our own files under a strict Content-Security-Policy (a test reads the CSP and every `<script src>`). **The public site: no tracker**; traffic read from Cloudflare Pages' own numbers, which need nothing on the page; **Cloudflare Web Analytics** (cookieless, built into Pages) only if the operator later asks for more; fonts and images self-hosted, no external CDN. No Google Analytics, no ad tracker, no cookie banner needed. | The page that holds a customer's password runs only our code; a product sold on care with data does not hand its visitors to a third party. | ADR (Session 43) |
 
-**Rows the runs add** (execution order; **next free D2613**):
+**Rows the runs add** (execution order; **next free D2617**):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -496,6 +496,10 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2610** | Run 4: *"`rendering.build_gateway_config()` (the gateway's collector config ... rendered into `/etc/agentic-postgres/telemetry/`)"*. | Nothing in the gateway's configuration varies by host or project (receiver ports, the store's service name, database, user, TTL, queue). | **A committed file, `infra/telemetry/gateway.yaml`**, mounted read-only from the model's directory like ClickHouse's `config.d` file; `test_telemetry_plane.py::test_the_gateway_is_the_pinned_collector` reads it. Only the users file is rendered (the subnet is Docker's). | A render of constants is a second place for the same text. | 0277 |
 | **D2611** | Run 4: *"`bin/telemetry.sh` (... `compose up -d --wait` ...)"*. | Every model in the tree is invoked through `bin/compose.sh` (the edge's header: *"Calling `docker compose` directly lets inherited environment variables win over --env-file"*), whose allowlist, root gate and `--volumes` refusal are tested. | **`bin/compose.sh --telemetry`**: the model `infra/telemetry/compose.yaml`, the fixed project `apg-telemetry`, the lock as the only env file; container-starting verbs need `--runtime` and root; **`--volumes` refused** (the operator's saved searches and up to 7 days of lines); `--edge` and `--telemetry` together refused. `telemetry.sh` calls it. | One wrapper for every model is one set of refusals. | 0277 |
 | **D2612** | -- (found by Run 4's own test). | The first `test_the_plane_is_refused_when_it_does_not_fit` run on this workstation, where `/etc/agentic-postgres` exists 0700 root: `bin/telemetry.py admit` **crashed with exit 1** -- `Path.exists()` raises `PermissionError` (pathlib swallows only not-found errors) -- instead of refusing. | **`telemetry_plane.read_charge` treats an unreadable state file as UNREADABLE** (`decide` refuses on it) and `admit` treats an unreadable `is_file` as not-installed wording only; an unprivileged `admit` now prints `committed undetermined: ... Permission denied` and refuses. | A decision fails closed; a crash is neither outcome (ADR 0195). | 0195 |
+| **D2613** | D2575: *"an OpenTelemetry `LoggingHandler` on the same two loggers with a `BatchLogRecordProcessor(...)` -- the record's body is the formatted message only, `exc_info` and `stack_info` dropped"*. | Run 5 measured the pinned SDK 1.44.0: `LoggingHandler` is **deprecated** (it names a separate `opentelemetry-instrumentation-logging` package, not installed) and adds the source file, line, thread and an exception's type, message and traceback as attributes by default. The Logs API (`get_logger(name).emit(LogRecord(...))`) raises no warning. | **`log_setup.OtlpLineHandler`, our own**: body `record.getMessage()` (a formatter would append `exc_info`/`stack_info`), the level, no attribute; the SDK's `BatchLogRecordProcessor` (2048/256/2,000 ms) does the queueing. No package added. | The handler that would have been used adds exactly what D2575 forbids, and is on its way out. | 0277 |
+| **D2614** | D2574: the collector's exporter *"`otlphttp` to `http://gateway:4318`"*. | `gateway` is the plane's generic service name; any container on the ingest network named so would answer it. | **The plane's gateway carries the explicit alias `apg-telemetry-gateway` on the ingest network**; the collector sends to `telemetry_plane.GATEWAY_OTLP_HTTP`; a test holds the alias and the endpoint together. | A name the platform chose is the one only the platform answers to. | 0277 |
+| **D2615** | Run 4: *"Targeted: the new modules, `test_process_limits`, `test_capacity_*` ..., `test_cli_contract`, `test_diagnostic_surface`, `test_host_infrastructure` ..."*. | Run 4 changed `bin/compose.sh`'s override conditional (the telemetry scope); `tests/contract/test_project_state_roots.py` slices that conditional out of `compose.sh` BY EXACT TEXT (deliberately: it raises rather than testing stale text) -- and no module named in Run 4's list, nor its `decide(` grep, reads `compose.sh`. Run 5's targeted run found it (5 failures); c0b1c5c was already pushed. | **Fixed forward as its own commit** (the anchor names the new two-line conditional). The lesson: a run that edits a `bin/` script greps `tests/` for the script's NAME before it chooses its targeted list (D979/D1486, the gate sees what a targeted list derived from a diff cannot). | A targeted list derived from what changed cannot see a reader of what changed that the list does not name. | -- |
+| **D2616** | `test_auth_service_shape`: compose supplies EXACTLY `settings.REQUIRED_VARIABLES` / `STORAGE_VARIABLES` plus `APP_MODE`; *"D1645: no new ... setting"* for the auth mode. | `APG_OTLP_LOGS_ENDPOINT` is read by `create_app`'s first call (`log_setup.configure_logging`), never by `settings.load`, and is optional -- `APP_MODE`'s exact shape, which the test already adds by name. | **Both equalities add `log_setup.OTLP_ENDPOINT_VARIABLE` beside `APP_MODE`** -- still exact in both directions, the name imported from its one declaration; ADR 0277 is the decision D1645 held out for. | A widening to one measured, declared consumer is not a loosening. | 0277 |
 
 ---
 
@@ -1101,6 +1105,51 @@ green. **Targeted**: `test_metrics_surface`, `test_request_log`,
 `test_telemetry_plane`, `test_project_runtime_stop_start`, `test_mcp_runtime`,
 `test_auth_service_shape`, `test_process_limits`, `test_acceptance_registry`,
 `test_environment_gates`, the sweep-selector guard. Commit, push, CI by SHA.
+
+**Done, 2026-10-18.** Measured first (`~/s42/run5/otel-probe.py`,
+`otel-api.py`): the image pins `opentelemetry-sdk` and
+`opentelemetry-exporter-otlp-proto-http` **1.44.0** (`versions.env`; the venv
+the same) -- **no dependency change**. In 1.44.0 the SDK's `LoggingHandler`
+warns *"deprecated. Use the handler from `opentelemetry-instrumentation-logging`
+instead"* and `InMemoryLogExporter` warns in favour of `InMemoryLogRecordExporter`;
+the Logs API path (`LoggerProvider().get_logger(name).emit(LogRecord(body=…,
+severity_…))` through `BatchLogRecordProcessor`) raises no warning and exports
+a record with the body, the severity and **no attribute** -- so the handler is
+our own (**D2613**). Built: `log_setup.OtlpLineHandler` (body
+`record.getMessage()`, never `format()`; no attribute; a failure goes to
+`handleError`, never to the request) and `otlp_provider` (batch 2048 / 256 /
+2,000 ms; the resource names the mode, never the project), installed by
+`configure_logging` beside the stdout handler, once, when
+`APG_OTLP_LOGS_ENDPOINT` is set; `compose.yaml` sets it on `auth`, `storage`
+and `mcp` (`http://metrics:4318/v1/logs`; all three share `edge` with `metrics`)
+and joins `metrics` to the external `telemetry-ingest` network
+(`apg-telemetry-ingest`); `rendering.build_otel_config` gains `resource/project`
+(upsert of the render's key), `otlp_http/gateway` (queue 1,000, retries 60 s, to
+`telemetry_plane.GATEWAY_OTLP_HTTP`) and a `logs` pipeline -- the metrics pipeline
+byte-identical; the plane's gateway answers on the ingest network by the explicit
+alias `apg-telemetry-gateway` (**D2614**); `bin/project-runtime.sh` sources the
+network helper and runs `ensure_ingest` before its three compose `up`/`start`
+calls. Tests: `test_metrics_surface` (+3: the stamp by upsert and the untouched
+metrics pipeline, the bounded export, the network joined and ensured before every
+start), `test_request_log` (+2: the exported record is the line and nothing else
+-- a planted exception token, an `extra` value and `Traceback` absent; 500 lines
+in < 0.4 s against a 0.5 s exporter). **Battery** (`~/s42/run5/battery5.py`):
+**5 of 5 killed** -- (a) `upsert` → `insert`, (b) the queue bound removed, (c) the
+formatted record exported, (d) a synchronous processor, (e) the ensure dropped
+before `start` -- each target FAILED, control
+`test_a_request_prints_one_line_with_the_template_and_no_caller_value` PASSED,
+every file restored `cmp`-equal. **Targeted** (once; every module reading
+`compose.yaml`, the collector's config, `log_setup`, `project-runtime` or
+`APG_OTLP`, plus the guards): **3,094 passed, 13 failed** -- `test_environment_gates`
+(the new test subscripted `environment["APG_…"]`, D2381: now `.get`),
+`test_auth_service_shape` ×3 (compose supplies exactly what `settings.load`
+declares plus `APP_MODE`: the new variable is the same shape and joins `APP_MODE`
+in both equalities, named from `log_setup`, **D2616**),
+`test_project_runtime_stop_start` ×4 (its fake release lacked `bin/lib/`; it gains
+the helper and a fake `docker` that answers the network question without
+recording), and `test_project_state_roots` ×5 -- **Run 4's miss (D2615)**: its
+harness slices `compose.sh`'s override conditional by exact text, and Run 4 had
+changed that line; the module re-run: **115 passed**.
 
 ### Run 6 — the control set's `0009`, the reconciler's insights and DB time (`projects/control/`, `bin/`, `src/`)
 

@@ -66,6 +66,15 @@ def root(tmp_path: Path) -> dict[str, Path]:
         assert source.count(literal) == 1, literal
         source = source.replace(literal, replacement)
     _executable(tree / "bin" / "project-runtime.sh", source)
+    # Session 42 (ADR 0277): the runtime sources the telemetry network helper,
+    # and a fake `docker` answers that the ingest network holds -- so no test
+    # creates a real network on the machine it runs on, and the recorded call
+    # log is unchanged (the helper's own proof is test_telemetry_plane.py).
+    (tree / "bin" / "lib").mkdir()
+    (tree / "bin" / "lib" / "telemetry-network.sh").write_text(
+        (REPO_ROOT / "bin" / "lib" / "telemetry-network.sh").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     for name in (
         "compose.sh",
         "edge-network.sh",
@@ -77,6 +86,12 @@ def root(tmp_path: Path) -> dict[str, Path]:
     fake = tmp_path / "fake-bin"
     fake.mkdir()
     _executable(fake / "id", ID)
+    _executable(
+        fake / "docker",
+        "#!/usr/bin/env bash\n"
+        '[ "$1 $2" = "network inspect" ] && { echo "apg-telemetry-ingest true"; exit 0; }\n'
+        "exit 1\n",
+    )
     # A python3 that is the recorder too, so a renderer reached through
     # `python_bin` is logged under its script's name rather than run.
     _executable(
