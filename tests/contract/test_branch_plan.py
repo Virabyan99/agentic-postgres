@@ -167,6 +167,13 @@ def test_the_persistent_service_cannot_reach_the_repository() -> None:
         "work_mem=4MB",
         "maintenance_work_mem=32MB",
         "listen_addresses=*",
+        # Session 42 (ADR 0278): the parent's pg_stat_statements, loaded --
+        # literals here, so a change to bootstrap_statements' tuple is seen.
+        "shared_preload_libraries=pg_stat_statements",
+        "pg_stat_statements.max=1000",
+        "pg_stat_statements.track=top",
+        "pg_stat_statements.track_utility=off",
+        "pg_stat_statements.track_planning=off",
     } == settings
     assert branch_plan.BRANCH_UNRECLAIMABLE_MB == 192
     assert _plan().hosts == (f"dev.pool.{DOMAIN}", f"dev.direct.{DOMAIN}")
