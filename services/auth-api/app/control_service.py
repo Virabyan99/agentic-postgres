@@ -67,6 +67,7 @@ from app import (
     operations,
     plans,
     refresh_sessions,
+    signals,
     totp,
 )
 from app import scopes as scope_map
@@ -893,6 +894,21 @@ class ControlService:
         self.require_role(caller, row["organization_id"], "viewer")
         plan = await self._plan_of(caller, row["organization_id"])
         return _usage(await self.repository.project_usage(caller.user_id, key, hours), plan)
+
+    async def project_insights(
+        self, caller: ControlPrincipal, key: str, hours: int, limit: int
+    ) -> dict[str, Any]:
+        """Session 42 (ADR 0278): the control set's insights document, as it is --
+        numbers, a fixed tuning sentence, `could_not_determine` with its reason."""
+        row = await self._live_project(caller, key)
+        self.require_role(caller, row["organization_id"], "viewer")
+        return await self.repository.project_insights(caller.user_id, key, hours, limit)
+
+    async def project_monitoring(self, caller: ControlPrincipal, key: str) -> dict[str, Any]:
+        """Session 42 (ADR 0279): each signal of `signals.SIGNALS` with its source."""
+        row = await self._live_project(caller, key)
+        self.require_role(caller, row["organization_id"], "viewer")
+        return signals.document(await self.repository.project_monitoring(caller.user_id, key))
 
     async def organization_usage(
         self, caller: ControlPrincipal, org: UUID, hours: int

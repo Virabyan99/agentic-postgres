@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 """`apg login|logout|context|org|project|compute|operation|endpoint|branch|plan|
-usage|notifications`: the management API.
+usage|notifications|insights|monitoring`: the management API.
 
 Invoked by `bin/login.sh`, `bin/logout.sh`, `bin/context.sh`, `bin/org.sh`,
 `bin/project.sh`, `bin/compute.sh`, `bin/operation.sh`, `bin/endpoint.sh`,
-`bin/branch.sh`, `bin/plan.sh`, `bin/usage.sh` and `bin/notifications.sh`,
+`bin/branch.sh`, `bin/plan.sh`, `bin/usage.sh`, `bin/notifications.sh`,
+`bin/insights.sh` and `bin/monitoring.sh` (Session 42, ADR 0278, ADR 0279),
 each passing its family as the first argument. Everything a
 test can hold still -- the private state directory, the checked secret files,
 the context, the refresh exchange, https -- is
@@ -1420,6 +1421,72 @@ def usage_show(arguments: argparse.Namespace) -> int:
     return cc.EXIT_OK
 
 
+# ---------------------------------------------------------------------------
+# insights, monitoring (Session 42, ADR 0278, ADR 0279)
+# ---------------------------------------------------------------------------
+
+
+def _insight_lines(document: dict[str, Any]) -> list[str]:
+    """A project's statements as printed: the numbers and nothing that sounds
+    like advice; the fixed tuning sentence last."""
+    key = document.get("project_key")
+    if document.get("status") == "could_not_determine":
+        return [f"{key}: insights could not be determined: {document.get('reason')}",
+                str(document.get("tuning"))]  # fmt: skip
+    window = document.get("window") or {}
+    samples = document.get("samples") or {}
+    lines = [
+        f"{key}: statements from {window.get('from')} to {window.get('to')} "
+        f"({samples.get('present')} of {samples.get('expected')} samples, "
+        f"{document.get('resets')} reset(s))"
+    ]
+    for statement in document.get("statements") or []:
+        ratio = statement.get("cache_hit_ratio")
+        lines.append(
+            f"  {statement['total_ms']:>12} ms  {statement['calls']:>8} calls  "
+            f"mean {statement['mean_ms']} ms  rows/call {statement['rows_per_call']}  "
+            f"reads/call {statement['shared_blks_read_per_call']}  "
+            f"cache {'n/a' if ratio is None else ratio}  [{statement['role']}]"
+        )
+        lines.append(f"      {statement['query']}")
+    if not document.get("statements"):
+        lines.append("  no statement of yours ran in this window")
+    lines.append(str(document.get("tuning")))
+    return lines
+
+
+def insights_show(arguments: argparse.Namespace) -> int:
+    """Exit 6 when the insights could not be determined (ADR 0195)."""
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    served = current.call(
+        "GET", f"/projects/{key}/insights?hours={arguments.hours}&limit={arguments.limit}"
+    )
+    emit(served, arguments.json, _insight_lines(served))
+    return cc.EXIT_UNREACHABLE if served.get("status") == "could_not_determine" else cc.EXIT_OK
+
+
+def _monitoring_lines(document: dict[str, Any]) -> list[str]:
+    """Each signal, its reading or why it is unread, and where it comes from."""
+    lines = [f"{document.get('project_key')}: signals read at {document.get('read_at')}"]
+    for signal in document.get("signals") or []:
+        if "unread" in signal:
+            reading = f"not read: {signal['unread']}"
+        else:
+            reading = f"{signal['value']} {signal['unit']} (at {signal['observed_at']})"
+        lines.append(f"  {signal['name']:<24} {reading}")
+        lines.append(f"  {'':<24} from {signal['source']}")
+    return lines
+
+
+def monitoring_show(arguments: argparse.Namespace) -> int:
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    served = current.call("GET", f"/projects/{key}/monitoring")
+    emit(served, arguments.json, _monitoring_lines(served))
+    return cc.EXIT_OK
+
+
 def notifications_list(arguments: argparse.Namespace) -> int:
     current = session()
     org = current_organization(current, arguments.organization)
@@ -1669,6 +1736,20 @@ def parser() -> argparse.ArgumentParser:
     verb.set_defaults(run=notifications_list)
     verb.add_argument("--organization")
     verb.add_argument("--limit", type=_at_most(200), default=50)
+    verb.add_argument("--json", action="store_true")
+
+    insights = _verbs(families.add_parser("insights", add_help=False))
+    verb = insights.add_parser("show", add_help=False)
+    verb.set_defaults(run=insights_show)
+    verb.add_argument("--project-key")
+    verb.add_argument("--hours", type=_at_most(168), default=24)
+    verb.add_argument("--limit", type=_at_most(50), default=20)
+    verb.add_argument("--json", action="store_true")
+
+    monitoring = _verbs(families.add_parser("monitoring", add_help=False))
+    verb = monitoring.add_parser("show", add_help=False)
+    verb.set_defaults(run=monitoring_show)
+    verb.add_argument("--project-key")
     verb.add_argument("--json", action="store_true")
     return top
 

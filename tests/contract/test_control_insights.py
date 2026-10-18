@@ -119,9 +119,13 @@ def test_no_member_advises(cluster: cc.ControlCluster) -> None:
         return set()
 
     assert not keys(document) & set(ADVICE), keys(document)
+    # And the published contract of the route says none of the four words.
+    snapshot = json.loads((cc.REPO_ROOT / "contracts/control-openapi.canonical.json").read_text())
+    published = json.dumps(snapshot["paths"]["/v1/projects/{key}/insights"]).lower()
+    assert not [word for word in ADVICE if word in published], published
     assert document["tuning"] == (
         "To change a query plan, write a migration in your project's set and run "
-        "apg migrate propose (docs/developer-guide.md)."
+        "apg migrate propose (docs/change-governance.md, Proposing)."
     )
     assert [s["calls"] for s in document["statements"]] == [10]
 

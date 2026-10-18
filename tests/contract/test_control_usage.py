@@ -22,6 +22,8 @@ from typing import Any
 import control_cluster as cc
 import pytest
 
+from app import signals
+
 pytestmark = [pytest.mark.contract, pytest.mark.database, pytest.mark.security, pytest.mark.p0]
 
 
@@ -343,3 +345,54 @@ def test_the_usage_routes_answer_a_foreign_and_a_missing_project_alike(drive: An
         assert refused.status_code == 422, (query, refused.text)
     assert drive.call("GET", f"/v1/organizations/{theirs['id']}/usage",
                       token=token).status_code == 404  # fmt: skip
+
+
+# ---------------------------------------------------------------------------
+# The insights and monitoring routes (Session 42, Run 7)
+# ---------------------------------------------------------------------------
+
+
+def test_the_insights_and_monitoring_routes_answer_a_viewer_and_a_read_key(drive: Any) -> None:
+    """ADR 0278/0279 through the routes: a viewer and a key holding only
+    `projects:read` read both, a key holding only `organizations:read` is refused;
+    an empty window's insights are `could_not_determine` with `statements` null;
+    monitoring lists every signal of `signals.SIGNALS` in order, each naming its
+    source, a reading the control database did not make `unread` -- never
+    dropped. A window outside 1..168, a limit outside 1..50 and an unknown
+    parameter are refused before anything is read."""
+    people = _people(drive, "insight")
+    project = people["project"]
+    keys = {}
+    for scope in ("projects:read", "organizations:read"):
+        minted = drive.call(
+            "POST", f"/v1/organizations/{people['id']}/keys", token=people["tokens"]["member"],
+            body={"name": scope.split(":")[0], "scopes": [scope]},
+        )  # fmt: skip
+        assert minted.status_code == 201, minted.text
+        keys[scope] = minted.json()["key"]
+    for token in (people["tokens"]["viewer"], keys["projects:read"]):
+        insights = drive.call("GET", f"/v1/projects/{project}/insights?hours=2", token=token)
+        assert insights.status_code == 200, insights.text
+        assert (insights.json()["status"], insights.json()["statements"]) == (
+            "could_not_determine", None,
+        )  # fmt: skip
+        monitoring = drive.call("GET", f"/v1/projects/{project}/monitoring", token=token)
+        assert monitoring.status_code == 200, monitoring.text
+        shown = monitoring.json()["signals"]
+        assert [s["name"] for s in shown] == [s.name for s in signals.SIGNALS]
+        assert [s["source"] for s in shown] == [s.source for s in signals.SIGNALS]
+        assert all(s["value"] is not None or s.get("unread") for s in shown), shown
+    for path in ("insights", "monitoring"):
+        refused = drive.call(
+            "GET", f"/v1/projects/{project}/{path}", token=keys["organizations:read"]
+        )
+        assert refused.status_code == 403, (path, refused.text)
+    for query in ("hours=0", "hours=169", "limit=0", "limit=51", "hours=2&days=1"):
+        refused = drive.call(
+            "GET", f"/v1/projects/{project}/insights?{query}", token=people["tokens"]["viewer"]
+        )
+        assert refused.status_code == 422, (query, refused.text)
+    unknown = drive.call(
+        "GET", f"/v1/projects/{project}/monitoring?hours=2", token=people["tokens"]["viewer"]
+    )
+    assert unknown.status_code == 422, unknown.text

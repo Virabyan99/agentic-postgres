@@ -170,6 +170,8 @@ bin/plan.sh show [--organization ID] [--json]
 bin/plan.sh notify-me [--organization ID] [--plan premium] [--json]
 bin/usage.sh show [--project-key KEY | --organization ID] [--hours N] [--json]
 bin/notifications.sh list [--organization ID] [--limit N] [--json]
+bin/insights.sh show [--project-key KEY] [--hours N] [--limit M] [--json]
+bin/monitoring.sh show [--project-key KEY] [--json]
 sudo bin/control.sh adopt --project KEY --organization ORG_ID --confirm CONTROL_KEY
 sudo bin/control.sh registry [--json]
 sudo bin/control.sh totp-reset --username NAME --confirm CONTROL_KEY
@@ -270,6 +272,21 @@ else is `422`. **No route writes a plan, a limit or a usage sample**: the plan
 is root's (an organisation is on Free), the limits are the release's
 (`app.control_plan_limits`, held equal to `plans.PLANS` by a test), and the
 samples are the reconciler's, through a function granted to nobody (D2533).
+
+### Insights and monitoring (Session 42)
+
+ADR 0278, ADR 0279; [monitoring](monitoring.md) is the page. Two reads, each of
+samples the reconciler records in this database -- the control plane reaches
+no project's database and no telemetry store.
+
+| Route | What | Who |
+|---|---|---|
+| `GET /v1/projects/{key}/insights?hours=N&limit=M` | The statements of the project's own and request roles over the window, the text normalised: calls, total and mean time, rows, rows per call, reads per call, cache hit ratio, each counted across resets; never a finding or a confidence; one fixed sentence pointing at `apg migrate propose`; fewer than two samples `could_not_determine` | viewer and above; a key with `projects:read` |
+| `GET /v1/projects/{key}/monitoring` | Ten signals, each with its value and `observed_at` or `unread` with the reason, and the table it comes from | viewer and above; a key with `projects:read` |
+
+`hours` is 1 to 168 (default 24) and `limit` 1 to 50 (default 20). Insight
+samples are written by `app.control_record_insights`, granted to nobody, and
+kept 7 days.
 
 **Idle sleep is offered only while sleeping is** (D2548): the setting answers
 `409 not_available` naming `idle_sleep` while `project.sleep` is not accepted,

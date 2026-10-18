@@ -91,14 +91,14 @@
       "version": "20261016120008"
     },
     {
-      "canonical_render_sha256": "91af90d9d59481d0865ba86a71ab5ad78758f93cde29bf9af1f2a70e399c175c",
+      "canonical_render_sha256": "63b2d12c941bea37f16cf609e1df5ffd4a2f381ef54394144e5001184ec0d44f",
       "name": "control_insights",
       "placeholders": [
         "auth_service",
         "object_owner"
       ],
       "template": "templates/0009-control-insights.sql",
-      "template_sha256": "e59551e9d96fae04cc55677853e6e21b98e91c859e0cc128b42865229585ebe9",
+      "template_sha256": "c751b1a57d6fde498efa43760aaef886c73208930bd4ddcc7d6204f8fcc0afd6",
       "version": "20261018120009"
     }
   ],

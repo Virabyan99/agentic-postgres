@@ -116,6 +116,10 @@ SHELL_COMMANDS = (
     "bin/plan.sh",
     "bin/usage.sh",
     "bin/notifications.sh",
+    # Session 42 (ADR 0278, ADR 0279): insights and monitoring, show -- verb-first;
+    # listed the run they landed (D1014).
+    "bin/insights.sh",
+    "bin/monitoring.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/db.sh",
@@ -575,6 +579,10 @@ COMMANDS_WITH_VERBS = {
     "bin/plan.sh",
     "bin/usage.sh",
     "bin/notifications.sh",
+    # Session 42 (ADR 0278, ADR 0279): insights and monitoring, show -- verb-first;
+    # listed the run they landed (D1014).
+    "bin/insights.sh",
+    "bin/monitoring.sh",
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/dev.sh",

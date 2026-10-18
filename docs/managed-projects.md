@@ -295,6 +295,30 @@ are read against.
 how much of the server one project uses, on the host, and means something
 else.
 
+**DB time** (Session 42, ADR 0278): the time your statements spent executing,
+read from PostgreSQL's `pg_stat_statements` for your own roles and the API's
+request roles, counted across resets like the requests (`db_time`). A sample
+that could not read it says so.
+
+## Query Insights and monitoring
+
+```
+bin/insights.sh show [--project-key KEY] [--hours N] [--limit M]
+bin/monitoring.sh show [--project-key KEY]
+```
+
+`insights show` lists your statements over the last `N` hours (1 to 168) -- the
+`M` that took the most time -- with their calls, time, rows and block reads,
+the text normalised so that no literal of yours is kept. Numbers only: to
+change a query plan, write a migration and run `apg migrate propose`. Fewer
+than two samples could not be determined (exit `6`). `monitoring show` prints
+ten readings, each with when it was read and where it comes from. Both are
+described in full in [monitoring](monitoring.md).
+
+**Release 1.20.0 restarts your database once**, at the release, to load the
+statement statistics (`shared_preload_libraries`): a brief interruption while
+the cluster restarts, timed per project on the day and recorded.
+
 ## Notifications
 
 ```

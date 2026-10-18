@@ -110,6 +110,10 @@ MATRIX: Final[dict[str, str]] = {
     "list_notifications": "viewer",
     "get_project_usage": ACCOUNT,
     "set_idle_sleep": ACCOUNT,
+    # Session 42 (ADR 0278, ADR 0279): a project's insights and monitoring,
+    # viewer and above -- the definer function checks the rank.
+    "get_project_insights": ACCOUNT,
+    "get_project_monitoring": ACCOUNT,
 }
 
 #: Session 41: the two writes that are SETTINGS, not operations -- no row of
@@ -227,6 +231,10 @@ KEY_SCOPES: Final[dict[str, str]] = {
     "get_organization_usage": "projects:read",
     "get_project_usage": "projects:read",
     "set_idle_sleep": "projects:write",
+    # Session 42: insights and monitoring are reads of a project; neither names
+    # a secret nor a literal of the customer's data (ADR 0278).
+    "get_project_insights": "projects:read",
+    "get_project_monitoring": "projects:read",
 }
 
 

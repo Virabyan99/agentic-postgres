@@ -3337,6 +3337,166 @@
         "summary": "Put a project to sleep after it has been idle"
       }
     },
+    "/v1/projects/{key}/insights": {
+      "get": {
+        "description": "Viewer and above, or a key holding `projects:read`. Sampled every five minutes from the statements your database roles and the API's request roles ran, the text normalised by PostgreSQL (no literal is kept): per statement the calls, total and mean time, rows, rows per call, shared blocks read per call and the cache hit ratio over the window, each counted across resets, the most time first. Numbers only: nothing here tells you what to change. To change a query plan, write a migration in your project's set and run `apg migrate propose`. Fewer than two samples in the window is `could_not_determine` with the reason.",
+        "operationId": "get_project_insights_v1_projects__key__insights_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The window, in hours back from now: 1 to 168 (default 24).",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 168,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "How many statements, the most time first: 1 to 50 (default 20).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The statements."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "A project's statements over a window"
+      }
+    },
+    "/v1/projects/{key}/monitoring": {
+      "get": {
+        "description": "Viewer and above, or a key holding `projects:read`. A short list of readings, each naming where it comes from -- the newest usage sample, the last hour's usage, the last backups reading, the newest insight sample -- with when it was read, or `unread` with the reason. No threshold and no alert: the reading and its age.",
+        "operationId": "get_project_monitoring_v1_projects__key__monitoring_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The signals."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`authorization_failed`: the caller's role is below what the route needs; or `second_factor_required`: the caller holds owner or admin somewhere, or the registry administrator's scope, and has not enrolled a second factor."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "A project's monitoring signals"
+      }
+    },
     "/v1/projects/{key}/restores": {
       "post": {
         "description": "Member and above, a person only. A branch at `target_time`, which must be inside the window `GET /v1/projects/{key}/backups` serves; otherwise as a branch's creation. The project itself is never overwritten.",

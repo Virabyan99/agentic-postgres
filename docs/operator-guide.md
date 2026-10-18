@@ -2269,3 +2269,40 @@ sudo systemctl start agentic-postgres-reconciler.service
 ```
 
 Nothing of the parent is read or touched by a deletion.
+
+## 23. The telemetry plane
+
+Session 42 (ADR 0277). ClickStack on the host, beside the edge: ClickHouse holds
+the services' request lines for 7 days, HyperDX is the UI over them with its own
+login, MongoDB is HyperDX's state, and the gateway is the same pinned
+OpenTelemetry collector every project runs. No port, no route; a project never
+waits for it and loses lines, never service, while it is down.
+[Monitoring](monitoring.md) is the page; this is the operator's sheet.
+
+```bash
+sudo systemctl stop agentic-postgres-reconciler.service       # the edge's rule: a sitting first
+sudo bin/telemetry.sh --host host.yaml up                     # admission first: exit 12 if it does not fit
+sudo bin/telemetry.sh --host host.yaml status                 # containers, limits, HyperDX's address
+sudo systemctl enable agentic-postgres-telemetry.service      # no --now: it is up
+sudo bin/doctor.sh capacity --host host.yaml                  # the committed line names apg-telemetry (platform)
+sudo systemctl start agentic-postgres-reconciler.service
+```
+
+The plane is charged by admission at its ceilings (the four `mem_limit`s,
+recorded in `/etc/agentic-postgres/telemetry/state.json` only after admission
+admits it); `down` removes the charge and keeps the volumes and the networks.
+HyperDX's session secret is made once in `/etc/agentic-postgres/telemetry/`
+(`0440 root:1000` -- the image runs as uid 1000) and never appears in the
+compose file or `docker inspect`.
+
+**HyperDX admits one account: register it straight after the first `up`.**
+From the operator's machine, to the address `status` prints:
+
+```bash
+ssh -L 18080:<address>:8080 op@<host>        # then http://localhost:18080 -- not 127.0.0.1
+```
+
+The connection is `http://clickhouse:8123`, user `reader`, no password; the
+log source `otel.otel_logs`. `apg-agent` can open the same forward and meets
+the login. `apg-diag containers` lists the plane under `-- apg-telemetry
+(platform)`.

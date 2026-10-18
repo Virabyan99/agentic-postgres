@@ -3,14 +3,14 @@
 **Status: EXECUTING since 2026-10-18.** Run 1 **in part** (the rigs 42a,
 42b, 42c; ADRs 0277, 0278, 0279; the threat list) -- **sitting U blocked: OVH
 out of stock in US-EAST-VA-2 (D2598)**; the operator chose to continue the
-code runs and retry; U0-U3, E0 and E1 complete Run 1 before Run 10. **Runs 2,
-3, 4, 5 and 6 done.** Rows **D2561–D2590** at planning,
+code runs and retry; U0-U3, E0 and E1 complete Run 1 before Run 10. **Runs 2
+to 7 done.** Rows **D2561–D2590** at planning,
 **D2591–D2596** added 2026-10-18 (the operator's amendment of Sessions
 43–45: web-first, the browser SQL editor, the split, and three of Session
 43's choices — recorded here because this plan holds the next free numbers;
-none changes a run of this session), **D2597–D2620** by the runs. ADRs
+none changes a run of this session), **D2597–D2622** by the runs. ADRs
 **0277–0279** written (0277's limits re-read by E1).
-**NEXT FREE: D2621, ADR 0280.**
+**NEXT FREE: D2623, ADR 0280.**
 
 The seventh session of Stage 5 and the second half of the operator's split
 (D2510): the stage plan's *Session 42* brief (`docs/plans/stage-5-plan.md` §5
@@ -504,6 +504,8 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2618** | D2570: *"`unread`'s CHECK whitelist gains `db_time`"*. | Every name in `unread` is its COLUMN's name (`0008`: `database_bytes`, ..., `last_customer_activity`), and `dispatch.usage_sample` names an unread figure by its key. | **The figure, its column and its unread name are all `db_time_ms`**; the document's member is `db_time` `{increase_ms, resets}` (beside `requests` `{increase, resets}`). A test refuses `db_time` in `unread` (the CHECK). | One name per figure, the way every other figure is named. | 0278 |
 | **D2619** | D2571: *"each the increase over the window"*; a window with no sample `could_not_determine`. | An increase needs two samples. A statement that appears in a later sample but not an earlier one may be new OR may have just entered the top 50 -- its cumulative counter is not an increase over the window. | **Fewer than two samples is `could_not_determine`** (*"one sample cannot show an increase; the window needs two"*); **a statement's first sample in the window counts nothing**; per statement, a decrease or a moved `stats_reset` is a reset counted from zero; `resets` counts the moves of `stats_reset` between consecutive samples. The ADR's document says so. | A count that cannot be told from a first appearance is not counted. | 0278 |
 | **D2620** | D2568: *"Insights are the statements of the project's customer-facing roles only"*. | Two places can keep a statement out: the reading's SQL (`r.rolname IN (...)`) and `dispatch.insight_sample`'s check. A test over the sample alone could not see either removed while the other held (the battery would have reported a survivor -- D493). | **Both layers, each held on its own**: the Docker test asserts the RAW reading holds no platform role (the SQL), and `test_an_insight_statement_of_a_platform_role_is_not_kept` feeds the dispatch a platform role's statement directly; the battery removed each separately (both killed). | Defence in depth is only depth if each layer is proved. | 0278 |
+| **D2621** | Run 7: *"`docs/developer-guide.md` (the tuning pointer's target section — read it exists first)"*; Run 6 wrote the insights document's fixed `tuning` sentence naming *"docs/developer-guide.md, Proposing"*. | No `docs/developer-guide.md` exists. Proposing a migration is `docs/change-governance.md`, *Proposing* (where `apg migrate propose` is documented). The sentence named a page a customer could not open. | **The sentence points at `docs/change-governance.md, Proposing`**: `0009` corrected (pushed in 569548c, applied on no cluster -- D912 does not bind), the control lock re-frozen, the proposal re-written (`44df1837…` removed, `e131442a…` added, the same 17 findings); `test_no_member_advises` pins the new sentence; no developer guide written. | A pointer is a claim about the tree; read before it is written. | 0278 |
+| **D2622** | Run 7: two routes, `MATRIX` + `KEY_SCOPES`, the snapshot regenerated; *"Targeted: ... `test_app_contract` (the snapshot) ..."*. | The control mode's paths are also DECLARED by hand in `services/auth-api/app/main.py` `control_paths()`, and two tests hold the snapshot and the served routes equal to it (`test_app_contract_aggregate::test_the_control_snapshot_is_what_this_checkout_generates`, `test_auth_service_shape::test_the_control_mode_serves_exactly_the_declared_paths`). Run 7 named neither; there is no `test_app_contract` module. | **Both paths added to `control_paths()`**; the two modules failed in the first targeted pass and passed after (62). Nothing at run time filters by the list (`public_paths` has no reader outside tests), so no deployed route was ever at stake. | A route has four declarations (router, matrix, key scopes, `control_paths`); a plan adding one names all four. | 0279 |
 
 ---
 
@@ -1023,6 +1025,45 @@ the `exit 12` path skipped in `up` → FAILED; **control**:
 `test_cli_contract`, `test_diagnostic_surface`, `test_host_infrastructure`,
 `test_repository_contract` if `src/` gained a module, `test_acceptance_registry`,
 `test_environment_gates`, the sweep-selector guard. Commit, push, CI by SHA.
+
+**Done.** 2026-10-18. Routes: `GET /v1/projects/{key}/insights` (`hours` 1..168
+default 24, `limit` 1..50 default 20, nothing else named) and `/monitoring`
+(nothing named) in `control_routes.py`; `control_service.project_insights` /
+`project_monitoring`, `control_repository`'s two calls of the DEFINER readers;
+`MATRIX` ACCOUNT, `KEY_SCOPES` `projects:read` for both; `main.control_paths()`
+widened by both (**D2622**); the control snapshot regenerated and
+`bin/app-contract.sh --check` clean. `services/auth-api/app/signals.py`: ten
+signals, each `<table>.<column>`, `document()` keeps an unread signal with its
+reason (ADR 0195). CLI: `bin/cloud.py` families `insights show` and `monitoring
+show` (`--json`, exit 6 on `could_not_determine`), `bin/insights.sh` and
+`bin/monitoring.sh` (shims of `bin/usage.sh`'s shape). The tuning sentence's
+target did not exist (**D2621**): it now names `docs/change-governance.md,
+Proposing`; `0009`, the control lock and the proposal (`e131442a…`, 17
+findings) follow. Documents: `docs/monitoring.md` (new: the signals and their
+sources, Query Insights, what is never recorded, the operator's plane, the
+forward, what is not collected), `docs/control-plane.md` (the commands, an
+*Insights and monitoring* subsection), `docs/managed-projects.md` (DB time, Query
+Insights and monitoring, the one restart at 1.20.0), `docs/operator-guide.md`
+§23 (the telemetry plane's sheet, the charge, the secret, the single HyperDX
+account, the forward), the index row. No developer guide written. Tests:
+`test_signals.py` (3: every source column exists in the control set's
+migrations, no two signals read one column, the monitoring function reads only
+the named tables); `test_control_usage::test_the_insights_and_monitoring_routes_answer_a_viewer_and_a_read_key`
+(through HTTP: a viewer and a `projects:read` key read both, an
+`organizations:read` key is 403, every signal in order with its source, the
+bounds and an unknown parameter 422 -- written because the plan's mutation (a)
+had no test that would fail); `test_control_cli` (+1, both families dispatch);
+`test_control_insights::test_no_member_advises` also reads the published
+contract of the route; `test_cli_contract` (both shims). **Battery**
+(`~/s42/run7/battery7.py`): **3 of 3 killed** -- (a) `projects:read` removed from
+the insights route's key scopes, (b) a `recommendation` member added to the
+document, (c) a signal pointed at `last_full_time` -- each target FAILED,
+control `test_control_usage::test_a_foreign_and_a_missing_project_answer_alike`
+PASSED, every file restored `cmp`-equal. **Targeted** (once: every module
+reading the control routes, roles, service, repository, `cloud.py`, the control
+set or the documents touched, plus the registry, claims, gates, index,
+documented-path, proposal, migration-set and repository guards; 35 modules):
+**1,676 passed, 2 failed** (D2622's two), then those two modules **62 passed**.
 
 **Done, 2026-10-18 (the limits from rig 42a's case 5; E1 re-reads them --
 D2598).** Measured first (`~/s42/run4/grants.sh`, `grants-d.sh`; contrib 0.159.0

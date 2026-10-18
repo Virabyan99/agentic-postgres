@@ -1374,6 +1374,91 @@ async def get_project_usage(request: Request, key: str) -> Response:
     return await _guard(run)
 
 
+#: Session 42 (ADR 0278): the insights window and how many statements.
+INSIGHT_HOURS_QUERY = openapi_docs.query_parameter(
+    "hours",
+    schema={"type": "integer", "minimum": 1, "maximum": 168, "default": 24},
+    description="The window, in hours back from now: 1 to 168 (default 24).",
+)
+INSIGHT_LIMIT_QUERY = openapi_docs.query_parameter(
+    "limit",
+    schema={"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+    description="How many statements, the most time first: 1 to 50 (default 20).",
+)
+
+
+def _insight_bounds(request: Request) -> tuple[int, int]:
+    """`hours` 1..168 (default 24) and `limit` 1..50 (default 20); nothing else
+    may be named."""
+    named = _query(request, ("hours", "limit"))
+    try:
+        hours = (
+            strict_query.as_bounded_int("hours", named["hours"], minimum=1, maximum=168)
+            if "hours" in named
+            else 24
+        )
+        limit = (
+            strict_query.as_bounded_int("limit", named["limit"], minimum=1, maximum=50)
+            if "limit" in named
+            else 20
+        )
+    except strict_query.InvalidQuery as exc:
+        raise errors.InvalidRequest(str(exc)) from exc
+    return hours, limit
+
+
+@router.get(
+    "/projects/{key}/insights",
+    openapi_extra=openapi_docs.described(
+        summary="A project's statements over a window",
+        description=(
+            "Viewer and above, or a key holding `projects:read`. Sampled every five minutes "
+            "from the statements your database roles and the API's request roles ran, the "
+            "text normalised by PostgreSQL (no literal is kept): per statement the calls, "
+            "total and mean time, rows, rows per call, shared blocks read per call and the "
+            "cache hit ratio over the window, each counted across resets, the most time "
+            "first. Numbers only: nothing here tells you what to change. To change a query "
+            "plan, write a migration in your project's set and run `apg migrate propose`. "
+            "Fewer than two samples in the window is `could_not_determine` with the reason."
+        ),
+        query_parameters=[INSIGHT_HOURS_QUERY, INSIGHT_LIMIT_QUERY],
+    ),
+    responses={200: openapi_docs.ok("The statements."), 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_YOURS, 422: openapi_docs.INVALID},
+)  # fmt: skip
+async def get_project_insights(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        hours, limit = _insight_bounds(request)
+        return JSONResponse(await _service(request).project_insights(caller, key, hours, limit))
+
+    return await _guard(run)
+
+
+@router.get(
+    "/projects/{key}/monitoring",
+    openapi_extra=openapi_docs.described(
+        summary="A project's monitoring signals",
+        description=(
+            "Viewer and above, or a key holding `projects:read`. A short list of readings, "
+            "each naming where it comes from -- the newest usage sample, the last hour's "
+            "usage, the last backups reading, the newest insight sample -- with when it was "
+            "read, or `unread` with the reason. No threshold and no alert: the reading and "
+            "its age."
+        ),
+    ),
+    responses={200: openapi_docs.ok("The signals."), 401: openapi_docs.UNAUTHENTICATED,
+               403: FACTOR_GATE, 404: NOT_YOURS, 422: openapi_docs.INVALID},
+)  # fmt: skip
+async def get_project_monitoring(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        _query(request, ())
+        return JSONResponse(await _service(request).project_monitoring(caller, key))
+
+    return await _guard(run)
+
+
 @router.put(
     "/projects/{key}/idle-sleep",
     openapi_extra=openapi_docs.described(

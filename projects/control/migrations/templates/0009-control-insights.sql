@@ -309,7 +309,7 @@ DECLARE
   v_present integer;
   v_resets integer;
   v_statements jsonb;
-  v_tuning text := 'To change a query plan, write a migration in your project''s set and run apg migrate propose (docs/developer-guide.md).';
+  v_tuning text := 'To change a query plan, write a migration in your project''s set and run apg migrate propose (docs/change-governance.md, Proposing).';
 BEGIN
   PERFORM app.control_enter(p_user);
   PERFORM app.control_require_role(app.control_project_organization(p_key), 'viewer');

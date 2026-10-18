@@ -376,6 +376,24 @@ class ControlRepository:
         assert row is not None
         return row["usage"]
 
+    async def project_insights(
+        self, user: UUID, key: str, hours: int, limit: int
+    ) -> dict[str, Any]:
+        row = await self._one(
+            user,
+            "SELECT app.control_project_insights(%s, %s, %s, %s) AS insights",
+            (user, key, hours, limit),
+        )
+        assert row is not None
+        return row["insights"]
+
+    async def project_monitoring(self, user: UUID, key: str) -> dict[str, Any]:
+        row = await self._one(
+            user, "SELECT app.control_project_monitoring(%s, %s) AS monitoring", (user, key)
+        )
+        assert row is not None
+        return row["monitoring"]
+
     async def organization_usage(
         self, user: UUID, organization: UUID, hours: int
     ) -> dict[str, Any]:

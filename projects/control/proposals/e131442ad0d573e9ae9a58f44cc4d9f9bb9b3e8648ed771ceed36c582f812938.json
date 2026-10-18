@@ -3,7 +3,7 @@
   "capability_contract_sha256": {
     "not_applicable": "the manifest declares no capabilities"
   },
-  "declared_at": "2026-10-18T07:12:37Z",
+  "declared_at": "2026-10-18T07:38:55Z",
   "declared_by": "Session 42 executor",
   "destructive": [
     {
@@ -155,7 +155,7 @@
       }
     ]
   },
-  "set_digest": "44df183787e991a40f2657366bd372324d358ccd7c22265d0abce2a3cd25b92d",
+  "set_digest": "e131442ad0d573e9ae9a58f44cc4d9f9bb9b3e8648ed771ceed36c582f812938",
   "surface": {
     "functions": [],
     "views": []

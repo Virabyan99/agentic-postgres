@@ -1112,3 +1112,59 @@ def test_idle_sleep_names_the_backup_consequence(
     assert off.returncode == 0, off.stderr
     assert json.loads(off.stdout)["idle_sleep_minutes"] is None
     assert stored() == ["never"]
+
+
+# ---------------------------------------------------------------------------
+# Session 42: insights and monitoring (ADR 0278, ADR 0279)
+# ---------------------------------------------------------------------------
+
+
+def test_insights_and_monitoring_dispatch_to_the_customer_cli(
+    person: Person, served: Any, accepting: None
+) -> None:
+    """INS-CLI-001: `insights show` and `monitoring show` print what `/v1`
+    serves. No sample is exit 6, "could not be determined", never an empty
+    list; two samples give the statement's increase and the fixed tuning
+    sentence, and no word of advice; the bounds are refused before anything
+    is sent (exit 2). `monitoring show` names every signal's source, and an
+    unread one says why."""
+    _, drive = served
+    _, org = _member(served, "insights-member")
+    key = "slot5-prod"
+    _adopt(drive, org, key, "https://slot5.test/api/app")
+    assert person.login("insights-member").returncode == 0
+
+    none = person.run("insights", "show", "--project-key", key)
+    assert none.returncode == 6, none.stderr
+    assert "could not be determined" in none.stdout and "apg migrate propose" in none.stdout
+    for minutes, calls, ms in ((10, 100, 400.0), (2, 150, 600.0)):
+        drive.cluster.query(
+            "INSERT INTO app.control_insight_samples (project_key, observed_at, queryid, role, "
+            "calls, total_exec_ms, rows, shared_blks_hit, shared_blks_read, query) VALUES "
+            f"('{key}', now() - interval '{minutes} minutes', 9, 'apg_slot5_prod_customer_app', "
+            f"{calls}, {ms}, {calls}, {calls * 3}, {calls}, "
+            "'SELECT name FROM app.items WHERE id = $1')"
+        )
+    read = person.run("insights", "show", "--project-key", key, "--json")
+    assert read.returncode == 0, read.stderr
+    document = json.loads(read.stdout)
+    (statement,) = document["statements"]
+    assert (statement["calls"], statement["total_ms"], statement["mean_ms"]) == (50, 200, 4)
+    printed = person.run("insights", "show", "--project-key", key)
+    assert printed.returncode == 0 and "WHERE id = $1" in printed.stdout, printed.stdout
+    for word in ("recommend", "confidence", "severity", "finding"):
+        assert word not in printed.stdout.lower(), word
+    for bad in (("--hours", "169"), ("--limit", "51"), ("--hours", "0")):
+        refused = person.run("insights", "show", "--project-key", key, *bad)
+        assert refused.returncode == 2, (bad, refused.stderr)
+
+    signals_read = person.run("monitoring", "show", "--project-key", key, "--json")
+    assert signals_read.returncode == 0, signals_read.stderr
+    listed = json.loads(signals_read.stdout)["signals"]
+    assert [s["name"] for s in listed][:2] == ["state", "database_bytes"]
+    assert all(s["source"].startswith("app.control_") for s in listed), listed
+    by_name = {s["name"]: s for s in listed}
+    assert by_name["insights_sampled_at"]["value"] is not None
+    assert "unread" in by_name["backup_status"], by_name["backup_status"]
+    text = person.run("monitoring", "show", "--project-key", key)
+    assert text.returncode == 0 and "from app.control_backup_readings" in text.stdout, text.stdout
