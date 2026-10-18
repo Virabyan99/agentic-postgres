@@ -276,7 +276,11 @@ def _extract_override_check(compose_source: str) -> str:
     it; if the anchor below stops matching at all, `.index` raises loudly
     instead of silently testing stale text.
     """
-    start_marker = 'if [ "${EDGE}" -eq 0 ] && in_list "${subcommand}" "${OVERRIDE_REQUIRED}"; then'
+    # Session 42 (ADR 0277): the conditional names the telemetry scope too.
+    start_marker = (
+        'if [ "${EDGE}" -eq 0 ] && [ "${TELEMETRY}" -eq 0 ] \\\n'
+        '      && in_list "${subcommand}" "${OVERRIDE_REQUIRED}"; then'
+    )
     start = compose_source.index(start_marker)
     end_marker = "\n    fi\n"
     end = compose_source.index(end_marker, start) + len(end_marker)
