@@ -486,6 +486,33 @@ def dump_argv(database: str) -> list[str]:
     ]  # fmt: skip
 
 
+#: The prefix of every line `app.export_upload` itself prints on stderr.
+UPLOAD_LINE_PREFIX = "export_upload: "
+#: How much of that line a refusal carries.
+UPLOAD_LINE_LIMIT = 200
+#: A line holding any of these is never carried, whatever printed it (a belt:
+#: the child's own lines name no target by construction, ADR 0259).
+UPLOAD_LINE_REFUSED = ("://", "X-Amz-", "Signature=")
+
+
+def upload_refusal_reason(returncode: int, stderr: bytes | str) -> str:
+    """A failed upload's refusal reason (D2564, D2559): `the upload exited N`,
+    then the child's LAST `export_upload: ` line -- its provider code, e.g.
+    `put_object failed: SignatureDoesNotMatch (HTTP 403)` -- cut to 200
+    characters. A traceback's lines are not the child's lines and are never
+    taken; a line holding a URL or a signature is never carried, and the
+    reason stays the bare exit code."""
+    reason = f"the upload exited {returncode}"
+    text = stderr.decode("utf-8", "replace") if isinstance(stderr, bytes) else stderr
+    own = [line for line in text.splitlines() if line.startswith(UPLOAD_LINE_PREFIX)]
+    if not own:
+        return reason
+    line = own[-1][:UPLOAD_LINE_LIMIT]
+    if any(marker in line for marker in UPLOAD_LINE_REFUSED):
+        return reason
+    return f"{reason}: {line}"
+
+
 # ---------------------------------------------------------------------------
 # Session 40: branches (ADR 0271, ADR 0272, ADR 0273)
 # ---------------------------------------------------------------------------

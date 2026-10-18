@@ -269,12 +269,30 @@ technically bounded in this beta"* (D1971).
     node's own services. Owed: the connector planes' existing refusals hold for
     a customer's definitions, and an endpoint stays the manifest's.
 9. **Observability poisoning and ClickStack exhaustion** (Session 42 since
-    the operator's split of 2026-10-16, D2510; it was Session 41's). A
-    customer writes log lines or query text that forge another project's
-    telemetry, or floods the telemetry store until the node's own readings
-    fail. Owed: every series and line names its project from the platform, not
-    from the payload; ClickStack bounded in memory, processes and CPU and
-    charged by admission.
+    the operator's split of 2026-10-16, D2510; it was Session 41's; made
+    specific by Session 42's Run 1, D2585 -- Run 9 moves it into the table as
+    `THR-INS-POISON` and `THR-INS-EXHAUST`). A customer writes log lines or
+    query text that forge another project's telemetry, or floods the telemetry
+    store until the node's own readings fail. Owed, by node id (proposed in
+    the Session 42 plan's §2; Run 9 writes what the runs wrote):
+    *a payload names another project* -- each project's collector stamps
+    `project` from the render over whatever the payload carried
+    (`tests/contract/test_metrics_surface.py::test_the_logs_pipeline_stamps_the_project`;
+    on the host
+    `tests/deployment/test_session42_telemetry_host.py::test_a_forged_project_is_stamped_over`);
+    *a customer's value in a line* -- none: the exported record is D1918's line
+    and nothing else, no traceback
+    (`tests/contract/test_request_log.py::test_the_exported_record_is_the_line_and_nothing_else`,
+    ADR 0249's canary);
+    *the plane exhausts the node* -- every telemetry service bounded and the
+    plane charged by admission at its ceilings
+    (`tests/contract/test_process_limits.py::test_the_telemetry_plane_is_bounded`,
+    `tests/contract/test_telemetry_admission.py::test_a_project_is_refused_with_the_charge`);
+    *the plane down takes a project with it* -- a project's export is a bounded
+    queue and a slow exporter never blocks a request
+    (`tests/contract/test_metrics_surface.py::test_the_export_queue_is_bounded`,
+    `tests/contract/test_request_log.py::test_a_slow_exporter_does_not_block_a_request`;
+    rig 42a's case 7 measured it first).
 10. **Cross-project leakage through any new surface** (every session). Any
     console page, `/api/v1` operation, snippet, notification, usage figure or
     diagnostics bundle that carries another project's data. Owed: each session
@@ -333,6 +351,29 @@ technically bounded in this beta"* (D1971).
     D2427). A branch writes the parent's backup repository, or opens the
     parent's data with the parent's credentials. **In the table as
     `THR-BR-PARENT`** since Session 40's Run 8, its residuals with it.
+14. **A statement's text carries a literal or a password into an insight**
+    (Session 42, D2568, D2597; Run 9 moves it into the table as
+    `THR-INS-LEAK`). `pg_stat_statements` keeps a utility statement as typed
+    when `track_utility` is on (an `ALTER ROLE … PASSWORD` from the bootstrap
+    or a rotation), a function's inner statements with `track = all`, and
+    grants its views AND the functions under them to `PUBLIC` (rig 42b: a
+    customer role read every statement through
+    `extensions.pg_stat_statements(true)` after the views alone were revoked).
+    Owed: the flags set where the extension is loaded, all four objects
+    revoked, only the customer-facing roles' normalised statements kept, a
+    foreign project's insights answering like a missing one
+    (`tests/contract/test_pg_stat_statements.py::test_the_bootstrap_creates_and_revokes_it`,
+    `tests/contract/test_insights_reading.py::test_a_literal_is_normalised_away`,
+    `::test_a_utility_statement_is_not_recorded`,
+    `tests/contract/test_control_insights.py::test_a_foreign_and_a_missing_project_answer_alike`).
+15. **The telemetry UI is reached by someone who is not the operator**
+    (Session 42, D2579; Run 9 moves it into the table as `THR-INS-UI`).
+    HyperDX holds every project's lines. Owed: no published port and no router
+    label on the plane, the host's listeners unchanged, HyperDX's own login
+    behind the SSH forward -- `apg-agent` can open the same forward (the sshd
+    file is global, D2579) and meets the login
+    (`tests/contract/test_telemetry_plane.py::test_no_port_and_no_router`,
+    `tests/deployment/test_session42_telemetry_host.py::test_the_listeners_did_not_change`).
 
 ## Scope
 

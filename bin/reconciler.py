@@ -866,7 +866,12 @@ def export(operation: Operation) -> dict[str, Any]:
             )  # fmt: skip
             if uploaded.returncode != 0:
                 raise Refused(
-                    "operation_failed", {"reason": f"the upload exited {uploaded.returncode}"}
+                    "operation_failed",
+                    {
+                        "reason": dispatch.upload_refusal_reason(
+                            uploaded.returncode, uploaded.stderr or b""
+                        )
+                    },
                 )
             lines = uploaded.stdout.decode("utf-8", "replace").strip().splitlines()
             if len(lines) != 1 or not lines[0].startswith("https://") or " " in lines[0]:

@@ -1,11 +1,16 @@
 # Session 42 — The OVH upgrade, ClickStack, `pg_stat_statements`, Query Insights, monitoring, and the fourth re-earning
 
-**Status: PLANNED 2026-10-17, not started.** Rows **D2561–D2590** at planning,
-and **D2591–D2596** added 2026-10-18 (the operator's amendment of Sessions
+**Status: EXECUTING since 2026-10-18.** Run 1 **in part** (the rigs 42b, 42c
+and 42a's cases 1-4, 6, 7; ADRs 0278, 0279; the threat list) -- **sitting U
+blocked: OVH out of stock in US-EAST-VA-2 (D2598)**; the operator chose to
+continue the code runs and retry; U0-U3, E0, E1 and ADR 0277 complete Run 1
+before Run 10. **Run 2 done.** Rows **D2561–D2590** at planning,
+**D2591–D2596** added 2026-10-18 (the operator's amendment of Sessions
 43–45: web-first, the browser SQL editor, the split, and three of Session
 43's choices — recorded here because this plan holds the next free numbers;
-none changes a run of this session). ADRs **0277–0279** reserved (written by
-Run 1). **NEXT FREE after this plan: D2597, ADR 0280.**
+none changes a run of this session), **D2597–D2607** by the runs. ADRs
+**0277–0279** reserved (0278, 0279 written; 0277 after case 5 and E1).
+**NEXT FREE: D2608, ADR 0280.**
 
 The seventh session of Stage 5 and the second half of the operator's split
 (D2510): the stage plan's *Session 42* brief (`docs/plans/stage-5-plan.md` §5
@@ -471,10 +476,21 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2595** | D2591 point 4: *"How the console holds its session (memory, or an `HttpOnly`, `SameSite=Strict` cookie with a CSRF rule) is that plan's decision and an ADR."* | The CLI holds a bearer token from `/v1/sessions`; the console does not exist. Session 44's editor will hold a customer's database password in a page (D2592). | **The operator, 2026-10-18: a cookie on the API's own origin.** The console is served from **`control.agenticpostgresql.com`**, the origin of `/v1` (no CORS, no cross-site cookie); the session is an **`HttpOnly`, `Secure`, `SameSite=Strict` cookie** set by the session route for the console, its lifetime the existing session's, login still requiring the TOTP code; **every write also checks `Origin`** (or a header only the console's own pages send) as the CSRF rule. **Not** page memory (a re-login and a TOTP code on every refresh), **not** `localStorage` (readable by any script on the page). The CLI and API keys keep bearer tokens, unchanged. | No script on the page can read the session, which matters most on the page that will hold a database password. | ADR (Session 43) |
 | **D2596** | D2591, *Must not (added)*: *"a third-party script or tracker on the site or the console without an operator decision recorded."* | Neither the site nor the console exists. | **The operator, 2026-10-18.** **The console: no third-party script, ever** — no analytics, widget or CDN library; every asset served from our own files under a strict Content-Security-Policy (a test reads the CSP and every `<script src>`). **The public site: no tracker**; traffic read from Cloudflare Pages' own numbers, which need nothing on the page; **Cloudflare Web Analytics** (cookieless, built into Pages) only if the operator later asks for more; fonts and images self-hosted, no external CDN. No Google Analytics, no ad tracker, no cookie banner needed. | The page that holds a customer's password runs only our code; a product sold on care with data does not hand its visitors to a third party. | ADR (Session 43) |
 
-**Rows the runs add** (execution order; next free D2597):
+**Rows the runs add** (execution order; **next free D2608**):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
+| **D2597** | D2566: *"`REVOKE ALL ON extensions.pg_stat_statements, extensions.pg_stat_statements_info FROM PUBLIC;` and `REVOKE ALL ON FUNCTION extensions.pg_stat_statements_reset(...) FROM PUBLIC;`"* | Rig 42b (18.4, extension 1.12): after revoking the two VIEWS, `customer_app` read **8 rows through `extensions.pg_stat_statements(true)`** and one through `extensions.pg_stat_statements_info()` -- both functions carry no ACL, so `PUBLIC` holds `EXECUTE`. `pg_stat_statements_reset(oid, oid, bigint, boolean)` is already revoked by the extension (`{postgres=X/postgres}`). | **Revoke all four objects**: the two views AND `extensions.pg_stat_statements(boolean)` and `extensions.pg_stat_statements_info()`, plus the reset function (a no-op belt). `check_violations` reads `has_function_privilege('customer_app', 'extensions.pg_stat_statements(boolean)', 'EXECUTE')` false beside the table privilege. Run 3's Docker-backed test reads the function as well as the view. | A view revoked over a function left open is a view revoked in name only. | 0278 |
+| **D2598** | D2562: *"the upgrade first, at `601a0ea`, before any code"*; §9: *"offers a plan other than the 12 GB one"* is a stop. | **2026-10-18 ~05:30Z, the OVHcloud manager**: *"An error has occurred retrieving information to upgrade to the new range. Sorry we are out of stock in region US-EAST-VA-2."* -- for the 12 GB plan and for 24 GB alike. U0 had run (05:11-05:13Z: four incremental backups 20-25 s, row counts, the reconciler stopped); U1 could not be confirmed; nothing changed on the host. | **The operator, 2026-10-18: continue the code runs; retry the upgrade periodically; sitting U, E0 and E1 whenever stock returns, before Run 10.** The reconciler, stopped by U0, is the operator's to start again (`sudo systemctl start agentic-postgres-reconciler`). At the retry U0 runs again (its backups and counts must be fresh), then U1-U3, E0, E1 as written. Runs 2-8 do not depend on the host's size; rig 42a's case 5 ran at the plan's fallback rate (100 lines/s) and is re-run at 10x E0's rate if that is higher. **If no stock by Run 10, the trip is re-planned** (the plane and `slot6-prod` at once on 7,746 MiB is the question). | §9's stop, answered by the operator; the order changes, the content does not. | 0221 |
+| **D2599** | Sheet U3: *"`sudo systemctl start agentic-postgres-reconciler`"* after the re-declaration. | U0 read `agentic-postgres-reconciler.service` **enabled**: stopped by U0's sheet, it would start by itself at the upgrade's reboot, reading the OLD `host.yaml` (D2411). | **U3's line is `sudo systemctl restart agentic-postgres-reconciler`** (starts it if stopped, re-reads the declaration if the boot started it). | A start that is a no-op on a running unit leaves the old declaration in memory. | -- |
+| **D2600** | D2578: HyperDX's session secret *"generated by `telemetry.sh up` once into `/etc/agentic-postgres/telemetry/hyperdx-session` (0600 root), bind-mounted read-only"*. | Rig 42a: the image `hyperdx/hyperdx:2.41.0` runs as **`node`, uid 1000** (`docker image inspect`: `User=node`; `id`: `uid=1000`), entrypoint `["sh","/etc/local/entry.sh"]`. A 0600 root file is unreadable inside it. The rig's wrapper (`EXPRESS_SESSION_SECRET="$(cat /run/apg/hyperdx-session)" exec sh /etc/local/entry.sh`) worked with a uid-1000 0400 file: `docker inspect` `Env` held no secret; the value is only in the processes' environment. | **The file is `0440 root:1000`** (readable by root and by the container's gid only; on the host gid 1000 is the locked `ubuntu` group, no member) -- Run 4 writes it and a host proof reads its mode and owner. | The secret takes the file path every other one takes; the container's user decides who must read it. | 0277 |
+| **D2601** | D2578/D2579: HyperDX's environment; *"no export off the host"*. | ClickStack's compose sets `USAGE_STATS_ENABLED: ${USAGE_STATS_ENABLED:-true}` -- **HyperDX phones home by default** -- and D2574 puts HyperDX on `apg-telemetry-ui`, a plain bridge WITH egress. Its own OTel SDK skips itself without an API key (rig: *"OpenTelemetry SDK initialization skipped"*). `TOKEN_ENCRYPTION_KEY` unset only means Slack/OAuth tokens unencrypted -- neither is used. | **`USAGE_STATS_ENABLED: "false"` and `OTEL_SDK_DISABLED: "true"` in `infra/telemetry/compose.yaml`**, guarded by `test_telemetry_plane.py` (both literals present). | A default that sends anything off the host is a default the plane must name and turn off. | 0277 |
+| **D2602** | D2579: the operator creates *"the one user"* at Sheet T2 over `ssh -L 18080:...`. | Rig 42a: **HyperDX admits ONE team**: a second `POST /api/register/password` answered `409 {"error":"teamAlreadyExists"}`. Its session cookie is **`Domain=localhost`** (`connect.sid`, `HttpOnly`, `SameSite=Lax`): a client on `127.0.0.1:18080` logs in (303 to `/`) and is still `401` everywhere. | **Sheet T2 opens `http://localhost:18080`** (never `127.0.0.1`) and the operator registers immediately after T1 -- the first registrant owns the plane. Recorded in ADR 0277: until T2, anyone who reaches the forward could register first; the forward needs `op`'s key. | The one-user property is HyperDX's own, and so is the order it imposes. | 0277 |
+| **D2603** | D2578: ClickHouse's `gateway` user *"`INSERT` on `otel`"*. | The contrib exporter's `create_schema: true` creates the database and the table. Rig 42a granted `gateway` `CREATE DATABASE`, `CREATE TABLE`, `INSERT`, `SELECT` on `otel.*` and it created `otel.otel_logs` (TTL 7 days, `ttl_only_drop_parts = 1`, `PARTITION BY toDate(Timestamp)`); whether `INSERT` alone fails was **not measured**. `reader` (`SELECT` on `otel.*`, profile `readonly = 2`): refused from `127.0.0.1` (*AUTHENTICATION_FAILED*), a write answered `403`; a container on the ingest network cannot resolve `clickhouse`. | **Run 4 measures `INSERT`-only first**; if `create_schema` needs more, `gateway` keeps exactly what the measurement shows (the rig's four grants are the ceiling), named in ADR 0277. | A grant written from a sentence is a grant nobody measured. | 0277 |
+| **D2604** | D2574: *"`otlphttp` to `http://gateway:4318`"*. | contrib 0.159.0 logs at start: *"`otlphttp` alias is deprecated; use `otlp_http` instead"*. | **The rendered collector names the exporter `otlp_http/gateway`**; a test reads the name. | A config that warns today stops loading in a later pin. | -- |
+| **D2605** | D2576: ClickHouse bounded by `max_server_memory_usage` and the logs table's TTL. | ClickHouse's default server config keeps its own system log tables (`query_log`, `trace_log`, `metric_log`, `text_log`, `part_log`, ... ) with no TTL of ours -- disk the plane's TTL does not bound -- and sizes `mark_cache_size` at 5 GiB by default. | **The plane's `config.d` file also removes the system log tables and sets `mark_cache_size` 256 MiB, `index_mark_cache_size` 64 MiB, `uncompressed_cache_size` 0** (rig 42a ran so); `test_telemetry_plane.py::test_the_store_has_a_ceiling_and_a_ttl` reads them. | A store bounded in its customer table and unbounded in its own is not bounded. | 0277 |
+| **D2606** | D2565: *"A new lint or destructive finding in an APPLIED release or control migration is §9's stop."* | The quote-aware reader (Run 2) changed `statements()` for **27 of 51 templates** and found **seven real `DROP FUNCTION`s the old reader hid** behind a `--` inside a `COMMENT ON ... IS '...'` literal: release `0025` (`app_private.auth_lookup_agent`, `app_private.auth_rotate_agent_secret`; the cut at its line 57), `0028` (`api.agent_audit_begin`; line 112), control `0004` (`app.control_get_operation`, `app.control_get_project`, `app.control_list_operations`, `app.control_list_projects`; line 144). The lint and the published surface: **unchanged** for the release, control and example sets; the example set's findings unchanged. The only reader of the findings is `bin/migrate.py propose` (a project set's proposal); no test re-derives a committed proposal's list. | **The operator, 2026-10-18: proceed.** Nothing is amended (D912); the six committed control proposals keep the lists they recorded (what their reviewer saw); Run 6's `0009` proposal will name the four `0004` drops its predecessors did not. | A finding that was always true and was hidden by the reader is the defect D2544 named, not a new one. | -- |
+| **D2607** | Run 2's battery (e): *"`''` escape handling removed -> the guard FAILED on a template that holds `''`"*. | Closing a literal and reopening it at once reads exactly as an escaped quote does, for a reader that only removes comments -- so the mutation could not fail any test (D493, uninformative). | **The scanner has no `''` case** (its docstring says why); battery (e) became *the identifier state removed* (`test_a_comment_after_a_literal_is_dropped` FAILED). | Untestable code is removed, not kept with a mutation that cannot see it. | -- |
 
 ---
 
@@ -739,6 +755,63 @@ ceiling, D2577), 0244 (the telemetry plane bounded by its rule, D2576), 0249
 PLANNED"* — written on 2026-10-18 with the operator's amendment of Sessions
 43–45 (D2591–D2593). Run 1 reads it and edits nothing in it.
 
+**Done (in part), 2026-10-18.** Rigs in WSL `~/s42/run1/rig42/` (transcripts
+beside each; every rig read back `docker ps -a | grep -c rig42` = 0, volumes 0,
+networks 0 at its end). **Rig 42c** (Docker 29.5.2): two concurrent `docker
+network connect --alias` of one container: the loser exited 1 in **10 of 10**
+trials with *"Error response from daemon: endpoint with name rig42c-edge
+already exists in network rig42c-net"*; two concurrent disconnects: *"container
+<64-hex id> is not connected to network rig42c-net"*, 10 of 10; **control**
+(sequential) the same two texts; a missing network: *"network rig42c-missing
+not found"*. The draft helpers over the same races: 0/0 in 20 trials; the
+draft connect to a missing network: 9. **Rig 42b**: ADR 0278's *Measured*
+section is its record (the five flags take; extension 1.12; `PUBLIC` holds
+the views AND the functions -- **D2597**; PostgREST records under `anon` /
+`authenticated`; the canary 0 rows, control 1; recreate windows 1.13-1.43 s
+off→on, control 1.27/1.31 s; memory delta under 3 MiB; restore paths start;
+dumps byte-identical). **Rig 42a** (the release `@hyperdx/app@2.41.0`, tag of
+2026-10-13; images by index digest: `hyperdx/hyperdx:2.41.0@sha256:00c6d5b7…`
+(= `docker.hyperdx.io/hyperdx/hyperdx:2.41.0`), `clickhouse/clickhouse-server:26.8-alpine@sha256:2ad32242…`
+(server 26.8.30.8), `mongo:5.0.32-focal@sha256:3b6c281e…`, ClickStack's
+collector `clickhouse/clickstack-otel-collector:2.41.0@sha256:04725e89…`
+(entrypoint `/opampsupervisor`, confirming p7), `telemetrygen:v0.159.0@sha256:bad7fde3…`;
+the gateway the pinned contrib 0.159.0, which carries the `clickhouse`
+exporter): **(1)** up healthy in 25 s; idle ClickHouse 114 MiB / 171 pids,
+HyperDX 528 MiB / 43, MongoDB 79 MiB / 54, gateway 31 MiB / 7, collector 38 MiB
+/ 8. **(2)** 20 records with resource `project=other` through the stand-in
+collector → all 20 rows read `beta-dev`; **control** 3 records straight to the
+gateway → `other`; the body is the line only. **(3)** HyperDX through the
+forward: one user registered (a second answered `409 teamAlreadyExists`), a
+connection (`http://clickhouse:8123`, `reader`, no password) and a log source on
+`otel.otel_logs` created over its API, and its own `/api/clickhouse-proxy` (the
+UI's path) returned the grouped rows -- **HyperDX reads the contrib gateway's
+table** (D2573 stands); **control**: ClickStack's own collector, OpAMP-connected
+to the rig's HyperDX, created `otel_cs.otel_logs` with **column-for-column
+identical** names and types (its receiver refused the unauthenticated test
+record, telemetrygen exit 1 -- consistent with p7's ingestion key; not chased).
+Cookie `Domain=localhost` (**D2602**). **(4)** `TTL toDateTime(Timestamp) +
+toIntervalDay(7)`, `ttl_only_drop_parts = 1`, `PARTITION BY toDate(Timestamp)`;
+`reader`/`gateway` refused from `127.0.0.1`; **control** `reader` from HyperDX's
+address read the count; `reader`'s `CREATE TABLE` 403; an ingest-only container
+cannot resolve `clickhouse` (**D2603**). **(6)** no published port but the
+rig-only forwarder's `127.0.0.1:18080`; HyperDX's `Env` holds the secret 0
+times (the processes hold it); no traefik label (**D2600**, **D2601**). **(7)**
+at 100 lines/s: **control** (gateway up, 120 s) collector 36.6→45.2 MiB, scrape
+200 in 11-13 ms, sender's logging call p50 161-224 µs / p99 447-621 µs;
+**gateway stopped 600 s** collector 49.2→65.8 MiB (limit 192), 0 restarts, no
+OOM, scrape 200 in 11-17 ms every 30 s, sender p50 157-272 µs / p99 552-784 µs --
+**a project does not depend on the plane** (§9's stop not met); the cost:
+of 60,000 lines sent while it was down, 5,401 arrived after the restart (the
+bounded queue drops after `max_elapsed_time` 60 s -- optional detail, by
+design). **Sitting U**: Sheet U0 ran 05:11-05:13Z (four incremental backups,
+20-25 s each; row counts of 24 `app` tables + `instance_uuid` in
+`/home/op/s42-u0/`; host 7,746 MiB, 4 × Haswell, `sda` 75 G / `sda1` 73.9 G, `/`
+72 G with 11 G used, booted 2026-10-17 14:44:11; the reconciler enabled,
+**D2599**); **U1 refused by OVH: out of stock (D2598)**. The threat list:
+item 9 rewritten with its node ids, items 14 and 15 added (D2585). ADRs 0278 and
+0279 written and indexed (0275 marked amended). **Owed before Run 10**: case 5
+(running at 100 lines/s), U0-U3 at the retry, E0, E1, ADR 0277.
+
 ### Run 2 — the three repairs: D2558, D2559, D2544 (`bin/`, `src/`)
 
 **Read first**: `bin/edge-network.sh` whole (344 lines); `bin/reconciler.py:823-886`;
@@ -778,6 +851,47 @@ name for `:494-510`) green. **Targeted**: `test_edge_network_race`,
 `test_migration_lint`-family modules (`grep -rln "lint_project_set\|destructive_findings" tests/contract/`),
 `test_mcp_contract`, `test_acceptance_registry`, `test_environment_gates`, the
 sweep-selector guard. Commit, push, CI by SHA.
+
+**Done, 2026-10-18.** **D2563**: `tests/contract/test_edge_network_race.py`
+written first (a fake `docker` keeping attachments in files; rig 42c's texts):
+against the tree, the four race cases FAILED on exit 9 (*"could not attach
+apg-edge-traefik-1 to apg-beta-dev-edge"* after Docker's *already exists*) and
+the class guard FAILED; the five exit-9 controls and the clean path PASSED. Then
+`connect_alias` and `disconnect_quiet` in `bin/edge-network.sh` and all nine
+call sites (five connects, four disconnects; every `die 9` text unchanged, Docker's
+own line printed first): 11/11. **D2564**: `reconciler_dispatch.upload_refusal_reason`
+(the child's last `export_upload: ` line, 200 characters, never one holding
+`://`, `X-Amz-` or `Signature=`) called from `reconciler.export`; read first:
+every stderr line `export_upload.py` prints is fixed text, `StorageError`'s
+`<operation> failed: <code> (HTTP <status>)`, or `load_config`'s variable / file
+path -- none a value; a traceback's lines never start with the prefix. The new
+test FAILED on the bare `the upload exited 5` before, 52/52 after. **D2565**:
+`test_sql_reader_quotes.py` FAILED (3) on the old reader; measured: no `E'...'`
+string in any of the 51 templates, dollar tags `$$` (268) and `$fn$` (244)
+(`$argon2id$` sits inside a literal), and the old reader left 18 templates with
+an odd quote count; then `sql_only` became a three-state scanner (`_scan`,
+`scan_end_state`), joined as the old one joined lines: 3/3, **every template ends
+in code**. Old vs new `statements()` (`~/s42/run2/diff-readers.py`): **27 of 51
+templates changed**; the lint and the published surface the SAME for the
+release, control and example sets; the example set's destructive findings the
+same; **seven hidden `DROP FUNCTION`s now found** in applied release `0025`,
+`0028` and control `0004` -- §9's stop, the operator: proceed (**D2606**). The
+`''` branch removed as untestable (**D2607**). **Battery** (`~/s42/run2/battery2.py`,
+run twice -- the second after the fake was rewrapped for ruff): **5 of 5 killed**
+(a) `connect_alias`'s re-read → 3 FAILED, (b) `disconnect_quiet`'s → 1 FAILED,
+(c) the URL belt → 3 FAILED, (d) the literal state → 1 FAILED, (e) the
+identifier state → 1 FAILED; control
+`test_metrics_surface.py::test_the_attachment_registers_the_alias_on_a_proxy_that_predates_it`
+PASSED in each; every file restored `cmp`-equal. **Targeted** (once, 21 modules
+-- the plan's `test_mcp_contract` does not exist; `test_capability_compiler` and
+`test_scope_vocabulary`, which read the MCP contract, ran in its place; the
+`test_migration_lint` family is `test_api_migrations`, `test_approval_gate`,
+`test_change_proposal`, `test_client_ir`, `test_control_set`,
+`test_database_function_signatures`, `test_dev_environment`,
+`test_project_migration_sets`, by `grep -rln "lint_project_set\|destructive_findings\|sql_only\|sql_surface"`):
+**822 passed**; ruff clean after rewrapping six long lines of the fake; the race
+module 11/11 again. (Workstation: `/tmp/pytest-of-gmpar` is root-owned since
+2026-10-18 08:24, so every run used `TMPDIR=~/s42/tmp`, `~/s42/pt.sh`.)
 
 ### Run 3 — `pg_stat_statements` loaded (`compose.yaml`, `src/`, `bin/`)
 

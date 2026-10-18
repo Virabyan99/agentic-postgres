@@ -143,6 +143,52 @@ has_alias() {
     "${container}" 2>/dev/null | grep -q -- "${alias}"
 }
 
+# Session 42, D2558/D2563: every connect and disconnect goes through these two.
+# Two units attach the proxy at boot -- a project's own unit and the edge's
+# reconcile -- and each checks `is_attached` before it acts, so both can find
+# it detached and both connect. The loser's connect fails with Docker's
+# "endpoint with name ... already exists in network ..." (rig 42c: 10 of 10
+# concurrent pairs). Before this, the loser read that as failure, exited 9,
+# and systemd took a project down at boot (beta-dev, Session 41).
+#
+# So a failed call is not the verdict; the network read AGAIN is. A connect
+# that failed while the proxy is now attached WITH its alias is the state
+# wanted, and the unit succeeds saying another unit got there first. Anything
+# else -- a network that is gone, an attachment without the alias, a daemon
+# error -- is still exit 9, with Docker's own text printed first. A test
+# (`test_every_connect_goes_through_the_helper`) refuses a direct call outside
+# these two.
+connect_alias() {
+  local network="$1" container="$2" message="$3" output
+  if output="$(docker network connect --alias "${EDGE_PROXY_ALIAS}" "${network}" "${container}" 2>&1)"; then
+    return 0
+  fi
+  if is_attached "${container}" "${network}" \
+    && has_alias "${container}" "${network}" "${EDGE_PROXY_ALIAS}"; then
+    printf 'edge-network: already attached by another unit: %s -> %s (%s)\n' \
+      "${container}" "${network}" "${output}" >&2
+    return 0
+  fi
+  printf '%s\n' "${output}" >&2
+  die 9 "${message}"
+}
+
+# The disconnect's twin: a disconnect that failed while the proxy is no longer
+# attached ("container ... is not connected to network ...") is done.
+disconnect_quiet() {
+  local network="$1" container="$2" message="$3" output
+  if output="$(docker network disconnect "${network}" "${container}" 2>&1)"; then
+    return 0
+  fi
+  if ! is_attached "${container}" "${network}"; then
+    printf 'edge-network: already detached by another unit: %s -> %s (%s)\n' \
+      "${container}" "${network}" "${output}" >&2
+    return 0
+  fi
+  printf '%s\n' "${output}" >&2
+  die 9 "${message}"
+}
+
 parse_arguments() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -237,11 +283,10 @@ main() {
         # for the moment between the two calls.
         printf 'edge-network: attached to %s without alias %s; reconnecting\n' \
           "${network}" "${EDGE_PROXY_ALIAS}"
-        docker network disconnect "${network}" "${container}" \
-          || die 9 "could not detach ${container} from ${network} to register its alias"
+        disconnect_quiet "${network}" "${container}" \
+          "could not detach ${container} from ${network} to register its alias"
       fi
-      docker network connect --alias "${EDGE_PROXY_ALIAS}" "${network}" "${container}" \
-        || die 9 "could not attach ${container} to ${network}"
+      connect_alias "${network}" "${container}" "could not attach ${container} to ${network}"
       printf 'edge-network: attached to %s as %s\n' "${network}" "${EDGE_PROXY_ALIAS}"
       ;;
 
@@ -253,8 +298,7 @@ main() {
         printf 'edge-network: already detached from %s\n' "${network}"
         return 0
       fi
-      docker network disconnect "${network}" "${container}" \
-        || die 9 "could not detach ${container} from ${network}"
+      disconnect_quiet "${network}" "${container}" "could not detach ${container} from ${network}"
       printf 'edge-network: detached from %s\n' "${network}"
       ;;
 
@@ -266,8 +310,7 @@ main() {
         printf 'edge-network: already attached to %s\n' "${NETWORK}"
         return 0
       fi
-      docker network connect --alias "${EDGE_PROXY_ALIAS}" "${NETWORK}" "${container}" \
-        || die 9 "could not attach ${container} to ${NETWORK}"
+      connect_alias "${NETWORK}" "${container}" "could not attach ${container} to ${NETWORK}"
       printf 'edge-network: attached to %s\n' "${NETWORK}"
       ;;
 
@@ -280,8 +323,7 @@ main() {
       fi
       is_branch_network "${NETWORK}" \
         || die 9 "${NETWORK} is not a branch edge network (no ${BRANCH_EDGE_LABEL} label)"
-      docker network disconnect "${NETWORK}" "${container}" \
-        || die 9 "could not detach ${container} from ${NETWORK}"
+      disconnect_quiet "${NETWORK}" "${container}" "could not detach ${container} from ${NETWORK}"
       printf 'edge-network: detached from %s\n' "${NETWORK}"
       ;;
 
@@ -313,15 +355,13 @@ main() {
           if has_alias "${container}" "${network}" "${EDGE_PROXY_ALIAS}"; then
             continue
           fi
-          docker network disconnect "${network}" "${container}" \
-            || die 9 "could not detach ${container} from ${network} to register its alias"
-          docker network connect --alias "${EDGE_PROXY_ALIAS}" "${network}" "${container}" \
-            || die 9 "could not reattach ${container} to ${network}"
+          disconnect_quiet "${network}" "${container}" \
+            "could not detach ${container} from ${network} to register its alias"
+          connect_alias "${network}" "${container}" "could not reattach ${container} to ${network}"
           realiased=$((realiased + 1))
           continue
         fi
-        docker network connect --alias "${EDGE_PROXY_ALIAS}" "${network}" "${container}" \
-          || die 9 "could not attach ${container} to ${network}"
+        connect_alias "${network}" "${container}" "could not attach ${container} to ${network}"
         attached=$((attached + 1))
       done
       printf 'edge-network: reconciled; %d newly attached, %d realiased, %d not running\n' \
@@ -332,8 +372,7 @@ main() {
       while IFS= read -r network; do
         [ -n "${network}" ] || continue
         is_attached "${container}" "${network}" && continue
-        docker network connect --alias "${EDGE_PROXY_ALIAS}" "${network}" "${container}" \
-          || die 9 "could not attach ${container} to ${network}"
+        connect_alias "${network}" "${container}" "could not attach ${container} to ${network}"
         branches=$((branches + 1))
       done < <(docker network ls --filter "label=${BRANCH_EDGE_LABEL}" --format '{{.Name}}')
       printf 'edge-network: branches; %d newly attached\n' "${branches}"

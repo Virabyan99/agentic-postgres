@@ -338,5 +338,7 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0272](0272-a-branchs-expiry-is-a-trigger.md) | A branch's expiry is a trigger | 40 | Accepted, amended in Session 41 |
 | [0273](0273-the-backups-surface-is-a-recorded-reading-with-its-age.md) | The backups surface is a recorded reading with its age | 40 | Accepted, amended in Session 41 |
 | [0274](0274-plans-are-a-release-table-enforced-before-an-operation-exists.md) | Plans are a release table, enforced before an operation exists | 41 | Accepted |
-| [0275](0275-usage-is-a-recorded-sample-and-a-notification-is-written-where-an-operation-ends.md) | Usage is a recorded sample, and a notification is written where an operation ends | 41 | Accepted |
+| [0275](0275-usage-is-a-recorded-sample-and-a-notification-is-written-where-an-operation-ends.md) | Usage is a recorded sample, and a notification is written where an operation ends | 41 | Accepted, amended in Session 42 (DB time, by 0278) |
 | [0276](0276-idle-sleep-is-a-trigger.md) | Idle sleep is a trigger | 41 | Accepted |
+| [0278](0278-pg-stat-statements-is-loaded-everywhere-and-read-only-by-the-platform.md) | `pg_stat_statements` is loaded everywhere and read only by the platform; Query Insights is a recorded sample with no advice | 42 | Accepted |
+| [0279](0279-monitoring-is-a-list-of-readings-that-each-name-their-source.md) | Monitoring is a list of readings that each name their source | 42 | Accepted |

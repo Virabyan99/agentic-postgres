@@ -156,6 +156,8 @@ class Database:
         self.interrupted: list[dict[str, Any]] = []
         self.uploaded: bytes | None = None
         self.upload_code = 0
+        #: What the upload child printed on stderr (D2564).
+        self.upload_stderr = b""
         #: A statement containing this marker is refused, as psql refuses one.
         self.refuse: str | None = None
 
@@ -166,7 +168,9 @@ class Database:
         if "app.export_upload" in argv:
             self.uploaded = kwargs.get("input")
             self.calls.append({"container": container, "argv": list(argv), "input": "", "vars": {}})
-            return subprocess.CompletedProcess(argv, self.upload_code, (URL + "\n").encode(), b"")
+            return subprocess.CompletedProcess(
+                argv, self.upload_code, (URL + "\n").encode(), self.upload_stderr
+            )
         text = kwargs.get("input") or ""
         self.calls.append(
             {"container": container, "argv": list(argv), "input": text, "vars": _variables(text)}
@@ -940,6 +944,54 @@ def test_the_export_url_is_the_operations_secret_and_the_archive_is_removed(
     finished = host.finished()
     assert (finished["error_code"], finished["secret"]) == ("operation_failed", "")
     assert list(host.module.EXPORT_ROOT.iterdir()) == []
+
+
+def _failed_upload(host: Host, stderr: bytes) -> str:
+    _deployed_slot(host, "project.export")
+    host.database.upload_code = 5
+    host.database.upload_stderr = stderr
+    assert host.once() == 0
+    finished = host.finished()
+    assert finished["error_code"] == "operation_failed"
+    return str(finished["result"]["reason"])
+
+
+def test_the_upload_refusal_names_the_providers_code(host: Host) -> None:
+    """D2564 (D2559): a failed upload's refusal carries the child's LAST
+    `export_upload: ` line -- the provider's code, which names no target by
+    construction (`StorageError`, ADR 0259) -- after the exit code, so the
+    operator reads SignatureDoesNotMatch instead of `exited 5` (Session 41's
+    mis-entered secret cost four windows to find). A traceback's lines are
+    not that child's lines and are never taken."""
+    reason = _failed_upload(
+        host,
+        b'Traceback (most recent call last):\n  File "x", line 1\n'
+        b"export_upload: put_object failed: AccessDenied (HTTP 403)\n"
+        b"export_upload: put_object failed: SignatureDoesNotMatch (HTTP 403)\n",
+    )
+    assert reason == (
+        "the upload exited 5: export_upload: put_object failed: SignatureDoesNotMatch (HTTP 403)"
+    )
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        b"export_upload: put_object failed at https://acct.r2.cloudflarestorage.com/b/k",
+        b"export_upload: X-Amz-Credential=AKIA/20261018/auto/s3/aws4_request",
+        b"export_upload: ?Signature=abcdef0123",
+    ],
+    ids=["url", "x-amz", "signature"],
+)
+def test_an_upload_line_with_a_url_is_not_carried(host: Host, line: bytes) -> None:
+    """The control and the belt: a line that holds `://`, `X-Amz-` or
+    `Signature=` is not carried -- the reason stays the bare exit code."""
+    assert _failed_upload(host, line + b"\n") == "the upload exited 5"
+
+
+def test_an_upload_with_no_line_keeps_the_bare_reason(host: Host) -> None:
+    """A child that printed nothing of its own (only a traceback): the bare reason."""
+    assert _failed_upload(host, b"Traceback (most recent call last):\n") == "the upload exited 5"
 
 
 def test_a_sleeping_project_is_neither_exported_nor_resized(host: Host) -> None:

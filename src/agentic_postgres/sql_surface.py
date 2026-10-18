@@ -76,6 +76,54 @@ def down_section(text: str) -> str:
     return rest if marker else ""
 
 
+def _scan(text: str) -> tuple[str, str]:
+    """The text with its line comments removed, and the state the scan ended in.
+
+    Three states (Session 42, D2565): **code**; a **literal** `'...'`; an
+    **identifier** `"..."`. A `--` starts a comment only in code, and the
+    comment runs to the end of its line; the newline is kept. An escaped quote
+    (`''`, `""`) needs no case of its own: closing the literal and reopening it
+    at once reads exactly as staying inside it would, for a reader that only
+    removes comments. A dollar-quoted body is scanned as code -- a
+    function body's `--` is a comment and its `'...'` a literal, the same
+    lexing -- which holds while no template carries a dollar-quoted DATA string
+    holding a quote (measured at Run 2: none, and the guard below would see
+    one). No template carries an `E'...'` string either (measured), so a
+    backslash is an ordinary character.
+    """
+    out: list[str] = []
+    state = "code"
+    index, length = 0, len(text)
+    while index < length:
+        character = text[index]
+        if state == "code":
+            if character == "-" and text.startswith("--", index):
+                newline = text.find("\n", index)
+                if newline == -1:
+                    break
+                index = newline
+                continue
+            if character == "'":
+                state = "literal"
+            elif character == '"':
+                state = "identifier"
+            out.append(character)
+            index += 1
+            continue
+        out.append(character)
+        if character == ("'" if state == "literal" else '"'):
+            state = "code"
+        index += 1
+    return "".join(out), state
+
+
+def scan_end_state(text: str) -> str:
+    """`code`, `literal` or `identifier`: where `_scan` ended. Every template the
+    product reads ends in `code` (`test_every_template_ends_its_scan_outside_a_literal`);
+    one that did not would be misread from its unclosed quote on."""
+    return _scan(text)[1]
+
+
 def sql_only(text: str) -> str:
     """The statements, with the reasoning stripped out.
 
@@ -85,12 +133,16 @@ def sql_only(text: str) -> str:
     That is Session 2 Run 7's defect exactly -- a substitution that also matched
     the comment documenting the substitution.
 
-    Line comments only. None of these templates has a `--` inside a string
-    literal, and a reader that quietly stopped working if one appeared would be
-    worse than one that never handled the case: the anti-vacuity assertions on
-    both sides fail if this strips too much.
+    Line comments only, read by a scanner that knows a literal and a quoted
+    identifier (D2565). Until Session 42 this cut every line at its first `--`
+    and promised that no template held one inside a literal; when one did, the
+    closing quote went with the cut and every later reader saw the rest of the
+    file as a string (D2544: ten destructive findings where twelve were due).
+    The promise is now the scanner's own end state, guarded per template.
+    Lines are joined as the old reader joined them (`splitlines`, no trailing
+    newline), so no reader downstream sees a different shape.
     """
-    return "\n".join(line.split("--")[0] for line in text.splitlines())
+    return "\n".join(_scan(text)[0].splitlines())
 
 
 def statements(text: str) -> str:
