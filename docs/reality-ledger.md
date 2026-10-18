@@ -21,13 +21,13 @@ the customer, and the session's close moves it to `beta` or back to
 | [Management API (/api/v1)](#management_api) | `beta` | 39 |
 | [CLI against the hosted service](#cli_remote) | `beta` | 37 |
 | [Web console](#console) | `planned` | 43 |
-| [Create a project](#projects_self_service) | `planned` | 42 |
-| [Delete a project](#project_deletion) | `planned` | 42 |
-| [Export a project](#export) | `planned` | 42 |
-| [Region](#region) | `planned` | 42 |
-| [Compute size](#compute_profiles) | `planned` | 42 |
-| [Sleep and wake](#sleep) | `planned` | 42 |
-| [Sleep when idle](#idle_sleep) | `planned` | 42 |
+| [Create a project](#projects_self_service) | `trial` | 42 |
+| [Delete a project](#project_deletion) | `trial` | 42 |
+| [Export a project](#export) | `trial` | 42 |
+| [Region](#region) | `trial` | 42 |
+| [Compute size](#compute_profiles) | `trial` | 42 |
+| [Sleep and wake](#sleep) | `trial` | 42 |
+| [Sleep when idle](#idle_sleep) | `trial` | 42 |
 | [Pooled connection string](#pooled_endpoint) | `beta` | 40 |
 | [Direct connection string](#direct_endpoint) | `beta` | 40 |
 | [Wake on connect](#wake_on_connect) | `planned` | — |
@@ -35,13 +35,13 @@ the customer, and the session's close moves it to `beta` or back to
 | [Restore to a new branch](#restore_to_branch) | `beta` | 41 |
 | [Restore a project in place](#in_place_restore) | `not_offered` | — |
 | [Promote a branch](#branch_promotion) | `not_offered` | — |
-| [Query Insights](#query_insights) | `planned` | 42 |
-| [Monitoring](#monitoring) | `planned` | 42 |
+| [Query Insights](#query_insights) | `trial` | 42 |
+| [Monitoring](#monitoring) | `trial` | 42 |
 | [Usage](#usage) | `beta` | 41 |
 | [Network egress usage](#egress_metering) | `not_metered` | — |
 | [Free plan](#plan_free) | `beta` | 41 |
 | [Premium plan](#plan_premium) | `beta` | 41 |
-| [Notifications](#notifications) | `planned` | 42 |
+| [Notifications](#notifications) | `trial` | 42 |
 | [Email](#email) | `planned` | — |
 | [Passkeys](#passkeys) | `planned` | — |
 | [SQL editor](#sql_editor) | `not_offered` | — |
@@ -159,109 +159,137 @@ the customer, and the session's close moves it to `beta` or back to
 
 ## Create a project
 
-`projects_self_service` · **planned** · since Session 38
+`projects_self_service` · **trial** · since Session 38
 
-**What a customer reads.** Not open yet. Creating a project will be refused with "capacity exhausted" when this server has no room, and nothing will be created.
+**What a customer reads.** Being verified. A member of an organization creates a project on a slot the operator prepared, and claims its first administrator with a one-time token only they hold. On the Free plan an organization holds one project; a second is refused with "plan limit reached", and when no slot is ready the request is refused with "capacity exhausted" -- in both cases nothing is created.
 
-**Today.** POST /v1/projects (bin/project.sh create) records a project.create operation once the organisation's plan admits it (ADR 0274: Free's projects_active, read under the organisation's lock before the slot); the reconciler, a root unit on the host, executes it into a prepared slot through admission and the deploy, and bin/project.sh claim sets the first administrator's password through the project's own reset route. The operator still creates every other project by hand. Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Refused as not available since Session 41's close; a later sitting re-earns it on a new slot.
+**Today.** POST /v1/projects (bin/project.sh create) records a project.create operation once the organisation's plan admits it (ADR 0274: Free's projects_active, read under the organisation's lock before the slot); the reconciler, a root unit on the host, executes it into a prepared slot through admission and the deploy, and bin/project.sh claim sets the first administrator's password through the project's own reset route. The operator still creates every other project by hand. Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Re-trialed a fourth time in Session 42 on 1.20.0 on a new slot, slot6-prod, in a new organisation, its probe samples written as they are taken (lifecycle_fourth_trial_live, D2581).
+
+*Customer-facing evidence:* `lifecycle_fourth_trial_live`.
 
 **Stage 5.** POST /v1/projects records a project.create operation (member and above, a person only), refused "capacity exhausted" with no slot ready before anything is recorded; the reconciler (Session 38) executes it into a prepared slot through the same admission and deploy, and the first administrator claims the account with a token only its requester holds (ADR 0256, ADR 0260).
 
 **Eventually (not promised).** Placement across a fleet of servers.
 
-*API operations:* `project.create` -- refused (`409 not_available`) until this concept is available, in beta or on trial.
+*Controls:* `project.create`, `bin/project.sh create`, `bin/project.sh claim`.
+
+*API operations:* `project.create` -- accepted.
 
 <a id="project_deletion"></a>
 
 ## Delete a project
 
-`project_deletion` · **planned** · since Session 38
+`project_deletion` · **trial** · since Session 38
 
-**What a customer reads.** Not open yet.
+**What a customer reads.** Being verified. An admin or owner deletes a project with its data; the slot it ran on is never reissued, and its backups are kept by the operator.
 
-**Today.** DELETE /v1/projects/{key} (bin/project.sh delete --confirm KEY) records a project.delete operation; the reconciler retires the slot's project with its data, leaves the provider's resources for the operator to revoke (bin/slot.sh revoke), and marks the slot consumed. A deleted project no longer counts against its organisation's plan. The operator retires every other project with bin/project-retire.sh. Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Refused as not available since Session 41's close; a later sitting re-earns it on a new slot.
+**Today.** DELETE /v1/projects/{key} (bin/project.sh delete --confirm KEY) records a project.delete operation; the reconciler retires the slot's project with its data, leaves the provider's resources for the operator to revoke (bin/slot.sh revoke), and marks the slot consumed. A deleted project no longer counts against its organisation's plan. The operator retires every other project with bin/project-retire.sh. Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Re-trialed a fourth time in Session 42 on 1.20.0 on a new slot, slot6-prod, in a new organisation, its probe samples written as they are taken (lifecycle_fourth_trial_live, D2581).
+
+*Customer-facing evidence:* `lifecycle_fourth_trial_live`.
 
 **Stage 5.** DELETE /v1/projects/{key} records a project.delete operation (admin and above, a person only); the reconciler retires the project with its data, the slot is consumed and never reissued, and the backups are kept by the operator -- this beta has no automatic removal (D2158, D2181).
 
 **Eventually (not promised).** The same, with a grace period and recovery.
 
-*API operations:* `project.delete` -- refused (`409 not_available`) until this concept is available, in beta or on trial.
+*Controls:* `project.delete`, `bin/project.sh delete`.
+
+*API operations:* `project.delete` -- accepted.
 
 <a id="export"></a>
 
 ## Export a project
 
-`export` · **planned** · since Session 38
+`export` · **trial** · since Session 38
 
-**What a customer reads.** Not open yet.
+**What a customer reads.** Being verified. A member exports a project's own data -- the app, api and public schemas -- as one archive, downloaded once by the person who asked within 15 minutes.
 
-**Today.** POST /v1/projects/{key}/export (bin/project.sh export) records a project.export operation; the reconciler dumps the app, api and public schemas (public since Session 39, D2333: the customer's own tables live there), uploads the archive through the project's own storage container, and hands its one-time URL to the requester's first read of the operation. The CLI downloads it once and checks its SHA-256. Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Refused as not available since Session 41's close; a later sitting re-earns it on a new slot.
+**Today.** POST /v1/projects/{key}/export (bin/project.sh export) records a project.export operation; the reconciler dumps the app, api and public schemas (public since Session 39, D2333: the customer's own tables live there), uploads the archive through the project's own storage container, and hands its one-time URL to the requester's first read of the operation. The CLI downloads it once and checks its SHA-256. Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Re-trialed a fourth time in Session 42 on 1.20.0 on a new slot, slot6-prod, in a new organisation, its probe samples written as they are taken (lifecycle_fourth_trial_live, D2581).
+
+*Customer-facing evidence:* `lifecycle_fourth_trial_live`.
 
 **Stage 5.** POST /v1/projects/{key}/export records a project.export operation (a person only); the archive holds the project's own schemas, and its download URL -- valid at most 15 minutes -- is shown once to the person who asked (D2164, ADR 0259).
 
 **Eventually (not promised).** Scheduled exports to a customer's own storage.
 
-*API operations:* `project.export` -- refused (`409 not_available`) until this concept is available, in beta or on trial.
+*Controls:* `project.export`, `bin/project.sh export`.
+
+*API operations:* `project.export` -- accepted.
 
 <a id="region"></a>
 
 ## Region
 
-`region` · **planned** · since Session 38
+`region` · **trial** · since Session 38
 
-**What a customer reads.** Every project runs in one location, the one server this beta runs on.
+**What a customer reads.** Being verified. Every project runs in one location, the one server this beta runs on, and each project's record names it.
 
-**Today.** One server in one location. Host manifest schema 4 declares the region; every deployed document, the registry row and a creation's result carry it. No operation chooses a region: a creation is placed where the server is. Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Refused as not available since Session 41's close; a later sitting re-earns it on a new slot.
+**Today.** One server in one location. Host manifest schema 4 declares the region; every deployed document, the registry row and a creation's result carry it. No operation chooses a region: a creation is placed where the server is. Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Re-trialed a fourth time in Session 42 on 1.20.0 on a new slot, slot6-prod, in a new organisation, its probe samples written as they are taken (lifecycle_fourth_trial_live, D2581).
+
+*Customer-facing evidence:* `lifecycle_fourth_trial_live`.
 
 **Stage 5.** The operator's declaration in host.yaml (schema 4), carried into every deployed document and the registry, with one value (D1957, D2161).
 
 **Eventually (not promised).** Placement across locations.
 
+*Controls:* `project.create`.
+
 <a id="compute_profiles"></a>
 
 ## Compute size
 
-`compute_profiles` · **planned** · since Session 38
+`compute_profiles` · **trial** · since Session 38
 
-**What a customer reads.** Not open yet. Changing a project's size will restart it, and the message will say how long the restart was measured to take.
+**What a customer reads.** Being verified. A member changes a project's compute size (small, standard or large -- every size is on the Free plan); the change restarts it, the message says for how long it was measured to take, and a size the server has no room for is refused with nothing changed.
 
-**Today.** Three named profiles -- small, standard (the release defaults) and large -- selected by a manifest's compute block (schema 10) and applied where the manifest is loaded, so every existing limit check bounds them. PUT /v1/projects/{key}/compute (bin/compute.sh set) records a project.resize operation the reconciler admits before it changes anything; since Session 39 the operation's result carries the reading admission decided on (D2362, ADR 0270). Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Refused as not available since Session 41's close; a later sitting re-earns it on a new slot.
+**Today.** Three named profiles -- small, standard (the release defaults) and large -- selected by a manifest's compute block (schema 10) and applied where the manifest is loaded, so every existing limit check bounds them. PUT /v1/projects/{key}/compute (bin/compute.sh set) records a project.resize operation the reconciler admits before it changes anything; since Session 39 the operation's result carries the reading admission decided on (D2362, ADR 0270). Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Re-trialed a fourth time in Session 42 on 1.20.0 on a new slot, slot6-prod, in a new organisation, its probe samples written as they are taken (lifecycle_fourth_trial_live, D2581).
+
+*Customer-facing evidence:* `lifecycle_fourth_trial_live`.
 
 **Stage 5.** PUT /v1/projects/{key}/compute records a project.resize operation; admission refuses a profile the server has no room for with nothing changed, and the message says the restart has not been measured on this server until a measured window exists (D1955, D2157, ADR 0258).
 
 **Eventually (not promised).** Compute scheduled independently of storage.
 
-*API operations:* `project.resize` -- refused (`409 not_available`) until this concept is available, in beta or on trial.
+*Controls:* `project.resize`, `bin/compute.sh set`, `bin/compute.sh get`.
+
+*API operations:* `project.resize` -- accepted.
 
 <a id="sleep"></a>
 
 ## Sleep and wake
 
-`sleep` · **planned** · since Session 38
+`sleep` · **trial** · since Session 38
 
-**What a customer reads.** Not open yet.
+**What a customer reads.** Being verified. A member puts a project to sleep and wakes it; its data is kept, and while it sleeps its addresses and its database doors refuse connections and its backups stop, so its last restore point is the moment it went to sleep.
 
-**Today.** POST /v1/projects/{key}/sleep and /wake (bin/project.sh sleep, wake) record project.sleep and project.wake operations; the reconciler stops and starts the slot's containers with their volumes kept, and the project's boot unit and backup timers with them. While it sleeps its customer poolers are stopped too, so both public names refuse the connection (D2336). Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Refused as not available since Session 41's close; a later sitting re-earns it on a new slot.
+**Today.** POST /v1/projects/{key}/sleep and /wake (bin/project.sh sleep, wake) record project.sleep and project.wake operations; the reconciler stops and starts the slot's containers with their volumes kept, and the project's boot unit and backup timers with them. While it sleeps its customer poolers are stopped too, so both public names refuse the connection (D2336). Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Re-trialed a fourth time in Session 42 on 1.20.0 on a new slot, slot6-prod, in a new organisation, its probe samples written as they are taken (lifecycle_fourth_trial_live, D2581).
+
+*Customer-facing evidence:* `lifecycle_fourth_trial_live`.
 
 **Stage 5.** project.sleep and project.wake, by request only, stop and start the project's containers with volumes kept; while it sleeps a caller gets the edge's 404, and its archiver is stopped, so its last restore point is the moment it went to sleep (D1956, D2155, ADR 0259). Idle sleep is its own row.
 
 **Eventually (not promised).** Compute suspended and resumed independently of storage.
 
-*API operations:* `project.sleep`, `project.wake` -- refused (`409 not_available`) until this concept is available, in beta or on trial.
+*Controls:* `project.sleep`, `project.wake`, `bin/project.sh sleep`, `bin/project.sh wake`.
+
+*API operations:* `project.sleep`, `project.wake` -- accepted.
 
 <a id="idle_sleep"></a>
 
 ## Sleep when idle
 
-`idle_sleep` · **planned** · since Session 38
+`idle_sleep` · **trial** · since Session 38
 
-**What a customer reads.** Not open yet. A project sleeps only when someone asks it to.
+**What a customer reads.** Being verified. A member may set a project to sleep after 15, 30 or 60 minutes with no request and no connection; it is off unless you turn it on. While it sleeps its backups stop, so its last restore point is the moment it went to sleep, and it wakes only when someone asks.
 
-**Today.** PUT /v1/projects/{key}/idle-sleep (bin/project.sh idle-sleep) records the minutes, offered only while project.sleep is accepted (D2548). The reconciler samples every slot every 300 s (ADR 0275) and asks the control set whether an awake slot is idle; the control set inserts ONE project.sleep with origin idle, on behalf of the member who set the minutes, only over a window of samples all present, awake, read and quiet -- no request answered below 400 and no connection by the project's own roles (ADR 0276). A missing or unread sample keeps the project awake. Built in Session 41 and run on slot5-prod, where idle_sleep_live and idle_trigger passed on the tagged evidence; but the setting acts through project.sleep, and sleep's row is planned since Session 41's close, so idle sleep is offered by neither door (D2548) and its row is planned with it (D2560).
+**Today.** PUT /v1/projects/{key}/idle-sleep (bin/project.sh idle-sleep) records the minutes, offered only while project.sleep is accepted (D2548). The reconciler samples every slot every 300 s (ADR 0275) and asks the control set whether an awake slot is idle; the control set inserts ONE project.sleep with origin idle, on behalf of the member who set the minutes, only over a window of samples all present, awake, read and quiet -- no request answered below 400 and no connection by the project's own roles (ADR 0276). A missing or unread sample keeps the project awake. Built in Session 41 and run on slot5-prod, where idle_sleep_live and idle_trigger passed on the tagged evidence; the setting acts through project.sleep, so it follows sleep's row (D2548, D2560). Re-trialed in Session 42 on slot6-prod, set to 15 minutes with the probes stopped (idle_sleep_retrial_live).
+
+*Customer-facing evidence:* `idle_sleep_retrial_live`.
 
 **Stage 5.** A per-project setting the reconciler acts on, built with Session 41's sampler of the counters it reads (D2147).
 
 **Eventually (not promised).** Compute suspended automatically and resumed on demand.
+
+*Controls:* `PUT /v1/projects/{key}/idle-sleep`, `bin/project.sh idle-sleep`.
 
 <a id="pooled_endpoint"></a>
 
@@ -387,29 +415,37 @@ the customer, and the session's close moves it to `beta` or back to
 
 ## Query Insights
 
-`query_insights` · **planned** · since Session 36
+`query_insights` · **trial** · since Session 36
 
-**What a customer reads.** Not open yet.
+**What a customer reads.** Being verified. Your statements' calls and time over a window, normalised; no recommendations.
 
-**Today.** pg_stat_statements is not loaded; no query is recorded.
+**Today.** pg_stat_statements is loaded on every project's database and every branch (track=top, utility statements not tracked, revoked from PUBLIC; ADR 0278). The reconciler samples the top 50 statements of each awake slot's customer-facing roles every 300 s into the control database, the text as PostgreSQL normalised it, kept 7 days; GET /v1/projects/{key}/insights (bin/insights.sh show) serves each statement's increase over 1 to 168 hours with resets read -- calls, time, rows, block reads and the cache hit ratio, numbers and never a recommendation; fewer than two samples is could_not_determine. DB time is part of usage. Built in Session 42 and read after a known workload on slot6-prod (insights_live).
+
+*Customer-facing evidence:* `insights_sampler`, `insights_api`, `insights_live`, `pgss_live`.
 
 **Stage 5.** pg_stat_statements loaded, normalised statements served per project, with no recommendation engine (D1965).
 
 **Eventually (not promised).** Longer history and recommendations.
 
+*Controls:* `GET /v1/projects/{key}/insights`, `bin/insights.sh show`.
+
 <a id="monitoring"></a>
 
 ## Monitoring
 
-`monitoring` · **planned** · since Session 36
+`monitoring` · **trial** · since Session 36
 
-**What a customer reads.** Not open yet.
+**What a customer reads.** Being verified. A short list of readings, each naming where it comes from.
 
-**Today.** Each project has its own collector and Prometheus store, routed nowhere; the operator reads them through doctor.
+**Today.** GET /v1/projects/{key}/monitoring (bin/monitoring.sh show) serves ten readings the control database already holds -- the newest usage sample, the last hour's requests and DB time, the last backups reading, the newest insight sample -- each with its source table and column and when it was read, or unread with the reason; no threshold and no alert (ADR 0279). The operator reads the services' request lines in a bounded ClickStack on the host, fed by each project's own collector, behind an SSH forward and its own login (ADR 0277). Built in Session 42 (telemetry_live).
+
+*Customer-facing evidence:* `monitoring_signals`, `telemetry_live`.
 
 **Stage 5.** A curated signal list, each naming its source, and ClickStack bounded on the host (D1964).
 
 **Eventually (not promised).** Dashboards and alert routing.
+
+*Controls:* `GET /v1/projects/{key}/monitoring`, `bin/monitoring.sh show`.
 
 <a id="usage"></a>
 
@@ -483,15 +519,19 @@ the customer, and the session's close moves it to `beta` or back to
 
 ## Notifications
 
-`notifications` · **planned** · since Session 36
+`notifications` · **trial** · since Session 36
 
-**What a customer reads.** Not open yet. Notifications will be shown in the console only.
+**What a customer reads.** Being verified. In-app notifications for an organization: one for every finished operation, and a notice once a day when a project passes 80% of a shown limit. Nothing is emailed.
 
-**Today.** control_finish_operation writes ONE notification from a fixed template in the transaction that finishes the operation -- its type, its project, how it ended, why the server requested it -- never a result member, a URL or a caller value; the reconciler writes the daily limit notice (ADR 0275). GET /v1/organizations/{organization}/notifications (bin/notifications.sh list) lists them newest first. Built in Session 41 and read for slot5-prod's lifecycle, where notifications_live did not pass: it counts one notification per operation of the eleven, and the failed export's operation_failed notification -- written as designed -- stood beside them (D2557). Planned since Session 41's close; a later sitting re-earns it.
+**Today.** control_finish_operation writes ONE notification from a fixed template in the transaction that finishes the operation -- its type, its project, how it ended, why the server requested it -- never a result member, a URL or a caller value; the reconciler writes the daily limit notice (ADR 0275). GET /v1/organizations/{organization}/notifications (bin/notifications.sh list) lists them newest first. Built in Session 41 and read for slot5-prod's lifecycle, where notifications_live did not pass: it counts one notification per operation of the eleven, and the failed export's operation_failed notification -- written as designed -- stood beside them (D2557). Re-trialed in Session 42 for slot6-prod's lifecycle, counted against every operation the record names by its outcome, a failed one included (notifications_retrial_live, D2581).
+
+*Customer-facing evidence:* `notifications_retrial_live`.
 
 **Stage 5.** A table and a list route (D1968).
 
 **Eventually (not promised).** In-app, email and webhook notifications.
+
+*Controls:* `GET /v1/organizations/{organization}/notifications`, `bin/notifications.sh list`.
 
 <a id="email"></a>
 

@@ -106,14 +106,20 @@ MAX_EXPIRY_SECONDS: Final = 7 * 86400
 BACKUP_RECORD_SECONDS: Final = 900
 
 #: The types the control mode accepts. Equal, by the guard, to the types whose
-#: ledger row accepts: since Session 41's close, `credential.rotate` (its row
-#: `direct_endpoint` is `beta`) and the four branch types (`branches` and
-#: `restore_to_branch` are `beta`, D2501 and D2504 repaired and re-earned live);
-#: the six managed-project types are refused again -- their re-trial's lifecycle
-#: claim failed on the tagged evidence (D2557). Written out, never derived from
-#: `EXECUTED_TYPES` -- building a type is not the decision to accept it.
+#: ledger row accepts: ALL ELEVEN since Session 42's bump -- the six
+#: managed-project types re-trialed a fourth time on a new slot, their probe
+#: samples written as taken (D2583, D2581); the four branch types, whose rows
+#: are `beta`; and `credential.rotate`, whose row `direct_endpoint` is `beta`.
+#: Written out, never derived from `EXECUTED_TYPES` -- building a type is not
+#: the decision to accept it.
 ACCEPTED_TYPES: Final[frozenset[str]] = frozenset(
     {
+        "project.create",
+        "project.delete",
+        "project.sleep",
+        "project.wake",
+        "project.resize",
+        "project.export",
         "credential.rotate",
         "branch.create",
         "branch.reset",

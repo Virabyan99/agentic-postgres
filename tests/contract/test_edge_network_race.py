@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.contract
+pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "bin" / "edge-network.sh"

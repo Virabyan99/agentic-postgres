@@ -455,6 +455,32 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "usage_api",
         "idle_trigger",
         "notifications",
+        # Session 42 (ADR 0277-0279). TWELVE, each a property of a CHECKOUT: the
+        # three repairs -- the edge's attach race (`edge_attach_race`), the
+        # upload's refusal naming the provider's code (`export_reason`), the SQL
+        # reader keeping a literal (`sql_reader_quotes`); `pg_stat_statements`
+        # loaded and revoked (`pgss_loaded`); the insights reading on a real
+        # server (`insights_sampler`) and its document (`insights_api`); DB time
+        # (`usage_db_time`); the commands (`insights_cli`); the monitoring list
+        # (`monitoring_signals`); and the telemetry plane bounded, admitted and
+        # fed (`telemetry_plane`, `telemetry_admission`, `telemetry_logs`).
+        #
+        # The session's other SIX are deliberately not here: four are read from
+        # the workstation (EXTERNAL) -- the fourth re-earning, idle sleep,
+        # notifications and insights on a new slot -- and two are the plane and
+        # the extension on the host.
+        "edge_attach_race",
+        "export_reason",
+        "sql_reader_quotes",
+        "pgss_loaded",
+        "insights_sampler",
+        "insights_api",
+        "usage_db_time",
+        "insights_cli",
+        "monitoring_signals",
+        "telemetry_plane",
+        "telemetry_admission",
+        "telemetry_logs",
     }
 )
 
@@ -917,6 +943,30 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "notifications_live": ("USE-LIVE-003",),
     "branch_retrial_live": ("BR-LIVE-003",),
     "branch_host_retrial_live": ("BR-LIVE-004",),
+    # Session 42 (ADR 0277-0279). EIGHTEEN claims, landing with the constant
+    # (D690): twelve offline, four external and two host, each requirement its
+    # own claim (ADR 0089). The session's subject: three repairs (D2558, D2559,
+    # D2544), the telemetry plane, `pg_stat_statements`, Query Insights and
+    # monitoring -- and the managed project's life re-earned a fourth time, its
+    # probe samples written as they are taken (D2581).
+    "edge_attach_race": ("DEP-ATTACH-001",),
+    "export_reason": ("LIFE-EXPORT-002",),
+    "sql_reader_quotes": ("TEN-READ-001",),
+    "pgss_loaded": ("INS-PGSS-001",),
+    "insights_sampler": ("INS-READ-001",),
+    "insights_api": ("INS-API-001",),
+    "usage_db_time": ("USE-DBTIME-001",),
+    "insights_cli": ("INS-CLI-001",),
+    "monitoring_signals": ("INS-SIGNAL-001",),
+    "telemetry_plane": ("INS-PLANE-001",),
+    "telemetry_admission": ("INS-ADMIT-001",),
+    "telemetry_logs": ("INS-LOGS-001",),
+    "telemetry_live": ("INS-HOST-001",),
+    "pgss_live": ("INS-HOST-002",),
+    "lifecycle_fourth_trial_live": ("LIFE-LIVE-006",),
+    "idle_sleep_retrial_live": ("USE-LIVE-004",),
+    "notifications_retrial_live": ("USE-LIVE-005",),
+    "insights_live": ("INS-LIVE-001",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

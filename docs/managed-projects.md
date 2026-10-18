@@ -8,20 +8,21 @@ it keeps. The routes and the roles are in [the control plane](control-plane.md);
 the operator's half -- slots, the reconciler, revocation -- is the
 [operator guide](operator-guide.md) §20.
 
-**Since Session 41's close the branch operations and setting a database
-credential are open** (Reality Ledger `beta`). The project operations were
-offered on the 1.19.0 trip (`trial`, ADR 0261) a third time and are `planned`
-again (D2557), so each answers `409 not_available` naming its row until a
-later trip re-earns it -- and idle sleep with them, since it acts through a
-sleep (D2548, D2560). [The Reality Ledger](reality-ledger.md) says why for
-each.
+**The branch operations and setting a database credential are open**
+(Reality Ledger `beta`). **The project operations are being verified**
+(`trial`, ADR 0261) since Session 42's bump: offered on the 1.20.0 trip and
+re-earned a fourth time on a new slot (D2583), each moved to `beta` or back to
+`planned` by the session's close -- and idle sleep with them, since it acts
+through a sleep (D2548, D2560). [The Reality Ledger](reality-ledger.md) says so
+for each.
 
 Since Session 41 (ADR 0274-0276) an organisation also has a **plan**, each
 project a **usage** record, the organisation **notifications**, and a project
 can be set to **sleep when idle**. Plans, usage and notifications are reads --
-plans and usage `beta`, notifications `planned` again (D2557); idle sleep is
+plans and usage `beta`, notifications `trial` again (D2583); idle sleep is
 offered only while sleeping is (`409 not_available` naming `idle_sleep`
-otherwise, as since Session 41's close).
+otherwise). Since Session 42 a project also has **Query Insights** and a short
+list of **monitoring** readings, both `trial` -- [monitoring](monitoring.md).
 
 ## The life of a project
 

@@ -93,9 +93,10 @@ def instant(text: str) -> datetime:
 
 @pytest.fixture(scope="module")
 def record41(record: dict[str, Any]) -> dict[str, Any]:
-    """Session 41's record: a NEW slot's key -- never the kept `slot3-prod` -- in
-    the lifecycle's OWN organisation, not the probe's (step 1)."""
-    assert record["session"] == 41, f"a Session {record['session']} record, not 41's"
+    """Session 41's record, or Session 42's fourth re-earning (D2581): a NEW
+    slot's key -- never the kept `slot3-prod` -- in the lifecycle's OWN
+    organisation, not the probe's (step 1)."""
+    assert record["session"] in (41, 42), f"a Session {record['session']} record, not 41's or 42's"
     key = str(record.get("project_key"))
     assert slot.SLOT_KEY.fullmatch(key) and key != "slot3-prod", key
     assert record.get("organization_id") and record.get("probe_organization_id"), record

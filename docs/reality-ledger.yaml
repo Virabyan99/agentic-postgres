@@ -205,10 +205,14 @@ rows:
   # -------------------------------------------------------------------------
   - id: projects_self_service
     concept: Create a project
-    status: planned
+    status: trial
     customer_text: >-
-      Not open yet. Creating a project will be refused with "capacity exhausted"
-      when this server has no room, and nothing will be created.
+      Being verified. A member of an organization creates a project on a slot
+      the operator prepared, and claims its first administrator with a one-time
+      token only they hold. On the Free plan an organization holds one project;
+      a second is refused with "plan limit reached", and when no slot is ready
+      the request is refused with "capacity exhausted" -- in both cases nothing
+      is created.
     today: >-
       POST /v1/projects (bin/project.sh create) records a project.create
       operation once the organisation's plan admits it (ADR 0274: Free's
@@ -225,11 +229,13 @@ rows:
       lifecycle_third_trial_live did not pass: the first export's upload was
       refused by a mis-entered storage credential, the run resumed at the
       export, and the four windows its probes had read (sleep, wake, both
-      resizes) were lost with the first attempt (D2557). Refused as not
-      available since Session 41's close; a later sitting re-earns it on a new
-      slot.
+      resizes) were lost with the first attempt (D2557). Re-trialed a fourth
+      time in Session 42 on 1.20.0 on a new slot, slot6-prod, in a new
+      organisation, its probe samples written as they are taken
+      (lifecycle_fourth_trial_live, D2581).
     today_evidence: null
-    evidence: []
+    evidence:
+      - lifecycle_fourth_trial_live
     stage5_reality: >-
       POST /v1/projects records a project.create operation (member and above,
       a person only), refused "capacity exhausted" with no slot ready before
@@ -238,15 +244,20 @@ rows:
       administrator claims the account with a token only its requester holds
       (ADR 0256, ADR 0260).
     eventual: Placement across a fleet of servers.
-    controls: []
+    controls:
+      - project.create
+      - bin/project.sh create
+      - bin/project.sh claim
     since_session: 38
     target_session: 42
 
   - id: project_deletion
     concept: Delete a project
-    status: planned
+    status: trial
     customer_text: >-
-      Not open yet.
+      Being verified. An admin or owner deletes a project with its data; the
+      slot it ran on is never reissued, and its backups are kept by the
+      operator.
     today: >-
       DELETE /v1/projects/{key} (bin/project.sh delete --confirm KEY) records a
       project.delete operation; the reconciler retires the slot's project with
@@ -262,26 +273,32 @@ rows:
       lifecycle_third_trial_live did not pass: the first export's upload was
       refused by a mis-entered storage credential, the run resumed at the
       export, and the four windows its probes had read (sleep, wake, both
-      resizes) were lost with the first attempt (D2557). Refused as not
-      available since Session 41's close; a later sitting re-earns it on a new
-      slot.
+      resizes) were lost with the first attempt (D2557). Re-trialed a fourth
+      time in Session 42 on 1.20.0 on a new slot, slot6-prod, in a new
+      organisation, its probe samples written as they are taken
+      (lifecycle_fourth_trial_live, D2581).
     today_evidence: null
-    evidence: []
+    evidence:
+      - lifecycle_fourth_trial_live
     stage5_reality: >-
       DELETE /v1/projects/{key} records a project.delete operation (admin and
       above, a person only); the reconciler retires the project with its data,
       the slot is consumed and never reissued, and the backups are kept by the
       operator -- this beta has no automatic removal (D2158, D2181).
     eventual: The same, with a grace period and recovery.
-    controls: []
+    controls:
+      - project.delete
+      - bin/project.sh delete
     since_session: 38
     target_session: 42
 
   - id: export
     concept: Export a project
-    status: planned
+    status: trial
     customer_text: >-
-      Not open yet.
+      Being verified. A member exports a project's own data -- the app, api and
+      public schemas -- as one archive, downloaded once by the person who asked
+      within 15 minutes.
     today: >-
       POST /v1/projects/{key}/export (bin/project.sh export) records a
       project.export operation; the reconciler dumps the app, api and public
@@ -297,26 +314,31 @@ rows:
       lifecycle_third_trial_live did not pass: the first export's upload was
       refused by a mis-entered storage credential, the run resumed at the
       export, and the four windows its probes had read (sleep, wake, both
-      resizes) were lost with the first attempt (D2557). Refused as not
-      available since Session 41's close; a later sitting re-earns it on a new
-      slot.
+      resizes) were lost with the first attempt (D2557). Re-trialed a fourth
+      time in Session 42 on 1.20.0 on a new slot, slot6-prod, in a new
+      organisation, its probe samples written as they are taken
+      (lifecycle_fourth_trial_live, D2581).
     today_evidence: null
-    evidence: []
+    evidence:
+      - lifecycle_fourth_trial_live
     stage5_reality: >-
       POST /v1/projects/{key}/export records a project.export operation (a
       person only); the archive holds the project's own schemas, and its
       download URL -- valid at most 15 minutes -- is shown once to the person
       who asked (D2164, ADR 0259).
     eventual: Scheduled exports to a customer's own storage.
-    controls: []
+    controls:
+      - project.export
+      - bin/project.sh export
     since_session: 38
     target_session: 42
 
   - id: region
     concept: Region
-    status: planned
+    status: trial
     customer_text: >-
-      Every project runs in one location, the one server this beta runs on.
+      Being verified. Every project runs in one location, the one server this
+      beta runs on, and each project's record names it.
     today: >-
       One server in one location. Host manifest schema 4 declares the region;
       every deployed document, the registry row and a creation's result carry
@@ -330,24 +352,29 @@ rows:
       first export's upload was refused by a mis-entered storage credential, the
       run resumed at the export, and the four windows its probes had read
       (sleep, wake, both resizes) were lost with the first attempt (D2557).
-      Refused as not available since Session 41's close; a later sitting
-      re-earns it on a new slot.
+      Re-trialed a fourth time in Session 42 on 1.20.0 on a new slot,
+      slot6-prod, in a new organisation, its probe samples written as they are
+      taken (lifecycle_fourth_trial_live, D2581).
     today_evidence: null
-    evidence: []
+    evidence:
+      - lifecycle_fourth_trial_live
     stage5_reality: >-
       The operator's declaration in host.yaml (schema 4), carried into every
       deployed document and the registry, with one value (D1957, D2161).
     eventual: Placement across locations.
-    controls: []
+    controls:
+      - project.create
     since_session: 38
     target_session: 42
 
   - id: compute_profiles
     concept: Compute size
-    status: planned
+    status: trial
     customer_text: >-
-      Not open yet. Changing a project's size will restart it, and the message
-      will say how long the restart was measured to take.
+      Being verified. A member changes a project's compute size (small, standard
+      or large -- every size is on the Free plan); the change restarts it, the
+      message says for how long it was measured to take, and a size the server
+      has no room for is refused with nothing changed.
     today: >-
       Three named profiles -- small, standard (the release defaults) and large
       -- selected by a manifest's compute block (schema 10) and applied where
@@ -364,25 +391,33 @@ rows:
       first export's upload was refused by a mis-entered storage credential, the
       run resumed at the export, and the four windows its probes had read
       (sleep, wake, both resizes) were lost with the first attempt (D2557).
-      Refused as not available since Session 41's close; a later sitting
-      re-earns it on a new slot.
+      Re-trialed a fourth time in Session 42 on 1.20.0 on a new slot,
+      slot6-prod, in a new organisation, its probe samples written as they are
+      taken (lifecycle_fourth_trial_live, D2581).
     today_evidence: null
-    evidence: []
+    evidence:
+      - lifecycle_fourth_trial_live
     stage5_reality: >-
       PUT /v1/projects/{key}/compute records a project.resize operation;
       admission refuses a profile the server has no room for with nothing
       changed, and the message says the restart has not been measured on this
       server until a measured window exists (D1955, D2157, ADR 0258).
     eventual: Compute scheduled independently of storage.
-    controls: []
+    controls:
+      - project.resize
+      - bin/compute.sh set
+      - bin/compute.sh get
     since_session: 38
     target_session: 42
 
   - id: sleep
     concept: Sleep and wake
-    status: planned
+    status: trial
     customer_text: >-
-      Not open yet.
+      Being verified. A member puts a project to sleep and wakes it; its data is
+      kept, and while it sleeps its addresses and its database doors refuse
+      connections and its backups stop, so its last restore point is the moment
+      it went to sleep.
     today: >-
       POST /v1/projects/{key}/sleep and /wake (bin/project.sh sleep, wake)
       record project.sleep and project.wake operations; the reconciler stops and
@@ -398,10 +433,12 @@ rows:
       first export's upload was refused by a mis-entered storage credential, the
       run resumed at the export, and the four windows its probes had read
       (sleep, wake, both resizes) were lost with the first attempt (D2557).
-      Refused as not available since Session 41's close; a later sitting
-      re-earns it on a new slot.
+      Re-trialed a fourth time in Session 42 on 1.20.0 on a new slot,
+      slot6-prod, in a new organisation, its probe samples written as they are
+      taken (lifecycle_fourth_trial_live, D2581).
     today_evidence: null
-    evidence: []
+    evidence:
+      - lifecycle_fourth_trial_live
     stage5_reality: >-
       project.sleep and project.wake, by request only, stop and start the
       project's containers with volumes kept; while it sleeps a caller gets the
@@ -409,14 +446,22 @@ rows:
       moment it went to sleep (D1956, D2155, ADR 0259). Idle sleep is its own
       row.
     eventual: Compute suspended and resumed independently of storage.
-    controls: []
+    controls:
+      - project.sleep
+      - project.wake
+      - bin/project.sh sleep
+      - bin/project.sh wake
     since_session: 38
     target_session: 42
 
   - id: idle_sleep
     concept: Sleep when idle
-    status: planned
-    customer_text: Not open yet. A project sleeps only when someone asks it to.
+    status: trial
+    customer_text: >-
+      Being verified. A member may set a project to sleep after 15, 30 or 60
+      minutes with no request and no connection; it is off unless you turn it
+      on. While it sleeps its backups stop, so its last restore point is the
+      moment it went to sleep, and it wakes only when someone asks.
     today: >-
       PUT /v1/projects/{key}/idle-sleep (bin/project.sh idle-sleep) records the
       minutes, offered only while project.sleep is accepted (D2548). The
@@ -427,17 +472,20 @@ rows:
       -- no request answered below 400 and no connection by the project's own
       roles (ADR 0276). A missing or unread sample keeps the project awake.
       Built in Session 41 and run on slot5-prod, where idle_sleep_live and
-      idle_trigger passed on the tagged evidence; but the setting acts through
-      project.sleep, and sleep's row is planned since Session 41's close, so
-      idle sleep is offered by neither door (D2548) and its row is planned with
-      it (D2560).
+      idle_trigger passed on the tagged evidence; the setting acts through
+      project.sleep, so it follows sleep's row (D2548, D2560). Re-trialed in
+      Session 42 on slot6-prod, set to 15 minutes with the probes stopped
+      (idle_sleep_retrial_live).
     today_evidence: null
-    evidence: []
+    evidence:
+      - idle_sleep_retrial_live
     stage5_reality: >-
       A per-project setting the reconciler acts on, built with Session 41's
       sampler of the counters it reads (D2147).
     eventual: Compute suspended automatically and resumed on demand.
-    controls: []
+    controls:
+      - PUT /v1/projects/{key}/idle-sleep
+      - bin/project.sh idle-sleep
     since_session: 38
     target_session: 42
 
@@ -646,37 +694,66 @@ rows:
     target_session: null
 
   # -------------------------------------------------------------------------
-  # Telemetry, insights, usage and plans (Session 41)
+  # Telemetry, insights, usage and plans (Sessions 41-42)
   # -------------------------------------------------------------------------
   - id: query_insights
     concept: Query Insights
-    status: planned
-    customer_text: Not open yet.
-    today: pg_stat_statements is not loaded; no query is recorded.
+    status: trial
+    customer_text: >-
+      Being verified. Your statements' calls and time over a window, normalised;
+      no recommendations.
+    today: >-
+      pg_stat_statements is loaded on every project's database and every branch
+      (track=top, utility statements not tracked, revoked from PUBLIC; ADR
+      0278). The reconciler samples the top 50 statements of each awake slot's
+      customer-facing roles every 300 s into the control database, the text as
+      PostgreSQL normalised it, kept 7 days; GET /v1/projects/{key}/insights
+      (bin/insights.sh show) serves each statement's increase over 1 to 168
+      hours with resets read -- calls, time, rows, block reads and the cache hit
+      ratio, numbers and never a recommendation; fewer than two samples is
+      could_not_determine. DB time is part of usage. Built in Session 42 and
+      read after a known workload on slot6-prod (insights_live).
     today_evidence: null
-    evidence: []
+    evidence:
+      - insights_sampler
+      - insights_api
+      - insights_live
+      - pgss_live
     stage5_reality: >-
       pg_stat_statements loaded, normalised statements served per project, with
       no recommendation engine (D1965).
     eventual: Longer history and recommendations.
-    controls: []
+    controls:
+      - GET /v1/projects/{key}/insights
+      - bin/insights.sh show
     since_session: 36
     target_session: 42
 
   - id: monitoring
     concept: Monitoring
-    status: planned
-    customer_text: Not open yet.
+    status: trial
+    customer_text: >-
+      Being verified. A short list of readings, each naming where it comes from.
     today: >-
-      Each project has its own collector and Prometheus store, routed nowhere;
-      the operator reads them through doctor.
+      GET /v1/projects/{key}/monitoring (bin/monitoring.sh show) serves ten
+      readings the control database already holds -- the newest usage sample,
+      the last hour's requests and DB time, the last backups reading, the newest
+      insight sample -- each with its source table and column and when it was
+      read, or unread with the reason; no threshold and no alert (ADR 0279). The
+      operator reads the services' request lines in a bounded ClickStack on the
+      host, fed by each project's own collector, behind an SSH forward and its
+      own login (ADR 0277). Built in Session 42 (telemetry_live).
     today_evidence: null
-    evidence: []
+    evidence:
+      - monitoring_signals
+      - telemetry_live
     stage5_reality: >-
       A curated signal list, each naming its source, and ClickStack bounded on
       the host (D1964).
     eventual: Dashboards and alert routing.
-    controls: []
+    controls:
+      - GET /v1/projects/{key}/monitoring
+      - bin/monitoring.sh show
     since_session: 36
     target_session: 42
 
@@ -785,8 +862,11 @@ rows:
 
   - id: notifications
     concept: Notifications
-    status: planned
-    customer_text: Not open yet. Notifications will be shown in the console only.
+    status: trial
+    customer_text: >-
+      Being verified. In-app notifications for an organization: one for every
+      finished operation, and a notice once a day when a project passes 80% of a
+      shown limit. Nothing is emailed.
     today: >-
       control_finish_operation writes ONE notification from a fixed template in
       the transaction that finishes the operation -- its type, its project, how
@@ -797,12 +877,17 @@ rows:
       lifecycle, where notifications_live did not pass: it counts one
       notification per operation of the eleven, and the failed export's
       operation_failed notification -- written as designed -- stood beside them
-      (D2557). Planned since Session 41's close; a later sitting re-earns it.
+      (D2557). Re-trialed in Session 42 for slot6-prod's lifecycle, counted
+      against every operation the record names by its outcome, a failed one
+      included (notifications_retrial_live, D2581).
     today_evidence: null
-    evidence: []
+    evidence:
+      - notifications_retrial_live
     stage5_reality: A table and a list route (D1968).
     eventual: In-app, email and webhook notifications.
-    controls: []
+    controls:
+      - GET /v1/organizations/{organization}/notifications
+      - bin/notifications.sh list
     since_session: 36
     target_session: 42
 

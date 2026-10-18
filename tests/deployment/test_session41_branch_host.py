@@ -95,7 +95,8 @@ def record(parent: dict[str, Any]) -> dict[str, Any]:
     if not path.is_file():
         pytest.fail(f"APG_BRANCH_RECORD_FILE points at {path}, which does not exist")
     document = json.loads(path.read_text(encoding="utf-8"))
-    assert (document.get("session"), document.get("kind")) == (41, "branches"), (
+    # Session 42 re-runs these against its own record (D2623).
+    assert document.get("session") in (41, 42) and document.get("kind") == "branches", (
         document.get("session"), document.get("kind"),
     )  # fmt: skip
     assert document.get("project_key") == parent["project"]["key"], document.get("project_key")

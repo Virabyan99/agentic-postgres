@@ -1,15 +1,16 @@
 # Session 42 — The OVH upgrade, ClickStack, `pg_stat_statements`, Query Insights, monitoring, and the fourth re-earning
 
-**Status: EXECUTING since 2026-10-18.** **Runs 1 to 8 done** -- Run 1's
+**Status: EXECUTING since 2026-10-18.** **Runs 1 to 8 done; Run 9's code
+done, its gates owed** -- Run 1's
 sitting U ran once OVH's stock returned (D2598): the host is **11,671 MiB, 6
 vCPU, 95 GiB** and declared so (D2628); E1 moved HyperDX's limit to 1,728 MiB
 and the plane's charge to 3,552 (D2626). Rows **D2561–D2590** at planning,
 **D2591–D2596** added 2026-10-18 (the operator's amendment of Sessions
 43–45: web-first, the browser SQL editor, the split, and three of Session
 43's choices — recorded here because this plan holds the next free numbers;
-none changes a run of this session), **D2597–D2630** by the runs. ADRs
+none changes a run of this session), **D2597–D2633** by the runs. ADRs
 **0277–0279** written (0277 amended by E1, D2626).
-**NEXT FREE: D2631, ADR 0280.**
+**NEXT FREE: D2634, ADR 0280.**
 
 The seventh session of Stage 5 and the second half of the operator's split
 (D2510): the stage plan's *Session 42* brief (`docs/plans/stage-5-plan.md` §5
@@ -513,6 +514,9 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2628** | Sheet U3: *"`disk_gb` only if the doctor's reading moved"*; *"`sudo systemctl start agentic-postgres-reconciler`"*. | The disk moved (`sda1` 73.9 G → 98.9 G). The product's reading is `usage.total // 1024**3` = **95** (102,915,489,792 B); `df -h`'s 96 G is rounded -- a first candidate built at 96 was removed before anything was installed. The reconciler was already `active` (the boot started it) and reads `host.yaml` once at start (D2411), so `start` would have done nothing. | `disk_gb` 71 → **95** and `memory_mb` 7746 → **11671** in both copies (candidates byte-equal, `e52d712e…`; the checkout's installed by the agent with `host.yaml.before-u3` kept, `/etc`'s by the operator); **`systemctl restart`**, then `idle`; `doctor capacity` 5 ok (11,671 MiB / 95 GiB declared, 9,457 claimable, was 5,532). | A declaration agrees with its reader exactly, not with a rounded display. | 0221 |
 | **D2629** | Sheet E0: *"the line rate (lines per second across the four projects) is the control load's unit for 42a(5) and E1"*; Sheet E1: *"`telemetrygen` at 10× E0's rate"*. | E0 ran 13 min after the boot and the containers' logs began at it: 608 `apg.*` lines in both windows -- **76 per `auth` and `storage` container, 0 per `mcp`**, one line per ~10.5 s per service, almost all health traffic: **~0.75 lines/s** across the host. 10× is 7.5 lines/s, below case 5's 100, so case 5 is not re-run (D2598's condition). | **E1 ran at 100 lines/s** (above 10× E0, and case 5's rate, so the host's peaks compare with the workstation's), driven by the pinned `telemetrygen` into the stand-in collector (no image built on the host), at ADR 0277's memory limits (`CH_MEM` 1152m, `HDX_MEM` 1696m, `MONGO_MEM` 448m, `GW_MEM` 224m), a reader query from HyperDX's container every 60 s standing in for case 5's searches (no forward on the host). | A rate read right after a boot is a floor, not the day's rate. | 0277 |
 | **D2630** | Sheet E1: *"the neighbours' memory (the four projects' `docker stats` at start and end) recorded"*; §9: *"a neighbour's memory moves by more than its own noise during E1"*. | `s42-e1.sh`'s `neighbours()` filtered `docker stats` lines for four leading spaces the format had and the output did not keep: both readings printed nothing. | **The start reading is E0's `docker stats` (08:48:53Z, three minutes before E1)**; the end reading is the operator's one `docker stats` line after the teardown, compared per container in Run 1's `**Done.**`. `free -m`: 9,206 MiB available at the start, 8,324 lowest under load, 9,120 after the teardown (buff/cache 2,545 → 5,833 MiB: the pulled images). | A filter that matches nothing reads as "no neighbour" -- the third outcome folded (ADR 0195). | — |
+| **D2631** | §2: node ids *"proposed; Run 9 writes what the runs actually wrote"*; `INS-CLI-001` proposed `tests/contract/test_cli_contract.py::test_telemetry_is_a_root_command`. | No such test exists (`pytest --collect-only`). Runs 2-7 wrote proofs §2 did not name: `test_an_attach_network_lost_to_another_unit_succeeds`, `test_a_clean_attach_and_detach_say_nothing_of_another_unit`, `test_an_upload_with_no_line_keeps_the_bare_reason`, `test_an_insight_statement_of_a_platform_role_is_not_kept`, `test_the_insights_and_monitoring_routes_answer_a_viewer_and_a_read_key`, `test_every_image_is_locked`, `test_the_users_admit_only_the_subnet_and_the_gateway_creates_and_inserts`, `test_an_unreadable_charge_refuses_rather_than_counting_zero`. | **The tree's ids** (D2129): `INS-CLI-001`'s operator half is `test_host_infrastructure.py::test_the_telemetry_unit_waits_for_docker_and_no_project_waits_for_it` (the unit runs the root launcher); every unnamed proof joins its requirement. The registry lists base names (D1119 strips `[case]`). | A proposed id is a prediction; the collection is the record. | — |
+| **D2632** | Run 2: `tests/contract/test_edge_network_race.py`, its proofs to be `DEP-ATTACH-001`'s (P0, claim `edge_attach_race`, offline). | The module carried `pytestmark = pytest.mark.contract` alone: collectible by name, invisible to `-m "p0 and not future and not live_host and not external"`, the sweep that reports the claim -- `test_every_offline_claims_proof_is_swept_by_the_gate_that_reports_it` failed on the bump (D1240/D1242's shape, a fourth time). | **`pytestmark = [pytest.mark.contract, pytest.mark.p0]`**; the guard green. Run 2's CI was green because nothing yet registered the proofs. | A module's marks are part of its registration. | — |
+| **D2633** | Run 9's battery: *"a widened fixture narrowed back → the re-run FAILED on the 42 record fixture"*. | The widened fixtures live in EXTERNAL and HOST modules whose `requires_environment` is the trip's: offline they SKIP, and a skip is not a kill (D386). | **Not in the battery**; the narrowing is read by the trip's own Session 42 records, where a narrowed fixture fails its whole module. The battery's seven mutations each run offline: the gate's literal, `project.sleep` unaccepted, a trial row citing a Session 41 claim (the plan's control `test_the_idle_sleep_row_is_reachable_iff_its_sleep_is_accepted` green), `INS` out of the regex, a threat row naming a missing test, an offline claim undeclared, a live requirement naming a missing proof -- 7/7 killed. | A mutation the battery cannot run is no evidence either way. | — |
 
 ---
 
@@ -1454,6 +1458,55 @@ in `SHELL_COMMANDS`). **Battery** (`battery9.py`): a `trial` row citing a
 Session 41 claim → FAILED; `INS` removed from the regex → FAILED; a widened
 fixture narrowed back → the re-run FAILED on the 42 record fixture; **control**:
 `test_the_idle_sleep_row_is_reachable_iff_its_sleep_is_accepted` green.
+
+**Done (the code), 2026-10-18.** Scripts in WSL `~/s42/run9/` (each from Session
+41's `~/s41/run9/` counterpart, every anchor counted). **The bump** (`bump42.py`):
+`VERSION` 1.20.0, `CURRENT_SESSION` 42, README:7 and the same 13 `--session` /
+`--through-session` literals in the same five files as 41's. **The price**
+(`upgrade42.sh`, D1624's rig: a worktree at `601a0ea` against a `tar` copy of
+this tree, both rendering the installed `project.example.yaml`): declared
+`--also api_operation_added` -- `bump minor`, **`requires minor`**, `ok`, changes
+`[api_operation_added, image_digest]`, no reasons, no operator digest moved;
+undeclared -- `requires patch` (`image_digest` alone: the lock's added images);
+two leaves differ (`versions_lock_sha256`, `template_version`), 6,350 → 6,350
+bytes; **a MINOR, as D2584 predicted** -- `compatibility.py` holds no class for a
+restart or a changed service definition (both `implementation`, `patch`). The
+example client regenerated and `generate --check` clean. `__init__.py`'s Session
+42 paragraph, the price last (its "ADR 0162 prices it a MINOR" on one line --
+the release contract reads it there). **The Ledger** (`ledger42.py`, D2583): the
+six managed-project rows, `idle_sleep`, `notifications`, `query_insights`,
+`monitoring` `trial` at 42, each naming only Session 42's claims, the close's
+`today` sentence replaced (anchors counted); the section header now reads
+*Sessions 41-42*. **`ACCEPTED_TYPES` the eleven** (`accepted42.py`), CTL-OPS-001's
+proof renamed back to `test_exactly_the_eleven_executed_types_are_accepted`
+with its registry node id (D1119). **Registry** (`registry42.py`): +18 under
+`# Session 42 (ADR 0277-0279)` -- **395** -- `INS` in the regex and its sentence,
+CTL-OPS-001's sentence moved, the tree's node ids (D2631). **Claims**
+(`claims42.py`): `CLAIMS` **302**, `OFFLINE_CLAIMS` **133**, `CLAIM_INTRODUCED_IN`
+at 42. **Threat rows** (`threats42.py`): `THR-INS-POISON`, `THR-INS-EXHAUST`,
+`THR-INS-LEAK`, `THR-INS-UI` after `THR-USE-IDLE`, items 9, 14 and 15 now pointers.
+**The gate** (`derive42.py`): `bin/session-42-check.sh` from 41's by diff --
+header and whole usage block rewritten, `SESSION=42`, **66 flag tokens and 33
+parser arms, equal to 41's** (D2588) -- and `test_session_forty_two_gate_modes.py`
+alongside; `SHELL_COMMANDS` lists it. **The live modules**:
+`tests/external/test_session42_reearning.py` (13 proofs; windows READ FROM THE
+SAMPLES FILE against the record's seal; notifications over operations +
+idle_operations + failed_exports) and `tests/deployment/test_session42_telemetry_host.py`
+(6). **Run against the Run 8 rehearsal's record** (`dry-proofs.py`, their first
+execution): the windows from the samples file, the insights, the signals, the
+no-secret scan PASSED; the two that read what the rehearsal shortens (3 s of
+asleep samples, no DB time from its fake sampler) FAILED as expected; the
+notifications' record half 14 = 14. **The older fixtures widened** (`widen42.py`):
+Sessions 38-41's lifecycle records and Sessions 40-41's branch records (external
+and host, D2623) accept 42. **Documents** (`docs42.py`): the upgrade guide's
+1.20.0 row and both release lines; the control plane's and managed projects'
+acceptance sentences; the matrix, the Ledger page and the product contract
+rendered (each `--check` 0). **Targeted** (`targeted.sh`, once): part A **1,820
+passed, 2 failed** -- the price sentence wrapped across two lines, and D2632 --
+both repaired, their modules **26 passed**; part B reaped by the harness on low
+memory at 62% (no failure yet), re-run at the operator's word in two foreground
+halves: **55 + 61 passed**. **Battery** (`battery9.py`): **7 of 7 killed**, each
+target FAILED with its control PASSED, every file restored (D2633).
 
 ### Run 10 — sitting 1 (day 1): the release, the plane, `slot6-prod` prepared, the dry run
 

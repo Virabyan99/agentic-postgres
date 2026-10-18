@@ -121,8 +121,10 @@ ID_PATTERN = re.compile(
     # Session 40 (ADR 0271-0273) adds `BR` for branches -- their names, the
     # restore plan, the re-key, the operations, the expiry, the backups surface.
     # Session 41 (ADR 0274-0276) adds `PLAN` for plans and entitlements and `USE`
-    # for usage samples, notifications and idle sleep.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV|LEDGER|CTL|KEY|OPN|LIFE|EP|BR|PLAN|USE)-[A-Z0-9]+(-\d+)?$"
+    # for usage samples, notifications and idle sleep. Session 42 (ADR 0277-0279)
+    # adds `INS` for the telemetry plane, `pg_stat_statements`, Query Insights and
+    # monitoring.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV|LEDGER|CTL|KEY|OPN|LIFE|EP|BR|PLAN|USE|INS)-[A-Z0-9]+(-\d+)?$"
 )
 
 

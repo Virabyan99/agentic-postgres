@@ -6304,7 +6304,7 @@
   test_nodeids:
     - tests/contract/test_reality_ledger.py::test_every_operation_type_names_a_ledger_row_and_is_accepted_iff_its_row_is_reachable
     - tests/contract/test_operation_types.py::test_the_type_table_is_closed
-    - tests/contract/test_operation_types.py::test_credential_rotate_and_the_branch_types_are_accepted_and_the_eleven_are_executed
+    - tests/contract/test_operation_types.py::test_exactly_the_eleven_executed_types_are_accepted
     - tests/contract/test_operation_types.py::test_a_type_not_accepted_is_refused_not_available_before_its_body
   description: >-
     `operations.py`'s type table is closed and every type names an
@@ -6322,7 +6322,9 @@
     new slot (D2518) and the four branch types with D2501 and D2504 repaired;
     and its close accepts `credential.rotate` and the four branch types, their
     rows `beta`, the six managed-project types refused with their rows
-    `planned` again (D2557); a write route whose type is not accepted answers `409 not_available` naming
+    `planned` again (D2557); Session 42's bump accepts all eleven again -- the
+    six re-trialed a fourth time on a new slot, their probe samples written as
+    taken (D2583, D2581); a write route whose type is not accepted answers `409 not_available` naming
     its row before the project or the body is read, and writes no row (ADR
     0254, D2054, D2170).
 
@@ -7756,3 +7758,273 @@
     parent untouched; **back by itself after the reboot** -- nothing reset it
     after the boot -- running the content its record's tag and digest resolve
     to; listed by `apg-diag containers`; nothing left after the deletion.
+
+# Session 42 (ADR 0277-0279)
+
+- id: DEP-ATTACH-001
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/contract/test_edge_network_race.py::test_an_attach_lost_to_another_unit_succeeds
+    - tests/contract/test_edge_network_race.py::test_an_attach_network_lost_to_another_unit_succeeds
+    - tests/contract/test_edge_network_race.py::test_a_reconcile_lost_to_another_unit_succeeds
+    - tests/contract/test_edge_network_race.py::test_a_detach_lost_to_another_unit_succeeds
+    - tests/contract/test_edge_network_race.py::test_any_other_failure_exits_nine
+    - tests/contract/test_edge_network_race.py::test_a_clean_attach_and_detach_say_nothing_of_another_unit
+    - tests/contract/test_edge_network_race.py::test_every_connect_goes_through_the_helper
+  description: >-
+    **The edge's attach race** (D2558, D2563): an attach, reconcile or detach
+    that loses a race to another unit reads the network again and succeeds when
+    the wanted state holds -- the edge attached with its alias, or detached --
+    and any other failure exits 9; a clean attach says nothing of another unit;
+    every connect and disconnect in `bin/edge-network.sh` goes through its two
+    helpers.
+
+- id: LIFE-EXPORT-002
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/contract/test_reconciler_dispatch.py::test_the_upload_refusal_names_the_providers_code
+    - tests/contract/test_reconciler_dispatch.py::test_an_upload_line_with_a_url_is_not_carried
+    - tests/contract/test_reconciler_dispatch.py::test_an_upload_with_no_line_keeps_the_bare_reason
+  description: >-
+    **A failed upload says why** (D2559, D2564): the export's refusal carries
+    the child's last `export_upload:` line -- the provider's code -- and never a
+    line holding a URL, an `X-Amz-` parameter or a signature; with no such line
+    the bare reason stands.
+
+- id: TEN-READ-001
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/contract/test_sql_reader_quotes.py::test_a_dash_dash_inside_a_literal_is_kept
+    - tests/contract/test_sql_reader_quotes.py::test_a_comment_after_a_literal_is_dropped
+    - tests/contract/test_sql_reader_quotes.py::test_every_template_ends_its_scan_outside_a_literal
+  description: >-
+    **The SQL reader knows a literal** (D2544, D2565): `--` inside a quoted
+    literal is kept as text, a comment after a literal is dropped, and every
+    template the product reads ends its scan outside a literal.
+
+- id: INS-PGSS-001
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/contract/test_pg_stat_statements.py::test_the_database_command_loads_the_extension
+    - tests/contract/test_pg_stat_statements.py::test_a_branch_loads_it_too
+    - tests/contract/test_pg_stat_statements.py::test_the_bootstrap_creates_and_revokes_it
+    - tests/contract/test_pg_stat_statements.py::test_the_bootstrap_check_reads_the_preload_and_the_revocation
+  description: >-
+    **`pg_stat_statements` everywhere** (ADR 0278): every project's database and
+    every branch start with its five settings -- preloaded, `max` 1,000,
+    `track=top`, utility statements and planning not tracked; the bootstrap
+    creates it in `extensions` and revokes its views and functions from
+    `PUBLIC`; `check_violations` reads all of it.
+
+- id: INS-READ-001
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/contract/test_insights_reading.py::test_a_literal_is_normalised_away
+    - tests/contract/test_insights_reading.py::test_a_utility_statement_is_not_recorded
+    - tests/contract/test_insights_reading.py::test_a_platform_roles_statement_is_absent
+    - tests/contract/test_insights_reading.py::test_the_text_is_cut_at_two_thousand
+    - tests/contract/test_reconciler_dispatch.py::test_an_insight_statement_of_a_platform_role_is_not_kept
+  description: >-
+    **The insights reading, on a real server** (ADR 0278, D2568, D2620): only
+    the customer-facing roles' statements, normalised -- a literal is a `$1`; a
+    `DO` block and a password never appear; a platform role's statement is
+    absent from the reading AND refused by the dispatch; the text cut at 2,000.
+
+- id: INS-API-001
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/contract/test_control_insights.py::test_a_reset_is_read_not_subtracted
+    - tests/contract/test_control_insights.py::test_no_member_advises
+    - tests/contract/test_control_insights.py::test_an_empty_window_is_not_an_empty_list
+    - tests/contract/test_control_insights.py::test_a_foreign_and_a_missing_project_answer_alike
+    - tests/contract/test_control_insights.py::test_no_role_but_the_reconciler_writes_a_sample
+    - tests/contract/test_control_insights.py::test_samples_older_than_seven_days_are_removed_by_the_writer
+    - tests/contract/test_control_usage.py::test_the_insights_and_monitoring_routes_answer_a_viewer_and_a_read_key
+  description: >-
+    **The insights document** (ADR 0278, D2571, D2619): increases over the
+    window with a reset read, never subtracted; samples expected and present; no
+    finding, recommendation, confidence or severity, in the document or the
+    published contract, and one fixed tuning sentence; fewer than two samples
+    `could_not_determine`, never an empty list; a foreign and a missing project
+    answer alike; only `control_record_insights` writes, granted to nobody,
+    keeping 7 days; through the route, a viewer and a `projects:read` key read
+    it.
+
+- id: USE-DBTIME-001
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/contract/test_control_usage.py::test_db_time_is_a_sum_of_increases
+    - tests/contract/test_control_usage.py::test_db_time_unread_is_named
+    - tests/contract/test_control_usage.py::test_the_usage_writer_is_0008s_plus_two_keys
+  description: >-
+    **DB time in usage** (ADR 0278, D2570, D2618): a sum of increases over the
+    customer-facing roles with resets read; a sample that could not read it
+    names `db_time_ms` unread; the writer's body is `0008`'s plus two keys.
+
+- id: INS-CLI-001
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/contract/test_control_cli.py::test_insights_and_monitoring_dispatch_to_the_customer_cli
+    - tests/contract/test_host_infrastructure.py::test_the_telemetry_unit_waits_for_docker_and_no_project_waits_for_it
+  description: >-
+    **The commands** (ADR 0277-0279): `apg insights show` and `apg monitoring
+    show` are customer commands into `/v1`; the telemetry plane is the
+    operator's, started by its own unit through the root launcher, which waits
+    for Docker and which no project waits for.
+
+- id: INS-SIGNAL-001
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/contract/test_signals.py::test_every_signal_names_a_source_that_exists
+    - tests/contract/test_signals.py::test_no_two_signals_read_one_column
+    - tests/contract/test_signals.py::test_the_monitoring_function_reads_only_the_named_tables
+  description: >-
+    **Monitoring names its sources** (ADR 0279, D2572, D2617): every signal
+    names a table and column that exist in the control set; no two read one
+    column; the reading function reads only those tables and serves exactly
+    those names.
+
+- id: INS-PLANE-001
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/contract/test_process_limits.py::test_the_telemetry_plane_is_bounded
+    - tests/contract/test_telemetry_plane.py::test_no_port_and_no_router
+    - tests/contract/test_telemetry_plane.py::test_the_gateway_is_the_pinned_collector
+    - tests/contract/test_telemetry_plane.py::test_the_store_has_a_ceiling_and_a_ttl
+    - tests/contract/test_telemetry_plane.py::test_no_secret_in_the_compose_file
+    - tests/contract/test_telemetry_plane.py::test_every_image_is_locked
+    - tests/contract/test_telemetry_plane.py::test_the_users_admit_only_the_subnet_and_the_gateway_creates_and_inserts
+  description: >-
+    **The telemetry plane** (ADR 0277, D2626): images by digest from the lock,
+    every service at ADR 0244's limits from the larger of the two measured
+    peaks, no published port, no router label, internal networks but the UI's;
+    the gateway the projects' pinned collector; ClickHouse's ceiling and TTL
+    set, its users admitted from the subnet alone with the gateway's three
+    grants; no secret in the compose file.
+
+- id: INS-ADMIT-001
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/contract/test_telemetry_admission.py::test_the_plane_is_charged_at_its_ceilings
+    - tests/contract/test_telemetry_admission.py::test_a_project_is_refused_with_the_charge
+    - tests/contract/test_telemetry_admission.py::test_an_unreadable_charge_refuses_rather_than_counting_zero
+    - tests/contract/test_telemetry_admission.py::test_the_plane_is_refused_when_it_does_not_fit
+  description: >-
+    **The plane is admitted and charged** (ADR 0277, D2577, D2608):
+    `telemetry.sh up` asks admission before anything starts and records the sum
+    of the four limits; the node's committed figure carries it; a project that
+    would fit without the charge is refused with it; an unreadable charge
+    refuses rather than counting zero; the plane itself is refused with exit 12
+    when it does not fit.
+
+- id: INS-LOGS-001
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/contract/test_metrics_surface.py::test_the_logs_pipeline_stamps_the_project
+    - tests/contract/test_metrics_surface.py::test_the_export_queue_is_bounded
+    - tests/contract/test_request_log.py::test_the_exported_record_is_the_line_and_nothing_else
+    - tests/contract/test_request_log.py::test_a_slow_exporter_does_not_block_a_request
+    - tests/contract/test_telemetry_plane.py::test_the_ingest_network_is_ensured_with_a_reread
+  description: >-
+    **The services' lines reach the plane** (ADR 0277, D2574, D2575): each
+    project's collector stamps `project` from its own render over the payload's
+    and exports through a bounded queue; the ingest network is ensured by the
+    project and the plane alike, re-read after a lost race; the services export
+    D1918's lines as the message only -- no traceback, no attribute -- and never
+    block a request.
+
+- id: INS-HOST-001
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/deployment/test_session42_telemetry_host.py::test_the_plane_is_bounded_and_charged
+    - tests/deployment/test_session42_telemetry_host.py::test_the_listeners_did_not_change
+    - tests/deployment/test_session42_telemetry_host.py::test_the_ui_holds_no_secret_in_its_environment
+    - tests/deployment/test_session42_telemetry_host.py::test_a_forged_project_is_stamped_over
+  description: >-
+    **The plane on the machine** (ADR 0277, D2586): its four containers running
+    at the release's limits, the charge in its state file their sum and in the
+    node's committed figure; the host listening publicly on 22, 80, 443 and 5432
+    only; HyperDX's session secret in none of its container's configuration; a
+    line sent to beta's collector claiming alpha stored as beta's.
+
+- id: INS-HOST-002
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/deployment/test_session42_telemetry_host.py::test_every_database_loads_the_extension
+    - tests/deployment/test_session42_telemetry_host.py::test_the_customer_role_cannot_read_it
+  description: >-
+    **Every database loads it and refuses it** (ADR 0278): each project's
+    running database reads the five settings back and holds the extension in
+    `extensions`; the request roles, and on the kept slot the customer's two
+    roles, hold neither the views nor the functions; the superuser reads the
+    view.
+
+- id: LIFE-LIVE-006
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/external/test_session42_reearning.py::test_every_accepted_type_ran_on_the_slot
+    - tests/external/test_session42_reearning.py::test_the_resizes_followed_the_admission_reading
+    - tests/external/test_session42_reearning.py::test_the_export_holds_the_three_customer_schemas
+    - tests/external/test_session42_reearning.py::test_both_routes_were_probed_through_every_window
+    - tests/external/test_session42_reearning.py::test_the_second_creation_after_the_deletion_was_refused_by_capacity
+  description: >-
+    **The fourth re-earning** (D2561, D2581): Session 42's lifecycle on
+    `slot6-prod` at the deployed commit, in a new organisation -- every accepted
+    type ran, the resizes decided by their own readings, the export holds `app`,
+    `api` and `public`; the slot's route AND pooled name probed through every
+    window, READ FROM THE SAMPLES FILE the record seals; a second creation after
+    the deletion refused `capacity_exhausted {no_slot}` with no row.
+
+- id: USE-LIVE-004
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/external/test_session42_reearning.py::test_the_idle_slot_was_put_to_sleep_by_the_reconciler
+    - tests/external/test_session42_reearning.py::test_the_idle_sleep_closed_both_doors
+  description: >-
+    **Idle sleep, re-trialed** (ADR 0276, D2560): set to 15 minutes with the
+    probes stopped, one `project.sleep` with `origin = idle` on behalf of the
+    setter within the bound, both names refused while it slept, then woken by a
+    member.
+
+- id: USE-LIVE-005
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/external/test_session42_reearning.py::test_every_finished_operation_was_notified_by_its_outcome
+    - tests/external/test_session42_reearning.py::test_no_notification_carries_a_secret
+  description: >-
+    **Notifications, counted by outcome** (ADR 0275, D2581): one per operation
+    the record names -- the eleven, the idle pair and any export refused and
+    resumed past -- its kind matching how it ended; no sentence holds a URL, an
+    export's hash or size, an operation's id, a door's host or the insights
+    canary.
+
+- id: INS-LIVE-001
+  priority: P0
+  target_session: 42
+  test_nodeids:
+    - tests/external/test_session42_reearning.py::test_the_workload_is_in_the_insights_without_its_literal
+    - tests/external/test_session42_reearning.py::test_usage_read_db_time
+    - tests/external/test_session42_reearning.py::test_monitoring_named_each_source
+    - tests/external/test_session42_reearning.py::test_this_module_uses_no_ssh
+  description: >-
+    **Insights through `/v1`** (ADR 0278-0279, D2569): after a known workload as
+    `customer_app` and two usage passes, the insights hold its statement
+    normalised with its 200 calls and never the canary's literal; usage reads DB
+    time; monitoring names every signal's source; no SSH.

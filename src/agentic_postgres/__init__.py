@@ -1203,7 +1203,71 @@ from pathlib import Path
 #: confirms the class against a DEPLOYMENT: `upgrade plan` on every project,
 #: with the same declaration, before the first 1.19.0 deploy -- and a `major`
 #: there is a stop condition.
-CURRENT_SESSION = 41
+#:
+#: **Session 42 moves it to 42, all-or-nothing again** (D690): EIGHTEEN
+#: requirements and eighteen claims -- `CLAIMS` 284 -> 302 and `OFFLINE_CLAIMS`
+#: 121 -> 133, counted from the tuples (D1628) -- twelve declared offline, four
+#: EXTERNAL and two host, every offline half written in the run that built its
+#: piece (Runs 2-7) and every live half here. One family joins the registry:
+#: `INS`, the telemetry plane, `pg_stat_statements`, Query Insights and
+#: monitoring; the three repairs go under the families their proofs already
+#: live in (`DEP`, `LIFE-EXPORT`, `TEN`) and DB time under `USE`. The external
+#: claims are the managed project's life re-earned a fourth time on a NEW slot
+#: in a NEW organisation -- its probe samples written as they are taken (D2581)
+#: -- its idle sleep, its notifications counted by outcome, and its insights
+#: after a known workload, all through `/v1` and the public names alone; the
+#: host claims are the plane bounded, charged and unreachable, and every
+#: database loading the extension it refuses to `customer_app`.
+#:
+#: **The session's subject is three repairs and the stage's observability.**
+#: The repairs: an edge attach that loses a race to another unit reads the
+#: network again (D2558, Run 2), an upload's refusal carries the provider's code
+#: (D2559), and the SQL reader keeps a `--` inside a literal (D2544). ADR 0277:
+#: ClickStack bounded on the host, fed by each project's own collector, which
+#: stamps the project over the payload's and exports through a bounded queue --
+#: a project never waits for it. ADR 0278: `pg_stat_statements` on every
+#: database and branch, `track=top`, utility statements off, revoked from
+#: `PUBLIC`; the customer roles' statements sampled into the control database
+#: and read as increases -- numbers, never advice. ADR 0279: monitoring is a
+#: list of readings, each naming its table and column.
+#:
+#: **No released migration** -- the insight samples and DB time are the control
+#: set's `0009`. **No outputs, manifest, host, capability, lock or secret
+#: schema moves** (outputs stay v22, the project manifest 11, `host.yaml` 4).
+#: Ten Ledger rows are `trial` (ADR 0261), so the eleven executed types are
+#: accepted again.
+#:
+#: **`VERSION` moves to `1.20.0`.** What moved: `postgres`'s command gains five
+#: `-c` flags, so the deploy RECREATES every database once (D2567), and the
+#: bootstrap creates the extension and revokes it; each collector's logs
+#: pipeline and the ingest network its `metrics` joins; `auth`, `storage` and
+#: `mcp` export their request lines, so the image moves; the control mode's
+#: insights and monitoring routes; the reconciler's insight sample and DB time
+#: (a restart of the unit); `bin/telemetry.sh`, its unit and `infra/telemetry/`
+#: (a platform plane, installed by hand, Sheet T1); `bin/edge-network.sh`;
+#: `bin/apg-diag.sh`'s plane section (re-installed by hand, Sheet PV);
+#: `bin/insights.sh` and `bin/monitoring.sh`.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig: a git
+#: worktree at `601a0ea`, the commit that IS deployed, and a `tar`-piped copy of
+#: this working tree, both rendering the INSTALLED tree's `project.example.yaml`.
+#: With `--also api_operation_added`: `bump minor`, **`requires minor`**,
+#: verdict `ok`, `changes [api_operation_added, image_digest]`, `reasons []`,
+#: `operator_digests_moved []`. Without the declaration: `requires patch` --
+#: the lock's added images alone. **Two leaves differ**: `versions_lock_sha256`
+#: and `template_version` 1.19.0 -> 1.20.0 (6,350 -> 6,350 bytes).
+#: **ADR 0162 prices it a MINOR, and `1.20.0` is that floor exactly**: no manifest,
+#: outputs, capability, lock or secret schema moves. What an operator must KNOW
+#: the reading cannot show: every project's database restarted once by its
+#: 1.20.0 deploy, the telemetry plane admitted and charged (3,552 MiB) by
+#: `telemetry.sh up`, the control project's ninth migration applied by its own
+#: deploy, the reconciler restarted after the checkout moves (D2179), `apg-diag`
+#: re-installed by hand, and a managed project moved to the release by
+#: `slot.sh redeploy` with the reconciler stopped (D2443). **The trip**
+#: confirms the class against a DEPLOYMENT: `upgrade plan` on every project,
+#: with the same declaration, before the first 1.20.0 deploy -- and a `major`
+#: there is a stop condition.
+CURRENT_SESSION = 42
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere
