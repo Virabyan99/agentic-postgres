@@ -1235,13 +1235,14 @@ class Reconciler:
         set's to refuse, never this loop's to guess. **No slot is asked while
         the release does not accept the sleep an idle request inserts** (D2548):
         the control set's function cannot read the Ledger, so this is the door."""
-        samples, awake, notices = [], [], []
+        samples, awake, notices, insights, durations = [], [], [], [], []
         offered = operations.IDLE_SLEEP_TYPE in operations.ACCEPTED_TYPES
         for entry in host_config.declared_slots(self.host):
             try:
                 document = _deployed(entry.key)
             except Refused:
                 continue
+            started = time.monotonic()
             block = self.usage_blocks.get(entry.key)
             sample, since, today = usage_of(
                 entry.key, document, self.usage_since.get(entry.key),
@@ -1255,10 +1256,20 @@ class Reconciler:
                     awake.append(entry.key)
                 plan = plans.DEFAULT_PLAN
                 notices += [(entry.key, e) for e in dispatch.limit_notices(sample, today, plan)]
+                # Session 42 (ADR 0278): one insight sample per awake slot, in the
+                # same pass; a slot whose reading failed records none and says why.
+                insight, why = insights_of(entry.key, document)
+                if insight is None:
+                    say(f"{entry.key}: no insight sample recorded ({why})")
+                else:
+                    insights.append(insight)
+            durations.append((entry.key, time.monotonic() - started))
         if not samples:
             return
         try:
             self.control.call(dispatch.RECORD_USAGE_SQL, samples=json.dumps(samples))
+            for insight in insights:
+                self.control.call(dispatch.RECORD_INSIGHTS_SQL, sample=json.dumps(insight))
             for key in awake:
                 requested = self.control.call(dispatch.REQUEST_IDLE_SLEEP_SQL, key=key)
                 if requested:
@@ -1271,6 +1282,10 @@ class Reconciler:
             say(f"the usage pass was not recorded: {error}")
             return
         say("usage " + ", ".join(f"{s['project_key']} {s['state']}" for s in samples))
+        # Session 42 (D2569): a usage pass's duration per slot, the envelope's
+        # UNMEASURED row "a usage pass's duration", read on the trip.
+        for key, seconds in durations:
+            say(f"usage pass for {key}: {seconds:.1f} s")
 
     def recover(self) -> int:
         """D2152: every operation still running was interrupted. Finished failed,
@@ -1470,6 +1485,20 @@ def usage_of(
         readings["customer_connections"] = (int(activity[0]), "")
         # Empty: no customer backend at all -- quiet, read (D2539).
         readings["last_customer_activity"] = (activity[1] or None, "")
+    # Session 42 (ADR 0278, D2570): DB time, the customer-facing roles' summed
+    # total_exec_time AS READ, with the extension's stats_reset beside it.
+    insight_roles = tuple(roles[suffix] for suffix in dispatch.INSIGHT_ROLE_SUFFIXES)
+    db_time, why = usage_reading.cluster_fields(
+        container, name, usage_reading.db_time_sql(insight_roles)
+    )
+    statements_reset: str | None = None
+    readings["db_time_ms"] = (None, why or "DB time was not readable")
+    if db_time is not None and len(db_time) == 2:
+        try:
+            readings["db_time_ms"] = (float(db_time[0]), "")
+            statements_reset = db_time[1] or None
+        except ValueError:
+            readings["db_time_ms"] = (None, "the cluster's DB time was not a number")
     readings["requests_counter"] = usage_reading.store_value(
         key, usage_reading.REQUESTS_BELOW_400_QUERY,
         empty="the store holds no request answered below 400",
@@ -1490,7 +1519,26 @@ def usage_of(
         today = int(counts[2]) if counts[2].isdigit() else None
         next_since = counts[3] if usage_reading.INSTANT.match(counts[3]) else None
     readings.update(_branch_usage(key))
-    return dispatch.usage_sample(key, sleeping=False, readings=readings), next_since, today
+    sample = dispatch.usage_sample(key, sleeping=False, readings=readings)
+    sample["statements_reset"] = statements_reset if sample["db_time_ms"] is not None else None
+    return sample, next_since, today
+
+
+def insights_of(key: str, document: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """One AWAKE slot's insight sample (ADR 0278, D2569): the top statements of
+    the customer-facing roles as `postgres` reads them through the container,
+    checked by `dispatch.insight_sample` -- or None and why. Never called for
+    a sleeping slot: its containers are stopped."""
+    database = document.get("database") or {}
+    container, name = str(database.get("container", "")), str(database.get("name", ""))
+    roles = naming.database_roles(naming.sql_key(key))
+    insight_roles = tuple(roles[suffix] for suffix in dispatch.INSIGHT_ROLE_SUFFIXES)
+    reading, why = usage_reading.cluster_json(
+        container, name, usage_reading.insights_sql(insight_roles)
+    )
+    if reading is None:
+        return None, why
+    return dispatch.insight_sample(key, reading, insight_roles)
 
 
 def _branch_usage(key: str) -> dict[str, tuple[Any, str]]:

@@ -226,6 +226,75 @@ def test_a_foreign_and_a_missing_project_answer_alike(cluster: cc.ControlCluster
 
 
 # ---------------------------------------------------------------------------
+# Session 42 (ADR 0278, D2570): DB time
+# ---------------------------------------------------------------------------
+
+
+def test_db_time_is_a_sum_of_increases(cluster: cc.ControlCluster) -> None:
+    """D553, the request counter's reading applied to DB time: 100 -> 150 ms,
+    then `statements_reset` MOVED (30 ms), then 70 ms, then a DECREASE (20 ms)
+    -- +50, reset +30, +40, reset +20: 140 ms with two resets. A sample that
+    could not read it is skipped, never read as zero."""
+    project = Project(cluster)
+    first, second = "'2026-10-18 00:00:00+00'", "'2026-10-18 01:00:00+00'"
+    for minutes, ms, reset in ((25, 100, first), (20, 150, first), (15, None, first),
+                               (10, 30, second), (5, 70, second), (2, 20, second)):  # fmt: skip
+        project.sample(minutes, db_time_ms=ms, statements_reset=reset)
+    assert project.usage()["db_time"] == {"increase_ms": 140, "resets": 2}, project.usage()
+
+
+def test_db_time_unread_is_named(cluster: cc.ControlCluster) -> None:
+    """The writer accepts `db_time_ms` NULL named in `unread` (the extension not
+    loaded, or not readable) and the CHECK admits the name; a window where no
+    sample read it says null -- not zero -- in the document."""
+    project = Project(cluster)
+    sample = {
+        "project_key": project.key, "state": "active", "db_time_ms": None,
+        "statements_reset": None, "unread": ["db_time_ms"],
+        "reason": "db_time_ms: the cluster did not answer (is pg_stat_statements loaded?)",
+    }  # fmt: skip
+    payload = json.dumps([sample]).replace("'", "''")
+    assert cluster.query(f"SELECT app.control_record_usage('{payload}'::jsonb)") == ["1"]
+    assert project.usage()["db_time"] is None
+    bogus = json.dumps([{**sample, "unread": ["db_time"]}]).replace("'", "''")
+    assert (
+        "control_usage_samples_unread_check"
+        in cluster.run(f"SELECT app.control_record_usage('{bogus}'::jsonb)").stderr
+    )
+
+
+def _function_body(template: str, name: str) -> str:
+    text = (cc.REPO_ROOT / "projects/control/migrations/templates" / template).read_text("utf-8")
+    start = text.index(f"FUNCTION app.{name}(")
+    body_start = text.index("AS $$", start)
+    return text[body_start : text.index("$$;", body_start + 5)]
+
+
+def test_the_usage_writer_is_0008s_plus_two_keys() -> None:
+    """0009 re-creates `control_record_usage`; its body is 0008's with ONLY
+    `db_time_ms` and `statements_reset` added -- the whitelist's two names,
+    the insert's two columns, their two casts. Removing exactly those lines
+    gives 0008's body back, byte for byte."""
+    before = _function_body("0008-control-plans-usage.sql", "control_record_usage")
+    after = _function_body("0009-control-insights.sql", "control_record_usage")
+    added = [line for line in after.splitlines() if line not in before.splitlines()]
+    assert added == [
+        "            'workflow_runs', 'last_customer_activity', 'unread', 'reason',",
+        "            'db_time_ms', 'statements_reset'",
+        "    last_customer_activity, unread, reason,",
+        "    db_time_ms, statements_reset",
+        "         s ->> 'reason',",
+        "         (s ->> 'db_time_ms')::double precision, (s ->> 'statements_reset')::timestamptz",
+    ], added
+    restored = (
+        after.replace(added[0] + "\n" + added[1], added[0].rstrip(","))
+        .replace(added[2] + "\n" + added[3], added[2].rstrip(","))
+        .replace(added[4] + "\n" + added[5], added[4].rstrip(","))
+    )
+    assert restored == before
+
+
+# ---------------------------------------------------------------------------
 # The routes (Run 5)
 # ---------------------------------------------------------------------------
 

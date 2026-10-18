@@ -1518,6 +1518,8 @@ def test_the_reconciler_asks_the_control_set_only_these() -> None:
         "control_adopt_project",
         # Session 41 (ADR 0275, ADR 0276).
         "control_record_usage", "control_request_idle_sleep", "control_record_limit_notice",
+        # Session 42 (ADR 0278, D2569): the insight sample.
+        "control_record_insights",
     }, sorted(called)  # fmt: skip
 
 
@@ -1541,3 +1543,25 @@ def test_no_idle_sleep_is_asked_for_while_the_sleep_is_not_accepted(
     (sample,) = json.loads(recorded["samples"])
     assert (sample["project_key"], sample["state"]) == (KEY, "active")
     assert host.database.named("control_request_idle_sleep") == []
+
+
+def test_an_insight_statement_of_a_platform_role_is_not_kept() -> None:
+    """Session 42 (ADR 0278, D2568): `insight_sample` keeps only the roles it
+    is given -- a platform role's statement in the reading is dropped here even
+    if the reading's own SQL filter had let it through; a statement whose
+    members are not the eight asked for refuses the whole reading (control)."""
+    roles = ("apg_beta_dev_customer_app", "apg_beta_dev_anon")
+    statement = {
+        "queryid": 1, "role": "apg_beta_dev_customer_app", "calls": 2, "total_exec_ms": 1.5,
+        "rows": 2, "shared_blks_hit": 3, "shared_blks_read": 1, "query": "SELECT $1",
+    }  # fmt: skip
+    platform = {**statement, "queryid": 2, "role": "apg_beta_dev_auth_service"}
+    sample, why = reconciler_dispatch.insight_sample(
+        KEY, {"stats_reset": None, "statements": [statement, platform]}, roles
+    )
+    assert why == "" and sample is not None
+    assert [s["queryid"] for s in sample["statements"]] == [1]
+    broken, why = reconciler_dispatch.insight_sample(
+        KEY, {"stats_reset": None, "statements": [{**statement, "literal": "x"}]}, roles
+    )
+    assert broken is None and "shape" in why

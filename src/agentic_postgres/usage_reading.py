@@ -23,13 +23,18 @@ import urllib.parse
 from agentic_postgres import container_exec, runtime_override
 
 __all__ = [
+    "INSIGHT_STATEMENTS",
+    "INSIGHT_TEXT",
     "INSTANT",
     "REQUESTS_BELOW_400_QUERY",
     "activity_sql",
     "cluster_fields",
     "cluster_int",
+    "cluster_json",
+    "db_time_sql",
     "directory_kb",
     "durable_counts_sql",
+    "insights_sql",
     "store_value",
 ]
 
@@ -177,6 +182,74 @@ def activity_sql(roles: tuple[str, str]) -> str:
         "ELSE greatest(backend_start, state_change) END)::text, '') "
         f"FROM pg_stat_activity WHERE usename IN ({names})"
     )
+
+
+def _checked_roles(roles: tuple[str, ...]) -> str:
+    for role in roles:
+        if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", role):
+            raise ValueError(f"not a derived role name: {role!r}")
+    return ", ".join(f"'{role}'" for role in roles)
+
+
+#: Session 42 (ADR 0278): how many statements one insight sample keeps, and
+#: how much of each one's normalised text.
+INSIGHT_STATEMENTS = 50
+INSIGHT_TEXT = 2000
+
+
+def insights_sql(roles: tuple[str, ...]) -> str:
+    """One insight sample as ONE `jsonb` text (ADR 0278, D2568): the
+    extension's `stats_reset` and the top 50 top-level statements by
+    cumulative time of the given roles -- the project's customer-facing ones,
+    derived by `naming.database_roles` -- in this database, counters AS READ,
+    the normalised text cut to 2000. `jsonb_agg`, never `json_agg`: the
+    latter prints a newline between elements, and the reader takes the whole
+    answer as one document. Read as `postgres`, the extension's only reader."""
+    names = _checked_roles(roles)
+    return (
+        "SELECT jsonb_build_object("
+        "'stats_reset', (SELECT stats_reset FROM extensions.pg_stat_statements_info), "
+        "'statements', coalesce((SELECT jsonb_agg(t ORDER BY t.total_exec_ms DESC) FROM ("
+        "SELECT s.queryid, r.rolname AS role, s.calls, s.total_exec_time AS total_exec_ms, "
+        "s.rows, s.shared_blks_hit, s.shared_blks_read, "
+        f"left(s.query, {INSIGHT_TEXT}) AS query "
+        "FROM extensions.pg_stat_statements s JOIN pg_roles r ON r.oid = s.userid "
+        "WHERE s.toplevel "
+        "AND s.dbid = (SELECT oid FROM pg_database WHERE datname = current_database()) "
+        f"AND r.rolname IN ({names}) "
+        f"ORDER BY s.total_exec_time DESC LIMIT {INSIGHT_STATEMENTS}) t), '[]'::jsonb))::text"
+    )
+
+
+def db_time_sql(roles: tuple[str, ...]) -> str:
+    """DB time as READ (ADR 0278, D2570): the given roles' summed top-level
+    `total_exec_time` in this database, and the extension's `stats_reset`, so
+    the document reads a reset rather than subtracting across one (D553)."""
+    names = _checked_roles(roles)
+    return (
+        "SELECT (SELECT coalesce(sum(s.total_exec_time), 0) FROM extensions.pg_stat_statements s "
+        "JOIN pg_roles r ON r.oid = s.userid WHERE s.toplevel AND s.dbid = "
+        "(SELECT oid FROM pg_database WHERE datname = current_database()) "
+        f"AND r.rolname IN ({names}))::text, "
+        "coalesce((SELECT stats_reset FROM extensions.pg_stat_statements_info)::text, '')"
+    )
+
+
+def cluster_json(container: str, database: str, statement: str) -> tuple[object | None, str]:
+    """One `psql` round trip whose WHOLE answer is one JSON document; or why not."""
+    try:
+        answered = container_exec.run(
+            container, "psql", "-U", "postgres", "-d", database, "-X", "-qtA",
+            "-c", statement, timeout=20,
+        )  # fmt: skip
+    except (OSError, subprocess.SubprocessError):
+        return None, "the cluster could not be reached"
+    if answered.returncode != 0:
+        return None, "the cluster did not answer (is pg_stat_statements loaded?)"
+    try:
+        return json.loads(answered.stdout), ""
+    except ValueError:
+        return None, "the cluster's answer was not one JSON document"
 
 
 def durable_counts_sql(since: str | None) -> str:

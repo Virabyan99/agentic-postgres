@@ -211,6 +211,9 @@ REQUEST_IDLE_SLEEP_SQL = "SELECT coalesce(app.control_request_idle_sleep(:'key')
 RECORD_LIMIT_NOTICE_SQL = (
     "SELECT coalesce(app.control_record_limit_notice(:'key', :'entitlement')::text, '');"
 )
+#: Session 42 (ADR 0278, D2569): one insight sample per awake slot per usage
+#: pass -- the closed set's fourteenth call, granted to nobody.
+RECORD_INSIGHTS_SQL = "SELECT app.control_record_insights(:'sample'::jsonb);"
 ADOPT_SQL = (
     "SELECT app.control_adopt_project(:'key', :'organization'::uuid, :'slug', :'environment', "
     ":'domain', :'template_version', :'source_commit', nullif(:'region', ''), :'profile', "
@@ -721,7 +724,33 @@ USAGE_FIGURES: tuple[str, ...] = (
     "agent_calls",
     "workflow_runs",
     "last_customer_activity",
+    # Session 42 (ADR 0278, D2570): the customer-facing roles' summed
+    # total_exec_time AS READ; `statements_reset` rides beside it in the sample.
+    "db_time_ms",
 )
+
+#: Session 42 (ADR 0278, D2568): the roles whose statements are the CUSTOMER'S
+#: -- their direct roles and the API's request roles; rig 42b measured a
+#: PostgREST request recorded under `anon` / `authenticated`, never the
+#: authenticator. Suffixes of `naming.database_roles`, never typed names.
+INSIGHT_ROLE_SUFFIXES = (
+    "customer_app",
+    "customer_admin",
+    "anon",
+    "authenticated",
+    "agent_reader",
+    "agent_writer",
+)
+_INSIGHT_KEYS = {
+    "queryid": int,
+    "role": str,
+    "calls": int,
+    "total_exec_ms": (int, float),
+    "rows": int,
+    "shared_blks_hit": int,
+    "shared_blks_read": int,
+    "query": str,
+}
 
 #: Said for every figure of a sleeping project: its containers are stopped.
 SLEEPING_REASON = "the project sleeps"
@@ -759,6 +788,37 @@ def usage_sample(
     sample["unread"] = unread
     sample["reason"] = "; ".join(reasons)[:300] or None
     return sample
+
+
+def insight_sample(
+    key: str, reading: object, roles: tuple[str, ...]
+) -> tuple[dict[str, Any] | None, str]:
+    """One slot's sample for `control_record_insights` (ADR 0278), from the
+    one document `usage_reading.insights_sql` answers -- or None and why. Every
+    statement is checked before it is recorded: the eight members and their
+    types, a role among the CUSTOMER-FACING ones (a platform role's statement
+    is never kept, whatever the reading held), at most 50, the text cut to
+    2000. The control set checks the same again (its whitelist)."""
+    if not isinstance(reading, dict) or set(reading) != {"stats_reset", "statements"}:
+        return None, "the insight reading was not the document asked for"
+    statements = reading["statements"]
+    if not isinstance(statements, list):
+        return None, "the insight reading carried no statement list"
+    kept: list[dict[str, Any]] = []
+    for statement in statements[:50]:
+        if not isinstance(statement, dict) or set(statement) != set(_INSIGHT_KEYS):
+            return None, "an insight statement was not the shape asked for"
+        for member, kind in _INSIGHT_KEYS.items():
+            value = statement[member]
+            if isinstance(value, bool) or not isinstance(value, kind):
+                return None, f"an insight statement's {member} was not a {kind}"
+        if statement["role"] not in roles:
+            continue
+        kept.append({**statement, "query": statement["query"][:2000]})
+    stats_reset = reading["stats_reset"]
+    if stats_reset is not None and not isinstance(stats_reset, str):
+        return None, "the extension's stats_reset was not an instant"
+    return {"project_key": key, "stats_reset": stats_reset, "statements": kept}, ""
 
 
 def limit_notices(sample: dict[str, Any], agent_calls_today: int | None, plan: str) -> list[str]:

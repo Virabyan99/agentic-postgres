@@ -4,13 +4,13 @@
 42b, 42c; ADRs 0277, 0278, 0279; the threat list) -- **sitting U blocked: OVH
 out of stock in US-EAST-VA-2 (D2598)**; the operator chose to continue the
 code runs and retry; U0-U3, E0 and E1 complete Run 1 before Run 10. **Runs 2,
-3, 4 and 5 done.** Rows **D2561–D2590** at planning,
+3, 4, 5 and 6 done.** Rows **D2561–D2590** at planning,
 **D2591–D2596** added 2026-10-18 (the operator's amendment of Sessions
 43–45: web-first, the browser SQL editor, the split, and three of Session
 43's choices — recorded here because this plan holds the next free numbers;
-none changes a run of this session), **D2597–D2616** by the runs. ADRs
+none changes a run of this session), **D2597–D2620** by the runs. ADRs
 **0277–0279** written (0277's limits re-read by E1).
-**NEXT FREE: D2617, ADR 0280.**
+**NEXT FREE: D2621, ADR 0280.**
 
 The seventh session of Stage 5 and the second half of the operator's split
 (D2510): the stage plan's *Session 42* brief (`docs/plans/stage-5-plan.md` §5
@@ -476,7 +476,7 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2595** | D2591 point 4: *"How the console holds its session (memory, or an `HttpOnly`, `SameSite=Strict` cookie with a CSRF rule) is that plan's decision and an ADR."* | The CLI holds a bearer token from `/v1/sessions`; the console does not exist. Session 44's editor will hold a customer's database password in a page (D2592). | **The operator, 2026-10-18: a cookie on the API's own origin.** The console is served from **`control.agenticpostgresql.com`**, the origin of `/v1` (no CORS, no cross-site cookie); the session is an **`HttpOnly`, `Secure`, `SameSite=Strict` cookie** set by the session route for the console, its lifetime the existing session's, login still requiring the TOTP code; **every write also checks `Origin`** (or a header only the console's own pages send) as the CSRF rule. **Not** page memory (a re-login and a TOTP code on every refresh), **not** `localStorage` (readable by any script on the page). The CLI and API keys keep bearer tokens, unchanged. | No script on the page can read the session, which matters most on the page that will hold a database password. | ADR (Session 43) |
 | **D2596** | D2591, *Must not (added)*: *"a third-party script or tracker on the site or the console without an operator decision recorded."* | Neither the site nor the console exists. | **The operator, 2026-10-18.** **The console: no third-party script, ever** — no analytics, widget or CDN library; every asset served from our own files under a strict Content-Security-Policy (a test reads the CSP and every `<script src>`). **The public site: no tracker**; traffic read from Cloudflare Pages' own numbers, which need nothing on the page; **Cloudflare Web Analytics** (cookieless, built into Pages) only if the operator later asks for more; fonts and images self-hosted, no external CDN. No Google Analytics, no ad tracker, no cookie banner needed. | The page that holds a customer's password runs only our code; a product sold on care with data does not hand its visitors to a third party. | ADR (Session 43) |
 
-**Rows the runs add** (execution order; **next free D2617**):
+**Rows the runs add** (execution order; **next free D2621**):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -500,6 +500,10 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2614** | D2574: the collector's exporter *"`otlphttp` to `http://gateway:4318`"*. | `gateway` is the plane's generic service name; any container on the ingest network named so would answer it. | **The plane's gateway carries the explicit alias `apg-telemetry-gateway` on the ingest network**; the collector sends to `telemetry_plane.GATEWAY_OTLP_HTTP`; a test holds the alias and the endpoint together. | A name the platform chose is the one only the platform answers to. | 0277 |
 | **D2615** | Run 4: *"Targeted: the new modules, `test_process_limits`, `test_capacity_*` ..., `test_cli_contract`, `test_diagnostic_surface`, `test_host_infrastructure` ..."*. | Run 4 changed `bin/compose.sh`'s override conditional (the telemetry scope); `tests/contract/test_project_state_roots.py` slices that conditional out of `compose.sh` BY EXACT TEXT (deliberately: it raises rather than testing stale text) -- and no module named in Run 4's list, nor its `decide(` grep, reads `compose.sh`. Run 5's targeted run found it (5 failures); c0b1c5c was already pushed. | **Fixed forward as its own commit** (the anchor names the new two-line conditional). The lesson: a run that edits a `bin/` script greps `tests/` for the script's NAME before it chooses its targeted list (D979/D1486, the gate sees what a targeted list derived from a diff cannot). | A targeted list derived from what changed cannot see a reader of what changed that the list does not name. | -- |
 | **D2616** | `test_auth_service_shape`: compose supplies EXACTLY `settings.REQUIRED_VARIABLES` / `STORAGE_VARIABLES` plus `APP_MODE`; *"D1645: no new ... setting"* for the auth mode. | `APG_OTLP_LOGS_ENDPOINT` is read by `create_app`'s first call (`log_setup.configure_logging`), never by `settings.load`, and is optional -- `APP_MODE`'s exact shape, which the test already adds by name. | **Both equalities add `log_setup.OTLP_ENDPOINT_VARIABLE` beside `APP_MODE`** -- still exact in both directions, the name imported from its one declaration; ADR 0277 is the decision D1645 held out for. | A widening to one measured, declared consumer is not a loosening. | 0277 |
+| **D2617** | D2572: *"`state` (registry)"* among the monitoring signals. | `app.control_projects` holds no state column (`0003`: key, organisation, slug, environment, domain, template version, source commit, adopted); a project's awake/asleep is the operation history's and the usage samples' (`control_usage_samples.state`, `active`/`sleeping`). | **`state` reads the newest usage sample's `state`**, with its `observed_at`, or `unread` when no sample exists -- still a column that exists, still no new reader. | The registry cannot answer it; the sample already does. | 0279 |
+| **D2618** | D2570: *"`unread`'s CHECK whitelist gains `db_time`"*. | Every name in `unread` is its COLUMN's name (`0008`: `database_bytes`, ..., `last_customer_activity`), and `dispatch.usage_sample` names an unread figure by its key. | **The figure, its column and its unread name are all `db_time_ms`**; the document's member is `db_time` `{increase_ms, resets}` (beside `requests` `{increase, resets}`). A test refuses `db_time` in `unread` (the CHECK). | One name per figure, the way every other figure is named. | 0278 |
+| **D2619** | D2571: *"each the increase over the window"*; a window with no sample `could_not_determine`. | An increase needs two samples. A statement that appears in a later sample but not an earlier one may be new OR may have just entered the top 50 -- its cumulative counter is not an increase over the window. | **Fewer than two samples is `could_not_determine`** (*"one sample cannot show an increase; the window needs two"*); **a statement's first sample in the window counts nothing**; per statement, a decrease or a moved `stats_reset` is a reset counted from zero; `resets` counts the moves of `stats_reset` between consecutive samples. The ADR's document says so. | A count that cannot be told from a first appearance is not counted. | 0278 |
+| **D2620** | D2568: *"Insights are the statements of the project's customer-facing roles only"*. | Two places can keep a statement out: the reading's SQL (`r.rolname IN (...)`) and `dispatch.insight_sample`'s check. A test over the sample alone could not see either removed while the other held (the battery would have reported a survivor -- D493). | **Both layers, each held on its own**: the Docker test asserts the RAW reading holds no platform role (the SQL), and `test_an_insight_statement_of_a_platform_role_is_not_kept` feeds the dispatch a platform role's statement directly; the battery removed each separately (both killed). | Defence in depth is only depth if each layer is proved. | 0278 |
 
 ---
 
@@ -1186,6 +1190,55 @@ green. **Targeted**: `test_control_usage`, `test_control_insights`,
 `test_idle_sleep`, `test_notifications`, the control-set modules (`grep -rln
 "control_cluster" tests/contract/`), `test_acceptance_registry`,
 `test_environment_gates`, the sweep-selector guard. Commit, push, CI by SHA.
+
+**Done, 2026-10-18.** `projects/control/migrations/templates/0009-control-insights.sql`
+(manifest `20261018120009 control_insights`): `app.control_insight_samples` (FORCE
+row security, the usage samples' read policy); `control_usage_samples.db_time_ms`
+and `statements_reset`, the `unread` CHECK dropped and added wider
+(`db_time_ms`, **D2618**); `control_record_usage` re-created -- 0008's body plus
+the two keys, held by `test_the_usage_writer_is_0008s_plus_two_keys` (the six
+added lines named, removing them gives 0008's body byte for byte);
+`control_record_insights` (INVOKER, granted to nobody, a whitelist, at most 50,
+the text cut to 2000, the key's samples older than 7 days deleted in the same
+transaction); `control_usage_document` re-created with a marked DB-time block
+(increases, a decrease or a moved `statements_reset` a reset); `control_project_insights`
+(DEFINER, viewer, 1..168 h, 1..50; **D2619**'s reading; no advising member; the
+fixed tuning sentence) and `control_project_monitoring` (DEFINER, viewer; the
+usage samples, the last hour's document, the backups reading, the insight samples
+-- `state` from the newest sample, **D2617**), both granted to the auth role only.
+`bin/migrate.sh --project project.control.example.yaml freeze-lock` (9
+migrations, follows `20261003120039`; the release lock untouched) and
+`verify-lock` clean; the proposal **`44df1837…`** written by `propose --by "Session
+42 executor"` (after `deploy.sh ... --render-only` of the control example, the
+render then removed): lint passed, **17 destructive findings** -- the 12 its
+predecessor named, the four `0004` drops the quote-aware reader now finds
+(D2606), and `0009`'s own `drop_constraint` on the `unread` CHECK. Python:
+`usage_reading.insights_sql` / `db_time_sql` (the six roles checked, `jsonb_agg`
+so the answer is one line) and `cluster_json`; `reconciler_dispatch.INSIGHT_ROLE_SUFFIXES`,
+`insight_sample` (eight members typed, roles filtered, 50, 2000),
+`RECORD_INSIGHTS_SQL`, `USAGE_FIGURES += db_time_ms`; `bin/reconciler.py`
+`usage_of` reads DB time, `insights_of` reads an awake slot's sample,
+`record_usage` records both in the same pass and says `usage pass for <key>: <s>
+s` per slot. Tests: `test_control_insights.py` (6), `test_insights_reading.py`
+(4, Docker: the canary on the locked image with `compose.yaml`'s flags -- the
+literal normalised to `$1`, the password and the `DO` block absent from the
+extension itself, the platform role's statement recorded by the extension and
+absent from the RAW reading and the sample, the text cut at 2000),
+`test_control_usage` (+3: DB time a sum of increases with two resets, unread
+named and `db_time` refused by the CHECK, the writer's body), `test_reconciler_dispatch`
+(+1, the dispatch's role filter; the closed set widened by exactly
+`control_record_insights`), `test_control_set`'s three exact lists widened by
+exactly `0009`'s names and its counts 8 → 9. **Battery** (`~/s42/run6/battery6.py`):
+**5 of 5 killed** -- (a) the 7-day delete removed, (b1) the dispatch's role check
+removed, (b2) the SQL's role filter removed (**D2620**), (c) a reset subtracted,
+(d) `db_time_ms` dropped from the writer's whitelist -- each target FAILED (the
+control cluster renders the mutated template; no lock check intervened), control
+`test_usage_sampler.py::test_calls_are_counted_from_durable_rows` PASSED, every
+file restored `cmp`-equal. **Targeted** (once: every module reading
+`control_cluster`, `usage_reading`, `reconciler_dispatch`, the reconciler,
+`projects/control` or the usage writer/document, plus the canary, the SQL
+reader, the migration-set, proposal, registry, claims, gates, index and
+repository guards): **1,651 passed**.
 
 ### Run 7 — the routes, the CLI, monitoring, the documents (`services/`, `bin/`, `docs/`)
 

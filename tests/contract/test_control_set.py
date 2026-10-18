@@ -50,6 +50,8 @@ TABLES = {
     "control_plan_interest",
     "control_usage_samples",
     "control_notifications",
+    # Session 42 (ADR 0278): the insight samples.
+    "control_insight_samples",
 }
 #: Every function the identity service may execute, and no other (ADR 0251).
 GRANTED = {
@@ -101,6 +103,9 @@ GRANTED = {
     "control_project_usage",
     "control_org_usage",
     "control_list_notifications",
+    # Session 42 (ADR 0278, ADR 0279): insights and monitoring, viewer and above.
+    "control_project_insights",
+    "control_project_monitoring",
 }
 #: Root's, never granted: the operator's three through `bin/control.sh`
 #: (D2068) and the reconciler's (D2093, D2151).
@@ -124,6 +129,8 @@ OPERATOR = {
     "control_record_usage",
     "control_request_idle_sleep",
     "control_record_limit_notice",
+    # Session 42 (ADR 0278): the insight sample -- granted to nobody.
+    "control_record_insights",
 }
 #: The helpers that run only inside the functions above.
 HELPERS = {
@@ -358,7 +365,7 @@ def test_the_control_example_renders_as_the_control_plane() -> None:
         assert outputs["control"] == {"enabled": True}
         assert outputs["routes"]["control"] == "https://fixture-control-dev.test/api/v1"
         assert outputs["migrations"]["project_set"]["root"] == "projects/control"
-        assert outputs["migrations"]["project_set"]["count"] == 8  # Session 41: 0008
+        assert outputs["migrations"]["project_set"]["count"] == 9  # Session 42: 0009
         assert outputs["storage"]["enabled"] is False
         values = dict(
             line.split("=", 1)
@@ -369,7 +376,7 @@ def test_the_control_example_renders_as_the_control_plane() -> None:
         assert values["CONTROL_ROUTE_PATH"] == "/api/v1"
         assert values["API_CONTROL_PATH"] == "/api"
         rendered_set = sorted(p.name for p in (directory / "migrations-project").glob("*.sql"))
-        assert len(rendered_set) == 8, rendered_set  # Session 41: 0008
+        assert len(rendered_set) == 9, rendered_set  # Session 42: 0009
     finally:
         # CLAUDE.md §1: a proof that renders deletes what it published.
         shutil.rmtree(directory, ignore_errors=True)

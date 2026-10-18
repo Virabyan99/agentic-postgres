@@ -89,6 +89,17 @@
       "template": "templates/0008-control-plans-usage.sql",
       "template_sha256": "068ca9b6b88ee1ec4ed4188f0b1e855dc039aeb3c755954ceb6755a8ee2956d6",
       "version": "20261016120008"
+    },
+    {
+      "canonical_render_sha256": "91af90d9d59481d0865ba86a71ab5ad78758f93cde29bf9af1f2a70e399c175c",
+      "name": "control_insights",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0009-control-insights.sql",
+      "template_sha256": "e59551e9d96fae04cc55677853e6e21b98e91c859e0cc128b42865229585ebe9",
+      "version": "20261018120009"
     }
   ],
   "schema_version": 3
