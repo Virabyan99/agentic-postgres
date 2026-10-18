@@ -205,10 +205,11 @@ def test_the_edge_plane_is_bounded() -> None:
 
 #: ADR 0244's rule over rig 42a's case 5 peaks (100 lines/s for 30 minutes;
 #: ADR 0277): memory max(4 x peak rounded up to 32 MiB, 64), pids max(4 x
-#: peak, 64), one core each. Sheet E1 re-reads the peaks on the host.
+#: peak, 64), one core each. Sheet E1 re-read the peaks on the upgraded host
+#: (D2626): HyperDX 425 MiB there against 420 here, so its limit is the host's.
 TELEMETRY_LIMITS = {
     "clickhouse": {"mem_limit": "1152m", "pids_limit": 740, "cpus": "1.0"},
-    "hyperdx": {"mem_limit": "1696m", "pids_limit": 216, "cpus": "1.0"},
+    "hyperdx": {"mem_limit": "1728m", "pids_limit": 216, "cpus": "1.0"},
     "mongo": {"mem_limit": "448m", "pids_limit": 260, "cpus": "1.0"},
     "gateway": {"mem_limit": "224m", "pids_limit": 64, "cpus": "1.0"},
 }

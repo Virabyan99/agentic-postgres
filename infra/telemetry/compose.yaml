@@ -117,8 +117,9 @@ services:
       - /bin/sh
       - -c
       - EXPRESS_SESSION_SECRET="$$(cat /run/apg/hyperdx-session)" exec sh /etc/local/entry.sh
-    # ADR 0244 from case 5: peak 420 MiB / 54 pids.
-    mem_limit: 1696m
+    # ADR 0244: peak 425 MiB / 54 pids on the upgraded host (Sheet E1, D2626;
+    # case 5 on the workstation read 420).
+    mem_limit: 1728m
     pids_limit: 216
     cpus: "1.0"
     environment:

@@ -1,16 +1,15 @@
 # Session 42 — The OVH upgrade, ClickStack, `pg_stat_statements`, Query Insights, monitoring, and the fourth re-earning
 
-**Status: EXECUTING since 2026-10-18.** Run 1 **in part** (the rigs 42a,
-42b, 42c; ADRs 0277, 0278, 0279; the threat list) -- **sitting U blocked: OVH
-out of stock in US-EAST-VA-2 (D2598)**; the operator chose to continue the
-code runs and retry; U0-U3, E0 and E1 complete Run 1 before Run 10. **Runs 2
-to 7 done.** Rows **D2561–D2590** at planning,
+**Status: EXECUTING since 2026-10-18.** **Runs 1 to 8 done** -- Run 1's
+sitting U ran once OVH's stock returned (D2598): the host is **11,671 MiB, 6
+vCPU, 95 GiB** and declared so (D2628); E1 moved HyperDX's limit to 1,728 MiB
+and the plane's charge to 3,552 (D2626). Rows **D2561–D2590** at planning,
 **D2591–D2596** added 2026-10-18 (the operator's amendment of Sessions
 43–45: web-first, the browser SQL editor, the split, and three of Session
 43's choices — recorded here because this plan holds the next free numbers;
-none changes a run of this session), **D2597–D2622** by the runs. ADRs
-**0277–0279** written (0277's limits re-read by E1).
-**NEXT FREE: D2623, ADR 0280.**
+none changes a run of this session), **D2597–D2630** by the runs. ADRs
+**0277–0279** written (0277 amended by E1, D2626).
+**NEXT FREE: D2631, ADR 0280.**
 
 The seventh session of Stage 5 and the second half of the operator's split
 (D2510): the stage plan's *Session 42* brief (`docs/plans/stage-5-plan.md` §5
@@ -506,6 +505,14 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2620** | D2568: *"Insights are the statements of the project's customer-facing roles only"*. | Two places can keep a statement out: the reading's SQL (`r.rolname IN (...)`) and `dispatch.insight_sample`'s check. A test over the sample alone could not see either removed while the other held (the battery would have reported a survivor -- D493). | **Both layers, each held on its own**: the Docker test asserts the RAW reading holds no platform role (the SQL), and `test_an_insight_statement_of_a_platform_role_is_not_kept` feeds the dispatch a platform role's statement directly; the battery removed each separately (both killed). | Defence in depth is only depth if each layer is proved. | 0278 |
 | **D2621** | Run 7: *"`docs/developer-guide.md` (the tuning pointer's target section — read it exists first)"*; Run 6 wrote the insights document's fixed `tuning` sentence naming *"docs/developer-guide.md, Proposing"*. | No `docs/developer-guide.md` exists. Proposing a migration is `docs/change-governance.md`, *Proposing* (where `apg migrate propose` is documented). The sentence named a page a customer could not open. | **The sentence points at `docs/change-governance.md, Proposing`**: `0009` corrected (pushed in 569548c, applied on no cluster -- D912 does not bind), the control lock re-frozen, the proposal re-written (`44df1837…` removed, `e131442a…` added, the same 17 findings); `test_no_member_advises` pins the new sentence; no developer guide written. | A pointer is a claim about the tree; read before it is written. | 0278 |
 | **D2622** | Run 7: two routes, `MATRIX` + `KEY_SCOPES`, the snapshot regenerated; *"Targeted: ... `test_app_contract` (the snapshot) ..."*. | The control mode's paths are also DECLARED by hand in `services/auth-api/app/main.py` `control_paths()`, and two tests hold the snapshot and the served routes equal to it (`test_app_contract_aggregate::test_the_control_snapshot_is_what_this_checkout_generates`, `test_auth_service_shape::test_the_control_mode_serves_exactly_the_declared_paths`). Run 7 named neither; there is no `test_app_contract` module. | **Both paths added to `control_paths()`**; the two modules failed in the first targeted pass and passed after (62). Nothing at run time filters by the list (`public_paths` has no reader outside tests), so no deployed route was ever at stake. | A route has four declarations (router, matrix, key scopes, `control_paths`); a plan adding one names all four. | 0279 |
+| **D2623** | §7: *"302 claims ... Everything else **passed**"*; Run 11 schedules the lifecycle on `slot6-prod` and no branch; Run 8 lists no branch instrument. | Four claims re-run at every merge need a branch of `slot3-prod` at the deployed commit and its record: `branch_live` (BR-LIVE-001), `branch_host_live` (BR-LIVE-002), `branch_retrial_live` (BR-LIVE-003), `branch_host_retrial_live` (BR-LIVE-004) -- `--branch-record-file` and `slot3-prod_dev` ready at the sweep. `slot3-prod` holds no branch (Session 41 deleted dev after its sweep). Without one, the four go `not_run` and the merge exits 5 for more than `documented_path`. | **The operator, 2026-10-18: add a branch run.** `s42-branches.py` (Run 8, `make-branches42.py`: Session 41's instrument by renaming alone) runs in sitting 2 after the lifecycle, before B1; `--after-reboot` after B1; `--delete-only` after S1. The sweep keeps `--branch-record-file /home/op/s42-branches.json` and the `slot3-prod_dev ready` preflight (exit file 94); the external half reads `~/s42/branches.json`. Run 9 widens the branch fixtures to 42. Memory is read with `s42-free.sh` before the branch (the plane's 3,520 MiB is charged; without the 12 GB upgrade a branch may not fit, §9). | A prediction of "everything else passed" names what each claim needs on the day. | 0271 |
+| **D2624** | D2581: *"a known workload as `customer_app` over its direct name"*. | `endpoint connect --role app` opens the POOLED door (`cloud.py` `ENDPOINT_ROLES`: app → pooled, admin → direct); the direct door's role is `customer_admin`. And `~/s39/run8/bin/psql` runs psql in a container, where a workstation path given to `-f` does not exist. | **The workload runs as `customer_app` through the pooled name**, the product's own `endpoint connect --role app`, the statements on psql's stdin (`connect`'s psql inherits it). Both roles are customer-facing (D2568), so insights read it either way; the record names the door. | — | 0278 |
+| **D2625** | D2567: *"`s42-window.py` ... `routes.app` `/api/rest/` and `/api/auth/health` once a second"*. | The auth service's health paths are container-local (`services/auth-api/app/main.py:9-16`, D231): the edge routes no `/api/auth/health`. The control mode serves no `/auth/jwks.json` (D2079), Session 35's auth class. PostgREST's root is `routes.rest`, not under `routes.app`. | **Two classes per project, read from the deployed document**: `rest` = `GET <routes.rest>/` (Session 35's class: 200 while PostgREST holds a database connection, 503 while it has none) and `auth` = `GET <routes.app>/auth/me` unauthenticated (401 in both modes). UP = any status but 404/502/503/504 within 5 s; every answer fsynced to the JSONL as taken (D2581's rule); `--stop-after-quiet` counts only after a DOWN answer. Rehearsed against a loopback stand-in with a 4 s outage (windows 3.5 and 4.0 s at a 0.5 s interval) and a control with none. | A probe of a path the edge does not route measures the edge's 404. | — |
+| **D2626** | ADR 0277 item 5: *"Sheet E1 re-reads the peaks on the upgraded host and the limits move to what it reads"*; the limits from rig 42a's case 5 (HyperDX 420 MiB → 1,696). | **Sheet E1** (2026-10-18 08:52-09:23Z, the 11,671 MiB host, 100 lines/s for 30 min): `memory.peak` ClickHouse 250 MiB / 182 pids, **HyperDX 425 MiB** / 54, MongoDB 98 / 64, the gateway ~49 MiB (`docker stats`; no `cat` in the image). ADR 0244's rule on 425: 4 × 425 = 1,700, rounded up to 32 → **1,728 MiB**, above 1,696. | **The rule takes the larger of the two readings**: HyperDX's `mem_limit` 1,696 → **1,728 MiB** (`infra/telemetry/compose.yaml`, `test_process_limits.TELEMETRY_LIMITS`, ADR 0277 amended in place); ClickHouse, MongoDB and the gateway stand (the workstation's peaks were the larger). **The charge 3,520 → 3,552 MiB** (`test_telemetry_admission`, `capacity_reading.platform_text`'s docstring). Battery: the limit back at 1696m → both proofs FAILED, control `test_no_port_and_no_router` PASSED. | A limit derived from one machine's peak is re-derived on the machine it runs on. | 0277 |
+| **D2627** | Sheet U2: *"`s42-u0.sh --counts-only` equal to U0's"*; D2598: *"the reconciler, stopped by U0, is the operator's to start again"*. | U0 ran 05:11-05:13Z with the reconciler stopped; the operator started it at ~05:57Z (the stock-out), so it ran until the upgrade and the boot started it again. U2 (08:42Z): alpha, beta, slot3-prod EQUAL; control-prod differs in ONE table, `app.control_usage_samples` 240 → 274. | **Not a loss: the reconciler's own sampling** -- ~2.8 h of running at one sample per 300 s is ~34. Every other count equal; the four doctors 12 ok. The script's "§9's stop" is a mechanical comparison, ruled here. | A count compared across a writer that ran is read per table, not as equality. | — |
+| **D2628** | Sheet U3: *"`disk_gb` only if the doctor's reading moved"*; *"`sudo systemctl start agentic-postgres-reconciler`"*. | The disk moved (`sda1` 73.9 G → 98.9 G). The product's reading is `usage.total // 1024**3` = **95** (102,915,489,792 B); `df -h`'s 96 G is rounded -- a first candidate built at 96 was removed before anything was installed. The reconciler was already `active` (the boot started it) and reads `host.yaml` once at start (D2411), so `start` would have done nothing. | `disk_gb` 71 → **95** and `memory_mb` 7746 → **11671** in both copies (candidates byte-equal, `e52d712e…`; the checkout's installed by the agent with `host.yaml.before-u3` kept, `/etc`'s by the operator); **`systemctl restart`**, then `idle`; `doctor capacity` 5 ok (11,671 MiB / 95 GiB declared, 9,457 claimable, was 5,532). | A declaration agrees with its reader exactly, not with a rounded display. | 0221 |
+| **D2629** | Sheet E0: *"the line rate (lines per second across the four projects) is the control load's unit for 42a(5) and E1"*; Sheet E1: *"`telemetrygen` at 10× E0's rate"*. | E0 ran 13 min after the boot and the containers' logs began at it: 608 `apg.*` lines in both windows -- **76 per `auth` and `storage` container, 0 per `mcp`**, one line per ~10.5 s per service, almost all health traffic: **~0.75 lines/s** across the host. 10× is 7.5 lines/s, below case 5's 100, so case 5 is not re-run (D2598's condition). | **E1 ran at 100 lines/s** (above 10× E0, and case 5's rate, so the host's peaks compare with the workstation's), driven by the pinned `telemetrygen` into the stand-in collector (no image built on the host), at ADR 0277's memory limits (`CH_MEM` 1152m, `HDX_MEM` 1696m, `MONGO_MEM` 448m, `GW_MEM` 224m), a reader query from HyperDX's container every 60 s standing in for case 5's searches (no forward on the host). | A rate read right after a boot is a floor, not the day's rate. | 0277 |
+| **D2630** | Sheet E1: *"the neighbours' memory (the four projects' `docker stats` at start and end) recorded"*; §9: *"a neighbour's memory moves by more than its own noise during E1"*. | `s42-e1.sh`'s `neighbours()` filtered `docker stats` lines for four leading spaces the format had and the output did not keep: both readings printed nothing. | **The start reading is E0's `docker stats` (08:48:53Z, three minutes before E1)**; the end reading is the operator's one `docker stats` line after the teardown, compared per container in Run 1's `**Done.**`. `free -m`: 9,206 MiB available at the start, 8,324 lowest under load, 9,120 after the teardown (buff/cache 2,545 → 5,833 MiB: the pulled images). | A filter that matches nothing reads as "no neighbour" -- the third outcome folded (ADR 0195). | — |
 
 ---
 
@@ -836,6 +843,36 @@ disk compressed, 66.96 MiB raw; volumes ClickHouse 98 M, MongoDB 302 M. ADR
 these and indexed (0221, 0244, 0249 marked amended). **Owed before Run 10**:
 U0-U3 at the retry, E0 (the real rate; case 5 re-run if 10x it exceeds 100
 lines/s), E1 (the limits re-read on the host; ADR 0277's numbers move with it).
+
+**Done (sitting U, E0, E1), 2026-10-18.** Stock returned; the operator changed
+the model in the OVHcloud manager (U1; the manager's figures were not written
+down) and **OVH rebooted the host itself at 08:35:47Z** -- no reboot button was
+needed. U0 was NOT re-run (D2598 asked for it); its backups and counts are from
+05:11-05:13Z, and the reconciler ran from ~05:57Z through the upgrade (D2627).
+**U2** (`~/s42/run1/s42-after-upgrade.txt`): ssh back at 08:40:13; the six units
+ALL ACTIVE 288 s after the boot, **each started by the boot** (left inactive
+before `multi-user.target` at mono 45.96 s), NRestarts 0 -- **D2558's race did not
+fire at this boot, which is not evidence of its repair** (the host runs
+601a0ea); **6 vCPU** Haswell, **11,671 MiB**, no swap, `sda` 100 G / `sda1`
+98.9 G, `/` 96 G with 11 G used, the IPv4 15.204.231.45 kept, the SSH host key
+unchanged, the checkout 601a0ea clean, 42 containers healthy. The four doctors
+**12 ok** each (every TLS 81-84 d; WAL archived at 08:41-08:42). Counts equal but
+`app.control_usage_samples` 240 → 274 (D2627). **U3** (D2628): `memory_mb` 11671,
+`disk_gb` 95 in both copies, the reconciler restarted and `idle`; `doctor
+capacity` 5 ok -- 9,457 MiB claimable (was 5,532), 9,222 available, 85 GiB free,
+1,104 MiB committed across 4, ceilings 12,320 MiB across 5. **E0** (08:48:53Z;
+`/home/op/s42-e0.txt`): ~0.75 `apg.*` lines/s since the boot, mostly health
+traffic (D2629); 9,217 MiB available; the four projects' containers 1.5-150 MiB
+each (the edge's Traefik 194 MiB). **E1** (08:52:13-09:23:42Z;
+`/home/op/s42-e1.txt`, `s42-e1.sh` sha256 `11a4d8a4…`): the stack up at ADR
+0277's memory limits, no published port; 100 lines/s for 1,800 s -- **179,997 of
+180,000 rows** (3 lost), **every row stamped `beta-dev` over the forged `other`**,
+the reader query 96-115 ms each minute; no OOM, no restart; lowest available
+**8,324 MiB** (floor 2,000 never near); peaks ClickHouse 250 MiB / 182, HyperDX
+**425** / 54, MongoDB 98 / 64, gateway ~49 MiB; 911 KiB on disk; `down -v` left 0
+containers, 0 volumes, 0 networks; 9,120 MiB available after. **HyperDX's limit
+moved to 1,728 MiB and the charge to 3,552** (D2626). The neighbours' readings
+(D2630): _the end reading pending the operator's line_. **Run 1 is done.**
 
 ### Run 2 — the three repairs: D2558, D2559, D2544 (`bin/`, `src/`)
 
@@ -1342,6 +1379,57 @@ scratchpad):
   the notifications read compares against the record's operations (a failed
   one included).
 
+**Done, 2026-10-18.** In WSL `~/s42/run8/` (`make-all.sh` re-derives, compiles,
+lints and `bash -n`s every child; exit 0). **`s42-derive.py`**: ten children from
+Session 41's by named substitution, every count asserted, the header split off
+first -- `s42-free`, `-probe-start/-stop`, `-launch`, `-sweep`, `-v1`,
+`-after-reboot`, `-external`, `-x0`, `-dns` -- plus `s42-units.sh` from Run 1's
+(itself derived) with the telemetry unit added once enabled (D2558: every unit
+back by itself). `s42-hostyaml.py` is Run 1's (`--memory-mb`, used by U3). The
+sweep keeps the branch preflight (exit file 94, D2623) and adds the plane's:
+**`telemetry.sh status` exits 0 with nothing running (it reports), so the
+preflight counts the four containers `running`** (exit file 93); the summary
+greps Session 42's host claims. `s42-after-reboot.sh` reads seven units (the
+plane's) and the plane's four containers through `apg-diag`. **`s42-lifecycle.py`**
+(`make-lifecycle42.py`, D2581): every probe sample one JSON line in
+`<record>.samples.jsonl`, fsynced as taken; each interval into
+`probe_intervals` as it closes; the file's bytes/sha256/lines sealed into
+`samples` at each window's end and at the stop; a resume reloads the file
+(refusing one whose sealed prefix moved) and the intervals; the insights step
+(D2569; `customer_app` through the pooled name, the statements on psql's stdin,
+D2624); session 42, `lifecycle-s42`. **`s42-branches.py`** (`make-branches42.py`,
+D2623): Session 41's by renaming alone. **`s42-window.py`** (D2625).
+**`s42-telemetry.py`**: the control (no answer before the forward), the forward
+as op, `GET /` through it (200/302/307), closed and read closed -- not rehearsed
+(no forward target off the host; its first execution is Run 10's).
+**`s42-r2shape.py`** (D2582): the pairs read from Infisical the materializer's
+way (the host manifest, the slot's bootstrap state, its machine identity),
+before SL2; yes/no only; re-execs under the checkout's venv when `python3` has
+no PyYAML. **Rehearsals, all PASSED**: `rehearse_window42.py` (a 4 s outage at
+a 0.5 s interval read 3.5 s on rest, 4.0 s on auth, stopped by quiet; the control
+stopped at `--max-seconds` with no DOWN answer); `rehearse_r2shape42.py` (good →
+exit 0, eight yes; the D2557 shape → exit 5, the secret and the difference NO;
+trailing whitespace → exit 5; a 404 → exit 6; no value or 8-character prefix
+printed in any case); **`rehearse_lifecycle42.py`** (`make-rehearse-lifecycle42.py`;
+the real control cluster and doors, a fake reconciler): killed (`SIGKILL`, the
+process group) once the D2500 hung pool sample and a later one were on disk and
+the export was claimed; the export finished `operation_failed`; resumed at the
+export to exit 0 -- **every byte held at the kill (5,143) still the file's
+prefix, 63 samples and 4 intervals reloaded, 0 dropped, the four pre-kill
+windows read with 30 route samples each, the seal = the file's sha256 and
+lines**; the insights' two passes, the statement at **200 calls**, no canary;
+**notifications 14 found = the 14 operations the record names by outcome
+(`operations` + `idle_operations` + `failed_exports`); Session 41's count, 13,
+does not match** (§7's prediction for a failed operation, shown); the eleven in
+order, the D2500 hang survived, no secret in the record, the samples or the
+transcript, 0600. Its first attempts failed on the harness: a fake error code
+the control set's CHECK refuses (`provider_error`; `operation_failed` is the
+real one), then a kill before the hung sample had landed. `--control` PASSED
+(the instrument stopped at the idle step). `rehearse_branches42.py`
+(`make-rehearse-branches42.py`, renaming alone; the parent bootstrapped by the
+checkout's statements, so Run 3's extension is in it): three phases exit 0 (237,
+23, 35 s), every check ok.
+
 ### Run 9 — the bump, the registry, the gate, the threat rows, the Ledger to `trial`, the documents
 
 **Gates once, clean tree, in shards** (D2587): `bin/session-01-check.sh` and
@@ -1388,6 +1476,10 @@ exists as a project** (D2448).
    wake; idle sleep at 15 with the probes stopped; wake; the two resizes; the
    export; **K2** at the pause; delete; the second creation `no_slot`). Exit 0
    expected; anything else is read, never re-run blind (§9).
+   **1b. The branches** (D2623, the operator's 2026-10-18): `s42-free.sh
+   before-branch` (FITS), then `s42-branches.py` on `slot3-prod` up to the
+   delete (`phase: live`); `--after-reboot` after B1, before S1; `--delete-only`
+   after S1.
 2. **A1'** (the registry: slot1/2/4/5/6 agrees (deleted)).
 3. **B1** — the reboot; then `s42-after-reboot.sh` BEFORE any sweep: **every
    unit — the four projects', the edge, the reconciler, the telemetry plane —

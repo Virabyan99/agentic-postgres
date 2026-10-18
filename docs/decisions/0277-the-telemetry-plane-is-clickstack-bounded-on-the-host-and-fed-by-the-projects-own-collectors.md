@@ -103,16 +103,20 @@ pinned `otel/opentelemetry-collector-contrib:0.159.0`, which carries the
    access log.
 5. **Bounded by ADR 0244's rule from the rig's peaks** (max(4 × peak rounded up
    to 32 MiB, 64); pids max(4 × peak, 64); `cpus` "1.0"): ClickHouse **1,152 MiB /
-   740 pids**, HyperDX **1,696 MiB / 216**, MongoDB **448 MiB / 260**, the gateway
+   740 pids**, HyperDX **1,728 MiB / 216**, MongoDB **448 MiB / 260**, the gateway
    **224 MiB / 64**. ClickHouse's own ceiling `max_server_memory_usage` = 80 % of
    its limit; its system log tables removed and its caches set small
    (`mark_cache_size` 256 MiB, `index_mark_cache_size` 64 MiB,
    `uncompressed_cache_size` 0); MongoDB `--wiredTigerCacheSizeGB 0.25`. **Sheet
    E1 re-reads the peaks on the upgraded host** and the limits move to what it
-   reads (D2576, D2598).
+   reads (D2576, D2598). **Amended by Sheet E1 (2026-10-18, D2626)**: on the 11,671 MiB host at
+   100 lines/s for 30 min the peaks were ClickHouse 250 MiB / 182, HyperDX
+   **425 MiB** / 54, MongoDB 98 MiB / 64, the gateway ~49 MiB; the rule takes the
+   larger of the two readings, so HyperDX moves 1,696 -> **1,728 MiB** and the
+   other three stand.
 6. **Charged at its ceilings**: `telemetry.sh up` asks admission first (`exit
    12` when it does not fit) and then writes `charge_mb` — the sum of the four
-   limits, **3,520 MiB** at the rig's numbers — into
+   limits, **3,552 MiB** after Sheet E1 (3,520 at the rig's numbers) — into
    `/etc/agentic-postgres/telemetry/state.json`, which `capacity_probe` adds to
    `committed`. A store whose use follows its load has no unreclaimable figure
    to declare; its ceiling is what keeps it from being admitted twice.

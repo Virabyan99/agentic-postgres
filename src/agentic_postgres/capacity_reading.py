@@ -196,7 +196,7 @@ class Reading:
         )
 
     def platform_text(self) -> str:
-        """`; apg-telemetry (platform) 3520` per platform charge (ADR 0277)."""
+        """`; apg-telemetry (platform) 3552` per platform charge (ADR 0277)."""
         return "".join(
             f"; {name} (platform) {charge}" for name, charge in sorted(self.platform.items())
         )

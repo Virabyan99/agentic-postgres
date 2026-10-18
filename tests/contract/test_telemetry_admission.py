@@ -69,7 +69,7 @@ def test_the_plane_is_charged_at_its_ceilings(tmp_path: Path) -> None:
     names it. `exclude_platform` is the plane deciding about itself."""
     model = yaml.safe_load(telemetry_plane.COMPOSE_PATH.read_text(encoding="utf-8"))
     limits = [telemetry_plane.memory_mb(s["mem_limit"]) for s in model["services"].values()]
-    assert _charge() == sum(limits) == 3520
+    assert _charge() == sum(limits) == 3552
     projects, state = tmp_path / "projects", tmp_path / "telemetry"
     projects.mkdir()
     state.mkdir()
@@ -80,7 +80,7 @@ def test_the_plane_is_charged_at_its_ceilings(tmp_path: Path) -> None:
     )  # fmt: skip
     assert done.returncode == 0, done.stderr
     recorded = json.loads((state / telemetry_plane.STATE_FILE).read_text("utf-8"))
-    assert recorded["charge_mb"] == 3520 and len(recorded["images"]) == 4
+    assert recorded["charge_mb"] == 3552 and len(recorded["images"]) == 4
     assert (state / telemetry_plane.STATE_FILE).stat().st_mode & 0o777 == 0o644
 
     def nothing(*_: str, **__: object) -> None:
@@ -88,9 +88,9 @@ def test_the_plane_is_charged_at_its_ceilings(tmp_path: Path) -> None:
 
     host = REPO_ROOT / "host.example.yaml"
     reading, _ = capacity_probe.read(host, projects, runner=nothing)
-    assert reading.platform == {"apg-telemetry": 3520}
-    assert reading.committed_total_mb == sum(reading.committed.values()) + 3520
-    assert "; apg-telemetry (platform) 3520" in reading.platform_text()
+    assert reading.platform == {"apg-telemetry": 3552}
+    assert reading.committed_total_mb == sum(reading.committed.values()) + 3552
+    assert "; apg-telemetry (platform) 3552" in reading.platform_text()
     excluded, _ = capacity_probe.read(host, projects, runner=nothing, exclude_platform=True)
     assert excluded.platform == {}
 
@@ -106,7 +106,7 @@ def test_a_project_is_refused_with_the_charge() -> None:
     refused = _decide(_reading(platform={"apg-telemetry": _charge()}), "slot6-prod", candidate)
     assert refused.outcome == "refused" and refused.exit_code == 12, refused.reason
     committed = dict(refused.lines)["committed"]
-    assert "apg-telemetry (platform) 3520" in committed, committed
+    assert "apg-telemetry (platform) 3552" in committed, committed
 
 
 def test_an_unreadable_charge_refuses_rather_than_counting_zero(tmp_path: Path) -> None:
@@ -134,7 +134,7 @@ def test_the_plane_is_refused_when_it_does_not_fit(tmp_path: Path) -> None:
     `bin/telemetry.sh up` acts on it: exit 12 BEFORE any network, secret or
     container (a fake `docker` records every call; `id` answers 0). The
     reference host.example.yaml declares 1,600 MiB claimable; the plane asks
-    3,520."""
+    3,552."""
     assert (
         _decide(_reading(committed={"a": 4000}), "apg-telemetry (platform)", _charge()).exit_code
         == 12
