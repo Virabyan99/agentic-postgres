@@ -54,6 +54,17 @@ services:
       - work_mem=${BRANCH_WORK_MEM:?required}
       - -c
       - maintenance_work_mem=${BRANCH_MAINTENANCE_WORK_MEM:?required}
+      # Session 42 (ADR 0278): the parent's pg_stat_statements, loaded.
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.max=1000
+      - -c
+      - pg_stat_statements.track=top
+      - -c
+      - pg_stat_statements.track_utility=off
+      - -c
+      - pg_stat_statements.track_planning=off
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DATABASE_NAME:?required} -q"]
       interval: 10s

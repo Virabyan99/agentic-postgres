@@ -31,6 +31,7 @@ from datetime import datetime
 from typing import Any
 
 from agentic_postgres import compute_profiles, config, naming, restore_drill, runtime_override
+from agentic_postgres.bootstrap_statements import PG_STAT_STATEMENTS_SETTINGS
 from agentic_postgres.restore_drill import Mount
 
 __all__ = [
@@ -125,6 +126,10 @@ def persistent_command() -> tuple[str, ...]:
     (`rendering._archive_settings`). Both on the command line, where this
     project sets archiving (ADR 0144), so the restored configuration cannot
     supply either.
+
+    And the parent's five `pg_stat_statements` settings (Session 42, ADR 0278):
+    the branch's catalogue holds the parent's extension, and a server holding
+    an extension it has not preloaded answers its view with an error (rig 42b).
     """
     database = _database()
     settings = (
@@ -135,6 +140,7 @@ def persistent_command() -> tuple[str, ...]:
         f"max_connections={database['max_connections']}",
         f"work_mem={database['work_mem_mb']}MB",
         f"maintenance_work_mem={database['maintenance_work_mem_mb']}MB",
+        *PG_STAT_STATEMENTS_SETTINGS,
     )
     command: list[str] = ["postgres"]
     for setting in settings:

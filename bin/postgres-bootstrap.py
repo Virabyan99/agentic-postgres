@@ -58,6 +58,8 @@ from agentic_postgres.bootstrap_statements import (
     BACKUP_FUNCTION_GRANTS,  # noqa: F401 -- re-export; read by build_statements, which moved
     BACKUP_SETTINGS_ROLE,  # noqa: F401 -- re-export; same
     IDENTITY_FIELDS,
+    PG_STAT_STATEMENTS_FUNCTIONS,
+    PG_STAT_STATEMENTS_TABLES,
     build_statements,
     public_endpoints,
 )
@@ -380,6 +382,61 @@ def check_violations(container: str, database: str, document: dict[str, Any]) ->
 
     # Session 39 (ADR 0269): the customer roles' login state and grants.
     violations += customer_violations(container, database, document, present)
+    # Session 42 (ADR 0278): the statement statistics loaded, and nobody's.
+    violations += pg_stat_statements_violations(container, database, document, present)
+    return violations
+
+
+def pg_stat_statements_violations(
+    container: str, database: str, document: dict[str, Any], present: set[str]
+) -> list[str]:
+    """`pg_stat_statements` as the cluster holds it (ADR 0278, D2566, D2597):
+    preloaded by the `postgres` command, installed in `extensions`, and readable
+    by nobody but the superuser -- `PUBLIC` holds nothing on its two views nor
+    on the three functions, and neither customer role holds the view or the
+    function under it (a direct grant would pass the `PUBLIC` reading). Read
+    from the catalog, never from the statements that would have made it so."""
+    violations: list[str] = []
+    preload = query(container, database, "SHOW shared_preload_libraries;")
+    if "pg_stat_statements" not in [part.strip() for part in preload.split(",")]:
+        violations.append(
+            f"pg_stat_statements is not in shared_preload_libraries ('{preload or 'empty'}')"
+        )
+    schema = query(
+        container,
+        database,
+        "SELECT coalesce((SELECT extnamespace::regnamespace::text FROM pg_extension "
+        "WHERE extname = 'pg_stat_statements'), 'absent');",
+    )
+    if schema != "extensions":
+        violations.append(f"extension pg_stat_statements is not installed in extensions ({schema})")
+        return violations
+    literal = migrations.quote_literal
+    readings = [
+        f"has_table_privilege('public', {literal(name)}, 'SELECT')::text"
+        for name in PG_STAT_STATEMENTS_TABLES
+    ] + [
+        f"has_function_privilege('public', {literal(name)}, 'EXECUTE')::text"
+        for name in PG_STAT_STATEMENTS_FUNCTIONS
+    ]
+    joined = " || ' ' || ".join(readings)
+    held = query(container, database, f"SELECT {joined};")
+    if held != " ".join(["false"] * len(readings)):
+        violations.append(f"PUBLIC still holds pg_stat_statements' objects ({held or 'unread'})")
+    roles = document["database"]["roles"]
+    for suffix in CUSTOMER_ROLES:
+        role = roles.get(suffix)
+        if role is None or role not in present:
+            continue
+        answer = query(
+            container,
+            database,
+            f"SELECT has_table_privilege({literal(role)}, {literal(PG_STAT_STATEMENTS_TABLES[0])}, "
+            f"'SELECT')::text || ' ' || has_function_privilege({literal(role)}, "
+            f"{literal(PG_STAT_STATEMENTS_FUNCTIONS[0])}, 'EXECUTE')::text;",
+        )
+        if answer != "false false":
+            violations.append(f"{role} can read pg_stat_statements ({answer or 'unread'})")
     return violations
 
 

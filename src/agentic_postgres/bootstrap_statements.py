@@ -74,6 +74,34 @@ AUTHENTICATOR_REQUEST_ROLES = (
     "agent_writer",
 )
 
+#: Session 42 (ADR 0278, D2566, D2597): `pg_stat_statements`'s objects, every
+#: one revoked from `PUBLIC`. The extension grants `SELECT` on its two views to
+#: `PUBLIC`, and the two FUNCTIONS under them carry no ACL at all -- rig 42b
+#: read every statement as a customer role through
+#: `extensions.pg_stat_statements(true)` after only the views were revoked. The
+#: reset function is revoked by the extension already; it is listed so that
+#: the revocation does not rest on a default. Signatures read on 18.4.
+#: The five `-c` settings that load it (ADR 0278, D2566), in the order
+#: `compose.yaml`'s `postgres` command writes them; a branch's
+#: `persistent_command()` carries the same five. A test holds the compose file's
+#: literals equal to this tuple.
+PG_STAT_STATEMENTS_SETTINGS = (
+    "shared_preload_libraries=pg_stat_statements",
+    "pg_stat_statements.max=1000",
+    "pg_stat_statements.track=top",
+    "pg_stat_statements.track_utility=off",
+    "pg_stat_statements.track_planning=off",
+)
+PG_STAT_STATEMENTS_TABLES = (
+    "extensions.pg_stat_statements",
+    "extensions.pg_stat_statements_info",
+)
+PG_STAT_STATEMENTS_FUNCTIONS = (
+    "extensions.pg_stat_statements(boolean)",
+    "extensions.pg_stat_statements_info()",
+    "extensions.pg_stat_statements_reset(oid, oid, bigint, boolean)",
+)
+
 
 def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     """Every statement the bootstrap plane issues, in order.
@@ -316,6 +344,17 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
         f"CREATE SCHEMA IF NOT EXISTS extensions AUTHORIZATION {q(roles['object_owner'])};"
     )
     statements.append("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions;")
+    # Session 42 (ADR 0278): the statement statistics Query Insights and DB
+    # time read, loaded by the `postgres` command's `shared_preload_libraries`.
+    # Creating it needs no preload (measured: a cluster without one creates it
+    # and only a read of the view fails), so the fixtures that stand a cluster
+    # up with no preload still run this list. Read by `postgres` through the
+    # container and by nobody else: PUBLIC loses every object it was given.
+    statements.append("CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA extensions;")
+    statements.append(f"REVOKE ALL ON {', '.join(PG_STAT_STATEMENTS_TABLES)} FROM PUBLIC;")
+    statements.append(
+        f"REVOKE ALL ON FUNCTION {', '.join(PG_STAT_STATEMENTS_FUNCTIONS)} FROM PUBLIC;"
+    )
 
     # app_private has to exist before the sentinel can live in it, and the
     # sentinel has to exist before any migration runs -- so neither can wait for

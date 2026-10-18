@@ -284,7 +284,7 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0218](0218-no-product-child-reads-the-terminal.md) | No product child reads the terminal: one exec helper, stdin closed unless input is given, and the class guarded by a scan | 30 | Accepted |
 | [0219](0219-the-reading-before-a-tag-takes-a-ref.md) | The reading before a tag takes a ref, and reads VERSION from it rather than from the working tree | 30 | Accepted |
 | [0220](0220-a-mirror-pass-has-three-outcomes-and-the-verb-reports-three.md) | A mirror pass has three outcomes, and the verb reports three: one immediate second pass separates a flake from a failure | 30 | Accepted |
-| [0221](0221-capacity-is-declared-admission-decides-a-reading-reports.md) | Capacity is declared, admission decides, and a reading reports | 31 | Accepted |
+| [0221](0221-capacity-is-declared-admission-decides-a-reading-reports.md) | Capacity is declared, admission decides, and a reading reports | 31 | Accepted, amended by 0277 (a platform plane charged at its ceilings) |
 | [0222](0222-every-project-service-is-bounded-in-processes-and-the-nine-in-cpu.md) | Every project service is bounded in processes, and the long-running nine in CPU | 31 | Accepted |
 | [0223](0223-the-collector-is-consumed-and-every-series-names-its-project.md) | The collector is consumed: the runtime exports its two instruments, the store stays unrouted, and every series names its project | 31 | Accepted |
 | [0224](0224-the-rotations-overlap-window-is-closed-by-the-step-six-deploy.md) | The rotation's overlap window is closed by the operator's step-6 deploy, and `retire` reports that it was | 31 | Accepted |
@@ -307,12 +307,12 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0241](0241-an-existing-deployed-document-is-read-by-version.md) | An existing deployed document is read by version, never validated as if this release wrote it | 34 | Accepted |
 | [0242](0242-approval-is-enforced-in-the-database-by-a-guard-a-gated-project-function-calls-first.md) | Approval is enforced in the database by a guard in `app` that a gated project function calls first, and a human's own write passes it | 35 | Accepted |
 | [0243](0243-a-change-to-a-project-set-is-proposed-and-a-host-applies-only-a-proposed-set.md) | A change to a project's migration set is proposed, recorded with the readings that exist, and a host applies a pending set only when a committed proposal names it; the names in both records are declared | 35 | Accepted |
-| [0244](0244-the-edge-and-every-long-running-service-are-bounded.md) | The edge and every long-running project service are bounded in memory, processes and CPU, and recreating the edge is a measured act | 35 | Accepted |
+| [0244](0244-the-edge-and-every-long-running-service-are-bounded.md) | The edge and every long-running project service are bounded in memory, processes and CPU, and recreating the edge is a measured act | 35 | Accepted, amended by 0277 (the telemetry plane) |
 | [0245](0245-the-diagnostic-account-reads-the-auth-storage-and-mcp-logs.md) | The diagnostic account reads the auth, storage and MCP logs, and its redaction knows a JSON key | 35 | Accepted |
 | [0246](0246-stage-5s-boundary-a-hosted-product-on-one-node.md) | Stage 5's boundary: a hosted product on one node; ADRs 0042, 0043, 0044, 0216 and 0217 superseded together | 36 | Accepted, item 2's port named by ADR 0268 |
 | [0247](0247-the-reality-ledger-is-a-programs-input.md) | The Reality Ledger is a program's input | 36 | Accepted, amended by 0254 |
 | [0248](0248-retention-extends-adr-0213-to-the-stage-4-record-by-aggregate-with-a-verb.md) | Retention extends ADR 0213 to the Stage 4 record, by aggregate, with a verb | 36 | Accepted |
-| [0249](0249-the-request-and-worker-lines-are-printed.md) | The request and worker lines are printed | 36 | Accepted |
+| [0249](0249-the-request-and-worker-lines-are-printed.md) | The request and worker lines are printed | 36 | Accepted, amended by 0277 (exported over OTLP) |
 | [0250](0250-a-secrets-age-is-the-providers-update-time-read-never-acted-on.md) | A secret's age is the provider's update time, read, never acted on | 36 | Accepted |
 | [0251](0251-the-control-plane-is-a-project-its-own-set-and-a-fourth-app-mode.md) | The control plane is a project: `control-prod`, its own set, and a fourth app mode of its `auth` container | 37 | Accepted, amended in Session 38 (D2172) |
 | [0252](0252-accounts-by-invitation-organisations-roles-and-totp.md) | Accounts by invitation, organisations, roles and TOTP | 37 | Accepted |
@@ -340,5 +340,6 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0274](0274-plans-are-a-release-table-enforced-before-an-operation-exists.md) | Plans are a release table, enforced before an operation exists | 41 | Accepted |
 | [0275](0275-usage-is-a-recorded-sample-and-a-notification-is-written-where-an-operation-ends.md) | Usage is a recorded sample, and a notification is written where an operation ends | 41 | Accepted, amended in Session 42 (DB time, by 0278) |
 | [0276](0276-idle-sleep-is-a-trigger.md) | Idle sleep is a trigger | 41 | Accepted |
+| [0277](0277-the-telemetry-plane-is-clickstack-bounded-on-the-host-and-fed-by-the-projects-own-collectors.md) | The telemetry plane is ClickStack, bounded on the host, fed by the projects' own collectors | 42 | Accepted |
 | [0278](0278-pg-stat-statements-is-loaded-everywhere-and-read-only-by-the-platform.md) | `pg_stat_statements` is loaded everywhere and read only by the platform; Query Insights is a recorded sample with no advice | 42 | Accepted |
 | [0279](0279-monitoring-is-a-list-of-readings-that-each-name-their-source.md) | Monitoring is a list of readings that each name their source | 42 | Accepted |

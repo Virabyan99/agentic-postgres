@@ -1,15 +1,15 @@
 # Session 42 — The OVH upgrade, ClickStack, `pg_stat_statements`, Query Insights, monitoring, and the fourth re-earning
 
-**Status: EXECUTING since 2026-10-18.** Run 1 **in part** (the rigs 42b, 42c
-and 42a's cases 1-4, 6, 7; ADRs 0278, 0279; the threat list) -- **sitting U
-blocked: OVH out of stock in US-EAST-VA-2 (D2598)**; the operator chose to
-continue the code runs and retry; U0-U3, E0, E1 and ADR 0277 complete Run 1
-before Run 10. **Run 2 done.** Rows **D2561–D2590** at planning,
+**Status: EXECUTING since 2026-10-18.** Run 1 **in part** (the rigs 42a,
+42b, 42c; ADRs 0277, 0278, 0279; the threat list) -- **sitting U blocked: OVH
+out of stock in US-EAST-VA-2 (D2598)**; the operator chose to continue the
+code runs and retry; U0-U3, E0 and E1 complete Run 1 before Run 10. **Run 2
+done.** Rows **D2561–D2590** at planning,
 **D2591–D2596** added 2026-10-18 (the operator's amendment of Sessions
 43–45: web-first, the browser SQL editor, the split, and three of Session
 43's choices — recorded here because this plan holds the next free numbers;
 none changes a run of this session), **D2597–D2607** by the runs. ADRs
-**0277–0279** reserved (0278, 0279 written; 0277 after case 5 and E1).
+**0277–0279** written (0277's limits re-read by E1).
 **NEXT FREE: D2608, ADR 0280.**
 
 The seventh session of Stage 5 and the second half of the operator's split
@@ -809,8 +809,18 @@ design). **Sitting U**: Sheet U0 ran 05:11-05:13Z (four incremental backups,
 72 G with 11 G used, booted 2026-10-17 14:44:11; the reconciler enabled,
 **D2599**); **U1 refused by OVH: out of stock (D2598)**. The threat list:
 item 9 rewritten with its node ids, items 14 and 15 added (D2585). ADRs 0278 and
-0279 written and indexed (0275 marked amended). **Owed before Run 10**: case 5
-(running at 100 lines/s), U0-U3 at the retry, E0, E1, ADR 0277.
+0279 written and indexed (0275 marked amended). **(5)** at the plan's fallback
+100 lines/s for 30 min (E0 not run, D2598), on a stack recreated fresh: 180,000
+lines, 28 HyperDX searches through its proxy (median 49 ms, max 75 ms), no OOM,
+no restart; `memory.peak` ClickHouse 285 MiB (pids 185, CPU up to 33 %),
+HyperDX 420 MiB (54), MongoDB 107 MiB (65); the gateway 52.4 MiB / 8 pids by
+`docker stats` (the contrib image has no `cat` for its cgroup); 11.15 MiB on
+disk compressed, 66.96 MiB raw; volumes ClickHouse 98 M, MongoDB 302 M. ADR
+0244's rule gives ClickHouse 1,152 MiB / 740, HyperDX 1,696 / 216, MongoDB 448 /
+260, the gateway 224 / 64 -- **a 3,520 MiB charge**. **ADR 0277** written from
+these and indexed (0221, 0244, 0249 marked amended). **Owed before Run 10**:
+U0-U3 at the retry, E0 (the real rate; case 5 re-run if 10x it exceeds 100
+lines/s), E1 (the limits re-read on the host; ADR 0277's numbers move with it).
 
 ### Run 2 — the three repairs: D2558, D2559, D2544 (`bin/`, `src/`)
 
@@ -892,6 +902,8 @@ PASSED in each; every file restored `cmp`-equal. **Targeted** (once, 21 modules
 **822 passed**; ruff clean after rewrapping six long lines of the fake; the race
 module 11/11 again. (Workstation: `/tmp/pytest-of-gmpar` is root-owned since
 2026-10-18 08:24, so every run used `TMPDIR=~/s42/tmp`, `~/s42/pt.sh`.)
+Committed with Run 1's documents as **12c4158**; **CI 39101559948 `contract`:
+success**.
 
 ### Run 3 — `pg_stat_statements` loaded (`compose.yaml`, `src/`, `bin/`)
 
@@ -919,6 +931,42 @@ green. **Targeted**: `test_pg_stat_statements`, every module the greps found,
 `test_branch_runtime` (and the branch modules), `test_process_limits`,
 `test_acceptance_registry`, `test_environment_gates`, the sweep-selector guard.
 Commit, push, CI by SHA.
+
+**Done, 2026-10-18.** Measured first (`~/s42/run3/noload.sh`): on a cluster
+started WITHOUT the preload -- every Docker-backed fixture's, and `apg dev up`'s --
+`CREATE EXTENSION pg_stat_statements WITH SCHEMA extensions` and the four
+`REVOKE`s succeed (only `SHOW shared_preload_libraries` is empty), so the
+bootstrap list changes no fixture. `check_violations` runs only from
+`postgres-bootstrap.py`'s deploy and check paths, where the preload is present.
+Then: `bootstrap_statements.PG_STAT_STATEMENTS_SETTINGS` (the five flags),
+`PG_STAT_STATEMENTS_TABLES` (two views) and `PG_STAT_STATEMENTS_FUNCTIONS`
+(three, signatures from rig 42b); `build_statements` creates the extension after
+`vector` and revokes all five objects from `PUBLIC` (D2597); `compose.yaml`'s
+`postgres` command and `infra/branch/compose.yaml` carry the five flags (one
+`-c` per line, the reasons in a comment); `branch_plan.persistent_command()`
+ends with them; `postgres-bootstrap.py`'s new `pg_stat_statements_violations`
+reads the preload, the extension's schema, `PUBLIC`'s privileges on all five
+objects and each customer role's on the view and its function. **The
+implementation was written before `tests/contract/test_pg_stat_statements.py`**
+(INS-PGSS-001: three offline readings and one Docker-backed test that starts the
+locked image with every literal `-c` of `compose.yaml`'s command, applies
+`build_statements`, asks the product's own `check_violations`, and is refused
+the view, the function and the info view as each customer role -- `postgres`
+reads, the control): 4/4, so the battery is what shows the tests can fail.
+**Battery** (`~/s42/run3/battery3.py`): **4 of 4 killed** -- (a) the preload flag
+dropped from `compose.yaml` → 2 FAILED (the offline reading and the cluster's
+check), (b) the function `REVOKE` dropped → 2 FAILED, (c) `track_utility` on →
+1 FAILED, (d) the branch's settings dropped → 1 FAILED; control
+`test_bootstrap_statements.py::test_the_bootstrap_still_pairs_the_schema_with_the_extension`
+PASSED in each; every file restored `cmp`-equal. **Targeted** (once: every
+module that reads `compose.yaml`, a command, `infra/branch`, `build_statements`
+or `bootstrap_statements` -- 50 by `grep -rlE` -- plus the registry, claims,
+gates and index guards): **1,783 passed, 6 failed** -- five `check_violations`
+tests whose fake catalog did not know the new questions (taught a healthy
+cluster's answers, before its generic `pg_extension` answer that the schema
+question also matches) and the ADR index's status for 0277 (the guard takes
+`Accepted, …`, not a parenthesis); the two modules re-run: **58 passed**. ADR
+0277 written meanwhile from case 5 (Run 1's `Done`).
 
 ### Run 4 — the telemetry plane (`infra/telemetry/`, `bin/`, `systemd/`, `libexec/`, `src/`)
 

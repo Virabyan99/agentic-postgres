@@ -214,6 +214,18 @@ def catalog(timeouts: dict[str, str], roles: list[str]) -> Any:
             return "absent"
         if "rolcanlogin" in sql:
             return "true true"
+        # Session 42 (ADR 0278): a healthy cluster's pg_stat_statements --
+        # preloaded, in `extensions`, PUBLIC and the customer roles holding
+        # nothing. Before the generic `pg_extension` answer, which the schema
+        # question also matches.
+        if "SHOW shared_preload_libraries" in sql:
+            return "pg_stat_statements"
+        if "extnamespace::regnamespace" in sql:
+            return "extensions"
+        if "has_table_privilege('public'" in sql:
+            return " ".join(["false"] * 5)
+        if "has_table_privilege(" in sql:
+            return "false false"
         if "pg_namespace" in sql or "pg_extension" in sql:
             return "1"
         if "has_database_privilege('public'" in sql:
