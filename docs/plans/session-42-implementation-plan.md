@@ -872,7 +872,12 @@ the reader query 96-115 ms each minute; no OOM, no restart; lowest available
 **425** / 54, MongoDB 98 / 64, gateway ~49 MiB; 911 KiB on disk; `down -v` left 0
 containers, 0 volumes, 0 networks; 9,120 MiB available after. **HyperDX's limit
 moved to 1,728 MiB and the charge to 3,552** (D2626). The neighbours' readings
-(D2630): _the end reading pending the operator's line_. **Run 1 is done.**
+(D2630), E0's at 08:48:53Z against the operator's after the teardown: every
+database, `auth`, `mcp`, `storage`, `metrics` and the edge within ±2.8 MiB of
+itself; the four `docs` +9.8 MiB each (19.2 → 29.0) and the four `edge-probe`
++9.8 to +15.1 -- even across the projects, in their first hour after the 08:35
+boot, in containers that share no network and no process with the plane --
+**no neighbour moved by E1; §9's stop not met.** **Run 1 is done.**
 
 ### Run 2 — the three repairs: D2558, D2559, D2544 (`bin/`, `src/`)
 
