@@ -1,7 +1,7 @@
 # Session 42 — The OVH upgrade, ClickStack, `pg_stat_statements`, Query Insights, monitoring, and the fourth re-earning
 
-**Status: EXECUTING since 2026-10-18.** **Runs 1 to 8 done; Run 9's code
-done, its gates owed** -- Run 1's
+**Status: EXECUTING since 2026-10-18.** **Runs 1 to 9 done** (both gates
+PASSED in shards on `41b9ac3`; Run 10, sitting 1, next) -- Run 1's
 sitting U ran once OVH's stock returned (D2598): the host is **11,671 MiB, 6
 vCPU, 95 GiB** and declared so (D2628); E1 moved HyperDX's limit to 1,728 MiB
 and the plane's charge to 3,552 (D2626). Rows **D2561–D2590** at planning,
@@ -1507,6 +1507,22 @@ both repaired, their modules **26 passed**; part B reaped by the harness on low
 memory at 62% (no failure yet), re-run at the operator's word in two foreground
 halves: **55 + 61 passed**. **Battery** (`battery9.py`): **7 of 7 killed**, each
 target FAILED with its control PASSED, every file restored (D2633).
+
+**Done (the gates), 2026-10-18/19**, on the clean tree at `41b9ac3` (CI green),
+by D2587's method (`make-gates.sh` from `~/s41/run9/`, the shards bin-packed by
+`shard-plan42.py` from `~/s41/run12`'s JUnit, each under `timeout 570`, run in
+the FOREGROUND). The first derivation masked four errors behind `pytest | tail -1
+|| fail` -- the workstation's `/tmp/pytest-of-gmpar` is root-owned -- so every
+gate script now exports `TMPDIR=~/s42/tmp` and reads each pytest step's own exit
+(`fixgates.py`), and both merges assert the shards' total against the selection's
+collected count (`addtotal.py`). **`bin/session-01-check.sh`: PASSED** -- 9
+shards, `evidence/session-01.json` `passed`, **8,106 passed, 0 failed, 3
+skipped, 0 errors** (8,109 = the collected total), P0 collected 8,657, 0 future
+placeholders, 0 identity collisions, 0 floating image refs. **`bin/session-42-check.sh
+--mode offline`: PASSED** -- steps A, 10 shards (each `exit=0`), steps 8/8b/8c,
+the merge **8,118 tests, 0 failures, 0 errors, 3 skipped = the collected 8,118**,
+`evidence/session-42-offline.json` **133 of 133 offline claims `passed`**
+(`checkout_commit` `41b9ac3`; `source_commit` null, as Session 41's offline half).
 
 ### Run 10 — sitting 1 (day 1): the release, the plane, `slot6-prod` prepared, the dry run
 
