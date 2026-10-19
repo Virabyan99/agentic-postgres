@@ -1695,7 +1695,13 @@ address in the browser and names the old host's rule (D2640); the Ledger page
 and the envelope page rendered. `docs/scope-closure.md` **§35**; the stage
 plan's Status block rewritten; CLAUDE.md §2 rewritten (old copy in the
 scratchpad). Targeted: the Ledger, operation-type, envelope and compute-profile
-modules **99 passed**.
+modules **99 passed**; with the two documentation guards **156 passed**.
+**The gate, once, on the close commit `f798af8`** (D2587's method, the shards
+in the FOREGROUND): `bin/session-01-check.sh` steps 1-3 and 5-7 PASSED; 9 shards,
+each `exit=0` -- **8,106 passed, 0 failed, 3 skipped = the 8,109 the selection
+collects** (re-counted on the commit); step 8 wrote `evidence/session-01.json`
+`passed` (P0 collected 8,657, 0 future placeholders, 0 identity collisions, 0
+floating image refs). Pushed; **CI 39268848957 success**.
 
 ---
 
