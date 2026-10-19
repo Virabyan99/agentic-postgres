@@ -28,10 +28,14 @@ and the edge runs on the host network, where ufw applies (D2250):
 |---|---|
 | 22/tcp | anywhere, key-only (`PasswordAuthentication no`) |
 | 80/tcp | anywhere: Let's Encrypt's HTTP-01 challenge and a redirect |
-| 443/tcp | the hosts that read secrets only — today `15.204.231.45` |
+| 443/tcp | the hosts that read secrets only — today `15.204.231.45` (and the old host `62.238.99.122` until M7's X1/X2 retire it, D2640) |
 
 The console is reached for a sitting and closed after it: a ufw rule for the
-operator's own address, removed on the same sheet (the way Run M1 reached it):
+operator's own address, removed on the same sheet (the way Run M1 reached it).
+**Read the address IN THE BROWSER you will use** (`https://ifconfig.me` in that
+browser): an operator's egress can rotate, so a terminal's address may not be
+the browser's (D2640) -- add a rule per address the browser shows, and delete
+each one:
 
 ```bash
 sudo ufw allow from <your address> to any port 443 proto tcp comment 'operator console, temporary'

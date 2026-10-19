@@ -38,49 +38,49 @@ shape those take.
 ## Status — read this first
 
 ```
-STAGE 5 IS EXECUTING. SESSION 41 CLOSED 2026-10-17: 1.19.0 -- the repairs, plans,
-                usage, notifications, idle sleep -- deployed on four projects on
-                OVH, swept, merged and TAGGED on 601a0ea (D1425).
-                docs/plans/session-41-implementation-plan.md is its record;
-                docs/scope-closure.md §34 what it closed, left and hands
-                Session 42. This plan was written 2026-10-03 at 42bf306.
+STAGE 5 IS EXECUTING. SESSION 42 CLOSED 2026-10-19: 1.20.0 -- the OVH upgrade,
+                the repairs, pg_stat_statements, ClickStack, Query Insights,
+                monitoring, the fourth re-earning -- deployed on four projects,
+                swept, merged and TAGGED on 77303e4 (D1425).
+                docs/plans/session-42-implementation-plan.md is its record;
+                docs/scope-closure.md §35 what it closed, left and hands
+                Session 43. This plan was written 2026-10-03 at 42bf306.
 DIRECTION       HOSTED (D1946). Session 36 paid the preconditions; Session 37
                 built the control plane (ADRs 0251-0255); Session 38 managed
                 projects (ADRs 0256-0261) and the move (ADRs 0262-0267);
                 Session 39 the public endpoints (ADRs 0268-0270); Session 40
                 branches (ADRs 0271-0273); Session 41 plans, usage and
-                notifications, idle sleep (ADRs 0274-0276).
-SESSIONS        36-45 (D1945, D2510, D2591-D2593). 36-41 DONE; 42 PLANNED
-                (docs/plans/session-42-implementation-plan.md: the OVH upgrade
-                first, ClickStack, insights, monitoring, the fourth
-                re-earning); 43 (WEB-FIRST: the public site, hosted customer
-                docs and quickstart, invitation links and onboarding in the
-                browser, the console, the packaged CLI -- D2591), 44 (the
-                browser SQL editor, the customer's own credential through a
-                relay that holds none -- D2592) and 45 (the journey, the
-                person's walk, the Stage 5 release -- D2593) unplanned.
-                Session 43's three choices decided (D2594 PyPI from CI,
-                D2595 the console's cookie, D2596 no third-party script).
-                Next free: D2597 (Session 42's plan).
-CURRENT_SESSION 41. Moves 41 -> 42, all-or-nothing per session (D690).
-template_version 1.19.0. host.yaml schema 4. Outputs v22, project manifest 11,
+                notifications, idle sleep (ADRs 0274-0276); Session 42 the
+                telemetry plane, pg_stat_statements and Query Insights,
+                monitoring (ADRs 0277-0279).
+SESSIONS        36-45 (D1945, D2510, D2591-D2593). 36-42 DONE; 43 (WEB-FIRST:
+                the public site, hosted customer docs and quickstart,
+                invitation links and onboarding in the browser, the console,
+                the packaged CLI -- D2591), 44 (the browser SQL editor, the
+                customer's own credential through a relay that holds none --
+                D2592) and 45 (the journey, the person's walk, the Stage 5
+                release -- D2593) unplanned. Session 43's three choices
+                decided (D2594 PyPI from CI, D2595 the console's cookie,
+                D2596 no third-party script).
+CURRENT_SESSION 42. Moves 42 -> 43, all-or-nothing per session (D690).
+template_version 1.20.0. host.yaml schema 4. Outputs v22, project manifest 11,
                 capability manifest 4, lock 4, project lock 3, api-surface 2,
-                control set 8.
+                control set 9.
 POSTGRESQL      18.4 STAYS -- the operator, 2026-10-03 (D1947). Measured that
                 day on Docker Hub: postgres 19beta4 is the newest 19 tag; no
                 19rc, no 19 GA, no pgvector pg19 image.
 HOST            OVH VPS US-East (Reston VA), apg-ovh-01, 15.204.231.45 -- the
-                move of 2026-10-08..10 (D2223, D2251): 4 vCPU, 7,745 MiB, no
-                swap. alpha-dev, beta-dev, control-prod and slot3-prod (the
-                one live customer project, no branch) at 1.19.0 on 601a0ea;
-                slot1-, slot2-, slot4- and slot5-prod CONSUMED and revoked (no
-                slot free; the next lifecycle needs slot6-prod). The edge
-                publishes 80, 443 and 5432. A reboot brings the units back by
-                themselves -- but at Session 41's boot beta-dev's lost an edge
-                attach race (D2558) -- and a branch now comes back too (D2504
-                repaired). The Hetzner CX23 holds the stopped copies until M7's
-                X1/X2 (allowed since 2026-10-12 ~21:30Z, not run). Secrets: a
-                self-hosted Infisical (ADR 0262).
+                move of 2026-10-08..10 (D2223, D2251), UPGRADED 2026-10-18 to
+                6 vCPU, 11,671 MiB, 95 GiB, no swap (D2628). alpha-dev,
+                beta-dev, control-prod and slot3-prod (the one live customer
+                project, no branch) at 1.20.0 on 77303e4, beside the
+                telemetry plane (ADR 0277, charged 3,552 MiB); slot1- to
+                slot6-prod CONSUMED and revoked (the next lifecycle needs
+                slot7-prod). The edge publishes 80, 443 and 5432. A reboot
+                brings all seven units back by themselves (D2558 repaired)
+                and a branch with them. The Hetzner CX23 holds the stopped
+                copies until M7's X1/X2 (allowed since 2026-10-12, not run).
+                Secrets: a self-hosted Infisical (ADR 0262).
 CONTROL PLANE   PYTHON, DOGFOODED -- the operator, 2026-10-03 (D1950): the
                 control plane is a project the product itself deploys, with
                 its own migration set and the existing auth service. No
@@ -91,28 +91,26 @@ ACCOUNTS        INVITE-ONLY -- the operator, 2026-10-03 (D1951). No public signu
 OBSERVABILITY   ClickStack ADDED, bounded, on-host -- the operator, 2026-10-03,
                 reversing D1519 for Stage 5 (D1964). The per-project collector
                 and Prometheus stay; one source per customer-visible metric.
-EVIDENCE        evidence/session-41.json: 284 claims, 280 passed, 4 failed --
-                documented_path (D1935); lifecycle_reearned_live,
-                lifecycle_third_trial_live and notifications_live (D2557: the
-                first export's credential mis-entered, the run resumed at the
-                export, four probed windows lost). Ledger: accounts,
-                organizations, api_keys, cli_remote, management_api,
-                pooled_endpoint, direct_endpoint, postgresql, branches,
-                restore_to_branch, backups_and_pitr, usage, plan_free and
-                plan_premium `beta`; the six managed-project rows, idle_sleep
-                and notifications `planned`, target 42; ACCEPTED_TYPES in main
-                = credential.rotate and the four branch types (D2560).
-ADRs            276, next free 0277.   migrations 39.   requirements 377.
-                claims 284, 121 declared offline.
+EVIDENCE        evidence/session-42.json: 302 claims, 301 passed, 1 failed --
+                documented_path (D1935). Ledger: accounts, organizations,
+                api_keys, cli_remote, management_api, pooled_endpoint,
+                direct_endpoint, postgresql, branches, restore_to_branch,
+                backups_and_pitr, usage, plan_free, plan_premium, the six
+                managed-project rows, idle_sleep, notifications,
+                query_insights and monitoring `beta`; no row `trial`;
+                ACCEPTED_TYPES = all eleven executed types.
+ADRs            279, next free 0280.   migrations 39.   requirements 395.
+                claims 302, 133 declared offline.
 divergences     D1-D1944 in earlier plans; D1945-D1984 here; D1985-D2041 in
                 Session 36's; D2042-D2144 in Session 37's; D2145-D2324 in
                 Session 38's and its migration plan's; D2325-D2421 in Session
-                39's; D2422-D2509 in Session 40's; D2510-D2560 in Session 41's.
-                **Next free: D2561.**
+                39's; D2422-D2509 in Session 40's; D2510-D2560 in Session 41's;
+                D2561-D2649 in Session 42's (D2591-D2596 Sessions 43-45's
+                choices). **Next free: D2650.**
 ```
 
 **Every number in §0 onward was measured on 2026-10-03 at `42bf306`**, or says
-whose it is. **The Status block above is re-read at each session's close.** (Re-read and rewritten at Session 41's close, 2026-10-17.)
+whose it is. **The Status block above is re-read at each session's close.** (Re-read and rewritten at Session 42's close, 2026-10-19.)
 
 ---
 

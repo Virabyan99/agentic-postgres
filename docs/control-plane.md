@@ -226,13 +226,13 @@ under the organisation's own lock so two concurrent creations leave one; only
 an organisation within its plan is ever told `capacity_exhausted`. A branch
 past the plan's `branches_total` is `409 branch_limit_reached`, the same way.
 
-**All eleven executed types are accepted since Session 42's bump**: the six
-managed-project types' rows are `trial` (ADR 0261) a fourth time, re-earned on a
-new slot in a new organisation with the probe samples written as they are taken
-(D2583, D2581); `branches` and `restore_to_branch` are `beta`; `credential.rotate`'s
-`direct_endpoint` is `beta`. Each `trial` row is being verified on the 1.20.0
-trip; a type whose row is not reachable answers `409 not_available` naming the
-row.
+**All eleven executed types are accepted since Session 42's bump**, and their
+rows are all `beta` since its close: the six managed-project types' rows were
+re-earned a fourth time on a new slot in a new organisation, with the probe
+samples written as they are taken, and moved to `beta` on 1.20.0's tagged
+evidence (D2583, D2581); `branches` and `restore_to_branch` are `beta`;
+`credential.rotate`'s `direct_endpoint` is `beta`. A type whose row is not
+reachable answers `409 not_available` naming the row.
 
 **Only the alpha, beta and control projects are the operator's**: the
 reconciler acts on declared slots alone, and a write naming an adopted project

@@ -107,8 +107,8 @@ BACKUP_RECORD_SECONDS: Final = 900
 
 #: The types the control mode accepts. Equal, by the guard, to the types whose
 #: ledger row accepts: ALL ELEVEN since Session 42's bump -- the six
-#: managed-project types re-trialed a fourth time on a new slot, their probe
-#: samples written as taken (D2583, D2581); the four branch types, whose rows
+#: managed-project types, re-earned a fourth time on a new slot and `beta`
+#: since Session 42's close (D2583, D2581); the four branch types, whose rows
 #: are `beta`; and `credential.rotate`, whose row `direct_endpoint` is `beta`.
 #: Written out, never derived from `EXECUTED_TYPES` -- building a type is not
 #: the decision to accept it.

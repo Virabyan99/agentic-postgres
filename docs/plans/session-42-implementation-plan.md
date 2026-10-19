@@ -1,11 +1,11 @@
 # Session 42 — The OVH upgrade, ClickStack, `pg_stat_statements`, Query Insights, monitoring, and the fourth re-earning
 
-**Status: EXECUTING since 2026-10-18.** **Runs 1 to 11 done** (both gates
-PASSED in shards on `41b9ac3`; sittings 1 and 2 on `77303e4`, 2026-10-19:
+**Status: COMPLETE, 2026-10-19.** **All twelve runs done**: both gates
+PASSED in shards on `41b9ac3`; sittings 1 and 2 on `77303e4`, 2026-10-19 --
 1.20.0 on all four, the plane up, the lifecycle on `slot6-prod`, the branches,
 the reboot with every unit back by itself, the sweep; **`1.20.0` TAGGED on
-`77303e4`**, evidence 302 claims, 301 passed, `documented_path` failed; Run
-12, the close, next) -- Run 1's
+`77303e4`**, evidence 302 claims, 301 passed, `documented_path` failed; the
+close moved all ten `trial` rows to `beta` (Run 12). Run 1's
 sitting U ran once OVH's stock returned (D2598): the host is **11,671 MiB, 6
 vCPU, 95 GiB** and declared so (D2628); E1 moved HyperDX's limit to 1,728 MiB
 and the plane's charge to 3,552 (D2626). Rows **D2561–D2590** at planning,
@@ -1664,6 +1664,38 @@ insights/usage pass duration; the lifecycle's numbers); `docs/scope-closure.md`
 rewritten; CLAUDE.md §2 rewritten for Session 43's planner (old copy to the
 scratchpad first). **Battery** over the Ledger moves (as Session 41's Run 12).
 Gate once in shards on the close commit; push; CI by SHA.
+
+**Done, 2026-10-19.** **The Ledger, from the TAGGED evidence** (`evidence/session-42.json`,
+1.20.0 on `77303e4`, 301/302; `~/s42/run12/ledger42.py`, every row's starting
+status and every `today` anchor asserted): all ten `trial` rows name only claims
+that passed, so **the six managed-project rows, `idle_sleep`, `query_insights`,
+`monitoring` and `notifications` are `beta`** -- "Being verified." dropped from
+each `customer_text`, each `today` saying what passed; **no `trial` row
+remains**; `ACCEPTED_TYPES` stays the eleven (a `beta` row accepts), its comment
+and the exact-set proof's docstring say so. **Battery** (`battery12.py`): 4 of 4
+killed with `test_the_type_table_is_closed` green in each -- `project.export`
+unaccepted (the exact set and the ledger guard FAILED), `sleep` back at
+`planned` (the ledger guard), `idle_sleep` back at `planned` with `project.sleep`
+accepted (the idle guard), `query_insights` citing a claim that failed in the
+tagged evidence (the evidence guard); every file restored and compared. Its
+first round expected the idle guard to kill the `sleep` mutation and it passed:
+that guard compares the `idle_sleep` row with the TYPE, not the `sleep` row --
+the expectation was wrong, so M4 gives it the mutation it reads (D493).
+**The envelope**: a Session 42 section of eleven rows (the upgraded host, E1's
+plane under load, 1.20.0's deploy per project and class, `slot6-prod`'s create
+and operations, the windows as the slot's names see them, idle sleep 1,200.4 s,
+Query Insights, the branch operations, the cold start with seven units, the
+host suite's duration); three `UNMEASURED` rows out (the pooled name through
+the windows, alpha-dev's window per class, the rescaled host), a usage pass's
+duration kept, **the plane's footprint at rest added** (no sheet read it).
+**Documents**: `control-plane.md` and `managed-projects.md` say the close's
+`beta`; operator guide §23 installs the unit (D2635), names `status`'s gateway
+line (D2636) and the saved-password trap (D2638); `secret-store.md` §1 reads the
+address in the browser and names the old host's rule (D2640); the Ledger page
+and the envelope page rendered. `docs/scope-closure.md` **§35**; the stage
+plan's Status block rewritten; CLAUDE.md §2 rewritten (old copy in the
+scratchpad). Targeted: the Ledger, operation-type, envelope and compute-profile
+modules **99 passed**.
 
 ---
 

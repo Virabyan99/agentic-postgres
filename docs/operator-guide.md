@@ -2283,10 +2283,19 @@ waits for it and loses lines, never service, while it is down.
 sudo systemctl stop agentic-postgres-reconciler.service       # the edge's rule: a sitting first
 sudo bin/telemetry.sh --host host.yaml up                     # admission first: exit 12 if it does not fit
 sudo bin/telemetry.sh --host host.yaml status                 # containers, limits, HyperDX's address
+sudo bin/provision-host.sh --install-launchers                # a release that adds a unit: its launcher first
+sudo install -m 0644 -o root -g root systemd/agentic-postgres-telemetry.service /etc/systemd/system/
+sudo systemctl daemon-reload
 sudo systemctl enable agentic-postgres-telemetry.service      # no --now: it is up
 sudo bin/doctor.sh capacity --host host.yaml                  # the committed line names apg-telemetry (platform)
 sudo systemctl start agentic-postgres-reconciler.service
 ```
+
+Only `provision-host.sh --apply` installs units, so on a host provisioned
+before 1.20.0 the unit is installed by hand as above (D2635); without it
+`enable` answers *"Unit ... does not exist"*. In 1.20.0 `status` prints the
+gateway as `(could not be read)`: it has no healthcheck and the line's template
+indexes one (D2636) -- `apg-diag containers` shows it `Up`.
 
 The plane is charged by admission at its ceilings (the four `mem_limit`s,
 recorded in `/etc/agentic-postgres/telemetry/state.json` only after admission
@@ -2303,6 +2312,11 @@ ssh -L 18080:<address>:8080 op@<host>        # then http://localhost:18080 -- no
 ```
 
 The connection is `http://clickhouse:8123`, user `reader`, no password; the
-log source `otel.otel_logs`. `apg-agent` can open the same forward and meets
+log source `otel.otel_logs`, its timestamp column `Timestamp` (there is no
+`TimestampTime`). If the source form's database and table stay greyed, the
+SAVED connection holds a password -- a browser fills the new HyperDX login into
+it, *Test Connection* still succeeds on the form's values, and an update to an
+empty password is ignored: create a new connection with no password, move the
+source onto it and delete the old one (D2638). `apg-agent` can open the same forward and meets
 the login. `apg-diag containers` lists the plane under `-- apg-telemetry
 (platform)`.

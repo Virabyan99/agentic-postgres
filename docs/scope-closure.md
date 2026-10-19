@@ -1644,3 +1644,60 @@ completeness.
    carries it: the managed-project rows, `idle_sleep` and `notifications`.
 5. §10's smaller rows of Session 41's plan.
 
+## 35. What Session 42 closed, what it left, and what Session 43 inherits
+
+**Session 42 is the OVH upgrade, the repairs, `pg_stat_statements`, ClickStack,
+Query Insights, monitoring and the fourth re-earning** -- the second half of
+the operator's split (D2510). Twelve runs, `D2561`–`D2649`, ADRs 0277–0279.
+The host was upgraded to 11,671 MiB, 6 vCPU, 95 GiB before any code (sitting U).
+**`1.20.0` is deployed on four projects -- alpha, beta, control-prod and
+`slot3-prod`, moved by `slot.sh redeploy` -- swept, merged and tagged on
+`77303e4`** (D1425), the deploy, the plane and both sittings on one day. The
+lifecycle ran on a NEW `slot6-prod` in its own organisation, the branches on
+`slot3-prod`. The merged evidence reads **302 claims: 301 passed, 1 failed** --
+`documented_path` by decision (D1935). The external half ran from `de3d204`,
+which differs from the tagged commit in one proof's expected role name alone
+(D2645, the operator's choice).
+
+**The sentence this session would most want carried forward: an instrument
+that writes each reading as it takes it loses nothing at a stop -- and a proof
+that has never run live carries its author's belief.** D2581's samples file held
+all 1,816 samples; `insights_live`'s proof, run live for the first time, failed
+on a role name the tree's own database proof already read correctly.
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **The six managed-project rows, `idle_sleep`, `notifications`** | Re-earned a fourth time on `slot6-prod` (`lifecycle_fourth_trial_live`, `idle_sleep_retrial_live`, `notifications_retrial_live` passed): all eight are **`beta`**; the eleven executed types accepted. |
+| **`query_insights` and `monitoring`** (ADRs 0278, 0279) | `pg_stat_statements` on every project; 200 calls of a known statement read back normalised with no literal; ten curated readings, each naming its source: both **`beta`**. |
+| **The telemetry plane** (ADR 0277) | ClickStack bounded on the host at a 3,552 MiB charge, its gateway the projects' pinned collector, HyperDX behind an SSH forward and its own login; lines of all four projects read in it; `telemetry_live` passed. |
+| **D2558 -- the edge's attach race at boot** | Repaired (Run 2): at B1 all seven units -- the plane's included -- came back by themselves, NRestarts 0. |
+| **D2559, D2544** | Repaired in Run 2: the upload's refusal keeps the provider's code (D2564); the SQL reader keeps a `--` inside a literal (D2565). |
+| **The OVH upgrade** (D2511) | 11,671 MiB, 6 vCPU, 95 GiB, the IPv4 and host key kept; declared in both copies (D2628). |
+| **The pooled name through the windows; alpha-dev's window per class; the rescaled host** | Read: the three `UNMEASURED` rows are out of the envelope. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **D2636** -- `telemetry.sh status` cannot read the gateway | Report only; a repair is a new commit, so after the tag. Its consequence for an instrument was met (D2646). |
+| **D2637** -- `provision-host.sh --check` reads a typed launcher list | Guard the class against the glob the install reads. |
+| **D2635** -- nothing but `--apply` installs a new unit | The operator guide §23 now says so; the product does not. |
+| **D2642** -- `bootstrap-providers` prints a literal count | Report only. |
+| **The plane's footprint at rest; a usage pass's duration** | `UNMEASURED`. |
+| **Hetzner** (M7 X1/X2) and the store's 443 rule for it (D2640) | Allowed since 2026-10-12; not run. |
+| **`slot1-` … `slot6-prod` consumed**; `lifecycle-s41` and `lifecycle-s42` remain, empty | The next lifecycle needs `slot7-prod`. |
+| `documented_path` | **`failed` by decision** (D1935). |
+
+### What Session 43 inherits, in order
+
+1. **The web-first session** (D2591): the public site on Cloudflare Pages, the
+   invitation as a link, onboarding and TOTP in the browser, the console, the
+   customer CLI packaged -- with D2594-D2596's choices (PyPI by trusted
+   publishing, the operator claiming the name first; the console's
+   HttpOnly/SameSite=Strict cookie; no third-party script).
+2. **D2636, D2637, D2642** -- small, and each a redeploy of all four when it
+   lands.
+3. The plan's §10, both lists.
+

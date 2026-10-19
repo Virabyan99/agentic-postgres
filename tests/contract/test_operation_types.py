@@ -110,7 +110,8 @@ def test_exactly_the_eleven_executed_types_are_accepted() -> None:
     from `test_credential_rotate_and_the_branch_types_are_accepted_and_the_eleven_are_executed`,
     D1119, as Session 41's bump did): every type in the table is built and
     executed, and every one is accepted -- the six managed-project types
-    re-trialed a fourth time on a new slot (D2583), the four branch types with
+    re-earned a fourth time on a new slot, `beta` since Session 42's close
+    (D2583), the four branch types with
     their rows `beta`, `credential.rotate` with its row `beta` -- and a type
     outside the table is never accepted. The ledger half (accepted iff the row
     is reachable) is `test_reality_ledger`'s."""

@@ -1122,6 +1122,160 @@ Sampled under:
 
 Session 40's boot did not lose the race; whether one does is timing.
 
+### The upgraded host's capacity (sitting U, D2628; Session 36's D1991 rescale)
+
+**11,671 MiB, 6 vCPU, 95 GiB declared (was 7,745 / 4 / 71); doctor capacity 9,457 MiB claimable (was 5,532), 9,222 available with four projects; after the telemetry plane: 4,656 MiB committed of which the plane 3,552, ceilings 15,872 MiB across 6; 8,208 MiB available before the lifecycle, 7,603 with slot6-prod live**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap, upgraded 2026-10-18
+- the model changed in the OVHcloud manager; OVH rebooted the host 2026-10-18 08:35:47Z
+- doctor capacity (U3, T1) and s42-free.sh's free -m (2026-10-19)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The IPv4 and the SSH host key were kept; the upgrade was a reboot, not a move.
+
+### The telemetry plane under load on the host (Sheet E1, ADR 0277)
+
+**100 lines/s for 1,800 s: 179,997 of 180,000 rows, every row stamped with the sending project; memory.peak ClickHouse 250 MiB (182 pids), HyperDX 425 MiB (54), MongoDB 98 MiB (64), the gateway ~49 MiB (docker stats); a reader query 96-115 ms each minute; the host's lowest available 8,324 MiB; 911 KiB on disk**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap, upgraded 2026-10-18
+- 2026-10-18 08:52-09:23Z, the stack at ADR 0277's limits, no published port
+- s42-e1.sh as root, telemetrygen into a stand-in collector; E0's real rate ~0.75 lines/s
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+HyperDX's limit moved to 1,728 MiB from this reading (4 x 425, D2626); the plane's charge is 3,552 MiB, its four limits.
+
+### 1.20.0's deploy, per project and class (R2a-R2d, pg_stat_statements loaded)
+
+**each database restarted once; unanswered: alpha-dev rest 3.2 s (503) and auth 7.6 s (404/502); beta-dev 4.2 and 8.5 s; control-prod auth 8.7 s (no rest route); slot3-prod (slot.sh redeploy) 2.1 and 8.4 s; every deploy exit 0**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap, upgraded 2026-10-18
+- 77303e4, 2026-10-19 05:14-05:25Z, one project at a time
+- ~/s42/run8/s42-window.py from the workstation, one GET a second per class: rest = PostgREST's root, auth = routes.app/auth/me, each answer written as taken
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The release restart costs seconds per project; the neighbours were not probed by it.
+
+### Provisioning a managed project at 1.20.0 (project.create, end to end)
+
+**slot6-prod 1,375.9 s from the request to succeeded (the instrument's 1,384.5 s); steps allocate 1.0, admit 0.8, deploy-1 63.8, admin 1.4, ports 1.4, deploy-2 41.2, unit 0.9, backup 1,259.1, registry 0.2 s; 7,603 MiB available with the slot (FITS)**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap, upgraded 2026-10-18
+- 1.20.0 at 77303e4, 2026-10-19 08:32-08:55Z, operation 453f9279, profile small
+- ~/s42/run8/s42-lifecycle.py from the workstation as the probe owner, in its own organisation lifecycle-s42, through the product's own CLI
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The first full backup is 92% of it, and 329 s shorter than 1.19.0's (1,588.1 s): read, not explained.
+
+### The lifecycle's other operations at 1.20.0, on slot6-prod
+
+**credential.rotate x3 1.7, 5.1, 4.4 s (check 0.0, alter 0.1-0.2, sync 0.4-0.5 s: the rest is the wait to be claimed); sleep 19.6 s (stop 11.1 s); wake 20.1 s (start 13.1 s), the first answer 15.1 s after it; resize small -> standard 59.4 s and standard -> large 58.8 s (deploy 57.5 / 56.3 s; 304 and 840 MiB against 4,801 MiB safe, both admitted); export 1.9 / 9.2 s (40,286 bytes; the URL 200 at once, 403 after its 900 s); delete 16.4 s (retire 14.8 s); the second create refused no_slot**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap, upgraded 2026-10-18
+- 1.20.0 at 77303e4, 2026-10-19 08:55-09:50Z
+- s42-lifecycle.py, each operation's created/finished and steps read back through /v1
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+RESIZE_WINDOW_SECONDS stays 84: both resizes' deploy steps are under it.
+
+### The sleep, wake and resize windows as the slot's names see them (D2171, D2444)
+
+**longest unanswered run, the app route / the pooled name: sleep 71.5 / 71.8 s; wake 12.0 / 16.8 s; resize to standard 8.6 / 16.8 s; resize to large 8.6 / 16.8 s; every window covered on both, 1,816 samples sealed**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap, upgraded 2026-10-18
+- 1.20.0 at 77303e4, 2026-10-19, slot6-prod, from the workstation
+- s42-lifecycle.py's probe threads every 2 s, each sample appended and fsynced as taken (D2581); a sample that could not be taken counts as failed
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The first lifecycle to read the pooled name through every window (D2500, D2557).
+
+### Idle sleep: from the setting to the sleep (ADR 0276)
+
+**set to 15 minutes at 09:26:17Z with the slot's probes paused; the reconciler's project.sleep (origin idle) requested 1,200.4 s later (20.0 min, within the 1,620 s bound), asleep 20.5 s after that; both names refused; woken in 22.9 s**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap, upgraded 2026-10-18
+- 1.20.0 at 77303e4, 2026-10-19, slot6-prod, the reconciler's 300 s sampler
+- s42-lifecycle.py's idle step; the operation read back through /v1
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 41 read 1,121.4 s: the request lands between 15 and 25 minutes by design.
+
+### Query Insights after a known workload (ADR 0278, INS-LIVE-001)
+
+**one call (4.2 s through the pooled door), a sample at 09:00:33Z, 200 calls in 40.5 s, the next sample at 09:05:37Z (304 s later); insights show held the statement normalised with exactly 200 calls, as the slot's customer_app role, its literal nowhere**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap, upgraded 2026-10-18
+- 1.20.0 at 77303e4, 2026-10-19 08:56-09:06Z, slot6-prod awake
+- s42-lifecycle.py through bin/endpoint.sh connect --role app and bin/insights.sh show
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+A statement's first sample counts nothing, so one call goes first (ADR 0278).
+
+### A branch's operations on slot3-prod at 1.20.0
+
+**branch.create at the end (tmp) 571.5 s (runtime 566.2); restore.create at a point (dev) 486.9 s; branch.reset 474.5 s; branch.delete 7.8 s (tmp, requested by the reconciler, finished 125.2 s after expires_at, origin expiry) and 4.5 s (dev); each door answered its FIRST connect at ready**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap, upgraded 2026-10-18
+- 1.20.0 at 77303e4, 2026-10-19 09:51-11:29Z, the parent slot3-prod
+- ~/s42/run8/s42-branches.py from the workstation as the probe owner, through the product's own CLI; created_at..finished_at read back through /v1
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Each of create, a point and reset is 147-159 s faster than 1.19.0's; tmp's expiry took 125.2 s against 1.19.0's 22.3 s -- read, not explained.
+
+### A cold start with four projects, the plane and a branch on OVH (B1, 1.20.0)
+
+**all seven units -- the edge, the four projects, the reconciler and the telemetry plane -- started by the boot itself, NRestarts 0, active by boot+69 s (three readings by boot+89 s); the plane's four containers and the branch's three up; the branch ready by itself (D2558 repaired)**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap, upgraded 2026-10-18
+- booted 2026-10-19 10:35:33Z at 77303e4, slot3-prod_dev ready before it
+- read as op before the sweep (s42-units.sh, D2140)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 41's boot failed beta-dev's unit on the edge's attach race; this did not.
+
+### The host suite's duration at 1.20.0
+
+**V1 (writing nothing, no lifecycle or branch proofs): 405 passed in 37 min 04 s; the sweep's suite (every proof, after the reboot): 425 passed, 1 failed, in 45 min 18 s; the whole sweep 10:38:59-11:27:52Z**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap, upgraded 2026-10-18
+- 77303e4, 2026-10-19, four projects and the plane up
+- s42-v1.sh and s42-sweep.sh as root, stdin from /dev/null
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 41's V1 took 44.5 min and its sweep 53.6 min on the 4 vCPU host.
+
 ---
 
 ## What was not measured, and why
@@ -1131,23 +1285,11 @@ run reads as an envelope of the whole system — which is the dishonest
 reporting this claim is most exposed to, arriving as a document that looks
 complete rather than as a claim that is false.
 
-### The resize and sleep windows as the slot's pooled name sees them (D2171, D2444)
-
-Session 40's lifecycle (1.18.0) probed the slot's app route through every window -- its row above -- but the pooled name's probe thread died after 4 samples (D2500). Session 41's (1.19.0) probed both through every window, but its first attempt stopped at the export, before the samples were written, and the run resumed after the windows: none of the four was read (D2557). Sessions 38 and 39 did not probe the slot at all.
-
-*Unblocked by: the next lifecycle on a new slot, run through without a stop (or an instrument that writes its samples as it takes them).*
-
 ### A usage pass's duration (ADR 0275)
 
-The reconciler logs one line at a pass's END ('usage <key> <state>, ...') and none at its start, and no step records it: Session 41's trip had no reading to take.
+The reconciler logs one line at a pass's END ('usage <key> <state>, ...') and none at its start, and no step records it. Session 42's lifecycle read the insight samples' spacing (304 s, the 300 s sampler) but not a pass's own length.
 
 *Unblocked by: a pass's start and end recorded by the reconciler, or a timed rig.*
-
-### Alpha-dev's 1.15.0 deploy window, per class (Session 37 R2a)
-
-R2a ran before the probe was started (D2138); beta's R2b window stands for the release, which recreated the same three services.
-
-*Unblocked by: the next release's deploy on alpha-dev with the probe running first.*
 
 ### Whether a boot of three projects meets the provider's rate limit
 
@@ -1155,11 +1297,11 @@ ADR 0255's client waits on a 429 silently; the two boots after it took ~30 s lon
 
 *Unblocked by: a counted wait in the materializer's output, or the provider's log.*
 
-### The rescaled host's capacity and its deploy windows (Session 36's D1991)
+### The telemetry plane's footprint at rest on the host (ADR 0277)
 
-The rescale was not taken: Hetzner had no CX33 (4 vCPU / 8 GB) in hel1 on 2026-10-04 (D2032), and a server elsewhere is a new Primary IPv4. Every Session 36 MACHINE row ran on the unchanged CX23.
+E1 read the plane under load and was torn down; after T1 installed it no sheet took its containers' docker stats at rest (op cannot reach the Docker socket, D1375), and a free -m difference across the day's other changes is not its footprint.
 
-*Unblocked by: CX33 in hel1 when stocked (Sheets H1-H3), or a planned move with its address change.*
+*Unblocked by: a root docker stats --no-stream of the four apg-telemetry containers, idle.*
 
 ### The deployment's own numbers, on the deployment
 
