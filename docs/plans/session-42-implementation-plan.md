@@ -1,16 +1,18 @@
 # Session 42 — The OVH upgrade, ClickStack, `pg_stat_statements`, Query Insights, monitoring, and the fourth re-earning
 
-**Status: EXECUTING since 2026-10-18.** **Runs 1 to 9 done** (both gates
-PASSED in shards on `41b9ac3`; Run 10, sitting 1, next) -- Run 1's
+**Status: EXECUTING since 2026-10-18.** **Runs 1 to 10 done** (both gates
+PASSED in shards on `41b9ac3`; sitting 1 on `77303e4`: 1.20.0 on all four,
+the plane up, `slot6-prod` ready, V1 and X0b green but D1935; Run 11, sitting
+2, next) -- Run 1's
 sitting U ran once OVH's stock returned (D2598): the host is **11,671 MiB, 6
 vCPU, 95 GiB** and declared so (D2628); E1 moved HyperDX's limit to 1,728 MiB
 and the plane's charge to 3,552 (D2626). Rows **D2561–D2590** at planning,
 **D2591–D2596** added 2026-10-18 (the operator's amendment of Sessions
 43–45: web-first, the browser SQL editor, the split, and three of Session
 43's choices — recorded here because this plan holds the next free numbers;
-none changes a run of this session), **D2597–D2633** by the runs. ADRs
+none changes a run of this session), **D2597–D2644** by the runs. ADRs
 **0277–0279** written (0277 amended by E1, D2626).
-**NEXT FREE: D2634, ADR 0280.**
+**NEXT FREE: D2645, ADR 0280.**
 
 The seventh session of Stage 5 and the second half of the operator's split
 (D2510): the stage plan's *Session 42* brief (`docs/plans/stage-5-plan.md` §5
@@ -517,6 +519,17 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2631** | §2: node ids *"proposed; Run 9 writes what the runs actually wrote"*; `INS-CLI-001` proposed `tests/contract/test_cli_contract.py::test_telemetry_is_a_root_command`. | No such test exists (`pytest --collect-only`). Runs 2-7 wrote proofs §2 did not name: `test_an_attach_network_lost_to_another_unit_succeeds`, `test_a_clean_attach_and_detach_say_nothing_of_another_unit`, `test_an_upload_with_no_line_keeps_the_bare_reason`, `test_an_insight_statement_of_a_platform_role_is_not_kept`, `test_the_insights_and_monitoring_routes_answer_a_viewer_and_a_read_key`, `test_every_image_is_locked`, `test_the_users_admit_only_the_subnet_and_the_gateway_creates_and_inserts`, `test_an_unreadable_charge_refuses_rather_than_counting_zero`. | **The tree's ids** (D2129): `INS-CLI-001`'s operator half is `test_host_infrastructure.py::test_the_telemetry_unit_waits_for_docker_and_no_project_waits_for_it` (the unit runs the root launcher); every unnamed proof joins its requirement. The registry lists base names (D1119 strips `[case]`). | A proposed id is a prediction; the collection is the record. | — |
 | **D2632** | Run 2: `tests/contract/test_edge_network_race.py`, its proofs to be `DEP-ATTACH-001`'s (P0, claim `edge_attach_race`, offline). | The module carried `pytestmark = pytest.mark.contract` alone: collectible by name, invisible to `-m "p0 and not future and not live_host and not external"`, the sweep that reports the claim -- `test_every_offline_claims_proof_is_swept_by_the_gate_that_reports_it` failed on the bump (D1240/D1242's shape, a fourth time). | **`pytestmark = [pytest.mark.contract, pytest.mark.p0]`**; the guard green. Run 2's CI was green because nothing yet registered the proofs. | A module's marks are part of its registration. | — |
 | **D2633** | Run 9's battery: *"a widened fixture narrowed back → the re-run FAILED on the 42 record fixture"*. | The widened fixtures live in EXTERNAL and HOST modules whose `requires_environment` is the trip's: offline they SKIP, and a skip is not a kill (D386). | **Not in the battery**; the narrowing is read by the trip's own Session 42 records, where a narrowed fixture fails its whole module. The battery's seven mutations each run offline: the gate's literal, `project.sleep` unaccepted, a trial row citing a Session 41 claim (the plan's control `test_the_idle_sleep_row_is_reachable_iff_its_sleep_is_accepted` green), `INS` out of the regex, a threat row naming a missing test, an offline claim undeclared, a live requirement naming a missing proof -- 7/7 killed. | A mutation the battery cannot run is no evidence either way. | — |
+| **D2634** | Sheet P1: *"Cloudflare R2 (EEUR, Standard): apg-slot6-prod, apg-slot6-prod-backup"* -- the operator's consoles; D2589: the agent may create the buckets, *"recorded"*. | At the operator's word (2026-10-19) the agent created **both R2 buckets through the Cloudflare API** (04:36Z, EEUR, Standard) and read the three DNS records back through it (each `15.204.231.45`, `proxied: false`, no AAAA). The R2 tokens, the B2 bucket `apg-slot6-prod-backup-mirror` and its key are the operator's -- no secret was created by or shown to the agent. | **Recorded here, as D2589 asks.** The buckets' names are the slot manifest's (`slot.sh prepare` printed the same three). | A provider object the agent creates is named by the product's derivation, never typed. | — |
+| **D2635** | Sheet T1: *"`sudo systemctl enable agentic-postgres-telemetry`"*. | `Unit agentic-postgres-telemetry.service does not exist`: nothing installs a NEW unit but `provision-host.sh --apply` (`install_units`), and neither Sheet T1 nor `docs/operator-guide.md` §23 runs it. `telemetry.sh up` had admitted the plane (3,552 of 8,353 safe) and its four containers were healthy. | **Sheet T1b**: `provision-host.sh --install-launchers`; `install -m 0644 -o root -g root systemd/agentic-postgres-telemetry.service /etc/systemd/system/`; `daemon-reload`; `enable` -- then the launcher's `status` resolved the release, `doctor capacity` 5 ok (committed 4,656 MiB with the plane's 3,552; ceilings 15,872 across 6), `provision-host.sh --check` meets the baseline. The guide's §23 gains the install at the close. | A sheet that enables a unit the release adds installs it first. | 0277 |
+| **D2636** | Sheet T1: *"`telemetry.sh status` -- four containers healthy, the limits, HyperDX's address"*. | The gateway reads `<id> (could not be read)`: `bin/telemetry.sh:170-174`'s whole `docker inspect` template fails `map has no entry for key "Health"` (rc 1) on a container with NO healthcheck -- reproduced on the workstation with the pinned collector image, while `{{if .State.Health}}` alone prints nothing. The other three read healthy; `apg-diag containers` lists the gateway `Up`. | **Report only, deferred past the tag**: the third outcome IS reported (ADR 0195), no proof reads `status`, and a repair is a new commit = four redeploys. Fixed in the next code session with a proof against a healthcheck-less container. | A template that indexes an optional member fails on the container that lacks it. | — |
+| **D2637** | Run 4: the telemetry launcher `libexec/agentic-postgres-telemetry`, installed by `provision-host.sh --install-launchers`. | `install_launchers` globs `libexec/agentic-postgres-*` (six now); `provision-host.sh --check` (`:336`) verifies launchers from a TYPED list of five: the telemetry launcher is installed and never checked. | **Deferred past the tag** with D2636: `--check` reads the same glob as the install (D600: guard the class against the definition, not the list). | Two readers of one set agree only when they read one definition. | — |
+| **D2638** | Sheet T2: *"Team settings -> a ClickHouse connection: host clickhouse, port 8123, user reader, no password; a log source: database otel, table otel_logs (timestamp, body as HyperDX's form names them)"*. | The source form's Database/Table stayed disabled: HyperDX's proxy got ClickHouse **516 AUTHENTICATION_FAILED** for `reader` -- the SAVED connection held a password (most likely the browser's autofill of the new HyperDX login), while *Test Connection* (the form's values) succeeded; a `PUT` with `password: ''` was **ignored** (still 516). And `otel.otel_logs` has **no `TimestampTime`** column (`Timestamp DateTime64(9)`). | **Repaired over HyperDX's own API** from the operator's logged-in browser console (rig 42a's route, no credential leaving the page): `POST /api/sources` (Logs, `otel.otel_logs`, `Timestamp`), `POST /api/connections` with `password: ''` → the proxy 200 (rows: alpha 495, beta 499, control 499, slot3 497), `PUT` the source onto it, `DELETE` the old (all 200). The operator then read lines of all four projects (SQL mode, or Lucene `ResourceAttributes.project:"…"`). | A form that saves what the browser filled is read back, not trusted. | 0277 |
+| **D2639** | ADR 0277 (`:128-129`): `gateway` and `reader` *"are admitted only from the telemetry network's subnet"*. | `reader` answers from the HOST: `op`'s `curl` to `192.168.16.3:8123` comes from the bridge's own address, inside `192.168.16.0/20`, and is admitted. | **Stands** -- host-local only, no published port, `reader` is `SELECT ON otel.*`, `readonly=2`; anyone on the host who can reach the bridge is already past `op`. Recorded so the next reader of the admission does not take "the subnet" to mean "the containers". | A subnet admission includes the bridge's host side. | 0277 |
+| **D2640** | Sheet SL1: *"open 443 on the store host to your address (docs/secret-store.md §1) ... close 443 again and read it closed"*. | The operator's egress address ROTATES: the browser left from `217.113.25.22`, WSL from `195.250.80.77`, so a rule for one did not admit the other (443 filtered from WSL). Both rules were added and both deleted; the agent read 443 filtered again. `ufw status` also lists **443 allowed from `62.238.99.122`** -- the old Hetzner host, whose retirement (M7 X1/X2) is allowed since 2026-10-12 and not run. | **The console sitting adds a rule per address the browser shows** (`ifconfig.me` IN THAT BROWSER) and deletes each; secret-store.md §1 says so at the close. **Rule [4] is removed with M7's X1/X2**, not before (the old host's projects are stopped; its read of the store is dormant). | An address read from one client is not the operator's address. | — |
+| **D2641** | Sheet H1: *"`--add-slot` ... `slot6-prod=slot6.agenticpostgresql.com=apg-slot6-prod-backup-mirror` ... `install ... /home/op/s42-h1/etc-host.yaml.slots /etc/agentic-postgres/host.yaml`"*. | `s42-hostyaml.py` takes `--slot KEY=DOMAIN` and writes `/home/op/s42-h1/etc-host.yaml` (no `.slots`); the entry carries no `mirror_bucket`, and `naming.backup_mirror_bucket_name` derives **`apg-slot6-prod-backup-mirror`** with no override -- the name P1 created and `slot.sh prepare` printed. Both candidates `346e9860…` (byte-equal), the inputs unchanged (`e52d712e…`); claimable 9,457 MiB. | **The tree's names** (the sheet as handed used them). A derived name is not written as an override (ADR 0002). | A sheet's file names are read from the script that writes them. | — |
+| **D2642** | Sheet SL1b: *"the pairs' shape, before they are materialized"*; D2582. | `s42-r2shape.py` checks the two R2 pairs (32/64 lowercase hex, distinct, no whitespace) -- ALL YES -- and not the B2 mirror pair, whose key shape differs. And `bootstrap-providers.sh --apply` prints *"created 4 resource(s)"* for a plan of 17 changes: the count is a LITERAL (`bin/bootstrap-providers.py:1027`). | **The mirror pair's first reader is the mirror unit**, after `slot6-prod`'s first backup (Run 11); a wrong pair there is the operator's re-entry, not a stop. The literal count is report-only (deferred with D2636). SL2 wrote **29 files** in generation `8dc34a38…` (`auth_jwt_prepared_key` absent and optional). | A count printed as a literal is a sentence, not a reading. | — |
+| **D2643** | Sheet RA: *"if the third project now FITS, the rehearsal's manifest is re-read against the new numbers (a row), never forced"*. | On the 11,671 MiB host with the plane charged, `/home/op/s31-third.yaml` is **admitted as declared** (exit 0); with the 1,000,000,000 MiB reserve injected it is **refused (exit 12)** -- the rehearsal's reading; `reversed: yes`; evidence `rehearsal-alpha-dev-admission-refused-202610190638b503.json` (gitignored; the checkout stayed clean). | **Stands**: the rehearsal's control expects *"the host's own decision, whatever it is"*, and its reading is the injected refusal -- neither depends on the manifest not fitting. Nothing re-read or forced. | A rehearsal that injects its condition does not need the host to be full. | 0190 |
+| **D2644** | Run 10: *"V1 ... and the agent's X0 (external, `-k`, writing nothing). If V1 or X0 fails: repair, move the commit, redeploy all four"*. | **X0** (08:03:58-08:09:25Z): 39 passed, 44 skipped, **1 ERROR** at setup of `test_session37_public_control.py::test_a_key_lists_projects_and_opens_no_project` -- *"The temporary directory /tmp/pytest-of-gmpar is not owned by the current user"*: the workstation's directory, root-owned since 2026-10-18 08:24, the one Run 9's gates met; `s42-x0.sh` exported no `TMPDIR`. **V1**'s one red is `documented_path` (D1935), as Session 41's. | **Not a product failure; the commit stands.** X0 re-run whole with `TMPDIR=~/s42/tmp` (`~/s42/run10/s42-x0b.sh`): **40 passed, 0 failed, 44 skipped** (37 `APG_LIFECYCLE_RECORD_FILE` absent -- Run 11's; 7 `APG_PUBLIC_IPV6` absent), exit 0. **Run 11's `s42-external.sh` gained the same export before it writes evidence.** | A workstation fault met once is fixed in every script that can meet it. | — |
 
 ---
 
@@ -1541,6 +1554,38 @@ one request to each project's `routes.app` first) → **PV** → **H1** →
 nothing) and the agent's **X0** (external, `-k`, writing nothing). **If V1 or X0
 fails**: repair, move the commit, redeploy all four — **before `slot6-prod`
 exists as a project** (D2448).
+
+**Done, 2026-10-19 (sitting 1)**, on the deploy commit **`77303e4`** (docs-only on
+`41b9ac3`; CI 39199665025 success). P1: the R2 buckets created by the agent at
+the operator's word, the DNS read back grey (D2634). The bundle `601a0ea..main`
+and the checkout over SSH, `FETCH_HEAD` confirmed `77303e4`. **R1**: `requires
+minor` / ok on all three; control-prod's project set 8 → 9. **R2a-R2d** (all
+exit 0; `s42-window.py`, one GET a second, D2625): alpha `rest` **3.2 s** (503) /
+`auth` **7.6 s** (404/502); beta 4.2 / 8.5; control-prod `auth` 8.7 (no `rest`
+route); slot3-prod (`slot.sh redeploy`) 2.1 / 8.4; control-prod applied
+`20261018120009_control_insights` (ledger 48). **A1**: agrees ×4 +
+slot1/2/4/5 `agrees (deleted)`. **T1**: the plane admitted (3,552 of 8,353 MiB
+safe), four containers healthy; the unit had to be installed first (Sheet T1b,
+D2635); `telemetry.sh status` cannot read the healthcheck-less gateway (D2636);
+`--check` misses the sixth launcher (D2637). `s42-telemetry.py`: HyperDX `000`
+before the forward, **200 through it**, `000` after. **T2**: the source repaired
+over HyperDX's API (D2638); the operator read lines of **all four projects**.
+**PV**: `apg-diag containers` lists `-- apg-telemetry (platform)`, four. **H1**:
+`slot6-prod` declared in both copies (`346e9860…`, D2641). **SL1**: prepared;
+the plan 17 changes, applied (D2642's literal), the credential shredded, the
+directory empty; the six provider keys entered by the operator through a
+console opened per address (D2640). **SL1b** ALL YES; **SL2** 29 files,
+generation `8dc34a38…`; **SL3** `slot6-prod ready`, registry `prepared
+(slot)`; **RC1** idle, the journal names `slot6-prod ready`; **RA** admitted as
+declared, refused (12) with the reserve (D2643); **K1** `kit-2026-10-19-s42`
+(18 artifacts, 3 projects) in WSL `~/dr-kits/` with every sha256 equal, the
+four copies naming `77303e4`. **V1** (07:00:13-07:37:26Z, **37 min 04 s**;
+Session 41's 44.5 min): **405 passed, 1 failed, 8 skipped** -- the one red
+`documented_path` (D1935). **X0b** (after X0's workstation ERROR, D2644): **40
+passed, 0 failed, 44 skipped**, exit 0. **No defect in the product: `77303e4`
+stands, and nothing is redeployed** (D2448). Owed after the tag: D2636, D2637,
+D2642's count; at the close: operator-guide §23 (D2635) and secret-store.md §1
+(D2640).
 
 ### Run 11 — sitting 2 (day 2): the re-earning, the insights, the reboot, the sweep, the tag
 
