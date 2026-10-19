@@ -46,7 +46,7 @@ from tests.external.test_session38_public_lifecycle import (  # noqa: F401 -- fi
     recorder,
 )
 
-from agentic_postgres import slot
+from agentic_postgres import naming, slot
 from app import signals
 
 pytestmark = [
@@ -395,8 +395,11 @@ def test_the_workload_is_in_the_insights_without_its_literal(record42: dict[str,
     pass, `insights show` held the workload's statement NORMALISED -- its
     literal a `$1` -- with exactly the 200 calls the window can see (the first
     call entered with the statement's first sample, which counts nothing), as
-    `customer_app`; the canary's literal appears nowhere in the insights or the
-    monitoring documents; the document carries no advising member."""
+    the slot's `customer_app` role -- the DATABASE role the extension records
+    (`rolname`), derived by `naming.database_roles`, never the suffix (D2645,
+    as `test_insights_reading` reads it); the canary's literal appears nowhere
+    in the insights or the monitoring documents; the document carries no
+    advising member."""
     insight = record42["observations"]["insights"]
     assert [w["calls"] for w in insight["workload"]] == [1, WORKLOAD_CALLS], insight["workload"]
     assert all(w["exit"] == 0 for w in insight["workload"]), insight["workload"]
@@ -407,7 +410,9 @@ def test_the_workload_is_in_the_insights_without_its_literal(record42: dict[str,
     found = [s for s in served["document"]["statements"]
              if all(part in s["query"] for part in NORMALISED)]  # fmt: skip
     assert len(found) == 1, found
-    assert (found[0]["calls"], found[0]["role"]) == (WORKLOAD_CALLS, "customer_app"), found[0]
+    roles = naming.database_roles(naming.sql_key(record42["project_key"]))
+    expected = (WORKLOAD_CALLS, roles["customer_app"])
+    assert (found[0]["calls"], found[0]["role"]) == expected, found[0]
     canary = insight["canary"]
     assert canary.startswith("APG-INSIGHT-CANARY-"), canary
     assert canary not in json.dumps(served) and canary not in json.dumps(insight["monitoring"])
