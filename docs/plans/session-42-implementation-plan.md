@@ -1,18 +1,20 @@
 # Session 42 — The OVH upgrade, ClickStack, `pg_stat_statements`, Query Insights, monitoring, and the fourth re-earning
 
-**Status: EXECUTING since 2026-10-18.** **Runs 1 to 10 done** (both gates
-PASSED in shards on `41b9ac3`; sitting 1 on `77303e4`: 1.20.0 on all four,
-the plane up, `slot6-prod` ready, V1 and X0b green but D1935; Run 11, sitting
-2, next) -- Run 1's
+**Status: EXECUTING since 2026-10-18.** **Runs 1 to 11 done** (both gates
+PASSED in shards on `41b9ac3`; sittings 1 and 2 on `77303e4`, 2026-10-19:
+1.20.0 on all four, the plane up, the lifecycle on `slot6-prod`, the branches,
+the reboot with every unit back by itself, the sweep; **`1.20.0` TAGGED on
+`77303e4`**, evidence 302 claims, 301 passed, `documented_path` failed; Run
+12, the close, next) -- Run 1's
 sitting U ran once OVH's stock returned (D2598): the host is **11,671 MiB, 6
 vCPU, 95 GiB** and declared so (D2628); E1 moved HyperDX's limit to 1,728 MiB
 and the plane's charge to 3,552 (D2626). Rows **D2561–D2590** at planning,
 **D2591–D2596** added 2026-10-18 (the operator's amendment of Sessions
 43–45: web-first, the browser SQL editor, the split, and three of Session
 43's choices — recorded here because this plan holds the next free numbers;
-none changes a run of this session), **D2597–D2644** by the runs. ADRs
+none changes a run of this session), **D2597–D2649** by the runs. ADRs
 **0277–0279** written (0277 amended by E1, D2626).
-**NEXT FREE: D2645, ADR 0280.**
+**NEXT FREE: D2650, ADR 0280.**
 
 The seventh session of Stage 5 and the second half of the operator's split
 (D2510): the stage plan's *Session 42* brief (`docs/plans/stage-5-plan.md` §5
@@ -530,6 +532,11 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2642** | Sheet SL1b: *"the pairs' shape, before they are materialized"*; D2582. | `s42-r2shape.py` checks the two R2 pairs (32/64 lowercase hex, distinct, no whitespace) -- ALL YES -- and not the B2 mirror pair, whose key shape differs. And `bootstrap-providers.sh --apply` prints *"created 4 resource(s)"* for a plan of 17 changes: the count is a LITERAL (`bin/bootstrap-providers.py:1027`). | **The mirror pair's first reader is the mirror unit**, after `slot6-prod`'s first backup (Run 11); a wrong pair there is the operator's re-entry, not a stop. The literal count is report-only (deferred with D2636). SL2 wrote **29 files** in generation `8dc34a38…` (`auth_jwt_prepared_key` absent and optional). | A count printed as a literal is a sentence, not a reading. | — |
 | **D2643** | Sheet RA: *"if the third project now FITS, the rehearsal's manifest is re-read against the new numbers (a row), never forced"*. | On the 11,671 MiB host with the plane charged, `/home/op/s31-third.yaml` is **admitted as declared** (exit 0); with the 1,000,000,000 MiB reserve injected it is **refused (exit 12)** -- the rehearsal's reading; `reversed: yes`; evidence `rehearsal-alpha-dev-admission-refused-202610190638b503.json` (gitignored; the checkout stayed clean). | **Stands**: the rehearsal's control expects *"the host's own decision, whatever it is"*, and its reading is the injected refusal -- neither depends on the manifest not fitting. Nothing re-read or forced. | A rehearsal that injects its condition does not need the host to be full. | 0190 |
 | **D2644** | Run 10: *"V1 ... and the agent's X0 (external, `-k`, writing nothing). If V1 or X0 fails: repair, move the commit, redeploy all four"*. | **X0** (08:03:58-08:09:25Z): 39 passed, 44 skipped, **1 ERROR** at setup of `test_session37_public_control.py::test_a_key_lists_projects_and_opens_no_project` -- *"The temporary directory /tmp/pytest-of-gmpar is not owned by the current user"*: the workstation's directory, root-owned since 2026-10-18 08:24, the one Run 9's gates met; `s42-x0.sh` exported no `TMPDIR`. **V1**'s one red is `documented_path` (D1935), as Session 41's. | **Not a product failure; the commit stands.** X0 re-run whole with `TMPDIR=~/s42/tmp` (`~/s42/run10/s42-x0b.sh`): **40 passed, 0 failed, 44 skipped** (37 `APG_LIFECYCLE_RECORD_FILE` absent -- Run 11's; 7 `APG_PUBLIC_IPV6` absent), exit 0. **Run 11's `s42-external.sh` gained the same export before it writes evidence.** | A workstation fault met once is fixed in every script that can meet it. | — |
+| **D2645** | Run 9's `INS-LIVE-001` proof, `test_the_workload_is_in_the_insights_without_its_literal`: the statement's `role` equal to `"customer_app"`. | Its FIRST live execution (Run 11's external half, 11:29-11:38Z) failed on that alone: the document's role is **`apg_slot6_prod_customer_app`** -- `usage_reading.insights_sql` reads `r.rolname`, the DATABASE role the extension records, as `test_insights_reading` already asserts with `naming.database_roles`; 200 calls, normalised, no literal. The offline fixture (`test_control_insights.py:67`) chose `role="customer_app"` itself and shared the belief (D673's shape). A fix is a commit after `slot6-prod`'s deletion (§9). | **The operator's choice (asked, 2026-10-19): fix the proof, re-run the external half, tag the deployed commit.** `de3d204` (test only; **0 product files differ from `77303e4`**): the expected role is `naming.database_roles(sql_key(key))["customer_app"]` -- stricter, the exact derived name. Battery against the real record: control PASSED; the bare suffix and another slot's derived role FAILED at the role assertion (`:415`). CI 39246842504 green. The external half re-run from `de3d204`: 106 passed. The first run's half and merge kept (`~/s42/run11/external-1/`). | A proof that never ran live carries its author's belief; the tree's own reader of the same value says which belief is right. | 0278 |
+| **D2646** | `~/s42/run8/s42-sweep.sh:167`: the plane running = four `running` lines in `telemetry.sh status`. | `status` cannot read the healthcheck-less gateway (D2636): its line is `(could not be read)`, the count is 3, and the sweep would have stopped at 93 before its suite. Found by reading the sweep before S1. | **The precondition reads `docker ps`** (the four `apg-telemetry-*-1` names running); `status` stays in the transcript. The host copy replaced, sha256 equal (`d285061c…`); backup `.before-plane-fix`. | An instrument that decides from a report inherits the report's blind spot. | — |
+| **D2647** | Run 11 steps 1b and 4: *"`--delete-only` after S1"*; *"S1 — the one sweep ...; then the external half from WSL; then the merge"*. | Sessions 40-41's external branch proofs read the branch record in phase **`deleted`** (`test_session4{0,1}_branches.py:72-81`); the host sweep needs `dev` LIVE. Session 41 ran its external half twice for this. | **The order is: sweep, `--delete-only`, the external half, the merge** -- the first external launch (11:28Z) was stopped before it wrote anything; `dev` deleted 11:28:59Z (both names refused); the external half ran once per proof version. | A record read by two halves is in the phase the LATER half reads. | — |
+| **D2648** | Sheet SL4: `slot.sh revoke ... --operator-credential-file /root/.config/.../infisical-control-plane-credential`. | The credential file was shredded at SL1; the sheet has no step that writes it. | **Handed with SL1's `nano` + `chmod 0600` first**, `shred -u` after, the directory read empty. Revoked identity `3f4871ae…`; the Infisical project kept (by design); no `projects/slot6-prod` (D2405). | A sheet that uses a shredded file writes it first. | — |
+| **D2649** | Run 11 step 1: *"sleep; wake; idle sleep at 15 with the probes stopped; wake; the two resizes; the export"*. | `s42-lifecycle.py` (as Session 41's) runs sleep/wake (3), the resizes (4), the export (5), the expiry control (6), **then** the idle sleep (6b), then K2 and the delete (7) -- and the expiry control holds the export's link until it expires (09:10-09:25Z), so the idle setting began at 09:26Z. | **The instrument's order stands** (the proofs read the record, not the order); recorded so a reader timing the idle step starts from 09:26Z, not the export. | A plan's sentence of an instrument's order is read against the instrument. | — |
 
 ---
 
@@ -1608,6 +1615,43 @@ D2642's count; at the close: operator-guide §23 (D2635) and secret-store.md §1
    merge (`write-session-evidence`); **then** the tag `1.20.0` on the deployed
    commit from the workstation.
 5. **SL4** (after the tag).
+
+**Done, 2026-10-19 (sitting 2, the same day as sitting 1 at the operator's
+word)**, every host step at `77303e4`. **The lifecycle** (`~/s42/run11/life-start.sh`,
+08:31:32-09:50:44Z, **exit 0**, record `~/s42/lifecycle.json`): the probe
+organisation's creation refused `plan_limit_reached` (409, nothing created);
+`lifecycle-s42` created; **create 1,384.5 s** (Session 41's 1,715.2); **Query
+Insights**: one call, a pass, 200 calls, a pass -- the statement held normalised
+(`relname = $1`) with **200 calls**, the canary nowhere; the margin with the
+slot 7,603 MiB; sleep (route 71.5 s / pool 71.8 s down) and wake (first answer
+15.1 s); **both resizes admitted** (304 and 840 MiB of 4,801 safe; route 8.6 s,
+pool 16.8 s down each); the export 40,286 B (0600), its link 200 at once and
+403 after expiry; **the idle sleep requested by the reconciler at 09:46:18Z,
+~20 min after the setting (09:26Z), asleep 20.5 s later**, 40 samples 404,
+both doors refused, turned off, woken; usage and notifications read; **K2**;
+deleted; the second creation `no_slot`. **D2581 held: 1,816 samples sealed**
+(146,021 B), no window lost. The neighbours through it (4,786 s): 0 down, 0
+429, `gaps rc=0`. **A1'** agrees ×4 + slot1/2/4/5/6 `agrees (deleted)`. **The
+branches** (09:51:19Z-, exit 0): `tmp` deleted by the reconciler **125.2 s**
+after `expires_at` (Session 41: 22.3 s; unexplained -- no proof bounds the
+latency, the instrument waits up to 2,700 s for the request); marks at T1; `dev` at T1, its door ready at the first attempt; row 1
+only through `dev`; a migration on `dev` only; the parent's passwords refused;
+`qa` refused `branch_limit_reached`; reset, the door ready at once; the
+neighbours 0 down. **B1** (10:35:33Z): **all seven units started by the boot,
+NRestarts 0, active by boot+69 s -- D2558 repaired** (Session 41's beta-dev
+FAILED here); the plane 4/4 and `dev` 3/3 up; `dev` back by itself
+(`--after-reboot` exit 0). **S1** (the sweep's plane check repaired first,
+D2646): 10:38:59-11:27:52Z, the suite **425 passed, 1 failed (`documented_path`),
+0 skipped** in 45:18; the host half **143 claims, 142 passed**, `source_commit`
+`77303e4`. `dev` deleted (11:28:59Z) **before** the external half (D2647). **The
+external half** found `insights_live` failed on its proof's role name alone
+(D2645); the operator chose to fix the proof: `de3d204` (test only), its CI
+39246842504 green; the external half re-run from it: **106 passed, 0 failed, 7
+skipped** (IPv6). **The merge: 302 claims, 301 passed, 1 failed:
+`documented_path` (D1935)**; `source_commit` `77303e4`, offline 133/133 at
+`41b9ac3`. **Tagged `1.20.0` on `77303e4`** (tag object `747fe5a`, pushed).
+**SL4**: slot6-prod's runtime identity revoked (the Infisical project kept,
+D2405), the credential shredded (D2648).
 
 ### Run 12 — the close
 
