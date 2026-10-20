@@ -1,11 +1,11 @@
 # Session 43 — The public site, the invitation as a link, onboarding in the browser, the console, and the packaged CLI
 
-**Status: EXECUTING — Runs 1–8 DONE (2026-10-19/20); Run 9 next.** Planned at `bd8f35c` (Session
+**Status: EXECUTING — Runs 1–9 DONE (2026-10-19/20); Run 10 (the sitting) next.** Planned at `bd8f35c` (Session
 42's close, tree clean) against the host as read that evening (§0). Rows
 **D2650–D2679** at planning; the runs add theirs from **D2680** (Run 1:
-D2680–D2687; Runs 2–8: D2688–D2720). ADRs **0280–0284** written by Run 1. The
+D2680–D2687; Runs 2–9: D2688–D2724). ADRs **0280–0284** written by Run 1. The
 site is live on its custom names (Sheet C4). **D2714: the lifecycle and the
-branches are re-earned in Run 10** (the operator, 2026-10-20). **NEXT FREE: D2721,
+branches are re-earned in Run 10** (the operator, 2026-10-20). **NEXT FREE: D2725,
 ADR 0285.**
 
 The eighth session of Stage 5 and the first of the operator's web-first split
@@ -524,6 +524,10 @@ execution order.
 | **D2718** | §5 Run 8 item 1 lists the driver's arguments and record. | The proofs need what the list did not name: the deployed commit (to refuse another release's record, as the lifecycle record does), the password file's name (beside the record), the string's port/user/database (to compare with `/v1`'s door), the page's own sign-out status (reading (d)), the driver's exit, and W0's QR. | **The driver gains `--source-commit` (required), `--qr-out` (W0; 0600 PNG of the QR element alone), and the record members `session` 43, `source_commit`, `password_file`, `string_port`/`string_user`/`string_database`, `csrf.sign_out`, `exit`**; rehearsed (walk rc 0; `--dry --qr-out` rc 0, a 0600 PNG; `--leak` rc 6, no record). The rehearsal's QR is the fixture's blank SVG — the real one is read only by the operator's phone at W0. | The record holds what its readers check, and nothing secret. | 0280 |
 | **D2719** | Sheet C4: *"POST …/domains … GET …/domains every 60 s up to 30 min → both status active"*; D2651: *"A Pages custom domain is a CNAME Cloudflare creates **proxied**"*. | Measured 2026-10-20: the two POSTs answered `initializing` (validation `http`); the next read said **`pending`, `CNAME record not set`** for both — **attaching a domain through the API creates no DNS record** (the dashboard's flow does). | **The agent created the two records through the zone's API**: `CNAME agenticpostgresql.com → agentic-postgres-site.pages.dev` and `CNAME www…` (ids `49746ae1…`, `b0a585fe…`), **proxied**, commented `Session 43 Sheet C4 (ADR 0283)`, each after a read that no A/AAAA/CNAME existed at that name; no POST repeated. Both domains then read **`active`** (certificate authority `google`). Read back: **only these two records proxied; all 23 A records DNS-only** (30 records). | ADR 0283's scope, exactly: the records Pages needs are proxied and name no host of ours. | 0283 |
 | **D2720** | D2596 (*"no third-party script in the console, no tracker on the site"*); rig 43c (D2687) read **no `<script`** in any body — on `*.pages.dev`. | On the CUSTOM names the zone's **Email Address Obfuscation** (`email_obfuscation: on`, a zone setting rig 43c could not see: `pages.dev` is not in the zone) rewrote every page holding the invitation address: each `mailto:invite@…` became `/cdn-cgi/l/email-protection#…` and **Cloudflare's `email-decode.min.js` was injected** (`/` 3,127 bytes against the build's 2,531). Same-origin, so `script-src 'self'` admits it and a check of asset HOSTS passes it — the parked `SITE-LIVE-001` proof would have passed. The zone's other rewriters read: `automatic_https_rewrites` on, `replace_insecure_js` on, `server_side_exclude` on (nothing in the build for any of them to act on), `rocket_loader` off, `minify` off, Zaraz 0 tools, no Web Analytics site. | **The agent set `email_obfuscation` to `off`** (read back `off`, 07:04:28Z; only proxied names pass through zone features and the site's two are the only ones, D2719). Re-read (`~/s43/run7/c4-read-2.txt`): **every one of the 14 pages and the 404 on both names is the build byte for byte**, with the build's CSP; the first read is the control. **`test_the_site_is_the_commits_build` now asserts each live page EQUALS the build's bytes** (stricter; the parked module). | A page is the build only if its bytes are; the platform's helpers are a writer the build does not know. | 0283 |
+| **D2721** | §5 Run 8: *"nothing committed but this paragraph and the two test modules + the driver"*. | Run 8's code commit `28df36e` carried `tests/deployment/test_session43_console_host.py` before its node ids were registered (Run 9's): **CI 39383128080 FAILED** in both jobs on one test, `test_deployment_suite_shape::test_every_deployment_proof_is_a_node_id_of_some_requirement` (D386/D1236) — D2715's class, which the agent's targeted list did not include for a DEPLOYMENT module (`test_environment_gates` and the selector guard are the external module's). | **`ccaa827` untracked the module** (the file kept on disk), checked in a clean worktree (`test_deployment_suite_shape` + `test_acceptance_registry` 28 passed) and pushed: **CI 39385306013 success** (site 39388127117). The module returned with `CON-HOST-001` in Run 9's `edffc5a`. Main was red from 28df36e to ccaa827, about two hours. | A new live module, of either kind, lands with its registry entry; the deployment guard belongs in the targeted list of any run that adds a `tests/deployment` module. | 0280 |
+| **D2722** | D2652: the operator chose to register the PyPI pending publisher and wait for the tag; §5 Run 7: the site deploys on every green push to `main`. | Since Run 7 the live site's `/quickstart/` and `/docs/cli/` say `pipx install agentic-postgres-cli` and `uv tool install agentic-postgres-cli` — a package that does not exist until Run 10's tag publishes it; PyPI's own words: a pending publisher *"does not … reserve a project's name"* (C2). | **Recorded and told to the operator, not changed by the agent** (the order is the operator's D2652): until the tag the command answers "not found", and the name is claimable by anyone. The Ledger's `cli_remote` text says *"published to PyPI as agentic-postgres-cli from release 1.21.0"*. If the operator wants the window closed sooner: publish earlier, or soften the two pages until the tag. | A page that promises a command must not run ahead of the command; the risk is named where the operator reads it. | 0283, 0284 |
+| **D2723** | §5 Run 9 and §2 (*"`DEP-LAUNCH-001` (family read by Run 9)"*, *"`OPS-PROV-002` (family read by Run 9)"*); D2681 (*"`THR-CON-GUESS` needs a requirement Run 9 names"*); D2665 (*"`cli_remote`'s evidence gains `cli_package`"*). | The tree: no `OPS-PROV-001` exists (the `OPS` and `DEP` families read whole; nothing outside the plan names either new id); `test_available_and_beta_rows_name_evidence_that_resolves` refuses a `beta` row naming a claim that has not passed in the newest evidence; `test_release_contract` reads the price sentence and *"schema moves"* each on ONE comment line. | **Rulings**: the plan's ids kept as written (`OPS-PROV-002`, `DEP-LAUNCH-001`); `THR-CON-GUESS` names `CTL-TOTP-001` and `SEC-CRED-002` — the factor's one-step window and replay refusal and the frozen Argon2id profile its door already rests on — and no new control (D2679); **`cli_package` joins `cli_remote`'s evidence at the close (Run 11)**, once it has passed; the price paragraph's two sentences re-wrapped. | A beta row names only what passed; a requirement for a carried risk is the control that exists, not a new one. | 0261, 0283 |
+| **D2724** | §5 Run 9 item 7: the gates in shards, once. | gate-01 shard 7's first attempt: `test_dev_command::test_status_on_a_project_with_no_environment_says_so_and_exits_four` read exit **5** (`EXIT_CONTRACT`), not 4 or 0; the module alone: 27 passed; `apg dev status` by hand: exit 0, *"no development environment"*; a stale `apg-dev-fixture-alpine-dev` container (exited 255 two weeks ago) on the workstation; **the whole shard re-run: 1,182 passed**. Session 42's same shard passed first time. | **The re-run's JUnit is the gate's** (the first attempt kept as `~/s43/run9/gate01-shard7.first.{txt,xml}`); an order dependence inside shard 7 on this workstation, **unexplained** — named in §10, not repaired here. | A flake re-run is evidence only with the failure kept beside it. | — |
 
 ---
 
@@ -1772,8 +1776,54 @@ bump's list to copy; `bin/upgrade.py --also` and `src/agentic_postgres/compatibi
    commit, gate, push — the commit is made first, the gates read it, then the
    push). Read CI. Then a documentation commit recording the gates (no CI read).
 
-**Done.** *(executor: the counts from the tuples; the gate diff's hunks; each
-shard's result and the totals; the SHA and CI.)*
+**Done.** 2026-10-20 (WSL `~/s43/run9/`), code `edffc5a`. Rows **D2721–D2724**.
+
+- **The counts, from the tuples** (D1628): requirements **395 → 415**, `CLAIMS`
+  **302 → 322**, `OFFLINE_CLAIMS` **133 → 149**, `CLAIM_INTRODUCED_IN` +20 at
+  43; ADRs 284 (Run 1). `VERSION` 1.21.0, `CURRENT_SESSION` 43 with its
+  paragraph; the 13 documented-path literals in five files (`bump43.py`); the
+  example client regenerated (its template version alone).
+- **The price** (`upgrade43.sh`, D1624's rig at `77303e4`): with `--also
+  api_operation_added` `bump minor`, `requires minor`, `ok`, changes
+  `[api_operation_added, image_digest]`; without, `requires patch`; two leaves
+  differ (`versions_lock_sha256`, `template_version`), 6,350 → 6,350 bytes.
+- **The registry** (`registry43.py`): the twenty §2 requirements, every node id
+  checked present by collection first (`collect.sh`: missing 0); the regex
+  gains `CON|SITE`. **The external module and the roster entry unparked**
+  (D2715) and the host module back (D2721).
+- **The gate** (`derive43.py`): `bin/session-43-check.sh` from 42's, the header
+  and usage block rewritten whole, **one flag** — tokens 66 → 67 (added
+  `--console-record-file` alone), parser arms 33 → 34. **The diff, every hunk**:
+  the header (1–104); the variable (178a); the usage comment (187); the
+  external synopsis (225); the three mode texts (227–280, 505); the two kept
+  texts' sentences (270–274, 522–524); the flags' session words (704–858); the
+  flag's entry (866a); the parser arm (1124a); the `=` refusal (1148a); the
+  existence check (2099a); the export (2124a). `test_session_forty_three_gate_modes.py`
+  from 42's by the same method, plus
+  `test_the_gate_exports_the_console_record_in_the_external_mode_alone`;
+  `SHELL_COMMANDS` lists the gate.
+- **The Ledger** (`ledger43.py`): `console` → `trial` naming
+  `console_walk_live`, `console_csrf_live`, `console_live_host`; `sql_editor` →
+  `planned`, 44, *"Not open yet."*; `cli_remote`'s text (its evidence at the
+  close, D2723); the schema's maximum 45; the console guard's exception gone.
+  **Six THR rows** (`threats43.py`; `THR-CON-GUESS` per D2723) and the upgrade
+  guide's 1.21.0 row; every derived document regenerated (`regen.sh`: every
+  check 0).
+- **Battery** (`battery9.py`): **8/8 KILLED**, every control PASSED, every file
+  restored — the gate's literal, the record's export, the console row planned,
+  `CON` out of the regex, a threat row's missing test, an offline claim
+  undeclared, a host node id renamed, the roster entry dropped.
+- **The gates, in foreground shards, on `edffc5a`** (`~/s43/run9/`, TMPDIR
+  `~/s43/tmp`, each shard under `timeout 570`, planned from the Session 42
+  close's measured times): **`session-01-check.sh` PASSED** — steps 1–3, 5–7;
+  eleven shards (457, 756, 1,313 + 1 skipped, 60, 58, 97, 1,182 — its first
+  attempt 1 failed, D2724 — 1,652, 1,964 + 3 skipped, 537, 157); step 8 merged
+  **8,237 = collected, 0 failures, 0 errors, 4 skipped**, P0 8,800, no
+  collision, no floating image. **`session-43-check.sh --mode offline`
+  PASSED** — steps A and B; eleven shards (457, 756, 1,314, 60, 58, 97, 1,182,
+  1,335, 1,780 + 3 skipped, 918, 286); step 9 merged **8,246 = collected**,
+  `evidence/session-43-offline.json` **149 claims, 149 passed**
+  (`source_commit` null as an offline half, checkout `edffc5a`).
 
 ### Run 10 — the sitting: the release, the dry run, the walk, the sweep, the tag, the publish
 
@@ -2005,8 +2055,15 @@ usage pass's duration `UNMEASURED`; `slot1-` … `slot6-prod` consumed;
   same CSP (it will need `connect-src` to its relay's `wss:` origin — that
   session's ADR amends 0280's constant), the same session cookie, and the
   `sql_editor` row at `planned` → 44.
-- **Session 45's walk** needs `slot7-prod` prepared and an ACCOUNT invitation
-  (D2669); the walker reads only the site.
+- **Session 45's walk** needs a slot prepared — **`slot8-prod`**, since D2714's
+  re-earning consumes `slot7-prod` in this session's Run 10 — and an ACCOUNT
+  invitation (D2669); the walker reads only the site.
+- **The site names a package before it exists** (D2722): `pipx install
+  agentic-postgres-cli` answers "not found" until the 1.21.0 tag publishes it,
+  and the name is unreserved until then; the order is the operator's (D2652).
+- **gate-01 shard 7 failed once** on `test_dev_command`'s status exit (5, not
+  4 or 0) and passed whole on its re-run (D2724): an order dependence on this
+  workstation, unexplained, the first attempt kept.
 
 ---
 
