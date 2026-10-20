@@ -543,10 +543,13 @@ class ConfirmFactorRequest(_Strict):
 
 
 class FactorEnrolmentResponse(BaseModel):
-    """The seed, shown ONCE: base32 and the enrolment URI that carries it."""
+    """The seed, shown ONCE: base32, the enrolment URI that carries it, and
+    that URI drawn as a QR code -- an `image/svg+xml` data URI the console
+    shows as an image, so no QR script runs in a browser (ADR 0282)."""
 
     secret: str
     otpauth_uri: str
+    otpauth_qr: str
 
 
 class CreateOrganizationRequest(_Strict):
@@ -567,10 +570,13 @@ class MintInvitationRequest(_Strict):
 
 
 class InvitationResponse(BaseModel):
-    """The invitation, and its token -- in this response and no other."""
+    """The invitation, and its token -- in this response and no other. Also as
+    the console's link, the token in its FRAGMENT, which no request line, proxy
+    log or `Referer` carries (ADR 0282)."""
 
     id: str
     invitation_token: str
+    accept_url: str
     organization_id: str | None
     role: ControlRole | None
     expires_at: str

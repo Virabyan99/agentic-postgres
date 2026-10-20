@@ -1168,3 +1168,80 @@ def test_insights_and_monitoring_dispatch_to_the_customer_cli(
     assert "unread" in by_name["backup_status"], by_name["backup_status"]
     text = person.run("monitoring", "show", "--project-key", key)
     assert text.returncode == 0 and "from app.control_backup_readings" in text.stdout, text.stdout
+
+
+# ---------------------------------------------------------------------------
+# Session 43: the invitation as a link (ADR 0282, D2657)
+# ---------------------------------------------------------------------------
+
+
+def _cloud() -> Any:
+    spec = importlib.util.spec_from_file_location("apg_cloud_s43", BIN / "cloud.py")
+    assert spec is not None and spec.loader is not None
+    cloud = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cloud)
+    return cloud
+
+
+def test_invite_writes_the_link(person: Person, served: Any, tmp_path: Path) -> None:
+    """`org invite --output` writes the console's link -- one line, 0600, printed
+    nowhere -- and `login accept --invitation-file` reads that file as it is."""
+    _, drive = served
+    owner = drive.account("link-owner")
+    seed = drive.enable_factor(owner)
+    drive.organization(owner, "the link's organisation")
+    from app import totp
+
+    assert (
+        person.login("link-owner", stdin=totp.totp(seed, int(time.time())) + "\n").returncode == 0
+    )
+    invitation = person.home / "invitation"
+    minted = person.run("org", "invite", "--role", "member", "--output", str(invitation))
+    assert minted.returncode == 0, minted.stderr
+    assert "invitation link written" in minted.stdout, minted.stdout
+    link = invitation.read_text(encoding="utf-8")
+    assert link.endswith("\n") and link.count("\n") == 1 and _mode(invitation) == 0o600
+    link = link.strip()
+    prefix = f"{cc.console_origin()}/accept#"
+    assert link.startswith(prefix), link[: len(prefix)]
+    token = link[len(prefix) :]
+    assert token and token not in minted.stdout and link not in minted.stdout
+
+    newcomer = Person(tmp_path / "newcomer", person.endpoint)
+    newcomer.home.mkdir()
+    held = newcomer.private("invitation", link)
+    password = newcomer.private("password", cc.PASSWORD)
+    accepted = newcomer.run(
+        "login", "accept", "--invitation-file", str(held), "--endpoint", person.endpoint,
+        "--username", "link-newcomer", "--password-file", str(password),
+    )  # fmt: skip
+    assert accepted.returncode == 0, accepted.stderr
+    assert drive.cluster.query(
+        "SELECT count(*) FROM app.control_accounts WHERE username = 'link-newcomer';"
+    ) == ["1"]
+
+
+def test_accept_reads_a_token_or_a_link(tmp_path: Path) -> None:
+    """A bare token or `https://<host>/accept#<token>`; every other shape is
+    refused with the one message, an http link and a link with a query included."""
+    cloud = _cloud()
+    token = "Abc_123-xyz"  # noqa: S105 -- a fixture shaped like a minted token
+
+    def read(text: str) -> str:
+        path = tmp_path / f"invitation-{abs(hash(text))}"
+        path.write_text(text + "\n", encoding="utf-8")
+        path.chmod(0o600)
+        return cloud.read_invitation(str(path))
+
+    assert read(token) == token
+    assert read(f"https://control.example.test/accept#{token}") == token
+    for refused in (
+        f"http://control.example.test/accept#{token}",
+        f"https://control.example.test/console/accept#{token}",
+        "https://control.example.test/accept#",
+        f"https://control.example.test/accept?token={token}#{token}",
+        f"https://control.example.test/accept#{token} extra",
+        "https:///accept#" + token,
+    ):
+        with pytest.raises(cloud.ClientError, match="does not hold one invitation token"):
+            read(refused)

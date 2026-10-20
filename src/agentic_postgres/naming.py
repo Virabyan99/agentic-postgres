@@ -439,6 +439,17 @@ def control_stripprefix_middleware_name(key: str) -> str:
     )
 
 
+def console_origin(domain: str) -> str:
+    """The console's origin, `https://<domain>` (Session 43, ADR 0281/0282).
+
+    The control project's own host serves the console beside `/api/v1`, so the
+    origin a console write must carry and the base of every invitation link are
+    this one expression -- the `route_*` URLs' scheme and host, with no path.
+    Rendered only for the control project (`APG_CONSOLE_ORIGIN`).
+    """
+    return f"https://{domain}"
+
+
 def app_buffering_middleware_name(key: str) -> str:
     """The application route's body-size middleware.
 

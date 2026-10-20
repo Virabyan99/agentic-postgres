@@ -26,6 +26,8 @@ import hmac
 import secrets
 import struct
 
+import segno
+
 __all__ = [
     "DIGITS",
     "ISSUER",
@@ -35,6 +37,7 @@ __all__ = [
     "hotp",
     "new_seed",
     "provisioning_uri",
+    "qr_data_uri",
     "step_of",
     "totp",
     "verify",
@@ -140,3 +143,16 @@ def provisioning_uri(username: str, seed: bytes) -> str:
         f"otpauth://totp/{label}?secret={secret}&issuer={ISSUER}"
         f"&period={STEP_SECONDS}&digits={DIGITS}&algorithm=SHA1"
     )
+
+
+def qr_data_uri(uri: str) -> str:
+    """`uri` as a QR code, an `image/svg+xml` data URI the console shows as an
+    `<img>` (ADR 0282). **Shown once**, in the answer that already carries the
+    URI: drawn here so that no QR script runs in the browser (D2659).
+
+    `light="white"` is part of the image, not of the page: segno's default is
+    dark modules on a transparent background, which a scanner reads as all dark
+    on a dark page -- rig 43b decoded the default to nothing and this to the
+    exact URI (D2682).
+    """
+    return segno.make(uri, error="m").svg_data_uri(scale=4, light="white")

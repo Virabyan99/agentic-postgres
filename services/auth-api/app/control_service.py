@@ -385,12 +385,16 @@ class ControlService:
     # -- the second factor ------------------------------------------------------
 
     async def begin_factor(self, caller: ControlPrincipal) -> dict[str, str]:
-        """A new seed, stored unconfirmed, returned ONCE as base32 and a URI."""
+        """A new seed, stored unconfirmed, returned ONCE as base32, a URI and
+        that URI drawn as a QR code (ADR 0282) -- three forms of one seed in
+        the one answer that already carried it, and no new holder."""
         seed = totp.new_seed()
         await self.repository.totp_begin(caller.user_id, seed)
+        uri = totp.provisioning_uri(caller.person.username, seed)
         return {
             "secret": base64.b32encode(seed).decode("ascii").rstrip("="),
-            "otpauth_uri": totp.provisioning_uri(caller.person.username, seed),
+            "otpauth_uri": uri,
+            "otpauth_qr": totp.qr_data_uri(uri),
         }
 
     async def confirm_factor(self, caller: ControlPrincipal, code: str) -> int:

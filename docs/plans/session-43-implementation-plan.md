@@ -490,6 +490,12 @@ execution order.
 | **D2687** | Rig 43c (D2676): *"reads … whether Pages adds headers of its own (recorded whole)"*; §9: *"rig 43c: Pages does not apply `_headers` to the HTML pages, or adds a script or a third-party request of its own"*. | Rig 43c (settled reads, two rounds): `_headers` applies to every HTML answer, `/missing` included (404 with `404.html`); `Referrer-Policy` in `_headers` REPLACES Pages' default `strict-origin-when-cross-origin`; `! Access-Control-Allow-Origin` DETACHES Pages' default `*`; no `<script` in any body. Pages/Cloudflare ADD `x-content-type-options: nosniff`, `cache-control`, `etag` and **NEL** (`report-to` → `https://a.nel.cloudflare.com/report/v4?s=…`, `nel` `success_fraction` 0.0) — and **`! Report-To` / `! NEL` do NOT detach them** (a fourth pass). Reads in the first ~20 s after a deploy return 522s mixed with 200s. Also: the operator's first temporary token held Pages **Read** (GET answered 8000007, create answered `10000 Authentication error`); edited to Edit, it worked. | **Not §9's stop (the agent's ruling, told to the operator)**: NEL is no script and causes no request by the page; the browser reports failed fetches only, to the CDN serving every byte. Recorded in ADR 0283; **Sheet C4 (Run 7) reads the headers on the custom domain** (the zone's own NEL setting may differ). The site's `_headers` carries `Referrer-Policy: no-referrer` and `! Access-Control-Allow-Origin`; the build refuses a site with no `404.html`; **every live read (Sheet C4, `SITE-LIVE-001`) waits for five consecutive 200s** before reading. Sheet C3's token wording stays (`Edit`); the rig token's `Read` was a slip at creation. | What Cloudflare adds is a fact of the platform to be named, not hidden; a read before propagation is not a reading. | 0283 |
 | **D2688** | D2670 (D2636): *"the inspect template already carries `{{if .State.Health}}` and still exits 1 … candidates `{{with .State.Health}}…` and `{{if index .State "Health"}}`"*. | Run 2 (`~/s43/run2/d2636.txt`, Docker 29.5.2, the pinned collector image): the SHORT template `{{.Name}} health={{if .State.Health}}…` prints `none` rc 0; the FULL `do_status` template fails *map has no entry for key "Health"*. **The cause is `{{.HostConfig.NanoCpus}}`**: the CLI runs an inspect template on its typed struct first (field `NanoCPUs`) and falls back to the raw JSON map only when that fails — and in the map a missing key is an error. Control: short + `NanoCpus` fails, short + `NanoCPUs` passes. In the full template `with .State.Health` fails too; `if index .State "Health"` and `with index …` print `none` rc 0 and the status of a container that has one. | **`{{if index .State "Health"}}`** (the plan's rule: the first candidate that prints `none` with rc 0), which reads in either mode; `NanoCpus` kept (it is what the map holds, and what the host's lines have always said). Commented at the template. | A template that fails only beside an unrelated field looks intermittent from outside; the mechanism is what keeps the next one from regressing. | — |
 | **D2689** | D2670 (D2642): *"the count is `len(created)` of the resources `--apply` created (the variable read from `:990-1027`)"*. | No such variable: `apply()` keeps `created_so_far` (project and identity only, for the failure report) and ignores `create_secret`'s return, which `add_missing_secrets` reads as *created vs already present* (`:788-810`). The plan counts project + identity + client secret + one value per generated secret + the read-only GRANT (`describe_plan`, `:680-686`). | **`resources_created`**: 3 (project, identity, client secret) + one per `create_secret` that returned True; the grant is a permission, not a resource. Session 42's plan of 17 is 16 resources. `created_so_far` (the failure report) unchanged. Test reads the expected number from what the fake provider RECORDED, at sessions 2 and 42 (control: their contracts differ in size, so no literal passes both). | The count is a reading of what this run did, not of the plan. | — |
+| **D2690** | Run 3 step 4: *"`segno` joins `requirements-dev.in` … and `bin/lock-dev-deps.sh --update` relocks `requirements-dev.txt`"*. | `--update` resolves **as of now** and stamps a new cutoff (`bin/lock-dev-deps.sh:176-190`): every floating dev dependency (pytest, httpx, jsonschema …) would move inside a run about cookies — D238's coupling, in the dev lock. The committed cutoff is `2026-09-03T15:16:21Z`; segno 1.6.6 (2025-03-12) predates it. | **Locked AT THE COMMITTED CUTOFF** with the script's own `compile_to` and `stamp` (sourced, `main` removed; `~/s43/run3` / `/tmp/s43-devlock.sh`): the diff is exactly `segno==1.6.6` with the two hashes rig 43b read (wheel `28c7d081…`, sdist `e60933af…`); `--check` and `--check-environment` pass (99 pinned). `versions.env` by `lock-versions.sh --update --packages-only` (no image moved). | Adding one package is not the moment to move the world. | 0282 |
+| **D2691** | Run 3 step 1: *"the control-mode setting `console_origin` reads it (required in control mode … a control app with no origin refuses to start)"*. | `test_the_control_mode_reads_exactly_what_auth_reads` holds `load(mode="control") == load(mode="auth")` (one environment, two modes, ADR 0251), and `bin/app-contract.py:201` builds `create_app("control").openapi()` with NO environment — the first build-time read made the snapshot capture fail (the run's first `--update` raised `APG_CONSOLE_ORIGIN is required`). | **Beside `Settings`, not in it**: `settings.CONSOLE_ORIGIN_VARIABLE` + `load_console_origin()` (an https origin, no path — compared byte for byte with `Origin`), read FIRST in the lifespan in control mode (`app.state.console_origin`), never at build. Both compose guards widen by that one named constant, `auth` only (`APP_MODE`/`APG_OTLP_LOGS_ENDPOINT`'s precedent). Rendered `APG_CONSOLE` (`1`/`0`) and `APG_CONSOLE_ORIGIN` (`https://<domain>` / empty) for every project; compose passes `${APG_CONSOLE_ORIGIN?required}` — set, possibly empty (the plan's `:-` failed `test_every_setting_is_required_interpolation_or_a_literal`: no default in `auth`'s environment; `STORAGE_CORS_ALLOWED_ORIGINS`'s shape instead). The rendered-mode test reads the two with `.get` (D2381). | A document generator must not need a running deployment's settings; the guard that the two modes read one environment stands. | 0281 |
+| **D2692** | Run 3 step 6: *"the QR decoded structurally (an `image/svg+xml;base64,` prefix, `<svg` after decoding, no `http`, no `<script`)"*. | segno's `svg_data_uri` is **percent-encoded**, `data:image/svg+xml;charset=utf-8,%3Csvg…`, not base64; its only `http` is the namespace (D2682). | The test asserts the prefix segno produces, decodes by `urllib.parse.unquote`, and asserts no `<script`, `href` or `url(`, one `http` = the namespace, and `fill='#fff'` (the white background). | Assert what the library emits, read once, not what was guessed. | 0282 |
+| **D2693** | Run 3 step 2: *"`_caller`: `Authorization` present → today's path; else … cookie"*. | A second reader of the bearer: `accept_invitation` decided "signed in" by `request.headers.get("authorization")` (`control_routes.py:404`) — a console user accepting a membership would have been anonymous. | **One rule, `_bearer(request)`**, read by `_caller` AND by `accept_invitation`: `Authorization` wins; else the access cookie only with the header (and, for a non-read, the console's `Origin`); a cookie value starting `apg_` is a 401. | CLAUDE.md §7 question 5: when a decision is implemented, every caller gets it. | 0281 |
+| **D2694** | ADR 0281: *"A write's Origin check also applies to the three session routes in console mode"*; `DELETE /v1/sessions/current`'s description: *"Answers 204 whether or not the token named a live session."* | — | **In console mode (the header present) a login, refresh or logout from any other `Origin` is `401` before its body is read** — the logout's *"always 204"* holds for bearer mode and for the console's own origin. In console mode an empty body reads the refresh cookie; a logout with no cookie and no body ends nothing and still clears both cookies (204). | A cross-origin request carrying the console's header is not the console. | 0281 |
+| **D2695** | Run 3 step 3: *"`org invite --output` writes `accept_url`"*. | Until 1.21.0 is deployed, the hosted control plane (1.20.0) answers no `accept_url`. | `org invite` writes `accept_url` when the server answers one, else the bare token, and says which (*"the invitation link written to …"* / *"the invitation token written to …"*); `login accept` reads either. | The CLI from this checkout keeps working against the deployed release until the sitting. | 0282 |
 
 ---
 
@@ -905,6 +911,8 @@ tests/contract/*.py`).
   `test_secret_origin`, `test_bootstrap_state`, `test_host_infrastructure`,
   `test_telemetry_admission`, `test_root_script_policy`,
   `test_operator_commands_run_on_the_host`): **1,497 passed, 2 skipped**.
+- Committed `95617a8c37bb4ac58ac54ec65e86c932f73abbe7`; **CI `contract` success**
+  (run 39369320493).
 
 ### Run 3 — the session cookie, the CSRF rule, the invitation link, the QR (`services/auth-api/`, `src/`, `bin/cloud.py`, `contracts/`)
 
@@ -1004,7 +1012,56 @@ cluster — the new module copies that harness), `test_totp.py`,
    `test_control_projects`, `test_repository_contract`, `test_environment_gates`,
    the sweep-selector guard. Commit, push, read CI.
 
-**Done.** *(executor: the snapshot diff's members; the battery; the SHA and CI.)*
+**Done.** 2026-10-20 (WSL `~/s43/run3/`). Rows **D2690–D2695**.
+
+- **The origin**: `naming.console_origin(domain)`; rendered `APG_CONSOLE` and
+  `APG_CONSOLE_ORIGIN` for every project (`1`/`https://<domain>` on the control
+  project only); compose `${APG_CONSOLE_ORIGIN?required}`; read in control mode
+  by `settings.load_console_origin()` first in the lifespan, never at build and
+  never in `Settings` (D2691).
+- **Cookie mode** (ADR 0281) in `control_routes.py`: `_bearer` (one rule, read
+  by `_caller` and by `accept_invitation`, D2693), `_console_session_request`
+  (a console login, refresh or logout from another `Origin` is 401, D2694),
+  `_tokens(console=True)` setting the two `__Host-` cookies and answering
+  `{expires_at, token_use}`, refresh/logout reading the refresh cookie from an
+  empty body, logout clearing both. The three session routes' descriptions and
+  the mint's name the header and the link.
+- **The link** (ADR 0282): `accept_url` in the mint answer;
+  `org invite --output` writes it (or the bare token from a pre-1.21.0 server,
+  D2695); `read_invitation` reads a token or `https://<host>/accept#<token>`;
+  `bin/cloud.py`'s import block wrapped in the packaging seam markers.
+- **The QR**: `totp.qr_data_uri` (`light="white"`, D2682) →
+  `FactorEnrolmentResponse.otpauth_qr`; segno 1.6.6 in `versions.in.yaml` /
+  `versions.env` (`--packages-only`, no image moved), the auth Dockerfile
+  (install + import control), the three compose build sites, and the dev lock
+  at the committed cutoff (D2690).
+- **The snapshot** (`bin/app-contract.sh --update --snapshot control`): **two
+  members** (`accept_url`, `otpauth_qr`), their two models' descriptions, and
+  **four** route descriptions (the three session routes and the mint) — the
+  plan said three members and three routes; `--check` passes for both
+  snapshots.
+- **Tests**: `tests/contract/test_console_session.py` (16: every node id of
+  `CON-SESSION-001`, `CON-CSRF-001`, `CON-INVITE-001`'s server half,
+  `CON-FACTOR-001`'s two, and `test_a_control_process_without_the_origin_does_not_start`);
+  `test_control_cli.py::test_invite_writes_the_link` (the real `org invite` →
+  `login accept` with the link file) and `::test_accept_reads_a_token_or_a_link`;
+  `test_version_lock.py::test_segno_is_locked`; stricter:
+  `test_control_sessions`' log canary plants the QR,
+  `test_control_routes_rendered` reads the two keys (`.get`, D2381); widened
+  by one named constant: the two compose guards in `test_auth_service_shape`.
+- **Battery** (`~/s43/run3/battery3.py`, `battery3.txt`): the plan's five
+  (httponly dropped; cookie without the header; no Origin check on writes;
+  token in the body; link in the query) and three more (a key rides a cookie;
+  the QR without its background; an `http` link accepted) — **8/8 KILLED**,
+  each target FAILED, each control PASSED, files restored `cmp`-equal.
+- **Targeted** — the first background run was reaped by memory pressure at 44%
+  (the laptop, not the tests); re-run in four FOREGROUND shards under `timeout
+  570` (`~/s43/shard.sh`; 27 modules). Found and fixed: compose's `:-` default
+  (`test_every_setting_is_required_interpolation_or_a_literal`), an `APG_`
+  subscript in a test body (`test_environment_gates`, D2381), and a stale
+  fixture render read before a later module re-rendered it
+  (`test_compose_contract`, green on the current render). Final: shard 1 139+55,
+  shard 2 364+20, shard 3 1,227+85, shard 4 46 — all passed.
 
 ### Run 4 — the console server, its plane and its first pages (`services/console/`, `compose.yaml`, `src/`, `bin/project-runtime.sh`)
 

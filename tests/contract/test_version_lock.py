@@ -563,3 +563,28 @@ def test_the_interpreter_is_not_moved_by_this_dependency_set(candidates: dict) -
         "the interpreter moved. Nothing in the Session 6 dependency set required "
         "3.13 when it was measured; a bump is its own decision (D240)"
     )
+
+
+def test_segno_is_locked(lock: dict[str, str], candidates: dict) -> None:
+    """Session 43 (ADR 0282): the QR library, one version in all four places.
+
+    The auth image installs it from the lock and imports it in the build's own
+    control; the offline suite runs the same version from the dev lock, both
+    artifact hashes rig 43b read (wheel and sdist); and the lock records the
+    digest `lock-versions.sh` resolved."""
+    version = candidates["packages"]["SEGNO_VERSION"]["version"]
+    assert candidates["packages"]["SEGNO_VERSION"]["package"] == "segno"
+    assert lock["SEGNO_VERSION"] == version == "1.6.6"
+    assert lock["SEGNO_VERSION_DIGEST"] == (
+        "sha256:e60933afc4b52137d323a4434c8340e0ce1e58cec71439e46680d4db188f11b3"
+    )
+    dev_in = (REPO_ROOT / "requirements-dev.in").read_text(encoding="utf-8")
+    assert re.search(rf"^segno=={re.escape(version)}$", dev_in, flags=re.MULTILINE)
+    dev_lock = (REPO_ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+    entry = dev_lock.split(f"segno=={version} \\\n", 1)[1].split("\n    #", 1)[0]
+    assert "28c7d081ed0cf935e0411293a465efd4d500704072cdb039778a2ab8736190c7" in entry
+    assert "e60933afc4b52137d323a4434c8340e0ce1e58cec71439e46680d4db188f11b3" in entry
+    dockerfile = (REPO_ROOT / "services" / "auth-api" / "Dockerfile").read_text(encoding="utf-8")
+    assert '"segno==${SEGNO_VERSION}"' in dockerfile
+    control = [line for line in dockerfile.splitlines() if 'python -c "import argon2' in line]
+    assert len(control) == 1 and " segno," in control[0], control

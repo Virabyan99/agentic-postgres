@@ -332,6 +332,10 @@ def test_the_compose_service_supplies_every_setting_the_service_requires(
     """
     supplied = set(compose_model["services"][service]["environment"])
     required = set(declared) | {"APP_MODE", log_setup.OTLP_ENDPOINT_VARIABLE}
+    if service == "auth":
+        # Session 43 (ADR 0281): read by `create_app` in control mode, beside
+        # APP_MODE, never by `settings.load` -- the `auth` service's only.
+        required |= {settings_module.CONSOLE_ORIGIN_VARIABLE}
 
     assert required - supplied == set(), (
         f"the service requires {sorted(required - supplied)} for `{service}`, which "
@@ -362,8 +366,10 @@ def test_the_auth_mode_reads_no_new_variable(compose_model: dict[str, Any]) -> N
     supplied = set(compose_model["services"]["auth"]["environment"])
     # Session 42 (ADR 0277): the one variable the telemetry export added, read
     # by `log_setup` at `create_app`, beside APP_MODE -- named, never inferred.
+    # Session 43 (ADR 0281): the console's origin, read by `create_app` in
+    # control mode only, the same shape.
     assert supplied == set(settings_module.REQUIRED_VARIABLES) | {
-        "APP_MODE", log_setup.OTLP_ENDPOINT_VARIABLE,
+        "APP_MODE", log_setup.OTLP_ENDPOINT_VARIABLE, settings_module.CONSOLE_ORIGIN_VARIABLE,
     }  # fmt: skip
 
     for relative in (

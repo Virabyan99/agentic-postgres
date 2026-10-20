@@ -1005,6 +1005,14 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "CONTROL_ROUTE_PATH",
     "CONTROL_ROUTER_NAME",
     "CONTROL_STRIPPREFIX_MIDDLEWARE_NAME",
+    # Session 43 (ADR 0280-0282). `1` on the control project, whose deploy
+    # starts the console under its facility profile (`project-runtime.sh`
+    # reads it, D2344's shape), `0` elsewhere; and the console's origin, which
+    # the control mode compares a console write's `Origin` with and builds an
+    # invitation link from -- EMPTY on every other project, which `compose.yaml`
+    # allows (`?required` without the colon) and nothing reads.
+    "APG_CONSOLE",
+    "APG_CONSOLE_ORIGIN",
     # The origin allowlist, as one comma-separated value (ADR 0109). Measured:
     # Traefik parses a comma-separated label into a list, read back from its own
     # API as `['https://a.example', 'https://b.example']`.
@@ -2241,6 +2249,9 @@ def build_compose_env(
         "CONTROL_ROUTE_PATH": identity.route_control_path,
         "CONTROL_ROUTER_NAME": identity.control_router,
         "CONTROL_STRIPPREFIX_MIDDLEWARE_NAME": identity.control_stripprefix_middleware,
+        # Session 43 (ADR 0280-0282): only where the mode above is `control`.
+        "APG_CONSOLE": "1" if control else "0",
+        "APG_CONSOLE_ORIGIN": naming.console_origin(identity.domain) if control else "",
         # The same sorted list the rendered document publishes, comma-joined --
         # measured to parse into a list by the locked Traefik, read back from
         # its own API rather than inferred from a response header.

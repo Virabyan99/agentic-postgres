@@ -107,6 +107,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     connections first.
     """
     mode = application.state.mode
+    if mode == "control":
+        # Session 43 (ADR 0281, 0282): the console's origin, beside `Settings`
+        # rather than in it (the control mode reads what `auth` reads). Here and
+        # not at build, so `create_app("control").openapi()` needs no environment.
+        application.state.console_origin = settings_module.load_console_origin()
     settings = settings_module.load(mode=mode)
     application.state.settings = settings
 

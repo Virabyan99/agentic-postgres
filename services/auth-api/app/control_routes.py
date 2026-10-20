@@ -26,14 +26,15 @@ accepted, before its body is read.
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
-from app import control_roles, errors, openapi_docs, strict_query
-from app.control_service import ControlPrincipal, ControlService
+from app import control_roles, errors, openapi_docs, refresh_sessions, strict_query
+from app.control_service import KEY_PREFIX, ControlPrincipal, ControlService
 from app.models import (
     AcceptInvitationRequest,
     BranchLimitReachedResponse,
@@ -74,6 +75,18 @@ router = APIRouter(prefix="/v1")
 #: member list -- nothing this surface answers belongs in a shared cache.
 NO_STORE = {"Cache-Control": "no-store"}
 
+#: Session 43 (ADR 0281). The console's session: two `__Host-` cookies --
+#: `HttpOnly; Secure; SameSite=Strict; Path=/`, no `Domain` -- set by the
+#: session routes when a request carries `X-Apg-Console: 1`, and honoured only
+#: with that header (which no other origin can send without a preflight that no
+#: route answers) and, on a write, only with the console's own `Origin`. A
+#: request with `Authorization` is bearer mode and ignores cookies: the CLI and
+#: management keys are unchanged.
+ACCESS_COOKIE = "__Host-apg_access"
+REFRESH_COOKIE = "__Host-apg_refresh"
+CONSOLE_HEADER = "x-apg-console"
+_READS = frozenset({"GET", "HEAD"})
+
 
 def _refused(description: str) -> dict[str, Any]:
     return {"model": ControlRefusedResponse, "description": description}
@@ -103,11 +116,52 @@ def _route(request: Request) -> str:
     return request.scope["route"].name
 
 
+def _console(request: Request) -> bool:
+    """The request says it is the console's (ADR 0281)."""
+    return request.headers.get(CONSOLE_HEADER) == "1"
+
+
+def _from_console_origin(request: Request) -> bool:
+    """`Origin` is the console's own, byte for byte."""
+    return request.headers.get("origin") == request.app.state.console_origin
+
+
+def _bearer(request: Request) -> str | None:
+    """The credential this request presents, as an `Authorization` value.
+
+    `Authorization` wins and cookies are then ignored. Otherwise the access
+    cookie, but only with the console's header and -- for anything but a read --
+    the console's `Origin`; a cookie without them is no credential at all. A
+    key never rides a cookie (ADR 0281 item 2)."""
+    authorization = request.headers.get("authorization")
+    if authorization is not None:
+        return authorization
+    cookie = request.cookies.get(ACCESS_COOKIE)
+    if cookie is None or not _console(request):
+        return None
+    if cookie.startswith(KEY_PREFIX):
+        raise errors.AuthenticationFailed("a management key in a cookie")
+    if request.method not in _READS and not _from_console_origin(request):
+        return None
+    return f"Bearer {cookie}"
+
+
+def _console_session_request(request: Request) -> bool:
+    """For the three session routes: whether this is the console's request.
+
+    A login, a refresh and a logout are writes, so in console mode each needs
+    the console's `Origin`; one from anywhere else is refused as unauthenticated
+    before its body is read."""
+    if not _console(request):
+        return False
+    if not _from_console_origin(request):
+        raise errors.AuthenticationFailed("a console session request from another origin")
+    return True
+
+
 async def _caller(request: Request) -> ControlPrincipal:
     """The bearer, verified, with the factor gate applied for this route."""
-    return await _service(request).authenticate(
-        request.headers.get("authorization"), _route(request)
-    )
+    return await _service(request).authenticate(_bearer(request), _route(request))
 
 
 def _query(request: Request, allowed: tuple[str, ...]) -> dict[str, str]:
@@ -152,16 +206,41 @@ async def _guard(handler: Callable[[], Awaitable[Response]]) -> Response:
     return response
 
 
-def _tokens(issued: Any, refresh: str) -> JSONResponse:
-    return JSONResponse(
-        {
-            "access_token": issued.token,
-            "token_type": "Bearer",
-            "expires_at": issued.expires_at,
-            "token_use": issued.token_use,
-            "refresh_token": refresh,
-        }
+def _session_cookie(response: Response, key: str, value: str, max_age: int) -> None:
+    response.set_cookie(
+        key, value, max_age=max_age, path="/", secure=True, httponly=True, samesite="strict"
     )
+
+
+def _tokens(issued: Any, refresh: str, *, console: bool = False) -> JSONResponse:
+    if not console:
+        return JSONResponse(
+            {
+                "access_token": issued.token,
+                "token_type": "Bearer",
+                "expires_at": issued.expires_at,
+                "token_use": issued.token_use,
+                "refresh_token": refresh,
+            }
+        )
+    # The console's answer holds no token: both live in cookies no script can
+    # read (ADR 0281), the access cookie expiring with the token it carries.
+    response = JSONResponse({"expires_at": issued.expires_at, "token_use": issued.token_use})
+    _session_cookie(
+        response, ACCESS_COOKIE, issued.token, max(1, issued.expires_at - int(time.time()))
+    )
+    _session_cookie(response, REFRESH_COOKIE, refresh, refresh_sessions.REFRESH_TTL_SECONDS)
+    return response
+
+
+async def _presented_refresh(request: Request, console: bool, model: type) -> str | None:
+    """The refresh token a refresh or a logout names: the body's, or -- in
+    console mode, with an empty body -- the refresh cookie's (`None` if the
+    console sent neither)."""
+    if console and not (await request.body()).strip():
+        return request.cookies.get(REFRESH_COOKIE) or None
+    payload = await _body(request, model)
+    return payload.refresh_token  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +256,9 @@ def _tokens(issued: Any, refresh: str) -> JSONResponse:
             "The password is verified first, an unknown username against a dummy hash, so "
             "every password failure is one answer that costs the same. Only then, if the person "
             "has an enabled second factor, is `totp_code` required: `second_factor_required` "
-            "without one, `second_factor_invalid` with a wrong one or one already used."
+            "without one, `second_factor_invalid` with a wrong one or one already used. "
+            "With `X-Apg-Console: 1` and the console's `Origin`, both tokens are set as "
+            "`__Host-` cookies (`HttpOnly; Secure; SameSite=Strict`) and the body holds neither."
         ),
         request_model=ControlLoginRequest,
     ),
@@ -193,12 +274,13 @@ async def create_session(request: Request) -> Response:
     """D2050. The release's login with the second factor as its hook."""
 
     async def run() -> Response:
+        console = _console_session_request(request)
         payload = await _body(request, ControlLoginRequest)
         assert isinstance(payload, ControlLoginRequest)
         issued, refresh = await _service(request).login(
             payload.username, payload.password, payload.totp_code
         )
-        return _tokens(issued, refresh)
+        return _tokens(issued, refresh, console=console)
 
     return await _guard(run)
 
@@ -209,7 +291,9 @@ async def create_session(request: Request) -> Response:
         summary="Exchange a refresh token for an access token and its successor",
         description=(
             "Single use, and every refusal answers identically -- the release's session "
-            "plane, unchanged. Confirming a second factor ends every session opened before it."
+            "plane, unchanged. Confirming a second factor ends every session opened before it. "
+            "With `X-Apg-Console: 1` and the console's `Origin`, an empty body reads the "
+            "refresh cookie and both cookies are replaced."
         ),
         request_model=RefreshRequest,
     ),
@@ -221,10 +305,12 @@ async def create_session(request: Request) -> Response:
 )
 async def refresh_session(request: Request) -> Response:
     async def run() -> Response:
-        payload = await _body(request, RefreshRequest)
-        assert isinstance(payload, RefreshRequest)
-        issued, successor = await _service(request).refresh(payload.refresh_token)
-        return _tokens(issued, successor)
+        console = _console_session_request(request)
+        presented = await _presented_refresh(request, console, RefreshRequest)
+        if presented is None:
+            raise errors.AuthenticationFailed("no refresh token presented")
+        issued, successor = await _service(request).refresh(presented)
+        return _tokens(issued, successor, console=console)
 
     return await _guard(run)
 
@@ -236,7 +322,9 @@ async def refresh_session(request: Request) -> Response:
         summary="Log out: end the session a refresh token names",
         description=(
             "Takes the refresh token, not an access token: the command-line client keeps only "
-            "the refresh token. Answers 204 whether or not the token named a live session."
+            "the refresh token. Answers 204 whether or not the token named a live session. "
+            "With `X-Apg-Console: 1` and the console's `Origin`, an empty body reads the "
+            "refresh cookie, and both cookies are cleared."
         ),
         request_model=LogoutRequest,
     ),
@@ -247,10 +335,16 @@ async def refresh_session(request: Request) -> Response:
 )
 async def end_session(request: Request) -> Response:
     async def run() -> Response:
-        payload = await _body(request, LogoutRequest)
-        assert isinstance(payload, LogoutRequest)
-        await _service(request).logout(payload.refresh_token)
-        return Response(status_code=204)
+        console = _console_session_request(request)
+        presented = await _presented_refresh(request, console, LogoutRequest)
+        if presented is not None:
+            await _service(request).logout(presented)
+        response = Response(status_code=204)
+        if console:
+            # Cleared with the attributes they were set with, or a browser keeps them.
+            for key in (ACCESS_COOKIE, REFRESH_COOKIE):
+                response.delete_cookie(key, path="/", secure=True, httponly=True, samesite="strict")
+        return response
 
     return await _guard(run)
 
@@ -347,7 +441,8 @@ async def confirm_factor(request: Request) -> Response:
             "owner of that organisation for a role at or below their own (only an owner "
             "invites an owner). With neither: an account invitation, minted by the registry "
             "administrator with an enabled second factor. Lives 72 hours unless "
-            "`expires_in_hours` (1-168) says otherwise."
+            "`expires_in_hours` (1-168) says otherwise. `accept_url` is the console's link, "
+            "the token in its fragment, which no request line or log receives."
         ),
         request_model=MintInvitationRequest,
     ),
@@ -371,7 +466,15 @@ async def mint_invitation(request: Request) -> Response:
             role=payload.role,
             expires_in_hours=payload.expires_in_hours,
         )
-        return JSONResponse(minted, status_code=201)
+        # The console's link, the token in its FRAGMENT (ADR 0282): a browser
+        # sends no fragment in a request line, a proxy log or a `Referer`.
+        token = minted["invitation_token"]
+        linked = {
+            "id": minted["id"],
+            "invitation_token": token,
+            "accept_url": f"{request.app.state.console_origin}/accept#{token}",
+        }
+        return JSONResponse({**linked, **minted}, status_code=201)
 
     return await _guard(run)
 
@@ -401,7 +504,10 @@ async def accept_invitation(request: Request) -> Response:
     async def run() -> Response:
         payload = await _body(request, AcceptInvitationRequest)
         assert isinstance(payload, AcceptInvitationRequest)
-        caller = await _caller(request) if request.headers.get("authorization") else None
+        # Signed in by bearer OR by the console's cookie (ADR 0281): the same
+        # rule every other route reads, so a cookie without the console's header
+        # and origin is no session here either.
+        caller = await _caller(request) if _bearer(request) is not None else None
         accepted = await _service(request).accept_invitation(
             payload.invitation_token,
             caller=caller,

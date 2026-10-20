@@ -78,6 +78,13 @@ def control_document() -> dict[str, Any]:
     )
 
 
+def console_origin() -> str:
+    """The control example's console origin, derived as the render derives it
+    (Session 43, ADR 0281) -- what `APG_CONSOLE_ORIGIN` holds for these proofs."""
+    manifest = config.load_project_manifest(CONTROL_EXAMPLE)
+    return naming.console_origin(manifest["project"]["domain"])
+
+
 @dataclass
 class ControlCluster:
     name: str
@@ -247,6 +254,17 @@ class ControlDriver:
             self._request(method, path, **self._arguments(token, body))
         )
 
+    def send(
+        self, method: str, path: str, *, headers: dict[str, str], content: str | None = None
+    ) -> Any:
+        """A request with exactly these headers -- `Cookie`, `Origin`,
+        `X-Apg-Console` written by the proof, the way a browser would send them
+        (Session 43). No cookie jar: the proof reads `Set-Cookie` itself."""
+        arguments: dict[str, Any] = {"headers": headers}
+        if content is not None:
+            arguments["content"] = content
+        return self.loop.run_until_complete(self._request(method, path, **arguments))
+
     def concurrently(self, *requests: tuple[str, str, str | None, Any]) -> list[Any]:
         """Several requests on several tasks of ONE event loop, at once."""
         import asyncio
@@ -386,6 +404,7 @@ def _environment(cluster: ControlCluster, work: Any) -> dict[str, str]:
         "APG_SIGNING_KEY_FILE": str(signing),
         "APG_LISTEN_PORT": "8080",
         "APG_ROLE_NAMES": json.dumps(role_names, separators=(",", ":"), sort_keys=True),
+        "APG_CONSOLE_ORIGIN": console_origin(),
     }
 
 

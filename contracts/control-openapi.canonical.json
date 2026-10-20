@@ -101,8 +101,12 @@
         "type": "object"
       },
       "FactorEnrolmentResponse": {
-        "description": "The seed, shown ONCE: base32 and the enrolment URI that carries it.",
+        "description": "The seed, shown ONCE: base32, the enrolment URI that carries it, and\nthat URI drawn as a QR code -- an `image/svg+xml` data URI the console\nshows as an image, so no QR script runs in a browser (ADR 0282).",
         "properties": {
+          "otpauth_qr": {
+            "title": "Otpauth Qr",
+            "type": "string"
+          },
           "otpauth_uri": {
             "title": "Otpauth Uri",
             "type": "string"
@@ -114,7 +118,8 @@
         },
         "required": [
           "secret",
-          "otpauth_uri"
+          "otpauth_uri",
+          "otpauth_qr"
         ],
         "title": "FactorEnrolmentResponse",
         "type": "object"
@@ -140,8 +145,12 @@
         "type": "object"
       },
       "InvitationResponse": {
-        "description": "The invitation, and its token -- in this response and no other.",
+        "description": "The invitation, and its token -- in this response and no other. Also as\nthe console's link, the token in its FRAGMENT, which no request line, proxy\nlog or `Referer` carries (ADR 0282).",
         "properties": {
+          "accept_url": {
+            "title": "Accept Url",
+            "type": "string"
+          },
           "expires_at": {
             "title": "Expires At",
             "type": "string"
@@ -186,6 +195,7 @@
         "required": [
           "id",
           "invitation_token",
+          "accept_url",
           "organization_id",
           "role",
           "expires_at"
@@ -320,7 +330,7 @@
   "paths": {
     "/v1/invitations": {
       "post": {
-        "description": "With `organization_id` and `role`: a membership invitation, minted by an admin or owner of that organisation for a role at or below their own (only an owner invites an owner). With neither: an account invitation, minted by the registry administrator with an enabled second factor. Lives 72 hours unless `expires_in_hours` (1-168) says otherwise.",
+        "description": "With `organization_id` and `role`: a membership invitation, minted by an admin or owner of that organisation for a role at or below their own (only an owner invites an owner). With neither: an account invitation, minted by the registry administrator with an enabled second factor. Lives 72 hours unless `expires_in_hours` (1-168) says otherwise. `accept_url` is the console's link, the token in its fragment, which no request line or log receives.",
         "operationId": "mint_invitation_v1_invitations_post",
         "requestBody": {
           "content": {
@@ -3862,7 +3872,7 @@
     },
     "/v1/sessions": {
       "post": {
-        "description": "The password is verified first, an unknown username against a dummy hash, so every password failure is one answer that costs the same. Only then, if the person has an enabled second factor, is `totp_code` required: `second_factor_required` without one, `second_factor_invalid` with a wrong one or one already used.",
+        "description": "The password is verified first, an unknown username against a dummy hash, so every password failure is one answer that costs the same. Only then, if the person has an enabled second factor, is `totp_code` required: `second_factor_required` without one, `second_factor_invalid` with a wrong one or one already used. With `X-Apg-Console: 1` and the console's `Origin`, both tokens are set as `__Host-` cookies (`HttpOnly; Secure; SameSite=Strict`) and the body holds neither.",
         "operationId": "create_session_v1_sessions_post",
         "requestBody": {
           "content": {
@@ -3944,7 +3954,7 @@
     },
     "/v1/sessions/current": {
       "delete": {
-        "description": "Takes the refresh token, not an access token: the command-line client keeps only the refresh token. Answers 204 whether or not the token named a live session.",
+        "description": "Takes the refresh token, not an access token: the command-line client keeps only the refresh token. Answers 204 whether or not the token named a live session. With `X-Apg-Console: 1` and the console's `Origin`, an empty body reads the refresh cookie, and both cookies are cleared.",
         "operationId": "end_session_v1_sessions_current_delete",
         "requestBody": {
           "content": {
@@ -3990,7 +4000,7 @@
     },
     "/v1/sessions/refresh": {
       "post": {
-        "description": "Single use, and every refusal answers identically -- the release's session plane, unchanged. Confirming a second factor ends every session opened before it.",
+        "description": "Single use, and every refusal answers identically -- the release's session plane, unchanged. Confirming a second factor ends every session opened before it. With `X-Apg-Console: 1` and the console's `Origin`, an empty body reads the refresh cookie and both cookies are replaced.",
         "operationId": "refresh_session_v1_sessions_refresh_post",
         "requestBody": {
           "content": {

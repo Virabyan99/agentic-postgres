@@ -17,8 +17,19 @@ thing, and reports itself healthy.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
+
+#: Session 43 (ADR 0281, ADR 0282): the console's origin, `https://<domain>`,
+#: rendered for the control project only (`naming.console_origin`). Read by
+#: `create_app` in control mode, beside `APP_MODE`, and never by `load` -- so
+#: the control mode still reads exactly what `auth` reads through `Settings`
+#: (`test_the_control_mode_reads_exactly_what_auth_reads`). Required there: a
+#: console write's `Origin` is compared with it and every invitation link is
+#: built from it, so a control process without one refuses to start.
+CONSOLE_ORIGIN_VARIABLE = "APG_CONSOLE_ORIGIN"
+_ORIGIN = re.compile(r"https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?")
 
 #: The three modes one image runs (ADR 0101, extended by ADR 0121). Required,
 #: never defaulted: an image that picked a mode by omission would start the
@@ -298,6 +309,23 @@ class McpSettings:
     #: class docstring gives; this one is genuinely absent on a project that
     #: exports nothing.
     otlp_endpoint: str | None = None
+
+
+def load_console_origin(environ: dict[str, str] | None = None) -> str:
+    """The console's origin, or raise (control mode only; ADR 0281).
+
+    An https origin with no path, no trailing slash and nothing after the
+    host: it is compared with a request's `Origin` header BYTE FOR BYTE, and a
+    value that could never equal one would refuse every console write while
+    the service reported itself healthy. The message names the variable only.
+    """
+    env = os.environ if environ is None else environ
+    value = env.get(CONSOLE_ORIGIN_VARIABLE, "")
+    if not value:
+        raise MissingSetting(f"{CONSOLE_ORIGIN_VARIABLE} is required in control mode")
+    if _ORIGIN.fullmatch(value) is None:
+        raise MissingSetting(f"{CONSOLE_ORIGIN_VARIABLE} must be an https origin with no path")
+    return value
 
 
 def load_mcp(environ: dict[str, str] | None = None) -> McpSettings:

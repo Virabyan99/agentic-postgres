@@ -74,17 +74,23 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+# packaging seam: begin
+# `bin/build-cli.py` replaces exactly the lines between these two markers when
+# it stages the published CLI (ADR 0284); nothing else in this file differs.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from agentic_postgres import control_client as cc  # noqa: E402
 from agentic_postgres import plans, scram  # noqa: E402
 from agentic_postgres.control_client import ClientError  # noqa: E402
+
+# packaging seam: end
 
 ROLES = ("owner", "admin", "member", "viewer")
 
@@ -144,11 +150,30 @@ def read_code(from_stdin: bool) -> str:
     return code
 
 
+#: The characters of a minted token (`secrets.token_urlsafe`), read from a link.
+_TOKEN_CHARACTERS = re.compile(r"[A-Za-z0-9_-]+")
+
+
 def read_invitation(path: str) -> str:
-    token = cc.read_private_file(Path(path)).decode("utf-8", errors="replace").strip()
-    if not token or any(c.isspace() for c in token):
-        raise ClientError(cc.EXIT_PREREQUISITE, f"{path} does not hold one invitation token")
-    return token
+    """One invitation token, from a 0600 file holding the token itself or the
+    console's link to it -- `https://<host>/accept#<token>`, the token in the
+    fragment (ADR 0282). Anything else is refused with one message."""
+    text = cc.read_private_file(Path(path)).decode("utf-8", errors="replace").strip()
+    refused = ClientError(cc.EXIT_PREREQUISITE, f"{path} does not hold one invitation token")
+    if not text or any(c.isspace() for c in text):
+        raise refused
+    if "://" not in text:
+        return text
+    link = urllib.parse.urlsplit(text)
+    if (
+        link.scheme != "https"
+        or not link.netloc
+        or link.path != "/accept"
+        or link.query
+        or _TOKEN_CHARACTERS.fullmatch(link.fragment) is None
+    ):
+        raise refused
+    return link.fragment
 
 
 def organization_id(text: str) -> str:
@@ -494,7 +519,14 @@ def org_invite(arguments: argparse.Namespace) -> int:
     if arguments.expires_hours is not None:
         body["expires_in_hours"] = arguments.expires_hours
     minted = current.call("POST", "/invitations", body)
-    deliver_secret(arguments.output, minted["invitation_token"], "the invitation token")
+    # The console's link (ADR 0282); a server before 1.21.0 answers the bare
+    # token only, which `login accept --invitation-file` reads as well.
+    link = minted.get("accept_url")
+    deliver_secret(
+        arguments.output,
+        link or minted["invitation_token"],
+        "the invitation link" if link else "the invitation token",
+    )
     kind = "an account" if arguments.account else f"{minted['role']} in {minted['organization_id']}"
     print(f"invitation {minted['id']} for {kind}, expires {minted['expires_at']}")
     return cc.EXIT_OK

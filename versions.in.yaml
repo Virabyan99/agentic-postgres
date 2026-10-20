@@ -457,6 +457,14 @@ packages:
     registry: pypi
     package: uvicorn
     version: "0.50.2"
+  # Session 43 (ADR 0282, rig 43b): the server draws the second factor's QR as
+  # an SVG data URI, so no QR script runs in the console. Pure Python, BSD,
+  # no dependency on 3.12; decoded by zbarimg back to the exact URI only with
+  # `light="white"` (D2682).
+  SEGNO_VERSION:
+    registry: pypi
+    package: segno
+    version: "1.6.6"
 
   # ---------------------------------------------------------------------------
   # Session 14, Run 3. OpenTelemetry, adopted as a TRANSPORT for correlation

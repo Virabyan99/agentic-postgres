@@ -182,6 +182,8 @@ def test_no_seed_reaches_a_log_line(
         "base32 secret": begun["secret"],
         "seed hex": seed.hex(),
         "enrolment uri": begun["otpauth_uri"],
+        # Session 43 (ADR 0282): the third form of the seed.
+        "enrolment qr": begun["otpauth_qr"],
         "confirming code": confirming,
         "login code": logging_in,
     }

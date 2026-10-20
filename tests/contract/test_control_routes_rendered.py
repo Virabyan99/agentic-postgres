@@ -155,10 +155,19 @@ def test_the_mode_is_control_only_where_the_facility_is_on() -> None:
     for name in ("project.example.yaml", "project.second.example.yaml"):
         values = _compose_env(_manifest(name, control=False))
         assert values["AUTH_APP_MODE"] == "auth", name
+        # Session 43 (ADR 0280-0282): no console and no origin off the control
+        # plane. `.get`, never a subscript: an `APG_` subscript in a test body
+        # reads as an environment gate (D2381).
+        console = (values.get("APG_CONSOLE"), values.get("APG_CONSOLE_ORIGIN"))
+        assert console == ("0", ""), name
     on = _manifest("project.second.example.yaml", control=True)
     values = _compose_env(on)
     identity = _identity(on)
     assert values["AUTH_APP_MODE"] == "control"
+    assert values.get("APG_CONSOLE") == "1"
+    origin = values.get("APG_CONSOLE_ORIGIN")
+    assert origin == f"https://{identity.domain}"
+    assert identity.route_control.startswith(f"{origin}/")
     assert values["API_CONTROL_PATH"] == on["api"]["public_base_path"] == "/api"
     assert values["CONTROL_ROUTE_PATH"] == "/api/v1" == identity.route_control_path
     assert values["CONTROL_ROUTER_NAME"] == identity.control_router
@@ -169,6 +178,8 @@ def test_the_mode_is_control_only_where_the_facility_is_on() -> None:
         "CONTROL_ROUTE_PATH",
         "CONTROL_ROUTER_NAME",
         "CONTROL_STRIPPREFIX_MIDDLEWARE_NAME",
+        "APG_CONSOLE",
+        "APG_CONSOLE_ORIGIN",
     ):
         assert key in rendering.COMPOSE_ENV_KEYS, key
 

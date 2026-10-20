@@ -28,6 +28,8 @@ ARG UVICORN_VERSION
 # already fixes -- psycopg-binary's rule, applied again.
 ARG OTEL_SDK_VERSION
 ARG OTEL_EXPORTER_OTLP_HTTP_VERSION
+# Session 43 (ADR 0282): the second factor's QR, drawn by the server.
+ARG SEGNO_VERSION
 
 # 65532:65532 is the conventional "nonroot" pair and matches the `user:` in
 # compose.yaml and the numeric ownership secrets.required.yaml declares for
@@ -85,8 +87,9 @@ RUN set -eu; \
       "botocore==${BOTOCORE_VERSION}" \
       "fastmcp==${FASTMCP_VERSION}" \
       "opentelemetry-sdk==${OTEL_SDK_VERSION}" \
-      "opentelemetry-exporter-otlp-proto-http==${OTEL_EXPORTER_OTLP_HTTP_VERSION}"; \
-    python -c "import argon2, boto3, botocore, fastapi, fastmcp, jwt, mcp, psycopg, psycopg_pool, pydantic, uvicorn"; \
+      "opentelemetry-exporter-otlp-proto-http==${OTEL_EXPORTER_OTLP_HTTP_VERSION}" \
+      "segno==${SEGNO_VERSION}"; \
+    python -c "import argon2, boto3, botocore, fastapi, fastmcp, jwt, mcp, psycopg, psycopg_pool, pydantic, segno, uvicorn"; \
     python -c "from opentelemetry.sdk.trace import TracerProvider; from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter"
 
 WORKDIR /app
