@@ -1326,7 +1326,8 @@ Commit, push, read CI.
   KILLED**, `test_console_server` (7) PASSED each time.
 - **Targeted** (foreground): 11 modules, **417 passed**.
 - Pushed with Run 4 in one push; Run 4's verdict is read at this run's SHA,
-  which contains it.
+  which contains it: `33bc552c1399ae33c8a93f4569170465025a774a`, **CI
+  `contract` success** (run 39377793540).
 
 ### Run 6 — the packaged CLI and its publish workflow (`bin/cloud.py`, `bin/build-cli.py`, `.github/workflows/publish-cli.yml`)
 
