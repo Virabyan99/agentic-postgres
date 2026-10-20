@@ -87,9 +87,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from agentic_postgres import control_client as cc  # noqa: E402
-from agentic_postgres import plans, scram  # noqa: E402
+from agentic_postgres import scram  # noqa: E402
 from agentic_postgres.control_client import ClientError  # noqa: E402
 
+#: What `--version` prints -- the checkout's release -- and the name the usage
+#: lines carry; the published package says `apg` and its own version.
+__version__ = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+PROG = "cloud.py"
+#: How a hint names another command: the checkout's shim here, `apg <family>`
+#: in the package.
+COMMAND = "bin/{}.sh"
 # packaging seam: end
 
 ROLES = ("owner", "admin", "member", "viewer")
@@ -213,7 +220,8 @@ def current_organization(current: cc.Session, given: str | None) -> str:
     chosen = current.context.get("organization")
     if not chosen:
         raise ClientError(
-            cc.EXIT_PREREQUISITE, "no organisation chosen: bin/org.sh use --organization ID"
+            cc.EXIT_PREREQUISITE,
+            f"no organisation chosen: {COMMAND.format('org')} use --organization ID",
         )
     return chosen
 
@@ -222,8 +230,8 @@ def refuse_a_live_session(where: Path) -> None:
     if cc.existing_state_directory(where) is not None and cc.load_session(where) is not None:
         raise ClientError(
             cc.EXIT_USAGE,
-            "a session is already held; end it first with bin/logout.sh (a login never drops "
-            "a live session)",
+            f"a session is already held; end it first with {COMMAND.format('logout')} "
+            "(a login never drops a live session)",
         )
 
 
@@ -298,7 +306,10 @@ def login_password(arguments: argparse.Namespace) -> int:
     print(f"logged in to {endpoint} as {me['username']}")
     factor = me.get("second_factor") or {}
     if factor.get("required") and not factor.get("enabled"):
-        print("enrol a second factor before anything else: bin/login.sh totp-enroll --output FILE")
+        print(
+            "enrol a second factor before anything else: "
+            f"{COMMAND.format('login')} totp-enroll --output FILE"
+        )
     if len(me.get("organizations") or []) == 1:
         context["organization"] = me["organizations"][0]["id"]
         cc.save_context(where, context)
@@ -403,7 +414,7 @@ def login_totp_enroll(arguments: argparse.Namespace) -> int:
         f"{enrolment['otpauth_uri']}\n{enrolment['secret']}",
         "the otpauth:// URI and the seed",
     )
-    print("add it to an authenticator, then: bin/login.sh totp-confirm")
+    print(f"add it to an authenticator, then: {COMMAND.format('login')} totp-confirm")
     return cc.EXIT_OK
 
 
@@ -414,7 +425,7 @@ def login_totp_confirm(arguments: argparse.Namespace) -> int:
     cc.remove_session(current.directory)
     print(
         f"second factor enabled; {answer.get('sessions_ended')} session(s) ended, this one "
-        f"included. Log in again with a code: bin/login.sh password --endpoint "
+        f"included. Log in again with a code: {COMMAND.format('login')} password --endpoint "
         f"{current.endpoint} --username NAME"
     )
     return cc.EXIT_OK
@@ -433,7 +444,7 @@ def logout(arguments: argparse.Namespace) -> int:
             {"ended": "key_context", "key_file": current.context["key_file"]},
             arguments.json,
             [f"forgot the key context; the key in {current.context['key_file']} is NOT "
-             "revoked (bin/org.sh key-revoke revokes it)"],
+             f"revoked ({COMMAND.format('org')} key-revoke revokes it)"],
         )  # fmt: skip
         return cc.EXIT_OK
     refresh = cc.load_session(current.directory)
@@ -603,7 +614,8 @@ def _project_key(current: cc.Session, given: str | None) -> str:
     key = given or current.context.get("project")
     if not key:
         raise ClientError(
-            cc.EXIT_PREREQUISITE, "no project chosen: bin/project.sh use --project-key KEY"
+            cc.EXIT_PREREQUISITE,
+            f"no project chosen: {COMMAND.format('project')} use --project-key KEY",
         )
     if not all(c.isalnum() or c == "-" for c in key):
         raise ClientError(cc.EXIT_USAGE, f"not a project key: {key!r}")
@@ -639,7 +651,7 @@ def _accepted(answer: Any, as_json: bool, *, what: str) -> dict[str, Any]:
     operation = answer["operation"]
     lines = [
         f"{what}: operation {operation['id']} recorded ({operation['status']})",
-        f"  follow it: bin/operation.sh wait --operation {operation['id']}",
+        f"  follow it: {COMMAND.format('operation')} wait --operation {operation['id']}",
     ]
     if answer.get("message"):
         lines.append(f"  {answer['message']}")
@@ -679,7 +691,7 @@ def project_create(arguments: argparse.Namespace) -> int:
     _accepted(answer, arguments.json, what="creating")
     if not arguments.json:
         print(f"  the administrator's handoff token is in {kept} (0600); once the operation has "
-              "succeeded: bin/project.sh claim --project-key KEY")  # fmt: skip
+              f"succeeded: {COMMAND.format('project')} claim --project-key KEY")  # fmt: skip
     return cc.EXIT_OK
 
 
@@ -889,7 +901,7 @@ def _shown(row: dict[str, Any]) -> dict[str, Any]:
         return row
     print(
         "operation: this read received the export's one-time download URL and discards it; "
-        "bin/project.sh export fetches the archive itself",
+        f"{COMMAND.format('project')} export fetches the archive itself",
         file=sys.stderr,
     )
     return {name: value for name, value in row.items() if name != "download_url"}
@@ -1325,10 +1337,6 @@ def branch_show(arguments: argparse.Namespace) -> int:
 # plan, usage, notifications (Session 41, ADR 0274, ADR 0275)
 # ---------------------------------------------------------------------------
 
-#: The plans a person may ask to be told about: every plan the release table
-#: does not make active (`plans.PLANS`, ADR 0274).
-INTEREST_PLANS = tuple(name for name in plans.PLAN_NAMES if plans.PLANS[name].status != "active")
-
 
 def _entitlement_rows(document: dict[str, Any]) -> list[dict[str, Any]]:
     rows = []
@@ -1377,11 +1385,25 @@ def plan_show(arguments: argparse.Namespace) -> int:
 
 
 def plan_notify_me(arguments: argparse.Namespace) -> int:
+    """Interest in a plan the server does not make active, named by the
+    server's own `GET /v1/plans` (Session 43, D2666): the release table is the
+    service's, and a published CLI cannot carry it -- so the choices are read,
+    and a name that is absent or active is refused here, before anything is
+    sent, with the usage exit argparse's `choices=` gave."""
     current = person_session()
     org = current_organization(current, arguments.organization)
-    served = current.call("POST", f"/organizations/{org}/plan-interest", {"plan": arguments.plan})
+    offered = [p["plan"] for p in current.call("GET", "/plans")["plans"] if p["status"] != "active"]
+    plan = arguments.plan
+    if plan is None and len(offered) == 1:
+        plan = offered[0]
+    if plan not in offered:
+        raise ClientError(
+            cc.EXIT_USAGE,
+            f"--plan must name a plan that is not active: {', '.join(offered) or 'none is'}",
+        )
+    served = current.call("POST", f"/organizations/{org}/plan-interest", {"plan": plan})
     said = "recorded" if served["recorded"] else "already recorded; nothing changed"
-    emit(served, arguments.json, [f"{arguments.plan} for organisation {org}: {said}",
+    emit(served, arguments.json, [f"{plan} for organisation {org}: {said}",
                                   f"  {served['note']}"])  # fmt: skip
     return cc.EXIT_OK
 
@@ -1538,7 +1560,8 @@ def _verbs(family: argparse.ArgumentParser) -> Any:
 
 
 def parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(prog="cloud.py", add_help=False)
+    top = argparse.ArgumentParser(prog=PROG, add_help=False)
+    top.add_argument("--version", action="version", version=f"apg {__version__}")
     families = top.add_subparsers(dest="family", required=True)
 
     login = _verbs(families.add_parser("login", add_help=False))
@@ -1751,7 +1774,8 @@ def parser() -> argparse.ArgumentParser:
     verb = plan.add_parser("notify-me", add_help=False)
     verb.set_defaults(run=plan_notify_me)
     verb.add_argument("--organization")
-    verb.add_argument("--plan", choices=INTEREST_PLANS, default=INTEREST_PLANS[0])
+    # Any name: the choices are the server's (`GET /v1/plans`), read by the verb.
+    verb.add_argument("--plan")
     verb.add_argument("--json", action="store_true")
 
     usage = _verbs(families.add_parser("usage", add_help=False))
@@ -1815,8 +1839,9 @@ def _waiting(verb: argparse.ArgumentParser) -> None:
 def main(argv: list[str] | None = None) -> int:
     try:
         arguments = parser().parse_args(argv)
-    except SystemExit:
-        return cc.EXIT_USAGE
+    except SystemExit as stop:
+        # `--version` exits 0 by argparse's own exit; every other parse exit is usage.
+        return cc.EXIT_OK if stop.code == 0 else cc.EXIT_USAGE
     try:
         return arguments.run(arguments)
     except ClientError as error:

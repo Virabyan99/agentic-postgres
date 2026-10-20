@@ -1,0 +1,126 @@
+# The customer CLI, published to PyPI as `agentic-postgres-cli` (Session 43,
+# ADR 0284, D2667).
+#
+# **Only a release tag publishes, and only when that commit's own `contract`
+# run succeeded.** The tag is a bare version pushed from the workstation onto
+# the deployed commit (D1425, D2041); `verify` refuses a tag that is not
+# `VERSION` and a commit with no green `contract` run -- an empty list is not a
+# verdict (D1057), and a cancelled or failed run is not a pass.
+#
+# **No token exists anywhere.** PyPI trusts this workflow file, this
+# repository and the `pypi` environment (trusted publishing, the pending
+# publisher Sheet C2 registered); `id-token: write` is granted to the publish
+# job alone, and the `pypi` environment admits release tags only.
+#
+# A PyPI version can never be uploaded twice: a broken release is fixed by the
+# next one, which is a release of four (D1425).
+name: publish-cli
+
+on:
+  push:
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
+
+permissions: {}
+
+concurrency:
+  group: publish-cli
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: The tag is the release, and contract passed on it
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The tag equals VERSION
+        run: |
+          set -eu
+          version="$(cat VERSION)"
+          if [ "${GITHUB_REF_NAME}" != "${version}" ]; then
+            echo "the tag ${GITHUB_REF_NAME} is not this commit's VERSION ${version}"
+            exit 1
+          fi
+          echo "the tag ${GITHUB_REF_NAME} is VERSION"
+
+      - name: contract succeeded on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          runs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${GITHUB_SHA}&event=push&branch=main" \
+            --jq '[.workflow_runs[] | select(.name == "contract")]')"
+          if [ "$(printf '%s' "${runs}" | jq 'length')" -eq 0 ]; then
+            echo "no contract run is registered for ${GITHUB_SHA}: that is not a verdict"
+            exit 1
+          fi
+          latest="$(printf '%s' "${runs}" | jq -c 'max_by(.run_number) | {status, conclusion}')"
+          if [ "$(printf '%s' "${latest}" | jq -r '.conclusion')" != "success" ]; then
+            echo "contract did not succeed on ${GITHUB_SHA}: ${latest}"
+            exit 1
+          fi
+          echo "contract succeeded on ${GITHUB_SHA}"
+
+  build:
+    name: Stage and build the CLI
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the pinned interpreter
+        id: python
+        run: echo "version=$(cat .python-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Install the pinned Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ steps.python.outputs.version }}
+
+      - name: Install the pinned uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+
+      - name: Stage from bin/cloud.py and build
+        run: python bin/build-cli.py --out "${RUNNER_TEMP}/cli"
+
+      - name: Keep the two artefacts for the publish job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cli-dist
+          path: ${{ runner.temp }}/cli/dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI by trusted publishing
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: The artefacts the build job made
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cli-dist
+          path: dist/
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/

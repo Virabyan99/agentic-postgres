@@ -504,6 +504,10 @@ execution order.
 | **D2701** | Run 4 step 1: `REDIRECTS = {"/": "/console/", "/console": "/console/"}`; the router rule ``Path(`/`) \|\| Path(`/accept`) \|\| PathPrefix(`/console/`)``. | `/console` (no slash) is not in the rule, so through the edge it is Traefik's own 404; the server's redirect for it is reachable only inside the container. | **Kept as planned** (§9's stop names any path outside the three, and adding `Path(`/console`)` would be a fourth); the redirect is harmless and costs nothing. | Recorded so nobody reads the redirect as a published path. | 0280 |
 | **D2702** | Run 5's table: *"Create organisation / project `#/new` — `POST /v1/organizations`, `POST /v1/projects` (both verifiers from `scram.js`; the two passwords shown once)"*; §0: *"`project create` builds both customer verifiers `:1176-1185`"*. | `CreateProjectRequest` is `{organization, name, profile, admin_username, handoff_sha256}` — no verifier. `bin/cloud.py:650-733`: the CLI keeps a HANDOFF TOKEN through the 20+ minute creation and then CLAIMS the project's application administrator by presenting it to the **new project's own** `{app_route}/auth/reset-password` — another origin from the console, and a token that would have to outlive a reload with no storage allowed (ADR 0280). The two verifiers at `:1180-1230` are **branch** creation's. | **The operator, 2026-10-20: the console creates organisations only; a project is created with `apg project create` / `claim` in Session 43** (the overview says so, and the Ledger's `console` row). Browser creation and claim are designed in Session 44/45's plan — Session 45's walk needs it (D2669). | A claim from the console is a cross-origin door this plan did not price; the smallest honest console offers what it can finish. | 0280 |
 | **D2703** | — | The Ledger's `agents`, `workflows`, `connectors` and `audit` rows said *"the console reaches them through Studio forwarders"*; D2661 decided no data view in the console. | **Rewritten**: each is reached at the project's own address; *"the console has no data view (D2661)"*. | A `stage5_reality` sentence the site will print must not promise what the console decided against. | 0280 |
+| **D2704** | D2666: *"`cli.py` (= `bin/cloud.py` with the seam replaced by [three imports])"*; Run 6 step 1: `--version` reads `VERSION` inside the seam. | Beyond the imports, two things in `cloud.py` must differ in a package: the program name in usage lines (`prog="cloud.py"`, D2684) and ten hints that name `bin/<family>.sh` (`:220, 229, 305, 410, 421, 440, 610, 646, 686, 896`) — a `pip install` user has no `bin/`. `argv[0]` would read `__main__.py` under `python -m`. | **The seam carries four values**: the imports, `__version__` (the checkout's `VERSION` / the package's), `PROG` (`cloud.py` / `apg`) and `COMMAND` (`bin/{}.sh` / `apg {}`); the ten hints read `COMMAND.format(family)` (the tree prints exactly what it printed). `--version` → `apg <VERSION>`, exit 0 (`main` now returns 0 for argparse's own exit 0). `--help` keeps the tree's behaviour (exit 2, usage — `logout` has no verbs, so its is the top level's); `test_the_wheel_runs_every_family` compares the wheel's words and exit to the tree's, whitespace collapsed (argparse indents by the name's length). | The package must not tell a customer to run a file they do not have. | 0284 |
+| **D2705** | Run 6 step 2: `DIR/README.md` from `site/pages/docs/cli.md` *"or a fixed paragraph and the site's URL if Run 7 has not landed; the run says which"*; `license` per ADR 0284. | Run 7 has not landed. The root `pyproject.toml` requires `setuptools>=68`; an SPDX string `license = "Apache-2.0"` needs setuptools 77+. `uv build` also writes a `.gitignore` into the out-dir. | **A fixed README paragraph** naming https://agenticpostgresql.com/docs/cli/; `license = { text = "Apache-2.0" }` plus the OSI classifier and `license-files = ["LICENSE"]` (the wheel's METADATA reads `License: Apache-2.0`, `License-File: LICENSE`, `Requires-Python: >=3.11`); `build-cli` removes the `.gitignore` and refuses unless `dist/` holds exactly one wheel and one sdist. | The backend the repository already names, and a `dist/` the publish job can upload whole. | 0284 |
+| **D2706** | Run 6 step 3: *"every action pinned by commit SHA as `ci.yml` pins its own (copy those SHAs for checkout, setup-python, setup-uv, upload/download-artifact)"*. | `ci.yml` pins no `download-artifact`. Its newest release, v8.0.2, is 2026-10-07 — 13 days old, under the 14-day rule. | **`actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` (v8.0.1, 2026-03-11)**; the others copied from `ci.yml` (checkout v7.0.1, setup-python v7.0.0, setup-uv v9.0.0 with uv 0.12.1, upload-artifact v7.0.1); `pypa/gh-action-pypi-publish@dc37677b…` (v1.14.2, rig 43d). | Every action a commit, every commit old enough to have been looked at. | 0284 |
+| **D2707** | D2667: *"`verify` … passes only if a `contract` run for that SHA concluded `success` — empty list or any other conclusion fails"*. | A commit can carry more than one `contract` run (a re-run). `ci.yml` cancels in-progress runs on `main`, so a deploy commit followed quickly by another push has a CANCELLED run. | **The LATEST `contract` run (by `run_number`) must have concluded `success`**; none registered fails (D1057), and so does a later failure after an earlier success. The step is EXECUTED in `test_publish_verifies_the_contract_run` against a fake `gh` (the real `jq`), seven cases. The deploy commit's own `contract` run must be green before the tag — a cancelled one means re-running it first. | The release tag publishes only what its commit's current verdict allows. | 0284 |
 
 ---
 
@@ -1389,8 +1393,41 @@ action pins and the uv setup to copy); `tests/contract/test_gate_contract.py:150
    **The publish workflow does not run** (no tag) — `gh api …/actions/runs?head_sha=`
    lists only `contract` for this SHA, and that is the expected reading.
 
-**Done.** *(executor: the staged file list and sizes; the wheel's name and
-sha256; the battery; the SHA and CI.)*
+**Done.** 2026-10-20 (WSL `~/s43/run6/`). Rows **D2704–D2707**.
+
+- **`LICENSE`** at the root: the Apache License 2.0, fetched unmodified from
+  apache.org (202 lines, sha256 `cfc7749b…3d30`) — the operator's choice
+  (D2685); §9's stop cleared.
+- **`bin/cloud.py`**: `plans` left (the `notify-me` verb reads `GET /v1/plans`
+  and refuses an absent or active name locally with exit 2 — the existing
+  `--plan free` proof unchanged); the seam carries `__version__`, `PROG`,
+  `COMMAND` (D2704); `--version` → `apg 1.20.0`, exit 0.
+- **`bin/build-cli.py --out DIR`** (registered in `PYTHON_COMMANDS`): refuses
+  an `--out` inside the repository or not empty (2), seam markers not exactly
+  once (3), no uv or a bad build (4). Staged at `/tmp/s43-cli2`:
+  `src/apg_cli/__init__.py` 76 B, `__main__.py` 55, `cli.py` 80,195,
+  `control_client.py` 19,147, `scram.py` 2,299; `pyproject.toml`, `README.md`
+  (the fixed paragraph, D2705), `LICENSE`. Built:
+  `agentic_postgres_cli-1.20.0-py3-none-any.whl` sha256 `566112da…76fd`,
+  `agentic_postgres_cli-1.20.0.tar.gz` `42f671f9…680a` (a build is not
+  byte-reproducible — timestamps; the release's own is CI's).
+- **`.github/workflows/publish-cli.yml`**: tag `[0-9]+.[0-9]+.[0-9]+` only;
+  `permissions: {}`; `verify` (tag = `VERSION`; the latest `contract` run
+  succeeded, D2707) → `build` (`contents: read`) → `publish` (environment
+  `pypi`, `id-token: write` only there); every action by SHA (D2706). It does
+  not run in this run (no tag).
+- **Tests**: `test_cli_package.py` (5 — the stage differs only in the seam;
+  stdlib-only imports; the version; `--out` refusals; the wheel installed with
+  `--network none` into `PYTHON_RUNTIME_IMAGE`, `apg --version` and all
+  fourteen families' usage equal to the tree's), `test_release_workflows.py`
+  (D2667's four node ids, the verify step executed in 7 cases, and the tag
+  rule).
+- **Battery** (`~/s43/run6/battery6.py`): the plan's four (`plans` back in the
+  staged seam; a line outside the seam changed; `id-token` on the build job;
+  the action by tag) and one more (an empty list passes) — **5/5 KILLED**, the
+  control (`test_control_cli::test_accept_reads_a_token_or_a_link`) PASSED.
+- **Targeted** (foreground): `test_cli_contract` 841; 8 modules 428 — all
+  passed.
 
 ### Run 7 — the site, its build, its workflow, the customer documentation (`site/`, `src/`, `bin/build-site.py`, `.github/workflows/site.yml`, `docs/`)
 

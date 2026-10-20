@@ -299,6 +299,8 @@ PYTHON_COMMANDS = (
     # Session 40: the branch runtime; `branch_plan`, `branch_rekey` and
     # `branch_record` hold everything a test holds still.
     "bin/branch-runtime.py",
+    # Session 43 (ADR 0284): stages bin/cloud.py as the published CLI and builds it.
+    "bin/build-cli.py",
     # Session 37 Run 7 (D2066). The verbs of login/logout/context/org/project;
     # everything a test holds still is `agentic_postgres.control_client`.
     "bin/cloud.py",
