@@ -222,6 +222,13 @@ ENVIRONMENT_VARIABLES = (
     # authorises anything. `APG_LIFECYCLE_RECORD_FILE` and `APG_SLOT_OUTPUTS` are
     # reused for the re-earning slot (slot4-prod).
     "APG_BRANCH_RECORD_FILE",
+    # Session 43 (ADR 0280, D2668). `APG_CONSOLE_RECORD_FILE` (external) is the
+    # 0600 record `tests/external/browser/console_walk.py` wrote while a real
+    # Chromium walked an invitation link to a working connection string: step
+    # names and times, statuses, cookie NAMES and flags, response headers --
+    # never a password, seed, token or cookie value (its self-check exits 6
+    # first). The rotated password sits beside it in the 0600 file it names.
+    "APG_CONSOLE_RECORD_FILE",
 )
 
 

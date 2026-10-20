@@ -263,6 +263,10 @@ SHELL_COMMANDS = (
     # Session 42 (ADR 0277-0279). Derived from 41's by diff with NO flag added
     # (D2588). Listed the run it landed (D1014), `git add`ed first (D1188).
     "bin/session-42-check.sh",
+    # Session 43 (ADR 0280-0284). Derived from 42's by diff with ONE flag added,
+    # `--console-record-file` (D2677). Listed the run it landed (D1014), `git
+    # add`ed first (D1188).
+    "bin/session-43-check.sh",
     # Session 38 (ADR 0257, D2150): customer slots -- prepare, status, revoke.
     # Listed the run it landed (D1014), `git add`ed first (D1188).
     "bin/slot.sh",

@@ -97,7 +97,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 387 requirements**
+**P0 — 407 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -488,6 +488,26 @@ Priorities:
 | `USE-DBTIME-001` | 42 | **DB time in usage** (ADR 0278, D2570, D2618): a sum of increases over the customer-facing roles with resets read; a sample that could not read it names `db_time_ms` unread; the writer's body is `0008`'s plus two keys. |
 | `USE-LIVE-004` | 42 | **Idle sleep, re-trialed** (ADR 0276, D2560): set to 15 minutes with the probes stopped, one `project.sleep` with `origin = idle` on behalf of the setter within the bound, both names refused while it slept, then woken by a member. |
 | `USE-LIVE-005` | 42 | **Notifications, counted by outcome** (ADR 0275, D2581): one per operation the record names -- the eleven, the idle pair and any export refused and resumed past -- its kind matching how it ended; no sentence holds a URL, an export's hash or size, an operation's id, a door's host or the insights canary. |
+| `CON-CSRF-001` | 43 | **The CSRF rule** (ADR 0281): a cookie is honoured only with `X-Apg-Console: 1`; a write needs `Origin` equal to the console's origin; no CORS header is ever answered; no log line holds a cookie value. |
+| `CON-FACTOR-001` | 43 | **The factor's QR** (ADR 0282): the enrolment answer carries `otpauth_qr`, an SVG data URI of `otpauth_uri` with no external reference; segno is pinned and imported by the image's build control. |
+| `CON-HOST-001` | 43 | **The console on the host** (ADR 0280): it runs on the control project only -- read from Docker's labels across every container -- bounded, unprivileged and healthy, on the edge network alone; the host still listens publicly on 22, 80, 443 and 5432 alone. |
+| `CON-INVITE-001` | 43 | **The invitation as a link** (ADR 0282): the mint answers `accept_url` = the console origin + `/accept#` + the token; `org invite` writes the link; `login accept` reads a token or a link and refuses anything else; no log line holds the token. |
+| `CON-LEDGER-001` | 43 | **The console claims only what is reachable** (ADR 0280, D2661): every console page names a Ledger row that is reachable, every `/v1` path its scripts call exists in the control snapshot, no page names a `planned` or `not_offered` row, no script builds SQL. |
+| `CON-LIVE-001` | 43 | **A person's walk, in a real browser** (ADR 0280, D2668): through the public origin with no SSH, an invitation link reaches an account, a confirmed factor, a session cookie, the Connect page and a password shown once and gone on reload, and that password connects over TLS; three first paints and the link-to-string time are recorded. |
+| `CON-LIVE-002` | 43 | **The console's policy, live** (ADR 0280-0281): the console's answers carry the exact policy; a cookie without the header and a write from another origin are refused, and the session survives the forged write; the accept page's address never held the token; the session cookies are `HttpOnly`/`Secure`/`Strict`. |
+| `CON-PLANE-001` | 43 | **The console's service** (ADR 0280): bounded, read-only, no secret, no mount, network `edge` only, profile `console` added only for the control project, its router rule exactly `/`, `/accept`, `/console/...` on the project's host. |
+| `CON-SCRAM-001` | 43 | **The browser's verifier** (D2660): the console's SCRAM verifier equals `scram.verifier` for the same password and salt; the password is never written to storage or a URL. |
+| `CON-SERVE-001` | 43 | **The console server** (ADR 0280): a fixed route table, GET and HEAD only, the exact CSP and security headers on every answer (404 and redirect included), no query and no header logged, no `<script src>` or `<link href>` that is not a relative path of its own. |
+| `CON-SESSION-001` | 43 | **The console's session** (ADR 0281): with `X-Apg-Console: 1` the session routes set the two `__Host-` cookies `HttpOnly; Secure; SameSite=Strict; Path=/` and answer no token; refresh and logout read the cookie; logout clears both; a bearer request is unchanged and ignores cookies; a key never rides a cookie. |
+| `DEP-LAUNCH-001` | 43 | **The check reads what the install installs** (D2637): `provision-host.sh --check` verifies exactly the launchers the install installs, a seventh included. |
+| `DX-PKG-001` | 43 | **The packaged CLI** (ADR 0284): the staged CLI differs from its sources only inside the seam; it imports only the standard library and itself; the wheel installs offline into a clean Python and runs `apg --version` and every family's usage; its version is `VERSION`. |
+| `DX-PKG-002` | 43 | **The CLI's publication** (ADR 0284, D2652): the publish workflow runs only on a release tag, verifies that SHA's `contract` success (an empty list fails), grants `id-token: write` to the publish job alone, and pins the publish action by SHA. |
+| `INS-STATUS-001` | 43 | **The plane's status reads every container** (D2636): `telemetry.sh status` reads each container of the plane, one with no healthcheck included, and names the one it could not read. |
+| `OPS-PROV-002` | 43 | **The providers' count is read** (D2642): `bootstrap-providers --apply` prints the number of resources it created, never a literal. |
+| `SITE-BUILD-001` | 43 | **The site's build** (ADR 0283): it builds from the tree alone, twice byte-equal; the pricing page is the entitlements of `PLANS` and the beta sentence, with no price; the Ledger page is the YAML's rows; the subset renderer refuses raw HTML; no host address. |
+| `SITE-CLAIM-001` | 43 | **The site claims only what is reachable** (ADR 0283, D2662): every page names its Ledger rows and each is reachable; no page holds a forbidden word, `bin/`, `sudo`, `ssh `, `git clone` or `--session`; no asset is third-party; `_headers` carries the site's CSP. |
+| `SITE-DEPLOY-001` | 43 | **The site's deployment** (D2653): the site workflow deploys only after `contract` succeeded on `main`, checks out that run's SHA, pins wrangler and every action, and holds the token only in the `site` environment. |
+| `SITE-LIVE-001` | 43 | **The site, live** (ADR 0283, D2720): the apex and `www` serve this commit's build byte for byte, with the CSP header and nothing loaded from any other host, and the pricing page's plans equal `GET /v1/plans`. |
 
 **P1 — 8 requirements**
 

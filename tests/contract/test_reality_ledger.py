@@ -257,10 +257,10 @@ def test_every_console_page_maps_to_a_reachable_row(ledger: dict) -> None:
     REACHABLE (`available`, `beta`, `trial`) -- a page for a `planned` or
     `not_offered` feature is a claim the node does not keep.
 
-    The `console` row itself is `planned` (target 43) until Session 43's bump
-    (Run 9) moves it with its claims; until then no view may name it, and it is
-    asserted to be exactly that. Run 9 removes this exception in the commit
-    that moves the row (D690).
+    The `console` row itself is reachable since Session 43's bump moved it with
+    its claims (D690): the exception that held it `planned` and unnamed until
+    then is gone, and a console that exists under a row that does not is
+    refused below.
     """
     pages = json.loads(
         (REPO_ROOT / "services" / "console" / "public" / "pages.json").read_text(encoding="utf-8")
@@ -271,12 +271,13 @@ def test_every_console_page_maps_to_a_reachable_row(ledger: dict) -> None:
     for view in views:
         assert view["ledger"], f"{view['id']} names no Ledger row"
         for row in view["ledger"]:
-            assert row != "console", f"{view['id']} names the console's own row"
             assert row in rows, f"{view['id']} names {row!r}, which the Ledger does not have"
             assert rows[row]["status"] in reality_ledger.REACHABLE, (
                 f"{view['id']} offers {row!r}, which is {rows[row]['status']}"
             )
-    assert (rows["console"]["status"], rows["console"]["target_session"]) == ("planned", 43)
+    assert rows["console"]["status"] in reality_ledger.REACHABLE, (
+        f"the console exists and its row is {rows['console']['status']}"
+    )
 
 
 def test_the_idle_sleep_row_is_reachable_iff_its_sleep_is_accepted(ledger: dict) -> None:

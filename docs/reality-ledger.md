@@ -20,7 +20,7 @@ the customer, and the session's close moves it to `beta` or back to
 | [Management API keys](#api_keys) | `beta` | 37 |
 | [Management API (/api/v1)](#management_api) | `beta` | 39 |
 | [CLI against the hosted service](#cli_remote) | `beta` | 37 |
-| [Web console](#console) | `planned` | 43 |
+| [Web console](#console) | `trial` | 43 |
 | [Create a project](#projects_self_service) | `beta` | 42 |
 | [Delete a project](#project_deletion) | `beta` | 42 |
 | [Export a project](#export) | `beta` | 42 |
@@ -44,7 +44,7 @@ the customer, and the session's close moves it to `beta` or back to
 | [Notifications](#notifications) | `beta` | 42 |
 | [Email](#email) | `planned` | — |
 | [Passkeys](#passkeys) | `planned` | — |
-| [SQL editor](#sql_editor) | `not_offered` | — |
+| [SQL editor](#sql_editor) | `planned` | 44 |
 | [Temporary support access](#support_access) | `not_offered` | — |
 | [Autoscaling](#autoscaling) | `not_offered` | — |
 | [High availability](#high_availability) | `not_offered` | — |
@@ -131,9 +131,9 @@ the customer, and the session's close moves it to `beta` or back to
 
 `cli_remote` · **beta** · since Session 36
 
-**What a customer reads.** The login, logout, context, org and project commands sign in with a password and a second factor, or with a key, and act through the management API only.
+**What a customer reads.** The apg command signs in with a password and a second factor, or with a key, and acts through the management API only: accounts, organizations, projects, branches, backups, compute, usage, plans, insights and monitoring. It is published to PyPI as agentic-postgres-cli from release 1.21.0.
 
-**Today.** Five commands in the checkout's bin/ (login.sh, logout.sh, context.sh, org.sh, project.sh) are clients of /api/v1; the rest of apg is still a dispatcher over bin/, run on the host or against a local cluster.
+**Today.** The customer commands in the checkout's bin/ (login, logout, context, org, project, endpoint, branch, compute, usage, plan, notifications, insights, monitoring, operation) are clients of /api/v1; Session 43 packages the same code as agentic-postgres-cli, a wheel that imports only the standard library, published from a release tag by trusted publishing (ADR 0284).
 
 *Customer-facing evidence:* `control_cli`, `control_keys_live`.
 
@@ -145,15 +145,19 @@ the customer, and the session's close moves it to `beta` or back to
 
 ## Web console
 
-`console` · **planned** · since Session 36
+`console` · **trial** · since Session 43
 
-**What a customer reads.** Not open yet.
+**What a customer reads.** Being verified. The console at https://control.agenticpostgresql.com/console/: accept an invitation link, set up your second factor, sign in, and see your organizations, projects, connection strings, branches, backups, usage, insights, monitoring, plan, notifications and settings. A project is created with the command-line client in this beta; the console has no data view and runs no SQL.
 
-**Today.** There is no web console. Studio is a loopback page an operator or developer runs locally against one project.
+**Today.** Static pages served by the control project's console service (ADR 0280) at /, /accept and /console/, every page a named /api/v1 call, signed in with two __Host- cookies honoured only with the console's header and, for a write, its own origin (ADR 0281). Trialed in Session 43 on 1.21.0: a person's walk in a real browser, the console's policy and CSRF rule live, and the console on the host (console_walk_live, console_csrf_live, console_live_host).
+
+*Customer-facing evidence:* `console_walk_live`, `console_csrf_live`, `console_live_host`.
 
 **Stage 5.** Static pages served by the control project, calling /api/v1 only: onboarding, projects, connect, branches, backups, usage, insights, monitoring, plan, notifications and settings; no data view and no SQL. A project is created with the command-line client in this beta.
 
 **Eventually (not promised).** A full web console with in-browser data tools.
+
+*Controls:* `/console/`, `/accept`.
 
 <a id="projects_self_service"></a>
 
@@ -565,13 +569,13 @@ the customer, and the session's close moves it to `beta` or back to
 
 ## SQL editor
 
-`sql_editor` · **not_offered** · since Session 36
+`sql_editor` · **planned** · since Session 43
 
-**What a customer reads.** Not available, by decision. Connect with psql or your own client through your project's direct connection string.
+**What a customer reads.** Not open yet.
 
 **Today.** No product surface runs SQL (ADR 0246).
 
-**Stage 5.** Cut (D1969); the Connect page shows a psql snippet instead.
+**Stage 5.** Planned for Session 44 (D2592): a browser SQL editor holding the customer's own credential in the page, through a WebSocket relay that holds none.
 
 **Eventually (not promised).** A browser SQL editor acting as the person, never a shared credential.
 

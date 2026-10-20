@@ -8028,3 +8028,273 @@
     `customer_app` and two usage passes, the insights hold its statement
     normalised with its 200 calls and never the canary's literal; usage reads DB
     time; monitoring names every signal's source; no SSH.
+
+# Session 43 (ADR 0280-0284)
+
+- id: INS-STATUS-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_telemetry_status.py::test_a_container_without_a_healthcheck_is_read
+    - tests/contract/test_telemetry_status.py::test_a_container_with_one_is_read
+  description: >-
+    **The plane's status reads every container** (D2636): `telemetry.sh status`
+    reads each container of the plane, one with no healthcheck included, and
+    names the one it could not read.
+
+- id: DEP-LAUNCH-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_provision_host_launchers.py::test_the_check_reads_the_install_glob
+    - tests/contract/test_provision_host_launchers.py::test_a_seventh_launcher_is_checked
+  description: >-
+    **The check reads what the install installs** (D2637): `provision-host.sh
+    --check` verifies exactly the launchers the install installs, a seventh
+    included.
+
+- id: OPS-PROV-002
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_bootstrap_providers.py::test_the_created_count_is_read
+  description: >-
+    **The providers' count is read** (D2642): `bootstrap-providers --apply`
+    prints the number of resources it created, never a literal.
+
+- id: CON-SESSION-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_console_session.py::test_the_console_login_sets_two_host_cookies
+    - tests/contract/test_console_session.py::test_the_console_login_body_holds_no_token
+    - tests/contract/test_console_session.py::test_refresh_reads_the_cookie
+    - tests/contract/test_console_session.py::test_logout_clears_both
+    - tests/contract/test_console_session.py::test_a_bearer_request_ignores_cookies
+    - tests/contract/test_console_session.py::test_a_key_in_a_cookie_is_refused
+  description: >-
+    **The console's session** (ADR 0281): with `X-Apg-Console: 1` the session
+    routes set the two `__Host-` cookies `HttpOnly; Secure; SameSite=Strict;
+    Path=/` and answer no token; refresh and logout read the cookie; logout
+    clears both; a bearer request is unchanged and ignores cookies; a key never
+    rides a cookie.
+
+- id: CON-CSRF-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_console_session.py::test_a_cookie_without_the_header_is_unauthenticated
+    - tests/contract/test_console_session.py::test_a_write_from_another_origin_is_refused
+    - tests/contract/test_console_session.py::test_a_write_without_an_origin_is_refused
+    - tests/contract/test_console_session.py::test_no_cors_header_is_answered
+    - tests/contract/test_console_session.py::test_no_line_holds_a_cookie_value
+  description: >-
+    **The CSRF rule** (ADR 0281): a cookie is honoured only with `X-Apg-Console:
+    1`; a write needs `Origin` equal to the console's origin; no CORS header is
+    ever answered; no log line holds a cookie value.
+
+- id: CON-INVITE-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_console_session.py::test_the_mint_answers_the_accept_url
+    - tests/contract/test_console_session.py::test_no_line_holds_the_invitation_token
+    - tests/contract/test_control_cli.py::test_invite_writes_the_link
+    - tests/contract/test_control_cli.py::test_accept_reads_a_token_or_a_link
+  description: >-
+    **The invitation as a link** (ADR 0282): the mint answers `accept_url` = the
+    console origin + `/accept#` + the token; `org invite` writes the link;
+    `login accept` reads a token or a link and refuses anything else; no log
+    line holds the token.
+
+- id: CON-FACTOR-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_console_session.py::test_the_enrolment_answer_carries_the_qr
+    - tests/contract/test_console_session.py::test_the_qr_references_nothing
+    - tests/contract/test_version_lock.py::test_segno_is_locked
+  description: >-
+    **The factor's QR** (ADR 0282): the enrolment answer carries `otpauth_qr`,
+    an SVG data URI of `otpauth_uri` with no external reference; segno is pinned
+    and imported by the image's build control.
+
+- id: CON-SERVE-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_console_server.py::test_only_the_listed_paths_answer
+    - tests/contract/test_console_server.py::test_every_answer_carries_the_policy
+    - tests/contract/test_console_server.py::test_the_log_names_no_query
+    - tests/contract/test_console_server.py::test_every_asset_is_our_own_file
+    - tests/contract/test_console_server.py::test_no_method_but_get_and_head
+  description: >-
+    **The console server** (ADR 0280): a fixed route table, GET and HEAD only,
+    the exact CSP and security headers on every answer (404 and redirect
+    included), no query and no header logged, no `<script src>` or `<link href>`
+    that is not a relative path of its own.
+
+- id: CON-PLANE-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_process_limits.py::test_the_console_is_bounded
+    - tests/contract/test_console_plane.py::test_the_profile_is_added_only_for_the_control_project
+    - tests/contract/test_console_plane.py::test_the_router_rule_is_the_three_paths
+    - tests/contract/test_console_plane.py::test_the_console_holds_no_secret_and_no_mount
+  description: >-
+    **The console's service** (ADR 0280): bounded, read-only, no secret, no
+    mount, network `edge` only, profile `console` added only for the control
+    project, its router rule exactly `/`, `/accept`, `/console/...` on the
+    project's host.
+
+- id: CON-LEDGER-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_reality_ledger.py::test_every_console_page_maps_to_a_reachable_row
+    - tests/contract/test_console_pages.py::test_every_called_path_is_in_the_snapshot
+    - tests/contract/test_console_pages.py::test_no_page_names_an_unreachable_row
+    - tests/contract/test_console_pages.py::test_no_script_holds_sql
+  description: >-
+    **The console claims only what is reachable** (ADR 0280, D2661): every
+    console page names a Ledger row that is reachable, every `/v1` path its
+    scripts call exists in the control snapshot, no page names a `planned` or
+    `not_offered` row, no script builds SQL.
+
+- id: CON-SCRAM-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_console_scram.py::test_the_browser_verifier_equals_the_clis
+    - tests/contract/test_console_pages.py::test_no_script_writes_storage
+  description: >-
+    **The browser's verifier** (D2660): the console's SCRAM verifier equals
+    `scram.verifier` for the same password and salt; the password is never
+    written to storage or a URL.
+
+- id: SITE-BUILD-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_site.py::test_two_builds_are_byte_equal
+    - tests/contract/test_site.py::test_the_pricing_page_follows_the_plans
+    - tests/contract/test_site.py::test_no_price_is_printed
+    - tests/contract/test_site.py::test_the_ledger_page_is_the_rows
+    - tests/contract/test_site.py::test_raw_html_is_refused
+    - tests/contract/test_site.py::test_the_site_names_no_host_address
+  description: >-
+    **The site's build** (ADR 0283): it builds from the tree alone, twice
+    byte-equal; the pricing page is the entitlements of `PLANS` and the beta
+    sentence, with no price; the Ledger page is the YAML's rows; the subset
+    renderer refuses raw HTML; no host address.
+
+- id: SITE-CLAIM-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_site.py::test_every_page_names_reachable_rows
+    - tests/contract/test_site.py::test_no_page_holds_an_operator_command
+    - tests/contract/test_site.py::test_no_forbidden_word
+    - tests/contract/test_site.py::test_no_third_party_asset
+    - tests/contract/test_site.py::test_the_headers_file_carries_the_policy
+  description: >-
+    **The site claims only what is reachable** (ADR 0283, D2662): every page
+    names its Ledger rows and each is reachable; no page holds a forbidden word,
+    `bin/`, `sudo`, `ssh `, `git clone` or `--session`; no asset is third-party;
+    `_headers` carries the site's CSP.
+
+- id: SITE-DEPLOY-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_release_workflows.py::test_the_site_deploys_only_after_contract
+    - tests/contract/test_release_workflows.py::test_the_site_workflow_pins_everything
+  description: >-
+    **The site's deployment** (D2653): the site workflow deploys only after
+    `contract` succeeded on `main`, checks out that run's SHA, pins wrangler and
+    every action, and holds the token only in the `site` environment.
+
+- id: DX-PKG-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_cli_package.py::test_the_stage_differs_only_in_the_seam
+    - tests/contract/test_cli_package.py::test_the_package_imports_only_stdlib
+    - tests/contract/test_cli_package.py::test_the_wheel_runs_every_family
+    - tests/contract/test_cli_package.py::test_the_version_is_the_release
+  description: >-
+    **The packaged CLI** (ADR 0284): the staged CLI differs from its sources
+    only inside the seam; it imports only the standard library and itself; the
+    wheel installs offline into a clean Python and runs `apg --version` and
+    every family's usage; its version is `VERSION`.
+
+- id: DX-PKG-002
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/contract/test_release_workflows.py::test_publish_runs_only_on_a_release_tag
+    - tests/contract/test_release_workflows.py::test_publish_verifies_the_contract_run
+    - tests/contract/test_release_workflows.py::test_only_the_publish_job_has_id_token
+    - tests/contract/test_release_workflows.py::test_publish_pins_the_action
+  description: >-
+    **The CLI's publication** (ADR 0284, D2652): the publish workflow runs only
+    on a release tag, verifies that SHA's `contract` success (an empty list
+    fails), grants `id-token: write` to the publish job alone, and pins the
+    publish action by SHA.
+
+- id: CON-HOST-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/deployment/test_session43_console_host.py::test_the_console_runs_only_on_the_control_project
+    - tests/deployment/test_session43_console_host.py::test_the_console_is_bounded
+    - tests/deployment/test_session43_console_host.py::test_the_listeners_did_not_change
+  description: >-
+    **The console on the host** (ADR 0280): it runs on the control project only
+    -- read from Docker's labels across every container -- bounded, unprivileged
+    and healthy, on the edge network alone; the host still listens publicly on
+    22, 80, 443 and 5432 alone.
+
+- id: CON-LIVE-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/external/test_session43_console.py::test_the_walk_reached_every_step
+    - tests/external/test_session43_console.py::test_the_password_was_shown_once
+    - tests/external/test_session43_console.py::test_the_string_from_the_page_connects
+    - tests/external/test_session43_console.py::test_the_times_were_recorded
+    - tests/external/test_session43_console.py::test_this_module_uses_no_ssh
+  description: >-
+    **A person's walk, in a real browser** (ADR 0280, D2668): through the public
+    origin with no SSH, an invitation link reaches an account, a confirmed
+    factor, a session cookie, the Connect page and a password shown once and
+    gone on reload, and that password connects over TLS; three first paints and
+    the link-to-string time are recorded.
+
+- id: CON-LIVE-002
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/external/test_session43_console.py::test_the_public_answers_carry_the_policy
+    - tests/external/test_session43_console.py::test_a_cookie_alone_is_refused_live
+    - tests/external/test_session43_console.py::test_a_foreign_origin_write_is_refused_live
+    - tests/external/test_session43_console.py::test_the_cookies_were_strict
+  description: >-
+    **The console's policy, live** (ADR 0280-0281): the console's answers carry
+    the exact policy; a cookie without the header and a write from another
+    origin are refused, and the session survives the forged write; the accept
+    page's address never held the token; the session cookies are
+    `HttpOnly`/`Secure`/`Strict`.
+
+- id: SITE-LIVE-001
+  priority: P0
+  target_session: 43
+  test_nodeids:
+    - tests/external/test_session43_console.py::test_the_site_is_the_commits_build
+    - tests/external/test_session43_console.py::test_the_site_loads_nothing_else
+    - tests/external/test_session43_console.py::test_the_pricing_page_matches_the_api
+  description: >-
+    **The site, live** (ADR 0283, D2720): the apex and `www` serve this commit's
+    build byte for byte, with the CSP header and nothing loaded from any other
+    host, and the pricing page's plans equal `GET /v1/plans`.

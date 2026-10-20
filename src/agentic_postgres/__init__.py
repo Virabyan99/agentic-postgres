@@ -1267,7 +1267,72 @@ from pathlib import Path
 #: confirms the class against a DEPLOYMENT: `upgrade plan` on every project,
 #: with the same declaration, before the first 1.20.0 deploy -- and a `major`
 #: there is a stop condition.
-CURRENT_SESSION = 42
+#:
+#: **Session 43 moves it to 43, all-or-nothing again** (D690): TWENTY
+#: requirements and twenty claims -- `CLAIMS` 302 -> 322 and `OFFLINE_CLAIMS`
+#: 133 -> 149, counted from the tuples (D1628) -- sixteen declared offline, three
+#: EXTERNAL and one host, every offline half written in the run that built its
+#: piece (Runs 2-7) and every live half here. Two families join the registry:
+#: `CON`, the console and its session, and `SITE`, the public site; the three
+#: repairs go under the families their proofs already live in (`INS`, `DEP`,
+#: `OPS`) and the packaged CLI under `DX`. The external claims are a person's
+#: walk in a real browser -- an invitation link to a working connection string,
+#: through the console's public origin alone -- the console's policy and its
+#: CSRF rule read live, and the site served byte for byte as this commit builds
+#: it; the host claim is the console on the control project only, bounded, the
+#: listeners unchanged. **The lifecycle and the branches are re-earned on the
+#: trip** (D2714, the operator's 2026-10-20): the Sessions 38-42 proofs refuse a
+#: record of another release, so they read a NEW slot's record at 1.21.0.
+#:
+#: **The session's subject is the web.** ADR 0280: the console, a fixed-route
+#: static server on the control project's own host (`/`, `/accept`,
+#: `/console/...`), every page a named `/v1` call, no SQL, no third-party byte.
+#: ADR 0281: the console's session is two `__Host-` cookies, `HttpOnly`,
+#: `Secure`, `SameSite=Strict`, honoured only with `X-Apg-Console: 1` and -- for
+#: a write -- the console's own `Origin`; a bearer is unchanged. ADR 0282: the
+#: invitation is a link whose token rides the fragment, and the factor's QR an
+#: SVG data URI drawn by the server. ADR 0283: the public site on Cloudflare
+#: Pages, built from the tree alone, deployed only after `contract` passed on
+#: `main`. ADR 0284: the customer CLI packaged as `agentic-postgres-cli`,
+#: published from a release tag by trusted publishing. The repairs: the plane's
+#: status reads a container with no healthcheck (D2636), `provision-host.sh
+#: --check` reads the launchers the install installs (D2637), and
+#: `bootstrap-providers --apply` counts what it created (D2642).
+#:
+#: **No released migration. No outputs, manifest, host, capability, lock or
+#: secret schema moves** (outputs stay v22, the project manifest 11, `host.yaml`
+#: 4). The Ledger's `console` row is `trial` (ADR 0261) and `sql_editor` is
+#: `planned` for Session 44.
+#:
+#: **`VERSION` moves to `1.21.0`.** What moved: the `console` service, under a
+#: Compose profile only the control project's render enables (`APG_CONSOLE=1`),
+#: its router on the control host; the control mode's session routes in cookie
+#: mode, the invitation's `accept_url` and the enrolment's `otpauth_qr` (segno
+#: pinned), so the `services/auth-api` image moves; `bin/cloud.py`'s seam and
+#: `bin/build-cli.py`; `site/` and `bin/build-site.py` (no host reads them);
+#: `bin/telemetry.sh`, `bin/provision-host.sh` and `bin/bootstrap-providers.py`.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig: a git
+#: worktree at `77303e4`, the commit that IS deployed, and a `tar`-piped copy of
+#: this working tree, both rendering the INSTALLED tree's `project.example.yaml`.
+#: With `--also api_operation_added`: `bump minor`, **`requires minor`**,
+#: verdict `ok`, `changes [api_operation_added, image_digest]`, `reasons []`,
+#: `operator_digests_moved []`. Without the declaration: `requires patch` --
+#: the lock's moved images alone. **Two leaves differ**: `versions_lock_sha256`
+#: and `template_version` 1.20.0 -> 1.21.0 (6,350 -> 6,350 bytes). The
+#: declaration is the console's cookie mode of the session routes and the two
+#: answer fields: additive, so a client of 1.20.0 is unchanged.
+#: **ADR 0162 prices it a MINOR, and `1.21.0` is that floor exactly**: no
+#: manifest, outputs, capability, lock or secret schema moves. What an operator
+#: must KNOW the reading cannot show: the control project's deploy starts the
+#: console (a new container on the edge network, bounded at 192 MiB), the other
+#: projects' deploys start nothing new, the reconciler is restarted after the
+#: checkout moves (D2179), and a managed project moves to the release by
+#: `slot.sh redeploy` with the reconciler stopped (D2443). **The trip**
+#: confirms the class against a DEPLOYMENT: `upgrade plan` on every project,
+#: with the same declaration, before the first 1.21.0 deploy -- and a `major`
+#: there is a stop condition.
+CURRENT_SESSION = 43
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

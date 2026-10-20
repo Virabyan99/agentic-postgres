@@ -481,6 +481,39 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "telemetry_plane",
         "telemetry_admission",
         "telemetry_logs",
+        # Session 43 (ADR 0280-0284). SIXTEEN, each a property of a CHECKOUT: the
+        # three repairs -- the plane's status reading a container with no
+        # healthcheck (`telemetry_status_reads_all`), the launcher check reading
+        # the install's own list (`launcher_check_reads_the_install`), the
+        # providers' count read (`provider_count_is_read`); the console's cookie
+        # session and CSRF rule (`console_session_cookie`, `console_csrf_rule`),
+        # the invitation link and the factor's QR (`invitation_link`,
+        # `factor_qr`), the console's server, service, Ledger map and browser
+        # verifier (`console_server`, `console_plane`, `console_ledger_map`,
+        # `console_scram`); the site's build, claims and workflow (`site_build`,
+        # `site_claims`, `site_workflow`); and the packaged CLI and its publish
+        # workflow (`cli_package`, `cli_publish_workflow`).
+        #
+        # The session's other FOUR are deliberately not here: three are read
+        # from the workstation (EXTERNAL) -- a person's walk in a real browser,
+        # the console's policy and CSRF rule live, the site served as built --
+        # and one is the console on the host.
+        "telemetry_status_reads_all",
+        "launcher_check_reads_the_install",
+        "provider_count_is_read",
+        "console_session_cookie",
+        "console_csrf_rule",
+        "invitation_link",
+        "factor_qr",
+        "console_server",
+        "console_plane",
+        "console_ledger_map",
+        "console_scram",
+        "site_build",
+        "site_claims",
+        "site_workflow",
+        "cli_package",
+        "cli_publish_workflow",
     }
 )
 
@@ -967,6 +1000,31 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "idle_sleep_retrial_live": ("USE-LIVE-004",),
     "notifications_retrial_live": ("USE-LIVE-005",),
     "insights_live": ("INS-LIVE-001",),
+    # Session 43 (ADR 0280-0284). TWENTY claims, landing with the constant
+    # (D690): sixteen offline, three external and one host, each requirement its
+    # own claim (ADR 0089). The session's subject: the web -- the console, its
+    # cookie session, the invitation as a link, the public site and the packaged
+    # CLI -- and three repairs (D2636, D2637, D2642).
+    "telemetry_status_reads_all": ("INS-STATUS-001",),
+    "launcher_check_reads_the_install": ("DEP-LAUNCH-001",),
+    "provider_count_is_read": ("OPS-PROV-002",),
+    "console_session_cookie": ("CON-SESSION-001",),
+    "console_csrf_rule": ("CON-CSRF-001",),
+    "invitation_link": ("CON-INVITE-001",),
+    "factor_qr": ("CON-FACTOR-001",),
+    "console_server": ("CON-SERVE-001",),
+    "console_plane": ("CON-PLANE-001",),
+    "console_ledger_map": ("CON-LEDGER-001",),
+    "console_scram": ("CON-SCRAM-001",),
+    "site_build": ("SITE-BUILD-001",),
+    "site_claims": ("SITE-CLAIM-001",),
+    "site_workflow": ("SITE-DEPLOY-001",),
+    "cli_package": ("DX-PKG-001",),
+    "cli_publish_workflow": ("DX-PKG-002",),
+    "console_live_host": ("CON-HOST-001",),
+    "console_walk_live": ("CON-LIVE-001",),
+    "console_csrf_live": ("CON-LIVE-002",),
+    "site_live": ("SITE-LIVE-001",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined
