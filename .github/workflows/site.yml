@@ -1,0 +1,71 @@
+# The public site, built from the repository and uploaded to Cloudflare Pages
+# (Session 43, ADR 0283, D2653).
+#
+# **Only after the full check.** This runs when `contract` completes on `main`,
+# deploys only if that run SUCCEEDED for a push, and builds the very commit
+# that run tested (`workflow_run.head_sha`) -- never whatever `main` points at
+# by the time this starts.
+#
+# **The token is a Pages-only one** (Account / Cloudflare Pages / Edit, this
+# account), held as a secret of the `site` environment, which admits `main`
+# only. Nothing else in this repository can read it, and nothing on the host or
+# the workstation holds it.
+#
+# wrangler is pinned to an exact version (rig 43c read 4.147.0, the newest at
+# least 14 days old) and run by the runner's own Node.
+name: site
+
+on:
+  workflow_run:
+    workflows: [contract]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and upload the site
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: site
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the commit contract passed
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Read the pinned interpreter
+        id: python
+        run: echo "version=$(cat .python-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Install the pinned Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ steps.python.outputs.version }}
+
+      - name: Install the hash-locked PyYAML the build reads
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+
+      - name: Build the site
+        run: python bin/build-site.py --out "${RUNNER_TEMP}/site"
+
+      - name: Upload to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          WRANGLER_SEND_METRICS: "false"
+        run: >-
+          npx --yes wrangler@4.147.0 pages deploy "${RUNNER_TEMP}/site"
+          --project-name agentic-postgres-site --branch main
+          --commit-hash "${HEAD_SHA}" --commit-dirty=true

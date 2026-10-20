@@ -16,6 +16,11 @@ none, because it tells a reader the set is whole.
 | [Handoff](handoff.md) | The machine, git, the environment, and the traps that have cost a run |
 | [Architecture decisions](decisions/README.md) | Every ADR, indexed by number and session |
 
+**The customer documentation is the public site** since Session 43 (ADR 0283):
+its sources are `site/pages/`, built by `bin/build-site.py` and published at
+https://agenticpostgresql.com/ by `.github/workflows/site.yml` after `contract`
+succeeds -- every page checked against the Reality Ledger at every build.
+
 ## Operator guides
 
 **Two pages describe operating the release in this checkout, and they are the
@@ -63,7 +68,7 @@ Before a deployment exists, and on a machine that is not one.
 | [Workflows](workflows.md) | `apg workflow`: a reviewed sequence over your own capabilities, the ten verbs, what a run's status document says, what `parked`, `stopped` and `replayed` mean, approvals, compensation, `wait` and `inspect`, what the worker is and what a run may never do |
 | [Change governance](change-governance.md) | `apg migrate propose` and `approve`: the record a change to your migration set needs before a host applies it — the digest, every member and the three readings it cannot take, destructive statements named and never refused, the two-name rule and `approvals_required`, the four sentences a host refuses with, the capability report, approval in the database, and what is not here |
 | [The control plane](control-plane.md) | The one project that holds people, organisations and a registry of the others at `/api/v1`: what makes a project the control plane, accounts by invitation, roles, the TOTP second factor and a lost device, management keys, the registry `bin/control.sh` writes, the terminal commands, the project operation routes and who may call each, the plan, usage, notification and idle-sleep routes (Session 41), and what is not here |
-| [Managed projects](managed-projects.md) | A project a customer creates, claims, sleeps, wakes, resizes, exports and deletes through `/api/v1`: the operations and their states, the slot and the `capacity_exhausted` refusals, the first administrator handed over by hash, what sleeping means for restore points, the export's one 15-minute link, what deletion keeps, idle sleep and what it does to restore points, a branch's door and reason, the plans and what each enforces, usage read or said not read, notifications, and every refusal's meaning |
+| [Managed projects](managed-projects.md) | Where the customer documentation went: the public site (`site/pages/docs/`), and the operator's half of managed projects in the operator guide §20 |
 | [Connectors](connectors.md) | `apg connector`: events out, signed requests in, runs on a clock — the three kinds, the file and its closed body, the manifest's endpoints, the signature scheme exactly (with an `openssl` example a sender can check), at-least-once delivery, enabling and binding an agent with exactly the definition's scopes, the status document, and what is not here |
 | [Studio](studio.md) | `apg studio`: a loopback page over your own deployment, holding your token and never handing it to the browser — the four launch answers and why an administrator always sees `stale_contract`, what each of the six views shows and what it cannot, the typed revocation, and what Studio never does |
 
@@ -81,7 +86,7 @@ Before a deployment exists, and on a machine that is not one.
 | [Secret handling](secret-handling.md) | Generations, per-consumer materialization, what may never be logged |
 | [Provider bootstrap](provider-bootstrap.md) | What is created at a provider, by identifier rather than by name -- and adopted by id on a replacement host |
 | [Node-loss runbook](node-loss-runbook.md) | The host is gone: the kit, adoption, the restore from the mirror, the deploy, the cutover last |
-| [Monitoring](monitoring.md) | A customer's signals and Query Insights through `/api/v1` -- each reading naming its source, numbers and never advice -- and the operator's telemetry plane: ClickStack on the host, the SSH forward, HyperDX's one login, and what is not collected (Session 42) |
+| [Monitoring](monitoring.md) | The reference behind the site's Query Insights and monitoring page -- each signal's source column, the insights route -- and the operator's telemetry plane: ClickStack on the host, the SSH forward, HyperDX's one login, and what is not collected (Session 42) |
 | [The secret store](secret-store.md) | The self-hosted Infisical every project's secrets live in: who reaches it, the keys the operator keeps, the encrypted nightly backup, a restore, upgrading, and what losing it means |
 | [Recovery operations](recovery-operations.md) | The ordinary days before it: the mirror, the kit, the restore's promises, the eight rehearsals and what each reads |
 | [Host baseline](host-baseline.md) | What `provision-host.sh` does to a machine |

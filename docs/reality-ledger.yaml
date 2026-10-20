@@ -149,8 +149,8 @@ rows:
     status: beta
     customer_text: >-
       https://control.agenticpostgresql.com/api/v1 manages accounts,
-      organizations, members, invitations and keys, and lists your projects.
-      Creating a project is not available yet and says so.
+      organizations, members, invitations and keys, and creates and manages
+      your projects, their branches, their connections and their backups.
     today: >-
       One management API in the control project's app mode, frozen as a
       contract (contracts/control-openapi.canonical.json). A project operation

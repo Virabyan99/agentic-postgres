@@ -508,6 +508,11 @@ execution order.
 | **D2705** | Run 6 step 2: `DIR/README.md` from `site/pages/docs/cli.md` *"or a fixed paragraph and the site's URL if Run 7 has not landed; the run says which"*; `license` per ADR 0284. | Run 7 has not landed. The root `pyproject.toml` requires `setuptools>=68`; an SPDX string `license = "Apache-2.0"` needs setuptools 77+. `uv build` also writes a `.gitignore` into the out-dir. | **A fixed README paragraph** naming https://agenticpostgresql.com/docs/cli/; `license = { text = "Apache-2.0" }` plus the OSI classifier and `license-files = ["LICENSE"]` (the wheel's METADATA reads `License: Apache-2.0`, `License-File: LICENSE`, `Requires-Python: >=3.11`); `build-cli` removes the `.gitignore` and refuses unless `dist/` holds exactly one wheel and one sdist. | The backend the repository already names, and a `dist/` the publish job can upload whole. | 0284 |
 | **D2706** | Run 6 step 3: *"every action pinned by commit SHA as `ci.yml` pins its own (copy those SHAs for checkout, setup-python, setup-uv, upload/download-artifact)"*. | `ci.yml` pins no `download-artifact`. Its newest release, v8.0.2, is 2026-10-07 — 13 days old, under the 14-day rule. | **`actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` (v8.0.1, 2026-03-11)**; the others copied from `ci.yml` (checkout v7.0.1, setup-python v7.0.0, setup-uv v9.0.0 with uv 0.12.1, upload-artifact v7.0.1); `pypa/gh-action-pypi-publish@dc37677b…` (v1.14.2, rig 43d). | Every action a commit, every commit old enough to have been looked at. | 0284 |
 | **D2707** | D2667: *"`verify` … passes only if a `contract` run for that SHA concluded `success` — empty list or any other conclusion fails"*. | A commit can carry more than one `contract` run (a re-run). `ci.yml` cancels in-progress runs on `main`, so a deploy commit followed quickly by another push has a CANCELLED run. | **The LATEST `contract` run (by `run_number`) must have concluded `success`**; none registered fails (D1057), and so does a later failure after an earlier success. The step is EXECUTED in `test_publish_verifies_the_contract_run` against a fake `gh` (the real `jq`), seven cases. The deploy commit's own `contract` run must be green before the tag — a cancelled one means re-running it first. | The release tag publishes only what its commit's current verdict allows. | 0284 |
+| **D2708** | D2662: the build refuses *"a `FORBIDDEN_WORDS` member"* in any page. | The Ledger page (D2674) prints every row's CONCEPT, and a `not_offered` row is named `Autoscaling` precisely to say it is not offered; `reality_ledger.forbidden_words_in` reads `customer_text`, not concept names. | **The site's word scan reads every page's prose and the Ledger page's two customer-facing columns** (*Today*, *What you get*), not its concept names; `test_no_forbidden_word` says so and counts the cells it read. | Naming a concept to say it is absent is the opposite of the claim §59 forbids. | 0283 |
+| **D2709** | D2662's page list; ADR 0283's digest inputs (*`site/**`, `plans.py`, `reality-ledger.yaml`, `VERSION`*). | `docs/managed-projects.md`'s life-of-a-project sections (states, creation and the claim, sleeping, sizes, export, deletion) had no page in D2662's list; a pointer alone would have lost them. The renderer's own grammar decides the bytes too. | **`site/pages/docs/projects.md` added** (13 pages + `404.html`); the **digest also covers `src/agentic_postgres/site_build.py`**; generated bodies are a page whose whole body is `@pricing` or `@ledger` (any other `@` line is refused); the Ledger page's front matter is `ledger: "*"` and only it may be. `docs/managed-projects.md` is the pointer; `control-plane.md`'s command list and *"no web console … no `apg project status`"* rewritten (both exist now); `monitoring.md`'s customer half moved to the site page, its reference kept. | One source for what a stranger reads, and nothing the old page said lost on the way. | 0283 |
+| **D2710** | Run 7 step 7's battery: *"write `$5/month` into `pricing.md`"*, *"add `<img …>` via a raw HTML line"*. | The BUILD refuses both before any test reads a page, so those tests would ERROR, not fail (D386). | **The two mutations remove the guard instead** (the build's price check; the renderer's raw-HTML check), killed by each test's own control; the plan's other two as written, and an *any https origin* mutation added — 5/5. | A mutation is evidence only when it fails the assertion it names. | — |
+| **D2711** | Run 7 step 8: *"if the project does not exist, wrangler creates it — rig 43c recorded whether it does; if it does not, the agent creates it through the API"*. | Rig 43c: `wrangler pages deploy` to an absent project answers *"The Pages project … does not exist"*. | **The agent created `agentic-postgres-site` through the API** (production branch `main`, `agentic-postgres-site.pages.dev`, no deployment) before the push that adds `site.yml`. | The first workflow run must have somewhere to upload. | 0283 |
+| **D2712** | D2665: *"Run 9: `management_api.customer_text` … rewritten to what the tree does"*. | The site prints every row's `customer_text` and goes live with this run's push; `management_api` still said *"Creating a project is not available yet and says so"*, false since Session 38. | **Rewritten in Run 7**: *"… manages accounts, organizations, members, invitations and keys, and creates and manages your projects, their branches, their connections and their backups."* `cli_remote`'s stays for Run 9: the package it would name is not published until the tag. | A sentence is corrected before it becomes public, not after. | 0254 |
 
 ---
 
@@ -1523,8 +1528,35 @@ every link valid); `tests/contract/test_documentation_index.py:440-490`.
    https://agenticpostgresql.com/` and `https://www.agenticpostgresql.com/` →
    200 with the CSP; `/docs/connecting/` 200; `/missing` 404.
 
-**Done.** *(executor: the page list and their Ledger rows; the build digest; the
-site workflow's run id and verdict; C4's readings; the battery; the SHA and CI.)*
+**Done.** 2026-10-20 (WSL `~/s43/run7/`). Rows **D2708–D2712**.
+
+- **`src/agentic_postgres/site_build.py`** (the subset, the guards, the
+  generated pricing and Ledger bodies, the layout, `_headers`, the digest) and
+  **`bin/build-site.py`** (registered; `--out`, `--check`; exit 2/3/5).
+  `CONTROL_ENDPOINT` and `CONSOLE_URL` are `naming`'s derivations, asserted.
+- **The pages** (`site/pages/`, 13) and their rows: `/` (accounts,
+  organizations, projects_self_service, postgresql, pooled/direct_endpoint,
+  branches, backups_and_pitr, plan_free), `/quickstart/`, `/pricing/`
+  (plan_free, plan_premium — generated), `/ledger/` (every row — generated),
+  `/docs/` and `getting-started`, `projects` (D2709), `connecting`,
+  `branches`, `backups`, `plans-and-usage`, `insights-and-monitoring`, `cli`,
+  `refusals`; every command copied from the CLI's usage (`~/s43/run7/usage.txt`);
+  every page ends with the invitation address. 17 files; two builds
+  byte-equal; digest at this commit printed by `bin/build-site.py --check`.
+- **Documents**: `managed-projects.md` the pointer; `control-plane.md` and
+  `monitoring.md` cut (D2709); `docs/README.md` names the site; the Ledger's
+  `management_api` sentence corrected (D2712).
+- **`.github/workflows/site.yml`** (D2653): `workflow_run` of `contract` on
+  `main`, success and push only, checks out `head_sha`, builds, `npx --yes
+  wrangler@4.147.0 pages deploy … --project-name agentic-postgres-site
+  --branch main`, environment `site`; the Pages project created first (D2711).
+- **Tests**: `test_site.py` (20: every node id of `SITE-BUILD-001` and
+  `SITE-CLAIM-001`, plus the published names and the command's refusals);
+  `test_release_workflows.py` gains D2653's two.
+- **Battery** (`~/s43/run7/battery7.py`): **5/5 KILLED**, `test_reality_ledger`
+  (13) PASSED each time (D2710).
+- **Targeted** (foreground): 11 modules **1,338 passed**; the documentation
+  guards 899.
 
 ### Run 8 — the trip's instruments, written and rehearsed offline
 

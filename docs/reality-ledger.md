@@ -115,7 +115,7 @@ the customer, and the session's close moves it to `beta` or back to
 
 `management_api` · **beta** · since Session 36
 
-**What a customer reads.** https://control.agenticpostgresql.com/api/v1 manages accounts, organizations, members, invitations and keys, and lists your projects. Creating a project is not available yet and says so.
+**What a customer reads.** https://control.agenticpostgresql.com/api/v1 manages accounts, organizations, members, invitations and keys, and creates and manages your projects, their branches, their connections and their backups.
 
 **Today.** One management API in the control project's app mode, frozen as a contract (contracts/control-openapi.canonical.json). A project operation is accepted only while its concept's ledger row is available, beta or trial, and refused as not available otherwise (ADR 0254, ADR 0261). Planned at Session 38's close because control_plane_live did not pass (D2317); it passed on 1.17.0 in Session 39's sweep, and the row is beta again (D2322).
 

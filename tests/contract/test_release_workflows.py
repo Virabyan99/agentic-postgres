@@ -1,7 +1,7 @@
 """The release workflows: what triggers them, what they verify, what they may hold.
 
-Session 43 (ADR 0284, D2667): `DX-PKG-002` -- `.github/workflows/publish-cli.yml`.
-Run 7 adds the site's half (`site.yml`, ADR 0283). Read with `yaml.safe_load`
+Session 43: `DX-PKG-002` -- `.github/workflows/publish-cli.yml` (ADR 0284,
+D2667) -- and `SITE-DEPLOY-001` -- `site.yml` (ADR 0283, D2653). Read with `yaml.safe_load`
 (where YAML 1.1 reads the key `on` as `True`), and the verify step's script is
 EXECUTED against a fake `gh`, once per bucket -- what it decides, not what it
 says.
@@ -25,6 +25,9 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
 
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 PUBLISH = WORKFLOWS / "publish-cli.yml"
+SITE = WORKFLOWS / "site.yml"
+#: rig 43c: the newest wrangler at least 14 days old on 2026-10-19.
+WRANGLER = "wrangler@4.147.0"
 #: rig 43d: v1.14.2's commit.
 PYPI_PUBLISH = "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33"
 
@@ -126,3 +129,42 @@ def test_publish_pins_the_action() -> None:
         assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", action), (
             f"{action} is not pinned by SHA"
         )
+
+
+# ---------------------------------------------------------------------------
+# SITE-DEPLOY-001: the site, only after the full check
+# ---------------------------------------------------------------------------
+
+
+def test_the_site_deploys_only_after_contract() -> None:
+    """Triggered by `contract` completing on `main`, deploying only on its
+    success for a push, building the commit THAT run tested, the token only in
+    the `site` environment."""
+    document = _load(SITE)
+    assert _trigger(document) == {
+        "workflow_run": {"workflows": ["contract"], "types": ["completed"], "branches": ["main"]}
+    }
+    assert document["permissions"] == {"contents": "read"}
+    (job,) = document["jobs"].values()
+    assert job["if"] == (
+        "github.event.workflow_run.conclusion == 'success' "
+        "&& github.event.workflow_run.event == 'push'"
+    )
+    assert job["environment"] == "site" and job["permissions"] == {"contents": "read"}
+    checkout = job["steps"][0]
+    assert checkout["with"]["ref"] == "${{ github.event.workflow_run.head_sha }}"
+    assert checkout["with"]["persist-credentials"] is False
+    text = SITE.read_text(encoding="utf-8")
+    assert text.count("secrets.") == 1 and "${{ secrets.CLOUDFLARE_API_TOKEN }}" in text
+    assert 'bin/build-site.py --out "${RUNNER_TEMP}/site"' in text
+    assert "--project-name agentic-postgres-site --branch main" in text
+
+
+def test_the_site_workflow_pins_everything() -> None:
+    document = _load(SITE)
+    for action in _uses(document):
+        assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", action), f"{action} is not pinned"
+    text = SITE.read_text(encoding="utf-8")
+    assert f"npx --yes {WRANGLER} pages deploy" in text
+    assert "--require-hashes -r requirements-dev.txt" in text
+    assert re.findall(r"wrangler@[\w.^~*-]+", text) == [WRANGLER]

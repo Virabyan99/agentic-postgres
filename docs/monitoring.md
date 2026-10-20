@@ -11,14 +11,12 @@ Two audiences, two places, and no number in both (ADR 0277, ADR 0278, ADR 0279).
 
 ## The signals a customer reads
 
-```
-bin/monitoring.sh show [--project-key KEY] [--json]
-```
-
-`GET /v1/projects/{key}/monitoring` (viewer and above, or a key holding
-`projects:read`). Each signal is a reading with the moment it was read and the
-table it comes from, or *not read* with the reason. There is no threshold, no
-colour and no alert: the reading and its age.
+**The customer's page is the public site's** since Session 43 (ADR 0283):
+`site/pages/docs/insights-and-monitoring.md`, published at
+https://agenticpostgresql.com/docs/insights-and-monitoring/ -- what each
+reading means, Query Insights' rules and the commands. What follows is the
+reference behind it: `GET /v1/projects/{key}/monitoring` (viewer and above, or
+a key holding `projects:read`) and the column each signal reads.
 
 | Signal | Unit | Source |
 |---|---|---|
@@ -38,35 +36,15 @@ column that exists, and the reading function to these tables only.
 
 ## Query Insights
 
-```
-bin/insights.sh show [--project-key KEY] [--hours N] [--limit M] [--json]
-```
-
+The customer's rules are the site page's (above). The reference:
 `GET /v1/projects/{key}/insights?hours=N&limit=M` (1 to 168 hours, default 24;
-1 to 50 statements, default 20). Every five minutes the server samples the
-statements your database roles (`customer_app`, `customer_admin`) and the API's
-request roles (`anon`, `authenticated`, `agent_reader`, `agent_writer`) ran, from
-PostgreSQL's `pg_stat_statements`. The text is the one PostgreSQL normalised: a
-literal is a `$1`, never your value. For each statement over the window: calls,
-total and mean time, rows, rows per call, shared blocks read per call and the
-cache hit ratio, counted across resets, the most time first.
-
-- **Numbers only.** Nothing here tells you what to change: there is no finding,
-  no recommendation and no confidence. To change a query plan, write a
-  migration in your project's set and run `apg migrate propose`
-  ([change governance](change-governance.md), *Proposing*).
-- **Fewer than two samples** in the window could not be determined: the reason
-  is printed and the command exits `6`. A statement's first sample in the
-  window counts nothing -- it may only just have entered the top 50.
-- **What is never recorded**: statements the platform's own roles run, a
-  statement inside one of your functions (only the calling statement is timed),
-  and any utility statement (`ALTER ROLE`, `DO`, `CREATE ...`) -- so a password
-  or a block's literal cannot reach an insight.
-- Samples are kept 7 days.
-
-**DB time** -- the time your statements spent executing -- is part of usage
-(`apg usage show`, `db_time`) and of the signals (`db_time_last_hour`), read from
-the same extension and counted across resets.
+1 to 50 statements, default 20) reads the samples the reconciler records from
+`pg_stat_statements` for the customer roles and the API's request roles (`anon`,
+`authenticated`, `agent_reader`, `agent_writer`), kept 7 days; a statement's
+first sample in a window counts nothing -- it may only just have entered the
+top 50. A developer changing a query plan writes a migration in the project's
+set and runs `apg migrate propose` ([change governance](change-governance.md),
+*Proposing*). DB time is `db_time` in usage and `db_time_last_hour` above.
 
 ## The operator's telemetry plane
 

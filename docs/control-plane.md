@@ -124,54 +124,14 @@ are never followed. The access token is never written; each command makes one
 refresh exchange. **A login refuses while a session is held** -- end it with
 `bin/logout.sh` first.
 
+**The customer's commands are documented on the public site** since Session 43
+(ADR 0283): `site/pages/docs/cli.md`, published at
+https://agenticpostgresql.com/docs/cli/, names every family as the packaged
+`apg` (`agentic-postgres-cli` on PyPI, ADR 0284); in a checkout the same
+commands are the shims `bin/login.sh`, `bin/org.sh`, `bin/project.sh`, ... over
+`bin/cloud.py`. The operator's three:
+
 ```
-bin/login.sh password --endpoint URL --username NAME [--password-file FILE] [--totp-code-stdin]
-bin/login.sh key --endpoint URL --key-file FILE
-bin/login.sh accept --endpoint URL --invitation-file FILE --username NAME [--display-name TEXT] [--password-file FILE]
-bin/login.sh accept --invitation-file FILE
-bin/login.sh totp-enroll [--output FILE]
-bin/login.sh totp-confirm [--totp-code-stdin]
-bin/logout.sh [--json]
-bin/context.sh show [--json]
-bin/org.sh list [--json]
-bin/org.sh create --name TEXT
-bin/org.sh use --organization ID
-bin/org.sh members [--organization ID] [--json]
-bin/org.sh invite (--account | --role owner|admin|member|viewer) --output FILE [--organization ID] [--expires-hours N]
-bin/org.sh set-role --user ID --role owner|admin|member|viewer [--organization ID]
-bin/org.sh remove --user ID [--organization ID]
-bin/org.sh keys [--organization ID] [--json]
-bin/org.sh key-create --name TEXT --scopes LIST --output FILE [--organization ID]
-bin/org.sh key-revoke --key-id ID [--organization ID]
-bin/project.sh list [--organization ID] [--json]
-bin/project.sh use --project-key KEY
-bin/project.sh show [--project-key KEY] [--json]
-bin/project.sh status [--project-key KEY] [--json]
-bin/project.sh create --name NAME --profile small|standard|large --admin-username USER [--organization ID] [--json]
-bin/project.sh claim [--project-key KEY] [--password-file FILE]
-bin/project.sh sleep [--project-key KEY] [--json]
-bin/project.sh wake [--project-key KEY] [--json]
-bin/project.sh export [--project-key KEY] --output FILE [--timeout S] [--interval S] [--json]
-bin/project.sh delete --project-key KEY --confirm KEY [--json]
-bin/project.sh backups [--project-key KEY] [--json]
-bin/project.sh idle-sleep [--project-key KEY] --minutes 15|30|60|never [--json]
-bin/compute.sh get [--project-key KEY] [--json]
-bin/compute.sh set [--project-key KEY] --profile small|standard|large [--json]
-bin/operation.sh show --operation ID [--json]
-bin/operation.sh list [--organization ID] [--json]
-bin/operation.sh wait --operation ID [--timeout S] [--interval S] [--json]
-bin/operation.sh cancel --operation ID [--json]
-bin/branch.sh create [--project-key KEY] --branch NAME --password-dir DIR [--at INSTANT] [--expires-in DURATION] [--wait]
-bin/branch.sh list|show [--project-key KEY] [--branch NAME] [--json]
-bin/branch.sh reset [--project-key KEY] --branch NAME --password-dir DIR [--at INSTANT] [--wait]
-bin/branch.sh delete [--project-key KEY] --branch NAME --confirm NAME [--wait]
-bin/plan.sh list [--json]
-bin/plan.sh show [--organization ID] [--json]
-bin/plan.sh notify-me [--organization ID] [--plan premium] [--json]
-bin/usage.sh show [--project-key KEY | --organization ID] [--hours N] [--json]
-bin/notifications.sh list [--organization ID] [--limit N] [--json]
-bin/insights.sh show [--project-key KEY] [--hours N] [--limit M] [--json]
-bin/monitoring.sh show [--project-key KEY] [--json]
 sudo bin/control.sh adopt --project KEY --organization ORG_ID --confirm CONTROL_KEY
 sudo bin/control.sh registry [--json]
 sudo bin/control.sh totp-reset --username NAME --confirm CONTROL_KEY
@@ -191,8 +151,8 @@ and keeps that meaning (D2528).
 
 Since `1.16.0` (Session 38, ADR 0256-0261) the control plane accepts six
 operation types on a **managed project** -- one the control plane created
-into a slot the operator prepared, as `docs/managed-projects.md` describes for
-the customer. Each route records an operation and answers `202 {operation}`;
+into a slot the operator prepared, as the site's *Projects* page
+(`site/pages/docs/projects.md`) describes for the customer. Each route records an operation and answers `202 {operation}`;
 a root unit on the host, the **reconciler**, executes it; `GET
 /v1/operations/{id}` reads it.
 
@@ -305,7 +265,14 @@ samples all present, awake, read and quiet.
   (D2451). A branch write answers `409 not_available` naming its row whenever
   that row is not reachable (ADR 0254); since Session 41's close the four are
   `beta`.
-- No account deletion, no email, no passkeys, no web console, no rate limit on
-  `/v1/sessions` or on accepting an invitation (Argon2id's cost is the only
-  throttle), no key expiry, no `apg project status` and no `/v1/ledger` --
-  each is a later session's, and `docs/reality-ledger.md` says which.
+- No account deletion, no email, no passkeys, no rate limit on `/v1/sessions`
+  or on accepting an invitation (Argon2id's cost and the edge's per-source
+  limit are the only throttles), no key expiry and no `/v1/ledger` -- each is a
+  later session's, and `docs/reality-ledger.md` says which. The Ledger is a page
+  of the public site instead (ADR 0283).
+- **The web console** is served beside `/v1` on the control project's own host
+  since Session 43 (ADR 0280-0282): `/`, `/accept` and `/console/` by its own
+  container, every call to `/api/v1` from the browser, the session two
+  `__Host-` cookies chosen by the `X-Apg-Console` header (ADR 0281), and an
+  invitation minted as a link whose token is in the fragment (ADR 0282). It
+  does not create a project in this beta (D2702).
