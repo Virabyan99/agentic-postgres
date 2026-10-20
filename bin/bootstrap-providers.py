@@ -902,6 +902,10 @@ def apply(
         created_so_far.append(("machine identity", identity_id))
         client_id = control.attach_universal_auth(identity_id)
         secret_id, client_secret = control.create_client_secret(identity_id, f"{key} runtime")
+        # Counted as they are made, never typed (D2642: a literal 4 survived from
+        # Session 2 into a plan of 17). A value the provider already held is not
+        # one this run created.
+        resources_created = 3
 
         # Every value goes through `generate_secret_value`, which is what this
         # loop did NOT do until Run 2 (D333). It called `token_hex` inline --
@@ -925,13 +929,14 @@ def apply(
             control.ensure_folder(
                 project_id, infisical["environment_slug"], secret["provider_path"]
             )
-            control.create_secret(
+            if control.create_secret(
                 project_id,
                 infisical["environment_slug"],
                 secret["provider_path"],
                 secret["provider_key"],
                 generate_secret_value(secret),
-            )
+            ):
+                resources_created += 1
     # ValueError joins the pair `add_missing_secrets` has always caught: it is
     # what `generate_secret_value` raises, and an uncaught one here prints a
     # traceback from a command that handles credentials.
@@ -1024,7 +1029,7 @@ def apply(
         state_path(key), json.dumps(document, indent=2, sort_keys=True) + "\n", mode=0o600
     )
 
-    print(f"bootstrap-providers: created 4 resource(s) for {key}")
+    print(f"bootstrap-providers: created {resources_created} resource(s) for {key}")
     print(f"bootstrap-providers: recorded them in {state_path(key)}")
     report_operator_supplied(session, facilities)
     return 0

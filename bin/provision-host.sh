@@ -244,6 +244,39 @@ PYTHON
 # Checks. Every one of these runs in --check and again after --apply.
 # ---------------------------------------------------------------------------
 
+# The launchers the checkout carries, by the short name the units invoke
+# (agentic-postgres-edge -> edge). The one definition both the install and the
+# check read: a typed list here once missed the telemetry launcher (D2637).
+launcher_names() {
+  local origin name
+  for origin in "${ROOT_DIR}"/libexec/agentic-postgres-*; do
+    [ -f "${origin}" ] || continue
+    name="$(basename "${origin}")"
+    printf '%s\n' "${name#agentic-postgres-}"
+  done
+}
+
+# Checked because the units name these paths and nothing else. A unit whose
+# Exec* target is absent fails at boot with a message about the unit rather
+# than about the missing file. Counts into the caller's `violations`.
+check_launchers() {
+  local launcher names
+  names="$(launcher_names)"
+  if [ -z "${names}" ]; then
+    bad "no launcher found in ${ROOT_DIR}/libexec; nothing could be checked"
+    violations=$((violations + 1))
+    return 0
+  fi
+  for launcher in ${names}; do
+    if [ -x "${LIBEXEC}/${launcher}" ]; then
+      ok "launcher ${launcher}"
+    else
+      bad "launcher ${launcher} is not installed at ${LIBEXEC}/${launcher}"
+      violations=$((violations + 1))
+    fi
+  done
+}
+
 check_baseline() {
   local violations=0 ssh_port listeners ufw_status clock
   ssh_port="$(host_field ssh.port)"
@@ -329,18 +362,7 @@ check_baseline() {
   fi
 
   printf '\n== launchers and units ==\n'
-  # Checked because the units name these paths and nothing else. A unit whose
-  # Exec* target is absent fails at boot with a message about the unit rather
-  # than about the missing file.
-  local launcher
-  for launcher in edge project firewall ssh-rollback database-access; do
-    if [ -x "${LIBEXEC}/${launcher}" ]; then
-      ok "launcher ${launcher}"
-    else
-      bad "launcher ${launcher} is not installed at ${LIBEXEC}/${launcher}"
-      violations=$((violations + 1))
-    fi
-  done
+  check_launchers
 
   # The sudo rule, checked for the two things that make it either useless or
   # dangerous: a mode sudo refuses to read, and a rule naming an account that is
@@ -645,16 +667,11 @@ render_templates() {
 install_launchers() {
   install -d -m 0755 -o root -g root "${LIBEXEC}"
 
-  # Named `origin` rather than `source`, which is a shell builtin and reads as
-  # one to both a human and a grep.
-  local origin name
-  for origin in "${ROOT_DIR}"/libexec/agentic-postgres-*; do
-    [ -f "${origin}" ] || continue
-    # agentic-postgres-edge -> edge. The units invoke the short name; the long
-    # name exists so the repository directory is self-describing.
-    name="$(basename "${origin}")"
-    name="${name#agentic-postgres-}"
-    install -m 0755 -o root -g root "${origin}" "${LIBEXEC}/${name}"
+  # The units invoke the short name; the long name exists so the repository
+  # directory is self-describing.
+  local name
+  for name in $(launcher_names); do
+    install -m 0755 -o root -g root "${ROOT_DIR}/libexec/agentic-postgres-${name}" "${LIBEXEC}/${name}"
   done
 
   note "installed $(find "${LIBEXEC}" -maxdepth 1 -type f | wc -l) launcher(s) into ${LIBEXEC}"

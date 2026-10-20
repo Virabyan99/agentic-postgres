@@ -488,6 +488,8 @@ execution order.
 | **D2685** | §9: *"the repository has no licence file when Run 6 stages the package (a public distribution needs the operator's licence decision)"*. | No `LICENSE*`/`COPYING*` in the tree; the GitHub repository is **public** with `license: null` (read 2026-10-19). | **The operator, 2026-10-19: Apache-2.0** for the CLI distribution and the repository. **Run 6** adds `LICENSE` (the Apache License 2.0 text, unmodified) at the root, `license = "Apache-2.0"` in the staged `pyproject.toml`, and the file in the wheel and sdist (not added in Run 1: Run 1 runs no test, and a new root file is read by repository guards). The stop is cleared. | The decision is the operator's; the file lands with the tests that read it. | 0284 |
 | **D2686** | D2668: *"rig 43e reads … that the `playwright` package and Chromium are inside"*. | Rig 43e: `mcr.microsoft.com/playwright/python:v1.63.0-noble@sha256:72bd171a…` (1,013,940,272 bytes) holds Python 3.12.3 and the browsers (`chromium-1243`, `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`) but **NOT the `playwright` package** (`ModuleNotFoundError`), and no `ensurepip` (a venv fails). `pip install --target DIR playwright==1.63.0` (+ `greenlet` 3.5.6, `pyee` 13.0.1, `typing_extensions` 4.16.0) then runs Chromium 153.0.8010.12 headless; FCP recorded (control: `about:blank` has none). | **Run 8's instrument installs the package into a target directory from a hash-locked requirements file** (`tests/external/browser/requirements.txt`, `--require-hashes`, the four pins above, hashes read from PyPI) with network, then runs the driver with `PYTHONPATH` set. The image stays pinned by its index digest. | The image is the browsers; the package is ours to pin. | 0280 |
 | **D2687** | Rig 43c (D2676): *"reads … whether Pages adds headers of its own (recorded whole)"*; §9: *"rig 43c: Pages does not apply `_headers` to the HTML pages, or adds a script or a third-party request of its own"*. | Rig 43c (settled reads, two rounds): `_headers` applies to every HTML answer, `/missing` included (404 with `404.html`); `Referrer-Policy` in `_headers` REPLACES Pages' default `strict-origin-when-cross-origin`; `! Access-Control-Allow-Origin` DETACHES Pages' default `*`; no `<script` in any body. Pages/Cloudflare ADD `x-content-type-options: nosniff`, `cache-control`, `etag` and **NEL** (`report-to` → `https://a.nel.cloudflare.com/report/v4?s=…`, `nel` `success_fraction` 0.0) — and **`! Report-To` / `! NEL` do NOT detach them** (a fourth pass). Reads in the first ~20 s after a deploy return 522s mixed with 200s. Also: the operator's first temporary token held Pages **Read** (GET answered 8000007, create answered `10000 Authentication error`); edited to Edit, it worked. | **Not §9's stop (the agent's ruling, told to the operator)**: NEL is no script and causes no request by the page; the browser reports failed fetches only, to the CDN serving every byte. Recorded in ADR 0283; **Sheet C4 (Run 7) reads the headers on the custom domain** (the zone's own NEL setting may differ). The site's `_headers` carries `Referrer-Policy: no-referrer` and `! Access-Control-Allow-Origin`; the build refuses a site with no `404.html`; **every live read (Sheet C4, `SITE-LIVE-001`) waits for five consecutive 200s** before reading. Sheet C3's token wording stays (`Edit`); the rig token's `Read` was a slip at creation. | What Cloudflare adds is a fact of the platform to be named, not hidden; a read before propagation is not a reading. | 0283 |
+| **D2688** | D2670 (D2636): *"the inspect template already carries `{{if .State.Health}}` and still exits 1 … candidates `{{with .State.Health}}…` and `{{if index .State "Health"}}`"*. | Run 2 (`~/s43/run2/d2636.txt`, Docker 29.5.2, the pinned collector image): the SHORT template `{{.Name}} health={{if .State.Health}}…` prints `none` rc 0; the FULL `do_status` template fails *map has no entry for key "Health"*. **The cause is `{{.HostConfig.NanoCpus}}`**: the CLI runs an inspect template on its typed struct first (field `NanoCPUs`) and falls back to the raw JSON map only when that fails — and in the map a missing key is an error. Control: short + `NanoCpus` fails, short + `NanoCPUs` passes. In the full template `with .State.Health` fails too; `if index .State "Health"` and `with index …` print `none` rc 0 and the status of a container that has one. | **`{{if index .State "Health"}}`** (the plan's rule: the first candidate that prints `none` with rc 0), which reads in either mode; `NanoCpus` kept (it is what the map holds, and what the host's lines have always said). Commented at the template. | A template that fails only beside an unrelated field looks intermittent from outside; the mechanism is what keeps the next one from regressing. | — |
+| **D2689** | D2670 (D2642): *"the count is `len(created)` of the resources `--apply` created (the variable read from `:990-1027`)"*. | No such variable: `apply()` keeps `created_so_far` (project and identity only, for the failure report) and ignores `create_secret`'s return, which `add_missing_secrets` reads as *created vs already present* (`:788-810`). The plan counts project + identity + client secret + one value per generated secret + the read-only GRANT (`describe_plan`, `:680-686`). | **`resources_created`**: 3 (project, identity, client secret) + one per `create_secret` that returned True; the grant is a permission, not a resource. Session 42's plan of 17 is 16 resources. `created_so_far` (the failure report) unchanged. Test reads the expected number from what the fake provider RECORDED, at sessions 2 and 42 (control: their contracts differ in size, so no literal passes both). | The count is a reading of what this run did, not of the plan. | — |
 
 ---
 
@@ -876,8 +878,33 @@ tests/contract/*.py`).
    the sweep-selector guard. Commit `fix(session-43): Run 2 -- telemetry status,
    the launcher check, the provider count (D2636, D2637, D2642)`; push; read CI.
 
-**Done.** *(executor: which template construct survived and why; the batteries'
-outcomes; the SHA and its CI verdict.)*
+**Done.** 2026-10-20 (WSL `~/s43/run2/`). Rows **D2688, D2689**.
+
+- **D2636**: `{{if index .State "Health"}}` — the first candidate printing
+  `health=none` rc 0 in the FULL template; the cause is the CLI's typed→map
+  fallback forced by `NanoCpus` (D2688). `tests/contract/test_telemetry_status.py`
+  (Docker-backed, the pinned collector image, `do_status` from a copy with only
+  `ROOT_DIR`, `main`, `require_root` and `compose` replaced): red before
+  (`<id> (could not be read)`; the healthchecked control passed), green after.
+- **D2637**: `launcher_names` (the install's glob) read by `install_launchers`
+  AND the new `check_launchers` (moved out of `check_baseline` first, typed list
+  intact, so the test went red on the missing seventh — `5 == 7` — and not on a
+  missing function). An empty glob is a DEVIATE, never a clean check (ADR 0195).
+  `tests/contract/test_provision_host_launchers.py` runs the REAL
+  `install_launchers` unprivileged (`install`'s `-o`/`-g` dropped) against a
+  checkout of the six real launchers plus `agentic-postgres-seventh`: 3 tests.
+- **D2642**: `resources_created` (D2689); `tests/contract/test_bootstrap_providers.py`
+  reuses `test_secret_origin`'s fresh-bootstrap harness: red at session 42
+  (`created 4` vs 16), green after; session 2 and the size control pass both.
+- **Battery** (`~/s43/run2/battery2.py`, `battery2.txt`): each repair reverted
+  alone → its own module FAILED (1, 3, 1), never ERROR; the other two green each
+  time; every file restored `cmp`-equal; all three green after. **PASSED.**
+- Targeted once (15 modules: the three new, `test_cli_contract`,
+  `test_diagnostic_surface`, `test_repository_contract`,
+  `test_environment_gates`, `test_acceptance_registry`, `test_evidence_claims`,
+  `test_secret_origin`, `test_bootstrap_state`, `test_host_infrastructure`,
+  `test_telemetry_admission`, `test_root_script_policy`,
+  `test_operator_commands_run_on_the_host`): **1,497 passed, 2 skipped**.
 
 ### Run 3 — the session cookie, the CSRF rule, the invitation link, the QR (`services/auth-api/`, `src/`, `bin/cloud.py`, `contracts/`)
 

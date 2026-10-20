@@ -167,9 +167,13 @@ ui_address() {
 do_status() {
   require_root "status"
   local container
+  # `NanoCpus` is not the CLI's struct field (`NanoCPUs`), so this template runs
+  # against the raw JSON map, where `.State.Health` on a container with no
+  # healthcheck is an error, not an empty value; `index` reads it as absent
+  # (D2636, measured on the pinned collector image).
   for container in $(compose --runtime ps --all --quiet 2>/dev/null); do
     docker inspect --format \
-      '{{.Name}} {{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} mem_limit={{.HostConfig.Memory}} pids_limit={{.HostConfig.PidsLimit}} nanocpus={{.HostConfig.NanoCpus}}' \
+      '{{.Name}} {{.State.Status}} health={{if index .State "Health"}}{{.State.Health.Status}}{{else}}none{{end}} mem_limit={{.HostConfig.Memory}} pids_limit={{.HostConfig.PidsLimit}} nanocpus={{.HostConfig.NanoCpus}}' \
       "${container}" 2>/dev/null || printf '%s (could not be read)\n' "${container}"
   done
   printf 'hyperdx (forward) %s:8080 on apg-telemetry-ui\n' "$(ui_address)"
