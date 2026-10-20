@@ -74,7 +74,7 @@ def branches(control: dict[str, Any], endpoint: str, probe: dict[str, Any]) -> d
     assert stat.S_IMODE(path.stat().st_mode) == 0o600, f"{path} is not 0600"
     document = json.loads(path.read_text(encoding="utf-8"))
     # Session 41 re-runs these against its own record (D2518), Session 42 too (D2623).
-    assert document.get("session") in (40, 41, 42) and document.get("kind") == "branches", (
+    assert document.get("session") in (40, 41, 42, 43) and document.get("kind") == "branches", (
         document.get("session"), document.get("kind"),
     )  # fmt: skip
     assert document.get("project_key") == PARENT, document.get("project_key")

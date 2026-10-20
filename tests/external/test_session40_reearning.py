@@ -80,7 +80,7 @@ def record40(record: dict[str, Any]) -> dict[str, Any]:
     """Session 40's record, Session 41's third re-earning (D2518) or Session
     42's fourth (D2581): a NEW slot every time -- a slot's key, never the kept
     `slot3-prod`."""
-    assert record["session"] in (40, 41, 42), (
+    assert record["session"] in (40, 41, 42, 43), (
         f"a Session {record['session']} record, not 40's, 41's or 42's"
     )
     key = str(record.get("project_key"))

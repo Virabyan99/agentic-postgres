@@ -99,7 +99,7 @@ def instant(text: str) -> datetime:
 def record42(record: dict[str, Any]) -> dict[str, Any]:
     """Session 42's record: a NEW slot's key -- never the kept `slot3-prod` -- in
     the lifecycle's OWN organisation, with its samples sealed (D2581)."""
-    assert record["session"] == 42, f"a Session {record['session']} record, not 42's"
+    assert record["session"] in (42, 43), f"a Session {record['session']} record, not 42's or 43's"
     key = str(record.get("project_key"))
     assert slot.SLOT_KEY.fullmatch(key) and key != "slot3-prod", key
     assert record.get("organization_id") and record.get("probe_organization_id"), record

@@ -64,8 +64,11 @@ function h(tag, properties, ...children) {
   return element;
 }
 
+// Flattened, as `h` flattens its children: a view hands over a list of
+// sections as one argument, and `replaceChildren` would print an array as the
+// text "[object HTMLElement]" instead of inserting its elements (D2713).
 function show(...nodes) {
-  main.replaceChildren(...nodes);
+  main.replaceChildren(...nodes.flat().filter((node) => node !== null && node !== undefined && node !== false));
 }
 
 function refusal(error) {
