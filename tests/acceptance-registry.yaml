@@ -6087,7 +6087,7 @@
     - tests/contract/test_reality_ledger.py::test_the_trial_rules_refuse_each_way_a_row_could_outlive_its_session
     - tests/contract/test_reality_ledger.py::test_no_customer_text_uses_a_forbidden_word
     - tests/contract/test_reality_ledger.py::test_the_page_is_current
-    - tests/contract/test_reality_ledger.py::test_no_console_exists_yet
+    - tests/contract/test_reality_ledger.py::test_every_console_page_maps_to_a_reachable_row
   description: >-
     `docs/reality-ledger.yaml` validates against `schemas/reality-
     ledger.schema.json` with unique ids; every evidence name is a registered

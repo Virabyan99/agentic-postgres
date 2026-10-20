@@ -752,6 +752,11 @@ SERVICE_RESOURCE_DEFAULTS: dict[str, dict[str, int | str]] = {
     # project with public endpoints starts them.
     "customer-pool": {"pids_limit": 64, "cpus": "1.0"},
     "customer-direct": {"pids_limit": 64, "cpus": "1.0"},
+    # Session 43 (ADR 0280): the console's static server, only on the control
+    # project. pids.peak 8 over 1,008 requests (~/s43/run4/measure.txt), so the
+    # floor of 64 decides; a quarter of a core, because it serves seven small
+    # files and the docs service's 1.0 is not lower.
+    "console": {"pids_limit": 64, "cpus": "0.25"},
 }
 
 #: The memory cap of each long-running project service that had none (ADR
@@ -787,6 +792,10 @@ SERVICE_MEMORY_LIMITS_MB: dict[str, int] = {
     # decides. Only a project with public endpoints starts them.
     "customer-pool": 64,
     "customer-direct": 64,
+    # Session 43 (ADR 0280), by the same rule: memory.peak 44.07 MiB over 1,008
+    # requests to every route on the workstation (~/s43/run4/measure.txt);
+    # 4 x 44.07 = 176.3, rounded up to 192.
+    "console": 192,
 }
 
 #: Every short-lived service's process limit: one-shots, probes and clients.

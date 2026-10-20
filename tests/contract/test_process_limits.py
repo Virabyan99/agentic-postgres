@@ -52,8 +52,9 @@ def test_every_service_carries_a_pids_limit(model: dict) -> None:
     nothing this product does until this holds.
     """
     services = model["services"]
-    # 22 since Session 39: `customer-pool` and `customer-direct` (ADR 0269).
-    assert len(services) == 22, f"the service count moved to {len(services)}; check the split"
+    # 22 since Session 39: `customer-pool` and `customer-direct` (ADR 0269);
+    # 23 since Session 43: `console` (ADR 0280).
+    assert len(services) == 23, f"the service count moved to {len(services)}; check the split"
 
     without = sorted(name for name, service in services.items() if "pids_limit" not in service)
     assert not without, f"these services are unbounded in processes: {without}"
@@ -88,7 +89,8 @@ def test_the_nine_take_theirs_from_the_environment_and_the_eleven_the_literal(
                 wrong.append(f"{name}: short-lived but carries a cpus cap")
     assert not wrong, wrong
 
-    assert len(LONG_RUNNING) == 11
+    # Twelve long-running since Session 43's `console` (ADR 0280); eleven short-lived.
+    assert len(LONG_RUNNING) == 12
     assert len(services) - len(LONG_RUNNING) == 11
 
 
@@ -174,7 +176,11 @@ def test_cpus_is_two_for_postgres_and_one_for_every_sidecar() -> None:
             "`${VAR:?required}` interpolation yields one and that is the form "
             "rig 31a measured Compose accepting"
         )
-        assert cpus == ("2.0" if name == "postgres" else "1.0"), f"{name}: cpus {cpus!r}"
+        # Session 43 (ADR 0280): the console takes a quarter of a core -- LESS
+        # than a sidecar, so the rule this holds (no sidecar takes both cores)
+        # is kept with room; named, so a second exception is a decision.
+        expected = {"postgres": "2.0", "console": "0.25"}.get(name, "1.0")
+        assert cpus == expected, f"{name}: cpus {cpus!r}"
 
 
 #: ADR 0244's edge values, from Sheet E0 (2026-09-30): memory max(4 x peak
@@ -229,6 +235,22 @@ def test_the_telemetry_plane_is_bounded() -> None:
         assert services[name]["image"].startswith("${") and "ports" not in services[name], name
 
 
+def test_the_console_is_bounded(model: dict) -> None:
+    """The console (Session 43, ADR 0280) carries ADR 0244's limits from its
+    measured peaks -- memory.peak 44.07 MiB and pids.peak 8 over 1,008 requests
+    (~/s43/run4/measure.txt): 192 MiB, 64 processes, a quarter of a core --
+    each interpolated from the render, read-only, never root, no `ports`."""
+    console = model["services"]["console"]
+    assert config.SERVICE_RESOURCE_DEFAULTS["console"] == {"pids_limit": 64, "cpus": "0.25"}
+    assert config.SERVICE_MEMORY_LIMITS_MB["console"] == 192
+    assert console["pids_limit"] == "${CONSOLE_PIDS_LIMIT:?required}"
+    assert console["cpus"] == "${CONSOLE_CPUS:?required}"
+    assert console["mem_limit"] == "${CONSOLE_MEMORY_LIMIT:?required}"
+    assert console["read_only"] is True and console["user"] == "65532:65532"
+    assert console["cap_drop"] == ["ALL"] and "ports" not in console
+    assert str(console["restart"]) == "on-failure:5"
+
+
 def _long_running(model: dict) -> set[str]:
     """The services that run for as long as the project does, by the FILE'S OWN
     restart policy -- not a list, so a new long-running service lands here."""
@@ -265,7 +287,7 @@ def test_the_four_new_memory_limits_are_rendered_from_config(model: dict) -> Non
     from agentic_postgres import naming
 
     # The four of ADR 0244 and, since Session 39, the two customer poolers by
-    # the same rule (ADR 0269).
+    # the same rule (ADR 0269); since Session 43 the console (ADR 0280).
     assert set(config.SERVICE_MEMORY_LIMITS_MB) == {
         "pgbouncer",
         "postgrest",
@@ -273,6 +295,7 @@ def test_the_four_new_memory_limits_are_rendered_from_config(model: dict) -> Non
         "edge-probe",
         "customer-pool",
         "customer-direct",
+        "console",
     }
     identity = naming.derive(
         slug="alpha",

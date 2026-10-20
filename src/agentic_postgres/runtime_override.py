@@ -26,6 +26,7 @@ import yaml
 
 from agentic_postgres.host_config import EDGE_POSTGRES_ENTRYPOINT
 from agentic_postgres.naming import (
+    CONSOLE_SERVICE,
     CONTROL_PATH_SUFFIX,
     CUSTOMER_DIRECT_SERVICE,
     CUSTOMER_POOL_SERVICE,
@@ -255,6 +256,13 @@ DEFERRED_SERVICES: tuple[str, ...] = tuple(
 #: `APG_DOCS_SNAPSHOT` while staying project-neutral.
 DOCS_SERVICE = "docs"
 DOCS_SERVICE_PORT = 8080
+
+#: Session 43's console (ADR 0280; its service is `naming.CONSOLE_SERVICE`): the
+#: port `serve.py` binds, and the three paths its router matches on the control
+#: project's host -- the root (redirected to `/console/`), the invitation page,
+#: and the console.
+CONSOLE_SERVICE_PORT = 8080
+CONSOLE_RULE_PATHS = "Path(`/`) || Path(`/accept`) || PathPrefix(`/console/`)"
 SNAPSHOT_FILENAME = "openapi.json"
 SNAPSHOT_CONTAINER_PATH = "/app/snapshot/openapi.json"
 
@@ -658,6 +666,12 @@ def build_override(
     #: The host directory the two userlists live in (absolute), derived by the
     #: deploy from the project's state root, never typed.
     customer_userlist_directory: str = "",
+    #: Session 43 (ADR 0280). Does this project serve the console? Read from the
+    #: rendered `APG_CONSOLE` -- the value `project-runtime.sh` reads for the
+    #: `console` profile, so the container and its router cannot disagree.
+    #: Off, the override names no console and every other project is unchanged.
+    console: bool = False,
+    console_router_name: str = "",
 ) -> dict[str, Any]:
     """Build the override document for one project's health route and migrations.
 
@@ -706,6 +720,8 @@ def build_override(
             "control_router_name and control_stripprefix_middleware_name are required "
             "for the control plane"
         )
+    if console and not console_router_name:
+        raise ValueError("console_router_name is required for the console")
     if not storage_router_name:
         raise ValueError("storage_router_name is required")
     if not storage_buffering_middleware_name:
@@ -1024,6 +1040,21 @@ def build_override(
                     userlist_directory=customer_userlist_directory,
                 )
                 if public_endpoints
+                else {}
+            ),
+            # Session 43 (ADR 0280). The console's router, on the control
+            # project only; its service is `profiles: [console]`, so no other
+            # project starts it or names it here.
+            **(
+                {
+                    CONSOLE_SERVICE: {
+                        "labels": _console_labels(
+                            https_entrypoint=https_entrypoint,
+                            console_router_name=console_router_name,
+                        )
+                    }
+                }
+                if console
                 else {}
             ),
         }
@@ -1505,6 +1536,28 @@ def _app_labels(
     }
 
 
+def _console_labels(*, https_entrypoint: str, console_router_name: str) -> dict[str, str]:
+    """The console's router (ADR 0280), on the control project's `console` only.
+
+    Exactly three matchers on the project's host -- the root, the invitation
+    page and `/console/...` -- so `/api/...`, `/docs/...` and `/__apg/...` keep
+    their own routers and nothing else reaches this container. The baseline
+    chain and nothing more: no buffering (the console takes no body) and no
+    strip (its server answers the paths as published).
+    """
+    router = f"traefik.http.routers.{console_router_name}"
+    service = f"traefik.http.services.{console_router_name}"
+    return {
+        "traefik.enable": "true",
+        f"{router}.rule": f"Host(`${{PROJECT_DOMAIN:?required}}`) && ({CONSOLE_RULE_PATHS})",
+        f"{router}.entrypoints": https_entrypoint,
+        f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
+        f"{router}.middlewares": "${BASELINE_MIDDLEWARE_CHAIN:?required}",
+        f"{router}.service": console_router_name,
+        f"{service}.loadbalancer.server.port": str(CONSOLE_SERVICE_PORT),
+    }
+
+
 def _control_labels(
     *,
     https_entrypoint: str,
@@ -1829,6 +1882,8 @@ def render_override(
     customer_pool_router_name: str = "",
     customer_direct_router_name: str = "",
     customer_userlist_directory: str = "",
+    console: bool = False,
+    console_router_name: str = "",
 ) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
     document = build_override(
@@ -1862,6 +1917,8 @@ def render_override(
         customer_pool_router_name=customer_pool_router_name,
         customer_direct_router_name=customer_direct_router_name,
         customer_userlist_directory=customer_userlist_directory,
+        console=console,
+        console_router_name=console_router_name,
     )
     header = (
         "# Generated from host.yaml and the rendered compose.env by ./deploy.sh.\n"

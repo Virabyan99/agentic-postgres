@@ -450,6 +450,19 @@ def console_origin(domain: str) -> str:
     return f"https://{domain}"
 
 
+#: The console's Compose service (ADR 0280): `profiles: [console]`, started
+#: only where the render says `APG_CONSOLE=1` -- the control project.
+CONSOLE_SERVICE = "console"
+
+
+def console_router_name(key: str) -> str:
+    """The router publishing the console on the control project's own host:
+    `/`, `/accept` and `/console/...` (ADR 0280). Derived for every project, as
+    the control router is; its labels are rendered only for the control
+    project."""
+    return traefik_name(f"apg-{key}-console", context="traefik_router_console")
+
+
 def app_buffering_middleware_name(key: str) -> str:
     """The application route's body-size middleware.
 

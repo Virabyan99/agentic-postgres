@@ -272,6 +272,8 @@ BUILT_SERVICE_USERS = {
     # Session 18 (ADR 0188): the mirror client, granted four secret files
     # owned by this uid and nothing else.
     "backup-mirror": "65532:65532",
+    # Session 43 (ADR 0280): the console, the docs service's numeric nonroot pair.
+    "console": "65532:65532",
 }
 
 #: Built services whose root filesystem is writable, and there is exactly one.

@@ -1,0 +1,37 @@
+{
+  "views": [
+    {
+      "id": "accept",
+      "path": "/accept",
+      "ledger": ["accounts", "organizations"],
+      "calls": [
+        "GET /v1/me",
+        "POST /v1/invitations/accept",
+        "POST /v1/sessions",
+        "POST /v1/sessions/refresh",
+        "POST /v1/me/totp",
+        "POST /v1/me/totp/confirm"
+      ]
+    },
+    {
+      "id": "sign-in",
+      "path": "/console/#/sign-in",
+      "ledger": ["accounts"],
+      "calls": ["POST /v1/sessions", "POST /v1/sessions/refresh"]
+    },
+    {
+      "id": "overview",
+      "path": "/console/#/",
+      "ledger": ["accounts", "organizations", "projects_self_service", "management_api"],
+      "calls": [
+        "GET /v1/me",
+        "GET /v1/organizations",
+        "GET /v1/projects",
+        "POST /v1/me/totp",
+        "POST /v1/me/totp/confirm",
+        "DELETE /v1/sessions/current",
+        "POST /v1/sessions/refresh"
+      ]
+    }
+  ]
+}

@@ -248,19 +248,35 @@ def test_every_operation_type_names_a_ledger_row_and_is_accepted_iff_its_row_is_
     )
 
 
-def test_no_console_exists_yet() -> None:
-    """The console half of ADR 0247's guard, with no subject yet (D2000).
+def test_every_console_page_maps_to_a_reachable_row(ledger: dict) -> None:
+    """The console half of ADR 0247's guard, now with its subject (ADR 0280).
 
-    Every console control must map to a ledger row; no console exists until
-    Session 42 (under `services/console/`), which replaces this test with the
-    real guard. Until then the set is asserted empty, so the day it appears
-    this fails rather than passing over a set nobody reads. (The operation-type
-    half became a guard of its own in Session 37, above.)
+    It replaces `test_no_console_exists_yet`, which held the set empty until a
+    console existed (D2000). Every view in `services/console/public/pages.json`
+    names at least one Ledger row, and every row it names exists and is
+    REACHABLE (`available`, `beta`, `trial`) -- a page for a `planned` or
+    `not_offered` feature is a claim the node does not keep.
+
+    The `console` row itself is `planned` (target 43) until Session 43's bump
+    (Run 9) moves it with its claims; until then no view may name it, and it is
+    asserted to be exactly that. Run 9 removes this exception in the commit
+    that moves the row (D690).
     """
-    assert not (REPO_ROOT / "services" / "console").exists(), (
-        "services/console exists: Session 42's guard (every console control maps "
-        "to a ledger row) must replace this assertion"
+    pages = json.loads(
+        (REPO_ROOT / "services" / "console" / "public" / "pages.json").read_text(encoding="utf-8")
     )
+    rows = {row["id"]: row for row in ledger["rows"]}
+    views = pages["views"]
+    assert views, "the console has no view: the guard would read an empty set"
+    for view in views:
+        assert view["ledger"], f"{view['id']} names no Ledger row"
+        for row in view["ledger"]:
+            assert row != "console", f"{view['id']} names the console's own row"
+            assert row in rows, f"{view['id']} names {row!r}, which the Ledger does not have"
+            assert rows[row]["status"] in reality_ledger.REACHABLE, (
+                f"{view['id']} offers {row!r}, which is {rows[row]['status']}"
+            )
+    assert (rows["console"]["status"], rows["console"]["target_session"]) == ("planned", 43)
 
 
 def test_the_idle_sleep_row_is_reachable_iff_its_sleep_is_accepted(ledger: dict) -> None:

@@ -67,9 +67,17 @@ is never published.
 2. **A compose service `console` under the facility profile `console`.**
    `bin/project-runtime.sh` adds `--profile console` only when the render says
    `APG_CONSOLE=1`, which `rendering.py` emits beside `AUTH_APP_MODE=control`,
-   so only the control project runs it. The service is bounded (`mem_limit`,
-   `pids_limit`, `cpus` from `CONSOLE_*` variables, ADR 0244), `read_only:
-   true`, on network `edge` only, with no secret and no mount.
+   so only the control project runs it. The deploy builds its router from the
+   same value (`_override_console`), so the container and its router cannot
+   disagree. The service is bounded by ADR 0244's rule from its measured peaks
+   (Session 43 Run 4, `~/s43/run4/measure.txt`: 1,008 requests over every
+   route, `memory.peak` 44.07 MiB, `pids.peak` 8): **`mem_limit` 192 MiB,
+   `pids_limit` 64, `cpus` 0.25** (a quarter of a core, less than any
+   sidecar's 1.0), from `CONSOLE_*` variables, `read_only: true`, uid 65532,
+   on network `edge` only, with no secret and no mount. Its environment is the
+   port and **`APG_CONSOLE_API_PATH`** — the rendered `CONTROL_ROUTE_PATH` —
+   which the server answers at `/console/env.json`, so no page types a path
+   `naming` derives (D2697).
 3. **One router, `apg-<key>-console`** (derived in `naming.py`), with the rule
    ``Host(PROJECT_DOMAIN) && (Path(`/`) || Path(`/accept`) ||
    PathPrefix(`/console/`))`` and the baseline middleware chain. `/api/…`,
@@ -87,7 +95,9 @@ is never published.
    scripts are its own files. `img-src data:` exists only for ADR 0282's QR.
    The other headers are `services/docs/serve.py`'s: `Referrer-Policy:
    no-referrer`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
-   COOP and CORP `same-origin`, `Cache-Control: no-store`.
+   COOP and CORP `same-origin`, `Cache-Control: no-store`. They are added in
+   `end_headers`, so the base handler's own 501 for another verb carries them
+   too (the docs server's 501 does not, D2700).
 5. **Every page maps to a Ledger row that is `trial`, `beta` or
    `available`, and every `/v1` path a script calls exists in
    `contracts/control-openapi.canonical.json`.** No page names a `planned` or
@@ -98,7 +108,8 @@ is never published.
    own client, through the Connect page's strings, and from Session 44 through
    the SQL editor (D2592). Studio stays loopback-only (ADR 0205).
 7. **The browser never sends a database password** (D2660). `scram.js` draws
-   24 random bytes (`crypto.getRandomValues`, base64url) as the password,
+   32 random bytes (`crypto.getRandomValues`, base64url — the CLI's
+   `secrets.token_urlsafe(32)`, D2698) as the password,
    computes the SCRAM-SHA-256 verifier with WebCrypto (rig 43a, reading 6),
    sends only the verifier, and shows the password once. It is held in a
    closure until the page is left, and never written to storage or a URL. A

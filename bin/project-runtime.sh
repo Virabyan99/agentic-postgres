@@ -126,6 +126,11 @@ session_profiles() {
   if grep -qx 'APG_PUBLIC_ENDPOINTS=1' "${rendered}/compose.env" 2>/dev/null; then
     profiles+=(--profile public-endpoints)
   fi
+  # Session 43 (ADR 0280): the console, a facility profile of the same shape --
+  # the control project's alone, by the render's APG_CONSOLE=1.
+  if grep -qx 'APG_CONSOLE=1' "${rendered}/compose.env" 2>/dev/null; then
+    profiles+=(--profile console)
+  fi
   printf '%s\n' "${profiles[@]}"
 }
 

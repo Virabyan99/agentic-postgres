@@ -496,6 +496,12 @@ execution order.
 | **D2693** | Run 3 step 2: *"`_caller`: `Authorization` present → today's path; else … cookie"*. | A second reader of the bearer: `accept_invitation` decided "signed in" by `request.headers.get("authorization")` (`control_routes.py:404`) — a console user accepting a membership would have been anonymous. | **One rule, `_bearer(request)`**, read by `_caller` AND by `accept_invitation`: `Authorization` wins; else the access cookie only with the header (and, for a non-read, the console's `Origin`); a cookie value starting `apg_` is a 401. | CLAUDE.md §7 question 5: when a decision is implemented, every caller gets it. | 0281 |
 | **D2694** | ADR 0281: *"A write's Origin check also applies to the three session routes in console mode"*; `DELETE /v1/sessions/current`'s description: *"Answers 204 whether or not the token named a live session."* | — | **In console mode (the header present) a login, refresh or logout from any other `Origin` is `401` before its body is read** — the logout's *"always 204"* holds for bearer mode and for the console's own origin. In console mode an empty body reads the refresh cookie; a logout with no cookie and no body ends nothing and still clears both cookies (204). | A cross-origin request carrying the console's header is not the console. | 0281 |
 | **D2695** | Run 3 step 3: *"`org invite --output` writes `accept_url`"*. | Until 1.21.0 is deployed, the hosted control plane (1.20.0) answers no `accept_url`. | `org invite` writes `accept_url` when the server answers one, else the bare token, and says which (*"the invitation link written to …"* / *"the invitation token written to …"*); `login accept` reads either. | The CLI from this checkout keeps working against the deployed release until the sitting. | 0282 |
+| **D2696** | Run 4 step 4: *"no string matching `\b(select\|insert\|update\|delete\|create\|drop\|alter)\s` case-insensitively outside comments — `test_no_script_holds_sql`"*. | That pattern matches the onboarding page's own sentence *"Create your account"* (and Run 5's *"Create organisation"*, *"Delete project"*). | **The guard matches SQL's SHAPE** (`select … from`, `insert into`, `update … set`, `delete from`, `create/drop/alter table\|role\|schema…`), with a control in the same test: SQL text is recognised, the pages' words are not. Comments are full-line `//` only (asserted) and removed before every scan. | A guard that fires on the product's own words gets switched off; one shaped like what it forbids does not. | 0280 |
+| **D2697** | Run 4 step 1: the routes are the seven files, `REDIRECTS`, `HEALTH_PATH`. | The pages call `/api/v1`, which is `identity.route_control_path` — `{api.public_base_path}/v1`, a manifest value. A page that typed it would be a second derivation (ADR 0061). | **One more answer, not a file: `/console/env.json`** → `{"api": "<APG_CONSOLE_API_PATH>"}`, compose passing `${CONTROL_ROUTE_PATH:?required}`; `api.js` reads it once. Without the variable the answer is 503, never a guessed path. | The renderer stays the one authority for a path. | 0280 |
+| **D2698** | D2660: *"the password from `crypto.getRandomValues` (24 bytes, base64url)"*. | The CLI's every database password is `secrets.token_urlsafe(32)` (`bin/cloud.py:1031, 1206`): 32 bytes. | **`scram.js` uses 32 bytes** (`PASSWORD_BYTES = 32`, base64url unpadded), the CLI's rule. | One rule for a customer's password, wherever it is made. | 0280 |
+| **D2699** | Run 4 step 2: *"`cpus` "0.25" (the docs service's value if lower — read it)"*; limits from a measurement. | Measured (`~/s43/run4/measure.txt`): 1,008 requests over every route, `memory.peak` 46,206,976 B (44.07 MiB), `pids.peak` 8, healthy; docs' `cpus` is 1.0 (not lower). Four counting guards in `test_process_limits.py` moved with the new service: services 22 → 23, long-running 11 → 12, the memory set + `console`, and `test_cpus_is_two_for_postgres_and_one_for_every_sidecar` (`console` 0.25, named). | **192 MiB / 64 pids / 0.25 cpu** in `config.SERVICE_MEMORY_LIMITS_MB` and `SERVICE_RESOURCE_DEFAULTS`, rendered as `CONSOLE_*`; the four guards widened to the measured set (each a named member, ADR 0280); `test_the_console_is_bounded` new. | ADR 0244's rule applied to a measurement, not a guess. | 0280, 0244 |
+| **D2700** | ADR 0280: *"the exact CSP and security headers on every answer (404 and redirect included)"*. | Measured (`~/s43/run4/docs501.txt`): `services/docs/serve.py`'s 501 for another verb (the base handler's `send_error`) carries **no** CSP; its 404 does (control). | **The console adds its headers in `end_headers`**, so its 501 carries them (`test_every_answer_carries_the_policy` asks a 501). The docs server is left as it is — its own surface, a later session's (§10). | The console's whole safety is its policy; an answer without it is one that opted out. | 0280 |
+| **D2701** | Run 4 step 1: `REDIRECTS = {"/": "/console/", "/console": "/console/"}`; the router rule ``Path(`/`) \|\| Path(`/accept`) \|\| PathPrefix(`/console/`)``. | `/console` (no slash) is not in the rule, so through the edge it is Traefik's own 404; the server's redirect for it is reachable only inside the container. | **Kept as planned** (§9's stop names any path outside the three, and adding `Path(`/console`)` would be a fourth); the redirect is harmless and costs nothing. | Recorded so nobody reads the redirect as a published path. | 0280 |
 
 ---
 
@@ -1168,8 +1174,58 @@ src/agentic_postgres/runtime_override.py compose.yaml`); `tests/contract/test_pr
    `test_repository_contract`, `test_cli_contract`, `test_environment_gates`,
    the sweep-selector guard. Commit, push, read CI.
 
-**Done.** *(executor: the measured peaks and the limits chosen; the battery; the
-SHA and CI.)*
+**Done.** 2026-10-20 (WSL `~/s43/run4/`). Rows **D2696–D2701**.
+
+- **`services/console/`**: `serve.py` (the seven file routes, `/console/env.json`
+  → the API path from `APG_CONSOLE_API_PATH` (D2697), the two redirects, the
+  health path; ADR 0280's CSP and the docs headers added in `end_headers`, so a
+  501 carries them too (D2700); `log_message` without the query); `Dockerfile`
+  (one stage from `PYTHON_BASE_IMAGE`, `public/` and `serve.py`, uid 65532,
+  the docs healthcheck); `public/`: `index.html`, `accept.html` (no inline
+  script), `app.css`, `api.js` (the only `fetch`: `X-Apg-Console`,
+  same-origin, `redirect: "error"`, one refresh-and-retry on 401), `app.js`
+  (the accept flow — fragment read and `replaceState` before the first request;
+  create account → console sign-in → factor enrolment from the server's QR →
+  sign in with the next code — sign-in with the code field on
+  `second_factor_required`, sign-out, the overview), `scram.js` (32-byte
+  password, D2698; its proof is Run 5's), `pages.json` (three views:
+  `accept`, `sign-in`, `overview`).
+- **Measured** (`~/s43/run4/measure.txt`): image 43,209,566 B; at rest
+  28.6 MB; 1,008 requests in 14.2 s → `memory.peak` 44.07 MiB, `pids.peak` 8;
+  healthy. **Limits 192 MiB / 64 / 0.25** (D2699).
+- **The plane**: `compose.yaml` `console` (`profiles: [console]`, `CONSOLE_*`,
+  read-only, `cap_drop: ALL`, `edge` only, no mount, no secret);
+  `config.py`, `rendering.py` (`CONSOLE` in `SERVICE_RESOURCE_ORDER`,
+  `CONSOLE_MEMORY_LIMIT`, `CONSOLE_ROUTER_NAME`); `naming.CONSOLE_SERVICE`,
+  `naming.console_router_name`; `runtime_override._console_labels` (the
+  three-path rule, the baseline chain only, port 8080) when `console`;
+  `bin/deploy-project.py::_override_console` at both override sites;
+  `bin/project-runtime.sh` adds `--profile console` on `APG_CONSOLE=1`.
+- **The guard** (ADR 0280): `test_no_console_exists_yet` → 
+  `test_every_console_page_maps_to_a_reachable_row` (the `console` row's own
+  name excluded until Run 9, asserted `planned`/43); `LEDGER-001`'s node id
+  moved in the registry, the acceptance matrix regenerated.
+- **Tests**: `test_console_server.py` (7 — the real server in a thread, asked
+  over HTTP: the closed table, the policy on 200/301/404/HEAD/501, the env
+  answer, the log, every asset our own, GET/HEAD only, the image),
+  `test_console_plane.py` (3 — two real renders through `project-runtime.sh`'s
+  `session_profiles` and the deploy's `_override_*`), `test_console_pages.py`
+  (6 — calls ⊆ snapshot and = `pages.json`, rows reachable, no SQL (D2696),
+  no storage, no markup sink, only `api.js` fetches),
+  `test_process_limits.py::test_the_console_is_bounded`; four counting guards
+  widened to the measured set (D2699); `BUILT_SERVICE_USERS` gains `console`.
+- **Renders**: the control example and `project.example.yaml` render and
+  validate in a temporary root (`~/s43/run4/renders.py`: `APG_CONSOLE` 1/0, the
+  origin on the control project only); `apg generate --check` exit 0; the two
+  fixture renders refreshed (`~/s43/rerender.sh`, 6 console keys each).
+- **Battery** (`~/s43/run4/battery4.py`): the plan's four (a route to
+  `/etc/passwd`; `frame-ancestors` dropped; the profile for every project; a
+  third-party script) and two more (markup from a value; a call outside the
+  snapshot) — **6/6 KILLED**, `test_docs_service` (33) PASSED each time.
+- **Targeted**, foreground shards: A (13 modules) and B (18) — found and fixed:
+  `bin/project-runtime.sh`'s executable bit lost through `\\wsl$`
+  (`test_cli_contract`), an `APG_` subscript in a test body (D2381), and
+  `BUILT_SERVICE_USERS` — then **1,262 + 857 and 592 + 85 passed**.
 
 ### Run 5 — the console's customer pages (`services/console/public/`, the Ledger row's text)
 

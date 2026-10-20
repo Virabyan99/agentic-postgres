@@ -1222,6 +1222,58 @@ services:
     networks:
       - edge
 
+  # Session 43's console (ADR 0280): the control project's own pages beside
+  # `/api/v1` on its host -- `/`, `/accept`, `/console/...` -- a fixed table of
+  # first-party files with its own Content-Security-Policy, the docs service's
+  # shape. It holds no credential, mounts nothing, proxies nothing: the pages
+  # call `/api/v1` from the browser. A FACILITY profile (D2344's shape):
+  # `project-runtime.sh` adds `--profile console` only where the render says
+  # APG_CONSOLE=1, which is the control project alone; the router labels are
+  # the runtime override's, on that project alone.
+  console:
+    # ADR 0244's rule from the measured peaks (config.SERVICE_RESOURCE_DEFAULTS
+    # and SERVICE_MEMORY_LIMITS_MB): memory.peak 44 MiB, pids.peak 8.
+    pids_limit: ${CONSOLE_PIDS_LIMIT:?required}
+    cpus: ${CONSOLE_CPUS:?required}
+    mem_limit: ${CONSOLE_MEMORY_LIMIT:?required}
+    build:
+      context: ./services/console
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_RUNTIME_IMAGE:?required}
+    profiles: [console]
+    restart: "on-failure:5"
+    labels:
+      apg.traefik.scope: managed
+      apg.project.key: ${PROJECT_KEY:?required}
+      apg.environment: ${PROJECT_ENVIRONMENT:?required}
+      traefik.docker.network: ${EDGE_NETWORK_NAME:?required}
+    user: "65532:65532"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 5s
+    environment:
+      APG_CONSOLE_PORT: "8080"
+      # The API's public path the pages call (`/api/v1`), the one value the
+      # server answers that is not a file: rendered from `naming`, never typed.
+      APG_CONSOLE_API_PATH: ${CONTROL_ROUTE_PATH:?required}
+    healthcheck:
+      test:
+        [
+          CMD,
+          python,
+          -c,
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/__apg/healthz', timeout=2).status==200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    # `edge` only, as `docs`: it reaches nothing, and nothing but the edge reaches it.
+    networks:
+      - edge
+
   # Session 14's metrics collector (ADR 0164). The backend of the `/metrics`
   # route ADR 0005 reserved in Session 1 and nothing owned for thirteen
   # sessions.

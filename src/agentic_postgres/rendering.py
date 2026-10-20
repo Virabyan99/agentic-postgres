@@ -706,6 +706,8 @@ SERVICE_RESOURCE_ORDER: tuple[str, ...] = (
     # `SERVICE_MEMORY_LIMITS_MB` already uses for `edge-probe`.
     "CUSTOMER_POOL",
     "CUSTOMER_DIRECT",
+    # Session 43 (ADR 0280): the console, on the control project only.
+    "CONSOLE",
 )
 
 #: be here. ``host.yaml`` is not one of the digested render inputs, so a
@@ -740,6 +742,11 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "APG_PUBLIC_ENDPOINTS",
     "CUSTOMER_POOL_CONNECTIONS",
     "CUSTOMER_DIRECT_CONNECTIONS",
+    # Session 43 (ADR 0280): the console's memory cap, rendered for every project
+    # for D178's reason (its service is `profiles: [console]`, started only where
+    # APG_CONSOLE=1), and its router's name (a label KEY, ADR 0013).
+    "CONSOLE_MEMORY_LIMIT",
+    "CONSOLE_ROUTER_NAME",
     # The customer routers' names (rendered into label KEYS by the runtime
     # override, ADR 0013) and the two SNI names their rules and the one
     # certificate read (values, interpolated). Rendered for every project, as
@@ -2252,6 +2259,7 @@ def build_compose_env(
         # Session 43 (ADR 0280-0282): only where the mode above is `control`.
         "APG_CONSOLE": "1" if control else "0",
         "APG_CONSOLE_ORIGIN": naming.console_origin(identity.domain) if control else "",
+        "CONSOLE_ROUTER_NAME": naming.console_router_name(identity.key),
         # The same sorted list the rendered document publishes, comma-joined --
         # measured to parse into a list by the locked Traefik, read back from
         # its own API rather than inferred from a response header.

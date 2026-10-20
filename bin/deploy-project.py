@@ -457,6 +457,20 @@ def _override_public_endpoints(compose_env: Path, key: str) -> dict[str, Any]:
     }
 
 
+def _override_console(compose_env: Path) -> dict[str, Any]:
+    """The console arguments `render_override` takes (ADR 0280).
+
+    `_override_public_endpoints`' shape: the profile `project-runtime.sh` starts
+    and the router the override writes both read the rendered `APG_CONSOLE`, so
+    a console without its router, or a router without its console, cannot be
+    deployed.
+    """
+    return {
+        "console": _env_value(compose_env, "APG_CONSOLE") == "1",
+        "console_router_name": _env_value(compose_env, "CONSOLE_ROUTER_NAME"),
+    }
+
+
 def _rest_enabled(compose_env: Path) -> bool:
     """Whether the manifest publishes REST (`api.rest.enabled`, D2172).
 
@@ -2292,6 +2306,7 @@ def render_runtime_only(arguments: argparse.Namespace) -> int:
         **_override_names(compose_env),
         **_override_control(compose_env),
         **_override_public_endpoints(compose_env, key),
+        **_override_console(compose_env),
         rest_enabled=_rest_enabled(compose_env),
         https_entrypoint=host["edge"]["https_entrypoint"],
         rendered_directory=str(rendered_directory),
@@ -2479,6 +2494,7 @@ def main(argv: list[str] | None = None) -> int:
         **_override_names(rendered_dir / "compose.env"),
         **_override_control(rendered_dir / "compose.env"),
         **_override_public_endpoints(rendered_dir / "compose.env", key),
+        **_override_console(rendered_dir / "compose.env"),
         rest_enabled=_rest_enabled(rendered_dir / "compose.env"),
         https_entrypoint=host["edge"]["https_entrypoint"],
         # The installed path, not the checkout's. The override is written into
