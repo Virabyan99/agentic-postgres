@@ -1,9 +1,12 @@
 # Session 43 — The public site, the invitation as a link, onboarding in the browser, the console, and the packaged CLI
 
-**Status: EXECUTING — Run 1 DONE 2026-10-19; Run 2 next.** Planned at `bd8f35c` (Session
+**Status: EXECUTING — Runs 1–8 DONE (2026-10-19/20); Run 9 next.** Planned at `bd8f35c` (Session
 42's close, tree clean) against the host as read that evening (§0). Rows
 **D2650–D2679** at planning; the runs add theirs from **D2680** (Run 1:
-D2680–D2687). ADRs **0280–0284** written by Run 1. **NEXT FREE: D2688, ADR 0285.**
+D2680–D2687; Runs 2–8: D2688–D2720). ADRs **0280–0284** written by Run 1. The
+site is live on its custom names (Sheet C4). **D2714: the lifecycle and the
+branches are re-earned in Run 10** (the operator, 2026-10-20). **NEXT FREE: D2721,
+ADR 0285.**
 
 The eighth session of Stage 5 and the first of the operator's web-first split
 (D2591, D2593): the stage plan's *Session 43* brief as amended
@@ -519,6 +522,8 @@ execution order.
 | **D2716** | §5 Run 8 item 2: *"the proof itself also sends one `httpx` request …"*, *"The site proofs read the apex and `www` with `httpx`"*; *"`site_build.input_digest()`"*. | No module under `tests/external/` imports `httpx`; the customer proofs reach the service through Session 38's `Recorder` (`urllib`, no redirect followed, every host recorded for `_only`). `site_build`'s function is `digest()`. | **The proofs use `Recorder`'s opener** (a `_get` that also returns the headers) and `site_build.digest()`; every request is recorded and each test ends with `_only` naming the hosts it may reach. | The tree's reader, not a second HTTP client. | 0283 |
 | **D2717** | §5 Run 8 item 5: *"every `/api/v1` call answered by Playwright's `page.route` from fixtures"*. | Rehearsal: `context.request` (the CSRF readings) does NOT pass through `context.route` — the three readings reached the local console server and read 404/404/501; the page's own calls (sign-out 204 included) did pass through. | **Recorded as the rehearsal's limit**: the CSRF readings' VALUES are measured only live (W1); the rehearsal exercises that they are taken and recorded as statuses. | A fixture cannot stand in for a request the router never sees. | 0280 |
 | **D2718** | §5 Run 8 item 1 lists the driver's arguments and record. | The proofs need what the list did not name: the deployed commit (to refuse another release's record, as the lifecycle record does), the password file's name (beside the record), the string's port/user/database (to compare with `/v1`'s door), the page's own sign-out status (reading (d)), the driver's exit, and W0's QR. | **The driver gains `--source-commit` (required), `--qr-out` (W0; 0600 PNG of the QR element alone), and the record members `session` 43, `source_commit`, `password_file`, `string_port`/`string_user`/`string_database`, `csrf.sign_out`, `exit`**; rehearsed (walk rc 0; `--dry --qr-out` rc 0, a 0600 PNG; `--leak` rc 6, no record). The rehearsal's QR is the fixture's blank SVG — the real one is read only by the operator's phone at W0. | The record holds what its readers check, and nothing secret. | 0280 |
+| **D2719** | Sheet C4: *"POST …/domains … GET …/domains every 60 s up to 30 min → both status active"*; D2651: *"A Pages custom domain is a CNAME Cloudflare creates **proxied**"*. | Measured 2026-10-20: the two POSTs answered `initializing` (validation `http`); the next read said **`pending`, `CNAME record not set`** for both — **attaching a domain through the API creates no DNS record** (the dashboard's flow does). | **The agent created the two records through the zone's API**: `CNAME agenticpostgresql.com → agentic-postgres-site.pages.dev` and `CNAME www…` (ids `49746ae1…`, `b0a585fe…`), **proxied**, commented `Session 43 Sheet C4 (ADR 0283)`, each after a read that no A/AAAA/CNAME existed at that name; no POST repeated. Both domains then read **`active`** (certificate authority `google`). Read back: **only these two records proxied; all 23 A records DNS-only** (30 records). | ADR 0283's scope, exactly: the records Pages needs are proxied and name no host of ours. | 0283 |
+| **D2720** | D2596 (*"no third-party script in the console, no tracker on the site"*); rig 43c (D2687) read **no `<script`** in any body — on `*.pages.dev`. | On the CUSTOM names the zone's **Email Address Obfuscation** (`email_obfuscation: on`, a zone setting rig 43c could not see: `pages.dev` is not in the zone) rewrote every page holding the invitation address: each `mailto:invite@…` became `/cdn-cgi/l/email-protection#…` and **Cloudflare's `email-decode.min.js` was injected** (`/` 3,127 bytes against the build's 2,531). Same-origin, so `script-src 'self'` admits it and a check of asset HOSTS passes it — the parked `SITE-LIVE-001` proof would have passed. The zone's other rewriters read: `automatic_https_rewrites` on, `replace_insecure_js` on, `server_side_exclude` on (nothing in the build for any of them to act on), `rocket_loader` off, `minify` off, Zaraz 0 tools, no Web Analytics site. | **The agent set `email_obfuscation` to `off`** (read back `off`, 07:04:28Z; only proxied names pass through zone features and the site's two are the only ones, D2719). Re-read (`~/s43/run7/c4-read-2.txt`): **every one of the 14 pages and the 404 on both names is the build byte for byte**, with the build's CSP; the first read is the control. **`test_the_site_is_the_commits_build` now asserts each live page EQUALS the build's bytes** (stricter; the parked module). | A page is the build only if its bytes are; the platform's helpers are a writer the build does not know. | 0283 |
 
 ---
 
@@ -1440,6 +1445,9 @@ action pins and the uv setup to copy); `tests/contract/test_gate_contract.py:150
   control (`test_control_cli::test_accept_reads_a_token_or_a_link`) PASSED.
 - **Targeted** (foreground): `test_cli_contract` 841; 8 modules 428 — all
   passed.
+- **CI**: Runs 6 and 7 pushed together; `contract` on the tip carrying both
+  (`f32a405`, a documentation commit over `e5da28e` and `a1bb5d1`) **39380320974
+  success**.
 
 ### Run 7 — the site, its build, its workflow, the customer documentation (`site/`, `src/`, `bin/build-site.py`, `.github/workflows/site.yml`, `docs/`)
 
@@ -1564,6 +1572,21 @@ every link valid); `tests/contract/test_documentation_index.py:440-490`.
   (13) PASSED each time (D2710).
 - **Targeted** (foreground): 11 modules **1,338 passed**; the documentation
   guards 899.
+- **CI and the first deployment**: `contract` on `f32a405` **39380320974
+  success** (06:51:31Z); the `site` workflow **39382851398 success**, started
+  3 s after it (`workflow_run`), every step green (the checkout of the commit
+  contract passed, the pinned interpreter, the hash-locked PyYAML, the build,
+  the upload); Pages' production deployment `bfb3c236` at 06:52:21Z.
+- **Sheet C4** (the agent, 2026-10-20; rows **D2719, D2720**): the two domains
+  attached (one POST each, never repeated), the two proxied CNAMEs created by the
+  agent (the API creates none, D2719), both `active` (Google's certificate); the
+  zone read back: only the two Pages records proxied, all 23 A records
+  DNS-only; Email Address Obfuscation found injecting a script on the custom
+  names and turned off (D2720); then **every page and the 404 on the apex and
+  `www` is the build byte for byte** after five consecutive 200s (D2687), with
+  the build's CSP, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
+  `nosniff`, `Cross-Origin-Opener-Policy`; Cloudflare's NEL/Report-To present
+  as rig 43c read them (`~/s43/run7/c4-read.py`, `c4-read-2.txt`).
 
 ### Run 8 — the trip's instruments, written and rehearsed offline
 
@@ -1641,9 +1664,66 @@ customer-connection fixture (`grep -n "verify-full\|sslmode" tests/external/*.py
    scripts with `bash -n` and shellcheck; `pytest --setup-plan` of the three new
    live modules with their variables set (D671).
 
-**Done.** *(executor: the rehearsal's transcript; the instrument's exit 6 on the
-leaking fixture; the image digest used; nothing committed but this paragraph and
-the two test modules + the driver — a code commit: CI read.)*
+**Done.** 2026-10-20 (WSL `~/s43/run8/`). Rows **D2713–D2720**.
+
+- **The operator's decision (D2714)**: the Sessions 38–42 proofs refuse a
+  lifecycle or branch record from another release (16 external claims + the
+  two host branch claims would fail at 1.21.0 on Session 42's records); **the
+  lifecycle and the branches are RE-EARNED in the sitting** — Run 10 below
+  gains Session 42 Run 11's shape. The nine record-session checks accept 43.
+- **`tests/external/browser/console_walk.py`** (in the tree, never collected —
+  `pytest --collect-only -q tests/external`: 125 items, none from `browser/`)
+  and its hash-locked package, **`tests/external/browser/requirements.txt`**
+  (playwright 1.63.0, greenlet 3.5.6, pyee 13.0.1, typing_extensions 4.16.0;
+  every distribution's sha256 from PyPI — `pip install --require-hashes
+  --only-binary :all: --target` inside the pinned image, measured: exit 0,
+  `playwright 1.63.0`). The driver's record and arguments as D2718.
+- **The rehearsal** (`~/s43/run8/rehearse.sh`, transcript `rehearse.txt`): the
+  console image served on `127.0.0.1:18080`, every page `/api/v1` call answered
+  by fixtures, the image
+  `mcr.microsoft.com/playwright/python:v1.63.0-noble@sha256:72bd171a…1f0`
+  with the hash-locked package: **the walk exit 0** — eleven steps `ok`, FCP
+  44–60 ms ×3, link→string 13.8 s, the cookies `HttpOnly`/`Secure`/`Strict`,
+  the password gone after the reload, sign-out 204 and no cookie left;
+  **`--leak` (a fixture puts the account's password into the page): exit 6,
+  no record written** (the control); **`--dry --qr-out` (W0): exit 0**, a 0600
+  PNG of the QR, `dry: true`. It found **D2713** (the overview printed
+  `[object HTMLElement]`). D2717: the CSRF readings are measured live only.
+- **`tests/deployment/test_session43_console_host.py`** (`CON-HOST-001`'s three:
+  the console only on control-prod by Docker's labels across the host, bounded
+  and unprivileged on the deployed edge network, the listeners).
+  **`tests/external/test_session43_console.py`** (`CON-LIVE-001`, `CON-LIVE-002`,
+  `SITE-LIVE-001`: 12 proofs, `Recorder`'s opener, `_only` on every test, no
+  SSH; the site proof compares bytes, D2720) and the roster entry **PARKED** in
+  `~/s43/run8/park/` for Run 9's commit (D2715). `pytest --setup-plan` of both
+  with every variable set: **15 planned, 0 skipped**. An offline read of the
+  page parser against the build: the pricing tables equal `PLANS`, a mutated
+  value differs.
+- **The trip's scripts** (`~/s43/run8/`): **`s43-derive.py`** derived sixteen
+  from Session 42's by named substitution, every count asserted (the first run
+  refused three children on three counts of mine; corrected, read back by diff
+  in `derive-diffs.txt`): `s43-{free,probe-start,probe-stop,after-reboot,dns,
+  units,launch,v1,sweep,external,x0}.sh`, `s43-{window,r2shape,hostyaml,
+  lifecycle,branches}.py` — the sweep with a console precondition (exit file
+  92) and the Session 43 claim read out; the external half with
+  `--console-record-file ~/s43/walk/record.json` and the expected 322/149; X0
+  with `not session43_console`; the window with a `console` class. New:
+  **`s43-walk.py`** + **`s43-walk.sh`** (W0/W1/`--check`; `--check` measured:
+  the precondition refused the Session 42 control copy with 92 — the control —
+  and the image + package held) and **`s43-after.sh`** (from `r2-read.sh`; the
+  console's three public answers and `apg-diag containers`/`listeners`; its
+  baseline before 1.21.0: `/console/` 404, `/` 404, `/api/v1/me` 401, no
+  console container, public TCP 22/80/443/5432 only). `bash -n` and
+  `shellcheck` clean, `py_compile` clean.
+- **The credential directory's readers** (§7): `test_session39_public_endpoints
+  .slot_creds` reads `<dir>/slot3-prod/customer_app` and `customer_admin` at
+  run time; `s43-branches.py` reads the same two files (`--parent-creds-dir`)
+  at run time — so W1 runs **before** the branches, and both read W1's
+  rotation. No reader holds a copy made before W1.
+- **Targeted** (foreground): `test_acceptance_registry`,
+  `test_environment_gates`, `test_future_marker_policy`, `test_evidence_claims`
+  **103 passed**; `test_console_pages`, `test_console_scram`,
+  `test_console_server` **16 passed**. Committed `28df36e`.
 
 ### Run 9 — the bump, the registry, the gate, the threat rows, the Ledger to `trial`
 
@@ -1726,8 +1806,22 @@ as `op`), `pytest --setup-plan` of the host modules with the variables set.
    the commit costs a redeploy, D2671).
 4. **W1** — `s43-walk.sh` (the record, the password file, the creds copy, the
    walker removed).
+4b. **The re-earning (D2714, the operator's 2026-10-20)** — Session 42 Run
+   11's shape, every script `~/s43/run8/s43-*` (derived, D2714):
+   **H1** `slot7-prod` declared in BOTH `host.yaml` copies (`s43-hostyaml.py`);
+   **SL1** its providers — DNS (three grey A records, `s43-dns.sh`) and the two
+   R2 buckets by the agent through the API; the B2 bucket + key and the
+   Infisical `/storage` + `/backup` pairs by the operator; **SL1b** the pairs'
+   shape read by `s43-r2shape.py` before they are materialized; **SL2**, **SL3**,
+   **RC1** (the reconciler re-reads the declaration, D2411); then **the
+   lifecycle** from WSL (`s43-lifecycle.py`, organisation `lifecycle-s43`,
+   **K2** at its pause); **the branches** AFTER W1 (`s43-free.sh
+   before-branch`, then `s43-branches.py` on `slot3-prod` up to the delete);
+   **A1'**; **B1** — the reboot, `s43-after-reboot.sh` BEFORE any sweep, then
+   `s43-branches.py --after-reboot`.
 5. **S1** — the one sweep (`s43-sweep.sh`; host evidence with the live slot's
-   outputs as Session 42's). Then **the external half** from WSL
+   outputs, K2's copy and the Session 43 records, as Session 42's); **then the
+   branch `--delete-only`** (D2647); **then the external half** from WSL
    (`s43-external.sh` with `--console-record-file`), then **the merge**
    (`write-session-evidence` with the CI artifact's offline half for the
    deployed SHA). **Exit 5 for `documented_path` only** (§7).
@@ -1740,7 +1834,7 @@ as `op`), `pytest --setup-plan` of the host modules with the variables set.
    container (`pip install agentic-postgres-cli==1.21.0 && apg --version`) —
    recorded as the close's reading (it is not in the evidence: the evidence was
    merged before the tag that publishes, §7).
-7. **SL** — none (no slot). **Sheet RC1**: the reconciler started and read
+7. **SL4** — `slot7-prod`'s identity revoked after the tag (D2714). **Sheet RC1**: the reconciler started and read
    active after the last sheet that stopped it (D2178).
 
 **Done.** *(executor: each window per project; the console's headers; V1/X0/W0
@@ -2021,6 +2115,8 @@ sudo systemctl start agentic-postgres-reconciler          # after R2d only
 ```
 
 ### Sheets A1, RA, K1, V1 (Run 10) — as Session 42's (`session-42-implementation-plan.md` Sheets A1, RA, K1, V1), the commit and file names moved to 43; RA after the last deploy (D2494).
+
+### Sheets H1, SL1, SL1b, SL2, SL3, RC1, K2, A1', B1, SL4 (Run 10; D2714) — as Session 42's (`session-42-implementation-plan.md` §Sheets H1–SL4), `slot6-prod` → `slot7-prod`, every script `~/s43/run8/s43-*`, every file `/home/op/s43-*`; SL4 after the tag, the credential written with `nano` and shredded (D2648).
 
 ### Sheet W0 / W1 — the walk (Run 10; the agent, from WSL, no SSH)
 
