@@ -1,9 +1,9 @@
 # Session 43 — The public site, the invitation as a link, onboarding in the browser, the console, and the packaged CLI
 
-**Status: PLANNED, 2026-10-19 — no run started.** Planned at `bd8f35c` (Session
+**Status: EXECUTING — Run 1 DONE 2026-10-19; Run 2 next.** Planned at `bd8f35c` (Session
 42's close, tree clean) against the host as read that evening (§0). Rows
-**D2650–D2679** at planning; the runs add theirs from **D2680**. ADRs **0280–0284**
-to be written by Run 1. **NEXT FREE after this plan: D2680, ADR 0285.**
+**D2650–D2679** at planning; the runs add theirs from **D2680** (Run 1:
+D2680–D2687). ADRs **0280–0284** written by Run 1. **NEXT FREE: D2688, ADR 0285.**
 
 The eighth session of Stage 5 and the first of the operator's web-first split
 (D2591, D2593): the stage plan's *Session 43* brief as amended
@@ -480,6 +480,14 @@ execution order.
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
+| **D2680** | Rigs 43b/43c and D2660: *"the digest `versions.env` pins as `PYTHON_BASE_IMAGE`"*, *"the pinned Node image (`NODE_BASE_IMAGE`)"*. | `versions.env` pins **`PYTHON_RUNTIME_IMAGE`** (`python:3.12-slim@sha256:229a2c5b…`, `:24`) and **`NODE_RUNTIME_IMAGE`** (`node:22-alpine@sha256:c610fcdf…`, `:18`). `PYTHON_BASE_IMAGE`/`NODE_BASE_IMAGE` are the BUILD ARGUMENTS `services/docs/Dockerfile:16-17` declares, which `compose.yaml` fills from the two `*_RUNTIME_IMAGE` pins. | **The rigs used the `*_RUNTIME_IMAGE` pins**; `services/console/Dockerfile` declares `ARG PYTHON_BASE_IMAGE` filled by compose exactly as `docs:` is; a test that needs "the pinned Node image" reads `NODE_RUNTIME_IMAGE`. | The plan named the argument, the tree pins the variable; one source either way. | 0280 |
+| **D2681** | Run 1 Step 4: *"The `THR-*` table gains five rows … and one carried row `THR-CON-GUESS`"*. | A table row must name requirements that EXIST in the registry and node ids that COLLECT (`tests/contract/test_acceptance_registry.py:482-505`: `test_threat_model_node_ids_are_collectible`, `test_threat_model_requirement_ids_exist_in_the_registry`); the requirements are registered in Run 9. The hosted list's own preamble says *"Each item moves into the table … in the run that registers the requirement"* (`threat-model.md:186-196`). | **Run 1 wrote hosted-list items 16–21** (the five plus the carried guessing item); **Run 9 moves each into the table** as `THR-CON-XSS`, `THR-CON-CSRF`, `THR-CON-LINK`, `THR-SITE-CLAIM`, `THR-SUPPLY`, `THR-CON-GUESS` with its registered requirement. `THR-CON-GUESS` needs a requirement Run 9 names (no new control: `CON-CSRF-001` or `CON-SESSION-001` is the nearest; Run 9 decides). | A row with an unregistered requirement is a control that looks measured — the preamble's own rule. | 0280–0284 |
+| **D2682** | D2659: *"`segno.make(uri, error="m").svg_data_uri(scale=4)`"*; rig 43b: *"Read that the data URI contains no `http` and no `<script`"*. | Rig 43b: the default SVG is dark modules on a **transparent** background — `zbarimg` decodes it to **nothing** after `rsvg-convert`; with `-b white` it decodes exactly (control: a one-character-different URI decodes to itself). **`svg_data_uri(scale=4, light="white")` decodes exactly with no rasteriser help; the default does not** (the control). The data URI holds `http` ONLY as the SVG namespace `xmlns='http://www.w3.org/2000/svg'`; no `href`, no `<script`. | **Run 3 calls `svg_data_uri(scale=4, light="white")`.** `test_the_qr_references_nothing` asserts no `<script`, no `href`, and that the only `http` in the decoded SVG is the namespace URI — not "no `http`". | A QR that a dark page makes unreadable is a step people fail; a test that forbade the namespace would fail on the first run. | 0282 |
+| **D2683** | D2666: *"`requires-python = ">=3.10"` only if rig 43d shows the code runs on 3.10, else `">=3.12"`"*. | Rig 43d: the wheel installed offline runs `apg --help` byte-equal to the tree's usage on **3.12 and 3.11**; **3.10 fails at import** (`from datetime import UTC` — 3.11+, `bin/cloud.py:78`). | **`requires-python = ">=3.11"`** — the rig's own rule, *"the lowest that passes decides"*; D2666's two-way choice omitted 3.11. | The honest floor is the lowest measured version that runs. | 0284 |
+| **D2684** | D2666: *"the wheel … runs `apg --version` and every family's `--help`"*; rig 43d's control: *"`bin/cloud.py --help` from the tree prints the same usage text"*. | `bin/cloud.py:1509` `argparse.ArgumentParser(prog="cloud.py", add_help=False)`: the packaged command prints **`usage: cloud.py`**, and **`--help` exits 2 as a usage error** — in the tree (the control: rc 2) and in the wheel alike (rig 43d: rc 2, byte-equal output). Family parsers behave the same (`login --help` → rc 2, *"the following arguments are required: verb"*). | **Run 6**: `prog` is the invoked name's basename (`cloud.py` from the tree, `apg` from the package); `--version` added. Whether `--help` becomes a real help (exit 0) is Run 6's to decide by reading the shims' and `test_control_cli`'s expectations first; **`test_the_wheel_runs_every_family` compares the wheel's output and exit code to the tree's**, whatever they are, never asserts 0 blind. | A packaged command that names a file the customer never saw; a proof asserting exit 0 would fail on first run. | 0284 |
+| **D2685** | §9: *"the repository has no licence file when Run 6 stages the package (a public distribution needs the operator's licence decision)"*. | No `LICENSE*`/`COPYING*` in the tree; the GitHub repository is **public** with `license: null` (read 2026-10-19). | **The operator, 2026-10-19: Apache-2.0** for the CLI distribution and the repository. **Run 6** adds `LICENSE` (the Apache License 2.0 text, unmodified) at the root, `license = "Apache-2.0"` in the staged `pyproject.toml`, and the file in the wheel and sdist (not added in Run 1: Run 1 runs no test, and a new root file is read by repository guards). The stop is cleared. | The decision is the operator's; the file lands with the tests that read it. | 0284 |
+| **D2686** | D2668: *"rig 43e reads … that the `playwright` package and Chromium are inside"*. | Rig 43e: `mcr.microsoft.com/playwright/python:v1.63.0-noble@sha256:72bd171a…` (1,013,940,272 bytes) holds Python 3.12.3 and the browsers (`chromium-1243`, `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`) but **NOT the `playwright` package** (`ModuleNotFoundError`), and no `ensurepip` (a venv fails). `pip install --target DIR playwright==1.63.0` (+ `greenlet` 3.5.6, `pyee` 13.0.1, `typing_extensions` 4.16.0) then runs Chromium 153.0.8010.12 headless; FCP recorded (control: `about:blank` has none). | **Run 8's instrument installs the package into a target directory from a hash-locked requirements file** (`tests/external/browser/requirements.txt`, `--require-hashes`, the four pins above, hashes read from PyPI) with network, then runs the driver with `PYTHONPATH` set. The image stays pinned by its index digest. | The image is the browsers; the package is ours to pin. | 0280 |
+| **D2687** | Rig 43c (D2676): *"reads … whether Pages adds headers of its own (recorded whole)"*; §9: *"rig 43c: Pages does not apply `_headers` to the HTML pages, or adds a script or a third-party request of its own"*. | Rig 43c (settled reads, two rounds): `_headers` applies to every HTML answer, `/missing` included (404 with `404.html`); `Referrer-Policy` in `_headers` REPLACES Pages' default `strict-origin-when-cross-origin`; `! Access-Control-Allow-Origin` DETACHES Pages' default `*`; no `<script` in any body. Pages/Cloudflare ADD `x-content-type-options: nosniff`, `cache-control`, `etag` and **NEL** (`report-to` → `https://a.nel.cloudflare.com/report/v4?s=…`, `nel` `success_fraction` 0.0) — and **`! Report-To` / `! NEL` do NOT detach them** (a fourth pass). Reads in the first ~20 s after a deploy return 522s mixed with 200s. Also: the operator's first temporary token held Pages **Read** (GET answered 8000007, create answered `10000 Authentication error`); edited to Edit, it worked. | **Not §9's stop (the agent's ruling, told to the operator)**: NEL is no script and causes no request by the page; the browser reports failed fetches only, to the CDN serving every byte. Recorded in ADR 0283; **Sheet C4 (Run 7) reads the headers on the custom domain** (the zone's own NEL setting may differ). The site's `_headers` carries `Referrer-Policy: no-referrer` and `! Access-Control-Allow-Origin`; the build refuses a site with no `404.html`; **every live read (Sheet C4, `SITE-LIVE-001`) waits for five consecutive 200s** before reading. Sheet C3's token wording stays (`Edit`); the rig token's `Read` was a slip at creation. | What Cloudflare adds is a fact of the platform to be named, not hidden; a read before propagation is not a reading. | 0283 |
 
 ---
 
@@ -768,9 +776,63 @@ frame-ancestors 'none'
 **The site's** (ADR 0283; `_headers`, `/*`): the same with `connect-src 'none'`
 and `img-src 'self'` (the site fetches nothing and draws no data URI).
 
-**Done.** *(executor: the zone act's ids; C1–C3 read back; each rig's readings
-with its control; the wrangler, segno, Playwright, uv and action versions and
-digests; PyPI's sentence; the five ADR file names. Push; no CI read.)*
+**Done.** 2026-10-19 (rigs in WSL `~/s43/rigs/`, each `<rig>.txt` written as
+taken; the scripts copied beside them). Rows **D2680–D2687**.
+
+- **Sheet C0** (the agent, Cloudflare API): zone
+  `5f7560988cc4d6d45c29425f6365ef0e`; exactly one route
+  `d1d4ee079f7343fe8c0ab6abf691ef9e` (`*.agenticpostgresql.com/*` →
+  `forgeai-sandbox`) and exactly one AAAA `eff5ae89635ee0bd496cda5085030871`
+  (`*` → `100::`, proxied), as p5/p6. Both DELETEd (200, 200); read again:
+  no route, no AAAA, **28 records** (the plan's 23 A + C1's 3 MX and 2 TXT),
+  every one `proxied: false`. `forgeai-sandbox` read present, untouched.
+  `nslookup www.agenticpostgresql.com 1.1.1.1` → *Non-existent domain*; `curl`
+  → exit 6.
+- **C1–C3** were done by the operator before the run (CLAUDE.md's record) and
+  read back: C1's records in the zone listing above; C3 by `gh api
+  …/environments` → `pypi` and `site`, each `custom_branch_policies: true`; C2
+  as recorded. `agentic-postgres-cli` and `agentic-postgres` still **404** on
+  PyPI at 19:4xZ.
+- **Licence (§9's Run 6 stop, raised early)**: none in the tree, the
+  repository public. **The operator: Apache-2.0** (D2685; the file lands in
+  Run 6).
+- **Rig 43a** (Chromium 153.0.8010.12): all six readings as planned —
+  same-origin POST carries both cookies, the header and `Origin`; the
+  cross-origin `fetch` with the header reaches the server only as `OPTIONS`
+  with no cookie; the cross-site form POST carries no cookie; a cross-site
+  navigation carries the Lax control and not the Strict cookie;
+  `document.cookie` = `""`; WebCrypto PBKDF2 4,096 = `hashlib`
+  (`4b041b5f…`), 4,095 differs.
+- **Rig 43b**: `segno` 1.6.6 (BSD, no dependency on 3.12, wheel sha256
+  `28c7d081…190c7`); decodes exactly only on a white background —
+  **`light="white"`** (D2682); `http` only as the SVG namespace.
+- **Rig 43c** (wrangler **4.147.0**): `_headers` applies everywhere, `404.html`
+  served with 404, `Referrer-Policy` overrides, `!` detaches ACAO, X-Rig only on
+  `/a/` (control); Cloudflare's NEL cannot be detached — not a stop, the
+  agent's ruling (D2687). The project deleted and read gone; **the operator
+  revoked the temporary token**: `/user/tokens/verify` with it → **401**
+  (`1000 Invalid API Token`), then the file shredded.
+- **Rig 43d** (uv 0.12.1): the staged wheel runs byte-equal to the tree's usage
+  on 3.12 and 3.11; **3.10 fails** (`datetime.UTC`) → `>=3.11` (D2683);
+  `prog="cloud.py"` and `--help` exiting 2 (D2684). `pypa/gh-action-pypi-publish`
+  **v1.14.2** → commit **`dc37677b2e1c63e2034f94d8a5b11f265b73ba33`**. PyPI's
+  sentence (<https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/>):
+  *"A "pending" publisher does not create a project or reserve a project's name
+  until it is actually used to publish. If you create a "pending" publisher but
+  another user registers the project name before you actually publish to it,
+  your "pending" publisher will be invalidated."*
+- **Rig 43e**: `mcr.microsoft.com/playwright/python:v1.63.0-noble@sha256:72bd171a9ffc2b4b59532aaa6210e21014d07093120dc25528870c0b840da1f0`
+  (1,013,940,272 bytes; Playwright 1.63.0, 2026-09-15) — the package is **not**
+  in it (D2686); installed with `--target`, FCP read (124 ms), `about:blank`
+  none.
+- **Step 4**: `docs/threat-model.md` hosted items **16–21**; the table rows
+  move in Run 9 (D2681).
+- **Step 5**: `docs/decisions/0280-the-console-is-a-first-party-fixed-route-static-server-on-the-control-projects-origin.md`,
+  `0281-the-consoles-session-is-a-pair-of-host-cookies-chosen-per-request-by-a-header-and-a-write-needs-the-consoles-origin.md`,
+  `0282-the-invitation-is-a-link-with-the-token-in-its-fragment-and-the-factors-qr-is-drawn-by-the-server.md`,
+  `0283-the-public-site-is-static-files-built-from-the-repository-published-to-cloudflare-pages-by-ci-every-claim-from-the-ledger.md`,
+  `0284-the-customer-cli-is-staged-from-the-repositorys-own-files-and-published-to-pypi-by-trusted-publishing-from-a-release-tag.md`,
+  indexed. Documentation only: pushed, no CI read.
 
 ### Run 2 — the three repairs: D2636, D2637, D2642 (`bin/`, tests)
 

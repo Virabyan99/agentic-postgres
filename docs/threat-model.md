@@ -380,6 +380,78 @@ technically bounded in this beta"* (D1971).
     (`tests/contract/test_telemetry_plane.py::test_no_port_and_no_router`,
     `tests/deployment/test_session42_telemetry_host.py::test_the_listeners_did_not_change`).
 
+Items 16–21 are Session 43's (ADRs 0280–0284), written in its Run 1. **Each
+moves into the table in Run 9**, the run that registers its requirement — a
+row naming an unregistered requirement fails
+`test_threat_model_requirement_ids_exist_in_the_registry` (D2681). The list
+was numbered 13 twice (D2673); it continues from 16.
+
+16. **The console's session is stolen by a script** (Session 43, ADR 0280, ADR
+    0281, D2655, D2656; **`THR-CON-XSS` in Run 9**). The console is the first
+    page of this product that a customer's browser runs, and from Session 44 it
+    will hold a database password. A script injected into it, or a third-party
+    file it loads, would read whatever the page can read. Owed: the console's
+    own Content-Security-Policy (`default-src 'none'; script-src 'self'`, no
+    `'unsafe-inline'` anywhere), no inline script, no file that is not the
+    console's own, and the session in two `HttpOnly` `__Host-` cookies that no
+    script can read
+    (`tests/contract/test_console_server.py::test_every_answer_carries_the_policy`,
+    `::test_every_asset_is_our_own_file`,
+    `tests/contract/test_console_session.py::test_the_console_login_sets_two_host_cookies`).
+17. **Another site makes requests with the console's session** (Session 43,
+    ADR 0281, D2656; **`THR-CON-CSRF` in Run 9**). A cookie is sent by the
+    browser, not by the page, so a page elsewhere could ride it. Owed:
+    `SameSite=Strict`; a cookie honoured only with the header `X-Apg-Console:
+    1`, which another origin cannot send without a preflight no route answers
+    (no CORS is added); a write honoured only when `Origin` is the console's
+    own; a bearer request ignoring cookies; a key never riding a cookie
+    (`tests/contract/test_console_session.py::test_a_cookie_without_the_header_is_unauthenticated`,
+    `::test_a_write_from_another_origin_is_refused`,
+    `::test_no_cors_header_is_answered`, `::test_a_key_in_a_cookie_is_refused`).
+18. **An invitation link leaks** (Session 43, ADR 0282, D2657; **`THR-CON-LINK`
+    in Run 9**). The link carries a single-use token that creates an account or
+    a membership. Owed: the token in the fragment, which no request line, proxy
+    log or `Referer` carries; the accept page removing it from the address bar
+    before its first request; `Referrer-Policy: no-referrer`; the existing 72-hour
+    default and single use; no log line holding the token
+    (`tests/contract/test_console_session.py::test_no_line_holds_the_invitation_token`,
+    `::test_the_mint_answers_the_accept_url`). Residual: whoever holds the link
+    before it is used holds the invitation — as with the token today.
+19. **The public site claims more than the node does** (Session 43, ADR 0283,
+    D2662–D2664, D2674; **`THR-SITE-CLAIM` in Run 9**). A stranger reads the
+    site before anything else; a sentence there is the product's promise.
+    Owed: every page names its Ledger rows and the build refuses a row that is
+    not reachable, a forbidden word, an operator command; the pricing page is
+    `plans.PLANS` and the beta sentence, generated, with no price; the Ledger
+    page is the YAML's rows (`tests/contract/test_site.py::test_every_page_names_reachable_rows`,
+    `::test_no_forbidden_word`, `::test_the_pricing_page_follows_the_plans`,
+    `::test_no_price_is_printed`). Residual: the site is deployed on every
+    green push to `main`, so it can describe a release the host does not run
+    yet; its footer names `VERSION`.
+20. **A supply-chain path into what a customer runs** (Session 43, ADR 0280,
+    ADR 0283, ADR 0284, D2653, D2666, D2667; **`THR-SUPPLY` in Run 9**). Three
+    things built here run on a customer's machine: the console's files, the
+    site's files and the CLI. Owed: the console loads only its own files; the
+    site is built by CI only after `contract` succeeded, from that run's commit,
+    with wrangler pinned to an exact version and every action pinned by SHA, its
+    token a Pages-only one in a GitHub environment limited to `main`; the CLI is
+    staged from the repository's own files, published only from a release tag
+    whose `contract` run succeeded, by trusted publishing (no stored token), the
+    publish action pinned by SHA
+    (`tests/contract/test_release_workflows.py::test_the_site_deploys_only_after_contract`,
+    `::test_publish_verifies_the_contract_run`, `::test_only_the_publish_job_has_id_token`,
+    `tests/contract/test_cli_package.py::test_the_package_imports_only_stdlib`).
+    Residual: a compromised GitHub account or Cloudflare account publishes
+    anything; the scope section's exclusion of a compromised registry stands.
+21. **Passwords and second-factor codes are guessed at a door the site now
+    links publicly** (carried, D2166, D2679; **`THR-CON-GUESS` in Run 9**).
+    `/v1/sessions` and `/v1/invitations/accept` have no throttle of their own;
+    the edge's `apg-rate-limit` (20 per second average, burst 40, per source) is
+    the only limit. A guess against a password pays Argon2id's cost; a guess
+    against a TOTP code is one in 10⁶ per window. **Unchanged in Session 43** —
+    a throttle is an operator decision. The site linking the console changes who
+    can reach the door, not what the door is.
+
 ## Scope
 
 This model covers the deployed system. **From Stage 5 (ADR 0246) external users
