@@ -160,9 +160,15 @@ def test_every_asset_is_our_own_file(serve: Any) -> None:
         assert "<script>" not in page.read_text(encoding="utf-8"), (
             f"{page.name} has an inline script"
         )
+    imports = re.compile(r'^import\b[^;]*?\bfrom\s+"([^"]+)";', re.MULTILINE)
+    found = 0
     for script in PUBLIC.glob("*.js"):
-        for imported in re.findall(r'\bfrom\s+"([^"]+)"', script.read_text(encoding="utf-8")):
+        text = script.read_text(encoding="utf-8")
+        assert "import(" not in text, f"{script.name} imports dynamically"
+        for imported in imports.findall(text):
+            found += 1
             assert imported in serve.ROUTES, f"{script.name} imports {imported!r}"
+    assert found >= 2, "no import statement was read: the check would read nothing"
 
 
 def test_no_method_but_get_and_head(serve: Any, port: int) -> None:

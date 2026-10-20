@@ -21,9 +21,9 @@ PUBLIC = REPO_ROOT / "services" / "console" / "public"
 SNAPSHOT = REPO_ROOT / "contracts" / "control-openapi.canonical.json"
 METHODS = "GET|POST|PUT|PATCH|DELETE"
 
-#: `call(...)` in the views and `send(...)` inside `api.js`: method and path
-#: literal (a string or a template), up to the first `+` or `,`.
-CALL = re.compile(rf'\b(?:call|send)\(\s*"({METHODS})",\s*(?:"([^"]*)"|`([^`]*)`)')
+#: `call(...)` and `operate(...)` in the views and `send(...)` inside `api.js`:
+#: method and path literal (a string or a template), up to the first `+` or `,`.
+CALL = re.compile(rf'\b(?:call|send|operate)\(\s*"({METHODS})",\s*(?:"([^"]*)"|`([^`]*)`)')
 
 #: SQL's SHAPE, not its vocabulary: the plan's `\b(select|...|create|...)\s`
 #: also matched the page's own sentence "Create your account" (D2696).

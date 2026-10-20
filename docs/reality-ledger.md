@@ -151,7 +151,7 @@ the customer, and the session's close moves it to `beta` or back to
 
 **Today.** There is no web console. Studio is a loopback page an operator or developer runs locally against one project.
 
-**Stage 5.** Static pages served by the control project, calling /api/v1 only, with no SQL tab; project views open that project's own Studio forwarders.
+**Stage 5.** Static pages served by the control project, calling /api/v1 only: onboarding, projects, connect, branches, backups, usage, insights, monitoring, plan, notifications and settings; no data view and no SQL. A project is created with the command-line client in this beta.
 
 **Eventually (not promised).** A full web console with in-browser data tools.
 
@@ -725,7 +725,7 @@ the customer, and the session's close moves it to `beta` or back to
 
 *Proved by:* `agent_surface`.
 
-**Stage 5.** Every project the reconciler creates carries its agent plane; the console opens it through the project's Studio forwarders.
+**Stage 5.** Every project the reconciler creates carries its agent plane, reached at the project's own address; the console has no data view (D2661).
 
 **Eventually (not promised).** The same.
 
@@ -741,7 +741,7 @@ the customer, and the session's close moves it to `beta` or back to
 
 *Proved by:* `workflow_run`.
 
-**Stage 5.** Every project the reconciler creates carries them; the console reaches them through Studio forwarders (D1970).
+**Stage 5.** Every project the reconciler creates carries them, reached at the project's own address; the console has no data view (D2661).
 
 **Eventually (not promised).** The same.
 
@@ -757,7 +757,7 @@ the customer, and the session's close moves it to `beta` or back to
 
 *Proved by:* `connector_delivery_live`.
 
-**Stage 5.** Every project the reconciler creates can enable them; the console reaches them through Studio forwarders (D1970).
+**Stage 5.** Every project the reconciler creates can enable them, reached at the project's own address; the console has no data view (D2661).
 
 **Eventually (not promised).** The same.
 
@@ -773,6 +773,6 @@ the customer, and the session's close moves it to `beta` or back to
 
 *Proved by:* `agent_audit_record`.
 
-**Stage 5.** Every project the reconciler creates carries it; the console reaches it through Studio forwarders.
+**Stage 5.** Every project the reconciler creates carries it, read at the project's own address; the console has no data view (D2661).
 
 **Eventually (not promised).** Audit export to a customer's own storage.

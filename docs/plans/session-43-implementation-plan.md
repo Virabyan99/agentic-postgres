@@ -502,6 +502,8 @@ execution order.
 | **D2699** | Run 4 step 2: *"`cpus` "0.25" (the docs service's value if lower — read it)"*; limits from a measurement. | Measured (`~/s43/run4/measure.txt`): 1,008 requests over every route, `memory.peak` 46,206,976 B (44.07 MiB), `pids.peak` 8, healthy; docs' `cpus` is 1.0 (not lower). Four counting guards in `test_process_limits.py` moved with the new service: services 22 → 23, long-running 11 → 12, the memory set + `console`, and `test_cpus_is_two_for_postgres_and_one_for_every_sidecar` (`console` 0.25, named). | **192 MiB / 64 pids / 0.25 cpu** in `config.SERVICE_MEMORY_LIMITS_MB` and `SERVICE_RESOURCE_DEFAULTS`, rendered as `CONSOLE_*`; the four guards widened to the measured set (each a named member, ADR 0280); `test_the_console_is_bounded` new. | ADR 0244's rule applied to a measurement, not a guess. | 0280, 0244 |
 | **D2700** | ADR 0280: *"the exact CSP and security headers on every answer (404 and redirect included)"*. | Measured (`~/s43/run4/docs501.txt`): `services/docs/serve.py`'s 501 for another verb (the base handler's `send_error`) carries **no** CSP; its 404 does (control). | **The console adds its headers in `end_headers`**, so its 501 carries them (`test_every_answer_carries_the_policy` asks a 501). The docs server is left as it is — its own surface, a later session's (§10). | The console's whole safety is its policy; an answer without it is one that opted out. | 0280 |
 | **D2701** | Run 4 step 1: `REDIRECTS = {"/": "/console/", "/console": "/console/"}`; the router rule ``Path(`/`) \|\| Path(`/accept`) \|\| PathPrefix(`/console/`)``. | `/console` (no slash) is not in the rule, so through the edge it is Traefik's own 404; the server's redirect for it is reachable only inside the container. | **Kept as planned** (§9's stop names any path outside the three, and adding `Path(`/console`)` would be a fourth); the redirect is harmless and costs nothing. | Recorded so nobody reads the redirect as a published path. | 0280 |
+| **D2702** | Run 5's table: *"Create organisation / project `#/new` — `POST /v1/organizations`, `POST /v1/projects` (both verifiers from `scram.js`; the two passwords shown once)"*; §0: *"`project create` builds both customer verifiers `:1176-1185`"*. | `CreateProjectRequest` is `{organization, name, profile, admin_username, handoff_sha256}` — no verifier. `bin/cloud.py:650-733`: the CLI keeps a HANDOFF TOKEN through the 20+ minute creation and then CLAIMS the project's application administrator by presenting it to the **new project's own** `{app_route}/auth/reset-password` — another origin from the console, and a token that would have to outlive a reload with no storage allowed (ADR 0280). The two verifiers at `:1180-1230` are **branch** creation's. | **The operator, 2026-10-20: the console creates organisations only; a project is created with `apg project create` / `claim` in Session 43** (the overview says so, and the Ledger's `console` row). Browser creation and claim are designed in Session 44/45's plan — Session 45's walk needs it (D2669). | A claim from the console is a cross-origin door this plan did not price; the smallest honest console offers what it can finish. | 0280 |
+| **D2703** | — | The Ledger's `agents`, `workflows`, `connectors` and `audit` rows said *"the console reaches them through Studio forwarders"*; D2661 decided no data view in the console. | **Rewritten**: each is reached at the project's own address; *"the console has no data view (D2661)"*. | A `stage5_reality` sentence the site will print must not promise what the console decided against. | 0280 |
 
 ---
 
@@ -1068,6 +1070,8 @@ cluster — the new module copies that harness), `test_totp.py`,
   fixture render read before a later module re-rendered it
   (`test_compose_contract`, green on the current render). Final: shard 1 139+55,
   shard 2 364+20, shard 3 1,227+85, shard 4 46 — all passed.
+- Committed `29f0c8de6d50928858d73637b8e11cbb69b0e884`; **CI `contract`
+  success** (run 39375323695).
 
 ### Run 4 — the console server, its plane and its first pages (`services/console/`, `compose.yaml`, `src/`, `bin/project-runtime.sh`)
 
@@ -1279,7 +1283,41 @@ naming `sql_editor` → `test_no_page_names_an_unreachable_row` FAILED; control:
 Targeted: the console modules, `test_reality_ledger`, `test_documentation_index`.
 Commit, push, read CI.
 
-**Done.** *(executor: the views built; the battery; the SHA and CI.)*
+**Done.** 2026-10-20 (WSL `~/s43/run5/`). Rows **D2702, D2703**.
+
+- **The views** (`services/console/public/app.js`, one file, fragment routes):
+  the overview (organisations, their projects, links), `#/new` (create an
+  organisation), and per project **Connect** (the two doors' strings; a new
+  password for `customer_app` or `customer_admin` made in the page, only its
+  verifier sent, the operation followed every 2 s, then the password, the
+  string with it and a `psql` line shown once), **Branches** (list; create or
+  restore-to with two passwords made in the page and shown once; reset; delete
+  with the name typed), **Backups**, **Usage**, **Insights** (the numbers and
+  the server's tuning sentence; *could not be determined* shown as such),
+  **Monitoring** (each reading with its source), **Settings** (idle sleep,
+  resize, sleep, wake, export — the download link shown once — and delete with
+  the key typed); per organisation **Plan** (*Notify me* for a plan not
+  active), **Usage**, **Notifications**, **Members and keys** (role change,
+  removal, an invitation link shown once with *Copy*, revocation, a key shown
+  once). Every refusal shows its word and a sentence. **No project-creation
+  view** (D2702, the operator's choice). `pages.json`: 15 views, every call
+  and every row.
+- **The Ledger**: `console.stage5_reality` rewritten (D2661's sentence plus
+  *"A project is created with the command-line client in this beta"*); the
+  `agents`, `workflows`, `connectors`, `audit` rows no longer say the console
+  reaches them through Studio (D2703); `docs/reality-ledger.md` regenerated.
+- **Tests**: `test_console_scram.py` (3, Docker-backed in `NODE_RUNTIME_IMAGE`,
+  `--network none`: the verifier byte-equal to `scram.verifier` for two salts,
+  the password's shape, `node --check` of every script); the page guard's call
+  reader also reads `operate(...)`; the asset guard reads only `import`
+  statements (it had matched the words *"Restorable from "*).
+- **Battery** (`~/s43/run5/battery5.py`): the plan's three (4,095 iterations;
+  a view calling `/v1/ledger`; a view naming `sql_editor`) and two more (a
+  syntax error in `app.js`; a password written to `localStorage`) — **5/5
+  KILLED**, `test_console_server` (7) PASSED each time.
+- **Targeted** (foreground): 11 modules, **417 passed**.
+- Pushed with Run 4 in one push; Run 4's verdict is read at this run's SHA,
+  which contains it.
 
 ### Run 6 — the packaged CLI and its publish workflow (`bin/cloud.py`, `bin/build-cli.py`, `.github/workflows/publish-cli.yml`)
 

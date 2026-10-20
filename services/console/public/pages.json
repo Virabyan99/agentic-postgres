@@ -17,7 +17,7 @@
       "id": "sign-in",
       "path": "/console/#/sign-in",
       "ledger": ["accounts"],
-      "calls": ["POST /v1/sessions", "POST /v1/sessions/refresh"]
+      "calls": ["POST /v1/sessions", "POST /v1/sessions/refresh", "DELETE /v1/sessions/current"]
     },
     {
       "id": "overview",
@@ -28,9 +28,113 @@
         "GET /v1/organizations",
         "GET /v1/projects",
         "POST /v1/me/totp",
-        "POST /v1/me/totp/confirm",
-        "DELETE /v1/sessions/current",
-        "POST /v1/sessions/refresh"
+        "POST /v1/me/totp/confirm"
+      ]
+    },
+    {
+      "id": "new-organization",
+      "path": "/console/#/new",
+      "ledger": ["organizations"],
+      "calls": ["POST /v1/organizations"]
+    },
+    {
+      "id": "connect",
+      "path": "/console/#/projects/{key}/connect",
+      "ledger": ["pooled_endpoint", "direct_endpoint", "postgresql"],
+      "calls": [
+        "GET /v1/projects/{key}/connections",
+        "POST /v1/projects/{key}/credentials",
+        "GET /v1/operations/{operation}"
+      ]
+    },
+    {
+      "id": "branches",
+      "path": "/console/#/projects/{key}/branches",
+      "ledger": ["branches", "restore_to_branch"],
+      "calls": [
+        "GET /v1/projects/{key}/branches",
+        "POST /v1/projects/{key}/branches",
+        "POST /v1/projects/{key}/restores",
+        "POST /v1/projects/{key}/branches/{branch}/reset",
+        "DELETE /v1/projects/{key}/branches/{branch}",
+        "GET /v1/operations/{operation}"
+      ]
+    },
+    {
+      "id": "backups",
+      "path": "/console/#/projects/{key}/backups",
+      "ledger": ["backups_and_pitr"],
+      "calls": ["GET /v1/projects/{key}/backups"]
+    },
+    {
+      "id": "project-usage",
+      "path": "/console/#/projects/{key}/usage",
+      "ledger": ["usage"],
+      "calls": ["GET /v1/projects/{key}/usage"]
+    },
+    {
+      "id": "insights",
+      "path": "/console/#/projects/{key}/insights",
+      "ledger": ["query_insights"],
+      "calls": ["GET /v1/projects/{key}/insights"]
+    },
+    {
+      "id": "monitoring",
+      "path": "/console/#/projects/{key}/monitoring",
+      "ledger": ["monitoring"],
+      "calls": ["GET /v1/projects/{key}/monitoring"]
+    },
+    {
+      "id": "project-settings",
+      "path": "/console/#/projects/{key}/settings",
+      "ledger": ["idle_sleep", "compute_profiles", "sleep", "export", "project_deletion", "region"],
+      "calls": [
+        "GET /v1/projects/{key}",
+        "PUT /v1/projects/{key}/idle-sleep",
+        "PUT /v1/projects/{key}/compute",
+        "POST /v1/projects/{key}/sleep",
+        "POST /v1/projects/{key}/wake",
+        "POST /v1/projects/{key}/export",
+        "DELETE /v1/projects/{key}",
+        "GET /v1/operations/{operation}"
+      ]
+    },
+    {
+      "id": "plan",
+      "path": "/console/#/org/{organization}/plan",
+      "ledger": ["plan_free", "plan_premium"],
+      "calls": [
+        "GET /v1/plans",
+        "GET /v1/organizations/{organization}/plan",
+        "POST /v1/organizations/{organization}/plan-interest"
+      ]
+    },
+    {
+      "id": "organization-usage",
+      "path": "/console/#/org/{organization}/usage",
+      "ledger": ["usage"],
+      "calls": ["GET /v1/organizations/{organization}/usage"]
+    },
+    {
+      "id": "notifications",
+      "path": "/console/#/org/{organization}/notifications",
+      "ledger": ["notifications"],
+      "calls": ["GET /v1/organizations/{organization}/notifications"]
+    },
+    {
+      "id": "organization-settings",
+      "path": "/console/#/org/{organization}/settings",
+      "ledger": ["organizations", "api_keys", "accounts"],
+      "calls": [
+        "GET /v1/organizations/{organization}/members",
+        "PATCH /v1/organizations/{organization}/members/{user}",
+        "DELETE /v1/organizations/{organization}/members/{user}",
+        "POST /v1/invitations",
+        "GET /v1/organizations/{organization}/invitations",
+        "DELETE /v1/organizations/{organization}/invitations/{invitation}",
+        "GET /v1/organizations/{organization}/keys",
+        "POST /v1/organizations/{organization}/keys",
+        "DELETE /v1/organizations/{organization}/keys/{key_id}"
       ]
     }
   ]
