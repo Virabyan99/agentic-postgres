@@ -210,7 +210,8 @@ def walk(control: dict[str, Any], console_origin: str) -> dict[str, Any]:
     path = Path(recorded)
     assert stat.S_IMODE(path.stat().st_mode) == 0o600, f"{path} is not 0600"
     document = json.loads(path.read_text(encoding="utf-8"))
-    assert (document.get("session"), document.get("mode")) == (43, "live"), (
+    # 44 since Session 44 re-ran this walk at its release (D2749).
+    assert document.get("session") in (43, 44) and document.get("mode") == "live", (
         document.get("session"), document.get("mode"),
     )  # fmt: skip
     assert document.get("base") == console_origin, (document.get("base"), console_origin)

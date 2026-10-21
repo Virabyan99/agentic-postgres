@@ -80,7 +80,7 @@ LIFECYCLE_TYPES = frozenset(kind for kind, _ in LIFECYCLE)
 #: Session 39 re-runs them against its own record, Session 40 against its
 #: re-earning slot's (D2442), Session 41 against its third (D2518), and
 #: Session 42 against its fourth (D2581).
-RECORD_SESSIONS = frozenset({38, 39, 40, 41, 42, 43})
+RECORD_SESSIONS = frozenset({38, 39, 40, 41, 42, 43, 44})
 
 #: The edge's answer for a host or path no router serves (rig 38b: 19 bytes).
 EDGE_404 = b"404 page not found"

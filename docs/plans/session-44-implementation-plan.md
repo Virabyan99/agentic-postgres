@@ -1,6 +1,6 @@
 # Session 44 — The browser SQL editor: the customer's own client in the console, through a relay that holds nothing
 
-**Status: EXECUTING — Runs 1–5 DONE (2026-10-22; rows D2759–D2785, ADRs 0285–0286; NEXT FREE D2786, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
+**Status: EXECUTING — Runs 1–6 DONE (2026-10-22; rows D2759–D2790, ADRs 0285–0286; NEXT FREE D2791, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
 clean, `main` = `origin/main`) against the host as read that afternoon (§0).
 Rows **D2732–D2758** at planning; the runs add theirs from **D2759**. ADRs
 **0285–0286** are Run 1's. **NEXT FREE after this table: D2759, ADR 0287.**
@@ -434,7 +434,7 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2757** | Stage plan *Measures* and §7: the editor proved live. | Sleeping a project live costs ~70 s down for its names (Session 43: 69.4 / 72.2 s) and `slot3-prod` is the kept customer project; `slot8-prod` sleeps inside the lifecycle instrument, which drives the CLI, not a browser. | **The *asleep* answer is proved offline** (`test_console_sql.py::test_an_asleep_project_opens_no_socket`, the page in Node with a fake `api.js`, every state in `control_states` walked; **the control**: `ready` opens one) **and the `4502` path live** (E1: a door name that matches the grammar and has no router — `pool.slot99.<zone>` — closes `4502`; the same handshake refusal a sleeping door gives, ADR 0268 `:73`). Sleeping `slot3-prod` for the editor is not done. | A live proof of a sentence the control API already proves live (`idle_sleep_live`) is not worth a customer project's outage. | 0195 |
 | **D2758** | — | The walk's console identity: Session 43 invited a NEW walker per walk; the probe owner (`~/s37/probe.json`, its password and TOTP seed in `~/s37/probe-password`, `probe-otpauth`) owns `probe-s37`, which holds `slot3-prod`. | **The editor walk (E1) signs in as the probe owner** (the driver computes the code from the seed with stdlib `hmac`; the seed, the console password and the database passwords live in variables only and are `Secret`-wrapped, D2420; `self_check` refuses a record holding any of them, the console walk's rule) — **no new account, no rotation**. It reads `customer_app` from `~/s39/run11/creds/slot3-prod/` AFTER W1′ (D2749) and `customer_admin` from the same directory. | The editor needs a signed-in member, not a new one; a rotation belongs to the walk that proves rotation. | — |
 
-**Rows added by the runs** (from **D2759**, in execution order; **next free D2786**):
+**Rows added by the runs** (from **D2759**, in execution order; **next free D2791**):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -465,6 +465,11 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2783** | Run 5 step 1: *"`policy(relay_origin)`, read once at start … (refuse to start unless `wss://<host>` alone)"*. | `serve.py` is imported by its own proofs and by Session 43's external module (`_console_policy`), which loaded it with no environment and compared the live headers with `SECURITY_HEADERS` — at 1.22.0 that comparison would have read a policy without the relay. | **`serve.py` exposes `policy(relay_origin)` and `security_headers(relay_origin)`**; at import an origin that is not `wss://<host>` leaves the headers unbuilt and `REFUSED` set, and **`main` exits 2 before it listens** (the image's own path, proved by subprocess for eleven bad origins). **Session 43's external proof now passes the origin `naming` derives from the console's host** (`_console_policy(console_origin)`), so it compares the live answer with ADR 0285's policy, read here as exactly `… connect-src 'self' wss://sql.agenticpostgresql.com …`. | The module stays importable for the proofs that read it; the server never serves without the policy. | 0285 |
 | **D2784** | Run 5 step 2: the view reads the relay's origin. | `api.js` is the ONLY file that calls `fetch` (`test_only_api_js_calls_fetch`) and read `env.json` for the API path alone. | **`api.js` keeps `env.json`'s whole answer and exports `relayOrigin()`**; the editor asks it, so `api.js` stays the one `fetch` caller and no page types the origin. | One reader of the server's environment. | 0285 |
 | **D2785** | Run 5 step 3: *"**The Ledger guard's exception** for `sql_editor` (one id …)"*. | Two guards read `pages.json`'s rows: `test_reality_ledger.py::test_every_console_page_maps_to_a_reachable_row` and `test_console_pages.py::test_no_page_names_an_unreachable_row`. | **The same one-id exception in both**, each allowing `sql_editor` only while it is `planned` with `target_session` 44 — a row that moved anywhere else fails both. Run 7 removes both. (ADR 0246's status line, Run 5 step 4's second item, was amended in Run 1.) | A guard the plan did not name would have refused the view. | 0285 |
+| **D2786** | Run 6 step 3: *"the marker from the record via an existing host gate or a new one — read the roster first; a new host gate is a row"*. | The host mode takes record files (`--branch-record-file`), but the walk's record is written on the workstation after the deploy, and D2752 gives the gate exactly one new flag, external-only. | **No new host gate.** `test_the_relay_logged_no_payload` reads the relay container's WHOLE log as root and holds: every line fullmatches ADR 0286's session or refusal grammar; no line holds `apg-s44-` (ANY walk's marker), `SELECT`, `SCRAM`, `n,,n=`, `c=biws`, `pg_sleep` or a traceback; and a closed session to the live slot's pooled door is there (the control that this is the log the walk wrote to). | Stricter than grepping one known marker, and it needs nothing carried to the host. | 0286 |
+| **D2787** | Run 6: *"Commit (the driver, the host module, the widening)"*; step 5 parks only the external module (D2715). | `test_deployment_suite_shape::test_every_deployment_proof_is_a_node_id_of_some_requirement` FAILED with the host module in the tree: its four proofs are no requirement's node ids until Run 7's registry (D2721's lesson, Session 43). | **The host module is PARKED too** (`~/s44/run6/park/test_session44_sql_relay_host.py`, beside the external module), and lands in Run 7 with the registry, the gate and the roster entry. Its collection and `--setup-plan` with every variable set ran here. | A module the suite-shape guard refuses would turn `main` red for a run. | — |
+| **D2788** | D2750 (2): *"through `psql` from the workstation to the same pooled door"*. | The pinned PostgreSQL image carries **no trust store** (D590: `ca-certificates` is not in the base), so `sslrootcert=system` failed: *"certificate verify failed"*. | **The timing mounts the workstation's CA bundle read-only** (`-v /etc/ssl/certs/ca-certificates.crt:/ca.pem:ro`, `sslrootcert=/ca.pem`), the password passed by environment NAME (`-e PGPASSWORD`), never argv. Its shape read once, read-only, against the kept slot3 door at 1.21.0: 20 timings, **median 168.7 ms** (167.2–175.6) — a pre-release reading, named the workstation's. | The image the product builds adds the bundle; the stock one the instrument borrows does not. | — |
+| **D2789** | Run 6 step 1: *"A `--rehearse` mode answering from fixtures (the console walk's)"*. | The console walk's fixtures answer `/api/v1` only; the editor also opens a WebSocket to the relay. | **The rehearsal answers the relay too**, with Playwright's `route_web_socket` and a fake PostgreSQL backend in the driver: a real SCRAM exchange against the creds files, canned answers, the cancel by its own socket — so the editor's DOM, `pg.js` in Chromium and the driver ran with no host. It found two driver defects before any trip: `get_by_role("button", name="Connect")` also matched **Disconnect** (`exact=True` now), and `--leak` could not trip the self-check until the record held page text (the overview's headings, the console walk's rule). | A rehearsal that skipped the socket would have skipped the code under test. | 0285 |
+| **D2790** | Run 6 step 2: the trip scripts *"derived from `~/s43/run8/` by named substitution and read whole after"*. | The name-based leftover check passed scripts still holding a bare `43`: **`write-session-evidence.py --session 43`** in `s44-external.sh` (the merge would have written Session 43's evidence) and `GATE_43_*` exit names; and the first derivation rewrote the Python children's lineage line into a false one. | **Named steps added for both** (`--session 43`, `GATE_43_`), plus the path-part, module-name, display-name and stage spellings; the parents' docstrings keep their lineage (only usage lines move); a second grep for bare `43` ran after; **every hand edit lives in `s44-post-derive.py`**, re-applied after any re-derivation. The diff of each child against its parent was read (`derive-diffs.txt`). | A check that reads names cannot see a number; the reading of the diff can. | — |
 
 ---
 
@@ -1264,7 +1269,48 @@ Targeted: `test_session44_sql_relay_host --collect-only`,
 `--collect-only`. Commit (the driver, the host module, the widening), push,
 read CI.
 
-**Done.** *(the executor writes it.)*
+**Done.** (2026-10-22; WSL `~/s44/run6/`.)
+
+- **The editor driver** `tests/external/browser/sql_walk.py` (the console walk's
+  shape; D2758): signs in as the probe owner with TOTP; reads the relay's origin
+  from `env.json`; opens `slot3-prod`'s editor recording the connections answer;
+  on the pooled door who-am-I, the marker statement, the role's connections,
+  `app_private` (the code PostgreSQL gives), Cancel on `pg_sleep(30)`, 5,000 rows
+  capped, 20 timed `SELECT 1`; on the direct door who-am-I and the count; the
+  relay's three refusals by raw TLS clients (live only); sign out. One 0600
+  record, the secrets held only for `self_check` (exit 6). `--rehearse` (D2789),
+  `--leak`, `--dry` (E0).
+- **Rehearsed offline** (`~/s44/run6/rehearse-sql.sh`, the console image built
+  from the tree on `127.0.0.1:18081`): **every step ok**, exit 0, 17.2 s —
+  `apg_slot3_prod_customer_app`/`slot3_prod`, `42501`, the cancel `57014` in
+  1.10 s, 1,000 rows `truncated`, the editor's `SELECT 1` median 62.5 ms against
+  the fake, the password field cleared both times, the policy served
+  `connect-src 'self' wss://sql.rehearsal.test`; **`--leak` → exit 6, no record
+  written**; `--dry` → exit 0. The editor's DOM ran in Chromium for the first
+  time here.
+- **The trip scripts** (`~/s44/run6/`): nineteen derived by `s44-derive.py` (58
+  named substitutions, `derive-counts.txt`; the diffs read, `derive-diffs.txt`;
+  D2790) and `s44-post-derive.py`'s hand edits — the sweep's summary names
+  `sql_relay_host`, the external half passes `--sql-editor-record-file
+  ~/s44/sql/record.json`, X0 skips `session44_sql`, `s44-after.sh` reads the
+  relay at R2d (health, certificate, a foreign `Origin`, the console's
+  `connect-src`). New: **`s44-sql.sh`** (E0/E1, then the `psql` timing — D2788).
+  `bash -n` and `shellcheck -S warning` clean on all. `s44-walk.py --check`:
+  preconditions refused before the deploy as designed (exit 92), the image and
+  the Playwright package hold (`~/s44/walk-home/pw`).
+- **The host module** `test_session44_sql_relay_host.py` (four proofs; the log by
+  D2786; `memory.peak` recorded as a JUnit property; `Mounts == []` and
+  `Tmpfs == {"/tmp"}`, the latter measured on a compose service first) —
+  `--setup-plan` with every variable set and `--collect-only` clean, then
+  **PARKED** with the external module `test_session44_sql_editor.py` (thirteen
+  proofs, SQL-LIVE-001/002) in `~/s44/run6/park/` (D2787, D2715).
+- **The widening** (D2748, D2749; `widen.py`, every anchor once): ten
+  record-reading modules accept 44 — Sessions 38–43's lifecycle, branch and
+  console proofs, external and host; **no `source_commit` check touched**.
+- **Targeted, once:** `test_deployment_suite_shape`, `test_environment_gates`,
+  `test_acceptance_registry` (the sweep-selector guard), `test_repository_contract`
+  — 279 passed; the ten widened modules collect (89).
+- Rows **D2786–D2790**.
 
 ### Run 7 — the bump, the registry, the gate, the threat rows, the Ledger to `trial`
 
