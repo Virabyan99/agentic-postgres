@@ -1,12 +1,14 @@
 # Session 43 — The public site, the invitation as a link, onboarding in the browser, the console, and the packaged CLI
 
-**Status: EXECUTING — Runs 1–9 DONE (2026-10-19/20); Run 10 (the sitting) next.** Planned at `bd8f35c` (Session
+**Status: EXECUTING — Runs 1–10 DONE (2026-10-19/21); Run 11 (the close) next.** Planned at `bd8f35c` (Session
 42's close, tree clean) against the host as read that evening (§0). Rows
 **D2650–D2679** at planning; the runs add theirs from **D2680** (Run 1:
-D2680–D2687; Runs 2–9: D2688–D2724). ADRs **0280–0284** written by Run 1. The
-site is live on its custom names (Sheet C4). **D2714: the lifecycle and the
-branches are re-earned in Run 10** (the operator, 2026-10-20). **NEXT FREE: D2725,
-ADR 0285.**
+D2680–D2687; Runs 2–10: D2688–D2729). ADRs **0280–0284** written by Run 1. The
+site is live on its custom names (Sheet C4). **1.21.0 deployed on all four,
+swept, TAGGED on `012ac06` and published to PyPI** (Run 10); evidence 322
+claims, 320 passed — `documented_path` and `site_live` failed (D2728: the
+proof's User-Agent, fixed at the close, re-earned at the next trip). **NEXT
+FREE: D2730, ADR 0285.**
 
 The eighth session of Stage 5 and the first of the operator's web-first split
 (D2591, D2593): the stage plan's *Session 43* brief as amended
@@ -528,6 +530,11 @@ execution order.
 | **D2722** | D2652: the operator chose to register the PyPI pending publisher and wait for the tag; §5 Run 7: the site deploys on every green push to `main`. | Since Run 7 the live site's `/quickstart/` and `/docs/cli/` say `pipx install agentic-postgres-cli` and `uv tool install agentic-postgres-cli` — a package that does not exist until Run 10's tag publishes it; PyPI's own words: a pending publisher *"does not … reserve a project's name"* (C2). | **Recorded and told to the operator, not changed by the agent** (the order is the operator's D2652): until the tag the command answers "not found", and the name is claimable by anyone. The Ledger's `cli_remote` text says *"published to PyPI as agentic-postgres-cli from release 1.21.0"*. If the operator wants the window closed sooner: publish earlier, or soften the two pages until the tag. | A page that promises a command must not run ahead of the command; the risk is named where the operator reads it. | 0283, 0284 |
 | **D2723** | §5 Run 9 and §2 (*"`DEP-LAUNCH-001` (family read by Run 9)"*, *"`OPS-PROV-002` (family read by Run 9)"*); D2681 (*"`THR-CON-GUESS` needs a requirement Run 9 names"*); D2665 (*"`cli_remote`'s evidence gains `cli_package`"*). | The tree: no `OPS-PROV-001` exists (the `OPS` and `DEP` families read whole; nothing outside the plan names either new id); `test_available_and_beta_rows_name_evidence_that_resolves` refuses a `beta` row naming a claim that has not passed in the newest evidence; `test_release_contract` reads the price sentence and *"schema moves"* each on ONE comment line. | **Rulings**: the plan's ids kept as written (`OPS-PROV-002`, `DEP-LAUNCH-001`); `THR-CON-GUESS` names `CTL-TOTP-001` and `SEC-CRED-002` — the factor's one-step window and replay refusal and the frozen Argon2id profile its door already rests on — and no new control (D2679); **`cli_package` joins `cli_remote`'s evidence at the close (Run 11)**, once it has passed; the price paragraph's two sentences re-wrapped. | A beta row names only what passed; a requirement for a carried risk is the control that exists, not a new one. | 0261, 0283 |
 | **D2724** | §5 Run 9 item 7: the gates in shards, once. | gate-01 shard 7's first attempt: `test_dev_command::test_status_on_a_project_with_no_environment_says_so_and_exits_four` read exit **5** (`EXIT_CONTRACT`), not 4 or 0; the module alone: 27 passed; `apg dev status` by hand: exit 0, *"no development environment"*; a stale `apg-dev-fixture-alpine-dev` container (exited 255 two weeks ago) on the workstation; **the whole shard re-run: 1,182 passed**. Session 42's same shard passed first time. | **The re-run's JUnit is the gate's** (the first attempt kept as `~/s43/run9/gate01-shard7.first.{txt,xml}`); an order dependence inside shard 7 on this workstation, **unexplained** — named in §10, not repaired here. | A flake re-run is evidence only with the failure kept beside it. | — |
+| **D2725** | §5 Run 10 step 3 (*"W0 — `s43-walk.sh --dry`"*); the walk's `--check` passed at Run 8 (D2718). | W0's first attempt **exited 1 before the login** (nothing minted, no walker): `s43-walk.py` loads the product's `services/auth-api/app/totp.py` to compute the probe owner's code, which since Run 9 imports `segno` (the QR); the launcher ran the system `python3`, which has none. `--check` stops before the code, so it could not see it. `s43-lifecycle.py` (line 251) and `s43-branches.py` (through the lifecycle module) load the same file. | **Every launcher runs the checkout's `.venv/bin/python`** — `s43-walk.sh` (one line, its backup kept), `life-start.sh`, `br-start.sh`, `br-after-reboot.sh`, `br-delete.sh` (each derived from Session 42's by count-asserted substitution). W0 then walked in 32.3 s. | An instrument that borrows a product module inherits the product's imports; its interpreter is the product's environment, not the system's. | 0282 |
+| **D2726** | Sheet R1 (as first handed this sitting): the three `upgrade plan` lines without `--also api_operation_added`, on the agent's claim that `plan` refused the flag. | No such refusal had been run: the claim was the agent's, never measured (D267); Run 9's offline rig had run `upgrade.sh plan … --also api_operation_added` successfully. | **Corrected before the operator ran it**; R1 read with the flag: `bump minor`, `requires minor`, `verdict ok`, changes `api_operation_added` + `image_digest`, no reasons, no operator digests moved, on all three. | A sheet's line is measured or it is not written. | 0162 |
+| **D2727** | Sheet H1: `s43-hostyaml.py --slot slot7-prod=slot7.agenticpostgresql.com` (Session 42's shape, renamed). | The derivation renamed the tool and kept its parent's comment text: the inserted comment read *"… a fourth time, then deletes (plan Run 10/11, D2561)"* — Session 42's. | **Both candidates corrected** to *"a fifth time … (plan Run 10, D2714)"* by a count-asserted edit (anchor once each) and **reloaded by the product's loader** (slots 1–7, capacity unchanged) before either copy was installed; candidates identical (`9a80b9c1…`). | A derivation that renames a writer must move the text the writer writes, not only its name. | — |
+| **D2728** | §5 Run 10 step 5: *"Exit 5 for `documented_path` only"*; §2 `site_live` (`SITE-LIVE-*`, the external module). | The merge: **322 claims, 320 passed, 2 failed — `documented_path` and `site_live`**. `site_live`'s three proofs failed on one cause: `_settled` never read five consecutive 200s, because **Cloudflare answers `403 error code: 1010` to the recorder's default `Python-urllib/3.x` User-Agent** (it names none). Measured with a control varying the User-Agent alone: curl 30/30 200; urllib default 20/20 403; urllib naming itself (`agentic-postgres-proof`, `curl/8.5.0`) 200. The zone's security events: `source bic`. A Configuration Rule (`bic: false` for the apex and `www`, the operator's choice) silenced the zone's own events but not the 403: **`agentic-postgres-site.pages.dev` itself answers 1010 to the same header — the Pages platform applies its own Browser Integrity Check, outside the zone's settings.** The proof's live half had never run (X0 excluded the module; Run 8 read the site with curl): §7's question 2, a never-executed proof failing on first execution. | **The operator (2026-10-21): tag 1.21.0 on `012ac06` with this evidence**; at the close (Run 11) the proof's recorder sends an explicit User-Agent naming the proof (an offline test and a battery); `site_live` is re-earned at the next host trip (Session 44). **The rule removed** (ruleset deleted; the zone back to its four managed rulesets, `browser_check` on). The site itself answers every client that names itself, byte-equal to the build (Sheet C4). | A live proof's client is a client the third party judges; what it sends is part of the measurement, and is fixed in the proof, never in the site's protections. | 0283 |
+| **D2729** | Sheet K1, read by `k1-read.sh` (derived from Session 42's). | The reader looks for `manifest.json`; the kit's file is **`kit.json`** — it printed *"kit release None"*, as Session 42's did. | **A reader defect, not a kit's**: `kit.json` read directly — release `012ac06`, projects alpha/beta/control; 19 files copied to `~/dr-kits/kit-2026-10-21-s43`, every sha256 equal to the host's. | A reader that prints `None` for a file it never found reports an absence as a value (ADR 0195). | 0195 |
 
 ---
 
@@ -1887,10 +1894,74 @@ as `op`), `pytest --setup-plan` of the host modules with the variables set.
 7. **SL4** — `slot7-prod`'s identity revoked after the tag (D2714). **Sheet RC1**: the reconciler started and read
    active after the last sheet that stopped it (D2178).
 
-**Done.** *(executor: each window per project; the console's headers; V1/X0/W0
-results; W1's record summary (steps, FCP ×3, link→string seconds); the merge's
-counts; the tag object; the publish run's id and verdict; PyPI's version and the
-clean install's output.)*
+**Done.** 2026-10-21, one sitting, 05:50Z–12:00Z (WSL `~/s43/run10/`, its
+`NOTES.md` the minute-by-minute record). Rows **D2725–D2729**.
+**The release.** R1 (with `--also api_operation_added`, D2726): `bump minor`,
+`requires minor`, `verdict ok` ×3, changes `api_operation_added` + `image_digest`.
+R2a–R2d, the reconciler stopped, each with `s43-window.py` and read by
+`s43-after.sh` before the next sheet: beta 43 migrations, auth down **9.4 s**;
+alpha 39, **9.3 s**; slot3-prod by `slot.sh redeploy` (userlists re-read, registry
+row 1.21.0/012ac06) 39, **6.6 s**; control-prod last, 48, **7.0 s** — rest never
+down on any; no database restart. The console: `apg-control-prod-console-1`
+healthy, its first 200 at 06:01:37 (404 until it existed), none down after;
+`/console/` 200 with the CSP, `no-store`, `DENY`, `no-referrer`; `/` → 301
+`/console/`; `/api/v1/me` 401. A1: adopted ×3, registry agrees ×4 + slot1–6
+deleted. RA: rehearsal `202610210605be19`, admitted as declared (0) / refused
+injected (12), reversed. K1: kit `kit-2026-10-21-s43` (18 artifacts, release
+012ac06) in `~/dr-kits`, sha256 equal (D2729); the four op copies at 012ac06.
+**V1** (40:26): 408 passed, 1 failed (`documented_path`), 8 skipped (no reboot,
+no slot yet); `test_session43_console_host` 3/3. **X0** (6:28): 40 passed, 44
+skipped (IPv6; Sessions 40–42's lifecycle records). The pinned Playwright image
+pulled (~17 min, 1.01 GB, digest `72bd171a`).
+**The walk.** W0 (after D2725's interpreter fix): every step ok in 32.3 s; FCP
+1,140 / 1,008 / 1,060 ms; CSRF — foreign-origin logout 401, header-less 401, the
+session alive after the forgery (200), sign-out 204; cookies `__Host-apg_access`
+and `__Host-apg_refresh`, HttpOnly, Secure, SameSite=Strict. **The operator's
+phone scanned the QR: `agentic-postgres: walk-s43-86e008` and a six-digit code**;
+the screenshot shredded. **W1**: 11/11 ok in 40.9 s, Chromium 153.0.8010.12;
+**link → connection string 26.1 s**; FCP 1,024 / 900 / 1,028 ms; slot3-prod's
+`customer_app` rotated from Connect (`apg_slot3_prod_customer_app` @
+`pool.slot3…:5432/slot3_prod`, `sslmode=verify-full`, the password in the string,
+**gone after a reload**); no cookie after sign-out; the creds file replaced (the
+old one kept as `customer_app.before-s43`); both walkers removed.
+**The re-earning (D2714).** H1 (D2727); SL1 — the three grey A records and the two
+R2 buckets (EEUR, Standard) made by the agent through the Cloudflare API, names
+from `naming`; `s43-dns.sh slot7-prod` GO; the B2 bucket, its key, the R2 tokens
+and the six Infisical secrets by the operator; `bootstrap-providers --apply`
+"created 16" of 17 proposed (D2642's class); SL1b ALL YES; SL2 29 files
+(generation `87e68899…`); SL3 `slot7-prod ready`; RC1 the restarted reconciler
+names it. **A usage pass measured: 1.0 s** (Session 42's UNMEASURED). **The
+lifecycle** (organisation `lifecycle-s43`, exit 0, 86 min): plan refusal exit 5
+`plan_limit_reached`; **create 1,378.0 s**; Query Insights read 200 calls through
+the pooled door; asleep 404, both doors refused; wake first answer 16.6 s; both
+resizes admitted (304 / 840 MiB of 4,801 safe); the export (40,286 B, `api`,
+`app`, `public`) and its link 200 at once, 403 after 930 s; the idle sleep the
+reconciler's (origin `idle`); usage 2,190 active seconds; K2; deleted; the second
+creation exit 5 `no_slot`. The slot's names down: sleep 69.4 / 72.2 s, wake
+14.0 / 17.9, resizes 8.0 / 17.9 and 10.0 / 17.6 (route / pool). The neighbours
+through it (5,199 s): 2,773 up per class, **0 down**, control 8,316 up. A1':
+slot7-prod `agrees (deleted)` and `consumed`. **The branches** (exit 0): `tmp`
+expired by the reconciler **52.3 s** after `expires_at` (Session 42: 125.2 s);
+the restore window waited 505.7 s past T1; `dev` at T1 holds row 1, main 1,2;
+its door ready at once; migrated on `dev` only; a second branch exit 5
+`branch_limit_reached`; reset, ready at once; the neighbours 0 down. **B1**: all
+seven units started BY THE BOOT (0 restarts), active by boot+79 s; the plane's
+four up; `dev` back by itself, its pool door answering.
+**The evidence.** S1 (47:16): suite 428 passed, 1 failed, **0 skipped**; host
+**143 passed, 1 failed** (`documented_path`); `console_live_host` passed. `dev`
+deleted (its names refuse). The external half from 012ac06: 115 passed, 3
+failed, 7 skipped. **Merged: 322 claims, 320 passed, 2 failed —
+`documented_path` (D1935) and `site_live` (D2728: the Pages platform refuses the
+proof's default Python User-Agent; the proof is fixed at the close and re-earned
+at the next trip)**; `console_walk_live` and `console_csrf_live` passed.
+**The tag and the publish.** `1.21.0` on 012ac06 (tag object `70d9b475`),
+pushed; `publish-cli` run **39594379819**: `verify`, `build` and `publish`
+(trusted publishing) success. PyPI `agentic-postgres-cli` **1.21.0** (Apache-2.0,
+Python ≥3.11, a wheel and an sdist); in a clean `python:3.12-slim`, `pip install
+agentic-postgres-cli==1.21.0` exit 0 and `apg --version` → `apg 1.21.0` — D2722's
+window closed. SL4: slot7-prod's identity `674ed41d…` revoked, the credential
+shredded. The final state: all seven units active, the checkout at 012ac06,
+clean.
 
 ### Run 11 — the close
 
@@ -1898,7 +1969,15 @@ clean install's output.)*
    `console_live_host` and the offline `CON-*` claims passed in
    `evidence/session-43.json`; `cli_remote`'s `today`/`customer_text` name the
    PyPI install (its evidence `cli_package` and the reading); **no row `trial`
-   at the close** (ADR 0261).
+   at the close** (ADR 0261). The site's rows stay where `site_live` (failed,
+   D2728) leaves them — nothing moves on it.
+1b. **D2728's repair** (the operator, 2026-10-21): the recorder the `site_live`
+   proofs use (`tests/external/test_session43_console.py`'s `_get` through
+   `test_session38_public_lifecycle.Recorder`) sends an explicit `User-Agent`
+   naming the proof — grep every reader of the recorder first (D979); an
+   offline test that the header is sent; a battery (the header removed is the
+   mutation, a request the change cannot reach the control). `site_live` is
+   re-earned at the next host trip (Session 44's), not here.
 2. **The envelope**: `capacity.ENVELOPE` gains a Session 43 section after
    `:2336` — the console's memory and pids peaks (Run 4) and on the host (S1's
    reading), each project's release window (R2a–R2d), the console's FCP ×3 and
