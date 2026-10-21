@@ -535,6 +535,11 @@ def test_a_session_is_closed_at_its_total(served: Any, monkeypatch: pytest.Monke
 def test_a_large_message_is_refused(served: Any) -> None:
     one = served("echo")
     with one.session() as session:
+        # The door first: before it is ready the relay holds at most 64 KiB
+        # (`test_the_byte_caps_close_the_session`), and a megabyte sent then
+        # meets that cap, not this one -- measured on CI's slower runner.
+        session.send(b"ready?")
+        assert session.recv(timeout=10) == b"ready?"
         session.send(b"\1" * relay_module.MAX_MESSAGE_BYTES)
         got = 0
         while got < relay_module.MAX_MESSAGE_BYTES:
@@ -834,7 +839,10 @@ def test_no_line_holds_the_payload(
             exchange = wire.login("postgres", tls_postgres["password"])
             rows, error = wire.query(f"SELECT '{marker}' /* {marker} */")
             assert (rows, error) == ([marker], None)  # the control
-            assert wire.query(f"SELECT {marker}")[1] == "42601"  # refused, marker and all
+            # Refused, marker and all: a quoted identifier is an undefined
+            # column whatever its hex digits are (unquoted, they parse either
+            # as arithmetic or not at all).
+            assert wire.query(f'SELECT "{marker}"')[1] == "42703"
         with connect(url, origin=ORIGIN, max_size=None) as session:
             session.send(b"\0\0\0\x08garbage-" + marker.encode())  # a malformed startup
             with contextlib.suppress(ConnectionClosed, TimeoutError):
