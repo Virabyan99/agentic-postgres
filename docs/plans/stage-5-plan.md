@@ -111,7 +111,7 @@ divergences     D1-D1944 in earlier plans; D1945-D1984 here; D1985-D2041 in
                 Session 38's and its migration plan's; D2325-D2421 in Session
                 39's; D2422-D2509 in Session 40's; D2510-D2560 in Session 41's;
                 D2561-D2649 in Session 42's (D2591-D2596 Sessions 43-45's
-                choices); D2650-D2730 in Session 43's. **Next free: D2731.**
+                choices); D2650-D2731 in Session 43's. **Next free: D2732.**
 ```
 
 **Every number in §0 onward was measured on 2026-10-03 at `42bf306`**, or says

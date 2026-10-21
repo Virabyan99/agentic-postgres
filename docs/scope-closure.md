@@ -1706,7 +1706,7 @@ on a role name the tree's own database proof already read correctly.
 **Session 43 is the web-first session** (D2591): the public site on Cloudflare
 Pages, the invitation as a link, onboarding and the second factor in the
 browser, the console, and the customer CLI packaged. Eleven runs,
-`D2650`–`D2730`, ADRs 0280–0284. **`1.21.0` is deployed on four projects --
+`D2650`–`D2731`, ADRs 0280–0284. **`1.21.0` is deployed on four projects --
 beta, alpha, `slot3-prod` (by `slot.sh redeploy`) and control-prod, where the
 console started -- swept, merged and tagged on `012ac06`** (D1425), no database
 restarted. **The tag published `agentic-postgres-cli` 1.21.0 to PyPI by trusted
@@ -1732,6 +1732,7 @@ never named itself.
 | **D2636, D2637, D2642** | Repaired in Run 2, each with a failing test first, deployed in 1.21.0; D2642's count read live at SL1 ("created 16 resources" for 17 changes, the grant a permission -- D2689). |
 | **The fifth re-earning** (D2714) | Every lifecycle and branch claim re-earned at 1.21.0 on `slot7-prod` and `slot3-prod`; at B1 all seven units came back by themselves. |
 | **A usage pass's duration** | Read: 1.0 s (the reconciler's own line); out of `UNMEASURED`. |
+| **The apt pins expired** (D2731, the class D533/D540 named) | Found by the close's cache-cold gate: `ca-certificates 20250419~deb12u1` and `pgbackrest 2.59.1` were gone from their archives, so the Postgres image no longer built from scratch. Repinned (`deb12u2`, `2.59.3`) on `main`; the image builds cache-cold again. |
 
 ### What it left, and why
 
@@ -1754,6 +1755,10 @@ never named itself.
    `sql_editor` is `planned` → 44.
 2. **`site_live` re-earned** at its host trip, with the recorder this close
    repaired (D2728).
+2b. **The repinned image shipped** (D2731): `main` carries the new apt pins
+   past the 1.21.0 tag, undeployed; Session 44's release prices them
+   (`image_digest`) and deploys them. Check both pins' indexes before any
+   session that rebuilds the image (the comments beside them say how).
 3. The plan's §10, both lists -- among them: a PyPI version cannot be
    re-uploaded (a CLI fix is a release of four); the site deploys on every green
    push to `main`, so it can run ahead of the deployed release.

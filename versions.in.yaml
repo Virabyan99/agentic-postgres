@@ -591,10 +591,15 @@ packages:
   # **Check it before any session that rebuilds this image**, and move the pin
   # deliberately if it has gone. A build failing closed because an upstream index
   # rotated is a bad moment to learn the pin was undiarised for four sessions.
+  #
+  # **It happened at Session 43's close (2026-10-21, D2731)**: a cache-cold build
+  # of this image failed in the gate, and the index offered 2.59.2 and 2.59.3 --
+  # 2.59.1 was gone. Moved to 2.59.3 (the newest, the latest to expire), a patch
+  # of the same 2.59 line.
   PGBACKREST_APT_VERSION:
     registry: apt
     package: pgbackrest
-    version: "2.59.1-1.pgdg12+1"
+    version: "2.59.3-1.pgdg12+1"
     index: https://apt.postgresql.org/pub/repos/apt/dists/bookworm-pgdg/main/binary-amd64/Packages.gz
 
   # The trust store, and the image had none at all (D590).
@@ -625,8 +630,13 @@ packages:
   # expires sooner than `PGBACKREST_APT_VERSION` and in the same way (D533). The
   # build fails closed when it does, which is the accepted half; nobody has
   # diarised either.
+  #
+  # **Both expired together, at Session 43's close (2026-10-21, D2731)**:
+  # `apt-cache policy` in the pinned base offered `20250419~deb12u2` from
+  # bookworm-security and `20230311+deb12u1` from bookworm -- deb12u1 gone.
+  # Moved to deb12u2.
   CA_CERTIFICATES_APT_VERSION:
     registry: apt
     package: ca-certificates
-    version: "20250419~deb12u1"
+    version: "20250419~deb12u2"
     index: http://deb.debian.org/debian-security/dists/bookworm-security/main/binary-amd64/Packages.xz
