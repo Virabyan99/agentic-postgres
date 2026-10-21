@@ -1,14 +1,15 @@
 # Session 43 — The public site, the invitation as a link, onboarding in the browser, the console, and the packaged CLI
 
-**Status: EXECUTING — Runs 1–10 DONE (2026-10-19/21); Run 11 (the close) next.** Planned at `bd8f35c` (Session
+**Status: COMPLETE — Runs 1–11 DONE (2026-10-19/21).** Planned at `bd8f35c` (Session
 42's close, tree clean) against the host as read that evening (§0). Rows
 **D2650–D2679** at planning; the runs add theirs from **D2680** (Run 1:
-D2680–D2687; Runs 2–10: D2688–D2729). ADRs **0280–0284** written by Run 1. The
+D2680–D2687; Runs 2–11: D2688–D2731). ADRs **0280–0284** written by Run 1. The
 site is live on its custom names (Sheet C4). **1.21.0 deployed on all four,
 swept, TAGGED on `012ac06` and published to PyPI** (Run 10); evidence 322
 claims, 320 passed — `documented_path` and `site_live` failed (D2728: the
-proof's User-Agent, fixed at the close, re-earned at the next trip). **NEXT
-FREE: D2730, ADR 0285.**
+proof's User-Agent, repaired at the close, re-earned at the next trip). The
+close (Run 11): `console` → `beta`; the expired apt pins moved on `main`,
+undeployed (D2731). **NEXT FREE: D2732, ADR 0285.**
 
 The eighth session of Stage 5 and the first of the operator's web-first split
 (D2591, D2593): the stage plan's *Session 43* brief as amended
@@ -2002,7 +2003,41 @@ clean.
    artefacts moved). Commit, push, read CI (the `site` workflow redeploys the
    Ledger page — its verdict read too).
 
-**Done.** *(executor.)*
+**Done.** 2026-10-21 (WSL `~/s43/run11/`), code `4da074d` + `9fa9042`. Rows
+**D2730, D2731**.
+- **The Ledger**, from the tagged evidence: `console` → **`beta`** (its six
+  offline claims, `console_walk_live`, `console_csrf_live`, `console_live_host`
+  all passed); `cli_remote` names `cli_package` and the published package; no
+  row names `site_live`, so nothing moves on it; no row `trial`.
+- **D2728's repair**: the shared `Recorder` sends `User-Agent:
+  agentic-postgres-proof`; `test_site.py::test_the_live_proofs_name_themselves_to_the_site`
+  reads it off the wire through both the recorder's `send` and its opener;
+  battery **3/3 killed** (FAILED, the control passing, every file restored by
+  `cmp`); against the live site the fixed recorder reads 200 on the apex, `www`,
+  `/pricing/` and `pages.dev` ×5, urllib's default still 403.
+- **The envelope**: Session 43's seven measurements; *a usage pass's duration*
+  out of `UNMEASURED` (1.0 s). **The documents**: `scope-closure.md` §36; the
+  stage plan's Status; the upgrade guide's 1.21.0 row (*"restarts no database"*);
+  the operator guide's stale release row (D2730). The Run 10 record corrected:
+  SL1's *"created 16"* is D2642's repair working (D2689).
+- **D2731**: the gate's cache-cold build found both apt pins expired — CI on
+  `244fd8d` had already failed on the same five errors (run 39596925289, 8,236
+  passed, 5 errors) — so `main` was red from `244fd8d`; repinned in `9fa9042`
+  (`ca-certificates 20250419~deb12u2`, `pgbackrest 2.59.3-1.pgdg12+1`), the
+  build red then green, unreleased (Session 44 prices and deploys it).
+- **Targeted**: 9 modules, 203 passed; the release guards 138 passed.
+  **`bin/session-01-check.sh` on `9fa9042`**, its steps and the suite in 11
+  foreground shards (`~/s43/run11`): steps 1, 2, 3, 5, 6, 7 passed; **8,238
+  merged = 8,238 collected** (Run 9's 8,237 + this close's one test), 0 failures,
+  0 errors, 3 skipped; step 8 exit 0. Shard 3's first attempt failed one test
+  on a registry TLS timeout pulling the pinned `python:3.12-slim` (the image
+  cache cleared that morning) — kept as `gate01-shard3.first.*`; the image
+  pulled, the shard re-run whole: 1,314 passed (D2724's rule).
+- **CI on `9fa9042`**: contract **39622093716** success; site
+  **39626122578** success (the live /ledger/ byte-equal to the build, read through the repaired Recorder: 200). The push's run registered ~14 minutes late
+  (GitHub's webhook-delivery incident of 2026-10-21 14:52Z).
+- **The handoff**: the launch folder's `CLAUDE.md` §2/§3 rewritten for Session
+  44 (its backup in the session's scratchpad); the project memory.
 
 ---
 
