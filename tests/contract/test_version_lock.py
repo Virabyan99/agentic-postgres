@@ -588,3 +588,30 @@ def test_segno_is_locked(lock: dict[str, str], candidates: dict) -> None:
     assert '"segno==${SEGNO_VERSION}"' in dockerfile
     control = [line for line in dockerfile.splitlines() if 'python -c "import argon2' in line]
     assert len(control) == 1 and " segno," in control[0], control
+
+
+def test_websockets_is_locked(lock: dict[str, str], candidates: dict) -> None:
+    """Session 44 (ADR 0286, D2771): the SQL relay's one dependency, one version
+    in all four places.
+
+    The relay image installs it from the lock and checks the installed version
+    in its own build; the offline suite serves the relay with the same version
+    from the dev lock -- where it is already a transitive (fastmcp-slim), which
+    is why the pin is 17.1 and not the newer 17.2 the dev lock's cutoff cannot
+    reach; both artifact hashes rig 44d read (wheel and sdist) are in that entry;
+    and the lock records the sdist's digest `lock-versions.sh` resolved."""
+    version = candidates["packages"]["WEBSOCKETS_VERSION"]["version"]
+    assert candidates["packages"]["WEBSOCKETS_VERSION"]["package"] == "websockets"
+    assert candidates["packages"]["WEBSOCKETS_VERSION"]["registry"] == "pypi"
+    assert lock["WEBSOCKETS_VERSION"] == version == "17.1"
+    assert lock["WEBSOCKETS_VERSION_DIGEST"] == (
+        "sha256:acfea4c20bf54384883ea33b1240fc1db4f52e190823a4e2b334bc3e8bfca96a"
+    )
+    dev_lock = (REPO_ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+    entry = dev_lock.split(f"\nwebsockets=={version} \\\n", 1)[1].split("\n    #", 1)[0]
+    assert "0c863507ada5805517ca6dff1c524dcd42942efe6304dacf06700878398d21a6" in entry
+    assert "acfea4c20bf54384883ea33b1240fc1db4f52e190823a4e2b334bc3e8bfca96a" in entry
+    dockerfile = (REPO_ROOT / "services" / "sql-relay" / "Dockerfile").read_text(encoding="utf-8")
+    assert "ARG WEBSOCKETS_VERSION\n" in dockerfile
+    assert '"websockets==${WEBSOCKETS_VERSION}"' in dockerfile
+    assert "websockets.__version__ == '${WEBSOCKETS_VERSION}'" in dockerfile

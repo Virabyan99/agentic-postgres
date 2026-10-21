@@ -465,6 +465,19 @@ packages:
     registry: pypi
     package: segno
     version: "1.6.6"
+  # Session 44 (ADR 0286, rig 44d): the SQL relay's WebSocket server, its only
+  # dependency. BSD-3-Clause, no `requires_dist`, `requires_python >=3.11`.
+  # 17.1 and not 17.2 (the newest at least 14 days old on 2026-10-21): the dev
+  # lock already holds 17.1 (a transitive of fastmcp-slim) and its cutoff
+  # predates 17.2, so 17.1 is the one version the image and the offline suite
+  # can both run without moving the dev lock (D2771, D2690's lesson). Rig 44d
+  # read the same answers from both: a foreign or absent `Origin` 403, never
+  # 101; a 2 MiB message closed 1009; `process_request` runs BEFORE the
+  # `origins` check (D2762).
+  WEBSOCKETS_VERSION:
+    registry: pypi
+    package: websockets
+    version: "17.1"
 
   # ---------------------------------------------------------------------------
   # Session 14, Run 3. OpenTelemetry, adopted as a TRANSPORT for correlation

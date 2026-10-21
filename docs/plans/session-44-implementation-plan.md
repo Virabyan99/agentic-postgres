@@ -1,6 +1,6 @@
 # Session 44 — The browser SQL editor: the customer's own client in the console, through a relay that holds nothing
 
-**Status: EXECUTING — Run 1 DONE (2026-10-21; rows D2759–D2770, ADRs 0285–0286; NEXT FREE D2771, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
+**Status: EXECUTING — Runs 1–2 DONE (2026-10-21; rows D2759–D2773, ADRs 0285–0286; NEXT FREE D2774, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
 clean, `main` = `origin/main`) against the host as read that afternoon (§0).
 Rows **D2732–D2758** at planning; the runs add theirs from **D2759**. ADRs
 **0285–0286** are Run 1's. **NEXT FREE after this table: D2759, ADR 0287.**
@@ -434,7 +434,7 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2757** | Stage plan *Measures* and §7: the editor proved live. | Sleeping a project live costs ~70 s down for its names (Session 43: 69.4 / 72.2 s) and `slot3-prod` is the kept customer project; `slot8-prod` sleeps inside the lifecycle instrument, which drives the CLI, not a browser. | **The *asleep* answer is proved offline** (`test_console_sql.py::test_an_asleep_project_opens_no_socket`, the page in Node with a fake `api.js`, every state in `control_states` walked; **the control**: `ready` opens one) **and the `4502` path live** (E1: a door name that matches the grammar and has no router — `pool.slot99.<zone>` — closes `4502`; the same handshake refusal a sleeping door gives, ADR 0268 `:73`). Sleeping `slot3-prod` for the editor is not done. | A live proof of a sentence the control API already proves live (`idle_sleep_live`) is not worth a customer project's outage. | 0195 |
 | **D2758** | — | The walk's console identity: Session 43 invited a NEW walker per walk; the probe owner (`~/s37/probe.json`, its password and TOTP seed in `~/s37/probe-password`, `probe-otpauth`) owns `probe-s37`, which holds `slot3-prod`. | **The editor walk (E1) signs in as the probe owner** (the driver computes the code from the seed with stdlib `hmac`; the seed, the console password and the database passwords live in variables only and are `Secret`-wrapped, D2420; `self_check` refuses a record holding any of them, the console walk's rule) — **no new account, no rotation**. It reads `customer_app` from `~/s39/run11/creds/slot3-prod/` AFTER W1′ (D2749) and `customer_admin` from the same directory. | The editor needs a signed-in member, not a new one; a rotation belongs to the walk that proves rotation. | — |
 
-**Rows added by the runs** (from **D2759**, in execution order; **next free D2771**):
+**Rows added by the runs** (from **D2759**, in execution order; **next free D2774**):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -450,6 +450,9 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2768** | D2737: *"anything else (`unknown` included) → 'The project's state could not be read; nothing was opened.'"* | Rig 44e: `creating`, `deleting` and `deleted` would be told the state *could not be read* — but it was read. | **Named**: *"The project is <state>; nothing was opened."* for `creating`, `deleting`, `deleted`; *could not be read* only for `unknown`, an unexpected value or a failed read. | ADR 0195: the third outcome is *I could not determine it*, not *I determined something I would rather not say*. | 0285 |
 | **D2769** | Run 1 step 5: *"the close codes `4400 4403 4408 4413 4429 4502`"*. | Rig 44d: an `Origin` refusal is an HTTP `403` **before** the upgrade (and D2762 puts it first), so no WebSocket exists to carry a close code for it. | **The close codes are `4400` (a text frame), `4408`, `4413`, `4429`, `4502`; `4403` is dropped.** | A code that can never be sent is a promise no test can hold. | 0286 |
 | **D2770** | Rig 44e: *"read whether the editor's logic can be a DOM-free module (`sql.js`) … Recorded: the module boundary Run 5 uses."* D2745 lists `pg` as the only new script. | Rig 44e: a module that imports nothing and takes `call` and `connect` as arguments runs in Node with stubs; a module touching `document` at import fails there. | **`services/console/public/sql.js` is the console's fifth script** (Run 5): `ROUTES`/`LISTED` gain `/console/sql.js` as well as `/console/pg.js`, the scripts' name list is `["api", "app", "pg", "scram", "sql"]`, and `test_no_script_holds_sql`, `test_no_script_writes_storage` and `test_only_pg_js_opens_a_websocket` cover it. | The plan asked the rig for the boundary; the boundary is a file, and every guard over the console's files must name it. | 0285 |
+| **D2771** | D2742 / rig 44d: *"the newest release ≥ 14 days old"* (17.2), *"the dev lock is NOT relocked"*; Run 2 step 4: the relay tested **in-process**. | The dev lock holds `websockets==17.1` (a transitive of `fastmcp-slim`) and its cutoff is `2026-09-03T15:16:21Z`; 17.2 was published 2026-10-03, after it. In-process tests would serve the relay with 17.1 while the image ran 17.2 — two versions, one proved. | **The pin is 17.1** (2026-08-26, 56 days; BSD-3-Clause; no `requires_dist`; wheel `0c863507…`, sdist `acfea4c2…`, both already in the dev lock's entry): rig 44d re-run on 17.1 read every answer identical (`~/s44/rigs/44d/rig-17.1.txt`). `test_websockets_is_locked` holds all four places, `test_segno_is_locked`'s shape. ADR 0286 names it. | One version proved is the version shipped; moving the dev lock's cutoff to reach 17.2 would move every floating dev dependency (D2690). | 0286 |
+| **D2772** | Run 2 step 4: *"the CA file passed by a test-only argument that the image never reads — a guard proves the image's entrypoint passes none"*. | `ssl.create_default_context()` reads OpenSSL's `SSL_CERT_FILE` (measured in the tests: a relay built with it set to the trusted CA reaches the door, with the stranger CA closes `4502`). | **The relay has no CA parameter at all**; the tests set `SSL_CERT_FILE` (in-process by `monkeypatch`, and in the canary's subprocess environment), the way any trust store is moved. **`test_the_relay_reads_no_secret_and_no_file` is the guard**: no `cafile`/`capath`/`cadata`, no `load_verify_locations`, no `open`, imports from a closed set, the four `APG_SQL_RELAY_*` names and no other, and the Dockerfile's `ENTRYPOINT ["python", "-u", "/app/relay.py"]` exactly. | A parameter that only tests use is still a parameter production code could reach; a guard over its absence is stricter than a guard over its non-use. | 0286 |
+| **D2773** | Run 2 step 2: *"the path grammar (D2740) and the ceilings (D2741) → an HTTP refusal before the upgrade; `origins=[ALLOWED_ORIGIN]` (rig 44d)"*. | ADR 0286 decision 3 (from D2741 and D2762): `Origin` checked by the relay itself, FIRST, in `process_request`; the ceilings close `4429` after the upgrade so the page can say why. | **The relay passes no `origins=`** and checks `Origin` itself, then the path; **the ceilings close `4429`** after the upgrade, as D2741 and the ADR say; `GET /__apg/healthz` is answered before the `Origin` check (the container's own healthcheck sends none). Battery mutation 1 (the `Origin` check removed) was KILLED **because** no second check stands behind it. | A belt behind the check would make the check's own test unable to fail; and a browser shows an HTTP refusal of a handshake only as `1006`, never a reason. | 0286 |
 
 ---
 
@@ -856,7 +859,56 @@ shape of a server's tests).
 Targeted: `test_sql_relay`, `test_version_lock`, `test_repository_contract`,
 `test_environment_gates`, the sweep-selector guard. Commit, push, read CI.
 
-**Done.** *(the executor writes it.)*
+**Done.** (2026-10-21; WSL `~/s44/run2/`.)
+
+- **The pin (D2771):** `WEBSOCKETS_VERSION` 17.1 in `versions.in.yaml` (after
+  `SEGNO_VERSION`, its reasons in the comment); `bin/lock-versions.sh --update
+  --packages-only` → `WEBSOCKETS_VERSION=17.1`,
+  `WEBSOCKETS_VERSION_DIGEST=sha256:acfea4c2…` (the sdist), the header's input
+  hash and stamp, 15 images carried forward; `--check` passes.
+  `tests/contract/test_version_lock.py::test_websockets_is_locked`.
+- **`services/sql-relay/relay.py`** (stdlib + `websockets`): ADR 0286's
+  constants at the top; `configuration()` refuses a missing or malformed value
+  (exit 2, one stderr line, before any socket); `process_request` — health,
+  then `Origin`, then the door grammar (D2773); the ceilings after the upgrade
+  (`4429`); upstream SSLRequest + TLS with SNI, ALPN `postgresql` and the
+  system store (`door_context()`, no CA parameter — D2772); three tasks per
+  session (browser → door with the 64 KiB pending cap and `4400` for text;
+  door → browser in ≤ 64 KiB binary frames with the 64 MiB cap; the idle/total
+  timer); `max_queue=2`, `compression=None`, `server_header=None`, the library's
+  loggers silenced; one line per session.
+- **`services/sql-relay/Dockerfile`**: `PYTHON_BASE_IMAGE`, `WEBSOCKETS_VERSION`
+  (no defaults), the install and a version self-check, uid 65532, `COPY
+  relay.py` only, `EXPOSE 8080`, a `urllib` healthcheck, exec-form entrypoint.
+  **Built once from the lock** (`~/s44/run2/image.txt`): 46.8 MB; with no
+  environment exit 2 and *"refused to start: APG_SQL_RELAY_PORT is not set"*;
+  read-only, `--cap-drop ALL`, uid 65532 → `healthy`; `websockets 17.1`, the
+  system store present; a foreign `Origin` → `403` and one log line.
+- **`tests/contract/test_sql_relay.py`** — 18 functions, 39 cases: every §2
+  node id of `SQL-RELAY-001`–`003` plus `test_health_answers_without_an_origin`,
+  `test_a_malformed_environment_refuses_to_start`, `test_a_text_frame_is_refused`.
+  The relay served in-process before a fake door (asyncio, TLS from a CA made
+  with `cryptography` in `tmp_path`); refusals read as raw status lines,
+  sessions through the dev lock's `websockets` 17.1 sync client. **The canary**
+  runs the relay as its own process, exactly as the image does, before
+  PostgreSQL 18.4 from `POSTGRES_IMAGE` with TLS on: a SCRAM login with a known
+  password and a statement carrying a marker — the marker came back (the
+  control); not one byte of the password, the nonce, the proof, the
+  server-first message, `SCRAM`, `SELECT`, the marker or the malformed second
+  session's bytes in stdout or stderr; exactly two lines, each the ADR's shape.
+  The timers' tests patch `IDLE_SECONDS`, `TOTAL_SECONDS`, `TICK_SECONDS`,
+  `PING_SECONDS`, `CONNECT_SECONDS`, `MAX_DOWN_BYTES` by name.
+- **Battery** (`~/s44/run2/battery2.py`, `battery2.txt`): the `Origin` check
+  removed; `.search` for `.fullmatch`; the per-door ceiling +1; the idle timer
+  never armed; `CERT_NONE` with no hostname check; the log line gaining a
+  frame's first 32 bytes — **6/6 KILLED**, each by its named test(s) as
+  `FAILED` (no `ERROR`), the control `test_the_grammar_agrees_with_naming`
+  PASSED in the same invocation; restored, `cmp` identical; unmutated 21 passed.
+- **Targeted, once:** `test_sql_relay`, `test_version_lock`,
+  `test_repository_contract`, `test_environment_gates`, `test_acceptance_registry`
+  (the sweep-selector guard), `test_compose_contract`,
+  `test_operator_commands_run_on_the_host` — **443 passed**.
+- Rows **D2771–D2773**. CI: read after the push, recorded in Run 3's commit.
 
 ### Run 3 — the relay's plane (`compose.yaml`, `src/`, `bin/`, the edge labels)
 

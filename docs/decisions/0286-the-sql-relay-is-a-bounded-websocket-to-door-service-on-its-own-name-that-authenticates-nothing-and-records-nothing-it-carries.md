@@ -48,7 +48,11 @@ operator chose on 2026-10-21 (D2733) that the relay has its own name.**
   readings the design follows (D2762)**: `process_request` runs **before** the
   `origins` check (a bad path with a foreign `Origin` → `400`), and the library
   **logs a handler's traceback on its own logger** (`websockets.server`,
-  *"connection handler failed"*).
+  *"connection handler failed"*). **Re-read on 17.1 in Run 2** (D2771:
+  2026-08-26, BSD-3-Clause, no `requires_dist`, wheel
+  `sha256:0c863507ada5805517ca6dff1c524dcd42942efe6304dacf06700878398d21a6`,
+  sdist `sha256:acfea4c20bf54384883ea33b1240fc1db4f52e190823a4e2b334bc3e8bfca96a`):
+  every reading identical.
 - **Rig 44a** (`~/s44/rigs/44a.txt`): Traefik **3.7.10** (`TRAEFIK_IMAGE`) with
   `websecure`'s production `respondingTimeouts` (read 30 s, write 30 s, idle
   60 s) and the baseline rate limit, Chromium from the pinned Playwright image:
@@ -108,7 +112,9 @@ operator chose on 2026-10-21 (D2733) that the relay has its own name.**
    existing resolver when the relay's router first appears — one issuance,
    never retried in a loop.
 2. **A new image, `services/sql-relay/`**, from `PYTHON_BASE_IMAGE`, installing
-   **`websockets` pinned** as `WEBSOCKETS_VERSION` (`registry: pypi` in
+   **`websockets` pinned** — **17.1**, the version the dev lock already holds,
+   so the image and the offline suite run one version (D2771) — as
+   `WEBSOCKETS_VERSION` (`registry: pypi` in
    `versions.in.yaml`, written to `versions.env` by `bin/lock-versions.sh
    --update --packages-only`) with an import self-check — the auth image's
    `segno` pattern. A compose service **`sql-relay` under the facility profile
