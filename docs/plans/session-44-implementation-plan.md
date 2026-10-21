@@ -1,6 +1,6 @@
 # Session 44 — The browser SQL editor: the customer's own client in the console, through a relay that holds nothing
 
-**Status: PLANNED (2026-10-21).** Planned at `8a594de` (Session 43's close, tree
+**Status: EXECUTING — Run 1 DONE (2026-10-21; rows D2759–D2770, ADRs 0285–0286; NEXT FREE D2771, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
 clean, `main` = `origin/main`) against the host as read that afternoon (§0).
 Rows **D2732–D2758** at planning; the runs add theirs from **D2759**. ADRs
 **0285–0286** are Run 1's. **NEXT FREE after this table: D2759, ADR 0287.**
@@ -434,10 +434,22 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2757** | Stage plan *Measures* and §7: the editor proved live. | Sleeping a project live costs ~70 s down for its names (Session 43: 69.4 / 72.2 s) and `slot3-prod` is the kept customer project; `slot8-prod` sleeps inside the lifecycle instrument, which drives the CLI, not a browser. | **The *asleep* answer is proved offline** (`test_console_sql.py::test_an_asleep_project_opens_no_socket`, the page in Node with a fake `api.js`, every state in `control_states` walked; **the control**: `ready` opens one) **and the `4502` path live** (E1: a door name that matches the grammar and has no router — `pool.slot99.<zone>` — closes `4502`; the same handshake refusal a sleeping door gives, ADR 0268 `:73`). Sleeping `slot3-prod` for the editor is not done. | A live proof of a sentence the control API already proves live (`idle_sleep_live`) is not worth a customer project's outage. | 0195 |
 | **D2758** | — | The walk's console identity: Session 43 invited a NEW walker per walk; the probe owner (`~/s37/probe.json`, its password and TOTP seed in `~/s37/probe-password`, `probe-otpauth`) owns `probe-s37`, which holds `slot3-prod`. | **The editor walk (E1) signs in as the probe owner** (the driver computes the code from the seed with stdlib `hmac`; the seed, the console password and the database passwords live in variables only and are `Secret`-wrapped, D2420; `self_check` refuses a record holding any of them, the console walk's rule) — **no new account, no rotation**. It reads `customer_app` from `~/s39/run11/creds/slot3-prod/` AFTER W1′ (D2749) and `customer_admin` from the same directory. | The editor needs a signed-in member, not a new one; a rotation belongs to the walk that proves rotation. | — |
 
-**Rows added by the runs** (from **D2759**, in execution order):
+**Rows added by the runs** (from **D2759**, in execution order; **next free D2771**):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
+| **D2759** | Run 1 step 1: *"Session 43's 28 plus `slot7-prod`'s three greys"* (31). | The zone held **33** records before D0 (34 after): the two branch wildcards `*.pool.slot3` and `*.direct.slot3` (Session 40's) were not in the count. None named `sql`; only the two Pages CNAMEs proxied. | Recorded; the stop was about a `sql` record, and there was none. Sheet D0 proceeded. | A count that was wrong by two in the reassuring direction is still a count to correct, not a reason to stop. | 0286 |
+| **D2760** | §4: *"a name nothing routes yet answers the edge's 404"*. | The edge answers `sql.agenticpostgresql.com` on 443 with a **TLS alert `unrecognized_name` (112)** (curl 35 from Windows and WSL): the default TLS option's `sniStrict` gives no certificate for a name with no router, so no HTTP is spoken at all. | Recorded. Nothing reads the name before R2d; the certificate is issued over HTTP-01 on port 80, which `sniStrict` does not touch. E0 reads the name only after R2d. | What the edge answers before a router exists is a fact of the TLS option, read rather than predicted. | 0286 |
+| **D2761** | D2731 (`versions.in.yaml` comment): *"the index offered 2.59.2 and 2.59.3 -- 2.59.1 was gone"*. | 2026-10-21 18:14Z: the pgdg index lists **2.59.3, 2.59.2 and 2.59.1**; bookworm-security lists `ca-certificates 20250419~deb12u2`. Both pins present. | **Both pins stand; nothing is repinned.** The comment's account of 2.59.1 is left as Session 43 recorded it (what the cache-cold build met); this row records the later reading. | The pins are present, which is all D2747 asked; the index's churn is upstream's. | — |
+| **D2762** | D2741: *"`Origin` equals the console's origin … else `403` before the upgrade; (2) the grammar"*; D2743: *"one line per session … and nothing else"*. | Rig 44d: `websockets` 17.2 runs **`process_request` before its own `origins` check** (a bad path with a foreign `Origin` → `400`), and **logs a handler's traceback on its own logger** (`websockets.server`, *"connection handler failed"*). | **The relay checks `Origin` itself, first, inside `process_request`**, then the path, then the ceilings (it does not rely on `origins=`); **the library's loggers get a handler that writes nothing** and the relay catches every session exception itself. The offline canary reads every line the process writes, the library's included. | Left to the library, the order of refusals and the log's content would be the library's. | 0286 |
+| **D2763** | D2751: *"If Traefik closes an upgraded connection carrying traffic before 1,800 s, §9's stop"*. | Rig 44a: through Traefik 3.7.10 with `websecure`'s 30/30/60 s, **every 150 s session survived — idle with no pings included**: none of the entrypoint's timeouts applies to an upgraded connection. | **No stop.** The relay's own idle 300 s is the only idle bound; the 20 s pings are kept for what lies between the browser and the edge, not for Traefik. | The measurement answered the stop's question in the favourable direction, beyond the margin asked. | 0286 |
+| **D2764** | D2741: *"4 per source (`X-Real-Ip`, only if rig 44a shows Traefik overwrites a client's value)"*. | Rig 44a: a client sending `X-Forwarded-For: 203.0.113.9` and `X-Real-Ip: 198.51.100.7` — the relay saw **both replaced by the true peer** (the control, no client headers, the same). | **The per-source ceiling stays**, keyed on `X-Real-Ip`. | The edge overwrites the header, so a client cannot choose its own bucket. | 0286 |
+| **D2765** | D2732 / rig 44b (1): *"the control: a wrong password → `ErrorResponse` `28P01`"*. | Through the door's shape a wrong password reads **`08P01` *"SASL authentication failed"***: PgBouncer authenticates the client itself (its userlist holds the verifier), so PostgreSQL never sees the attempt. | **Every proof and the page read `08P01`** for a wrong password through a door (`test_console_pg.py`, E1); the page's text is *"The database refused the password."* for `08P01` and `28P01` alike. | The answer a customer gets is PgBouncer's; a proof expecting PostgreSQL's would fail on first execution. | 0285 |
+| **D2766** | Rig 44b (6): *"the 1,000-row cap → the cap's cancel ends it and the socket stays usable"*; D2755. | A fast statement **finishes before the cap's cancel lands** (200,000 rows, 3.29 MB in 0.27 s, rows past the cap read and dropped); a statement **still producing rows** is ended by the cancel with **`57014`** after ~1,380 rows in 1.8 s. Either way the next statement ran. | **The next statement is sent only after a cancel's own session has closed** (a late cancel cannot reach it); **the cap's own `57014` is shown as the cap's sentence, never as an error**; `test_the_row_cap_cancels` uses a statement still producing rows (`pg_sleep` per row), with the fast statement as its second case. | A cap that sends a cancel must own what the cancel does, including when it arrives too late to matter. | 0285 |
+| **D2767** | D2732: SCRAM-SHA-256 with the server signature verified. | Nothing in the plan bounds the server-first message's iteration count: anything between the page and the door that rewrote it could lower `i` and make an offline guess against a captured exchange cheaper. | **The client refuses a server-first whose iteration count is below 4,096 (PostgreSQL's default) or whose nonce does not extend its own.** Threat item 25 names it. | The relay can read and could rewrite; the client can refuse what would weaken its own proof. | 0285 |
+| **D2768** | D2737: *"anything else (`unknown` included) → 'The project's state could not be read; nothing was opened.'"* | Rig 44e: `creating`, `deleting` and `deleted` would be told the state *could not be read* — but it was read. | **Named**: *"The project is <state>; nothing was opened."* for `creating`, `deleting`, `deleted`; *could not be read* only for `unknown`, an unexpected value or a failed read. | ADR 0195: the third outcome is *I could not determine it*, not *I determined something I would rather not say*. | 0285 |
+| **D2769** | Run 1 step 5: *"the close codes `4400 4403 4408 4413 4429 4502`"*. | Rig 44d: an `Origin` refusal is an HTTP `403` **before** the upgrade (and D2762 puts it first), so no WebSocket exists to carry a close code for it. | **The close codes are `4400` (a text frame), `4408`, `4413`, `4429`, `4502`; `4403` is dropped.** | A code that can never be sent is a promise no test can hold. | 0286 |
+| **D2770** | Rig 44e: *"read whether the editor's logic can be a DOM-free module (`sql.js`) … Recorded: the module boundary Run 5 uses."* D2745 lists `pg` as the only new script. | Rig 44e: a module that imports nothing and takes `call` and `connect` as arguments runs in Node with stubs; a module touching `document` at import fails there. | **`services/console/public/sql.js` is the console's fifth script** (Run 5): `ROUTES`/`LISTED` gain `/console/sql.js` as well as `/console/pg.js`, the scripts' name list is `["api", "app", "pg", "scram", "sql"]`, and `test_no_script_holds_sql`, `test_no_script_writes_storage` and `test_only_pg_js_opens_a_websocket` cover it. | The plan asked the rig for the boundary; the boundary is a file, and every guard over the console's files must name it. | 0285 |
 
 ---
 
@@ -721,9 +733,73 @@ connect-src 'self' wss://sql.agenticpostgresql.com; font-src 'none';
 base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 ```
 
-**Done.** *(the executor writes it: the record id and the reads of D0; the pins'
-reads; each rig's readings with its control; the items; the ADRs' file names.
-Documentation only: pushed, no CI read.)*
+**Done.** (2026-10-21, 18:14–18:40Z; documentation only — pushed, no CI read.)
+
+- **Sheet D0** (the agent, the Cloudflare API, zone `5f7560988cc4d6d45c29425f6365ef0e`):
+  33 records listed, **none named `sql`** (D2759: the plan's count omitted the two
+  slot3 branch wildcards); `A sql.agenticpostgresql.com → 15.204.231.45`,
+  `proxied: false`, TTL 1, comment *"apg sql relay (Session 44, D2733)"*, **record
+  id `af246339104e95bba082ecfbc7f510ae`**, created 18:14:02Z, read back; 34
+  records after, the two Pages CNAMEs the only proxied ones. `nslookup … 1.1.1.1`
+  → `15.204.231.45`. `https://sql.agenticpostgresql.com/` → curl 35, TLS alert
+  `unrecognized_name` (D2760).
+- **The apt pins** (`~/s44/rigs/pins.txt`, 18:14:48Z): pgdg lists `2.59.3-1.pgdg12+1`
+  (and 2.59.2, 2.59.1 — D2761); bookworm-security lists `20250419~deb12u2`. **Both
+  present; nothing repinned.**
+- **Rig 44d** (`~/s44/rigs/44d/`): `websockets` **17.2** (2026-10-03, 18 days;
+  17.3 two days old), BSD-3-Clause, **no `requires_dist`**, wheel
+  `sha256:6627b913…268a5b`, sdist `sha256:36c2fb94…dc8792`. Foreign `Origin` →
+  `403`, no `Origin` → `403` (control: listed → `101`); 2 MiB → `1009`
+  (control: 1 MiB echoed); bad path → `400`; **`process_request` runs before the
+  `origins` check, and the library logs tracebacks on its own logger** (D2762).
+  No stop.
+- **Rig 44a** (`~/s44/rigs/44a.txt`; Traefik 3.7.10, Chromium from the pinned
+  Playwright image, the rig CA trusted through `--ignore-certificate-errors-spki-list`
+  with `ignore_https_errors` OFF — the image has no `certutil`; control: a
+  certificate from an unrelated key → `ERR_CERT_AUTHORITY_INVALID`; the rig's
+  entrypoints bound to 443/5432 inside its network, the timeouts copied
+  verbatim): (1) the relay saw `Origin: https://console.test` and **no
+  `Cookie`** (control: `__Host-c=1` to the console host); (2) a WebSocket to an
+  unnamed host → `connect-src` violation, **0 requests at the edge**; (3)
+  65,792 bytes byte-exact; (4) **all four 150 s sessions survived**, idle with no
+  pings included (D2763 — no stop); (5) 500 frames in 5 s all echoed (control:
+  100 GETs → 43 × 200, 57 × 429); (6) client `X-Forwarded-For`/`X-Real-Ip`
+  **overwritten** by the edge (D2764); (7) 32 sessions × 60 s streaming 10 KiB/s
+  each: rig relay **19.5 MiB / 3 pids** peak (control 18.8 MiB / 3) — the
+  workstation's reading; (8) an upgraded session logs `DownstreamStatus: 0`.
+- **Rig 44b** (`~/s44/rigs/44b.txt`; the prototype `pg.js`, `suite.mjs`,
+  `pgrelay.py` kept in `~/s44/rigs/44b/` for Runs 2 and 4; PostgreSQL 18.4,
+  PgBouncer 1.24.1 transaction + session, Traefik TCP router with the `postgres`
+  option; Node 22.23.2 and Chromium): SCRAM authenticated and **the proof equals
+  Python's in both runtimes**; wrong password → **`08P01`** (D2765); tampered
+  `v=` → refused before `AuthenticationOk`; `22012` after one result; COPY
+  out dropped, COPY in → `CopyFail` → `57014`, 0.01 s; **cancel → `57014` in
+  1.05–1.08 s** in both modes (control `pg_sleep(3)` completed 3.01 s); the cap:
+  a fast statement finished first, a producing one was ended `57014` at ~1,380
+  rows in 1.8 s (D2766); the crypto vector equal in Chromium, Node and Python;
+  the role's connections 1–2 against its limit 2. No stop. (Postgres ran
+  without `ssl=on`: the door terminates TLS at Traefik and PgBouncer speaks
+  plaintext to the cluster, as on the host.)
+- **Rig 44c** (`~/s44/rigs/44c.txt`): `/etc/ssl/certs/ca-certificates.crt`
+  present in `PYTHON_RUNTIME_IMAGE`; rig door verified with the rig CA (TLSv1.3,
+  ALPN `postgresql`), control without it → `unable to get local issuer
+  certificate`; `unknown.test` → EOF → `4502`; a router whose backend does not
+  resolve also answers no TLS. **Live door with the image's own store:
+  `pool.slot3…` and `direct.slot3…` VERIFIED** (TLSv1.3, ALPN `postgresql`, one
+  certificate `CN=pool.slot3.agenticpostgresql.com`); `pool.slot99…` → EOF. No
+  stop.
+- **Rig 44e** (`~/s44/rigs/44e.txt`): a DOM-free `sql.js` with injected `call`
+  and `connect` runs in the pinned Node image; all nine states walked (asleep
+  three → no socket; `ready`/`updating` → one, the password reaching only
+  `connect`); `409` → not offered; the control, a DOM-touching module →
+  `ReferenceError: document is not defined` (D2768, D2770).
+- **Threat items 22–26** appended to `docs/threat-model.md`'s hosted list.
+- **ADRs** `docs/decisions/0285-the-browser-sql-editor-is-the-customers-own-client-an-in-house-wire-protocol-client-in-the-console.md`
+  and `0286-the-sql-relay-is-a-bounded-websocket-to-door-service-on-its-own-name-that-authenticates-nothing-and-records-nothing-it-carries.md`,
+  indexed; ADR 0246's and ADR 0280's status lines and index rows name 0285.
+  `test_every_adr_is_indexed` and `test_the_index_status_agrees_with_each_adr`
+  run once: 2 passed.
+- Rows **D2759–D2770**. **NEXT FREE D2771, ADR 0287.**
 
 ### Run 2 — the relay (`services/sql-relay/`, `versions.in.yaml`, tests)
 

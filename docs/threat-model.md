@@ -457,6 +457,90 @@ was numbered 13 twice (D2673); it continues from 16.
     against a TOTP code is one in 10⁶ per window. **Unchanged in Session 43** —
     a throttle is an operator decision. The site linking the console changes who
     can reach the door, not what the door is.
+22. **The relay becomes an open proxy** (Session 44, ADR 0286, D2739–D2741).
+    The SQL relay opens TCP connections on a browser's behalf, and it
+    authenticates nothing. Owed: it reaches one address only — the edge's own
+    Postgres entrypoint, `apg-edge-proxy:8432` on the control project's `edge`
+    network, rendered and never typed — and resolves no DNS; it carries only a
+    path naming a door host in the grammar `naming` derives (`pool.`/`direct.`
+    under one slot domain of the zone, a branch label optional), refused with a
+    `400` before any TCP; it speaks SSLRequest, then TLS with that name as SNI
+    and verifies the certificate, so the edge's `sniStrict` routing is the only
+    router — the same door a stranger reaches on 5432 today; it upgrades only for
+    the console's exact `Origin` (`403` otherwise; rig 44d: a foreign or absent
+    `Origin` is never answered `101`)
+    (`tests/contract/test_sql_relay.py::test_only_a_door_name_is_accepted`,
+    `::test_an_address_or_a_port_is_refused`,
+    `::test_a_foreign_origin_is_refused_before_the_upgrade`,
+    `::test_the_grammar_agrees_with_naming`, `::test_the_door_is_verified`).
+    Residual: `Origin` stops a browser on another site, not a non-browser client
+    — which can already reach every door directly on 5432.
+23. **The customer's database password in the page** (Session 44, ADR 0285,
+    D2732, D2744, D2756). From this session the console holds the most valuable
+    secret a customer has: a password that opens their data. Owed: the console's
+    policy names exactly one more origin, `connect-src 'self'
+    wss://sql.<zone>`, rendered from the relay's name — there is nowhere else a
+    script could send it (rig 44a: Chromium blocked a WebSocket to a host the
+    policy does not name before any request reached the edge); no third-party
+    file (D2596); the password read once from one input into a closure, the input
+    cleared, never storage, a URL, a fragment or a request to `/v1`; SCRAM-SHA-256
+    proves it, so neither the relay nor the door ever receives it (rig 44b: the
+    client's proof equal to Python's for the logged exchange, in Node and in
+    Chromium); the relay's name carries none of the console's `__Host-` cookies
+    (rig 44a, with the console host as the control); THR-CON-XSS's controls
+    (`tests/contract/test_console_server.py::test_the_policy_admits_the_relay_alone`,
+    `tests/contract/test_console_pages.py::test_only_pg_js_opens_a_websocket`,
+    `tests/contract/test_console_sql.py::test_the_password_reaches_only_the_socket`,
+    `tests/contract/test_console_pg.py::test_the_scram_proof_equals_pythons`).
+24. **Exhaustion of the relay or of a project's connections** (Session 44, ADR
+    0286, D2736, D2741). An unauthenticated service holding long-lived sockets
+    is a pool anyone can drain. Owed: 32 sessions in total, 4 per door host, 4
+    per source address (`X-Real-Ip`, which rig 44a measured the edge overwriting
+    whatever a client sends) → close `4429`; idle 300 s and total 1,800 s →
+    `4408`; one message at most 1 MiB; 64 MiB towards the browser and 64 KiB
+    before the door is ready → `4413`; the edge's existing rate limit on the
+    upgrade; and the database's own bound unchanged — each role's `CONNECTION
+    LIMIT`, enforced by PostgreSQL and PgBouncer exactly as for `psql`, so the
+    relay adds no claimant to ADR 0070's budget
+    (`tests/contract/test_sql_relay.py::test_the_ceilings_refuse_the_next_session`,
+    `::test_an_idle_session_is_closed`, `::test_a_session_is_closed_at_its_total`,
+    `::test_the_byte_caps_close_the_session`). Residual: 32 sessions can be
+    held by anyone for up to 30 minutes each; the relay is the editor's
+    availability, never the doors'.
+25. **The relay can read what it carries** (Session 44, ADR 0286, D2732, D2743;
+    the operator's choice). TLS ends at the edge on the browser's side and
+    starts again at the relay towards the door, so the relay process holds the
+    plaintext protocol in memory: statements, rows and the SASL exchange —
+    never the password. Owed: one line per session (an id, the door host, the
+    outcome, the close code, seconds, bytes) and nothing else; the library's
+    own logger silenced (rig 44d: `websockets` logs a handler's traceback by
+    itself, D2762); a canary offline (a known password and a marker through the
+    relay, no line holding either) and live (the editor walk's marker read
+    absent from the relay container's whole log on the host); the client
+    refuses a server-first message whose iteration count is below 4096 or whose
+    nonce does not extend its own, so nothing between it and the door can
+    cheapen an offline guess (D2767)
+    (`tests/contract/test_sql_relay.py::test_no_line_holds_the_payload`,
+    `::test_the_relay_reads_no_secret_and_no_file`,
+    `tests/deployment/test_session44_sql_relay_host.py::test_the_relay_logged_no_payload`).
+    Residual: a captured SASL exchange admits an offline guess against the
+    password; the console and the CLI make 32-byte random ones, so no guess is
+    practical — **a verifier a customer computes from a weak password through
+    the raw API is the customer's risk**, said in the editor's documentation. The
+    host's root could already read every database; the relay adds no new reader.
+26. **A statement with no deadline** (Session 44, ADR 0285, D2735). No customer
+    role has a `statement_timeout` and the customer poolers set no
+    `query_timeout`: a customer's `psql` can hold a statement for as long as it
+    likes, and so could an editor session. Owed: the editor cancels its own
+    statement 60 s after sending it, and on the person's click — a
+    CancelRequest sent as its own relay session, so it arrives encrypted (rig
+    44b: a `pg_sleep(30)` cancelled 1 s in ended `57014` 1.05–1.08 s after it
+    was sent, through both pool modes, in Node and Chromium; the uncancelled
+    control `pg_sleep(3)` completed); the relay closes any
+    session at 30 minutes
+    (`tests/contract/test_console_pg.py::test_a_cancel_stops_the_statement`).
+    Residual: `psql`'s same gap is named, not closed — a role timeout would
+    change what every client gets, a product decision for a later session.
 
 ## Scope
 
