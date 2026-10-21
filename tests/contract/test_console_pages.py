@@ -88,10 +88,23 @@ def test_every_called_path_is_in_the_snapshot() -> None:
     }, sorted(called - listed)
 
 
+#: D2746: the editor's view lands in Run 5, before the bump moves its row out of
+#: `planned` -- the console's own order in Session 43. ONE id, allowed only while
+#: it is `planned` for Session 44; Run 7 (the bump) removes this exception.
+PLANNED_UNTIL_THE_BUMP = {"sql_editor": 44}
+
+
 def test_no_page_names_an_unreachable_row() -> None:
-    rows = {row["id"]: row["status"] for row in reality_ledger.load()["rows"]}
+    ledger = {row["id"]: row for row in reality_ledger.load()["rows"]}
+    rows = {key: row["status"] for key, row in ledger.items()}
     for view in _pages()["views"]:
         for row in view["ledger"]:
+            if row in PLANNED_UNTIL_THE_BUMP:
+                assert (rows.get(row), ledger[row].get("target_session")) == (
+                    "planned",
+                    PLANNED_UNTIL_THE_BUMP[row],
+                ), (view["id"], row)
+                continue
             assert rows.get(row) in reality_ledger.REACHABLE, (view["id"], row, rows.get(row))
 
 
@@ -119,6 +132,17 @@ def test_no_markup_is_built_from_a_value() -> None:
         for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(",
                      "new Function"):  # fmt: skip
             assert sink not in text, f"{name} uses {sink}"
+
+
+def test_only_pg_js_opens_a_websocket() -> None:
+    """ADR 0285: the editor's wire client is the one script that opens a socket --
+    to the relay's origin, the one other origin the policy names."""
+    openers = sorted(name for name, text in _scripts().items() if "WebSocket(" in text)
+    assert openers == ["pg.js"], openers
+    assert "new WebSocket(url)" in _scripts()["pg.js"]
+    for name, text in _scripts().items():
+        for other in ("EventSource(", "RTCPeerConnection", "sendBeacon", "XMLHttpRequest"):
+            assert other not in text, f"{name} uses {other}"
 
 
 def test_only_api_js_calls_fetch() -> None:

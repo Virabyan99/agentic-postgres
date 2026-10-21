@@ -9,19 +9,29 @@
 
 const CONSOLE_HEADER = "X-Apg-Console";
 
-let apiPath = null;
+let environment = null;
 
 // The API's public path (`/api/v1` on the control project), served by the
 // console's own server from what the render derived -- never typed here.
-async function base() {
-  if (apiPath === null) {
+async function served() {
+  if (environment === null) {
     const answer = await fetch("/console/env.json", { credentials: "same-origin", cache: "no-store" });
     if (!answer.ok) {
       throw new Refusal(answer.status, "console_unconfigured");
     }
-    apiPath = (await answer.json()).api;
+    environment = await answer.json();
   }
-  return apiPath;
+  return environment;
+}
+
+async function base() {
+  return (await served()).api;
+}
+
+// The SQL relay's origin (`wss://sql.<zone>`, Session 44, ADR 0285): the one
+// other origin the console's policy names, served beside the API path.
+export async function relayOrigin() {
+  return (await served()).sql_relay;
 }
 
 export class Refusal extends Error {

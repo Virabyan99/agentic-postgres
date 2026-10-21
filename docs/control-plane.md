@@ -275,4 +275,7 @@ samples all present, awake, read and quiet.
   container, every call to `/api/v1` from the browser, the session two
   `__Host-` cookies chosen by the `X-Apg-Console` header (ADR 0281), and an
   invitation minted as a link whose token is in the fragment (ADR 0282). It
-  does not create a project in this beta (D2702).
+  does not create a project in this beta (D2702). Since Session 44 its SQL
+  editor (ADR 0285) is the customer's own client: the password typed into the
+  page, PostgreSQL's protocol carried by the relay on its own name
+  `wss://sql.<zone>` (ADR 0286), which authenticates nothing and holds nothing.

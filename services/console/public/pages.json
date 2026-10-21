@@ -48,6 +48,15 @@
       ]
     },
     {
+      "id": "sql-editor",
+      "path": "/console/#/projects/{key}/sql",
+      "ledger": ["sql_editor", "pooled_endpoint", "direct_endpoint"],
+      "calls": [
+        "GET /v1/projects/{key}",
+        "GET /v1/projects/{key}/connections"
+      ]
+    },
+    {
       "id": "branches",
       "path": "/console/#/projects/{key}/branches",
       "ledger": ["branches", "restore_to_branch"],

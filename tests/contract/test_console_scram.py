@@ -82,8 +82,9 @@ def test_every_script_parses(tmp_path: Path) -> None:
     parse alone, so an import a browser resolves and Node cannot does not mask
     a syntax error."""
     names = sorted(script.stem for script in PUBLIC.glob("*.js"))
-    # `pg` since Session 44 (ADR 0285): the SQL editor's wire client.
-    assert names == ["api", "app", "pg", "scram"], names
+    # `pg` and `sql` since Session 44 (ADR 0285): the SQL editor's wire client
+    # and its DOM-free decisions.
+    assert names == ["api", "app", "pg", "scram", "sql"], names
     for script in PUBLIC.glob("*.js"):
         shutil.copy(script, tmp_path / f"{script.stem}.mjs")
     checks = " && ".join(f"node --check /c/{name}.mjs" for name in names)

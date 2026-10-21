@@ -1,6 +1,6 @@
 # Session 44 — The browser SQL editor: the customer's own client in the console, through a relay that holds nothing
 
-**Status: EXECUTING — Runs 1–4 DONE (2026-10-22; rows D2759–D2782, ADRs 0285–0286; NEXT FREE D2783, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
+**Status: EXECUTING — Runs 1–5 DONE (2026-10-22; rows D2759–D2785, ADRs 0285–0286; NEXT FREE D2786, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
 clean, `main` = `origin/main`) against the host as read that afternoon (§0).
 Rows **D2732–D2758** at planning; the runs add theirs from **D2759**. ADRs
 **0285–0286** are Run 1's. **NEXT FREE after this table: D2759, ADR 0287.**
@@ -434,7 +434,7 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2757** | Stage plan *Measures* and §7: the editor proved live. | Sleeping a project live costs ~70 s down for its names (Session 43: 69.4 / 72.2 s) and `slot3-prod` is the kept customer project; `slot8-prod` sleeps inside the lifecycle instrument, which drives the CLI, not a browser. | **The *asleep* answer is proved offline** (`test_console_sql.py::test_an_asleep_project_opens_no_socket`, the page in Node with a fake `api.js`, every state in `control_states` walked; **the control**: `ready` opens one) **and the `4502` path live** (E1: a door name that matches the grammar and has no router — `pool.slot99.<zone>` — closes `4502`; the same handshake refusal a sleeping door gives, ADR 0268 `:73`). Sleeping `slot3-prod` for the editor is not done. | A live proof of a sentence the control API already proves live (`idle_sleep_live`) is not worth a customer project's outage. | 0195 |
 | **D2758** | — | The walk's console identity: Session 43 invited a NEW walker per walk; the probe owner (`~/s37/probe.json`, its password and TOTP seed in `~/s37/probe-password`, `probe-otpauth`) owns `probe-s37`, which holds `slot3-prod`. | **The editor walk (E1) signs in as the probe owner** (the driver computes the code from the seed with stdlib `hmac`; the seed, the console password and the database passwords live in variables only and are `Secret`-wrapped, D2420; `self_check` refuses a record holding any of them, the console walk's rule) — **no new account, no rotation**. It reads `customer_app` from `~/s39/run11/creds/slot3-prod/` AFTER W1′ (D2749) and `customer_admin` from the same directory. | The editor needs a signed-in member, not a new one; a rotation belongs to the walk that proves rotation. | — |
 
-**Rows added by the runs** (from **D2759**, in execution order; **next free D2783**):
+**Rows added by the runs** (from **D2759**, in execution order; **next free D2786**):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -462,6 +462,9 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2780** | Run 4 read-first: *"`pg.js` imports from it rather than repeating them"*. | `scram.js` exported only `ITERATIONS`, `SALT_BYTES`, `PASSWORD_BYTES`, `newPassword`, `verifier`; its `base64` and `hmac` were private and PBKDF2 inline. | **`scram.js` exports `base64`, `hmac` and a new `scramKeys(password, salt, iterations)`**, and `verifier` is built from `scramKeys`; `test_console_scram`'s verifier-equals-the-CLI's proof is unchanged and passes. | One implementation of RFC 5802's keys in the console. | 0285 |
 | **D2781** | Run 4 step 2: *"PostgreSQL 18.4 + PgBouncer (both pool modes) + the in-process relay"*. | In production the edge (Traefik) terminates the door's TLS and PgBouncer speaks plaintext behind it; the relay needs a TLS peer that answers SSLRequest. | **In the test PgBouncer terminates its clients' TLS** (`client_tls_sslmode = require`, a certificate for both door names from a CA made in `tmp_path`); the relay verifies it as it verifies the edge. Traefik's own part was measured in rig 44b and is read live by E0/E1. | The client's and the relay's behaviour is what this test holds; the edge's is rig 44b's and the trip's. | 0286 |
 | **D2782** | CLAUDE.md §1 (D386): *"`FAILED` is a kill, `ERROR` is a broken fixture that never reached the assertion."* | Battery round 1: *the cancel sent on the same socket* came out **ERROR** — the one live driver threw at a later `open()` (`53300` *too many connections for role "editor"*: the corrupted cancel left the server connection busy), so the module-scoped fixture failed before any assertion. | **Every live measurement records its own failure as data** (`step(name, f)`), so a broken step fails its own test's assertion and the fixture still delivers; round 2 re-ran all five mutations. | A mutation that breaks the fixture proves only that something broke. | — |
+| **D2783** | Run 5 step 1: *"`policy(relay_origin)`, read once at start … (refuse to start unless `wss://<host>` alone)"*. | `serve.py` is imported by its own proofs and by Session 43's external module (`_console_policy`), which loaded it with no environment and compared the live headers with `SECURITY_HEADERS` — at 1.22.0 that comparison would have read a policy without the relay. | **`serve.py` exposes `policy(relay_origin)` and `security_headers(relay_origin)`**; at import an origin that is not `wss://<host>` leaves the headers unbuilt and `REFUSED` set, and **`main` exits 2 before it listens** (the image's own path, proved by subprocess for eleven bad origins). **Session 43's external proof now passes the origin `naming` derives from the console's host** (`_console_policy(console_origin)`), so it compares the live answer with ADR 0285's policy, read here as exactly `… connect-src 'self' wss://sql.agenticpostgresql.com …`. | The module stays importable for the proofs that read it; the server never serves without the policy. | 0285 |
+| **D2784** | Run 5 step 2: the view reads the relay's origin. | `api.js` is the ONLY file that calls `fetch` (`test_only_api_js_calls_fetch`) and read `env.json` for the API path alone. | **`api.js` keeps `env.json`'s whole answer and exports `relayOrigin()`**; the editor asks it, so `api.js` stays the one `fetch` caller and no page types the origin. | One reader of the server's environment. | 0285 |
+| **D2785** | Run 5 step 3: *"**The Ledger guard's exception** for `sql_editor` (one id …)"*. | Two guards read `pages.json`'s rows: `test_reality_ledger.py::test_every_console_page_maps_to_a_reachable_row` and `test_console_pages.py::test_no_page_names_an_unreachable_row`. | **The same one-id exception in both**, each allowing `sql_editor` only while it is `planned` with `target_session` 44 — a row that moved anywhere else fails both. Run 7 removes both. (ADR 0246's status line, Run 5 step 4's second item, was amended in Run 1.) | A guard the plan did not name would have refused the view. | 0285 |
 
 ---
 
@@ -1161,7 +1164,51 @@ Targeted: `test_console_server`, `test_console_pages`, `test_console_sql`,
 external module's `--collect-only` (it reads the policy from `serve.py` — its
 helper must still load). Commit, push, read CI.
 
-**Done.** *(the executor writes it.)*
+**Done.** (2026-10-22; WSL `~/s44/run5/`.)
+
+- **`serve.py`**: ADR 0280's directives with `connect-src 'self' {relay}`;
+  `policy()` and `security_headers()` refusing anything but `wss://<host>`;
+  read once at start from `APG_CONSOLE_SQL_RELAY_ORIGIN`, `main` exiting 2 on a
+  bad value (D2783); `env.json` answers `{"api", "sql_relay"}`; `/console/sql.js`
+  routed.
+- **`public/sql.js`** (DOM-free, imports nothing — rig 44e): `stateSentence`
+  (asleep / named / could-not-be-read — D2737, D2768), `doors` (from the
+  connections answer; `409 not_available` → not offered — D2738), `openDoor`
+  (the state first, then — only if it may — the password, then `connect`),
+  `endSentence` (every close code and `08P01`/`28P01` a sentence, never
+  *asleep*), `runStatement` (results as plain values, the cap's sentence, the
+  deadline's). **`api.js`** exports `relayOrigin()` (D2784).
+- **`app.js`**: `#/projects/{key}/sql` — the door chooser from the answer, one
+  `type=password autocomplete=off` input cleared the moment it is read, Connect /
+  Disconnect / Run / Cancel, results as text-node tables (`NULL` shown as text),
+  the 60 s sentence; the session closed on every navigation and on `pagehide`;
+  *SQL* in the project's tabs; *Open the SQL editor* on the Connect page.
+  **The view's DOM half is executed first by Run 6's offline rehearsal** (its
+  decisions are executed here, in Node).
+- **`pages.json`**: view `sql-editor`, rows `sql_editor`, `pooled_endpoint`,
+  `direct_endpoint`, calls `GET /v1/projects/{key}` and `…/connections`; the
+  one-id exception in both page guards (D2785).
+- **Documents**: `product-contract.md`'s boundary sentence in ADR 0285's words;
+  `control-plane.md`'s console paragraph names the editor and the relay's name.
+- **Tests**: `test_console_server.py` — `POLICY` is now the exact string for the
+  fixture relay, `test_the_policy_admits_the_relay_alone` (one directive moved,
+  by one origin), `test_a_bad_relay_origin_refuses_to_start` (eleven origins,
+  each refused by `policy()` and by the process); `test_console_pages.py::
+  test_only_pg_js_opens_a_websocket`; `tests/contract/test_console_sql.py` (four:
+  every `control_states.STATES` value plus an unreadable state — a socket for
+  `ready`/`updating` only; no doors → no editor and another refusal re-raised;
+  the password only in `connect`'s arguments and no page deadline of its own;
+  every ending a sentence); the names and routes lists gain `sql`.
+- **Battery** (`battery5.py`): `connect-src` gaining `wss:`; `sql.js` opening
+  while `sleeping`; the password written to `sessionStorage`; a second file
+  calling `new WebSocket`; a cell by `innerHTML` — **5/5 KILLED** as `FAILED`,
+  the control `test_the_log_names_no_query` PASSED, three files restored, `cmp`
+  identical.
+- **Targeted, once:** the console's six modules, `test_reality_ledger`,
+  `test_site`, `test_documentation_index`, `test_session12_documented_path`,
+  `test_acceptance_registry`, `test_environment_gates`, `test_console_pg` — **184
+  passed**; `tests/external/test_session43_console.py --collect-only` collects 12.
+- Rows **D2783–D2785**.
 
 ### Run 6 — the trip's instruments, written and rehearsed offline
 

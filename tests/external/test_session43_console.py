@@ -89,15 +89,18 @@ COOKIES = ("__Host-apg_access", "__Host-apg_refresh")
 SETTLED = 5
 
 
-def _console_policy() -> dict[str, str]:
-    """`services/console/serve.py`'s headers, loaded from the file the image copies."""
+def _console_policy(console_origin: str) -> dict[str, str]:
+    """`services/console/serve.py`'s headers, loaded from the file the image copies,
+    for the relay origin the render derives from the console's own host (ADR 0285:
+    the policy names it in `connect-src`)."""
     specification = importlib.util.spec_from_file_location(
         "apg_console_serve_policy", REPO_ROOT / "services" / "console" / "serve.py"
     )
     assert specification is not None and specification.loader is not None
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
-    return dict(module.SECURITY_HEADERS)
+    host = naming.sql_relay_host(urlsplit(console_origin).hostname or "")
+    return dict(module.security_headers(naming.sql_relay_origin(host)))
 
 
 def _get(recorder: Recorder, url: str, headers: dict[str, str] | None = None,
@@ -303,7 +306,7 @@ def test_the_public_answers_carry_the_policy(
 ) -> None:
     """`/console/` and `/accept` answer the server's exact headers -- as the
     browser read them during the walk, and as this proof reads them now."""
-    policy = {name.lower(): value for name, value in _console_policy().items()}
+    policy = {name.lower(): value for name, value in _console_policy(console_origin).items()}
     for path in ("/console/", "/accept"):
         seen = walk["headers"][path]
         for name in ("content-security-policy", "x-frame-options", "referrer-policy",

@@ -268,10 +268,19 @@ def test_every_console_page_maps_to_a_reachable_row(ledger: dict) -> None:
     rows = {row["id"]: row for row in ledger["rows"]}
     views = pages["views"]
     assert views, "the console has no view: the guard would read an empty set"
+    # D2746: the editor's view lands before the bump moves `sql_editor`; ONE id,
+    # allowed only while it is `planned` for Session 44. Run 7 removes this.
+    planned_until_the_bump = {"sql_editor": 44}
     for view in views:
         assert view["ledger"], f"{view['id']} names no Ledger row"
         for row in view["ledger"]:
             assert row in rows, f"{view['id']} names {row!r}, which the Ledger does not have"
+            if row in planned_until_the_bump:
+                assert (rows[row]["status"], rows[row].get("target_session")) == (
+                    "planned",
+                    planned_until_the_bump[row],
+                ), (view["id"], row)
+                continue
             assert rows[row]["status"] in reality_ledger.REACHABLE, (
                 f"{view['id']} offers {row!r}, which is {rows[row]['status']}"
             )

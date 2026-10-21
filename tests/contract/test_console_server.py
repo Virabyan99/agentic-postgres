@@ -12,7 +12,10 @@ from __future__ import annotations
 import http.client
 import importlib.util
 import io
+import os
 import re
+import subprocess
+import sys
 import threading
 from collections.abc import Iterator
 from contextlib import redirect_stdout
@@ -28,12 +31,19 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
 SERVICE = REPO_ROOT / "services" / "console"
 PUBLIC = SERVICE / "public"
 
-#: ADR 0280's policy, written out here so the module's constant is compared
-#: with the decision rather than with itself.
-POLICY = (
+#: ADR 0280's policy, written out here so the module's policy is compared
+#: with the decision rather than with itself -- and ADR 0285's, which is the
+#: same string with ONE more origin in `connect-src`, for the fixture's relay.
+ADR_0280_POLICY = (
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
     "connect-src 'self'; font-src 'none'; base-uri 'none'; form-action 'none'; "
     "frame-ancestors 'none'"
+)
+RELAY_ORIGIN = "wss://sql.example.test"
+POLICY = (
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+    "connect-src 'self' wss://sql.example.test; font-src 'none'; base-uri 'none'; "
+    "form-action 'none'; frame-ancestors 'none'"
 )
 LISTED = (
     "/console/",
@@ -43,6 +53,7 @@ LISTED = (
     "/console/api.js",
     "/console/scram.js",
     "/console/pg.js",
+    "/console/sql.js",
     "/console/pages.json",
 )
 
@@ -54,6 +65,7 @@ def serve(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setenv("APG_CONSOLE_PUBLIC", str(PUBLIC))
     monkeypatch.setenv("APG_CONSOLE_API_PATH", "/api/v1")
+    monkeypatch.setenv("APG_CONSOLE_SQL_RELAY_ORIGIN", RELAY_ORIGIN)
     specification = importlib.util.spec_from_file_location(
         "apg_console_serve", SERVICE / "serve.py"
     )
@@ -127,7 +139,7 @@ def test_the_env_answer_is_the_api_path(port: int) -> None:
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     connection.request("GET", "/console/env.json")
     answer = connection.getresponse()
-    assert answer.read() == b'{"api": "/api/v1"}\n'
+    assert answer.read() == b'{"api": "/api/v1", "sql_relay": "wss://sql.example.test"}\n'
     assert answer.getheader("Content-Type") == "application/json; charset=utf-8"
     connection.close()
 
@@ -204,3 +216,42 @@ def serve_routes_files() -> list[tuple[Path, str]]:
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return [(Path(path.name), kind) for path, kind in dict.fromkeys(module.ROUTES.values())]
+
+
+def test_the_policy_admits_the_relay_alone(serve: Any) -> None:
+    """ADR 0285: every directive of ADR 0280's policy byte for byte, except that
+    `connect-src` gains the relay's origin -- one origin, and nothing else moved."""
+    assert serve.CONTENT_SECURITY_POLICY == POLICY == serve.policy(RELAY_ORIGIN)
+    before = ADR_0280_POLICY.split("; ")
+    after = POLICY.split("; ")
+    assert len(before) == len(after)
+    changed = [(old, new) for old, new in zip(before, after, strict=True) if old != new]
+    assert changed == [("connect-src 'self'", f"connect-src 'self' {RELAY_ORIGIN}")]
+    assert serve.policy("wss://sql.agenticpostgresql.com").count("wss://") == 1
+
+
+@pytest.mark.parametrize(
+    "origin",
+    ["", "ws://sql.example.test", "wss://*", "wss://*.example.test", "wss://sql.example.test/",
+     "wss://sql.example.test/path", "wss://sql.example.test:443", "https://sql.example.test",
+     "wss://SQL.example.test", "wss://sql.example.test wss://evil.test", "wss://localhost"],
+)  # fmt: skip
+def test_a_bad_relay_origin_refuses_to_start(serve: Any, origin: str) -> None:
+    """Anything but exactly `wss://<host>` builds no policy, and the server, as
+    the image runs it, exits before it listens."""
+    with pytest.raises(ValueError, match="wss://<host>"):
+        serve.policy(origin)
+    environment = {
+        **{k: v for k, v in os.environ.items() if not k.startswith("APG_CONSOLE_")},
+        "APG_CONSOLE_PUBLIC": str(PUBLIC),
+        "APG_CONSOLE_PORT": "0",
+        "APG_CONSOLE_API_PATH": "/api/v1",
+        "APG_CONSOLE_SQL_RELAY_ORIGIN": origin,
+    }
+    started = subprocess.run(
+        [sys.executable, str(SERVICE / "serve.py")], env=environment, capture_output=True,
+        text=True, timeout=30, check=False,
+    )  # fmt: skip
+    assert started.returncode == 2
+    assert started.stdout == ""
+    assert started.stderr.startswith("apg-console refused to start: APG_CONSOLE_SQL_RELAY_ORIGIN")

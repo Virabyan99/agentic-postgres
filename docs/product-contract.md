@@ -628,9 +628,13 @@ deployed documents already on a host's own disk — run as root at a terminal,
 holding no credential, served to nobody and read by nothing — is not that
 catalog, and ADR 0185 says where the line is.
 
-**A product surface runs no SQL** (ADR 0246): the console, Studio, `/api/v1`,
-MCP, a workflow and a connector. A customer's own client, with the customer's
-own database credential, may; an agent never does.
+**No product surface runs SQL on the platform's side or holds a credential
+that opens a project's data; the console may host the customer's own client,
+which speaks with the customer's own credential through a relay that holds
+none and records none of what it carries** (ADR 0246, amended by ADR 0285).
+The console, Studio, `/api/v1`, MCP, a workflow and a connector run no SQL;
+the console's SQL editor is the customer's client, not the platform's, and an
+agent never runs SQL.
 
 The agent constraint is the load-bearing one. An agent's reachable surface is
 exactly the set of capabilities enumerated in `capabilities.yaml`, each bound

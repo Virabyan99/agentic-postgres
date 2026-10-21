@@ -10,8 +10,10 @@
 // lives in one view's variables, is shown once, and is never put in a URL or
 // a fragment route. A feature the Ledger does not offer has no control here.
 
-import { call, Refusal } from "/console/api.js";
+import { call, Refusal, relayOrigin } from "/console/api.js";
+import { connect } from "/console/pg.js";
 import { newPassword, verifier } from "/console/scram.js";
+import { DEADLINE_SENTENCE, doors, openDoor, runStatement } from "/console/sql.js";
 
 // What each refusal means, in the words the documentation uses.
 const REFUSALS = {
@@ -340,7 +342,7 @@ function frame(me, title, ...body) {
 }
 
 function projectNav(key) {
-  const views = [["connect", "Connect"], ["branches", "Branches"], ["backups", "Backups"], ["usage", "Usage"],
+  const views = [["connect", "Connect"], ["sql", "SQL"], ["branches", "Branches"], ["backups", "Backups"], ["usage", "Usage"],
     ["insights", "Insights"], ["monitoring", "Monitoring"], ["settings", "Settings"]];
   return h("nav", { className: "tabs" }, views.map(([view, text]) => link(`#/projects/${key}/${view}`, text)));
 }
@@ -436,6 +438,7 @@ async function connectView(me, key) {
     h("p", {}, "The password is not stored anywhere you can read it back. Set a new one to see it once:"),
     button("New password for the pooled door (customer_app)", rotate("customer_app", "pooled")),
     button("New password for the direct door (customer_admin)", rotate("customer_admin", "direct")),
+    h("p", {}, link(`#/projects/${key}/sql`, "Open the SQL editor")),
     result);
 }
 
@@ -753,10 +756,97 @@ async function orgSettingsView(me, org) {
     result);
 }
 
+// -- the SQL editor (Session 44, ADR 0285) -------------------------------------
+
+// The open editor session, if any: closed -- and its password with it -- on
+// every navigation, on Disconnect and when the page is hidden (D2756).
+let editor = null;
+
+function closeEditor() {
+  if (editor) {
+    editor.close();
+    editor = null;
+  }
+}
+
+window.addEventListener("pagehide", closeEditor);
+
+function resultView(result) {
+  return h("section", { className: "result" },
+    result.columns.length
+      ? h("table", {},
+        h("thead", {}, h("tr", {}, result.columns.map((name) => h("th", {}, name)))),
+        h("tbody", {}, result.rows.map((cells) => h("tr", {}, cells.map((cell) => h("td", {}, cell === null ? "NULL" : cell))))))
+      : null,
+    result.truncated ? h("p", { className: "muted" }, result.truncated) : null,
+    result.command ? h("p", { className: "muted" }, result.command) : null,
+    result.notices.map((notice) => h("p", { className: "muted" }, notice)));
+}
+
+async function sqlView(me, key) {
+  const found = await doors(call, key);
+  if (!found.offered) {
+    frame(me, key, projectNav(key), h("p", {}, REFUSALS.not_available));
+    return;
+  }
+  const relay = await relayOrigin();
+  const status = h("p", { className: "muted", role: "status" }, "Not connected.");
+  const results = h("div", {});
+  const [doorLabel, doorChoice] = choice("Door", found.doors.map((door) => ({ value: door.name, label: `${door.name} — ${door.user}` })), "pooled");
+  const [passwordLabel, password] = field("Password", { type: "password", autocomplete: "off" });
+  const statement = h("textarea", { rows: 8, placeholder: "Write a statement", spellcheck: false });
+  const say = (text) => { status.textContent = text; };
+  const connectForm = h("form", {
+    onsubmit: async (event) => {
+      event.preventDefault();
+      closeEditor();
+      const door = found.doors.find((candidate) => candidate.name === doorChoice.value);
+      say("Connecting…");
+      const opened = await openDoor({
+        call, connect, relay, key, door,
+        readPassword: () => {
+          const typed = password.value;
+          password.value = "";
+          return typed;
+        },
+      });
+      if (!opened.opened) {
+        say(opened.say);
+        return;
+      }
+      editor = opened.session;
+      say(`Connected to the ${door.name} door as ${door.user}.`);
+    },
+  }, doorLabel, passwordLabel, h("button", { type: "submit" }, "Connect"),
+  button("Disconnect", () => { closeEditor(); say("Not connected."); }));
+  const run = async () => {
+    if (!editor) {
+      say("Connect first.");
+      return;
+    }
+    results.replaceChildren();
+    say("Running…");
+    const failed = await runStatement(editor, statement.value, (result) => results.append(resultView(result)));
+    say(failed || "Done.");
+    if (failed && editor && editor.reader && editor.reader.failure) {
+      closeEditor();
+    }
+  };
+  frame(me, key, projectNav(key),
+    h("p", {}, "Your own client: it connects as your database role with the password you type here, which stays in this page."),
+    connectForm,
+    statement,
+    h("p", {}, button("Run", run), " ", button("Cancel", () => { if (editor) editor.cancel(); })),
+    h("p", { className: "muted" }, DEADLINE_SENTENCE),
+    status,
+    results);
+}
+
 // -- the router ----------------------------------------------------------------
 
 const VIEWS = [
   [/^#\/projects\/([^/]+)\/connect$/, connectView, KEY],
+  [/^#\/projects\/([^/]+)\/sql$/, sqlView, KEY],
   [/^#\/projects\/([^/]+)\/branches$/, branchesView, KEY],
   [/^#\/projects\/([^/]+)\/backups$/, backupsView, KEY],
   [/^#\/projects\/([^/]+)\/usage$/, projectUsageView, KEY],
@@ -770,6 +860,7 @@ const VIEWS = [
 ];
 
 async function route() {
+  closeEditor();
   if (location.hash === "#/sign-in") {
     signInView();
     return;

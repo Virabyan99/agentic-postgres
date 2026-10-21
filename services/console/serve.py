@@ -16,6 +16,14 @@ only hands them over.
 API's public path, from `APG_CONSOLE_API_PATH` (compose interpolates the
 rendered `CONTROL_ROUTE_PATH`, `identity.route_control_path`), so no page types
 a path `naming.py` derives (ADR 0061).
+
+**Since Session 44 (ADR 0285)** the policy names one more origin, the SQL
+relay's (`connect-src 'self' wss://sql.<zone>`), from
+`APG_CONSOLE_SQL_RELAY_ORIGIN` -- rendered by `naming.sql_relay_origin`, never
+typed. It is read once at start and must be exactly `wss://<host>`: anything
+else refuses to start, because a console whose policy admits the wrong origin
+is a console that can send a database password there. `env.json` answers it
+too, so the editor types no origin either.
 """
 
 from __future__ import annotations
@@ -23,6 +31,7 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import re
 import signal
 import socketserver
 import sys
@@ -50,6 +59,8 @@ ROUTES: dict[str, tuple[Path, str]] = {
     "/console/scram.js": (PUBLIC / "scram.js", JAVASCRIPT),
     # Session 44 (ADR 0285): the SQL editor's wire client.
     "/console/pg.js": (PUBLIC / "pg.js", JAVASCRIPT),
+    # Session 44 (ADR 0285, rig 44e): the editor's DOM-free decisions.
+    "/console/sql.js": (PUBLIC / "sql.js", JAVASCRIPT),
     "/console/pages.json": (PUBLIC / "pages.json", JSON),
 }
 
@@ -65,36 +76,63 @@ REDIRECTS: dict[str, str] = {
 
 HEALTH_PATH = "/__apg/healthz"
 
-#: ADR 0280's constant. `default-src 'none'` first, so anything not named is
+#: ADR 0280's directives. `default-src 'none'` first, so anything not named is
 #: refused; no `'unsafe-inline'` anywhere, because every script and stylesheet is
 #: one of the files above; `img-src data:` only for the factor's QR (ADR 0282);
-#: `connect-src 'self'` keeps every fetch on this origin; `form-action 'none'`
-#: because no page submits a form -- `api.js` sends JSON.
-CONTENT_SECURITY_POLICY = "; ".join(
-    (
-        "default-src 'none'",
-        "script-src 'self'",
-        "style-src 'self'",
-        "img-src 'self' data:",
-        "connect-src 'self'",
-        "font-src 'none'",
-        "base-uri 'none'",
-        "form-action 'none'",
-        "frame-ancestors 'none'",
-    )
+#: `connect-src` keeps every fetch on this origin and, since ADR 0285, names the
+#: SQL relay's origin and nothing else; `form-action 'none'` because no page
+#: submits a form -- `api.js` sends JSON, the editor intercepts its own.
+DIRECTIVES = (
+    "default-src 'none'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "connect-src 'self' {relay}",
+    "font-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
 )
 
-SECURITY_HEADERS: dict[str, str] = {
-    "Content-Security-Policy": CONTENT_SECURITY_POLICY,
-    # The accept page's link carries the token in its fragment, which no
-    # browser sends anyway; `no-referrer` is the second lock (ADR 0282).
-    "Referrer-Policy": "no-referrer",
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-    "Cross-Origin-Opener-Policy": "same-origin",
-    "Cross-Origin-Resource-Policy": "same-origin",
-    "Cache-Control": "no-store",
-}
+#: `wss://<host>` and nothing else: no path, no port, no wildcard, no `ws:`.
+RELAY_ORIGIN_SHAPE = re.compile(
+    r"wss://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+)
+
+
+def policy(relay_origin: str) -> str:
+    """ADR 0280's policy with the relay's origin in `connect-src` (ADR 0285)."""
+    if not RELAY_ORIGIN_SHAPE.fullmatch(relay_origin) or len(relay_origin) > 259:
+        raise ValueError("the relay's origin is not exactly wss://<host>")
+    return "; ".join(DIRECTIVES).format(relay=relay_origin)
+
+
+def security_headers(relay_origin: str) -> dict[str, str]:
+    """Every header every answer carries, for one relay origin."""
+    return {
+        "Content-Security-Policy": policy(relay_origin),
+        # The accept page's link carries the token in its fragment, which no
+        # browser sends anyway; `no-referrer` is the second lock (ADR 0282).
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Resource-Policy": "same-origin",
+        "Cache-Control": "no-store",
+    }
+
+
+#: Read once at start. An origin that is not `wss://<host>` leaves the policy
+#: unbuilt and `main` refuses to start; nothing is ever served without it.
+RELAY_ORIGIN = os.environ.get("APG_CONSOLE_SQL_RELAY_ORIGIN", "")
+try:
+    SECURITY_HEADERS: dict[str, str] = security_headers(RELAY_ORIGIN)
+    CONTENT_SECURITY_POLICY = SECURITY_HEADERS["Content-Security-Policy"]
+    REFUSED = ""
+except ValueError as refused:
+    SECURITY_HEADERS = {}
+    CONTENT_SECURITY_POLICY = ""
+    REFUSED = f"APG_CONSOLE_SQL_RELAY_ORIGIN: {refused}"
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -153,7 +191,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not API_PATH:
                 self._respond(503, b"not configured\n", "text/plain; charset=utf-8", head=head)
                 return
-            body = (json.dumps({"api": API_PATH}, sort_keys=True) + "\n").encode("utf-8")
+            answer = {"api": API_PATH, "sql_relay": RELAY_ORIGIN}
+            body = (json.dumps(answer, sort_keys=True) + "\n").encode("utf-8")
             self._respond(200, body, JSON, head=head)
             return
 
@@ -183,6 +222,9 @@ class Server(socketserver.ThreadingTCPServer):
 
 
 def main() -> int:
+    if REFUSED:
+        sys.stderr.write(f"apg-console refused to start: {REFUSED}\n")
+        return 2
     server = Server(("0.0.0.0", PORT), Handler)  # noqa: S104
 
     def shut_down(signum: int, frame: object) -> None:
