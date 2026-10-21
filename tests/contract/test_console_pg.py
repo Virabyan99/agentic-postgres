@@ -78,6 +78,41 @@ def _node(tmp_path: Path, driver: str, *, network: str = "none", timeout: int = 
     return json.loads(done.stdout.strip().splitlines()[-1])
 
 
+#: Retries a TCP connect to each port from a container on the bridge network, the
+#: way the driver will reach the relay. On Docker Desktop a port newly bound in WSL
+#: answers at `host.docker.internal` only once WSL's localhost forwarding registers
+#: it -- the first gate shard met that race (D2793); CI's Docker Engine answers at once.
+REACH = r"""
+const net = require("node:net");
+const ports = process.argv.slice(1).map(Number);
+const once = (port) => new Promise((resolve) => {
+  const socket = net.connect({ host: "host.docker.internal", port }, () => { socket.end(); resolve(true); });
+  socket.on("error", () => resolve(false));
+  socket.setTimeout(2000, () => { socket.destroy(); resolve(false); });
+});
+(async () => {
+  for (const port of ports) {
+    let ok = false;
+    for (let attempt = 0; attempt < 120 && !ok; attempt++) {
+      ok = await once(port);
+      if (!ok) await new Promise((r) => setTimeout(r, 500));
+    }
+    if (!ok) { console.log(`unreachable ${port}`); process.exit(1); }
+  }
+  console.log("reachable");
+})();
+"""
+
+
+def _reachable(ports: list[int]) -> None:
+    done = subprocess.run(
+        ["docker", "run", "--rm", "--add-host", "host.docker.internal:host-gateway", NODE,
+         "node", "-e", REACH, *map(str, ports)],
+        capture_output=True, text=True, check=False, timeout=180,
+    )  # fmt: skip
+    assert done.stdout.strip() == "reachable", (done.stdout, done.stderr[-500:])
+
+
 # A stand-in WebSocket for the pure half: `script(socket, sent)` answers what the
 # client sends. Installed as the global before pg.js runs, as the browser's is.
 FAKE = r"""
@@ -362,6 +397,7 @@ def door(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, Any]]:
             )
             servers.append(server)
             relays[mode] = f"ws://host.docker.internal:{server.sockets[0].getsockname()[1]}"
+        _reachable([int(url.rsplit(":", 1)[1]) for url in relays.values()])
         yield {"relays": relays, "password": password, "lines": lines}
     finally:
         os.environ.pop("SSL_CERT_FILE", None)
