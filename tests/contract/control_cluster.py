@@ -372,7 +372,7 @@ def _environment(cluster: ControlCluster, work: Any) -> dict[str, str]:
     lock = capability_compiler.compile_lock(
         canonical=canonical,
         project_key=cluster.document["project"]["key"],
-        upstream="https://fixture-control-dev.test/api/rest",
+        upstream="https://control.fixture-dev.test/api/rest",
         sources={
             "capabilities_sha256": "0" * 64,
             "api_surface_sha256": "0" * 64,

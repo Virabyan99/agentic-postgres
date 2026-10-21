@@ -757,6 +757,12 @@ SERVICE_RESOURCE_DEFAULTS: dict[str, dict[str, int | str]] = {
     # floor of 64 decides; a quarter of a core, because it serves seven small
     # files and the docs service's 1.0 is not lower.
     "console": {"pids_limit": 64, "cpus": "0.25"},
+    # Session 44 (ADR 0286): the SQL relay, only on the control project. The real
+    # image under 32 streaming sessions read pids.peak 21 (~/s44/run3/measure.txt:
+    # asyncio's resolver threads), so the floor of 64 decides; half a core, more
+    # than the console's quarter because it carries TLS on both sides of every
+    # session, less than a sidecar's 1.0.
+    "sql-relay": {"pids_limit": 64, "cpus": "0.5"},
 }
 
 #: The memory cap of each long-running project service that had none (ADR
@@ -796,6 +802,11 @@ SERVICE_MEMORY_LIMITS_MB: dict[str, int] = {
     # requests to every route on the workstation (~/s43/run4/measure.txt);
     # 4 x 44.07 = 176.3, rounded up to 192.
     "console": 192,
+    # Session 44 (ADR 0286), by the same rule: the real relay image under 32
+    # sessions each streaming 10 KiB/s through TLS on both sides read memory.peak
+    # 40.49 MiB (~/s44/run3/measure.txt; 20.1 MiB at rest); 4 x 40.49 = 162.0,
+    # rounded up to 192 (D2774).
+    "sql-relay": 192,
 }
 
 #: Every short-lived service's process limit: one-shots, probes and clients.

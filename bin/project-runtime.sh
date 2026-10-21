@@ -131,6 +131,11 @@ session_profiles() {
   if grep -qx 'APG_CONSOLE=1' "${rendered}/compose.env" 2>/dev/null; then
     profiles+=(--profile console)
   fi
+  # Session 44 (ADR 0286): the SQL relay, the same shape -- the control
+  # project's alone, by the render's APG_SQL_RELAY=1.
+  if grep -qx 'APG_SQL_RELAY=1' "${rendered}/compose.env" 2>/dev/null; then
+    profiles+=(--profile sql-relay)
+  fi
   printf '%s\n' "${profiles[@]}"
 }
 

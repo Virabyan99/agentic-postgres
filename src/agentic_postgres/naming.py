@@ -463,6 +463,52 @@ def console_router_name(key: str) -> str:
     return traefik_name(f"apg-{key}-console", context="traefik_router_console")
 
 
+#: Session 44's SQL relay (ADR 0286): `profiles: [sql-relay]`, started only where
+#: the render says `APG_SQL_RELAY=1` -- the control project, as the console.
+SQL_RELAY_SERVICE = "sql-relay"
+
+
+def sql_relay_zone(control_domain: str) -> str:
+    """The zone the door names live under: the control domain without its first
+    label (`control.agenticpostgresql.com` -> `agenticpostgresql.com`), ADR 0286.
+
+    Refused when fewer than two labels remain: a relay whose zone is a bare TLD
+    would admit door names under every domain in it."""
+    _, _, zone = control_domain.partition(".")
+    if zone.count(".") < 1 or not all(zone.split(".")):
+        raise NamingError(f"the control domain {control_domain!r} leaves no zone of two labels")
+    return zone
+
+
+def sql_relay_host(control_domain: str) -> str:
+    """The relay's own name, `sql.<zone>` (the operator's choice, D2733): another
+    host, so the console's `__Host-` cookies never reach it (rig 44a)."""
+    return f"sql.{sql_relay_zone(control_domain)}"
+
+
+def sql_relay_origin(host: str) -> str:
+    """The relay's origin as the console's policy names it: `wss://<host>`,
+    nothing else -- no path, no port (ADR 0285 decision 4)."""
+    if not host or "/" in host or ":" in host:
+        raise NamingError(f"not a host: {host!r}")
+    return f"wss://{host}"
+
+
+def sql_relay_upstream(alias: str, port: int) -> str:
+    """`<alias>:<port>`: the edge's own Postgres entrypoint on the project's
+    `edge` network (ADR 0167's alias, `host_config.EDGE_PROXY_ALIAS`, and
+    `host_config.EDGE_POSTGRES_PORT`). Passed in by the render rather than
+    imported, because `host_config` imports `config`, which imports this module."""
+    return f"{alias}:{port}"
+
+
+def sql_relay_router_name(key: str) -> str:
+    """The router publishing the relay on its own name (ADR 0286). Derived for
+    every project, as the console's is; its labels are rendered only for the
+    control project."""
+    return traefik_name(f"apg-{key}-sql-relay", context="traefik_router_sql_relay")
+
+
 def app_buffering_middleware_name(key: str) -> str:
     """The application route's body-size middleware.
 

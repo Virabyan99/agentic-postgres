@@ -53,8 +53,9 @@ def test_every_service_carries_a_pids_limit(model: dict) -> None:
     """
     services = model["services"]
     # 22 since Session 39: `customer-pool` and `customer-direct` (ADR 0269);
-    # 23 since Session 43: `console` (ADR 0280).
-    assert len(services) == 23, f"the service count moved to {len(services)}; check the split"
+    # 23 since Session 43: `console` (ADR 0280); 24 since Session 44:
+    # `sql-relay` (ADR 0286).
+    assert len(services) == 24, f"the service count moved to {len(services)}; check the split"
 
     without = sorted(name for name, service in services.items() if "pids_limit" not in service)
     assert not without, f"these services are unbounded in processes: {without}"
@@ -89,8 +90,9 @@ def test_the_nine_take_theirs_from_the_environment_and_the_eleven_the_literal(
                 wrong.append(f"{name}: short-lived but carries a cpus cap")
     assert not wrong, wrong
 
-    # Twelve long-running since Session 43's `console` (ADR 0280); eleven short-lived.
-    assert len(LONG_RUNNING) == 12
+    # Thirteen long-running since Session 44's `sql-relay` (ADR 0286); eleven
+    # short-lived.
+    assert len(LONG_RUNNING) == 13
     assert len(services) - len(LONG_RUNNING) == 11
 
 
@@ -179,7 +181,9 @@ def test_cpus_is_two_for_postgres_and_one_for_every_sidecar() -> None:
         # Session 43 (ADR 0280): the console takes a quarter of a core -- LESS
         # than a sidecar, so the rule this holds (no sidecar takes both cores)
         # is kept with room; named, so a second exception is a decision.
-        expected = {"postgres": "2.0", "console": "0.25"}.get(name, "1.0")
+        # Session 44 (ADR 0286): the relay takes half a core, the second
+        # named exception below a sidecar's 1.0.
+        expected = {"postgres": "2.0", "console": "0.25", "sql-relay": "0.5"}.get(name, "1.0")
         assert cpus == expected, f"{name}: cpus {cpus!r}"
 
 
@@ -251,6 +255,24 @@ def test_the_console_is_bounded(model: dict) -> None:
     assert str(console["restart"]) == "on-failure:5"
 
 
+def test_the_sql_relay_is_bounded(model: dict) -> None:
+    """The SQL relay (Session 44, ADR 0286) carries ADR 0244's limits from the
+    real image's measured peaks under 32 streaming sessions -- memory.peak
+    40.49 MiB and pids.peak 21 (~/s44/run3/measure.txt): 4 x 40.49 rounded up
+    to 192 MiB, the floor of 64 processes, half a core -- each interpolated from
+    the render, read-only, never root, no `ports`. An unauthenticated service
+    holding long-lived sockets is the one that most needs a ceiling."""
+    relay = model["services"]["sql-relay"]
+    assert config.SERVICE_RESOURCE_DEFAULTS["sql-relay"] == {"pids_limit": 64, "cpus": "0.5"}
+    assert config.SERVICE_MEMORY_LIMITS_MB["sql-relay"] == 192
+    assert relay["pids_limit"] == "${SQL_RELAY_PIDS_LIMIT:?required}"
+    assert relay["cpus"] == "${SQL_RELAY_CPUS:?required}"
+    assert relay["mem_limit"] == "${SQL_RELAY_MEMORY_LIMIT:?required}"
+    assert relay["read_only"] is True and relay["user"] == "65532:65532"
+    assert relay["cap_drop"] == ["ALL"] and "ports" not in relay
+    assert str(relay["restart"]) == "on-failure:5"
+
+
 def _long_running(model: dict) -> set[str]:
     """The services that run for as long as the project does, by the FILE'S OWN
     restart policy -- not a list, so a new long-running service lands here."""
@@ -296,6 +318,7 @@ def test_the_four_new_memory_limits_are_rendered_from_config(model: dict) -> Non
         "customer-pool",
         "customer-direct",
         "console",
+        "sql-relay",
     }
     identity = naming.derive(
         slug="alpha",

@@ -471,6 +471,19 @@ def _override_console(compose_env: Path) -> dict[str, Any]:
     }
 
 
+def _override_sql_relay(compose_env: Path) -> dict[str, Any]:
+    """The SQL relay arguments `render_override` takes (ADR 0286).
+
+    `_override_console`'s shape: the profile `project-runtime.sh` starts and the
+    router the override writes both read the rendered `APG_SQL_RELAY`, so a
+    relay without its router, or a router without its relay, cannot be deployed.
+    """
+    return {
+        "sql_relay": _env_value(compose_env, "APG_SQL_RELAY") == "1",
+        "sql_relay_router_name": _env_value(compose_env, "SQL_RELAY_ROUTER_NAME"),
+    }
+
+
 def _rest_enabled(compose_env: Path) -> bool:
     """Whether the manifest publishes REST (`api.rest.enabled`, D2172).
 
@@ -2307,6 +2320,7 @@ def render_runtime_only(arguments: argparse.Namespace) -> int:
         **_override_control(compose_env),
         **_override_public_endpoints(compose_env, key),
         **_override_console(compose_env),
+        **_override_sql_relay(compose_env),
         rest_enabled=_rest_enabled(compose_env),
         https_entrypoint=host["edge"]["https_entrypoint"],
         rendered_directory=str(rendered_directory),
@@ -2495,6 +2509,7 @@ def main(argv: list[str] | None = None) -> int:
         **_override_control(rendered_dir / "compose.env"),
         **_override_public_endpoints(rendered_dir / "compose.env", key),
         **_override_console(rendered_dir / "compose.env"),
+        **_override_sql_relay(rendered_dir / "compose.env"),
         rest_enabled=_rest_enabled(rendered_dir / "compose.env"),
         https_entrypoint=host["edge"]["https_entrypoint"],
         # The installed path, not the checkout's. The override is written into

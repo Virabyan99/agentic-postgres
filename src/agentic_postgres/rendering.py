@@ -708,6 +708,8 @@ SERVICE_RESOURCE_ORDER: tuple[str, ...] = (
     "CUSTOMER_DIRECT",
     # Session 43 (ADR 0280): the console, on the control project only.
     "CONSOLE",
+    # Session 44 (ADR 0286): the SQL relay, on the control project only.
+    "SQL_RELAY",
 )
 
 #: be here. ``host.yaml`` is not one of the digested render inputs, so a
@@ -747,6 +749,10 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     # APG_CONSOLE=1), and its router's name (a label KEY, ADR 0013).
     "CONSOLE_MEMORY_LIMIT",
     "CONSOLE_ROUTER_NAME",
+    # Session 44 (ADR 0286): the SQL relay's memory cap and its router's name,
+    # for the console's reasons (`profiles: [sql-relay]`, APG_SQL_RELAY=1).
+    "SQL_RELAY_MEMORY_LIMIT",
+    "SQL_RELAY_ROUTER_NAME",
     # The customer routers' names (rendered into label KEYS by the runtime
     # override, ADR 0013) and the two SNI names their rules and the one
     # certificate read (values, interpolated). Rendered for every project, as
@@ -1020,6 +1026,17 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     # allows (`?required` without the colon) and nothing reads.
     "APG_CONSOLE",
     "APG_CONSOLE_ORIGIN",
+    # Session 44 (ADR 0285, ADR 0286). `1` on the control project, whose deploy
+    # starts the relay under its facility profile; the relay's own name (its
+    # router's rule), the zone its door grammar is built over, its one upstream
+    # -- the edge's Postgres entrypoint by ADR 0167's alias -- and the origin the
+    # console's policy names. EMPTY on every other project, as the console's
+    # origin is (`?required` without the colon).
+    "APG_SQL_RELAY",
+    "APG_SQL_RELAY_HOST",
+    "APG_SQL_RELAY_ZONE",
+    "APG_SQL_RELAY_UPSTREAM",
+    "APG_CONSOLE_SQL_RELAY_ORIGIN",
     # The origin allowlist, as one comma-separated value (ADR 0109). Measured:
     # Traefik parses a comma-separated label into a list, read back from its own
     # API as `['https://a.example', 'https://b.example']`.
@@ -2260,6 +2277,20 @@ def build_compose_env(
         "APG_CONSOLE": "1" if control else "0",
         "APG_CONSOLE_ORIGIN": naming.console_origin(identity.domain) if control else "",
         "CONSOLE_ROUTER_NAME": naming.console_router_name(identity.key),
+        # Session 44 (ADR 0286): the relay, derived once from the control
+        # project's own domain and the edge's constants, never typed.
+        "APG_SQL_RELAY": "1" if control else "0",
+        "APG_SQL_RELAY_HOST": naming.sql_relay_host(identity.domain) if control else "",
+        "APG_SQL_RELAY_ZONE": naming.sql_relay_zone(identity.domain) if control else "",
+        "APG_SQL_RELAY_UPSTREAM": (
+            naming.sql_relay_upstream(host_config.EDGE_PROXY_ALIAS, host_config.EDGE_POSTGRES_PORT)
+            if control
+            else ""
+        ),
+        "APG_CONSOLE_SQL_RELAY_ORIGIN": (
+            naming.sql_relay_origin(naming.sql_relay_host(identity.domain)) if control else ""
+        ),
+        "SQL_RELAY_ROUTER_NAME": naming.sql_relay_router_name(identity.key),
         # The same sorted list the rendered document publishes, comma-joined --
         # measured to parse into a list by the locked Traefik, read back from
         # its own API rather than inferred from a response header.

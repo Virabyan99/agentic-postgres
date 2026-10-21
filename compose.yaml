@@ -1258,6 +1258,11 @@ services:
       # The API's public path the pages call (`/api/v1`), the one value the
       # server answers that is not a file: rendered from `naming`, never typed.
       APG_CONSOLE_API_PATH: ${CONTROL_ROUTE_PATH:?required}
+      # Session 44 (ADR 0285): the SQL relay's origin, the one more origin the
+      # console's policy names (`connect-src 'self' wss://sql.<zone>`). Rendered
+      # from `naming`; EMPTY on every project but the control one, which nothing
+      # starts the console on (`?required` without the colon).
+      APG_CONSOLE_SQL_RELAY_ORIGIN: ${APG_CONSOLE_SQL_RELAY_ORIGIN?required}
     healthcheck:
       test:
         [
@@ -1271,6 +1276,64 @@ services:
       retries: 5
       start_period: 5s
     # `edge` only, as `docs`: it reaches nothing, and nothing but the edge reaches it.
+    networks:
+      - edge
+
+  # Session 44's SQL relay (ADR 0286): a WebSocket in from the console's editor,
+  # one TLS connection out to a project's door -- through the edge's own Postgres
+  # entrypoint (`apg-edge-proxy:8432` on this project's `edge` network, ADR 0167),
+  # by the name the certificate proves. It authenticates nothing and holds
+  # nothing: no secret, no mount, no port, no call to `/v1`. A FACILITY profile,
+  # the console's shape: `project-runtime.sh` adds `--profile sql-relay` only
+  # where the render says APG_SQL_RELAY=1 (the control project); its router, on
+  # its own name `sql.<zone>`, is the runtime override's, on that project alone.
+  sql-relay:
+    # ADR 0244's rule from the real image's measured peaks under 32 streaming
+    # sessions (~/s44/run3/measure.txt): memory.peak 40.5 MiB, pids.peak 21.
+    pids_limit: ${SQL_RELAY_PIDS_LIMIT:?required}
+    cpus: ${SQL_RELAY_CPUS:?required}
+    mem_limit: ${SQL_RELAY_MEMORY_LIMIT:?required}
+    build:
+      context: ./services/sql-relay
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_RUNTIME_IMAGE:?required}
+        WEBSOCKETS_VERSION: ${WEBSOCKETS_VERSION:?required}
+    profiles: [sql-relay]
+    restart: "on-failure:5"
+    labels:
+      apg.traefik.scope: managed
+      apg.project.key: ${PROJECT_KEY:?required}
+      apg.environment: ${PROJECT_ENVIRONMENT:?required}
+      traefik.docker.network: ${EDGE_NETWORK_NAME:?required}
+    user: "65532:65532"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 5s
+    # The four values `relay.py` reads, each refusing to start when missing or
+    # malformed. The allowed origin IS the console's; the zone and the upstream
+    # are rendered from `naming` and `host_config`, never typed. EMPTY on every
+    # other project, which never starts this service (`?required`, no colon).
+    environment:
+      APG_SQL_RELAY_PORT: "8080"
+      APG_SQL_RELAY_ALLOWED_ORIGIN: ${APG_CONSOLE_ORIGIN?required}
+      APG_SQL_RELAY_ZONE: ${APG_SQL_RELAY_ZONE?required}
+      APG_SQL_RELAY_UPSTREAM: ${APG_SQL_RELAY_UPSTREAM?required}
+    healthcheck:
+      test:
+        [
+          CMD,
+          python,
+          -c,
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/__apg/healthz', timeout=2).status==200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    # `edge` only: the edge reaches it, and it reaches the edge's alias -- the
+    # one address it ever connects to.
     networks:
       - edge
 

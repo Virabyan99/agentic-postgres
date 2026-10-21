@@ -31,6 +31,7 @@ from agentic_postgres.naming import (
     CUSTOMER_DIRECT_SERVICE,
     CUSTOMER_POOL_SERVICE,
     HEALTH_ROUTE_PATH,
+    SQL_RELAY_SERVICE,
 )
 
 #: The two services Session 4 publishes on host loopback, and the ports they
@@ -263,6 +264,10 @@ DOCS_SERVICE_PORT = 8080
 #: and the console.
 CONSOLE_SERVICE_PORT = 8080
 CONSOLE_RULE_PATHS = "Path(`/`) || Path(`/accept`) || PathPrefix(`/console/`)"
+
+#: Session 44's SQL relay (ADR 0286; its service is `naming.SQL_RELAY_SERVICE`):
+#: the port `relay.py` binds. Its router matches its own host and nothing else.
+SQL_RELAY_SERVICE_PORT = 8080
 SNAPSHOT_FILENAME = "openapi.json"
 SNAPSHOT_CONTAINER_PATH = "/app/snapshot/openapi.json"
 
@@ -672,6 +677,11 @@ def build_override(
     #: Off, the override names no console and every other project is unchanged.
     console: bool = False,
     console_router_name: str = "",
+    #: Session 44 (ADR 0286). Does this project run the SQL relay? Read from
+    #: the rendered `APG_SQL_RELAY` -- the value `project-runtime.sh` reads for
+    #: the `sql-relay` profile. Off, the override names no relay.
+    sql_relay: bool = False,
+    sql_relay_router_name: str = "",
 ) -> dict[str, Any]:
     """Build the override document for one project's health route and migrations.
 
@@ -722,6 +732,8 @@ def build_override(
         )
     if console and not console_router_name:
         raise ValueError("console_router_name is required for the console")
+    if sql_relay and not sql_relay_router_name:
+        raise ValueError("sql_relay_router_name is required for the SQL relay")
     if not storage_router_name:
         raise ValueError("storage_router_name is required")
     if not storage_buffering_middleware_name:
@@ -1055,6 +1067,20 @@ def build_override(
                     }
                 }
                 if console
+                else {}
+            ),
+            # Session 44 (ADR 0286). The relay's router, on the control project
+            # only; its service is `profiles: [sql-relay]`.
+            **(
+                {
+                    SQL_RELAY_SERVICE: {
+                        "labels": _sql_relay_labels(
+                            https_entrypoint=https_entrypoint,
+                            sql_relay_router_name=sql_relay_router_name,
+                        )
+                    }
+                }
+                if sql_relay
                 else {}
             ),
         }
@@ -1558,6 +1584,27 @@ def _console_labels(*, https_entrypoint: str, console_router_name: str) -> dict[
     }
 
 
+def _sql_relay_labels(*, https_entrypoint: str, sql_relay_router_name: str) -> dict[str, str]:
+    """The SQL relay's router (ADR 0286), on the control project's `sql-relay` only.
+
+    One matcher: its own host, `sql.<zone>`, and nothing else -- no path, so no
+    other host's request can reach it and it reaches no other router's paths.
+    The baseline chain and nothing more: no buffering (rig 44a carried every
+    WebSocket without it) and no strip (the relay answers the paths as sent).
+    """
+    router = f"traefik.http.routers.{sql_relay_router_name}"
+    service = f"traefik.http.services.{sql_relay_router_name}"
+    return {
+        "traefik.enable": "true",
+        f"{router}.rule": "Host(`${APG_SQL_RELAY_HOST:?required}`)",
+        f"{router}.entrypoints": https_entrypoint,
+        f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
+        f"{router}.middlewares": "${BASELINE_MIDDLEWARE_CHAIN:?required}",
+        f"{router}.service": sql_relay_router_name,
+        f"{service}.loadbalancer.server.port": str(SQL_RELAY_SERVICE_PORT),
+    }
+
+
 def _control_labels(
     *,
     https_entrypoint: str,
@@ -1884,6 +1931,8 @@ def render_override(
     customer_userlist_directory: str = "",
     console: bool = False,
     console_router_name: str = "",
+    sql_relay: bool = False,
+    sql_relay_router_name: str = "",
 ) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
     document = build_override(
@@ -1919,6 +1968,8 @@ def render_override(
         customer_userlist_directory=customer_userlist_directory,
         console=console,
         console_router_name=console_router_name,
+        sql_relay=sql_relay,
+        sql_relay_router_name=sql_relay_router_name,
     )
     header = (
         "# Generated from host.yaml and the rendered compose.env by ./deploy.sh.\n"

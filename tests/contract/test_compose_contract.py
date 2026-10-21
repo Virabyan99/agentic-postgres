@@ -274,6 +274,9 @@ BUILT_SERVICE_USERS = {
     "backup-mirror": "65532:65532",
     # Session 43 (ADR 0280): the console, the docs service's numeric nonroot pair.
     "console": "65532:65532",
+    # Session 44 (ADR 0286): the SQL relay, the console's pair; it holds
+    # nothing a uid could own.
+    "sql-relay": "65532:65532",
 }
 
 #: Built services whose root filesystem is writable, and there is exactly one.

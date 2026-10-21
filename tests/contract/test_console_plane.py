@@ -119,7 +119,15 @@ def test_the_console_holds_no_secret_and_no_mount(deploy: Any, sandbox: Path) ->
     model = yaml.safe_load((REPO_ROOT / "compose.yaml").read_text(encoding="utf-8"))
     console = model["services"]["console"]
     assert console["profiles"] == ["console"]
-    assert set(console["environment"]) == {"APG_CONSOLE_PORT", "APG_CONSOLE_API_PATH"}
+    # Three since Session 44 (ADR 0285): the relay's origin, the one more
+    # origin the console's policy names -- rendered, never typed.
+    assert set(console["environment"]) == {
+        "APG_CONSOLE_PORT",
+        "APG_CONSOLE_API_PATH",
+        "APG_CONSOLE_SQL_RELAY_ORIGIN",
+    }
+    relay_origin = console["environment"].get("APG_CONSOLE_SQL_RELAY_ORIGIN")
+    assert relay_origin == "${APG_CONSOLE_SQL_RELAY_ORIGIN?required}"
     # `.get`: an `APG_` subscript in a test body reads as an environment gate (D2381).
     api_path = console["environment"].get("APG_CONSOLE_API_PATH")
     assert api_path == "${CONTROL_ROUTE_PATH:?required}"

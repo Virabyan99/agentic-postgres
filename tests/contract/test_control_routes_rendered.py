@@ -77,6 +77,10 @@ def _manifest(name: str, *, control: bool) -> dict[str, Any]:
     document = copy.deepcopy(document)
     if control:
         document["control"] = {"enabled": True}
+        # A control project's domain has the deployment's shape, control.<zone>:
+        # the SQL relay's name drops the first label, and a zone of one label
+        # is refused (Session 44, ADR 0286, D2775).
+        document["project"]["domain"] = "control." + document["project"]["domain"]
     return document
 
 
@@ -193,7 +197,8 @@ def test_every_project_names_the_route_and_records_the_facility() -> None:
         document = _manifest("project.second.example.yaml", control=control)
         identity = _identity(document)
         outputs = rendering.build_outputs(document, capabilities, identity, {})
-        assert outputs["routes"]["control"] == "https://fixture-alpine-dev.test/api/v1"
+        domain = "control.fixture-alpine-dev.test" if control else "fixture-alpine-dev.test"
+        assert outputs["routes"]["control"] == f"https://{domain}/api/v1"
         assert outputs["routes"]["control"] == identity.route_control
         assert outputs["control"] == {"enabled": control}
 

@@ -363,7 +363,7 @@ def test_the_control_example_renders_as_the_control_plane() -> None:
 
         outputs = json.loads((directory / "outputs.json").read_text(encoding="utf-8"))
         assert outputs["control"] == {"enabled": True}
-        assert outputs["routes"]["control"] == "https://fixture-control-dev.test/api/v1"
+        assert outputs["routes"]["control"] == "https://control.fixture-dev.test/api/v1"
         assert outputs["migrations"]["project_set"]["root"] == "projects/control"
         assert outputs["migrations"]["project_set"]["count"] == 9  # Session 42: 0009
         assert outputs["storage"]["enabled"] is False

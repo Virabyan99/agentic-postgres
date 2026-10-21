@@ -1,6 +1,6 @@
 # Session 44 — The browser SQL editor: the customer's own client in the console, through a relay that holds nothing
 
-**Status: EXECUTING — Runs 1–2 DONE (2026-10-21; rows D2759–D2773, ADRs 0285–0286; NEXT FREE D2774, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
+**Status: EXECUTING — Runs 1–3 DONE (2026-10-21; rows D2759–D2776, ADRs 0285–0286; NEXT FREE D2777, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
 clean, `main` = `origin/main`) against the host as read that afternoon (§0).
 Rows **D2732–D2758** at planning; the runs add theirs from **D2759**. ADRs
 **0285–0286** are Run 1's. **NEXT FREE after this table: D2759, ADR 0287.**
@@ -434,7 +434,7 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2757** | Stage plan *Measures* and §7: the editor proved live. | Sleeping a project live costs ~70 s down for its names (Session 43: 69.4 / 72.2 s) and `slot3-prod` is the kept customer project; `slot8-prod` sleeps inside the lifecycle instrument, which drives the CLI, not a browser. | **The *asleep* answer is proved offline** (`test_console_sql.py::test_an_asleep_project_opens_no_socket`, the page in Node with a fake `api.js`, every state in `control_states` walked; **the control**: `ready` opens one) **and the `4502` path live** (E1: a door name that matches the grammar and has no router — `pool.slot99.<zone>` — closes `4502`; the same handshake refusal a sleeping door gives, ADR 0268 `:73`). Sleeping `slot3-prod` for the editor is not done. | A live proof of a sentence the control API already proves live (`idle_sleep_live`) is not worth a customer project's outage. | 0195 |
 | **D2758** | — | The walk's console identity: Session 43 invited a NEW walker per walk; the probe owner (`~/s37/probe.json`, its password and TOTP seed in `~/s37/probe-password`, `probe-otpauth`) owns `probe-s37`, which holds `slot3-prod`. | **The editor walk (E1) signs in as the probe owner** (the driver computes the code from the seed with stdlib `hmac`; the seed, the console password and the database passwords live in variables only and are `Secret`-wrapped, D2420; `self_check` refuses a record holding any of them, the console walk's rule) — **no new account, no rotation**. It reads `customer_app` from `~/s39/run11/creds/slot3-prod/` AFTER W1′ (D2749) and `customer_admin` from the same directory. | The editor needs a signed-in member, not a new one; a rotation belongs to the walk that proves rotation. | — |
 
-**Rows added by the runs** (from **D2759**, in execution order; **next free D2774**):
+**Rows added by the runs** (from **D2759**, in execution order; **next free D2777**):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -453,6 +453,9 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2771** | D2742 / rig 44d: *"the newest release ≥ 14 days old"* (17.2), *"the dev lock is NOT relocked"*; Run 2 step 4: the relay tested **in-process**. | The dev lock holds `websockets==17.1` (a transitive of `fastmcp-slim`) and its cutoff is `2026-09-03T15:16:21Z`; 17.2 was published 2026-10-03, after it. In-process tests would serve the relay with 17.1 while the image ran 17.2 — two versions, one proved. | **The pin is 17.1** (2026-08-26, 56 days; BSD-3-Clause; no `requires_dist`; wheel `0c863507…`, sdist `acfea4c2…`, both already in the dev lock's entry): rig 44d re-run on 17.1 read every answer identical (`~/s44/rigs/44d/rig-17.1.txt`). `test_websockets_is_locked` holds all four places, `test_segno_is_locked`'s shape. ADR 0286 names it. | One version proved is the version shipped; moving the dev lock's cutoff to reach 17.2 would move every floating dev dependency (D2690). | 0286 |
 | **D2772** | Run 2 step 4: *"the CA file passed by a test-only argument that the image never reads — a guard proves the image's entrypoint passes none"*. | `ssl.create_default_context()` reads OpenSSL's `SSL_CERT_FILE` (measured in the tests: a relay built with it set to the trusted CA reaches the door, with the stranger CA closes `4502`). | **The relay has no CA parameter at all**; the tests set `SSL_CERT_FILE` (in-process by `monkeypatch`, and in the canary's subprocess environment), the way any trust store is moved. **`test_the_relay_reads_no_secret_and_no_file` is the guard**: no `cafile`/`capath`/`cadata`, no `load_verify_locations`, no `open`, imports from a closed set, the four `APG_SQL_RELAY_*` names and no other, and the Dockerfile's `ENTRYPOINT ["python", "-u", "/app/relay.py"]` exactly. | A parameter that only tests use is still a parameter production code could reach; a guard over its absence is stricter than a guard over its non-use. | 0286 |
 | **D2773** | Run 2 step 2: *"the path grammar (D2740) and the ceilings (D2741) → an HTTP refusal before the upgrade; `origins=[ALLOWED_ORIGIN]` (rig 44d)"*. | ADR 0286 decision 3 (from D2741 and D2762): `Origin` checked by the relay itself, FIRST, in `process_request`; the ceilings close `4429` after the upgrade so the page can say why. | **The relay passes no `origins=`** and checks `Origin` itself, then the path; **the ceilings close `4429`** after the upgrade, as D2741 and the ADR say; `GET /__apg/healthz` is answered before the `Origin` check (the container's own healthcheck sends none). Battery mutation 1 (the `Origin` check removed) was KILLED **because** no second check stands behind it. | A belt behind the check would make the check's own test unable to fail; and a browser shows an HTTP refusal of a handshake only as `1006`, never a reason. | 0286 |
+| **D2774** | Run 3 step 2: *"limits … **pids 64, cpus 0.5, memory 128 MiB** — Run 1's rig 44a peak under 32 sessions × 2 at least; if the peak exceeds 64 MiB, the limit is twice the peak"*. | Rig 44a's 19.5 MiB was the rig's echo server, with no TLS leg to a door. **The real relay image**, read-only as compose runs it, under 32 sessions each streaming 10 KiB/s through TLS on both sides (`~/s44/run3/measure.txt`): **memory.peak 40.49 MiB, pids.peak 21** (20.1 MiB / 3 at rest; 19.4 MB delivered, no error). ADR 0244's rule for every bounded service (`config.SERVICE_MEMORY_LIMITS_MB`'s docstring): the larger of 64 and 4 × peak, rounded up to 32. | **pids 64 (the floor), cpus 0.5, memory 192 MiB** (4 × 40.49 = 162 → 192), the project's rule over the plan's ×2; recorded in `config.py` beside the console's. | One rule for every ceiling; the plan's ×2 would have been the only service bounded more tightly than the rule allows. | 0286 |
+| **D2775** | D2733: *"`naming.sql_relay_host(control_domain)` … refused when the remainder has fewer than two labels"*. | The committed control example's domain was `fixture-control-dev.test`: its zone would be the bare TLD `test`, and the render refused it. `test_control_routes_rendered` made `project.second.example.yaml` a control project the same way (`fixture-alpine-dev.test`). | **The refusal stands; the control example takes the deployment's shape**, `control.fixture-dev.test` (zone `fixture-dev.test`, relay `sql.fixture-dev.test`), and the routes test's helper prefixes `control.` when it turns a manifest into a control project. The two literals that named the old domain (`control_cluster.py`, `test_control_set.py`) moved with it; **every module that renders the control example ran** (D979). | A zone of one label would let the grammar admit door names under a whole TLD; a fixture is moved to the production shape rather than the guard to the fixture's. | 0286 |
+| **D2776** | Run 2's `**Done.**`: *"Targeted, once … 443 passed"*. | **CI on `8c1d1a8` FAILED** (`contract` run 39659742863: *Session 2 offline contract* and *Session 1 gate*, 1 failed of 8,282): `test_a_large_message_is_refused` sent its 1 MiB control frame before the fake door's TLS was ready, met the 64 KiB pending cap (`4413`, the relay as designed) — a race the workstation never lost. And Run 3's shard found the canary's refused statement flaky: the random marker unquoted parses as arithmetic (`42703`) or not at all (`42601`). | **Test-only repair at `ef48bec`**: the large-message test establishes the door with a round trip first; the canary quotes the marker (`42703`, always). No product change. Any test that sends more than 64 KiB must first see the door answer. | A green workstation run is one sample of a race; CI is the second machine. | — |
 
 ---
 
@@ -908,7 +911,8 @@ Targeted: `test_sql_relay`, `test_version_lock`, `test_repository_contract`,
   `test_repository_contract`, `test_environment_gates`, `test_acceptance_registry`
   (the sweep-selector guard), `test_compose_contract`,
   `test_operator_commands_run_on_the_host` — **443 passed**.
-- Rows **D2771–D2773**. CI: read after the push, recorded in Run 3's commit.
+- Rows **D2771–D2773**. **CI on `8c1d1a8`: `contract` FAILED** (run 39659742863,
+  `test_a_large_message_is_refused`, a race; D2776) — repaired test-only at `ef48bec`.
 
 ### Run 3 — the relay's plane (`compose.yaml`, `src/`, `bin/`, the edge labels)
 
@@ -973,7 +977,58 @@ Targeted: `test_sql_relay_plane`, `test_console_plane`, `test_process_limits`,
 sweep-selector guard; `bin/session-01-check.sh` is NOT run (code run: CI).
 Commit, push, read CI.
 
-**Done.** *(the executor writes it.)*
+**Done.** (2026-10-21; WSL `~/s44/run3/`.)
+
+- **`naming.py`**: `SQL_RELAY_SERVICE`, `sql_relay_zone` (refusing a zone of one
+  label — D2775), `sql_relay_host`, `sql_relay_origin` (refusing a path or a
+  port), `sql_relay_upstream(alias, port)` (the values passed in by the render,
+  because `host_config` imports `config`, which imports `naming`), and
+  `sql_relay_router_name`.
+- **`config.py`**: `sql-relay` pids 64 / cpus 0.5 / memory 192 MiB (D2774, the
+  real image's peaks: 40.49 MiB, 21 pids under 32 sessions).
+- **`rendering.py`**: `SQL_RELAY` in `SERVICE_RESOURCE_ORDER`; nine keys in
+  `COMPOSE_ENV_KEYS` (`SQL_RELAY_MEMORY_LIMIT`, `SQL_RELAY_ROUTER_NAME`,
+  `APG_SQL_RELAY`, `APG_SQL_RELAY_HOST`, `APG_SQL_RELAY_ZONE`,
+  `APG_SQL_RELAY_UPSTREAM`, `APG_CONSOLE_SQL_RELAY_ORIGIN`, and the pids/cpus
+  pair from the order); control: `1`, `sql.<zone>`, `<zone>`,
+  `apg-edge-proxy:8432` (from `host_config`), `wss://sql.<zone>`; elsewhere `0`
+  and empty.
+- **`compose.yaml`**: `sql-relay` after `console` — profile `sql-relay`, built
+  from `services/sql-relay` with `PYTHON_BASE_IMAGE` and `WEBSOCKETS_VERSION`,
+  the limits, uid 65532, read-only, `/tmp` tmpfs, every capability dropped,
+  `no-new-privileges`, the four environment names (the allowed origin IS
+  `APG_CONSOLE_ORIGIN`), the healthcheck, network `edge`; no secret, volume,
+  port or `depends_on`. The console's environment gains
+  `APG_CONSOLE_SQL_RELAY_ORIGIN` (its server reads it from Run 5).
+- **`runtime_override.py`**: `build_override(…, sql_relay, sql_relay_router_name)`
+  (a relay without a name raises), `_sql_relay_labels` — rule
+  ``Host(`${APG_SQL_RELAY_HOST:?required}`)``, `websecure`, the resolver, the
+  baseline chain only, port 8080; `bin/deploy-project.py` `_override_sql_relay`
+  at both call sites; `bin/project-runtime.sh` `--profile sql-relay` iff
+  `APG_SQL_RELAY=1`.
+- **The metrics filter** (`naming.project_router_names`): the console's router is
+  not enumerated, so the relay's is not either (the console's decision followed).
+- **Tests**: `tests/contract/test_sql_relay_plane.py` (five: the profile, the
+  rule, nothing held, the names derived, the upstream following the edge's
+  constants) and `test_process_limits.py::test_the_sql_relay_is_bounded`;
+  fixtures moved under ADR 0286: the service counts (23 → 24, long-running
+  12 → 13), the cpus exceptions and the memory set (`test_process_limits`),
+  `BUILT_SERVICE_USERS` (`test_compose_contract`), the console's environment
+  (three names, `test_console_plane`), the control example's domain (D2775).
+- **The render without a host** (`~/s44/run3/render.txt`, uid 1000):
+  `--render-only` of the control example and `project.example.yaml` rc 0; the
+  control render's model resolves under `--profile sql-relay --profile console`
+  with every value rendered (`compose-config.txt`); `.generated/fixture-control-dev`
+  removed; `render-config --bounds-doc` already current.
+- **Battery** (`battery3.py`): the profile for every project; the rule widened
+  with ``|| PathPrefix(`/`)``; a `secrets:` line; the upstream typed — **4/4
+  KILLED** as `FAILED`, the control `test_the_sql_relay_is_bounded` PASSED,
+  four files restored, `cmp` identical. (A typed value EQUAL to the derived one
+  is invisible to any reading of the output — D493 — so the test that kills it
+  moves the edge's constants and watches the render follow.)
+- **Targeted, once** (three foreground shards — the plan's list plus every
+  module that renders the control example): shard A 983 passed and the canary failing on its flaky expectation, repaired (D2776) and re-run green three times with its module 39/39; shard B (every test_control_* module) 135 passed; shard C 192 passed.
+- Rows **D2774–D2776**.
 
 ### Run 4 — the wire client (`services/console/public/pg.js`, tests)
 
