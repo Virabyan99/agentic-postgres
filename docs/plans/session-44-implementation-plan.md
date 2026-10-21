@@ -1,6 +1,6 @@
 # Session 44 — The browser SQL editor: the customer's own client in the console, through a relay that holds nothing
 
-**Status: EXECUTING — Runs 1–3 DONE (2026-10-21; rows D2759–D2776, ADRs 0285–0286; NEXT FREE D2777, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
+**Status: EXECUTING — Runs 1–4 DONE (2026-10-22; rows D2759–D2782, ADRs 0285–0286; NEXT FREE D2783, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
 clean, `main` = `origin/main`) against the host as read that afternoon (§0).
 Rows **D2732–D2758** at planning; the runs add theirs from **D2759**. ADRs
 **0285–0286** are Run 1's. **NEXT FREE after this table: D2759, ADR 0287.**
@@ -434,7 +434,7 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2757** | Stage plan *Measures* and §7: the editor proved live. | Sleeping a project live costs ~70 s down for its names (Session 43: 69.4 / 72.2 s) and `slot3-prod` is the kept customer project; `slot8-prod` sleeps inside the lifecycle instrument, which drives the CLI, not a browser. | **The *asleep* answer is proved offline** (`test_console_sql.py::test_an_asleep_project_opens_no_socket`, the page in Node with a fake `api.js`, every state in `control_states` walked; **the control**: `ready` opens one) **and the `4502` path live** (E1: a door name that matches the grammar and has no router — `pool.slot99.<zone>` — closes `4502`; the same handshake refusal a sleeping door gives, ADR 0268 `:73`). Sleeping `slot3-prod` for the editor is not done. | A live proof of a sentence the control API already proves live (`idle_sleep_live`) is not worth a customer project's outage. | 0195 |
 | **D2758** | — | The walk's console identity: Session 43 invited a NEW walker per walk; the probe owner (`~/s37/probe.json`, its password and TOTP seed in `~/s37/probe-password`, `probe-otpauth`) owns `probe-s37`, which holds `slot3-prod`. | **The editor walk (E1) signs in as the probe owner** (the driver computes the code from the seed with stdlib `hmac`; the seed, the console password and the database passwords live in variables only and are `Secret`-wrapped, D2420; `self_check` refuses a record holding any of them, the console walk's rule) — **no new account, no rotation**. It reads `customer_app` from `~/s39/run11/creds/slot3-prod/` AFTER W1′ (D2749) and `customer_admin` from the same directory. | The editor needs a signed-in member, not a new one; a rotation belongs to the walk that proves rotation. | — |
 
-**Rows added by the runs** (from **D2759**, in execution order; **next free D2777**):
+**Rows added by the runs** (from **D2759**, in execution order; **next free D2783**):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -456,6 +456,12 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2774** | Run 3 step 2: *"limits … **pids 64, cpus 0.5, memory 128 MiB** — Run 1's rig 44a peak under 32 sessions × 2 at least; if the peak exceeds 64 MiB, the limit is twice the peak"*. | Rig 44a's 19.5 MiB was the rig's echo server, with no TLS leg to a door. **The real relay image**, read-only as compose runs it, under 32 sessions each streaming 10 KiB/s through TLS on both sides (`~/s44/run3/measure.txt`): **memory.peak 40.49 MiB, pids.peak 21** (20.1 MiB / 3 at rest; 19.4 MB delivered, no error). ADR 0244's rule for every bounded service (`config.SERVICE_MEMORY_LIMITS_MB`'s docstring): the larger of 64 and 4 × peak, rounded up to 32. | **pids 64 (the floor), cpus 0.5, memory 192 MiB** (4 × 40.49 = 162 → 192), the project's rule over the plan's ×2; recorded in `config.py` beside the console's. | One rule for every ceiling; the plan's ×2 would have been the only service bounded more tightly than the rule allows. | 0286 |
 | **D2775** | D2733: *"`naming.sql_relay_host(control_domain)` … refused when the remainder has fewer than two labels"*. | The committed control example's domain was `fixture-control-dev.test`: its zone would be the bare TLD `test`, and the render refused it. `test_control_routes_rendered` made `project.second.example.yaml` a control project the same way (`fixture-alpine-dev.test`). | **The refusal stands; the control example takes the deployment's shape**, `control.fixture-dev.test` (zone `fixture-dev.test`, relay `sql.fixture-dev.test`), and the routes test's helper prefixes `control.` when it turns a manifest into a control project. The two literals that named the old domain (`control_cluster.py`, `test_control_set.py`) moved with it; **every module that renders the control example ran** (D979). | A zone of one label would let the grammar admit door names under a whole TLD; a fixture is moved to the production shape rather than the guard to the fixture's. | 0286 |
 | **D2776** | Run 2's `**Done.**`: *"Targeted, once … 443 passed"*. | **CI on `8c1d1a8` FAILED** (`contract` run 39659742863: *Session 2 offline contract* and *Session 1 gate*, 1 failed of 8,282): `test_a_large_message_is_refused` sent its 1 MiB control frame before the fake door's TLS was ready, met the 64 KiB pending cap (`4413`, the relay as designed) — a race the workstation never lost. And Run 3's shard found the canary's refused statement flaky: the random marker unquoted parses as arithmetic (`42703`) or not at all (`42601`). | **Test-only repair at `ef48bec`**: the large-message test establishes the door with a round trip first; the canary quotes the marker (`42703`, always). No product change. Any test that sends more than 64 KiB must first see the door answer. | A green workstation run is one sample of a race; CI is the second machine. | — |
+| **D2777** | Run 4 step 2: the live tests run `pg.js` in Node against the relay of Run 2. | Measured (`~/s44/run4/origin.txt`): **Node 22's global `WebSocket` sends no `Origin`**, so the relay refuses it `403`; undici's `new WebSocket(url, {headers})` sends the one given. And a refused handshake fires `error` and **never `close`** (readyState stays 0). | **The test driver wraps the global `WebSocket`** with the console's `Origin` before calling `pg.js`; `pg.js` has no seam for it. `pg.js`'s `opened()` treats an `error` before `open` as the refusal (`closeCode` 1006) and keeps a 15 s timer, so no runtime can leave a connect hanging. | A browser always sends `Origin`; the stand-in must, and the client must not depend on a `close` that some runtimes never fire. | 0285 |
+| **D2778** | Run 4 step 2: *"the in-process relay from Run 2"* with the Node container. | The workstation's Docker is **Docker Desktop** (29.5.2): `--network host` is its VM's namespace, not WSL's — the first live run never reached the relay (no relay line at all). | **The live half runs Node on the bridge network with `--add-host host.docker.internal:host-gateway`** and the in-process relay bound to `0.0.0.0` (a test's listener, `noqa: S104`), which also holds on CI's Docker Engine. | One fixture that reaches the relay the same way on both machines. | — |
+| **D2779** | Run 4 step 2: *"the SCRAM proof against Python's (fixed nonce and salt passed by a test-only hook the page never calls — a guard that `app.js` never passes it)"*. | The proof is a function of the password, the client-first message and the server-first message alone. | **No hook**: `pg.js` exports the pure `clientFinal(password, clientFirstBare, serverFirst)`, which `authenticate` calls and the test compares with Python for fixed exchanges; the fake servers of the pure half are a stand-in global `WebSocket`. `connect` takes the plan's five options and one more, `deadlineSeconds` (default 60), which the live test sets to 2 and **Run 5's guard holds `app.js` never passes**. | A seam the page could pass is a seam; a pure function has none, and its test is stricter (two exchanges, three refusals). | 0285 |
+| **D2780** | Run 4 read-first: *"`pg.js` imports from it rather than repeating them"*. | `scram.js` exported only `ITERATIONS`, `SALT_BYTES`, `PASSWORD_BYTES`, `newPassword`, `verifier`; its `base64` and `hmac` were private and PBKDF2 inline. | **`scram.js` exports `base64`, `hmac` and a new `scramKeys(password, salt, iterations)`**, and `verifier` is built from `scramKeys`; `test_console_scram`'s verifier-equals-the-CLI's proof is unchanged and passes. | One implementation of RFC 5802's keys in the console. | 0285 |
+| **D2781** | Run 4 step 2: *"PostgreSQL 18.4 + PgBouncer (both pool modes) + the in-process relay"*. | In production the edge (Traefik) terminates the door's TLS and PgBouncer speaks plaintext behind it; the relay needs a TLS peer that answers SSLRequest. | **In the test PgBouncer terminates its clients' TLS** (`client_tls_sslmode = require`, a certificate for both door names from a CA made in `tmp_path`); the relay verifies it as it verifies the edge. Traefik's own part was measured in rig 44b and is read live by E0/E1. | The client's and the relay's behaviour is what this test holds; the edge's is rig 44b's and the trip's. | 0286 |
+| **D2782** | CLAUDE.md §1 (D386): *"`FAILED` is a kill, `ERROR` is a broken fixture that never reached the assertion."* | Battery round 1: *the cancel sent on the same socket* came out **ERROR** — the one live driver threw at a later `open()` (`53300` *too many connections for role "editor"*: the corrupted cancel left the server connection busy), so the module-scoped fixture failed before any assertion. | **Every live measurement records its own failure as data** (`step(name, f)`), so a broken step fails its own test's assertion and the fixture still delivers; round 2 re-ran all five mutations. | A mutation that breaks the fixture proves only that something broke. | — |
 
 ---
 
@@ -1028,7 +1034,8 @@ Commit, push, read CI.
   moves the edge's constants and watches the render follow.)
 - **Targeted, once** (three foreground shards — the plan's list plus every
   module that renders the control example): shard A 983 passed and the canary failing on its flaky expectation, repaired (D2776) and re-run green three times with its module 39/39; shard B (every test_control_* module) 135 passed; shard C 192 passed.
-- Rows **D2774–D2776**.
+- Rows **D2774–D2776**. CI on `b90e3fc`: read after its push (queued behind
+  `ef48bec`), recorded in Run 5.
 
 ### Run 4 — the wire client (`services/console/public/pg.js`, tests)
 
@@ -1063,7 +1070,52 @@ guards over `public/*.js` now read `pg.js`), `test_console_server` (`pg.js` is
 not yet a ROUTE: **the file lands in `public/` with its route in this run**, so
 `LISTED` and `ROUTES` gain `/console/pg.js` here, D2745). Commit, push, read CI.
 
-**Done.** *(the executor writes it.)*
+**Done.** (2026-10-22; WSL `~/s44/run4/`.)
+
+- **`services/console/public/pg.js`** (ES module, no DOM, no global state): the
+  startup message (protocol 3.0; `user`, `database`, `application_name =
+  apg-console-editor`); SASL SCRAM-SHA-256 only — `clientFinal` refuses a
+  server-first message whose nonce does not extend the client's or whose
+  iteration count is below 4,096 (D2767), and the server's signature is checked
+  before `AuthenticationOk` is accepted; the simple query protocol as an async
+  iterator of results `{columns, rows, command, notices, truncated}`, an
+  `ErrorResponse` thrown as `PgError {code, message, detail, hint, position}`
+  after the results before it and once the server is ready; `CopyFail` for COPY
+  in, COPY out dropped with a notice, `CopyBothResponse` closes; the caps (1,000
+  rows / 2 MiB → one cancel, `truncated`, the cap's own `57014` swallowed —
+  D2766); the 60 s deadline (`deadlineSeconds`, its `57014` thrown with
+  `deadline: true`); a cancel as its own relay session, one at a time, and the
+  next statement waiting for it; every message bounded (under 4 bytes or over
+  1 MiB closes with a named error); the password read only inside
+  `authenticate`. The header cites the protocol chapter's sections.
+- **`scram.js`** exports `base64`, `hmac`, `scramKeys` (D2780). **`serve.py`**
+  routes `/console/pg.js`; `test_console_server`'s `LISTED` and
+  `test_console_scram`'s names (`api`, `app`, `pg`, `scram`) moved with it.
+- **`tests/contract/test_console_pg.py`** — 19 cases, every §2 node id of
+  `SQL-CLIENT-001` plus `test_a_message_outside_the_bound_closes_the_connection`.
+  Pure (9): the startup and cancel bytes against Python's; `clientFinal` equal to
+  Python's for two exchanges and refusing three; a fake SCRAM server forging its
+  signature (the control: signing correctly → connected, pid 7 key 42); MD5,
+  cleartext, trust, `SCRAM-SHA-256-PLUS` alone and a stray `ReadyForQuery` each
+  refused with nothing sent after; a length over and under the bound. **Live
+  (10), first execution green**: PostgreSQL 18.4, PgBouncer 1.24.1 in
+  transaction and session mode with client TLS (D2781), the relay in this
+  process (D2778), Node's `WebSocket` given the console's `Origin` (D2777) —
+  rows and NULLs and tags; `22012`, `42601` at position 1, `42501`, the
+  connection usable after; a wrong password `08P01` (D2765); COPY both ways;
+  a cancel `57014` in under 6 s and its session closed, the uncancelled
+  control completing, the 2 s deadline flagged; the fast, live and byte caps
+  `truncated` at 1,000 / 1,000 / ~511 rows with no error and the next statement
+  answered; the role's connections within its limit 2.
+- **Battery** (`battery4.py`): the signature check skipped; MD5 accepted; the row
+  cap off by one; the cancel sent on the same socket; the length bound removed —
+  **5/5 KILLED** in round 2, each `FAILED` (no `ERROR`), the control
+  `test_the_startup_message_is_exact` PASSED, `cmp` identical, the unmutated
+  module 19 passed (round 1 left the cancel mutation as `ERROR`, D2782).
+- **Targeted, once:** `test_console_pg`, `test_console_scram`, `test_console_pages`,
+  `test_console_server`, `test_acceptance_registry` (the sweep-selector guard),
+  `test_environment_gates` — 73 passed.
+- Rows **D2777–D2782**.
 
 ### Run 5 — the editor page, the policy, the Ledger exception (`services/console/`, `docs/`)
 

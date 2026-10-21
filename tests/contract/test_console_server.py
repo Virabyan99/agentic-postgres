@@ -42,6 +42,7 @@ LISTED = (
     "/console/app.js",
     "/console/api.js",
     "/console/scram.js",
+    "/console/pg.js",
     "/console/pages.json",
 )
 

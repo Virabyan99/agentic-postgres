@@ -48,6 +48,8 @@ ROUTES: dict[str, tuple[Path, str]] = {
     "/console/app.js": (PUBLIC / "app.js", JAVASCRIPT),
     "/console/api.js": (PUBLIC / "api.js", JAVASCRIPT),
     "/console/scram.js": (PUBLIC / "scram.js", JAVASCRIPT),
+    # Session 44 (ADR 0285): the SQL editor's wire client.
+    "/console/pg.js": (PUBLIC / "pg.js", JAVASCRIPT),
     "/console/pages.json": (PUBLIC / "pages.json", JSON),
 }
 

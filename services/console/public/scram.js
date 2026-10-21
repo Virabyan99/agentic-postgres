@@ -6,6 +6,10 @@
 // PostgreSQL's parameters, as the Python module's: 4096 iterations, a 16-byte
 // salt, `SCRAM-SHA-256$4096:<salt>$<StoredKey>:<ServerKey>` (RFC 5802, RFC 7677).
 // WebCrypto's PBKDF2 was read equal to Python's in Chromium (rig 43a).
+//
+// Since Session 44 (ADR 0285) the SQL editor's wire client (`pg.js`) proves a
+// password with the same primitives, so `base64`, `hmac` and `scramKeys` are
+// exported rather than written twice.
 
 export const ITERATIONS = 4096;
 export const SALT_BYTES = 16;
@@ -14,7 +18,7 @@ export const PASSWORD_BYTES = 32;
 
 const encoder = new TextEncoder();
 
-function base64(bytes) {
+export function base64(bytes) {
   let binary = "";
   for (const byte of new Uint8Array(bytes)) {
     binary += String.fromCharCode(byte);
@@ -30,11 +34,25 @@ export function newPassword() {
   return base64url(crypto.getRandomValues(new Uint8Array(PASSWORD_BYTES)));
 }
 
-async function hmac(key, text) {
+export async function hmac(key, text) {
   const imported = await crypto.subtle.importKey(
     "raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
   );
-  return crypto.subtle.sign("HMAC", imported, encoder.encode(text));
+  return crypto.subtle.sign("HMAC", imported, typeof text === "string" ? encoder.encode(text) : text);
+}
+
+// RFC 5802's keys for `password`: SaltedPassword, ClientKey, StoredKey, ServerKey.
+export async function scramKeys(password, salt, iterations) {
+  const material = await crypto.subtle.importKey(
+    "raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"],
+  );
+  const salted = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations }, material, 256,
+  );
+  const clientKey = await hmac(salted, "Client Key");
+  const storedKey = await crypto.subtle.digest("SHA-256", clientKey);
+  const serverKey = await hmac(salted, "Server Key");
+  return { salted, clientKey, storedKey, serverKey };
 }
 
 // The verifier for `password`; a fresh salt unless `saltBytes` is given (a
@@ -47,14 +65,6 @@ export async function verifier(password, saltBytes) {
   if (salt.length !== SALT_BYTES) {
     throw new Error("the salt must be 16 bytes");
   }
-  const material = await crypto.subtle.importKey(
-    "raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"],
-  );
-  const salted = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: ITERATIONS }, material, 256,
-  );
-  const clientKey = await hmac(salted, "Client Key");
-  const storedKey = await crypto.subtle.digest("SHA-256", clientKey);
-  const serverKey = await hmac(salted, "Server Key");
+  const { storedKey, serverKey } = await scramKeys(password, salt, ITERATIONS);
   return `SCRAM-SHA-256$${ITERATIONS}:${base64(salt)}$${base64(storedKey)}:${base64(serverKey)}`;
 }
