@@ -227,3 +227,47 @@ def test_the_headers_file_carries_the_policy(built: dict[str, bytes]) -> None:
     assert "  ! Access-Control-Allow-Origin\n" in headers
     assert site_build.CONTENT_SECURITY_POLICY == POLICY
     assert "404.html" in built, "Pages serves the index for a missing path without a 404 page"
+
+
+def test_the_live_proofs_name_themselves_to_the_site() -> None:
+    """D2728: the live site proofs' recorder sends the proof's own User-Agent --
+    Cloudflare Pages refuses urllib's default `Python-urllib/3.x` (403, error
+    1010), which is how `site_live` failed on its first live run. Read off the
+    wire: a loopback server records the header each request arrives with,
+    through both the recorder's own `send` and the opener the console module's
+    `_get` uses."""
+    import http.server
+    import threading
+
+    from tests.external.test_session38_public_lifecycle import (
+        USER_AGENT,
+        Recorder,
+    )
+
+    arrived: list[str | None] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            arrived.append(self.headers.get("User-Agent"))
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            return None
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/"
+        recorder = Recorder()
+        assert recorder.send("GET", url)[0] == 200
+        with recorder.opener.open(url, timeout=10) as response:
+            assert response.status == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert arrived == [USER_AGENT, USER_AGENT]
+    assert USER_AGENT == "agentic-postgres-proof"
+    assert not USER_AGENT.startswith("Python-urllib")

@@ -1701,3 +1701,60 @@ on a role name the tree's own database proof already read correctly.
    lands.
 3. The plan's §10, both lists.
 
+## 36. What Session 43 closed, what it left, and what Session 44 inherits
+
+**Session 43 is the web-first session** (D2591): the public site on Cloudflare
+Pages, the invitation as a link, onboarding and the second factor in the
+browser, the console, and the customer CLI packaged. Eleven runs,
+`D2650`–`D2730`, ADRs 0280–0284. **`1.21.0` is deployed on four projects --
+beta, alpha, `slot3-prod` (by `slot.sh redeploy`) and control-prod, where the
+console started -- swept, merged and tagged on `012ac06`** (D1425), no database
+restarted. **The tag published `agentic-postgres-cli` 1.21.0 to PyPI by trusted
+publishing**, and it installs and runs from a clean Python 3.12. The lifecycle
+was re-earned a fifth time on a NEW `slot7-prod` (D2714), the branches on
+`slot3-prod`. The merged evidence reads **322 claims: 320 passed, 2 failed** --
+`documented_path` by decision (D1935) and `site_live` (D2728).
+
+**The sentence this session would most want carried forward: a live proof's
+client is a client the third party judges.** `site_live` ran live for the first
+time at the sweep and failed, not on the site but on its own User-Agent:
+Cloudflare Pages refuses urllib's default with error 1010, outside any setting
+the zone holds. The site answered every client that named itself; the proof had
+never named itself.
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **`console`** (ADRs 0280, 0281, 0282) | Built, then walked in a real browser on 1.21.0 -- an invitation link to a working connection string in 26.1 s, the second factor read by the operator's phone, the CSRF rule and the `__Host-` cookies read live, the console bounded on the host: `console_walk_live`, `console_csrf_live`, `console_live_host` and the offline console claims passed -- **`beta`**. |
+| **The customer CLI packaged** (ADR 0284) | `agentic-postgres-cli` 1.21.0 published from the tag (`publish-cli` run 39594379819); `cli_package` passed; `cli_remote` names it. D2722's window (the site naming a package before it existed) closed. |
+| **The public site** (ADR 0283) | Built from the tree, its claims from the Ledger, deployed by CI to Cloudflare Pages on the apex and `www`, byte-equal to the build (C4); `site_build`, `site_claims` and `site_workflow` passed. |
+| **D2636, D2637, D2642** | Repaired in Run 2, each with a failing test first, deployed in 1.21.0; D2642's count read live at SL1 ("created 16 resources" for 17 changes, the grant a permission -- D2689). |
+| **The fifth re-earning** (D2714) | Every lifecycle and branch claim re-earned at 1.21.0 on `slot7-prod` and `slot3-prod`; at B1 all seven units came back by themselves. |
+| **A usage pass's duration** | Read: 1.0 s (the reconciler's own line); out of `UNMEASURED`. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **`site_live`** (D2728) | Failed on its first live run: the proofs' recorder sent urllib's default User-Agent, which Cloudflare Pages refuses (1010). **Repaired at the close** (the recorder names itself; an offline test, 3/3 mutations killed; read live against the site: 200) -- **re-earned at the next host trip**, not on this evidence. No Ledger row names it. |
+| **The console's peak on the host** | `console_live_host` read it bounded and healthy; its `memory.peak` there was not read (D1375). The rig's 44 MiB stands, as the development machine's. |
+| **The plane's footprint at rest** | `UNMEASURED`. |
+| **Hetzner** (M7 X1/X2) and the store's 443 rule for it (D2640) | Allowed since 2026-10-12; not run. |
+| **`slot1-` … `slot7-prod` consumed**; `lifecycle-s41`, `-s42`, `-s43` remain, empty; the walkers `walk-s43-…` remain without membership | The next lifecycle -- and Session 45's walk -- needs `slot8-prod`. |
+| **D2724** -- gate-01 shard 7 failed once (`test_dev_command`) | An order dependence on the workstation, unexplained; the first attempt kept. |
+| `documented_path` | **`failed` by decision** (D1935). |
+
+### What Session 44 inherits, in order
+
+1. **The browser SQL editor** (D2592): the customer's own credential in the
+   page, a WebSocket relay that holds none; the editor joins the console under
+   the same CSP (its `connect-src` gains the relay's `wss:` origin -- that
+   session's ADR amends 0280's constant) and the same session cookie;
+   `sql_editor` is `planned` → 44.
+2. **`site_live` re-earned** at its host trip, with the recorder this close
+   repaired (D2728).
+3. The plan's §10, both lists -- among them: a PyPI version cannot be
+   re-uploaded (a CLI fix is a release of four); the site deploys on every green
+   push to `main`, so it can run ahead of the deployed release.
+

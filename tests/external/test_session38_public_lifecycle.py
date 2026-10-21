@@ -85,6 +85,11 @@ RECORD_SESSIONS = frozenset({38, 39, 40, 41, 42, 43})
 #: The edge's answer for a host or path no router serves (rig 38b: 19 bytes).
 EDGE_404 = b"404 page not found"
 
+#: Every request a proof makes names the proof (D2728): Cloudflare Pages answers
+#: urllib's default `Python-urllib/3.x` with 403 "error code: 1010" (its own
+#: Browser Integrity Check, measured on pages.dev itself), and this name 200.
+USER_AGENT = "agentic-postgres-proof"
+
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args: Any, **kwargs: Any) -> None:
@@ -98,6 +103,7 @@ class Recorder:
         self.opener = urllib.request.build_opener(
             _NoRedirect, urllib.request.HTTPSHandler(context=ssl.create_default_context())
         )
+        self.opener.addheaders = [("User-Agent", USER_AGENT)]
         self.seen: list[tuple[str, str]] = []
 
     def send(

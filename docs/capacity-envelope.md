@@ -1276,6 +1276,104 @@ Sampled under:
 
 Session 41's V1 took 44.5 min and its sweep 53.6 min on the 4 vCPU host.
 
+### The console service's footprint (Run 4's rig, ADR 0280)
+
+**image 43,209,566 B; 28.6 MB at rest; 1,008 requests in 14.2 s -> memory.peak 44.07 MiB, pids.peak 8, healthy throughout; limits set from it: 192 MiB, 64 pids, 0.25 CPU (D2699)**
+
+Sampled under:
+
+- the operator's development machine (Windows 11, WSL 2, Docker Desktop)
+- 2026-10-20, the console image built from the tree, no other load
+- ~/s43/run4/measure.txt: cgroup memory.peak and pids.peak read after the burst
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+On the deployment host console_live_host read the container bounded at these limits and healthy; its own peak there was not read (op cannot reach the Docker socket, D1375).
+
+### 1.21.0's deploy, per project and class (R2a-R2d, no database restart)
+
+**auth unanswered beta-dev 9.4 s, alpha-dev 9.3 s, slot3-prod (slot.sh redeploy) 6.6 s, control-prod 7.0 s (404/502); rest never unanswered on any; the console first answered 200 41 s into control-prod's window and never failed after; every deploy exit 0**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap
+- 012ac06, 2026-10-21 05:51-06:03Z, one project at a time, the reconciler stopped
+- ~/s43/run8/s43-window.py from the workstation, one GET a second per class, each answer written as taken
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 42's release, which restarted each database, cost rest 2.1-4.2 s.
+
+### The console in a real browser: first paint and invitation to connection string
+
+**first contentful paint 1,140 / 1,008 / 1,060 ms (W0) and 1,024 / 900 / 1,028 ms (W1); DOMContentLoaded 1,158-1,442 ms; from opening the invitation link to the connection string with the rotated password on the Connect page 26.1 s, the account, the second factor and the sign-in included**
+
+Sampled under:
+
+- the operator's development machine (Windows 11, WSL 2), reaching control.agenticpostgresql.com on the deployment host over the public internet
+- Chromium 153.0.8010.12 in the pinned Playwright 1.63.0 image, --network host
+- 1.21.0 at 012ac06, 2026-10-21 07:24Z (W0) and 07:29Z (W1)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Named as from the operator's workstation (D2675): the time is the driver's, typing at machine speed, not a person's.
+
+### The fifth re-earning: slot7-prod's lifecycle at 1.21.0
+
+**create 1,378.0 s; wake's first answer 16.6 s; the slot's names unanswered during sleep 69.4 / 72.2 s, wake 14.0 / 17.9 s, the standard resize 8.0 / 17.9 s and the large 10.0 / 17.6 s (route / pool); the export link refused 930 s after it was read; 8,111 MiB available before, 7,510 with the slot live; the neighbours through 5,199 s: 0 unanswered**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap
+- 012ac06, 2026-10-21 08:01-09:27Z, organisation lifecycle-s43
+- s43-lifecycle.py from the workstation, its samples written as taken (D2581); the neighbours by s43-probe-start.sh on the host
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 42's slot6-prod: create 1,384.5 s, wake 15.1 s.
+
+### A usage pass's duration (ADR 0275)
+
+**1.0 s for slot3-prod, the one awake slot**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap
+- 012ac06, 2026-10-21 08:00:19Z, the reconciler's first pass after RC1's restart
+- the reconciler's own line 'usage pass for <key>: <s> s' (bin/reconciler.py)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+One reading of one slot; Session 42 listed it UNMEASURED.
+
+### Branches at 1.21.0 (slot3-prod)
+
+**an expired branch deleted by the reconciler 52.3 s after expires_at (Session 42: 125.2 s); the restore window's top passed a mark 505.7 s after it was written; every unit and the branch back by themselves after a reboot, all active by boot+79 s**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap
+- 012ac06, 2026-10-21 09:29-10:20Z, the reboot at 10:17:34Z
+- s43-branches.py from the workstation; s43-after-reboot.sh
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The expiry is a reconciler pass's spacing, not a promise.
+
+### The host suite's duration at 1.21.0
+
+**V1 (writing nothing, no lifecycle or branch proofs): 408 passed, 1 failed, in 40 min 26 s; the sweep's suite (every proof, after the reboot): 428 passed, 1 failed, in 47 min 16 s; the external half 115 passed, 3 failed, in 11 min 04 s**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap; the external half from the operator's development machine
+- 012ac06, 2026-10-21, four projects and the plane up
+- s43-v1.sh and s43-sweep.sh as root, stdin from /dev/null; s43-external.sh
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 42's: V1 37 min 04 s, the sweep's suite 45 min 18 s.
+
 ---
 
 ## What was not measured, and why
@@ -1284,12 +1382,6 @@ Listed rather than omitted. An envelope missing the scenarios nobody could
 run reads as an envelope of the whole system — which is the dishonest
 reporting this claim is most exposed to, arriving as a document that looks
 complete rather than as a claim that is false.
-
-### A usage pass's duration (ADR 0275)
-
-The reconciler logs one line at a pass's END ('usage <key> <state>, ...') and none at its start, and no step records it. Session 42's lifecycle read the insight samples' spacing (304 s, the 300 s sampler) but not a pass's own length.
-
-*Unblocked by: a pass's start and end recorded by the reconciler, or a timed rig.*
 
 ### Whether a boot of three projects meets the provider's rate limit
 

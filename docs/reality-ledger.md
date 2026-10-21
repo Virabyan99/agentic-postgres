@@ -20,7 +20,7 @@ the customer, and the session's close moves it to `beta` or back to
 | [Management API keys](#api_keys) | `beta` | 37 |
 | [Management API (/api/v1)](#management_api) | `beta` | 39 |
 | [CLI against the hosted service](#cli_remote) | `beta` | 37 |
-| [Web console](#console) | `trial` | 43 |
+| [Web console](#console) | `beta` | 43 |
 | [Create a project](#projects_self_service) | `beta` | 42 |
 | [Delete a project](#project_deletion) | `beta` | 42 |
 | [Export a project](#export) | `beta` | 42 |
@@ -133,9 +133,9 @@ the customer, and the session's close moves it to `beta` or back to
 
 **What a customer reads.** The apg command signs in with a password and a second factor, or with a key, and acts through the management API only: accounts, organizations, projects, branches, backups, compute, usage, plans, insights and monitoring. It is published to PyPI as agentic-postgres-cli from release 1.21.0.
 
-**Today.** The customer commands in the checkout's bin/ (login, logout, context, org, project, endpoint, branch, compute, usage, plan, notifications, insights, monitoring, operation) are clients of /api/v1; Session 43 packages the same code as agentic-postgres-cli, a wheel that imports only the standard library, published from a release tag by trusted publishing (ADR 0284).
+**Today.** The customer commands in the checkout's bin/ (login, logout, context, org, project, endpoint, branch, compute, usage, plan, notifications, insights, monitoring, operation) are clients of /api/v1; Session 43 packages the same code as agentic-postgres-cli, a wheel that imports only the standard library, published from a release tag by trusted publishing (ADR 0284). 1.21.0 was published from its tag on 012ac06 and installs and runs from a clean Python 3.12 (pip install agentic-postgres-cli==1.21.0; apg --version).
 
-*Customer-facing evidence:* `control_cli`, `control_keys_live`.
+*Customer-facing evidence:* `control_cli`, `control_keys_live`, `cli_package`.
 
 **Stage 5.** Five commands built in Session 37 as clients of /api/v1 -- login (password, key, accept, totp-enroll, totp-confirm), logout, context show, org (list, create, use, members, invite, set-role, remove, keys, key-create, key-revoke) and project (list, use, show); later sessions add branch, backup, compute, usage and plan. Offered by invitation.
 
@@ -145,13 +145,13 @@ the customer, and the session's close moves it to `beta` or back to
 
 ## Web console
 
-`console` · **trial** · since Session 43
+`console` · **beta** · since Session 43
 
-**What a customer reads.** Being verified. The console at https://control.agenticpostgresql.com/console/: accept an invitation link, set up your second factor, sign in, and see your organizations, projects, connection strings, branches, backups, usage, insights, monitoring, plan, notifications and settings. A project is created with the command-line client in this beta; the console has no data view and runs no SQL.
+**What a customer reads.** The console at https://control.agenticpostgresql.com/console/: accept an invitation link, set up your second factor, sign in, and see your organizations, projects, connection strings, branches, backups, usage, insights, monitoring, plan, notifications and settings. A project is created with the command-line client in this beta; the console has no data view and runs no SQL.
 
-**Today.** Static pages served by the control project's console service (ADR 0280) at /, /accept and /console/, every page a named /api/v1 call, signed in with two __Host- cookies honoured only with the console's header and, for a write, its own origin (ADR 0281). Trialed in Session 43 on 1.21.0: a person's walk in a real browser, the console's policy and CSRF rule live, and the console on the host (console_walk_live, console_csrf_live, console_live_host).
+**Today.** Static pages served by the control project's console service (ADR 0280) at /, /accept and /console/, every page a named /api/v1 call, signed in with two __Host- cookies honoured only with the console's header and, for a write, its own origin (ADR 0281). Built in Session 43 and walked on 1.21.0 in a real browser: an invitation link to a working connection string in 26.1 s, the second factor read by a phone, the CSRF rule and the cookies read live, the console bounded on the host -- console_walk_live, console_csrf_live and console_live_host passed on the tagged evidence (1.21.0 on 012ac06).
 
-*Customer-facing evidence:* `console_walk_live`, `console_csrf_live`, `console_live_host`.
+*Customer-facing evidence:* `console_server`, `console_session_cookie`, `console_csrf_rule`, `console_scram`, `console_plane`, `console_ledger_map`, `console_walk_live`, `console_csrf_live`, `console_live_host`.
 
 **Stage 5.** Static pages served by the control project, calling /api/v1 only: onboarding, projects, connect, branches, backups, usage, insights, monitoring, plan, notifications and settings; no data view and no SQL. A project is created with the command-line client in this beta.
 

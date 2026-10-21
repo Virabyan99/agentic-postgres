@@ -68,6 +68,14 @@
 # notifications_retrial_live, insights_live (its proof's role name corrected,
 # D2645), pgss_live, telemetry_live and their offline claims -- so all ten are
 # `beta`. No trial row remains. Accepted: all eleven executed types.
+#
+# Session 43 (Run 9) moved its own console to `trial`. Its close (Run 11) read the
+# TAGGED evidence, evidence/session-43.json (320/322, 1.21.0 on 012ac06):
+# console_walk_live, console_csrf_live, console_live_host and the console's offline
+# claims passed, so console is `beta`; cli_package passed, so cli_remote names it and
+# the published package. site_live failed (D2728: Cloudflare Pages refuses the proof's
+# default Python User-Agent) -- no row names it, so nothing moves on it. No trial row
+# remains. Accepted: all eleven executed types.
 
 schema_version: 1
 rows:
@@ -184,10 +192,14 @@ rows:
       monitoring, operation) are clients of /api/v1; Session 43 packages the
       same code as agentic-postgres-cli, a wheel that imports only the standard
       library, published from a release tag by trusted publishing (ADR 0284).
+      1.21.0 was published from its tag on 012ac06 and installs and runs from a
+      clean Python 3.12 (pip install agentic-postgres-cli==1.21.0; apg
+      --version).
     today_evidence: null
     evidence:
       - control_cli
       - control_keys_live
+      - cli_package
     stage5_reality: >-
       Five commands built in Session 37 as clients of /api/v1 -- login
       (password, key, accept, totp-enroll, totp-confirm), logout, context
@@ -201,9 +213,9 @@ rows:
 
   - id: console
     concept: Web console
-    status: trial
+    status: beta
     customer_text: >-
-      Being verified. The console at
+      The console at
       https://control.agenticpostgresql.com/console/: accept an invitation link,
       set up your second factor, sign in, and see your organizations, projects,
       connection strings, branches, backups, usage, insights, monitoring, plan,
@@ -213,12 +225,20 @@ rows:
       Static pages served by the control project's console service (ADR 0280) at
       /, /accept and /console/, every page a named /api/v1 call, signed in with
       two __Host- cookies honoured only with the console's header and, for a
-      write, its own origin (ADR 0281). Trialed in Session 43 on 1.21.0: a
-      person's walk in a real browser, the console's policy and CSRF rule live,
-      and the console on the host (console_walk_live, console_csrf_live,
-      console_live_host).
+      write, its own origin (ADR 0281). Built in Session 43 and walked on 1.21.0
+      in a real browser: an invitation link to a working connection string in
+      26.1 s, the second factor read by a phone, the CSRF rule and the cookies
+      read live, the console bounded on the host -- console_walk_live,
+      console_csrf_live and console_live_host passed on the tagged evidence
+      (1.21.0 on 012ac06).
     today_evidence: null
     evidence:
+      - console_server
+      - console_session_cookie
+      - console_csrf_rule
+      - console_scram
+      - console_plane
+      - console_ledger_map
       - console_walk_live
       - console_csrf_live
       - console_live_host
