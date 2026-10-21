@@ -1325,6 +1325,15 @@ CLAIM_INTRODUCED_IN = {
     "console_walk_live": 43,
     "console_csrf_live": 43,
     "site_live": 43,
+    "sql_client": 44,
+    "sql_relay_admission": 44,
+    "sql_relay_bounds": 44,
+    "sql_relay_holds_nothing": 44,
+    "sql_relay_plane": 44,
+    "sql_editor_page": 44,
+    "sql_relay_host": 44,
+    "sql_editor_live": 44,
+    "sql_relay_live": 44,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

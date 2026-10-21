@@ -88,23 +88,10 @@ def test_every_called_path_is_in_the_snapshot() -> None:
     }, sorted(called - listed)
 
 
-#: D2746: the editor's view lands in Run 5, before the bump moves its row out of
-#: `planned` -- the console's own order in Session 43. ONE id, allowed only while
-#: it is `planned` for Session 44; Run 7 (the bump) removes this exception.
-PLANNED_UNTIL_THE_BUMP = {"sql_editor": 44}
-
-
 def test_no_page_names_an_unreachable_row() -> None:
-    ledger = {row["id"]: row for row in reality_ledger.load()["rows"]}
-    rows = {key: row["status"] for key, row in ledger.items()}
+    rows = {row["id"]: row["status"] for row in reality_ledger.load()["rows"]}
     for view in _pages()["views"]:
         for row in view["ledger"]:
-            if row in PLANNED_UNTIL_THE_BUMP:
-                assert (rows.get(row), ledger[row].get("target_session")) == (
-                    "planned",
-                    PLANNED_UNTIL_THE_BUMP[row],
-                ), (view["id"], row)
-                continue
             assert rows.get(row) in reality_ledger.REACHABLE, (view["id"], row, rows.get(row))
 
 

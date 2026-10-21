@@ -72,6 +72,11 @@ no-op.
 | `THR-SITE-CLAIM` | None -- a stranger reading the public site before anything else | The product's promise: what a person believes the node does | Every page names its Ledger rows and the build refuses a row that is not reachable, a forbidden word or an operator command; the pricing page is `plans.PLANS` and the beta sentence, generated, with no price; the Ledger page is the YAML's rows; the live site compared byte for byte with the commit's build (ADR 0283, D2662-D2664, D2674, D2720) | The site's build digest is in every page; the live proof recomputes it | The site deploys on every green push to `main`, so it can describe a release the host does not run yet; its footer names `VERSION` | `SITE-BUILD-001`, `SITE-CLAIM-001`, `SITE-LIVE-001` | `tests/contract/test_site.py::test_every_page_names_reachable_rows`, `tests/contract/test_site.py::test_no_forbidden_word`, `tests/contract/test_site.py::test_the_pricing_page_follows_the_plans`, `tests/contract/test_site.py::test_no_price_is_printed`, `tests/external/test_session43_console.py::test_the_site_is_the_commits_build` | 43 |
 | `THR-SUPPLY` | Changes what the console, the site or the CLI ships between the repository and a customer's machine | Whatever a customer runs: the console's files, the site's files, the CLI | The console loads only its own files; the site built by CI only after `contract` succeeded, from that run's commit, wrangler and every action pinned, its token Pages-only in an environment limited to `main`; the CLI staged from the repository's own files, published only from a release tag whose `contract` run succeeded, by trusted publishing with no stored token, the publish action pinned by SHA (ADR 0280, ADR 0283, ADR 0284, D2653, D2666, D2667) | Each workflow run is recorded by GitHub; PyPI records the publisher | A compromised GitHub or Cloudflare account publishes anything; a compromised registry stays out of scope | `SITE-DEPLOY-001`, `DX-PKG-001`, `DX-PKG-002`, `CON-SERVE-001` | `tests/contract/test_release_workflows.py::test_the_site_deploys_only_after_contract`, `tests/contract/test_release_workflows.py::test_publish_verifies_the_contract_run`, `tests/contract/test_release_workflows.py::test_only_the_publish_job_has_id_token`, `tests/contract/test_cli_package.py::test_the_package_imports_only_stdlib`, `tests/contract/test_console_server.py::test_every_asset_is_our_own_file` | 43 |
 | `THR-CON-GUESS` | Guesses passwords and second-factor codes at `/v1/sessions` and `/v1/invitations/accept`, which the site now links publicly | Accounts | Unchanged in Session 43 (D2166, D2679): each password guess pays Argon2id's frozen cost; a code is one in 10⁶ per window, the window one step, a step used once; the edge's `apg-rate-limit` (20 per second average, burst 40, per source) is the only limit -- a throttle of the routes' own is an operator decision | A refused attempt is unauthenticated, as any other | The doors have no throttle of their own; the site linking the console changes who can reach them, not what they are | `CTL-TOTP-001`, `SEC-CRED-002` | `tests/contract/test_totp.py::test_the_window_is_one_step`, `tests/contract/test_totp.py::test_a_replayed_step_is_refused`, `tests/contract/test_control_sessions.py::test_login_requires_the_code_once_enabled`, `tests/contract/test_auth_hashing.py::test_the_encoded_hash_records_the_frozen_profile` | 43 |
+| `THR-SQL-PROXY` | Opens WebSockets to the relay naming any host, address, port or path | Every address the host can reach, and other projects' doors | The relay's admission before any TCP: the console's `Origin` byte for byte (403), then one path naming a door host in the grammar `naming` derives (400); one upstream, the edge's own Postgres entrypoint by ADR 0167's alias, rendered; the door name used only as SNI and the certificate verified, so the edge's `sniStrict` routing is the only router (ADR 0286, D2739-D2741, D2762) | Each refusal is one log line naming its reason, origin or path, and nothing of the request | `Origin` stops a browser on another site, not a non-browser client -- which can reach every door directly on 5432 | `SQL-RELAY-001`, `SQL-RELAY-003`, `SQL-LIVE-002` | `tests/contract/test_sql_relay.py::test_a_foreign_origin_is_refused_before_the_upgrade`, `tests/contract/test_sql_relay.py::test_only_a_door_name_is_accepted`, `tests/contract/test_sql_relay.py::test_an_address_or_a_port_is_refused`, `tests/contract/test_sql_relay.py::test_the_grammar_agrees_with_naming`, `tests/contract/test_sql_relay.py::test_the_door_is_verified`, `tests/external/test_session44_sql_editor.py::test_a_foreign_origin_is_refused_live`, `tests/external/test_session44_sql_editor.py::test_a_name_outside_the_grammar_is_refused_live` | 44 |
+| `THR-SQL-SECRET` | A script in the console page, or a request the page could be made to send, reaching the customer's database password | The customer's database password, which opens their data | The console's policy names one more origin and no other (`connect-src 'self' wss://sql.<zone>`, rendered); no third-party file; the password read once into a closure and the input cleared, never storage, an address or `/v1`; SCRAM-SHA-256 proves it, so neither the relay nor the door receives it (ADR 0285, D2744, D2756) | The policy is on every answer; the live proof reads `connect-src` and `env.json` | A compromised console image or control host serves what it likes -- `THR-CON-XSS`'s residual | `SQL-PAGE-001`, `SQL-CLIENT-001`, `SQL-LIVE-002` | `tests/contract/test_console_server.py::test_the_policy_admits_the_relay_alone`, `tests/contract/test_console_pages.py::test_only_pg_js_opens_a_websocket`, `tests/contract/test_console_sql.py::test_the_password_reaches_only_the_socket`, `tests/contract/test_console_pg.py::test_the_scram_proof_equals_pythons`, `tests/external/test_session44_sql_editor.py::test_the_console_policy_names_the_relay` | 44 |
+| `THR-SQL-EXHAUST` | Opens and holds as many relay sessions, or as many database connections, as it can | The relay's availability; each project's connections | 32 sessions in total, 4 per door host, 4 per source (`X-Real-Ip`, which the edge overwrites) closed 4429; idle 300 s and total 1,800 s closed 4408; one message at most 1 MiB; 64 MiB down and 64 KiB before the door is ready closed 4413; each role's `CONNECTION LIMIT` enforced by PostgreSQL and PgBouncer exactly as for `psql` (ADR 0286, D2736, D2741, D2764) | Each session is one log line with its outcome, close code and bytes | 32 sessions can be held by anyone for up to 30 minutes each; the relay is the editor's availability, never the doors' | `SQL-RELAY-002`, `SQL-LIVE-001` | `tests/contract/test_sql_relay.py::test_the_ceilings_refuse_the_next_session`, `tests/contract/test_sql_relay.py::test_an_idle_session_is_closed`, `tests/contract/test_sql_relay.py::test_a_session_is_closed_at_its_total`, `tests/contract/test_sql_relay.py::test_the_byte_caps_close_the_session`, `tests/external/test_session44_sql_editor.py::test_the_role_stayed_inside_its_limit` | 44 |
+| `THR-SQL-READ` | Reads the relay's output or memory, or captures the SASL exchange it carries | Statements, rows, and a password guessable from a captured exchange | One line per session and nothing else, the library's loggers silenced; a canary offline through a real PostgreSQL and live on the host; the client refuses a server-first message under 4,096 iterations or with a nonce that does not extend its own; the console and the CLI make 32-byte passwords (ADR 0286, D2743, D2762, D2767) | The host proof reads the relay container's whole log: session lines alone, no marker | The relay reads what it carries while it carries it (the operator's choice, D2732); a weak password set through the raw API is guessable offline from a captured exchange | `SQL-RELAY-003`, `SQL-HOST-001`, `SQL-CLIENT-001` | `tests/contract/test_sql_relay.py::test_no_line_holds_the_payload`, `tests/contract/test_sql_relay.py::test_the_relay_reads_no_secret_and_no_file`, `tests/deployment/test_session44_sql_relay_host.py::test_the_relay_logged_no_payload`, `tests/contract/test_console_pg.py::test_the_scram_proof_equals_pythons` | 44 |
+| `THR-SQL-DEADLINE` | Runs a statement that never ends, through the editor | A project's connections and its CPU | The editor cancels its own statement 60 s after sending it, and on the person's click -- a CancelRequest sent as its own relay session, so it arrives encrypted -- and waits for that session before the next statement; the relay ends any session at 30 minutes (ADR 0285, D2735, D2754, D2766) | The cancelled statement's `57014` is shown, named as the deadline's | No customer role has a `statement_timeout`: `psql` can still hold a statement for as long as it likes -- named, not closed | `SQL-CLIENT-001`, `SQL-LIVE-001` | `tests/contract/test_console_pg.py::test_a_cancel_stops_the_statement`, `tests/external/test_session44_sql_editor.py::test_the_cancel_stopped_the_statement` | 44 |
 
 ## Studio: a page in the operator's browser, on the operator's machine
 
@@ -387,7 +392,9 @@ technically bounded in this beta"* (D1971).
     `tests/deployment/test_session42_telemetry_host.py::test_the_listeners_did_not_change`).
 
 Items 16–21 are Session 43's (ADRs 0280–0284), written in its Run 1. **Each
-moved into the table in Run 9**, the run that registered its requirement — a
+moved into the table in Run 9**, the run that registered its requirement; items
+22–26 are Session 44's (ADRs 0285–0286), written in its Run 1 and moved into the
+table in its Run 7 — a
 row naming an unregistered requirement fails
 `test_threat_model_requirement_ids_exist_in_the_registry` (D2681). The list
 was numbered 13 twice (D2673); it continues from 16.
@@ -457,7 +464,7 @@ was numbered 13 twice (D2673); it continues from 16.
     against a TOTP code is one in 10⁶ per window. **Unchanged in Session 43** —
     a throttle is an operator decision. The site linking the console changes who
     can reach the door, not what the door is.
-22. **The relay becomes an open proxy** (Session 44, ADR 0286, D2739–D2741).
+22. **The relay becomes an open proxy** (Session 44, ADR 0286, D2739–D2741). **In the table as `THR-SQL-PROXY`** since Session 44's Run 7.
     The SQL relay opens TCP connections on a browser's behalf, and it
     authenticates nothing. Owed: it reaches one address only — the edge's own
     Postgres entrypoint, `apg-edge-proxy:8432` on the control project's `edge`
@@ -476,7 +483,7 @@ was numbered 13 twice (D2673); it continues from 16.
     Residual: `Origin` stops a browser on another site, not a non-browser client
     — which can already reach every door directly on 5432.
 23. **The customer's database password in the page** (Session 44, ADR 0285,
-    D2732, D2744, D2756). From this session the console holds the most valuable
+    D2732, D2744, D2756). **In the table as `THR-SQL-SECRET`** since Session 44's Run 7. From this session the console holds the most valuable
     secret a customer has: a password that opens their data. Owed: the console's
     policy names exactly one more origin, `connect-src 'self'
     wss://sql.<zone>`, rendered from the relay's name — there is nowhere else a
@@ -493,7 +500,7 @@ was numbered 13 twice (D2673); it continues from 16.
     `tests/contract/test_console_sql.py::test_the_password_reaches_only_the_socket`,
     `tests/contract/test_console_pg.py::test_the_scram_proof_equals_pythons`).
 24. **Exhaustion of the relay or of a project's connections** (Session 44, ADR
-    0286, D2736, D2741). An unauthenticated service holding long-lived sockets
+    0286, D2736, D2741). **In the table as `THR-SQL-EXHAUST`** since Session 44's Run 7. An unauthenticated service holding long-lived sockets
     is a pool anyone can drain. Owed: 32 sessions in total, 4 per door host, 4
     per source address (`X-Real-Ip`, which rig 44a measured the edge overwriting
     whatever a client sends) → close `4429`; idle 300 s and total 1,800 s →
@@ -508,7 +515,7 @@ was numbered 13 twice (D2673); it continues from 16.
     held by anyone for up to 30 minutes each; the relay is the editor's
     availability, never the doors'.
 25. **The relay can read what it carries** (Session 44, ADR 0286, D2732, D2743;
-    the operator's choice). TLS ends at the edge on the browser's side and
+    the operator's choice). **In the table as `THR-SQL-READ`** since Session 44's Run 7. TLS ends at the edge on the browser's side and
     starts again at the relay towards the door, so the relay process holds the
     plaintext protocol in memory: statements, rows and the SASL exchange —
     never the password. Owed: one line per session (an id, the door host, the
@@ -528,7 +535,7 @@ was numbered 13 twice (D2673); it continues from 16.
     practical — **a verifier a customer computes from a weak password through
     the raw API is the customer's risk**, said in the editor's documentation. The
     host's root could already read every database; the relay adds no new reader.
-26. **A statement with no deadline** (Session 44, ADR 0285, D2735). No customer
+26. **A statement with no deadline** (Session 44, ADR 0285, D2735). **In the table as `THR-SQL-DEADLINE`** since Session 44's Run 7. No customer
     role has a `statement_timeout` and the customer poolers set no
     `query_timeout`: a customer's `psql` can hold a statement for as long as it
     likes, and so could an editor session. Owed: the editor cancels its own

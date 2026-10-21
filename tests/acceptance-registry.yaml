@@ -8298,3 +8298,164 @@
     **The site, live** (ADR 0283, D2720): the apex and `www` serve this commit's
     build byte for byte, with the CSP header and nothing loaded from any other
     host, and the pricing page's plans equal `GET /v1/plans`.
+
+# Session 44 (ADR 0285-0286)
+
+- id: SQL-CLIENT-001
+  priority: P0
+  target_session: 44
+  test_nodeids:
+    - tests/contract/test_console_pg.py::test_the_startup_message_is_exact
+    - tests/contract/test_console_pg.py::test_the_scram_proof_equals_pythons
+    - tests/contract/test_console_pg.py::test_a_forged_server_signature_is_refused
+    - tests/contract/test_console_pg.py::test_only_scram_is_spoken
+    - tests/contract/test_console_pg.py::test_a_message_outside_the_bound_closes_the_connection
+    - tests/contract/test_console_pg.py::test_a_query_returns_its_rows
+    - tests/contract/test_console_pg.py::test_an_error_names_its_code
+    - tests/contract/test_console_pg.py::test_copy_is_refused
+    - tests/contract/test_console_pg.py::test_a_cancel_stops_the_statement
+    - tests/contract/test_console_pg.py::test_the_row_cap_cancels
+  description: >-
+    **The console's wire client** (ADR 0285): the startup message exact; the
+    SCRAM-SHA-256 proof equal to Python's, a server-first under 4,096 iterations
+    or with a foreign nonce refused; a forged server signature refused before
+    AuthenticationOk; any other authentication refused; a message outside 4
+    bytes..1 MiB closes the connection; through PgBouncer in both pool modes and
+    the relay, rows, SQLSTATEs (a wrong password 08P01), COPY refused, a cancel
+    and the 60 s deadline stopping a statement, the row and byte caps truncating
+    with no error.
+
+- id: SQL-RELAY-001
+  priority: P0
+  target_session: 44
+  test_nodeids:
+    - tests/contract/test_sql_relay.py::test_a_foreign_origin_is_refused_before_the_upgrade
+    - tests/contract/test_sql_relay.py::test_no_origin_is_refused
+    - tests/contract/test_sql_relay.py::test_only_a_door_name_is_accepted
+    - tests/contract/test_sql_relay.py::test_an_address_or_a_port_is_refused
+    - tests/contract/test_sql_relay.py::test_the_grammar_agrees_with_naming
+    - tests/contract/test_sql_relay.py::test_health_answers_without_an_origin
+    - tests/contract/test_sql_relay.py::test_a_malformed_environment_refuses_to_start
+  description: >-
+    **The relay's admission** (ADR 0286): a foreign or absent `Origin` refused
+    403 before the upgrade; only a door name in the grammar `naming` derives
+    accepted, an address, a port, a query or another path refused 400 before any
+    TCP; health answered without an `Origin`; a missing or malformed environment
+    refuses to start.
+
+- id: SQL-RELAY-002
+  priority: P0
+  target_session: 44
+  test_nodeids:
+    - tests/contract/test_sql_relay.py::test_the_ceilings_refuse_the_next_session
+    - tests/contract/test_sql_relay.py::test_an_idle_session_is_closed
+    - tests/contract/test_sql_relay.py::test_a_session_is_closed_at_its_total
+    - tests/contract/test_sql_relay.py::test_a_large_message_is_refused
+    - tests/contract/test_sql_relay.py::test_the_byte_caps_close_the_session
+    - tests/contract/test_sql_relay.py::test_a_text_frame_is_refused
+    - tests/contract/test_sql_relay.py::test_the_relay_pings
+  description: >-
+    **The relay's bounds** (ADR 0286): the 33rd session, the 5th per door and
+    the 5th per source closed 4429; idle and total closed 4408; a message over 1
+    MiB closed 1009; the 64 MiB and 64 KiB caps close 4413; a text frame closes
+    4400; it pings.
+
+- id: SQL-RELAY-003
+  priority: P0
+  target_session: 44
+  test_nodeids:
+    - tests/contract/test_sql_relay.py::test_no_line_holds_the_payload
+    - tests/contract/test_sql_relay.py::test_the_relay_reads_no_secret_and_no_file
+    - tests/contract/test_sql_relay.py::test_the_door_is_verified
+    - tests/contract/test_sql_relay.py::test_an_unreachable_door_is_reported_unreachable
+  description: >-
+    **The relay holds and records nothing** (ADR 0286, D2743): no line holds a
+    password, a SASL message, a statement or a marker, through a real PostgreSQL
+    with the relay run as the image runs it; it opens no file, reads four
+    environment names and no CA; the door is verified (a stranger CA or a name
+    the certificate lacks closes 4502); an unreachable door is reported
+    unreachable, never asleep.
+
+- id: SQL-PLANE-001
+  priority: P0
+  target_session: 44
+  test_nodeids:
+    - tests/contract/test_process_limits.py::test_the_sql_relay_is_bounded
+    - tests/contract/test_sql_relay_plane.py::test_the_profile_is_added_only_for_the_control_project
+    - tests/contract/test_sql_relay_plane.py::test_the_router_rule_is_the_relay_host_alone
+    - tests/contract/test_sql_relay_plane.py::test_the_relay_holds_no_secret_and_no_mount
+    - tests/contract/test_sql_relay_plane.py::test_the_names_are_derived
+    - tests/contract/test_sql_relay_plane.py::test_the_upstream_follows_the_edges_constants
+    - tests/contract/test_version_lock.py::test_websockets_is_locked
+  description: >-
+    **The `sql-relay` service** (ADR 0286): bounded, read-only, uid 65532, no
+    secret, no mount, network `edge` only, profile `sql-relay` added only for
+    the control project, its router rule exactly its own host, every name and
+    its upstream derived, `websockets` pinned in one version for the image and
+    the offline suite.
+
+- id: SQL-PAGE-001
+  priority: P0
+  target_session: 44
+  test_nodeids:
+    - tests/contract/test_console_server.py::test_the_policy_admits_the_relay_alone
+    - tests/contract/test_console_server.py::test_a_bad_relay_origin_refuses_to_start
+    - tests/contract/test_console_pages.py::test_only_pg_js_opens_a_websocket
+    - tests/contract/test_console_sql.py::test_an_asleep_project_opens_no_socket
+    - tests/contract/test_console_sql.py::test_a_project_without_doors_shows_no_editor
+    - tests/contract/test_console_sql.py::test_the_password_reaches_only_the_socket
+    - tests/contract/test_console_sql.py::test_every_ending_has_a_sentence
+  description: >-
+    **The editor page** (ADR 0285): the console's policy admits `'self'` and the
+    relay's origin alone, and a bad origin refuses to start; only `pg.js` opens
+    a WebSocket; an asleep project opens no socket; a project with no door shows
+    no editor; the password reaches only the socket; every ending is a sentence,
+    never *asleep*.
+
+- id: SQL-HOST-001
+  priority: P0
+  target_session: 44
+  test_nodeids:
+    - tests/deployment/test_session44_sql_relay_host.py::test_the_relay_runs_only_on_the_control_project
+    - tests/deployment/test_session44_sql_relay_host.py::test_the_relay_is_bounded
+    - tests/deployment/test_session44_sql_relay_host.py::test_the_listeners_did_not_change
+    - tests/deployment/test_session44_sql_relay_host.py::test_the_relay_logged_no_payload
+  description: >-
+    **The relay on the host** (ADR 0286): on `control-prod` only, bounded,
+    healthy, no mount, its memory peak read; the listeners unchanged; its whole
+    log session and refusal lines in ADR 0286's grammar, no marker, statement or
+    SASL word, the walk's session there.
+
+- id: SQL-LIVE-001
+  priority: P0
+  target_session: 44
+  test_nodeids:
+    - tests/external/test_session44_sql_editor.py::test_the_editor_walk_reached_every_step
+    - tests/external/test_session44_sql_editor.py::test_each_door_answered_as_its_role
+    - tests/external/test_session44_sql_editor.py::test_postgres_decided_the_refusal
+    - tests/external/test_session44_sql_editor.py::test_the_cancel_stopped_the_statement
+    - tests/external/test_session44_sql_editor.py::test_the_rows_were_capped
+    - tests/external/test_session44_sql_editor.py::test_the_role_stayed_inside_its_limit
+    - tests/external/test_session44_sql_editor.py::test_the_times_were_recorded
+    - tests/external/test_session44_sql_editor.py::test_this_module_uses_no_ssh
+  description: >-
+    **The editor walk, in a real browser** (ADR 0285): through the public
+    origins with no SSH, a member signs in, opens a project's editor, and each
+    door answers as its role; PostgreSQL refuses `app_private`; Cancel stops
+    `pg_sleep`; 5,000 rows are capped at 1,000; the role's connections stay
+    within its limit; the times are recorded.
+
+- id: SQL-LIVE-002
+  priority: P0
+  target_session: 44
+  test_nodeids:
+    - tests/external/test_session44_sql_editor.py::test_a_foreign_origin_is_refused_live
+    - tests/external/test_session44_sql_editor.py::test_a_name_outside_the_grammar_is_refused_live
+    - tests/external/test_session44_sql_editor.py::test_an_unrouted_door_is_unreachable_live
+    - tests/external/test_session44_sql_editor.py::test_the_console_policy_names_the_relay
+    - tests/external/test_session44_sql_editor.py::test_the_relay_certificate_names_its_host
+  description: >-
+    **The relay, live** (ADR 0286): a foreign `Origin` refused 403, a name
+    outside the grammar 400, an unrouted door name closed 4502; the console's
+    policy and `env.json` name the relay's origin; the relay's certificate names
+    its host and its health answers.

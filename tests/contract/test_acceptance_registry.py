@@ -124,8 +124,9 @@ ID_PATTERN = re.compile(
     # for usage samples, notifications and idle sleep. Session 42 (ADR 0277-0279)
     # adds `INS` for the telemetry plane, `pg_stat_statements`, Query Insights and
     # monitoring. Session 43 (ADR 0280-0284) adds `CON` for the console and its
-    # session and `SITE` for the public site.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV|LEDGER|CTL|KEY|OPN|LIFE|EP|BR|PLAN|USE|INS|CON|SITE)-[A-Z0-9]+(-\d+)?$"
+    # session and `SITE` for the public site. Session 44 (ADR 0285-0286) adds
+    # `SQL` for the browser SQL editor and its relay.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU|NODE|WF|EVT|CONN|GOV|LEDGER|CTL|KEY|OPN|LIFE|EP|BR|PLAN|USE|INS|CON|SITE|SQL)-[A-Z0-9]+(-\d+)?$"
 )
 
 

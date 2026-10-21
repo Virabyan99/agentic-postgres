@@ -44,7 +44,7 @@ the customer, and the session's close moves it to `beta` or back to
 | [Notifications](#notifications) | `beta` | 42 |
 | [Email](#email) | `planned` | — |
 | [Passkeys](#passkeys) | `planned` | — |
-| [SQL editor](#sql_editor) | `planned` | 44 |
+| [SQL editor](#sql_editor) | `trial` | 44 |
 | [Temporary support access](#support_access) | `not_offered` | — |
 | [Autoscaling](#autoscaling) | `not_offered` | — |
 | [High availability](#high_availability) | `not_offered` | — |
@@ -147,13 +147,13 @@ the customer, and the session's close moves it to `beta` or back to
 
 `console` · **beta** · since Session 43
 
-**What a customer reads.** The console at https://control.agenticpostgresql.com/console/: accept an invitation link, set up your second factor, sign in, and see your organizations, projects, connection strings, branches, backups, usage, insights, monitoring, plan, notifications and settings. A project is created with the command-line client in this beta; the console has no data view and runs no SQL.
+**What a customer reads.** The console at https://control.agenticpostgresql.com/console/: accept an invitation link, set up your second factor, sign in, and see your organizations, projects, connection strings, branches, backups, usage, insights, monitoring, plan, notifications and settings. A project is created with the command-line client in this beta; the console runs no SQL on the platform's side, and its SQL editor is your own client.
 
 **Today.** Static pages served by the control project's console service (ADR 0280) at /, /accept and /console/, every page a named /api/v1 call, signed in with two __Host- cookies honoured only with the console's header and, for a write, its own origin (ADR 0281). Built in Session 43 and walked on 1.21.0 in a real browser: an invitation link to a working connection string in 26.1 s, the second factor read by a phone, the CSRF rule and the cookies read live, the console bounded on the host -- console_walk_live, console_csrf_live and console_live_host passed on the tagged evidence (1.21.0 on 012ac06).
 
 *Customer-facing evidence:* `console_server`, `console_session_cookie`, `console_csrf_rule`, `console_scram`, `console_plane`, `console_ledger_map`, `console_walk_live`, `console_csrf_live`, `console_live_host`.
 
-**Stage 5.** Static pages served by the control project, calling /api/v1 only: onboarding, projects, connect, branches, backups, usage, insights, monitoring, plan, notifications and settings; no data view and no SQL. A project is created with the command-line client in this beta.
+**Stage 5.** Static pages served by the control project, calling /api/v1 only: onboarding, projects, connect, branches, backups, usage, insights, monitoring, plan, notifications and settings; no SQL on the platform's side -- the SQL editor is the customer's own client (ADR 0285). A project is created with the command-line client in this beta.
 
 **Eventually (not promised).** A full web console with in-browser data tools.
 
@@ -569,15 +569,19 @@ the customer, and the session's close moves it to `beta` or back to
 
 ## SQL editor
 
-`sql_editor` · **planned** · since Session 43
+`sql_editor` · **trial** · since Session 43
 
-**What a customer reads.** Not open yet.
+**What a customer reads.** Being verified: a SQL editor in the console that connects as your own database role, with your password held only in the page.
 
-**Today.** No product surface runs SQL (ADR 0246).
+**Today.** The console's SQL editor is the customer's own PostgreSQL client (ADR 0285): it speaks the protocol from the page, proves the password with SCRAM-SHA-256 and sends it nowhere, through a relay on its own name that authenticates nothing, holds nothing and records none of what it carries (ADR 0286). Trialed in Session 44 on 1.22.0: the editor walk in a real browser, the relay asked through its public name, and the relay on the host (sql_editor_live, sql_relay_live, sql_relay_host).
 
-**Stage 5.** Planned for Session 44 (D2592): a browser SQL editor holding the customer's own credential in the page, through a WebSocket relay that holds none.
+*Customer-facing evidence:* `sql_editor_live`, `sql_relay_live`, `sql_relay_host`.
+
+**Stage 5.** A SQL editor in the console on a project's pooled and direct doors, as the door's own role, the password typed into the page; PostgreSQL decides every grant, row policy and connection limit. A statement still running after 60 seconds is cancelled; a session ends after 30 minutes or 5 idle minutes; at most 1,000 rows are shown.
 
 **Eventually (not promised).** A browser SQL editor acting as the person, never a shared credential.
+
+*Controls:* `/console/`.
 
 <a id="support_access"></a>
 

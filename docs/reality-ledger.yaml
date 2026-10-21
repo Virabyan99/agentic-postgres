@@ -215,12 +215,12 @@ rows:
     concept: Web console
     status: beta
     customer_text: >-
-      The console at
-      https://control.agenticpostgresql.com/console/: accept an invitation link,
-      set up your second factor, sign in, and see your organizations, projects,
-      connection strings, branches, backups, usage, insights, monitoring, plan,
-      notifications and settings. A project is created with the command-line
-      client in this beta; the console has no data view and runs no SQL.
+      The console at https://control.agenticpostgresql.com/console/: accept an
+      invitation link, set up your second factor, sign in, and see your
+      organizations, projects, connection strings, branches, backups, usage,
+      insights, monitoring, plan, notifications and settings. A project is
+      created with the command-line client in this beta; the console runs no SQL
+      on the platform's side, and its SQL editor is your own client.
     today: >-
       Static pages served by the control project's console service (ADR 0280) at
       /, /accept and /console/, every page a named /api/v1 call, signed in with
@@ -245,8 +245,9 @@ rows:
     stage5_reality: >-
       Static pages served by the control project, calling /api/v1 only:
       onboarding, projects, connect, branches, backups, usage, insights,
-      monitoring, plan, notifications and settings; no data view and no SQL.
-      A project is created with the command-line client in this beta.
+      monitoring, plan, notifications and settings; no SQL on the platform's
+      side -- the SQL editor is the customer's own client (ADR 0285). A project
+      is created with the command-line client in this beta.
     eventual: A full web console with in-browser data tools.
     controls:
       - /console/
@@ -987,18 +988,32 @@ rows:
   # -------------------------------------------------------------------------
   - id: sql_editor
     concept: SQL editor
-    status: planned
+    status: trial
     customer_text: >-
-      Not open yet.
-    today: No product surface runs SQL (ADR 0246).
+      Being verified: a SQL editor in the console that connects as your own
+      database role, with your password held only in the page.
+    today: >-
+      The console's SQL editor is the customer's own PostgreSQL client (ADR
+      0285): it speaks the protocol from the page, proves the password with
+      SCRAM-SHA-256 and sends it nowhere, through a relay on its own name that
+      authenticates nothing, holds nothing and records none of what it carries
+      (ADR 0286). Trialed in Session 44 on 1.22.0: the editor walk in a real
+      browser, the relay asked through its public name, and the relay on the
+      host (sql_editor_live, sql_relay_live, sql_relay_host).
     today_evidence: null
-    evidence: []
+    evidence:
+      - sql_editor_live
+      - sql_relay_live
+      - sql_relay_host
     stage5_reality: >-
-      Planned for Session 44 (D2592): a browser SQL editor holding the
-      customer's own credential in the page, through a WebSocket relay that
-      holds none.
+      A SQL editor in the console on a project's pooled and direct doors, as the
+      door's own role, the password typed into the page; PostgreSQL decides
+      every grant, row policy and connection limit. A statement still running
+      after 60 seconds is cancelled; a session ends after 30 minutes or 5 idle
+      minutes; at most 1,000 rows are shown.
     eventual: A browser SQL editor acting as the person, never a shared credential.
-    controls: []
+    controls:
+      - /console/
     since_session: 43
     target_session: 44
 

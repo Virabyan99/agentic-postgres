@@ -1301,8 +1301,8 @@ from pathlib import Path
 #:
 #: **No released migration. No outputs, manifest, host, capability, lock or
 #: secret schema moves** (outputs stay v22, the project manifest 11, `host.yaml`
-#: 4). The Ledger's `console` row is `trial` (ADR 0261) and `sql_editor` is
-#: `planned` for Session 44.
+#: 4). The Ledger's `console` row was `trial` (ADR 0261) and `sql_editor`
+#: `planned` for Session 44 -- `console` moved to `beta` at Session 43's close.
 #:
 #: **`VERSION` moves to `1.21.0`.** What moved: the `console` service, under a
 #: Compose profile only the control project's render enables (`APG_CONSOLE=1`),
@@ -1332,7 +1332,59 @@ from pathlib import Path
 #: confirms the class against a DEPLOYMENT: `upgrade plan` on every project,
 #: with the same declaration, before the first 1.21.0 deploy -- and a `major`
 #: there is a stop condition.
-CURRENT_SESSION = 43
+#:
+#: **Session 44 moves it to 44, all-or-nothing again** (D690): NINE requirements
+#: and nine claims -- `CLAIMS` 322 -> 331 and `OFFLINE_CLAIMS` 149 -> 155, counted
+#: from the tuples (D1628) -- six declared offline, two EXTERNAL and one host,
+#: every offline half written in the run that built its piece (Runs 2-6) and every
+#: live half here. One family joins the registry: `SQL`, the browser SQL editor and
+#: its relay. The external claims are the editor walk in a real browser -- a member
+#: signed in, a project's editor used on both doors, PostgreSQL deciding every
+#: refusal -- and the relay asked through its public name with clients a browser
+#: could not be; the host claim is the relay on the control project only, bounded,
+#: its whole log holding session lines alone. **The lifecycle and the branches are
+#: re-earned on the trip** (D2748) and the console walk re-run (D2749): the
+#: Sessions 38-43 proofs refuse a record of another release.
+#:
+#: **The session's subject is the SQL editor.** ADR 0285: the customer's own
+#: PostgreSQL client, written here (`pg.js`: SCRAM-SHA-256 through WebCrypto, the
+#: server's signature checked before AuthenticationOk, the simple query protocol,
+#: a cancel as its own relay session), the password held only in the page, the
+#: console's policy naming one more origin -- and ADR 0246's sentence amended: no
+#: product surface runs SQL on the platform's side or holds a credential that
+#: opens a project's data. ADR 0286: the relay, its own service on its own name
+#: (`sql.<zone>`), authenticating nothing, holding nothing, reaching only door
+#: names through the edge's own Postgres entrypoint, and recording none of what it
+#: carries.
+#:
+#: **No released migration. No outputs, manifest, host, capability, lock or secret
+#: schema moves** (outputs stay v22, the project manifest 11, `host.yaml` 4). The
+#: Ledger's `sql_editor` row is `trial` (ADR 0261); the `console` row has been
+#: `beta` since Session 43's close.
+#:
+#: **`VERSION` moves to `1.22.0`.** What moved: the `sql-relay` service, under a
+#: Compose profile only the control project's render enables (`APG_SQL_RELAY=1`),
+#: its router on its own name; the console's server (its policy from one rendered
+#: origin, `pg.js` and `sql.js`), so the console image moves; the Postgres image's
+#: apt pins (D2731 on `main` since Session 43's close), so **every project's
+#: database restarts once** (D2747); `websockets` pinned for the relay's image.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig: a git worktree at
+#: `012ac06`, the commit that IS deployed, and a `tar`-piped copy of this working
+#: tree, both rendering the INSTALLED tree's `project.example.yaml`: `bump minor`,
+#: **`requires patch`**, verdict `ok`, `changes [image_digest]`, `reasons []`,
+#: `operator_digests_moved []`; two leaves differ (`versions_lock_sha256`,
+#: `template_version` 1.21.0 -> 1.22.0). No pair of rendered documents can see a
+#: new service on the control project or a console policy, so the reading prices
+#: the lock alone; **`1.22.0` is proposed above that floor** (D2791) -- a new public
+#: surface is a feature, and minor covers patch. What an operator must KNOW the
+#: reading cannot show: the control project's deploy starts the relay and its
+#: certificate is the edge resolver's first issuance for `sql.<zone>`; every
+#: project's database restarts once; the reconciler is restarted after the
+#: checkout moves (D2179). **The trip** confirms the class against a DEPLOYMENT:
+#: `upgrade plan` on every project before the first 1.22.0 deploy -- and a `major`
+#: there is a stop condition.
+CURRENT_SESSION = 44
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

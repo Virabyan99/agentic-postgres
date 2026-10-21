@@ -162,7 +162,9 @@ def test_every_page_names_reachable_rows() -> None:
         assert page.ledger, page.route
         for row in page.ledger:
             assert statuses.get(row) in reality_ledger.REACHABLE, (page.route, row)
-    for unreachable in ("sql_editor", "billing", "no_such_row"):
+    # `passkeys` since Session 44 (D2745): `sql_editor` became reachable at the bump,
+    # and the example is a row that stays planned.
+    for unreachable in ("passkeys", "billing", "no_such_row"):
         with pytest.raises(site_build.SiteError, match="names the Ledger row"):
             site_build.check_page(_page("A sentence.", (unreachable,)), ledger)
     with pytest.raises(site_build.SiteError, match="only the Ledger page"):

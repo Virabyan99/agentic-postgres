@@ -267,6 +267,8 @@ SHELL_COMMANDS = (
     # `--console-record-file` (D2677). Listed the run it landed (D1014), `git
     # add`ed first (D1188).
     "bin/session-43-check.sh",
+    # Session 44 (ADR 0285-0286): the browser SQL editor and its relay.
+    "bin/session-44-check.sh",
     # Session 38 (ADR 0257, D2150): customer slots -- prepare, status, revoke.
     # Listed the run it landed (D1014), `git add`ed first (D1188).
     "bin/slot.sh",

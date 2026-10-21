@@ -514,6 +514,21 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "site_workflow",
         "cli_package",
         "cli_publish_workflow",
+        # Session 44 (ADR 0285-0286). SIX, each a property of a CHECKOUT: the
+        # console's wire client against PostgreSQL through PgBouncer and the relay
+        # (`sql_client`); the relay's admission, bounds and silence
+        # (`sql_relay_admission`, `sql_relay_bounds`, `sql_relay_holds_nothing`);
+        # its service (`sql_relay_plane`); and the editor page (`sql_editor_page`).
+        #
+        # The session's other THREE are deliberately not here: two are read from
+        # the workstation (EXTERNAL) -- the editor walk in a real browser and the
+        # relay asked through its public name -- and one is the relay on the host.
+        "sql_client",
+        "sql_relay_admission",
+        "sql_relay_bounds",
+        "sql_relay_holds_nothing",
+        "sql_relay_plane",
+        "sql_editor_page",
     }
 )
 
@@ -1025,6 +1040,19 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "console_walk_live": ("CON-LIVE-001",),
     "console_csrf_live": ("CON-LIVE-002",),
     "site_live": ("SITE-LIVE-001",),
+    # Session 44 (ADR 0285-0286). NINE claims, landing with the constant (D690):
+    # six offline, two external and one host, each requirement its own claim
+    # (ADR 0089). The session's subject: the browser SQL editor -- the customer's
+    # own client in the console -- and the relay that carries it and holds nothing.
+    "sql_client": ("SQL-CLIENT-001",),
+    "sql_relay_admission": ("SQL-RELAY-001",),
+    "sql_relay_bounds": ("SQL-RELAY-002",),
+    "sql_relay_holds_nothing": ("SQL-RELAY-003",),
+    "sql_relay_plane": ("SQL-PLANE-001",),
+    "sql_editor_page": ("SQL-PAGE-001",),
+    "sql_relay_host": ("SQL-HOST-001",),
+    "sql_editor_live": ("SQL-LIVE-001",),
+    "sql_relay_live": ("SQL-LIVE-002",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

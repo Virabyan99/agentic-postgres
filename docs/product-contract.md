@@ -97,7 +97,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 407 requirements**
+**P0 — 416 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -508,6 +508,15 @@ Priorities:
 | `SITE-CLAIM-001` | 43 | **The site claims only what is reachable** (ADR 0283, D2662): every page names its Ledger rows and each is reachable; no page holds a forbidden word, `bin/`, `sudo`, `ssh `, `git clone` or `--session`; no asset is third-party; `_headers` carries the site's CSP. |
 | `SITE-DEPLOY-001` | 43 | **The site's deployment** (D2653): the site workflow deploys only after `contract` succeeded on `main`, checks out that run's SHA, pins wrangler and every action, and holds the token only in the `site` environment. |
 | `SITE-LIVE-001` | 43 | **The site, live** (ADR 0283, D2720): the apex and `www` serve this commit's build byte for byte, with the CSP header and nothing loaded from any other host, and the pricing page's plans equal `GET /v1/plans`. |
+| `SQL-CLIENT-001` | 44 | **The console's wire client** (ADR 0285): the startup message exact; the SCRAM-SHA-256 proof equal to Python's, a server-first under 4,096 iterations or with a foreign nonce refused; a forged server signature refused before AuthenticationOk; any other authentication refused; a message outside 4 bytes..1 MiB closes the connection; through PgBouncer in both pool modes and the relay, rows, SQLSTATEs (a wrong password 08P01), COPY refused, a cancel and the 60 s deadline stopping a statement, the row and byte caps truncating with no error. |
+| `SQL-HOST-001` | 44 | **The relay on the host** (ADR 0286): on `control-prod` only, bounded, healthy, no mount, its memory peak read; the listeners unchanged; its whole log session and refusal lines in ADR 0286's grammar, no marker, statement or SASL word, the walk's session there. |
+| `SQL-LIVE-001` | 44 | **The editor walk, in a real browser** (ADR 0285): through the public origins with no SSH, a member signs in, opens a project's editor, and each door answers as its role; PostgreSQL refuses `app_private`; Cancel stops `pg_sleep`; 5,000 rows are capped at 1,000; the role's connections stay within its limit; the times are recorded. |
+| `SQL-LIVE-002` | 44 | **The relay, live** (ADR 0286): a foreign `Origin` refused 403, a name outside the grammar 400, an unrouted door name closed 4502; the console's policy and `env.json` name the relay's origin; the relay's certificate names its host and its health answers. |
+| `SQL-PAGE-001` | 44 | **The editor page** (ADR 0285): the console's policy admits `'self'` and the relay's origin alone, and a bad origin refuses to start; only `pg.js` opens a WebSocket; an asleep project opens no socket; a project with no door shows no editor; the password reaches only the socket; every ending is a sentence, never *asleep*. |
+| `SQL-PLANE-001` | 44 | **The `sql-relay` service** (ADR 0286): bounded, read-only, uid 65532, no secret, no mount, network `edge` only, profile `sql-relay` added only for the control project, its router rule exactly its own host, every name and its upstream derived, `websockets` pinned in one version for the image and the offline suite. |
+| `SQL-RELAY-001` | 44 | **The relay's admission** (ADR 0286): a foreign or absent `Origin` refused 403 before the upgrade; only a door name in the grammar `naming` derives accepted, an address, a port, a query or another path refused 400 before any TCP; health answered without an `Origin`; a missing or malformed environment refuses to start. |
+| `SQL-RELAY-002` | 44 | **The relay's bounds** (ADR 0286): the 33rd session, the 5th per door and the 5th per source closed 4429; idle and total closed 4408; a message over 1 MiB closed 1009; the 64 MiB and 64 KiB caps close 4413; a text frame closes 4400; it pings. |
+| `SQL-RELAY-003` | 44 | **The relay holds and records nothing** (ADR 0286, D2743): no line holds a password, a SASL message, a statement or a marker, through a real PostgreSQL with the relay run as the image runs it; it opens no file, reads four environment names and no CA; the door is verified (a stranger CA or a name the certificate lacks closes 4502); an unreachable door is reported unreachable, never asleep. |
 
 **P1 — 8 requirements**
 

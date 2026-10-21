@@ -229,6 +229,12 @@ ENVIRONMENT_VARIABLES = (
     # never a password, seed, token or cookie value (its self-check exits 6
     # first). The rotated password sits beside it in the 0600 file it names.
     "APG_CONSOLE_RECORD_FILE",
+    # Session 44 (ADR 0285, D2752). `APG_SQL_EDITOR_RECORD_FILE` (external) is the
+    # 0600 record `tests/external/browser/sql_walk.py` wrote while a real Chromium
+    # used the SQL editor on both doors: step names and times, the doors' names,
+    # result cells, SQLSTATEs, the marker -- never a password, seed or cookie
+    # value (its self-check exits 6 first).
+    "APG_SQL_EDITOR_RECORD_FILE",
 )
 
 
