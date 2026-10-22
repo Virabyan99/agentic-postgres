@@ -1,6 +1,6 @@
 # Session 44 — The browser SQL editor: the customer's own client in the console, through a relay that holds nothing
 
-**Status: EXECUTING — Runs 1–6 DONE (2026-10-22; rows D2759–D2790, ADRs 0285–0286; NEXT FREE D2791, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
+**Status: EXECUTING — Runs 1–7 DONE (2026-10-22; rows D2759–D2794, ADRs 0285–0286; NEXT FREE D2795, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
 clean, `main` = `origin/main`) against the host as read that afternoon (§0).
 Rows **D2732–D2758** at planning; the runs add theirs from **D2759**. ADRs
 **0285–0286** are Run 1's. **NEXT FREE after this table: D2759, ADR 0287.**
@@ -434,7 +434,7 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2757** | Stage plan *Measures* and §7: the editor proved live. | Sleeping a project live costs ~70 s down for its names (Session 43: 69.4 / 72.2 s) and `slot3-prod` is the kept customer project; `slot8-prod` sleeps inside the lifecycle instrument, which drives the CLI, not a browser. | **The *asleep* answer is proved offline** (`test_console_sql.py::test_an_asleep_project_opens_no_socket`, the page in Node with a fake `api.js`, every state in `control_states` walked; **the control**: `ready` opens one) **and the `4502` path live** (E1: a door name that matches the grammar and has no router — `pool.slot99.<zone>` — closes `4502`; the same handshake refusal a sleeping door gives, ADR 0268 `:73`). Sleeping `slot3-prod` for the editor is not done. | A live proof of a sentence the control API already proves live (`idle_sleep_live`) is not worth a customer project's outage. | 0195 |
 | **D2758** | — | The walk's console identity: Session 43 invited a NEW walker per walk; the probe owner (`~/s37/probe.json`, its password and TOTP seed in `~/s37/probe-password`, `probe-otpauth`) owns `probe-s37`, which holds `slot3-prod`. | **The editor walk (E1) signs in as the probe owner** (the driver computes the code from the seed with stdlib `hmac`; the seed, the console password and the database passwords live in variables only and are `Secret`-wrapped, D2420; `self_check` refuses a record holding any of them, the console walk's rule) — **no new account, no rotation**. It reads `customer_app` from `~/s39/run11/creds/slot3-prod/` AFTER W1′ (D2749) and `customer_admin` from the same directory. | The editor needs a signed-in member, not a new one; a rotation belongs to the walk that proves rotation. | — |
 
-**Rows added by the runs** (from **D2759**, in execution order; **next free D2791**):
+**Rows added by the runs** (from **D2759**, in execution order; **next free D2795**):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -470,6 +470,10 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2788** | D2750 (2): *"through `psql` from the workstation to the same pooled door"*. | The pinned PostgreSQL image carries **no trust store** (D590: `ca-certificates` is not in the base), so `sslrootcert=system` failed: *"certificate verify failed"*. | **The timing mounts the workstation's CA bundle read-only** (`-v /etc/ssl/certs/ca-certificates.crt:/ca.pem:ro`, `sslrootcert=/ca.pem`), the password passed by environment NAME (`-e PGPASSWORD`), never argv. Its shape read once, read-only, against the kept slot3 door at 1.21.0: 20 timings, **median 168.7 ms** (167.2–175.6) — a pre-release reading, named the workstation's. | The image the product builds adds the bundle; the stock one the instrument borrows does not. | — |
 | **D2789** | Run 6 step 1: *"A `--rehearse` mode answering from fixtures (the console walk's)"*. | The console walk's fixtures answer `/api/v1` only; the editor also opens a WebSocket to the relay. | **The rehearsal answers the relay too**, with Playwright's `route_web_socket` and a fake PostgreSQL backend in the driver: a real SCRAM exchange against the creds files, canned answers, the cancel by its own socket — so the editor's DOM, `pg.js` in Chromium and the driver ran with no host. It found two driver defects before any trip: `get_by_role("button", name="Connect")` also matched **Disconnect** (`exact=True` now), and `--leak` could not trip the self-check until the record held page text (the overview's headings, the console walk's rule). | A rehearsal that skipped the socket would have skipped the code under test. | 0285 |
 | **D2790** | Run 6 step 2: the trip scripts *"derived from `~/s43/run8/` by named substitution and read whole after"*. | The name-based leftover check passed scripts still holding a bare `43`: **`write-session-evidence.py --session 43`** in `s44-external.sh` (the merge would have written Session 43's evidence) and `GATE_43_*` exit names; and the first derivation rewrote the Python children's lineage line into a false one. | **Named steps added for both** (`--session 43`, `GATE_43_`), plus the path-part, module-name, display-name and stage spellings; the parents' docstrings keep their lineage (only usage lines move); a second grep for bare `43` ran after; **every hand edit lives in `s44-post-derive.py`**, re-applied after any re-derivation. The diff of each child against its parent was read (`derive-diffs.txt`). | A check that reads names cannot see a number; the reading of the diff can. | — |
+| **D2791** | Run 7 step 1 and §2: 1.22.0 a minor; the price *"read rather than chosen"* (D704). | D1624's rig (a worktree at the deployed `012ac06` against a `tar` copy of this tree, both rendering the installed `project.example.yaml`): `bump minor`, **`requires patch`**, verdict `ok`, `changes [image_digest]`, `reasons []`, `operator_digests_moved []`; two leaves differ (`versions_lock_sha256`, `template_version`). No pair of rendered documents can show a new service under the control project's profile or a console policy, so the reading prices the lock alone. | **`1.22.0` kept, proposed above the reading's floor**: a new public surface (the relay's name, the editor) is a feature, and a minor covers a patch. Written into the release paragraph in ADR 0162's form and into the upgrade table's row. **The trip's `upgrade plan` on every project confirms it; a `major` there is a stop condition.** | The reading prices what a document shows; what an operator meets (a new container, a new certificate) is said beside it. | — |
+| **D2792** | Run 7 step 4: `site/pages/docs/sql-editor.md` (what it is, the two doors, the password stays in the page, the relay records none of it); the first draft named the relay's host. | `test_site.py::test_the_site_names_no_host_address` (Run 7's targeted run: 1,389 passed, **1 failed**) admits only the `www.` and `control.` names on a site page — the guard the site has had since Session 43. | **The page names no host**: it says the editor connects through the relay on its own name, which the console reads from `env.json`; the guard is not widened. The gates passed it on `c947180`. | A page that names a host is one more place an address must be kept true; the console already holds it. | 0283 |
+| **D2793** | Run 4: the live half of `test_console_pg.py` runs the relay in-process and Node in a container on the bridge (D2778). | Session-01 gate shard 4 at `df5ff04`: **pass, fail, fail — even alone**. On Docker Desktop a port newly bound in WSL answers at `host.docker.internal` only once WSL's localhost forwarding has registered it; the Node container sometimes connected first and every session was refused at the handshake, no relay line written. CI's Docker Engine never lost it. | **Test-only repair at `6f90455`**: the `door` fixture retries a TCP connect to each relay port from a container on the bridge (up to 60 s) before the driver runs (`REACH`, `_reachable`). Four runs green; shards 4–6 re-run on it, passed. No product change. | A workstation race is not a product defect, and a test that loses it reads like one. | — |
+| **D2794** | Run 7 step 1: Session 44's paragraph *"the D690 shape of `:1271-1334`"*; Run 7's targeted list. | Session-01 gate shard 9 at `6f90455`: **`test_the_constants_comment_states_the_class_it_proposes` FAILED** — the paragraph said *"`1.22.0` is proposed above that floor"* but never *"ADR 0162 prices it a MINOR"*, and its schema sentence sat in the paragraph before; the proof reads the LAST paragraph only. `test_release_contract` was not in Run 7's targeted list, so the commit carried it (`df5ff04` would have gone red in CI). | **Repaired at `c947180`** (comment only): the last paragraph prices the class in that form and names the five schemas that did not move; `test_release_contract` + `test_gate_contract` (the two readers of the comment) 69 passed; shards 8 and 9 re-run at `c947180`, the first attempts kept (`shard8-attempt1-6f90455.txt`, `shard9-attempt1-df5ff04.txt`). `df5ff04`, `6f90455` and `c947180` pushed together (CI on the head, green). | **A bump's targeted list includes `test_release_contract`** — the class sentence has a reader. | 0162 |
 
 ---
 
@@ -1366,7 +1370,68 @@ a changed image declare); `bin/session-43-check.sh:1-230`;
    push after both pass. Read CI. Then a documentation commit recording the
    gates (no CI read).
 
-**Done.** *(the executor writes it.)*
+**Done.** (2026-10-22; WSL `~/s44/run7/`.)
+
+- **The constant and the version** (`bump44.py`, `session-paragraph.py`):
+  `CURRENT_SESSION = 44` with its paragraph in the D690 shape (the claims counted
+  from the tuples, the subject, the schemas, the price); `VERSION` 1.22.0;
+  `README.md`; the documented path's thirteen `--session 43` literals moved; the
+  operator and upgrade guides' release lines and the upgrade table's 1.22.0 row
+  (`docs44.py`: every database restarts once, the control project's deploy starts
+  one container, no migration, proposed as a minor — D2791).
+- **The price** (`upgrade44.sh`, `upgrade.txt`; D1624's rig against the deployed
+  `012ac06`): `bump minor`, `requires patch`, verdict `ok`, `changes
+  [image_digest]`, two leaves (`versions_lock_sha256`, `template_version`) —
+  **1.22.0 kept above the floor** (D2791).
+- **The registry** (`registry44.py`, `claims44.py`): nine requirements —
+  `SQL-CLIENT-001`, `SQL-RELAY-001..003`, `SQL-PLANE-001`, `SQL-PAGE-001`,
+  `SQL-HOST-001`, `SQL-LIVE-001..002` — node ids from `--collect-only`; the
+  regex gains `SQL`; **424 requirements; `CLAIMS` 331, `OFFLINE_CLAIMS` 155**;
+  `CLAIM_INTRODUCED_IN` at 44; `APG_SQL_EDITOR_RECORD_FILE` in the roster; the
+  host and external modules unparked (D2787, D2715).
+- **The gate** (`derive44.py`, `make-gates44.sh`): `bin/session-44-check.sh` from
+  43's by `sed`, its header and usage block rewritten whole, then the one flag.
+  **The diff read whole — 33 hunks**: the header (the subject, the six offline /
+  two external / one host claims, the sweep's declarations with `slot8-prod`);
+  `SESSION=44` and `SQL_EDITOR_RECORD_FILE=""`; the usage block's three modes
+  rewritten (Session 43's text kept below each, its claims inherited); the flag's
+  help, its two parse arms and its `=` refusal; its existence check and the
+  export; the session number in the inherited prose (*"Sessions 36 to 44"*).
+  `SHELL_COMMANDS` gains it; `test_session_forty_four_gate_modes.py` from 43's
+  plus `test_the_gate_exports_the_sql_editor_record_in_the_external_mode_alone`.
+- **The Ledger** (`ledger44.py`, `unexcept.py`, `site-fixture.py`): `sql_editor`
+  → `trial` on its three live claims; the `console` row's two sentences the
+  editor made false; the four agent rows' *"no data view"* re-read and kept; both page guards' one-id exception removed;
+  `test_site.py`'s fixture → `passkeys`; `site/pages/docs/sql-editor.md`
+  (naming no host — D2792).
+- **The threat rows** (`threats44.py`): items 22–26 as `THR-SQL-PROXY`,
+  `-SECRET`, `-EXHAUST`, `-READ`, `-DEADLINE`, each with its requirements.
+- **The derived documents** (`regen.sh`): the matrix (424), bounds, the reviewed
+  surfaces, the client (`contract.ts`'s version line), the catalog, the
+  evaluation report — all current at the gate's steps 6–7.
+- **Battery** (`battery7.py`): **8/8 killed**, each `FAILED` with its control
+  green, restored by copy and `cmp` — the gate's literal; the record's export;
+  the row left `planned`; `SQL` out of the regex; a threat row's test missing; an
+  offline claim undeclared; a host node id renamed; the roster entry dropped
+  (first run named the wrong test and SURVIVED — the reader broken, not the guard;
+  re-run on `test_every_gate_names_a_registered_variable`, killed).
+- **Targeted, once**: 1,389 passed, 1 failed (`test_site`'s host guard — D2792,
+  repaired before the commit `df5ff04`).
+- **The gates, in shards** (D2554; `TMPDIR=~/s44/tmp`, each shard `timeout 570`
+  in the foreground): **`bin/session-01-check.sh` PASSED** — steps 1–3, 5–7 at
+  `df5ff04`; shards 1–3 at `df5ff04`, 4–6 at `6f90455` (D2793), 7 at `6f90455`,
+  10 and 11 at `c947180`, 8 and 9
+  re-run at `c947180` (D2794; first attempts kept); step 8 merged **8,362 =
+  collected, 0 failed, 3 skipped**, evidence written. **`bin/session-44-check.sh
+  --mode offline` PASSED at `c947180`** on a clean tree: steps A (1, 2, 2b, 4–7),
+  eleven shards **8,371 = collected, 0 failed, 3 skipped**, step B (8, 8b, 8c),
+  step 9 — `evidence/session-44-offline.json`, checkout `c947180`, **155 of 155
+  claims passed**.
+- **Pushed**: `0a77af9` (Run 5) CI green (contract 39678381757, site
+  39681875750); `6fd2313` (Run 6) alone, green (contract 39737460801);
+  `df5ff04` + `6f90455` + `c947180` together, **green on the head** (contract
+  39740975116).
+- Rows **D2791–D2794**. **NEXT FREE D2795, ADR 0287.**
 
 ### Run 8 — the sitting: the release, the walks, the re-earning, the sweep, the tag, the publish
 
