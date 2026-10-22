@@ -1376,8 +1376,10 @@ from pathlib import Path
 #: `operator_digests_moved []`; two leaves differ (`versions_lock_sha256`,
 #: `template_version` 1.21.0 -> 1.22.0). No pair of rendered documents can see a
 #: new service on the control project or a console policy, so the reading prices
-#: the lock alone; **`1.22.0` is proposed above that floor** (D2791) -- a new public
-#: surface is a feature, and minor covers patch. What an operator must KNOW the
+#: the lock alone. **ADR 0162 prices it a MINOR, and `1.22.0` is proposed above
+#: the reading's floor** (D2791) -- a new public surface is a feature, and minor
+#: covers patch: no manifest, outputs, capability, lock or secret schema moves.
+#: What an operator must KNOW the
 #: reading cannot show: the control project's deploy starts the relay and its
 #: certificate is the edge resolver's first issuance for `sql.<zone>`; every
 #: project's database restarts once; the reconciler is restarted after the
