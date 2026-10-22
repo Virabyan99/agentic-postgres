@@ -19,7 +19,13 @@ The rules, for the LATEST operation that decides:
 * failed `interrupted`, `could_not_determine` or `operation_failed` --
   `unknown`: the operation stopped part way and what it left is not known
   (ADR 0195's third outcome, never folded into `ready`);
-* pending -- not started, so the state before it.
+* pending -- not started, so the state before it;
+* any status of `branch.create`, `branch.reset`, `branch.delete`,
+  `restore.create` or `credential.rotate` -- the state before it: these act on
+  a branch (its own record, `/branches`) or on a credential, never on the
+  project's own compute, so they decide nothing about it (ADR 0287, D2795 --
+  read as `unknown` before, the SQL editor refused every project that had
+  ever had a branch or a rotation).
 
 A project with no deciding operation -- one the operator adopted (alpha, beta,
 the control project) -- is `ready`, and `managed_by` says the operator manages
@@ -76,6 +82,13 @@ UNKNOWN_AFTER: Final[frozenset[str]] = frozenset(
     {"interrupted", "could_not_determine", "operation_failed"}
 )
 
+#: Operations that act on a branch or a credential, never on the project's own
+#: compute: whatever their status they leave the project's state as it was
+#: (ADR 0287). A type in neither this set nor the tables above stays `unknown`.
+ELSEWHERE: Final[frozenset[str]] = frozenset(
+    {"branch.create", "branch.reset", "branch.delete", "restore.create", "credential.rotate"}
+)
+
 #: Who manages a project: the operator (adopted, no operation) or the
 #: reconciler (at least one operation decided its state).
 OPERATOR: Final = "operator"
@@ -111,6 +124,8 @@ _UNCHANGED: Final = _Unchanged()
 def _after(operation: Mapping[str, Any]) -> str | _Unchanged:
     kind, status = operation.get("type"), operation.get("status")
     code = operation.get("error_code")
+    if kind in ELSEWHERE:
+        return _UNCHANGED
     if status == "running":
         if kind == "project.export":
             return _UNCHANGED

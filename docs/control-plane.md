@@ -200,7 +200,9 @@ fails `invalid_request` with nothing run. A project's `state` (`creating`,
 `ready`, `sleeping`, `updating`, `deleting`, `deleted`, ...) is computed from
 its operation history; an interrupted or undetermined latest operation reads
 `unknown`, never `ready`, and an adopted project reads `ready` as
-operator-managed.
+operator-managed. A branch, a restore to a branch or a credential rotation
+leaves the project's state as it was, in any status (ADR 0287): it acts on a
+branch or a credential, not on the project's compute.
 
 **The first administrator is handed over by hash** (ADR 0260): `bin/project.sh
 create` keeps a random token 0600 on the creator's disk and sends only its

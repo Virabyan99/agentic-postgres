@@ -6531,6 +6531,8 @@
     - tests/contract/test_control_states.py::test_pending_and_cancelled_leave_the_state_before_them
     - tests/contract/test_control_states.py::test_an_adopted_project_with_no_operation_is_operator_managed
     - tests/contract/test_control_states.py::test_a_history_it_cannot_read_is_unknown
+    - tests/contract/test_control_states.py::test_an_operation_on_a_branch_or_a_credential_leaves_the_state
+    - tests/contract/test_control_states.py::test_every_operation_type_is_decided_or_elsewhere
     - tests/contract/test_control_states.py::test_every_state_answered_is_in_the_closed_list
     - tests/contract/test_control_projects.py::test_a_project_reads_its_state_from_its_history
   description: >-
@@ -6540,8 +6542,10 @@
     `unknown`, never `ready`; a failure that ran nothing, a pending and a
     cancelled operation leave the state before them; an adopted project with
     no operation is `ready` and operator-managed; a history the reader cannot
-    read is `unknown`; every state answered is in the closed list, and the
-    route answers what the reader computes.
+    read is `unknown`; an operation on a branch or a credential leaves the
+    state as it was, in any status, and every type in the closed table is
+    decided or such an operation (ADR 0287); every state answered is in the
+    closed list, and the route answers what the reader computes.
 
 - id: OPN-REG-001
   priority: P0
