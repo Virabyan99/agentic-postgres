@@ -1229,7 +1229,53 @@ re-collected: 13); `ruff` clean on the tree. Rows D2854–D2856 and Sheet IR3;
    offline`. Commit **before** the gates, push after both pass, read CI. Then a
    documentation commit recording the gates (no CI read).
 
-**Done.** —
+**Done.** — 2026-10-23, commit `4f4b207` (scripts `~/s45/run8/`). **The
+constant and the version**: `CURRENT_SESSION = 45` with its paragraph (the class
+priced in ADR 0162's words in the last paragraph); `VERSION` `1.23.0`;
+`README.md:7`; **17** `--session 44` literals moved across five documents, counted
+per file; the guides' release lines and the upgrade table's 1.23.0 row. **The
+price** (D1624's rig, `upgrade45.sh`, against the deployed `224b660`): `bump`
+**minor**, `requires` **patch**, `verdict` **ok**, `changes` `[]`, one leaf
+(`template_version`) -- 1.23.0 is proposed above that floor. **The registry**:
+**eight** requirements, not §2's seven (**D2857**: `USE-LIVE-007`, the
+re-earning's own claim `notifications_reearned_live`, because ADR 0261 admits only
+this session's claims on a `trial` row and a reachable row needs some -- the
+operator's choice): `UI-TOKENS-001`, `UI-FONTS-001`, `UI-SITE-001`,
+`UI-CONSOLE-001`, `USE-IDLE-002`, `UI-LIVE-001`, `USE-LIVE-006`, `USE-LIVE-007`,
+node ids from the tree's collection; the regex gains `UI`; **432 requirements;
+`CLAIMS` 339, `OFFLINE_CLAIMS` 160** (§7's prediction of 338 moves to **339** by
+D2857); `CLAIM_INTRODUCED_IN` at 45; `APG_LOOK_RECORD_FILE` in the roster; the two
+parked modules unparked. **The gate**: `bin/session-45-check.sh` derived from
+44's -- `diff` read whole, **32 hunks**: the session numbers, the header and
+usage block rewritten (D1488), one flag `--look-record-file` (external only), the
+synopsis' missing continuation added; `test_session_forty_five_gate_modes.py`
+with the claim table and the look-record test; `SHELL_COMMANDS`. **The Ledger**:
+`notifications` -> `trial` naming `notifications_reearned_live` (controls: the
+GET route, `bin/notifications.sh list`, `/console/`; since/target 45); the
+console's view, tab, route and `pages.json` entry and the site's mentions
+restored (the inverse of `4d6f892`, count-asserted); *"Notices at 80%"* on
+Pricing; the console row lists notifications again; the schema's
+`target_session` maximum 46. **The threat table** gains `THR-UI-FONT`
+(`UI-FONTS-001`). Derived documents regenerated, each `current` after.
+**Battery 8/8** (`battery8.py`), each FAILED (no ERROR) with its control green,
+restored `cmp`-identical (7 files), unmutated 10 passed: the gate's literal; the
+record's export dropped; the row left `planned` with its view restored; `UI` out
+of the regex; a threat row's test missing; an offline claim undeclared; the
+roster entry dropped; the schema maximum back to 45 with a row at 46.
+**Targeted, once**: **1,108 + 439 passed**. **The gates, in shards, once**, on the
+committed `4f4b207`, each shard `timeout 570` in the foreground,
+`TMPDIR=~/s45/tmp`: **`bin/session-01-check.sh` PASSED** -- steps 1-7 passed, 12
+shards (457, 756, 1,328, 112, 49, 69, 886, 539, 1,088, 1,338, 1,400, 418), merged
+**8,443 = collected by the selection**, 0 failures, 0 errors, **3 skipped**, step 8
+exit 0; **`bin/session-45-check.sh --mode offline` PASSED** -- steps 1-7 and 8-8c
+passed, 13 shards (the planner's budget 330 s, D2839; the longest 233 s), merged
+**8,452 = collected**, 0 failures, 0 errors, **3 skipped**, step 9 **160 of 160
+offline claims passed** (`evidence/session-45-offline.json`, `checkout_commit`
+`4f4b207`, `source_commit` null as for every offline half since Session 22).
+**Pushed**; CI green on `4f4b2070f4cc67c5a1ea085f71eba35b784b5f0b`: **contract
+39974644732, site 39978429705** (the site now runs ahead of the deployed 1.22.0
+with the visual pass and the notifications mentions). **NEXT FREE D2858, ADR
+0290.**
 
 ### Run 9 — the sitting: the release, the dry runs, the re-earning, the walks, the sweep, the tag, the publish
 
