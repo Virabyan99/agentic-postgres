@@ -18,5 +18,3 @@ Everything here is what the beta does today; [What exists](/ledger/) says the sa
 - [What a refusal means](/docs/refusals/): every refusal's word, and what to do.
 
 The management API is `https://control.agenticpostgresql.com/api/v1`; the console and the command-line client both act through it.
-
-Something here wrong or missing? Write to [invite@agenticpostgresql.com](mailto:invite@agenticpostgresql.com).

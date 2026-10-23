@@ -54,5 +54,3 @@ An export is an archive of the project's own schemas -- `app`, `api` and `public
 An admin or owner deletes a project with `apg project delete --project-key KEY --confirm KEY`, or the console's project settings with the key typed. Its containers, data, credentials and address on this server are removed. The slot is never given to another project. The project's backups are kept by the operator.
 
 Every project runs in one location, the one server this beta runs on.
-
-Something here wrong or missing? Write to [invite@agenticpostgresql.com](mailto:invite@agenticpostgresql.com).

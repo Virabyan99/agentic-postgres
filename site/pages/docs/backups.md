@@ -30,5 +30,3 @@ apg project export --output ./export.tar.gz
 ```
 
 The console's project *Settings* shows the download link once.
-
-Something here wrong or missing? Write to [invite@agenticpostgresql.com](mailto:invite@agenticpostgresql.com).

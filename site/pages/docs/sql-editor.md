@@ -35,5 +35,3 @@ The relay can read what it carries while it carries it. The console and the comm
 - A project that is asleep must be woken from *Settings* first; the editor says so and opens nothing.
 
 Not offered yet: the editor on a branch's doors, saved statements, and exporting a result.
-
-Something here wrong or missing? Write to [invite@agenticpostgresql.com](mailto:invite@agenticpostgresql.com).

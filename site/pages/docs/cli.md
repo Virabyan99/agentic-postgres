@@ -51,5 +51,3 @@ Most commands take `--json` for a machine-readable answer. A command that starts
 | 5 | the server refused; the refusal's word is printed |
 | 6 | the server could not be reached, or a reading could not be determined |
 | 7 | `wait` stopped at its own timeout; the operation continues |
-
-Something here wrong or missing? Write to [invite@agenticpostgresql.com](mailto:invite@agenticpostgresql.com).

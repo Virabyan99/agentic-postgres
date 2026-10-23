@@ -36,5 +36,3 @@ apg compute set --profile standard
 ```
 
 A size change restarts the project. Every project runs in one location, the one server this beta runs on.
-
-Something here wrong or missing? Write to [invite@agenticpostgresql.com](mailto:invite@agenticpostgresql.com).

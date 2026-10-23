@@ -24,5 +24,3 @@ A refusal is one word, the same in the console, the command-line client and the 
 | `not_available` | that is not offered yet; the answer names the row in [What exists](/ledger/) |
 
 An operation that started and then failed names the step it stopped at and the reason; the operator reads why.
-
-Something here wrong or missing? Write to [invite@agenticpostgresql.com](mailto:invite@agenticpostgresql.com).

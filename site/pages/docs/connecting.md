@@ -38,5 +38,3 @@ postgresql://customer_app:PASSWORD@pool.PROJECT-DOMAIN:5432/DATABASE?sslmode=ver
 ```
 
 The console and `apg endpoint show` give the exact host, role and database.
-
-Something here wrong or missing? Write to [invite@agenticpostgresql.com](mailto:invite@agenticpostgresql.com).

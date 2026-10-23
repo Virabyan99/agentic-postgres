@@ -33,5 +33,3 @@ A key reads your organisations and projects through the management API. It is sh
 apg org key-create --name ci --scopes projects:read --output ./key
 apg login key --endpoint https://control.agenticpostgresql.com/api/v1 --key-file ./key
 ```
-
-Something here wrong or missing? Write to [invite@agenticpostgresql.com](mailto:invite@agenticpostgresql.com).

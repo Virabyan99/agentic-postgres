@@ -417,6 +417,8 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2846** | D2845 / ADR 0289 as accepted at Run 1: the witnesses are `count by (project) (…)`, so `store_value`'s label check applies. | `store_value` refuses only a series labelled with ANOTHER project (`labelled is not None and labelled != project_key`, `usage_reading.py:160-163`); a series with NO `project` label passes it — so `count by (project)` alone would still take an unlabelled `up` (the store's own scrape, or a collector without its `const_labels`) as this project's witness. | **Each witness selects the project inside the query**: `count by (project) (up{job="edge",project="<key>"} == 1)` and `count by (project) (traefik_tls_certs_not_after{project="<key>"})`; the key asserted against `naming.TRAEFIK_NAME_PATTERN` before it enters the matcher (`ValueError` otherwise). IR2 read both witness series carrying `project` on both stores, so the form finds them. ADR 0289 decision 1 says so. Battery m5 (the edge witness without the matcher) and m6 (the key check removed) are killed. | A witness for THIS project must name it; a check that refuses only a wrong name admits no name at all. | 0289 |
 | **D2847** | D2813 / ADR 0288 decision 4 (Run 1): six pins move, *"(f) is not moved: the fonts live outside `site/`"*, and *"no seventh test moves"*. | **`test_site.py::test_the_site_names_no_host_address` decodes EVERY built file as UTF-8** (`:125`, `{name: data.decode("utf-8") for name, data in built.items()}`), not only `site/`'s (`:126-127`) — so the build's two `woff2` raise there. Found reading `test_site.py` whole at Run 3, before any build carried a font. A seventh pin; §9's stop. | **The operator, 2026-10-23 (asked at the stop): allowlist the binaries.** The scan reads every text file of the build (`.html`, `.css`, `.txt`, `.svg`, `_headers`) as before, and asserts the files it does not decode are **exactly** the two `woff2` in `SHARED_ASSETS` (pinned by `test_look.py`): stricter — an unexpected binary fails it (battery 3's pin-(g) mutation killed). ADR 0288 decision 4 gains (g), saying its first reading was wrong. | A Run-1 ADR that names the tests it moves must be corrected in the open when the tree shows one more. | 0288 |
 | **D2848** | D2813 / D2847: the pins a binary file meets are (a)–(g). | **`test_repository_contract.py::test_no_tracked_file_uses_crlf` (`:393-404`) reads every TRACKED file's bytes and refuses any `\r`** — both `woff2` hold 0x0D by chance (found by running it once the fonts were intent-to-add). A sweep of every whole-tree scan in the suite (`ls-files`, `rglob("*")`) found no other: each filters by suffix or skips an undecodable file. §9's stop again. | **The operator, 2026-10-23: exempt the two fonts by path.** `BINARY_FILES` names them; the test asserts they exist and are the only files skipped, every other tracked file scanned as before; a tracked stray file holding `\r` still FAILED it (control `test_every_text_pair_meets_4_5` passed). `.gitattributes` gains `*.woff2 binary`. ADR 0288 decision 4 gains (h). | The tree's first binary file meets every byte-level guard at once; each exemption names the file, never a kind. | 0288 |
+| **D2849** | D2830 / §2 `UI-LIVE-001`: the look walk asserts *"both families `loaded` (`document.fonts`)"* on every site route and the console's sign-in. | **Measured at Run 4** (the local build served with its own `_headers` policy in the pinned Playwright image, Chromium 153): a browser fetches a face only when the page USES it — `JetBrains Mono` reads **`unloaded`** on `/`, `/pricing/` and `/ledger/` (no code on them) and `loaded` on `/docs/connecting/` and `/quickstart/`, at both widths; `Schibsted Grotesk` `loaded` everywhere; no violation, no request off the origin, `scrollWidth` = `innerWidth` at 390 and 1280. | **Run 7's look walk reads each family as `loaded` or `unloaded` and fails on `error`** (a refused or broken font), and asserts `loaded` for both on at least one page that sets code (`/docs/connecting/`). | A face not asked for is not a font that failed; ADR 0195's third outcome is `error`, not `unloaded`. | 0288 |
+| **D2850** | Brief `:145`: *"Every page keeps 'Something here wrong or missing? Write to invite@agenticpostgresql.com' above the footer, after a rule."* | Thirteen pages carried the sentence in their own Markdown (`index.md`, `quickstart.md`, the eleven docs pages); `pricing.md` and `ledger.md` did not. With the chrome's feedback line (Run 4), the docs pages showed it twice (seen in the Run 4 screenshots). | **The line is the chrome's** (`_layout`'s `feedback`, `<div class="feedback">`), so every page has it once, the generated pages included; the thirteen pages' own copies were removed, count-asserted (`~/s45/run4/feedback.py`). No test read the sentence. | One place says it, so no page can lose it or say it twice. | 0288 |
 
 ---
 
@@ -844,7 +846,58 @@ for layout only.
    apex 200 and byte-equal to the build — the live proof's own check, run with
    `-k test_the_site_is_the_commits_build` from WSL, writes nothing).
 
-**Done.** —
+**Done (2026-10-23; CI and the live read follow the push).** `site_build`:
+`NAVIGATION` the four (*Quickstart, Docs, Pricing, What exists*),
+`INVITATION_HREF`, `DOCS_GROUPS` (the SQL editor in *Use a project*) with
+`docs_order()` and `check_groups` (a page no group holds, an entry that is no
+page, or a repeat is a `SiteError`), `CONTAINERS`, `BLOCKS`, `CHIP_CLASSES` +
+`chip()`, `ledger_summary`, `ledger_examples`, `plan_summary` (`PLAN_SUMMARY`'s
+four keys), `restore_example` (`RESTORE_EXAMPLE`), `docs_index`, `chips_for`,
+`unique_ids`, `_check_anchors`, `LOGO`; `render_markdown` gains `::: <name>`
+containers (one level of nesting) and generated-block lines through a per-page
+resolver (`@chips` only from the page's own `ledger:`, `@ledger-examples` only
+on `/`); `@pricing`/`@ledger` are the FIRST line and Markdown may follow;
+`check_page` holds that `@ledger` opens the one `"*"` page and no other.
+`pricing_body`: each plan a `<section class="plan plan-<name>">`, its status
+paragraph `class="plan-status"`, the fourth cell `class="enforced|shown"` (its
+text unchanged), `BETA_SENTENCE` still the first `<p>`. `ledger_body`: the
+filter's radios (*All* + each status present, counts in the labels), *"43
+concepts"*, the chip inside the *Today* cell. The template: the beta bar (a
+`<div>`, *"Release {VERSION}"*), the header (logo + wordmark to `/`, the four with
+`aria-current` by prefix, *Console*, the invitation button, the `<details>`
+menu with *4 steps / 10 pages / Free in the beta / 43 concepts / for members* —
+every count the build's), the feedback line (D2850), the four-column footer
+and *"Agentic Postgres {VERSION}, beta"*, the title *"{title}, Agentic
+Postgres"* — **no `<p>` in the chrome**. The docs layout on `/quickstart/` and
+`/docs/…`: the sidebar (current page marked, the management API address), the
+breadcrumb, the page's own `#` heading, the lead from `description`, the
+page's chips, the body, previous / next, *On this page* from the `h2`s.
+`site.css` gains the chrome's and components' rules (the six `:has()` filter
+rules, the chips' colours, the bar, the instrument, the containers, 1100 /
+900 px): **site.css 18,543 B + app.css 6,263 B = 24,806 B** of 30,720 (Run 6
+has ~5.9 KB). **The live proof's own parser** (`test_session43_console._parse`)
+read the built pricing page offline: `paragraphs[0] == BETA_SENTENCE` and both
+plans' section rows equal the plan table's. **Look rehearsal**
+(`~/s45/run4/look.py`, the local build under its own `_headers` policy,
+Chromium 153, 5 routes × 390 / 1280): `scrollWidth == innerWidth` everywhere,
+no violation, no request off the origin; **D2849** (a face not used is
+`unloaded`); screenshots `~/s45/run4/shots/` read — the duplicated feedback
+line found there (**D2850**: the thirteen pages' copies removed,
+count-asserted). New `tests/contract/test_site_look.py` (10 tests, `pytestmark`
+first). **Battery** (`~/s45/run4/battery4.py`): a docs page dropped from
+`DOCS_GROUPS`, a chip word typed, the bar's widths off by one, a duplicate
+heading unsuffixed, a `style=` emitted, the restore flag renamed, an unknown
+container accepted, the current section by exact route, previous / next
+swapped, the docs count typed — **10/10 killed, each FAILED**, the controls
+(`test_the_ledger_page_is_the_rows`, `test_the_pricing_page_follows_the_plans`;
+for the dropped group, which breaks the build, `test_every_text_pair_meets_4_5`)
+green; restored and `cmp`-equal. **Targeted, once**: `ruff` clean;
+`build-site.py --check` byte-equal (23 files); `test_site_look`, `test_site`
+(untouched since Run 3), `test_look`, `test_release_workflows`,
+`test_documentation_index`, `test_session12_documented_path`,
+`test_reality_ledger`, `test_acceptance_registry`, `test_evidence_claims`,
+`test_environment_gates`, `test_repository_contract`, `test_console_server`
+**471 passed**. Rows D2849–D2850; **NEXT FREE D2851, ADR 0290.**
 
 ### Run 5 — the site's pages
 

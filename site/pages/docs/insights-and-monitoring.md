@@ -42,5 +42,3 @@ apg insights show --project-key KEY --hours 24 --limit 20
 - Samples are kept 7 days.
 
 **Database time** -- the time your statements spent executing -- is part of usage (`apg usage show`) and of the readings above.
-
-Something here wrong or missing? Write to [invite@agenticpostgresql.com](mailto:invite@agenticpostgresql.com).

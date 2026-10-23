@@ -37,5 +37,3 @@ apg branch delete --branch dev --confirm dev --wait
 ```
 
 To connect to a branch, add `--branch dev` to `apg endpoint connect`.
-
-Something here wrong or missing? Write to [invite@agenticpostgresql.com](mailto:invite@agenticpostgresql.com).

@@ -18,5 +18,3 @@ The beta is invite-only: there is no public signup. To ask for an invitation, [w
 - [Quickstart](/quickstart/): from the invitation link to a working connection string.
 - [Documentation](/docs/): connecting, branches, backups, plans and usage, Query Insights and monitoring, the command-line client.
 - [Open the console](https://control.agenticpostgresql.com/console/) if you already have an account.
-
-Something here wrong or missing? Write to [invite@agenticpostgresql.com](mailto:invite@agenticpostgresql.com).

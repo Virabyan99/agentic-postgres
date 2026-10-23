@@ -6,15 +6,17 @@
 <meta name="referrer" content="no-referrer">
 <meta name="description" content="{{description}}">
 <meta name="apg-site-digest" content="{{digest}}">
-<title>{{title}} · Agentic Postgres</title>
+<title>{{title}}, Agentic Postgres</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/site.css">
 </head>
 <body>
-<header><nav>{{nav}}</nav></header>
-<main>
+<div class="beta-bar"><span>Invite-only beta. Every organisation is on the Free plan, at no cost.</span><span class="release">Release {{version}}</span></div>
+<header class="site-header">{{header}}</header>
+<main class="{{layout}}">
 {{body}}
 </main>
-<footer>{{footer}}</footer>
+<div class="feedback">{{feedback}}</div>
+<footer class="site-footer">{{footer}}</footer>
 </body>
 </html>

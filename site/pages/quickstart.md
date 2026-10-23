@@ -39,5 +39,3 @@ apg endpoint connect --role app --password-file ./app-password
 ```
 
 Both doors require TLS (`sslmode=verify-full`) on port 5432. See [Connecting](/docs/connecting/).
-
-Something here wrong or missing? Write to [invite@agenticpostgresql.com](mailto:invite@agenticpostgresql.com).
