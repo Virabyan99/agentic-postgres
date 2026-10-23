@@ -1,6 +1,6 @@
 # 0280 — The console is a first-party fixed-route static server on the control project's origin
 
-- **Status:** Accepted; decision 4's policy constant and decision 6 amended by ADR 0285 (Session 44)
+- **Status:** Accepted; decision 4's policy constant and decision 6 amended by ADR 0285 (Session 44); decision 4's `font-src` and the route table amended by ADR 0288 (Session 45)
 - **Date:** 2026-10-19
 - **Session:** 43, Run 1 (`docs/plans/session-43-implementation-plan.md`,
   D2655, D2660, D2661, D2668, D2675, D2680, D2686; rigs 43a, 43e)

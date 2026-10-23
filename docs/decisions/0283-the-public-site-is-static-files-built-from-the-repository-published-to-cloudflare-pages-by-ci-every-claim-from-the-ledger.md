@@ -1,6 +1,6 @@
 # 0283 — The public site is static files built from the repository, published to Cloudflare Pages by CI, every claim from the Ledger
 
-- **Status:** Accepted
+- **Status:** Accepted; decision 2's Markdown subset and decision 7's policy amended by ADR 0288 (Session 45)
 - **Date:** 2026-10-19
 - **Session:** 43, Run 1 (`docs/plans/session-43-implementation-plan.md`,
   D2650, D2651, D2653, D2654, D2662, D2663, D2664, D2674, D2676, D2687; rig

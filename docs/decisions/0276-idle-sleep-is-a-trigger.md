@@ -1,6 +1,6 @@
 # 0276 — Idle sleep is a trigger
 
-- **Status:** Accepted
+- **Status:** Accepted; decision 2(a)'s reading of an absent counter is amended by ADR 0289 (Proposed, Session 45)
 - **Date:** 2026-10-16
 - **Session:** 41, Run 1 (`docs/plans/session-41-implementation-plan.md`,
   D2525, D2531, D2534; the operator's answer of 2026-10-16)

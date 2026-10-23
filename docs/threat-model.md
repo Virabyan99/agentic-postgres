@@ -548,6 +548,26 @@ was numbered 13 twice (D2673); it continues from 16.
     (`tests/contract/test_console_pg.py::test_a_cancel_stops_the_statement`).
     Residual: `psql`'s same gap is named, not closed — a role timeout would
     change what every client gets, a product decision for a later session.
+27. **A font file from a third party's repository** (Session 45, ADR 0288,
+    D2815; `THR-UI-FONT` at the bump). From this session the site and the
+    console serve two typefaces made from `google/fonts`' variable TTFs, and a
+    browser parses a font with its own native code: a malicious or corrupted
+    font is input reaching that parser on every visitor's machine, served from
+    our own origins. Owed: the inputs fetched once, at **one pinned upstream
+    commit** (`e7db6ca603fd4862010383ff17ffd6cc4ffac1c0`), each input's sha256
+    recorded in ADR 0288 beside the git blob id GitHub reports for it; the
+    outputs made by a recorded, reproducible command in the pinned Python image
+    (rig 45a: two fresh containers byte-equal, `SOURCE_DATE_EPOCH` fixed) and
+    **pinned by sha256 in a test**
+    (`tests/contract/test_look.py::test_the_fonts_are_the_recorded_files`), so
+    a changed byte fails offline; one copy in the repository
+    (`services/console/public/fonts/`), served same-origin as `font/woff2` with
+    `nosniff` under `font-src 'self'` — no host but our own is ever asked for
+    a font at run time (rig 45b: Chromium loads both under `'self'` and refuses
+    them under `'none'`). Residual: the pin proves we serve the bytes we
+    reviewed, not that those bytes are benign — the same limit `CFG-014`'s
+    digest pins have for images; a new upstream version is a deliberate act
+    (rig 45a again, the ADR's table, the pinned hashes), never a refresh.
 
 ## Scope
 

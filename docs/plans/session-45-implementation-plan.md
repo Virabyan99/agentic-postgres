@@ -412,6 +412,8 @@ Rows the runs add go in a second table below it, in execution order.
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
+| **D2844** | Plan D2815 / Run 1 step 1: the fonts made once by `varLib.instancer` + `pyftsubset`, *"the input and output sha256s … into ADR 0288; `test_the_fonts_are_the_recorded_files` pins the outputs' sha256"*. | **Rig 45a: `fonttools varLib.instancer` 4.67.0 is not reproducible by default** — it stamps `head.modified` with the time of saving. Two fresh containers differed in the `head` table only (`modified` 3875597825 vs 3875565738); `pyftsubset` alone (Schibsted, no instancer) was byte-equal on a re-run. | **The recipe sets `SOURCE_DATE_EPOCH` to the pinned upstream commit's time** (1792720938, `google/fonts` `e7db6ca6`, 2026-10-23T02:02:18Z): two fresh containers then produced byte-equal TTF and `woff2` (`61a4199a…`, 29,232 B), and that build is the one committed and pinned. ADR 0288 records the recipe with the variable. | A pinned hash is reviewable only if the bytes can be made again from the recorded inputs; a clock in the output would make every re-make a different file. | 0288 |
+| **D2845** | Plan D2832: the witnesses are `count(up{job="edge"} == 1)` and `count(traefik_tls_certs_not_after)`, read through `store_value`. | `store_value` (`usage_reading.py:160-163`) refuses a series whose `project` label names another project (*"the store answered for another project"*) — but `count(…)` strips every label, so for a bare `count` that check reads `None` and passes **vacuously**. | **The witnesses are `count by (project) (…)`**, so the check applies to them; Sheet IR2 reads each witness's raw label set first. If a witness series carries no `project`, the plan's bare form is used and the reason is recorded in ADR 0289. | Question 3 of CLAUDE.md §7 (whose store answered?) kept for the two readings that decide a zero. | 0289 |
 
 ---
 
@@ -588,7 +590,37 @@ method).
    reading that did not arrive"* → *"…unless the store shows the edge was read
    for this project"*). Both ADRs indexed in `docs/decisions/README.md`.
 
-**Done.** —
+**Done, in part (2026-10-23) — Sheet IR2 not yet run; ADR 0289 `Proposed`
+until it is.** Greps (step 0): `woff`, `:has(` only in this plan and the stage
+plan's D2810; `traefik_tls_certs_not_after` and `up{job` in Session 14's
+D782–D784 (a stopped edge reads `up` **0, not absent**; `honor_labels: true`
+keeps `job="edge"`; the certificate series is kept by `cn`) — ADR 0289 rests on
+them. **Rig 45a** (`~/s45/rigs/45a/rig.txt`): `google/fonts` pinned at
+`e7db6ca603fd4862010383ff17ffd6cc4ffac1c0`; the four inputs' git blobs equal
+planning's p5; both `METADATA.pb` `OFL` (axes 400–900, 100–800); Google's
+`latin` range read from its CSS API; JetBrains Mono limited to `wght` 400–500
+(28.1% smaller, 29,084 vs 40,460 B); outputs `schibsted-grotesk.woff2`
+`b29bc789…` 49,112 B and `jetbrains-mono.woff2` `61a4199a…` 29,232 B (78,344 B
+together), `fvar` kept in both, no glyph missing for the brief's set or the
+tree's own non-ASCII text (`£§·—…€`); controls: Schibsted re-run byte-equal,
+Lexend through the same command a different hash; **D2844** (the instancer's
+timestamp, fixed by `SOURCE_DATE_EPOCH`). **Rig 45b** (`~/s45/rigs/45b/rig.txt`,
+Chromium 153.0.8010.12): both faces `loaded` under `font-src 'self'`, `error`
+with two violations under `'none'`; presentation-attribute SVG no violation,
+`style=` a `style-src-attr` violation with the fill unchanged; the `:has()`
+filter shows exactly the chosen status, *All* every row; `<details>` closed
+hidden / open shown; `scrollWidth` 390/390, 600/390 with the control; `Tab` →
+`2px solid rgb(31, 79, 163)` and `:focus-visible`, a mouse click → no ring.
+Playwright's `request` event records blocked attempts too (the look walk reads
+attempts). No §9 stop met by either rig. **Threat item 27** written. **ADR 0288**
+(Accepted) and **ADR 0289** (Proposed) written and indexed; ADRs 0276, 0280,
+0283, 0285 carry the amendment in their status lines. No seventh test moves:
+the live site proof reads only `index.html` routes and page `<link>/<img>/
+<script>` assets. **D2845** (the witnesses keep `project`). **Sheet IR2 is
+owed**: the agent's write of `s45-ir2.sh` (the root, read-only script) was
+refused by the session's permission classifier, so nothing was placed on the
+host; the operator decides how it is run. Rows D2844–D2845; **NEXT FREE D2846,
+ADR 0290.**
 
 ### Run 2 — D2805 repaired (`usage_reading`, the reconciler, tests first)
 

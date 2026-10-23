@@ -1,6 +1,6 @@
 # 0285 — The browser SQL editor is the customer's own client: an in-house wire-protocol client in the console, the password held only in the page
 
-- **Status:** Accepted
+- **Status:** Accepted; decision 4's deployed policy string amended by ADR 0288 (`font-src 'self'`, Session 45)
 - **Date:** 2026-10-21
 - **Session:** 44, Run 1 (`docs/plans/session-44-implementation-plan.md`,
   D2732, D2734, D2735, D2737, D2738, D2744–D2746, D2754–D2757, D2765–D2768;
