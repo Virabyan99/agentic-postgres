@@ -199,8 +199,13 @@ def _handshake(host: str, path: str, origin: str) -> tuple[ssl.SSLSocket, int, b
 
 
 def _pooled(control: dict[str, Any]) -> tuple[str, str]:
-    """slot3's pooled door name and its zone, derived as the console derives them."""
-    zone = naming.sql_relay_zone(str(urlsplit(control["routes"]["control"]).hostname))
+    """slot3's pooled door name and its zone, derived as the console derives them --
+    from the control route the DEPLOYED document publishes, `{status, url}`
+    (`deployed_output.published_route`); the render's bare string is not what the
+    deploy writes (D2799)."""
+    route = control["routes"]["control"]
+    assert isinstance(route, dict) and route.get("status") == "ready", route
+    zone = naming.sql_relay_zone(str(urlsplit(route["url"]).hostname))
     return f"pool.slot3.{zone}", zone
 
 
