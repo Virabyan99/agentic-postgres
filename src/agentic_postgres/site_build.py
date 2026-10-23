@@ -37,6 +37,19 @@ PAGES_ROOT = SITE_ROOT / "pages"
 TEMPLATE = SITE_ROOT / "templates" / "base.html"
 STYLESHEET = SITE_ROOT / "static" / "site.css"
 
+#: ADR 0288 (D2814): the assets the site and the console share live ONCE, in
+#: the console's tree -- its image bakes only its own build context -- and the
+#: build copies exactly these, listed, never globbed, to the same relative
+#: paths. The fonts' bytes are pinned by `tests/contract/test_look.py`.
+CONSOLE_PUBLIC = REPO_ROOT / "services" / "console" / "public"
+SHARED_ASSETS = (
+    "fonts/schibsted-grotesk.woff2",
+    "fonts/jetbrains-mono.woff2",
+    "fonts/OFL-schibsted-grotesk.txt",
+    "fonts/OFL-jetbrains-mono.txt",
+    "favicon.svg",
+)
+
 #: The product's published address for a request for an invitation (D2654):
 #: forwarded by Cloudflare Email Routing; the product sends and stores nothing.
 INVITATION_ADDRESS = "invite@agenticpostgresql.com"
@@ -58,7 +71,8 @@ ALLOWED_ORIGINS = (
 )
 
 #: ADR 0283 item 7: the console's policy (ADR 0280) with nothing to connect
-#: to and no data URI to draw.
+#: to and no data URI to draw; `font-src 'self'` since ADR 0288, for the two
+#: typefaces the build carries and no host.
 CONTENT_SECURITY_POLICY = "; ".join(
     (
         "default-src 'none'",
@@ -66,7 +80,7 @@ CONTENT_SECURITY_POLICY = "; ".join(
         "style-src 'self'",
         "img-src 'self'",
         "connect-src 'none'",
-        "font-src 'none'",
+        "font-src 'self'",
         "base-uri 'none'",
         "form-action 'none'",
         "frame-ancestors 'none'",
@@ -417,6 +431,7 @@ def digest_inputs() -> list[Path]:
     files = sorted(path for path in SITE_ROOT.rglob("*") if path.is_file())
     return [
         *files,
+        *(CONSOLE_PUBLIC / relative for relative in SHARED_ASSETS),
         REPO_ROOT / "services" / "auth-api" / "app" / "plans.py",
         reality_ledger.LEDGER_PATH,
         REPO_ROOT / "VERSION",
@@ -493,6 +508,8 @@ def build() -> dict[str, bytes]:
         site_digest=site_digest, version=version,
     ).encode("utf-8")  # fmt: skip
     files["site.css"] = STYLESHEET.read_bytes()
+    for relative in SHARED_ASSETS:
+        files[relative] = (CONSOLE_PUBLIC / relative).read_bytes()
     files["_headers"] = HEADERS_FILE.encode("utf-8")
     pricing = files.get("pricing/index.html", b"").decode("utf-8")
     for mark in PRICE_MARKS:

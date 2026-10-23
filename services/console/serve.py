@@ -46,6 +46,11 @@ HTML = "text/html; charset=utf-8"
 JAVASCRIPT = "text/javascript; charset=utf-8"
 CSS = "text/css; charset=utf-8"
 JSON = "application/json; charset=utf-8"
+# Session 45 (ADR 0288): the two typefaces, their licences and the favicon.
+FONT = "font/woff2"
+TEXT = "text/plain; charset=utf-8"
+SVG = "image/svg+xml"
+FONTS_DIR = PUBLIC / "fonts"
 
 #: Every file route this service has. A request for anything else is 404 before
 #: a file system call is made. The console's views are a fragment router inside
@@ -62,6 +67,13 @@ ROUTES: dict[str, tuple[Path, str]] = {
     # Session 44 (ADR 0285, rig 44e): the editor's DOM-free decisions.
     "/console/sql.js": (PUBLIC / "sql.js", JAVASCRIPT),
     "/console/pages.json": (PUBLIC / "pages.json", JSON),
+    # Session 45 (ADR 0288): one copy of the shared assets, which the site's
+    # builder copies (D2814) -- the files rig 45a made, pinned by sha256.
+    "/console/fonts/schibsted-grotesk.woff2": (FONTS_DIR / "schibsted-grotesk.woff2", FONT),
+    "/console/fonts/jetbrains-mono.woff2": (FONTS_DIR / "jetbrains-mono.woff2", FONT),
+    "/console/fonts/OFL-schibsted-grotesk.txt": (FONTS_DIR / "OFL-schibsted-grotesk.txt", TEXT),
+    "/console/fonts/OFL-jetbrains-mono.txt": (FONTS_DIR / "OFL-jetbrains-mono.txt", TEXT),
+    "/console/favicon.svg": (PUBLIC / "favicon.svg", SVG),
 }
 
 #: Where the API's public path is served, and the only answer not read from a file.
@@ -81,14 +93,15 @@ HEALTH_PATH = "/__apg/healthz"
 #: one of the files above; `img-src data:` only for the factor's QR (ADR 0282);
 #: `connect-src` keeps every fetch on this origin and, since ADR 0285, names the
 #: SQL relay's origin and nothing else; `form-action 'none'` because no page
-#: submits a form -- `api.js` sends JSON, the editor intercepts its own.
+#: submits a form -- `api.js` sends JSON, the editor intercepts its own;
+#: `font-src 'self'` since ADR 0288, for the two typefaces above and no host.
 DIRECTIVES = (
     "default-src 'none'",
     "script-src 'self'",
     "style-src 'self'",
     "img-src 'self' data:",
     "connect-src 'self' {relay}",
-    "font-src 'none'",
+    "font-src 'self'",
     "base-uri 'none'",
     "form-action 'none'",
     "frame-ancestors 'none'",

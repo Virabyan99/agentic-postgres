@@ -390,11 +390,26 @@ def test_gitattributes_forces_lf() -> None:
     assert "*.sh   text eol=lf" in text or "*.sh text eol=lf" in text
 
 
+#: The tree's only binary files (ADR 0288, D2848): the two typefaces, whose
+#: compressed bytes hold 0x0D by chance and whose sha256 `test_look.py` pins.
+BINARY_FILES = (
+    "services/console/public/fonts/jetbrains-mono.woff2",
+    "services/console/public/fonts/schibsted-grotesk.woff2",
+)
+
+
 def test_no_tracked_file_uses_crlf() -> None:
+    """Every tracked file but the two typefaces holds no `\\r`; those two are
+    named, must exist and be tracked, and are the only files skipped -- so a new
+    binary still meets this scan (ADR 0288 pin (h), D2848)."""
     offenders = []
+    skipped = []
     for relative in git("ls-files").split():
         path = REPO_ROOT / relative
         if not path.is_file():
+            continue
+        if relative in BINARY_FILES:
+            skipped.append(relative)
             continue
         try:
             if b"\r" in path.read_bytes():
@@ -402,6 +417,7 @@ def test_no_tracked_file_uses_crlf() -> None:
         except OSError:
             continue
     assert not offenders, f"tracked files with CRLF: {offenders}"
+    assert sorted(skipped) == sorted(BINARY_FILES), skipped
 
 
 def _executed_copies(dockerfile: str) -> list[str]:

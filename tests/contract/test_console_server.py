@@ -34,17 +34,23 @@ PUBLIC = SERVICE / "public"
 #: ADR 0280's policy, written out here so the module's policy is compared
 #: with the decision rather than with itself -- and ADR 0285's, which is the
 #: same string with ONE more origin in `connect-src`, for the fixture's relay.
+#: Both carry `font-src 'self'` since ADR 0288 (D2813 (c)), nothing else moved.
 ADR_0280_POLICY = (
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-    "connect-src 'self'; font-src 'none'; base-uri 'none'; form-action 'none'; "
+    "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; "
     "frame-ancestors 'none'"
 )
 RELAY_ORIGIN = "wss://sql.example.test"
 POLICY = (
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-    "connect-src 'self' wss://sql.example.test; font-src 'none'; base-uri 'none'; "
+    "connect-src 'self' wss://sql.example.test; font-src 'self'; base-uri 'none'; "
     "form-action 'none'; frame-ancestors 'none'"
 )
+#: ADR 0288 (D2813 (d)): the typefaces, their licences and the favicon.
+FONTS = {
+    "/console/fonts/schibsted-grotesk.woff2": "fonts/schibsted-grotesk.woff2",
+    "/console/fonts/jetbrains-mono.woff2": "fonts/jetbrains-mono.woff2",
+}
 LISTED = (
     "/console/",
     "/accept",
@@ -55,6 +61,11 @@ LISTED = (
     "/console/pg.js",
     "/console/sql.js",
     "/console/pages.json",
+    "/console/fonts/schibsted-grotesk.woff2",
+    "/console/fonts/jetbrains-mono.woff2",
+    "/console/fonts/OFL-schibsted-grotesk.txt",
+    "/console/fonts/OFL-jetbrains-mono.txt",
+    "/console/favicon.svg",
 )
 
 
@@ -98,7 +109,7 @@ def _ask(port: int, method: str, path: str) -> http.client.HTTPResponse:
 
 
 def test_only_the_listed_paths_answer(serve: Any, port: int) -> None:
-    """A closed table: the seven files, the API path, two redirects and the
+    """A closed table: the listed files, the API path, two redirects and the
     health path -- and nothing a path could name besides."""
     assert tuple(serve.ROUTES) == LISTED
     assert serve.REDIRECTS == {"/": "/console/", "/console": "/console/"}
@@ -202,20 +213,52 @@ def test_the_image_bakes_only_its_own_files() -> None:
         "COPY serve.py /app/serve.py",
     ]
     assert "USER 65532:65532" in text
-    assert sorted(path.name for path in PUBLIC.iterdir()) == sorted(
-        path.name for path, _ in serve_routes_files()
-    )
+    # Every file under `public/`, at any depth, by its RELATIVE path, is a
+    # routed file and nothing else is there (ADR 0288, D2813 (e): stricter than
+    # the top-level names it compared before -- a stray file in `fonts/` fails).
+    baked = sorted(path.relative_to(PUBLIC).as_posix() for path in PUBLIC.rglob("*")
+                   if path.is_file())  # fmt: skip
+    assert baked == sorted(path.as_posix() for path, _ in serve_routes_files())
+    assert sorted(path.relative_to(PUBLIC).as_posix() for path in PUBLIC.rglob("*")
+                  if path.is_dir()) == ["fonts"]  # fmt: skip
 
 
 def serve_routes_files() -> list[tuple[Path, str]]:
-    """The files the table serves -- and nothing else is in `public/`."""
+    """The files the table serves, relative to `public/` -- and nothing else is there."""
     specification = importlib.util.spec_from_file_location(
         "apg_console_files", SERVICE / "serve.py"
     )
     assert specification is not None and specification.loader is not None
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
-    return [(Path(path.name), kind) for path, kind in dict.fromkeys(module.ROUTES.values())]
+    return [
+        (path.relative_to(module.PUBLIC), kind)
+        for path, kind in dict.fromkeys(module.ROUTES.values())
+    ]
+
+
+def test_the_fonts_are_served_as_fonts(serve: Any, port: int) -> None:
+    """ADR 0288: each typeface answers 200 as `font/woff2` with the policy and
+    `nosniff`, its bytes the committed file's; each licence is plain text and
+    the favicon an SVG -- all from this origin, so `font-src 'self'` admits them."""
+    for route, relative in FONTS.items():
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        connection.request("GET", route)
+        answer = connection.getresponse()
+        body = answer.read()
+        connection.close()
+        assert answer.status == 200, route
+        assert answer.getheader("Content-Type") == "font/woff2", route
+        assert answer.getheader("Content-Security-Policy") == POLICY, route
+        assert answer.getheader("X-Content-Type-Options") == "nosniff", route
+        assert body == (PUBLIC / relative).read_bytes() and body[:4] == b"wOF2", route
+    kinds = {route: kind for route, (_, kind) in serve.ROUTES.items()}
+    assert kinds["/console/fonts/OFL-schibsted-grotesk.txt"] == "text/plain; charset=utf-8"
+    assert kinds["/console/fonts/OFL-jetbrains-mono.txt"] == "text/plain; charset=utf-8"
+    assert kinds["/console/favicon.svg"] == "image/svg+xml"
+    for route in LISTED:
+        if route.startswith("/console/fonts/") or route == "/console/favicon.svg":
+            assert _ask(port, "GET", route).status == 200, route
 
 
 def test_the_policy_admits_the_relay_alone(serve: Any) -> None:

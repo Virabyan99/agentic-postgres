@@ -415,6 +415,8 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2844** | Plan D2815 / Run 1 step 1: the fonts made once by `varLib.instancer` + `pyftsubset`, *"the input and output sha256s … into ADR 0288; `test_the_fonts_are_the_recorded_files` pins the outputs' sha256"*. | **Rig 45a: `fonttools varLib.instancer` 4.67.0 is not reproducible by default** — it stamps `head.modified` with the time of saving. Two fresh containers differed in the `head` table only (`modified` 3875597825 vs 3875565738); `pyftsubset` alone (Schibsted, no instancer) was byte-equal on a re-run. | **The recipe sets `SOURCE_DATE_EPOCH` to the pinned upstream commit's time** (1792720938, `google/fonts` `e7db6ca6`, 2026-10-23T02:02:18Z): two fresh containers then produced byte-equal TTF and `woff2` (`61a4199a…`, 29,232 B), and that build is the one committed and pinned. ADR 0288 records the recipe with the variable. | A pinned hash is reviewable only if the bytes can be made again from the recorded inputs; a clock in the output would make every re-make a different file. | 0288 |
 | **D2845** | Plan D2832: the witnesses are `count(up{job="edge"} == 1)` and `count(traefik_tls_certs_not_after)`, read through `store_value`. | `store_value` (`usage_reading.py:160-163`) refuses a series whose `project` label names another project (*"the store answered for another project"*) — but `count(…)` strips every label, so for a bare `count` that check reads `None` and passes **vacuously**. | **The witnesses are `count by (project) (…)`**, so the check applies to them; Sheet IR2 reads each witness's raw label set first. If a witness series carries no `project`, the plan's bare form is used and the reason is recorded in ADR 0289. | Question 3 of CLAUDE.md §7 (whose store answered?) kept for the two readings that decide a zero. | 0289 |
 | **D2846** | D2845 / ADR 0289 as accepted at Run 1: the witnesses are `count by (project) (…)`, so `store_value`'s label check applies. | `store_value` refuses only a series labelled with ANOTHER project (`labelled is not None and labelled != project_key`, `usage_reading.py:160-163`); a series with NO `project` label passes it — so `count by (project)` alone would still take an unlabelled `up` (the store's own scrape, or a collector without its `const_labels`) as this project's witness. | **Each witness selects the project inside the query**: `count by (project) (up{job="edge",project="<key>"} == 1)` and `count by (project) (traefik_tls_certs_not_after{project="<key>"})`; the key asserted against `naming.TRAEFIK_NAME_PATTERN` before it enters the matcher (`ValueError` otherwise). IR2 read both witness series carrying `project` on both stores, so the form finds them. ADR 0289 decision 1 says so. Battery m5 (the edge witness without the matcher) and m6 (the key check removed) are killed. | A witness for THIS project must name it; a check that refuses only a wrong name admits no name at all. | 0289 |
+| **D2847** | D2813 / ADR 0288 decision 4 (Run 1): six pins move, *"(f) is not moved: the fonts live outside `site/`"*, and *"no seventh test moves"*. | **`test_site.py::test_the_site_names_no_host_address` decodes EVERY built file as UTF-8** (`:125`, `{name: data.decode("utf-8") for name, data in built.items()}`), not only `site/`'s (`:126-127`) — so the build's two `woff2` raise there. Found reading `test_site.py` whole at Run 3, before any build carried a font. A seventh pin; §9's stop. | **The operator, 2026-10-23 (asked at the stop): allowlist the binaries.** The scan reads every text file of the build (`.html`, `.css`, `.txt`, `.svg`, `_headers`) as before, and asserts the files it does not decode are **exactly** the two `woff2` in `SHARED_ASSETS` (pinned by `test_look.py`): stricter — an unexpected binary fails it (battery 3's pin-(g) mutation killed). ADR 0288 decision 4 gains (g), saying its first reading was wrong. | A Run-1 ADR that names the tests it moves must be corrected in the open when the tree shows one more. | 0288 |
+| **D2848** | D2813 / D2847: the pins a binary file meets are (a)–(g). | **`test_repository_contract.py::test_no_tracked_file_uses_crlf` (`:393-404`) reads every TRACKED file's bytes and refuses any `\r`** — both `woff2` hold 0x0D by chance (found by running it once the fonts were intent-to-add). A sweep of every whole-tree scan in the suite (`ls-files`, `rglob("*")`) found no other: each filters by suffix or skips an undecodable file. §9's stop again. | **The operator, 2026-10-23: exempt the two fonts by path.** `BINARY_FILES` names them; the test asserts they exist and are the only files skipped, every other tracked file scanned as before; a tracked stray file holding `\r` still FAILED it (control `test_every_text_pair_meets_4_5` passed). `.gitattributes` gains `*.woff2 binary`. ADR 0288 decision 4 gains (h). | The tree's first binary file meets every byte-level guard at once; each exemption names the file, never a kind. | 0288 |
 
 ---
 
@@ -754,7 +756,46 @@ test functions are registered at the bump (Run 8, `USE-IDLE-002`). Row D2846;
    https://agenticpostgresql.com/fonts/schibsted-grotesk.woff2` → 200,
    `content-type: font/woff2`, and the page's CSP `font-src 'self'`).
 
-**Done.** —
+**Done (2026-10-23; CI and the live read follow the push).** Rig 45a's four
+files in `services/console/public/fonts/` (sha256 equal to ADR 0288's table;
+no CR byte in the licences, so `*.txt text eol=lf` leaves them byte-equal),
+`favicon.svg` (312 B, presentation attributes only). `serve.py`: `FONT`,
+`TEXT`, `SVG`, `FONTS_DIR`, five routes, `font-src 'self'`. `index.html` /
+`accept.html`: the icon link, a static `<header class="top">` with the inline
+logo and wordmark outside `#main` (D2820), footer *"Agentic Postgres, beta"*,
+the accept page's title *"Accept your invitation, Agentic Postgres"* (D2824).
+`site_build`: `CONSOLE_PUBLIC`, `SHARED_ASSETS` (five paths, copied by `build()`
+and in `digest_inputs()`), `font-src 'self'`; `base.html` the icon link. **The
+token block** written once (`~/s45/run3/tokens.css`) and placed byte-equal at
+the top of both stylesheets by `compose-css.py`, the `@font-face` rules after
+it; light only; bodies on the tokens and the brief's type (layout waits for
+Runs 4 and 6): **site.css 4,611 B + app.css 6,263 B = 10,874 B** of 30,720.
+Contrast computed for 31 pairs before the test pinned them (`contrast.py`): the
+lowest `text-3` on `surface-hover` 5.30 and `accent` on `accent-tint` 5.43,
+all ≥ 4.5. **Two more pins than ADR 0288 named, each a §9 stop put to the
+operator**: (g) `test_the_site_names_no_host_address` decodes the BUILD
+(D2847), (h) `test_no_tracked_file_uses_crlf` reads every tracked file's bytes
+(D2848) — the operator chose an exact-path allowlist for both; `.gitattributes`
+gains `*.woff2 binary`; ADR 0288 decision 4 gains (g) and (h). The moved tests
+(a)–(e), (g), (h) and the new ones: `tests/contract/test_look.py` (8 tests,
+`pytestmark` first), `test_console_server.py::test_the_fonts_are_served_as_fonts`,
+`test_site.py::test_the_build_carries_the_shared_assets`. **Battery**
+(`~/s45/run3/battery3.py`, `battery3.txt`, `battery3-rerun.txt`,
+`battery3h.txt`): a font byte flipped, one token in one file, `text-3`
+lightened in both, `font-src 'none'` back, a third-party `url()`, a licence
+removed, a dark block back, an unexpected binary in the build (g), a stray file
+in `fonts/` (e), a tracked stray file holding `\r` (h) — **10/10 killed, each
+FAILED**. The licence mutation's first control (`test_two_builds_are_byte_equal`)
+FAILED with it — the build copies the licence, so that control was reachable
+(D499); re-run with `test_every_text_pair_meets_4_5` as its control: killed,
+control green. Every file restored, `cmp`-equal, `git status` unchanged.
+**Targeted, once** (final tree): `ruff` clean; `build-site.py --check` 23
+files byte-equal; `test_look`, `test_site`, `test_console_server`,
+`test_console_pages`, `test_console_scram`, `test_console_sql`,
+`test_console_plane`, `test_reality_ledger`, `test_release_workflows`,
+`test_acceptance_registry`, `test_evidence_claims`, `test_environment_gates`,
+`test_documentation_index`, `test_repository_contract` **468 passed**. Rows
+D2847–D2848; **NEXT FREE D2849, ADR 0290.**
 
 ### Run 4 — the site's template, chrome and builder components
 

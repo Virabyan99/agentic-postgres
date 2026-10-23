@@ -33,3 +33,7 @@ Dockerfile     text eol=lf
 libexec/*        text eol=lf
 infra/host/*     text eol=lf
 systemd/*        text eol=lf
+
+# Session 45 (ADR 0288): the typefaces are pinned by sha256, so git must never
+# treat one as text -- `* text=auto` decides by content, this says it outright.
+*.woff2          binary

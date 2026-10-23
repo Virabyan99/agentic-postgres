@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-23
 - **Session:** 45, Run 1 (`docs/plans/session-45-implementation-plan.md`,
-  D2810, D2812–D2831, D2843, D2844; rigs 45a, 45b)
+  D2810, D2812–D2831, D2843, D2844, D2847, D2848; rigs 45a, 45b)
 - **Affects:** `services/console/public/fonts/` (new: two `woff2`, two OFL
   licences), `services/console/public/favicon.svg` (new),
   `services/console/serve.py` (`ROUTES`, content types, `DIRECTIVES`),
@@ -12,7 +12,10 @@
   `site/templates/base.html`, `src/agentic_postgres/site_build.py`
   (`SHARED_ASSETS`, `CONTENT_SECURITY_POLICY`, `NAVIGATION`, `DOCS_GROUPS`,
   `CONTAINERS`, the generated blocks), `site/pages/**`. Tests moved:
-  `tests/contract/test_site.py` (`POLICY`, `test_no_third_party_asset`),
+  `tests/contract/test_site.py` (`POLICY`, `test_no_third_party_asset`,
+  `test_the_site_names_no_host_address`),
+  `tests/contract/test_repository_contract.py` (`test_no_tracked_file_uses_crlf`),
+  `.gitattributes` (`*.woff2 binary`),
   `tests/contract/test_console_server.py` (`ADR_0280_POLICY`, `POLICY`,
   `LISTED`, `test_the_image_bakes_only_its_own_files`). New:
   `tests/contract/test_look.py`, `tests/contract/test_site_look.py`,
@@ -185,7 +188,8 @@ installed outside the page's policy and by the console):
 
    `'self'` names the serving origin and no other host; there is still no
    `'unsafe-inline'` anywhere.
-4. **The six pins move exactly so, each to an equal or stricter form** (D2813):
+4. **The pins move exactly so, each to an equal or stricter form** (D2813;
+   (g) D2847; (h) D2848):
    - (a) `test_site.py` `POLICY` — `font-src 'self'`, the rest of the string
      byte-equal.
    - (b) `test_no_third_party_asset` — *every `url(…)` in `site.css` is one of
@@ -202,6 +206,26 @@ installed outside the page's policy and by the console):
      routed files' (its two `COPY` lines unchanged): stricter than today, since
      a stray file in a subdirectory now fails it too.
    - (f) not moved (decision 2).
+   - **(g), found in Run 3 and decided by the operator (D2847):**
+     `test_the_site_names_no_host_address` ALSO decodes every file of the
+     BUILD as UTF-8 (`test_site.py:125`), not only the files under `site/`, so
+     the build's two `woff2` raised there. It now reads every text file of the
+     build as before (`.html`, `.css`, `.txt`, `.svg`, `_headers`) and asserts
+     that the files it does not decode are **exactly** the two typefaces in
+     `SHARED_ASSETS` (whose bytes `test_look.py` pins): stricter than before,
+     since an unexpected binary in the build now fails it. This ADR's first
+     reading said no seventh test moves; that was wrong, and is recorded here
+     rather than corrected silently.
+   - **(h), found in Run 3 and decided by the operator (D2848):**
+     `test_repository_contract.py::test_no_tracked_file_uses_crlf` reads every
+     TRACKED file's bytes and refuses any `\r`; compressed `woff2` data holds
+     0x0D by chance. It now skips exactly the two typefaces by path
+     (`BINARY_FILES`), asserts they exist and are the only files skipped, and
+     scans every other tracked file as before — a new binary still meets it
+     (battery: a tracked stray file holding `\r` FAILED it). `.gitattributes`
+     gains `*.woff2 binary`, so git never normalises or diffs a font as text.
+     Every other whole-tree scan in the suite filters by suffix or skips an
+     undecodable file (swept at the same stop).
 
    Any other test that would have to move is §9's stop, never an edit.
    `test_the_fonts_are_served_as_fonts` (each font route → 200, `font/woff2`,

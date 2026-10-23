@@ -1,35 +1,114 @@
-/* The site's one stylesheet (ADR 0283): our own file, system fonts only. */
+/* The site's one stylesheet (ADR 0283, ADR 0288): our own file, so the
+   policy needs no 'unsafe-inline'; the typefaces are our own files too. */
+/* tokens: begin -- ADR 0288. This block is byte-equal in site/static/site.css
+   and services/console/public/app.css (test_look); edit both or neither. The
+   values are the design brief's (docs/design/session-45/design-brief.md). */
 :root {
-  color-scheme: light dark;
-  --ink: #1d1f23;
-  --paper: #ffffff;
-  --muted: #5b616b;
-  --line: #d7dbe0;
-  --accent: #2257c5;
-  --code: #f3f4f6;
+  color-scheme: light;
+  --ground: #F4F6F5;
+  --surface: #FFFFFF;
+  --surface-sunk: #F8FAF9;
+  --surface-hover: #E8EDEB;
+  --ink: #142027;
+  --ink-body: #26333B;
+  --text-2: #3D4A52;
+  --text-3: #55626B;
+  --rule: #D3DBD8;
+  --rule-soft: #E1E7E5;
+  --border-control: #C3CDCA;
+  --accent: #0B6B4F;
+  --accent-hover: #084E3A;
+  --accent-tint: #DCEFE6;
+  --accent-wash: #F1F8F4;
+  --focus: #1F4FA3;
+  --on-ink-text: #E6ECEA;
+  --on-ink-muted: #9FB0AB;
+  --on-ink-rule: #2A3A43;
+  --on-ink-action: #6FCF9F;
+  --on-ink-action-text: #0B2A1F;
+  --on-ink-comment: #8FA59E;
+  --on-ink-border: #3A4B54;
+  --chip-beta-text: #0B6B4F;
+  --chip-beta-bg: #DCEFE6;
+  --chip-beta-bar: #0B6B4F;
+  --chip-verify-text: #1F4FA3;
+  --chip-verify-bg: #E1E9F7;
+  --chip-verify-bar: #1F4FA3;
+  --chip-planned-text: #7A4F00;
+  --chip-planned-bg: #F6EBD3;
+  --chip-planned-bar: #E3B65A;
+  --chip-absent-text: #3F4A51;
+  --chip-absent-bg: #E6EAEC;
+  --chip-absent-bar: #AEB8BE;
+  --chip-unmetered-text: #FFFFFF;
+  --chip-unmetered-bg: #5D6A72;
+  --chip-unmetered-bar: #5D6A72;
+  --window-stripe-a: #CFE7DB;
+  --window-stripe-b: #DCEFE6;
+  --window-border: #A9D2BF;
+  --warning-bg: #F6EBD3;
+  --warning-text: #3B2A00;
+  --once-border: #E3B65A;
+  --destructive-border: #7A4F00;
+  --font-text: "Schibsted Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --radius-chip: 4px;
+  --radius-control: 8px;
+  --radius-panel: 12px;
+  --radius-large: 16px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 56px;
+  --space-11: 64px;
+  --space-12: 88px;
+  --space-13: 96px;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ink: #e7e9ec;
-    --paper: #15171a;
-    --muted: #a3a9b2;
-    --line: #33373d;
-    --accent: #7aa2ff;
-    --code: #1f2227;
-  }
+/* tokens: end */
+@font-face {
+  font-family: "Schibsted Grotesk";
+  src: url(/fonts/schibsted-grotesk.woff2) format("woff2");
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url(/fonts/jetbrains-mono.woff2) format("woff2");
+  font-weight: 400 500;
+  font-style: normal;
+  font-display: swap;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
-header, main, footer { max-width: 46rem; margin: 0 auto; padding: 0 1rem; }
-header nav { display: flex; flex-wrap: wrap; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--line); }
-header a[aria-current="page"] { font-weight: 600; }
-main { padding-top: 1rem; padding-bottom: 3rem; }
-footer { color: var(--muted); font-size: 0.9rem; padding-bottom: 2rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 400 17px/1.6 var(--font-text); }
+header, main, footer { max-width: 46rem; margin: 0 auto; padding: 0 var(--space-4); }
+header nav { display: flex; flex-wrap: wrap; gap: var(--space-4); padding: var(--space-4) 0; border-bottom: 1px solid var(--rule); font-size: 15px; font-weight: 500; }
+header a[aria-current="page"] { color: var(--accent); font-weight: 600; }
+main { padding-top: var(--space-4); padding-bottom: var(--space-9); }
+footer { color: var(--text-3); font-size: 14px; padding-bottom: var(--space-7); border-top: 1px solid var(--rule); padding-top: var(--space-4); }
 a { color: var(--accent); }
-h1 { font-size: 2rem; line-height: 1.2; }
-h2 { margin-top: 2rem; }
-code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 0.92em; background: var(--code); padding: 0.05rem 0.25rem; border-radius: 4px; }
-pre { background: var(--code); padding: 0.75rem 1rem; border-radius: 6px; overflow-x: auto; }
-pre code { padding: 0; background: none; }
-table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.95rem; }
-th, td { text-align: left; vertical-align: top; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--line); }
+a:hover { color: var(--accent-hover); }
+h1, h2, h3 { color: var(--ink); }
+h1 { font-size: 48px; line-height: 1.05; font-weight: 750; letter-spacing: -0.03em; }
+h2 { margin-top: var(--space-7); font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+h3 { font-size: 20px; font-weight: 700; letter-spacing: -0.015em; }
+p, li { color: var(--ink-body); }
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--surface-hover); padding: 2px 6px; border-radius: var(--radius-chip); }
+pre { background: var(--ink); color: var(--on-ink-text); padding: var(--space-3) var(--space-4); border-radius: var(--radius-panel); overflow-x: auto; font-size: 14px; line-height: 1.75; }
+pre code { padding: 0; background: none; color: inherit; font-size: inherit; }
+table { width: 100%; border-collapse: collapse; margin: var(--space-4) 0; font-size: 15px; background: var(--surface); }
+th, td { text-align: left; vertical-align: top; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--rule-soft); }
+th { background: var(--surface-sunk); color: var(--text-3); font-weight: 600; }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+@media (max-width: 900px) {
+  h1 { font-size: 38px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none; animation: none; }
+}

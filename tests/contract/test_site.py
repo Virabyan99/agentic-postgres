@@ -23,11 +23,17 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
 
 BUILD = REPO_ROOT / "bin" / "build-site.py"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "site.yml"
+#: ADR 0283 item 7's policy as ADR 0288 moved it: `font-src 'self'`, the rest
+#: byte-equal (D2813 (a)).
 POLICY = (
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; "
-    "connect-src 'none'; font-src 'none'; base-uri 'none'; form-action 'none'; "
+    "connect-src 'none'; font-src 'self'; base-uri 'none'; form-action 'none'; "
     "frame-ancestors 'none'"
 )
+#: The build's only files that are not text (ADR 0288, D2847): the two
+#: typefaces, whose bytes `test_look.py` pins by sha256.
+BINARY = ("fonts/jetbrains-mono.woff2", "fonts/schibsted-grotesk.woff2")
+TEXT_SUFFIXES = (".html", ".css", ".txt", ".svg")
 
 
 @pytest.fixture(scope="module")
@@ -121,8 +127,17 @@ def test_raw_html_is_refused(line: str) -> None:
 def test_the_site_names_no_host_address(built: dict[str, bytes]) -> None:
     """No address of the host, no IPv4 literal, and no name under the zone but
     the apex, `www` and `control` -- in the build, its sources or the workflow
-    (D2651: the records this site owns name no host of ours)."""
-    texts = {name: data.decode("utf-8") for name, data in built.items()}
+    (D2651: the records this site owns name no host of ours). Every text file
+    of the build is read; the files it cannot read as text are exactly the two
+    typefaces, so an unexpected binary fails here (ADR 0288, D2847)."""
+    binary = sorted(name for name in built
+                    if name != "_headers" and not name.endswith(TEXT_SUFFIXES))  # fmt: skip
+    assert (
+        binary
+        == sorted(BINARY)
+        == sorted(a for a in site_build.SHARED_ASSETS if a.endswith(".woff2"))
+    )
+    texts = {name: data.decode("utf-8") for name, data in built.items() if name not in BINARY}
     texts.update({str(path): path.read_text(encoding="utf-8")
                   for path in site_build.SITE_ROOT.rglob("*") if path.is_file()})  # fmt: skip
     texts["site.yml"] = WORKFLOW.read_text(encoding="utf-8")
@@ -199,8 +214,10 @@ def test_no_forbidden_word(built: dict[str, bytes]) -> None:
 
 
 def test_no_third_party_asset(built: dict[str, bytes]) -> None:
-    """Every `src=`/`href=` in the built HTML and every `url(` in the CSS is
-    the site's own, `#`, the invitation mailto, or an allowed https origin."""
+    """Every `src=`/`href=` in the built HTML is the site's own, `#`, the
+    invitation mailto, or an allowed https origin; every `url(…)` in the CSS is
+    one of the typefaces the build carries, and nothing is imported (ADR 0288,
+    D2813 (b): an allowlist of the measured set, not a weaker scan)."""
     found = 0
     for name, text in _html(built).items():
         for target in re.findall(r'\b(?:src|href)="([^"]+)"', text):
@@ -214,11 +231,30 @@ def test_no_third_party_asset(built: dict[str, bytes]) -> None:
                 assert target.startswith(("/", "#")) and not target.startswith("//"), (name, target)
         assert "<script" not in text and "<iframe" not in text, name
     assert found > 50, "the scan read almost nothing"
-    assert "url(" not in built["site.css"].decode("utf-8") and "@import" not in built[
-        "site.css"
-    ].decode("utf-8")
+    css = built["site.css"].decode("utf-8")
+    assert "@import" not in css
+    urls = [u.strip("\"'") for u in re.findall(r"url\(([^)]*)\)", css)]
+    assert sorted(urls) == sorted("/" + name for name in BINARY), urls
+    for url in urls:
+        assert url.lstrip("/") in built and url.lstrip("/") in site_build.SHARED_ASSETS, url
+    assert css.count("url(") == len(urls)
     with pytest.raises(site_build.SiteError, match="another origin"):
         site_build.render_markdown(site_build.PAGES_ROOT / "x.md", "[x](https://cdn.example/x.js)")
+
+
+def test_the_build_carries_the_shared_assets(built: dict[str, bytes]) -> None:
+    """ADR 0288 (D2814): the typefaces, their licences and the favicon live
+    once, in the console's tree; the build carries each, byte-equal, at the
+    same relative path, and the digest covers it -- and every page links the
+    favicon from the site's own origin."""
+    assert len(site_build.SHARED_ASSETS) == 5
+    inputs = site_build.digest_inputs()
+    for relative in site_build.SHARED_ASSETS:
+        source = site_build.CONSOLE_PUBLIC / relative
+        assert built[relative] == source.read_bytes(), relative
+        assert source in inputs, relative
+    for name, text in _html(built).items():
+        assert '<link rel="icon" href="/favicon.svg" type="image/svg+xml">' in text, name
 
 
 def test_the_headers_file_carries_the_policy(built: dict[str, bytes]) -> None:
