@@ -213,6 +213,36 @@ def test_a_recent_wake_restarts_the_window(project: Project) -> None:
     assert project.request() == "NULL"
 
 
+def _woken(project: Project, minutes_ago: int) -> None:
+    project.cluster.query(
+        "INSERT INTO app.control_operations (organization_id, project_key, type, status, "
+        "requested_by, arguments, started_at, finished_at, claimed_by, attempt, progress) VALUES "
+        f"('{project.org}', '{project.key}', 'project.wake', 'succeeded', '{project.member}', "
+        f"'{{}}', now() - interval '{minutes_ago + 1} minutes', "
+        f"now() - interval '{minutes_ago} minutes', 'rig', 1, 100)"
+    )
+
+
+def test_a_woken_project_left_untouched_sleeps(project: Project) -> None:
+    """D2805, ADR 0289: a project woken 20 minutes ago that nobody has used since
+    has no request series, and the sampler reads the counter as 0 when the store
+    shows the edge was read. Four samples reading 0 across the window, no
+    customer backend: ONE pending `project.sleep`, origin idle -- the control
+    set needs no change for a read zero. Control: the first request after the
+    wake moves the counter 0 -> 1, and that window keeps the project awake."""
+    _woken(project, 20)
+    project.quiet_window(counter=0)
+    assert project.request() != "NULL"
+    assert project.rows()[-1] == f"project.sleep|pending|idle|{project.member}"
+    assert len(project.rows()) == 2
+    used = Project(project.cluster)
+    _woken(used, 20)
+    for seconds, counter in zip(QUIET, (0, 0, 1, 1), strict=True):
+        used.sample(seconds, counter=counter)
+    assert used.request() == "NULL"
+    assert [row.split("|")[0] for row in used.rows()] == ["project.wake"]
+
+
 def test_the_request_names_the_member_who_set_it(project: Project) -> None:
     """The row is attributed to whoever set the minutes last -- the owner here --
     and a setting of `never` stops it."""

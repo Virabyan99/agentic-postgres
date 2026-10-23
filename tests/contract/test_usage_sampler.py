@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+import urllib.parse
 from collections.abc import Iterator
 from typing import Any
 
@@ -42,21 +43,50 @@ def _reconciler() -> Any:
     return module
 
 
-class Containers:
-    """`container_exec.run`'s stand-in: each read answered by what it asks."""
+#: The three store queries ADR 0289 names, written out here rather than read
+#: from the module, so a witness that drifts from the decision fails these
+#: tests instead of being followed by the stub (D673).
+REQUESTS = 'sum(traefik_service_requests_total{code=~"[123].."})'
+EDGE_READ = f'count by (project) (up{{job="edge",project="{KEY}"}} == 1)'
+CERTIFICATE = f'count by (project) (traefik_tls_certs_not_after{{project="{KEY}"}})'
+UNWITNESSED = (
+    "requests_counter: the store holds no request answered below 400 "
+    "and could not show the edge was read"
+)
 
-    def __init__(self, *, store_up: bool = True, backends: str = "0|") -> None:
+
+def _counted(value: str, project: str = KEY) -> list[dict[str, Any]]:
+    return [{"metric": {"project": project}, "value": [0, value]}]
+
+
+class Containers:
+    """`container_exec.run`'s stand-in: each read answered by what it asks.
+
+    `store` maps a store query to its series (None: the query is not
+    answered); a query it does not name is answered with one series of 57."""
+
+    def __init__(
+        self,
+        *,
+        store_up: bool = True,
+        backends: str = "0|",
+        store: dict[str, list[dict[str, Any]] | None] | None = None,
+    ) -> None:
         self.store_up = store_up
         self.backends = backends
+        self.store = store or {}
         self.asked: list[str] = []
+        self.queries: list[str] = []
 
     def __call__(self, container: str, *argv: str, **kwargs: Any) -> Any:
         text = " ".join(argv)
         self.asked.append(text)
         if argv[0] == "wget":
-            if not self.store_up:
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(argv[-1]).query)["query"][0]
+            self.queries.append(query)
+            series = self.store.get(query, _counted("57"))
+            if not self.store_up or series is None:
                 return subprocess.CompletedProcess(argv, 1, "", "wget: connection refused")
-            series = [{"metric": {"project": KEY}, "value": [0, "57"]}]
             body = {"status": "success", "data": {"result": series}}
             return subprocess.CompletedProcess(argv, 0, json.dumps(body), "")
         if "pg_database_size" in text:
@@ -134,6 +164,88 @@ def test_a_customer_backend_is_activity(sampled: Any, monkeypatch: pytest.Monkey
     assert (sample["customer_connections"], sample["last_customer_activity"]) == (
         1, "2026-10-16 17:04:00+00",
     )  # fmt: skip
+
+
+def test_an_absent_series_with_a_witness_reads_zero(
+    sampled: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D2805, ADR 0289: after a wake nobody has used, the edge has no request
+    series for the project. With the store showing that it read the edge
+    (`up{job="edge"} == 1`) and holding the project's own certificate series,
+    the counter reads 0 -- READ, not unread -- and each witness was asked for
+    THIS project by name."""
+    containers = Containers(
+        store={REQUESTS: [], EDGE_READ: _counted("1"), CERTIFICATE: _counted("1")}
+    )
+    monkeypatch.setattr(sampled.container_exec, "run", containers)
+    sample, _, _ = sampled.usage_of(KEY, DOCUMENT, SINCE, None)
+    assert sample["requests_counter"] == 0
+    assert "requests_counter" not in sample["unread"]
+    assert "requests_counter" not in (sample["reason"] or "")
+    assert containers.queries[:3] == [REQUESTS, EDGE_READ, CERTIFICATE], containers.queries
+
+
+@pytest.mark.parametrize(
+    "witnesses",
+    [
+        {EDGE_READ: [], CERTIFICATE: _counted("1")},
+        {EDGE_READ: _counted("1"), CERTIFICATE: []},
+        {EDGE_READ: None, CERTIFICATE: _counted("1")},
+        {EDGE_READ: _counted("1"), CERTIFICATE: None},
+        {EDGE_READ: _counted("1", "slot3-prod"), CERTIFICATE: _counted("1")},
+        {EDGE_READ: _counted("0"), CERTIFICATE: _counted("1")},
+    ],
+    ids=[
+        "no-edge-read",
+        "no-certificate",
+        "edge-unanswered",
+        "certificate-unanswered",
+        "another-project",
+        "zero-count",
+    ],
+)
+def test_an_absent_series_without_a_witness_is_unread(
+    sampled: Any, monkeypatch: pytest.MonkeyPatch, witnesses: dict[str, Any]
+) -> None:
+    """No request series and EITHER witness missing, unanswered, another
+    project's or not positive: the store could not show it reached the edge for
+    this project, so the counter stays unread with one reason -- never 0
+    (ADR 0195, ADR 0289) -- and the idle decision keeps the project awake."""
+    monkeypatch.setattr(
+        sampled.container_exec, "run", Containers(store={REQUESTS: [], **witnesses})
+    )
+    sample, _, _ = sampled.usage_of(KEY, DOCUMENT, SINCE, None)
+    assert sample["requests_counter"] is None
+    assert "requests_counter" in sample["unread"]
+    assert UNWITNESSED in sample["reason"], sample["reason"]
+
+
+def test_a_present_series_is_its_value(sampled: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A request series is its own value, 0 included, and asks for no witness:
+    the witnesses decide only an ABSENT series. A request query the store does
+    not answer keeps its own reason, as before."""
+    for value in ("57", "0"):
+        containers = Containers(store={REQUESTS: _counted(value), EDGE_READ: [], CERTIFICATE: []})
+        monkeypatch.setattr(sampled.container_exec, "run", containers)
+        sample, _, _ = sampled.usage_of(KEY, DOCUMENT, SINCE, None)
+        assert sample["requests_counter"] == int(value)
+        assert "requests_counter" not in sample["unread"]
+        assert EDGE_READ not in containers.queries and CERTIFICATE not in containers.queries
+    unanswered = Containers(
+        store={REQUESTS: None, EDGE_READ: _counted("1"), CERTIFICATE: _counted("1")}
+    )
+    monkeypatch.setattr(sampled.container_exec, "run", unanswered)
+    sample, _, _ = sampled.usage_of(KEY, DOCUMENT, SINCE, None)
+    assert sample["requests_counter"] is None
+    assert "requests_counter: the store did not answer the query" in sample["reason"]
+
+
+def test_the_witnesses_name_only_a_project_key() -> None:
+    """The project key is interpolated into the witnesses' label matcher, so it
+    is asserted against the Traefik name pattern first; anything else is refused
+    before the store is asked."""
+    with pytest.raises(ValueError):
+        usage_reading.requests_below_400('slot5-prod"} or vector(1) #')
 
 
 @pytest.fixture(scope="module")

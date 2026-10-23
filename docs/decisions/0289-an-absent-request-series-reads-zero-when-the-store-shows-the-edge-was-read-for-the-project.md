@@ -5,7 +5,7 @@
   on the control `alpha-dev`'s)
 - **Date:** 2026-10-23
 - **Session:** 45, Run 1 (`docs/plans/session-45-implementation-plan.md`,
-  D2805, D2812 (1), D2832, D2833, D2845; the operator's answer at planning,
+  D2805, D2812 (1), D2832, D2833, D2845, D2846; the operator's answer at planning,
   2026-10-23; Sheet IR2)
 - **Affects:** `src/agentic_postgres/usage_reading.py` (`requests_below_400`,
   its two witness queries and its reason sentence, beside
@@ -105,13 +105,17 @@ unread.** The sampler alone changes; no migration.
      `(None, "the store holds no request answered below 400 and could not show
      the edge was read")`, one constant, unread as today.
 
-   The witness queries keep the `project` label — **`count by (project)
-   (up{job="edge"} == 1)`** and **`count by (project)
-   (traefik_tls_certs_not_after)`** (D2845) — so `store_value`'s own check —
-   every series must name the project asked about, or the reading reached the
-   wrong store — applies to them too; a bare `count(…)` strips every label and
-   would pass that check vacuously. IR2 read both witness series carrying
-   `project` on both stores, so this form is the one built.
+   The witness queries keep the `project` label and **select it** —
+   **`count by (project) (up{job="edge",project="<key>"} == 1)`** and
+   **`count by (project) (traefik_tls_certs_not_after{project="<key>"})`**
+   (D2845, D2846). Keeping the label lets `store_value`'s own check — every
+   series must name the project asked about, or the reading reached the wrong
+   store — apply to them, where a bare `count(…)` strips every label and would
+   pass it vacuously; **selecting** it means a series with NO `project` label
+   is not a witness either, which the check alone would admit (it refuses only
+   another project's name). The key is asserted against
+   `naming.TRAEFIK_NAME_PATTERN` before it enters the matcher. IR2 read both
+   witness series carrying `project` on both stores, so this form finds them.
 2. **The reconciler's usage pass calls it** in place of `store_value` for the
    request figure (`bin/reconciler.py:1502-1505`). **`store_value` itself is
    unchanged**, so `doctor usage`'s `requests_total` (`bin/doctor.py:949-962`)

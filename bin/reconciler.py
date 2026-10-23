@@ -1499,10 +1499,9 @@ def usage_of(
             statements_reset = db_time[1] or None
         except ValueError:
             readings["db_time_ms"] = (None, "the cluster's DB time was not a number")
-    readings["requests_counter"] = usage_reading.store_value(
-        key, usage_reading.REQUESTS_BELOW_400_QUERY,
-        empty="the store holds no request answered below 400",
-    )  # fmt: skip
+    # ADR 0289 (D2805): no request series reads 0 only when the store shows
+    # the edge was read for this project; otherwise unread, as before.
+    readings["requests_counter"] = usage_reading.requests_below_400(key)
     counts, why = usage_reading.cluster_fields(
         container, name, usage_reading.durable_counts_sql(since)
     )

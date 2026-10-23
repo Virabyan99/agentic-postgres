@@ -414,6 +414,7 @@ Rows the runs add go in a second table below it, in execution order.
 |---|---|---|---|---|---|
 | **D2844** | Plan D2815 / Run 1 step 1: the fonts made once by `varLib.instancer` + `pyftsubset`, *"the input and output sha256s … into ADR 0288; `test_the_fonts_are_the_recorded_files` pins the outputs' sha256"*. | **Rig 45a: `fonttools varLib.instancer` 4.67.0 is not reproducible by default** — it stamps `head.modified` with the time of saving. Two fresh containers differed in the `head` table only (`modified` 3875597825 vs 3875565738); `pyftsubset` alone (Schibsted, no instancer) was byte-equal on a re-run. | **The recipe sets `SOURCE_DATE_EPOCH` to the pinned upstream commit's time** (1792720938, `google/fonts` `e7db6ca6`, 2026-10-23T02:02:18Z): two fresh containers then produced byte-equal TTF and `woff2` (`61a4199a…`, 29,232 B), and that build is the one committed and pinned. ADR 0288 records the recipe with the variable. | A pinned hash is reviewable only if the bytes can be made again from the recorded inputs; a clock in the output would make every re-make a different file. | 0288 |
 | **D2845** | Plan D2832: the witnesses are `count(up{job="edge"} == 1)` and `count(traefik_tls_certs_not_after)`, read through `store_value`. | `store_value` (`usage_reading.py:160-163`) refuses a series whose `project` label names another project (*"the store answered for another project"*) — but `count(…)` strips every label, so for a bare `count` that check reads `None` and passes **vacuously**. | **The witnesses are `count by (project) (…)`**, so the check applies to them; Sheet IR2 reads each witness's raw label set first. If a witness series carries no `project`, the plan's bare form is used and the reason is recorded in ADR 0289. | Question 3 of CLAUDE.md §7 (whose store answered?) kept for the two readings that decide a zero. | 0289 |
+| **D2846** | D2845 / ADR 0289 as accepted at Run 1: the witnesses are `count by (project) (…)`, so `store_value`'s label check applies. | `store_value` refuses only a series labelled with ANOTHER project (`labelled is not None and labelled != project_key`, `usage_reading.py:160-163`); a series with NO `project` label passes it — so `count by (project)` alone would still take an unlabelled `up` (the store's own scrape, or a collector without its `const_labels`) as this project's witness. | **Each witness selects the project inside the query**: `count by (project) (up{job="edge",project="<key>"} == 1)` and `count by (project) (traefik_tls_certs_not_after{project="<key>"})`; the key asserted against `naming.TRAEFIK_NAME_PATTERN` before it enters the matcher (`ValueError` otherwise). IR2 read both witness series carrying `project` on both stores, so the form finds them. ADR 0289 decision 1 says so. Battery m5 (the edge witness without the matcher) and m6 (the key check removed) are killed. | A witness for THIS project must name it; a check that refuses only a wrong name admits no name at all. | 0289 |
 
 ---
 
@@ -665,7 +666,41 @@ whole; **every reader of `store_value` and `REQUESTS_BELOW_400_QUERY`** (`grep -
    `test_doctor_readings`, `test_reconciler*` (every module the grep named),
    `test_acceptance_registry`, `test_evidence_claims`. Commit, push, read CI.
 
-**Done.** —
+**Done (2026-10-23).** Readers grepped first: `store_value` is read by
+`bin/doctor.py:965` (`probe_store`, unchanged — a report) and the reconciler;
+`REQUESTS_BELOW_400_QUERY` by the reconciler and one test; the old empty-reason
+sentence by no test. **Red first** (`~/s45/run2/red.txt`, before any product
+edit): 8 failed — `test_an_absent_series_with_a_witness_reads_zero`, the six
+cases of `test_an_absent_series_without_a_witness_is_unread` (`no-edge-read`,
+`no-certificate`, `edge-unanswered`, `certificate-unanswered`,
+`another-project`, `zero-count`) and `test_the_witnesses_name_only_a_project_key`
+— and 10 passed, two of them new: `test_a_present_series_is_its_value` (a
+series, 0 included, asks for no witness; an unanswered request query keeps its
+own reason) and `test_idle_sleep.py::test_a_woken_project_left_untouched_sleeps`
+(a wake 20 min ago, four samples reading 0 → one `project.sleep`, origin idle;
+control: 0, 0, 1, 1 → nothing) — **the control set needed no change for a read
+zero**, as ADR 0289 said. The stub store answers by the decoded query, and the
+tests write the three queries out literally (D673). **Repair**:
+`usage_reading.requests_below_400` with `EDGE_READ_WITNESS_QUERY`,
+`CERTIFICATE_WITNESS_QUERY`, `REQUESTS_UNWITNESSED`; the module sentence
+amended; `bin/reconciler.py` calls it in place of `store_value`. **D2846**: the
+witnesses select `project="<key>"` (an unlabelled series is no witness), the key
+asserted against `naming.TRAEFIK_NAME_PATTERN`; ADR 0289 decision 1 updated.
+Green: 18/18 (`~/s45/run2/green.txt`). **Battery** (`~/s45/run2/battery2.py`,
+`battery2.txt`): m1 witnesses removed, m2 only `up`, m3 the reconciler back on
+`store_value`, m4 `seen < 0`, m5 the edge witness without the project matcher,
+m6 the key check removed — **6/6 killed, each killer FAILED (not ERROR), the
+control `test_idle_sleep.py::test_a_moved_counter_is_not_idle` PASSED in every
+invocation**; both files restored and `cmp`-equal. **Targeted, once**: `ruff
+format` (one file) and `ruff check` clean; `test_usage_sampler`,
+`test_idle_sleep`, `test_doctor_readings`, `test_reconciler_claim`,
+`test_reconciler_dispatch`, `test_branch_expiry`, `test_insights_reading`,
+`test_acceptance_registry`, `test_evidence_claims` **205 passed**;
+`test_backups_reading_from_the_producer`, `test_admin_handoff`,
+`test_control_projects`, `test_export_upload`, `test_project_retire`,
+`test_restore_promotion_bound`, `test_cli_contract` **903 passed**. The new
+test functions are registered at the bump (Run 8, `USE-IDLE-002`). Row D2846;
+**NEXT FREE D2847, ADR 0290.**
 
 ### Run 3 — the tokens, the fonts, the logo, the favicon, the two policies
 
