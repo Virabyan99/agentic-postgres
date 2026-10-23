@@ -422,6 +422,9 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2851** | Run 5 step 1: each feature's chips by **`@chips <row> …` — rows the page's `ledger:` already lists**. | `index.md`'s `ledger:` held nine rows; the fourth feature (*Numbers that name their source*) describes `monitoring`, `usage` and `query_insights`, which it did not list — and `@chips` refuses a row outside the page's list (Run 4). | **The three rows join `index.md`'s `ledger:`** (all `beta`, so reachable): a page names the rows it describes, which is ADR 0283's rule and the reason the list exists. | The list is the page's claim; the block may not claim past it, so the list grows with the page. | 0283 |
 | **D2852** | Run 5 step 1: *"`::: band` … `::: features` with four `::: feature` blocks"*; brief `:158` *"white band"*; `:160` *"See all 43 in What exists"*. | Containers nest one level (D2821, Run 4): `band > features > feature` is three and is refused. A number typed in prose is what the builder exists to prevent (D2821's rule). | **`::: features` stands alone** under its `##`, its white panel from CSS (`main.home > .features`); the ledger band's link reads *"See every concept in What exists"* — the count is in `@ledger-summary`'s generated heading above it. | The vocabulary's own limit and the counts' own rule, each kept rather than widened for one section. | 0288 |
 | **D2853** | D2828: hooks only, *"no behaviour change"*; the sign-in view hides *Code from your app* until the server asks for it (`signInView`, `codeLabel.hidden = true`, shown on `second_factor_required`). | **`app.css`'s `label { display: block }` beats the `hidden` attribute** (an author rule over the user agent's `display: none`), so the field shows from the first paint — in the deployed 1.22.0 too (`224b660`'s `app.css:34`, no `[hidden]` rule). Seen in Run 6's sign-in screenshot, not by any test: neither driver asserts it hidden. | **`[hidden] { display: none !important; }` in `app.css`** restores what the script already says — no script, label or flow changes; guarded by `test_console_look.py::test_a_hidden_field_stays_hidden`. Both drivers' rehearsals pass with it (the editor walk waits for the field after the refusal, as it was written to). | A stylesheet that silently undid a script's state was a behaviour change already made; the pass restores it rather than preserving a defect. | 0288 |
+| **D2854** | D2833: *"the window's samples read `requests_counter` **0, never unread**"*, proved from the lifecycle record by an external proof. | The usage answer reports the counter only as `requests: {increase, resets}` over whole hours (`0008:798-854`), never per sample and never its unread count; an hour also holds the probes' requests from before the export, so `increase` is not 0. And no external proof can see the store: the series' ABSENCE -- D2805's case -- is invisible from outside. | **The external proof reads what the outside can show**: the instrument's own count of requests to the slot since the export is 0 (`quiet.slot_requests_after_recreation`), every operation since is an export, and the control set's own decision fired -- which ADR 0276's window clause allows only when every sample READ the counter. **The absence is read at the sitting by a root, read-only sheet (IR3)** while the idle window runs: on `slot9-prod`'s store, `count(traefik_service_requests_total{code=~"[123].."})` **empty** and both ADR 0289 witnesses at least 1 (IR2's script, slot9's container) -- recorded in Run 9's **Done.** beside the claim. | A proof says what it can see; the one fact it cannot see is read once, by the only reader who can, and named. | 0289 |
+| **D2855** | D2833 / §2 `USE-LIVE-006`: *"the sleep was requested within the window + one interval"*. | Session 42 measured its idle sleep **1,200.4 s** after the setting (`capacity.ENVELOPE`) -- already past 15 × 60 + 300 = 1,200 s: the reconciler asks after the pass that completes the window, and a pass takes time. | **The proof's bound is the window and two intervals** (1,500 s) -- the plan's own §9 stop line -- and it also holds the sleep no earlier than the window after the last export's finish (a wake or an export restarts the window, ADR 0276). | A bound a measured run already exceeded would fail a correct product. | 0276 |
+| **D2856** | Run 7 step 2: the trip scripts derived *"by named substitutions, the counts and the diffs read"*, the detached launchers *"in Session 44's D2796 form"*. | `s45-derive.py` (20 of 20, 65 substitutions; no Session 44 name left in any body; the bare-`44` grep after found only kept lineage headers) also renamed a HISTORICAL comment -- *"Session 45 (ADR 0286)"* in `s45-after.sh`, where the relay is Session 44's -- and Session 44's own `life-start.sh` was not yet in D2796's form (no `PATH`, its output not to a file); no `ext-start.sh` existed (the external half was started detached by hand). | **`s45-post-derive.py` reverts the attribution** and holds every hand edit (the lifecycle's six, `s45-after.sh`'s two, `s45-external.sh`'s two, `s45-x0.sh`'s one), re-applied after any re-derivation; **the four launchers are written in D2796's form** (`life-start.sh`, `br-start.sh`, `br-delete.sh`, and a new `ext-start.sh` wrapper), each refusing a previous attempt's files. | A rename cannot tell a lineage from a claim; the diff read can. | — |
 
 ---
 
@@ -1122,7 +1125,52 @@ D2786–D2790; `~/s44/run6/` (every instrument); `~/s44/run8/NOTES.md`;
    `test_acceptance_registry`, `test_repository_contract`, the widened modules'
    `--collect-only`. Commit (the driver, the widening), push, read CI.
 
-**Done.** —
+**Done (2026-10-23; CI follows the push).** **The look driver**
+`tests/external/browser/site_look.py` (never collected): the site's routes from
+`site/pages` by `route_of`'s rule, the console's `/console/`, 390 × 844 and 1280
+× 800 — `scrollWidth`/`innerWidth`, every ATTEMPTED request, each family's
+status, the CSP violations, the first Tab's ring, the page's digest, a
+screenshot; one 0600 record, no secret held; `--rehearse`, `--plant-foreign`
+(rehearsal only), `--dry`; exit 0 / 2 / 4. **Rehearsed** (`~/s45/run7/
+rehearse-look.sh`: the build under its own `_headers` policy — read back from the
+Docker network, `font-src 'self'` — and the console image built from the tree):
+**32 readings, no problem** (no sideways scroll, nothing off the origin, no
+violation, no font `error`, the ring `solid 2px rgb(31, 79, 163)` and
+`:focus-visible` everywhere), one digest; JetBrains Mono `loaded` on every page
+(each now sets code); the control `--plant-foreign` named
+`https://third-party.invalid/planted.png` on `/` at both widths; `--dry` wrote
+nothing. **The trip scripts** (`~/s45/run7/`): `s45-derive.py` — 20 of 20, 65
+substitutions, no Session 44 name in a body (the bare-`44` grep after found only
+lineage headers) — and `s45-post-derive.py` (**D2856**): the lifecycle **without
+any `--resume*` flag** (argparse refuses each; the paths unreachable behind
+defaults) and with **D2833's quiet** — every slot probe paused and the host probe
+stopped BEFORE the export, `status()` counting any request to the slot's routes
+until the idle sleep is requested, the idle reading gaining `quiet` and the hour's
+`window_usage`; `s45-after.sh` reading the console's typefaces and favicon at R2d
+(and the relay's lineage reverted); `s45-external.sh` `--look-record-file` and
+the counts 338 / 160; `s45-x0.sh` excluding `session45_look` and
+`session45_idle`. New: **`s45-look.sh`** (L0/L1; refuses a checkout not at the
+control project's commit) and the four launchers in D2796's form
+(`life-start.sh`, `br-start.sh`, `br-delete.sh`, `ext-start.sh`);
+`~/s45/host-address` copied (never typed). **The parked proofs**
+(`~/s45/run7/park/`): `test_session45_look.py` (`UI-LIVE-001`, 6 tests) and
+`test_session45_idle.py` (`USE-LIVE-006`, 4 tests; **D2854**: the store-side
+absence is Sheet IR3's root read at the sitting; **D2855**: the window and two
+intervals) with `roster.py` (`APG_LOOK_RECORD_FILE`) — with the roster entry
+applied temporarily, `--setup-plan` with every variable set **exit 0**, 10
+collected; `tests/conftest.py` restored `cmp`-equal. **The widening** (D2714):
+the nine pins gain 45 (`widen.py`, each anchor once; no `source_commit` count
+moved); two lines past 100 columns name their tuple first (`widen-wrap.py`).
+**Rehearsed**: `s45-lifecycle.py --help` (and `--resume` / `--resume-at-k2`
+refused); `s45-walk.sh --check` — the pinned image pulled, Playwright 1.63.0
+installed hash-locked into `~/s45/walk-home/pw`, the preconditions refused
+(exit 92: the control project is at `224b660`, not this checkout — as it should
+be before the sitting; the temporary control copy moved aside). **Targeted,
+once**: `test_environment_gates`, `test_acceptance_registry` (the
+sweep-selector guard), `test_repository_contract`, `test_deployment_suite_shape`
+**279 passed**; the widened modules **77 collected** (the two wrapped ones
+re-collected: 13); `ruff` clean on the tree. Rows D2854–D2856 and Sheet IR3;
+**NEXT FREE D2857, ADR 0290.**
 
 ### Run 8 — the bump, the registry, the gate, `notifications` to `trial`
 
@@ -1398,6 +1446,22 @@ sudo -v
 # each answer's series count and names printed, no value of any other kind)
 script -q -e -c 'sudo bash /home/op/s45-ir2.sh' /home/op/s45-ir2.txt
 ```
+
+### Sheet IR3 — the absent series, read during the idle window (Run 9; root; read-only; D2854)
+
+```
+sudo -v
+# the agent writes /home/op/s45-ir3.sh first: IR2's script against apg-slot9-prod-store-1 only,
+# run AFTER the lifecycle's idle setting and BEFORE the sleep is requested (life.out's
+# "idle-sleep" line, then within ~15 minutes); it prints series counts and labels, no value
+script -q -e -c 'sudo bash /home/op/s45-ir3.sh' /home/op/s45-ir3.txt
+```
+
+Expected: `count(traefik_service_requests_total{code=~"[123].."})` → **0 series** (the
+case); `count by (project) (up{job="edge",project="slot9-prod"} == 1)` and the
+certificate witness → one series each. A request series present means the instrument's
+quiet did not hold, or the export recreated nothing: recorded, and the claim's evidence
+says which.
 
 ### Sheet R1 — the release priced (Run 9)
 

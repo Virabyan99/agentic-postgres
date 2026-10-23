@@ -80,8 +80,8 @@ def record40(record: dict[str, Any]) -> dict[str, Any]:
     """Session 40's record, Session 41's third re-earning (D2518) or Session
     42's fourth (D2581): a NEW slot every time -- a slot's key, never the kept
     `slot3-prod`."""
-    assert record["session"] in (40, 41, 42, 43, 44), (
-        f"a Session {record['session']} record, not one of Sessions 40-44's"
+    assert record["session"] in (40, 41, 42, 43, 44, 45), (
+        f"a Session {record['session']} record, not one of Sessions 40-45's"
     )
     key = str(record.get("project_key"))
     assert slot.SLOT_KEY.fullmatch(key) and key != "slot3-prod", key

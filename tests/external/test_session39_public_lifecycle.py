@@ -73,8 +73,8 @@ ROTATED = ("customer_app", "customer_admin", "customer_app")
 def record39(record: dict[str, Any]) -> dict[str, Any]:
     # D2442: Session 40's record has these members and these eleven operations
     # too, so 39's claim re-runs against the newest record, asserting all of it.
-    assert record["session"] in (39, 40, 41, 42, 43, 44), (
-        f"a Session {record['session']} record, not one of Sessions 39-44's"
+    assert record["session"] in (39, 40, 41, 42, 43, 44, 45), (
+        f"a Session {record['session']} record, not one of Sessions 39-45's"
     )
     assert isinstance(record.get("doors"), dict), "the record names no doors"
     return record
