@@ -235,6 +235,12 @@ ENVIRONMENT_VARIABLES = (
     # result cells, SQLSTATEs, the marker -- never a password, seed or cookie
     # value (its self-check exits 6 first).
     "APG_SQL_EDITOR_RECORD_FILE",
+    # Session 45 (ADR 0288, D2830). `APG_LOOK_RECORD_FILE` (external) is the 0600
+    # record `tests/external/browser/site_look.py` wrote while a real Chromium read
+    # every site page and the console's sign-in at two widths: widths, attempted
+    # request URLs, font statuses, the focus ring, the site's digest -- it signs
+    # nothing in and holds no secret.
+    "APG_LOOK_RECORD_FILE",
 )
 
 

@@ -529,6 +529,19 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "sql_relay_holds_nothing",
         "sql_relay_plane",
         "sql_editor_page",
+        # Session 45 (ADR 0288-0289). FIVE, each a property of a CHECKOUT: one
+        # look's tokens (`ui_tokens`) and its two typefaces (`ui_fonts`), the site's
+        # builder components (`ui_site`), the console's hooks (`ui_console`), and an
+        # absent request series read with its witnesses (`idle_absent_series`).
+        #
+        # The session's other TWO are deliberately not here: both are read from the
+        # workstation (EXTERNAL) -- the look walk in a real browser and a woken
+        # project left untouched, idle-slept on the lifecycle's slot.
+        "ui_tokens",
+        "ui_fonts",
+        "ui_site",
+        "ui_console",
+        "idle_absent_series",
     }
 )
 
@@ -1053,6 +1066,20 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "sql_relay_host": ("SQL-HOST-001",),
     "sql_editor_live": ("SQL-LIVE-001",),
     "sql_relay_live": ("SQL-LIVE-002",),
+    # Session 45 (ADR 0288-0289). SEVEN claims, landing with the constant (D690):
+    # five offline and two external, each requirement its own claim (ADR 0089).
+    # The session's subject: the visual pass on the site and the console, and an
+    # absent request series read as zero only with its witnesses (D2805).
+    "ui_tokens": ("UI-TOKENS-001",),
+    "ui_fonts": ("UI-FONTS-001",),
+    "ui_site": ("UI-SITE-001",),
+    "ui_console": ("UI-CONSOLE-001",),
+    "idle_absent_series": ("USE-IDLE-002",),
+    "ui_look_live": ("UI-LIVE-001",),
+    "idle_after_wake_live": ("USE-LIVE-006",),
+    # D2857: notifications re-earned under a claim of THIS session, so its `trial`
+    # row names evidence ADR 0261 admits -- Session 42's proofs on slot9's record.
+    "notifications_reearned_live": ("USE-LIVE-007",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

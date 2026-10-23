@@ -8463,3 +8463,138 @@
     outside the grammar 400, an unrouted door name closed 4502; the console's
     policy and `env.json` name the relay's origin; the relay's certificate names
     its host and its health answers.
+
+# Session 45 (ADR 0288-0289)
+
+- id: UI-TOKENS-001
+  priority: P0
+  target_session: 45
+  test_nodeids:
+    - tests/contract/test_look.py::test_the_two_stylesheets_share_one_token_block
+    - tests/contract/test_look.py::test_every_text_pair_meets_4_5
+    - tests/contract/test_look.py::test_there_is_no_dark_theme
+    - tests/contract/test_look.py::test_every_interactive_element_shows_focus
+    - tests/contract/test_look.py::test_the_stylesheets_fit_the_budget
+  description: >-
+    **One look's tokens** (ADR 0288): one token block in the site's and the
+    console's stylesheets, byte-equal; every text pair the brief names at least
+    4.5:1 by the WCAG formula from the parsed tokens; light only; a
+    `:focus-visible` ring on every focusable element; the two stylesheets within
+    30,720 bytes.
+
+- id: UI-FONTS-001
+  priority: P0
+  target_session: 45
+  test_nodeids:
+    - tests/contract/test_look.py::test_the_fonts_are_the_recorded_files
+    - tests/contract/test_look.py::test_each_font_has_its_licence
+    - tests/contract/test_look.py::test_every_url_is_one_of_the_fonts
+    - tests/contract/test_console_server.py::test_the_fonts_are_served_as_fonts
+    - tests/contract/test_site.py::test_the_build_carries_the_shared_assets
+  description: >-
+    **The two typefaces** (ADR 0288, threat item 27): the files rig 45a made
+    from `google/fonts` at a pinned commit, pinned by sha256, each beside its
+    OFL licence; the console routes them as `font/woff2`, the site's build
+    carries them byte-equal, both policies say `font-src 'self'`, and every
+    `url()` in either stylesheet is one of them.
+
+- id: UI-SITE-001
+  priority: P0
+  target_session: 45
+  test_nodeids:
+    - tests/contract/test_site_look.py::test_chips_are_the_rows_words
+    - tests/contract/test_site_look.py::test_the_counts_are_the_ledgers
+    - tests/contract/test_site_look.py::test_the_bar_sums_to_the_ledger
+    - tests/contract/test_site_look.py::test_every_docs_page_is_in_one_group
+    - tests/contract/test_site_look.py::test_previous_and_next_follow_the_groups
+    - tests/contract/test_site_look.py::test_heading_ids_are_unique_and_listed
+    - tests/contract/test_site_look.py::test_the_current_section_is_marked
+    - tests/contract/test_site_look.py::test_no_page_carries_a_style_attribute
+    - tests/contract/test_site_look.py::test_the_restore_example_is_a_documented_command
+    - tests/contract/test_site_look.py::test_an_unknown_container_is_refused
+  description: >-
+    **The site's chrome and components come from the builder** (ADR 0288): every
+    chip is its row's `STATUS_WORDS`; every count and the stacked bar are the
+    Ledger's; every docs page is in exactly one group and previous / next follow
+    the groups; heading ids are unique and *On this page* lists every `h2`; the
+    current section is marked by prefix; no page carries a `style=` or a script;
+    the restore example's command is the documented one; the layout vocabulary
+    is closed.
+
+- id: UI-CONSOLE-001
+  priority: P0
+  target_session: 45
+  test_nodeids:
+    - tests/contract/test_console_look.py::test_every_state_has_a_chip
+    - tests/contract/test_console_look.py::test_an_unknown_state_is_never_ready
+    - tests/contract/test_console_look.py::test_the_logo_is_static_markup
+    - tests/contract/test_console_look.py::test_no_console_page_carries_a_style_attribute
+    - tests/contract/test_console_look.py::test_a_hidden_field_stays_hidden
+    - tests/contract/test_console_look.py::test_the_drivers_anchors_are_unchanged
+  description: >-
+    **The console's look adds no script, route or text** (ADR 0288): the state
+    chips cover every state and fail to `unknown`, whose colours are never
+    `ready`'s; the mark is static markup; no page or script sets an inline
+    style; a `hidden` field stays hidden (D2853); every literal the walk drivers
+    select by occurs as often as before the pass.
+
+- id: USE-IDLE-002
+  priority: P0
+  target_session: 45
+  test_nodeids:
+    - tests/contract/test_usage_sampler.py::test_an_absent_series_with_a_witness_reads_zero
+    - tests/contract/test_usage_sampler.py::test_an_absent_series_without_a_witness_is_unread
+    - tests/contract/test_usage_sampler.py::test_a_present_series_is_its_value
+    - tests/contract/test_usage_sampler.py::test_the_witnesses_name_only_a_project_key
+    - tests/contract/test_idle_sleep.py::test_a_woken_project_left_untouched_sleeps
+  description: >-
+    **An absent request series reads zero only with its witnesses** (ADR 0289,
+    D2805): a series is its value; no series reads 0 when the project's own
+    store shows the edge was read for it and holds its certificate series, else
+    unread with one reason; the witnesses select the project by name; a woken
+    project left untouched is idle-slept by the control set's own decision.
+
+- id: UI-LIVE-001
+  priority: P0
+  target_session: 45
+  test_nodeids:
+    - tests/external/test_session45_look.py::test_the_look_walk_reached_every_page
+    - tests/external/test_session45_look.py::test_no_page_scrolls_sideways
+    - tests/external/test_session45_look.py::test_every_request_stayed_on_its_origin
+    - tests/external/test_session45_look.py::test_both_typefaces_loaded
+    - tests/external/test_session45_look.py::test_focus_is_visible
+    - tests/external/test_session45_look.py::test_this_module_uses_no_ssh
+  description: >-
+    **The look, live, in a real browser** (ADR 0288): through the public origins
+    with no SSH, every site page this tree builds and the console's sign-in at
+    390 and 1280 px -- no sideways scroll, every attempted request to the page's
+    own origin and no policy violation, no typeface in error, the focus ring
+    drawn; the record pinned to the deployed commit and the site's digest.
+
+- id: USE-LIVE-006
+  priority: P0
+  target_session: 45
+  test_nodeids:
+    - tests/external/test_session45_idle.py::test_the_instrument_made_no_request
+    - tests/external/test_session45_idle.py::test_the_idle_window_read_zero_not_unread
+    - tests/external/test_session45_idle.py::test_the_sleep_was_requested_in_the_window
+    - tests/external/test_session45_idle.py::test_this_module_uses_no_ssh
+  description: >-
+    **A woken project left untouched is idle-slept, live** (ADR 0289, D2833):
+    after the lifecycle's last recreation the instrument asked the slot nothing,
+    and the reconciler requested the idle sleep within the window and two
+    intervals -- a decision no unread sample in the window can pass.
+
+- id: USE-LIVE-007
+  priority: P0
+  target_session: 45
+  test_nodeids:
+    - tests/external/test_session42_reearning.py::test_every_finished_operation_was_notified_by_its_outcome
+    - tests/external/test_session42_reearning.py::test_no_notification_carries_a_secret
+  description: >-
+    **Notifications, re-earned at 1.23.0** (ADR 0275, D2857): on the seventh
+    re-earning's record -- slot9-prod's lifecycle, run in ONE attempt -- every
+    operation the record names was notified once by its outcome, and no
+    notification holds a secret. Session 42's proofs, read again: a claim
+    Session 45 introduces, so the `notifications` row's `trial` names evidence
+    of its own session (ADR 0261).

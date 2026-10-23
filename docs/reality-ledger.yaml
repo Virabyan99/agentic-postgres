@@ -86,6 +86,13 @@
 # first attempt, names two of the four exports the product notified), so
 # notifications is `planned` again, target Session 45, its console view and site
 # mentions removed with it. No trial row remains. Accepted: all eleven executed types.
+#
+# Session 45 (Run 8, the bump) moved notifications to `trial` (D2834), its console view
+# and site mentions back with it, naming the one claim this session introduces for it --
+# notifications_reearned_live, Session 42's proofs read again on slot9-prod's record --
+# because ADR 0261's trial row names only its own session's claims and a reachable row
+# names some (D2857). Its close moves it to `beta` only if that claim and the two older
+# ones pass on the tagged evidence, else `planned` again with the views removed.
 
 schema_version: 1
 rows:
@@ -228,7 +235,7 @@ rows:
       The console at https://control.agenticpostgresql.com/console/: accept an
       invitation link, set up your second factor, sign in, and see your
       organizations, projects, connection strings, branches, backups, usage,
-      insights, monitoring, plan and settings. A project is
+      insights, monitoring, plan, notifications and settings. A project is
       created with the command-line client in this beta; the console runs no SQL
       on the platform's side, and its SQL editor is your own client.
     today: >-
@@ -931,31 +938,33 @@ rows:
 
   - id: notifications
     concept: Notifications
-    status: planned
-    customer_text: Not open yet. Notifications will be shown in the console only.
+    status: trial
+    customer_text: >-
+      Being verified: in-app notifications for an organization -- one for every
+      finished operation, and a notice once a day when a project passes 80% of a
+      shown limit. Nothing is emailed.
     today: >-
       control_finish_operation writes ONE notification from a fixed template in
       the transaction that finishes the operation -- its type, its project, how
       it ended, why the server requested it -- never a result member, a URL or a
       caller value; the reconciler writes the daily limit notice (ADR 0275). GET
       /v1/organizations/{organization}/notifications (bin/notifications.sh list)
-      lists them newest first. Built in Session 41 and read for slot5-prod's
-      lifecycle, where notifications_live did not pass: it counts one
-      notification per operation of the eleven, and the failed export's
-      operation_failed notification -- written as designed -- stood beside them
-      (D2557). Re-earned in Session 42 for slot6-prod's lifecycle, counted
-      against every operation the record names by its outcome, a failed one
-      included: notifications_retrial_live passed on the tagged evidence (1.20.0
-      on 77303e4, D2581). Not re-earned in Session 44: slot8-prod's record was
-      finished from its first attempt and names two of the four exports the
-      product notified once each (D2798). Planned since Session 44's close;
-      Session 45's lifecycle re-earns it.
+      lists them newest first. Built in Session 41; re-earned in Session 42
+      (notifications_retrial_live passed on the tagged evidence, 1.20.0 on
+      77303e4); not re-earned in Session 44 (D2798: a record finished from its
+      first attempt). Being verified in Session 45 on slot9-prod's lifecycle,
+      run in ONE attempt (D2837): notifications_reearned_live, Session 42's
+      proofs read again on that record (D2857).
     today_evidence: null
-    evidence: []
+    evidence:
+      - notifications_reearned_live
     stage5_reality: A table and a list route (D1968).
     eventual: In-app, email and webhook notifications.
-    controls: []
-    since_session: 36
+    controls:
+      - GET /v1/organizations/{organization}/notifications
+      - bin/notifications.sh list
+      - /console/
+    since_session: 45
     target_session: 45
 
   - id: email

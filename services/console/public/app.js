@@ -382,7 +382,7 @@ function projectNav(key) {
 }
 
 function orgNav(org) {
-  const views = [["plan", "Plan"], ["usage", "Usage"], ["settings", "Members and keys"]];
+  const views = [["plan", "Plan"], ["usage", "Usage"], ["notifications", "Notifications"], ["settings", "Members and keys"]];
   return h("nav", { className: "tabs" }, views.map(([view, text]) => link(`#/org/${org}/${view}`, text)));
 }
 
@@ -712,6 +712,14 @@ async function orgUsageView(me, org) {
     served.projects.length ? served.projects.map(usageSection) : h("p", {}, "No project in this window."));
 }
 
+async function notificationsView(me, org) {
+  const served = await call("GET", `/organizations/${org}/notifications?limit=50`);
+  frame(me, "Notifications", orgNav(org),
+    served.notifications.length
+      ? table([["created_at", "When"], ["project", "Project"], ["kind", "Kind"], ["text", "What happened"]], served.notifications)
+      : h("p", {}, "Nothing yet."));
+}
+
 async function orgSettingsView(me, org) {
   const [members, invitations, keys] = await Promise.all([
     call("GET", `/organizations/${org}/members`),
@@ -883,6 +891,7 @@ const VIEWS = [
   [/^#\/projects\/([^/]+)\/settings$/, projectSettingsView, KEY],
   [/^#\/org\/([^/]+)\/plan$/, planView, UUID],
   [/^#\/org\/([^/]+)\/usage$/, orgUsageView, UUID],
+  [/^#\/org\/([^/]+)\/notifications$/, notificationsView, UUID],
   [/^#\/org\/([^/]+)\/settings$/, orgSettingsView, UUID],
 ];
 

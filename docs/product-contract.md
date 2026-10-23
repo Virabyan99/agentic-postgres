@@ -97,7 +97,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 416 requirements**
+**P0 — 424 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -517,6 +517,14 @@ Priorities:
 | `SQL-RELAY-001` | 44 | **The relay's admission** (ADR 0286): a foreign or absent `Origin` refused 403 before the upgrade; only a door name in the grammar `naming` derives accepted, an address, a port, a query or another path refused 400 before any TCP; health answered without an `Origin`; a missing or malformed environment refuses to start. |
 | `SQL-RELAY-002` | 44 | **The relay's bounds** (ADR 0286): the 33rd session, the 5th per door and the 5th per source closed 4429; idle and total closed 4408; a message over 1 MiB closed 1009; the 64 MiB and 64 KiB caps close 4413; a text frame closes 4400; it pings. |
 | `SQL-RELAY-003` | 44 | **The relay holds and records nothing** (ADR 0286, D2743): no line holds a password, a SASL message, a statement or a marker, through a real PostgreSQL with the relay run as the image runs it; it opens no file, reads four environment names and no CA; the door is verified (a stranger CA or a name the certificate lacks closes 4502); an unreachable door is reported unreachable, never asleep. |
+| `UI-CONSOLE-001` | 45 | **The console's look adds no script, route or text** (ADR 0288): the state chips cover every state and fail to `unknown`, whose colours are never `ready`'s; the mark is static markup; no page or script sets an inline style; a `hidden` field stays hidden (D2853); every literal the walk drivers select by occurs as often as before the pass. |
+| `UI-FONTS-001` | 45 | **The two typefaces** (ADR 0288, threat item 27): the files rig 45a made from `google/fonts` at a pinned commit, pinned by sha256, each beside its OFL licence; the console routes them as `font/woff2`, the site's build carries them byte-equal, both policies say `font-src 'self'`, and every `url()` in either stylesheet is one of them. |
+| `UI-LIVE-001` | 45 | **The look, live, in a real browser** (ADR 0288): through the public origins with no SSH, every site page this tree builds and the console's sign-in at 390 and 1280 px -- no sideways scroll, every attempted request to the page's own origin and no policy violation, no typeface in error, the focus ring drawn; the record pinned to the deployed commit and the site's digest. |
+| `UI-SITE-001` | 45 | **The site's chrome and components come from the builder** (ADR 0288): every chip is its row's `STATUS_WORDS`; every count and the stacked bar are the Ledger's; every docs page is in exactly one group and previous / next follow the groups; heading ids are unique and *On this page* lists every `h2`; the current section is marked by prefix; no page carries a `style=` or a script; the restore example's command is the documented one; the layout vocabulary is closed. |
+| `UI-TOKENS-001` | 45 | **One look's tokens** (ADR 0288): one token block in the site's and the console's stylesheets, byte-equal; every text pair the brief names at least 4.5:1 by the WCAG formula from the parsed tokens; light only; a `:focus-visible` ring on every focusable element; the two stylesheets within 30,720 bytes. |
+| `USE-IDLE-002` | 45 | **An absent request series reads zero only with its witnesses** (ADR 0289, D2805): a series is its value; no series reads 0 when the project's own store shows the edge was read for it and holds its certificate series, else unread with one reason; the witnesses select the project by name; a woken project left untouched is idle-slept by the control set's own decision. |
+| `USE-LIVE-006` | 45 | **A woken project left untouched is idle-slept, live** (ADR 0289, D2833): after the lifecycle's last recreation the instrument asked the slot nothing, and the reconciler requested the idle sleep within the window and two intervals -- a decision no unread sample in the window can pass. |
+| `USE-LIVE-007` | 45 | **Notifications, re-earned at 1.23.0** (ADR 0275, D2857): on the seventh re-earning's record -- slot9-prod's lifecycle, run in ONE attempt -- every operation the record names was notified once by its outcome, and no notification holds a secret. Session 42's proofs, read again: a claim Session 45 introduces, so the `notifications` row's `trial` names evidence of its own session (ADR 0261). |
 
 **P1 — 8 requirements**
 

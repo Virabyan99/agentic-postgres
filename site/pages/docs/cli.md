@@ -36,6 +36,7 @@ It asks for your password, and reads the six-digit code from standard input when
 | `apg branch create`, `reset`, `delete`, `list`, `show` | branches and restores |
 | `apg plan list`, `show`, `notify-me` | plans |
 | `apg usage show` | usage readings |
+| `apg notifications list` | notifications |
 | `apg insights show` | Query Insights |
 | `apg monitoring show` | monitoring readings |
 

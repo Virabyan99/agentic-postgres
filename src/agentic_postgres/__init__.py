@@ -1359,8 +1359,8 @@ from pathlib import Path
 #:
 #: **No released migration. No outputs, manifest, host, capability, lock or secret
 #: schema moves** (outputs stay v22, the project manifest 11, `host.yaml` 4). The
-#: Ledger's `sql_editor` row is `trial` (ADR 0261); the `console` row has been
-#: `beta` since Session 43's close.
+#: Ledger's `sql_editor` row was `trial` (ADR 0261) -- `beta` at Session 44's
+#: close; the `console` row has been `beta` since Session 43's close.
 #:
 #: **`VERSION` moves to `1.22.0`.** What moved: the `sql-relay` service, under a
 #: Compose profile only the control project's render enables (`APG_SQL_RELAY=1`),
@@ -1386,7 +1386,55 @@ from pathlib import Path
 #: checkout moves (D2179). **The trip** confirms the class against a DEPLOYMENT:
 #: `upgrade plan` on every project before the first 1.22.0 deploy -- and a `major`
 #: there is a stop condition.
-CURRENT_SESSION = 44
+#:
+#: **Session 45 moves it to 45, all-or-nothing again** (D690): EIGHT requirements
+#: and eight claims -- `CLAIMS` 331 -> 339 and `OFFLINE_CLAIMS` 155 -> 160, counted
+#: from the tuples (D1628) -- five declared offline and three EXTERNAL, every
+#: offline half written in the run that built its piece (Runs 2-6) and every live
+#: half here. One family joins the registry: `UI`, the visual pass. The external
+#: claims are the look walk in a real browser -- every site page and the console's
+#: sign-in at two widths, nothing asked of another origin -- a woken project left
+#: untouched, idle-slept, and notifications re-earned on the new slot's record
+#: (`notifications_reearned_live`, D2857). **The lifecycle and the branches are
+#: re-earned on the trip** (D2714, D2837: slot9-prod, in ONE attempt): the
+#: `notifications` row is `trial` from this bump, naming that claim (ADR 0261),
+#: until the close reads it beside Sessions 41's and 42's.
+#:
+#: **The session's subject is the look, and D2805.** ADR 0288: two typefaces made
+#: once from `google/fonts` at a pinned commit and pinned by sha256, served from
+#: our own origins under `font-src 'self'`; one token block in both stylesheets;
+#: presentation by stylesheets and SVG attributes alone; the site's layout from a
+#: closed vocabulary and its numbers from the builder; the console by hooks only.
+#: ADR 0289: an absent request series reads zero only when the project's own store
+#: shows the edge was read for it -- the reconciler's sampler alone changes, and
+#: the control set's decision is unchanged.
+#:
+#: **No released migration and no control-set migration. No outputs, manifest,
+#: host, capability, lock or secret schema moves** (outputs stay v22, the project
+#: manifest 11, `host.yaml` 4). The Ledger's schema admits a row for Session 46.
+#:
+#: **`VERSION` moves to `1.23.0`.** What moved: the console's files (its
+#: typefaces, favicon, stylesheet, `app.js`'s hooks), so the console image moves
+#: on the control project; the reconciler's usage sampler (`usage_reading.
+#: requests_below_400`); the site's builder and pages. No Postgres image moves, so
+#: **no database restarts**.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig: a git worktree at
+#: `224b660`, the commit that IS deployed, and a `tar`-piped copy of this working
+#: tree, both rendering the INSTALLED tree's `project.example.yaml`: `bump minor`,
+#: **`requires patch`**, verdict `ok`, `changes []`, `reasons []`,
+#: `operator_digests_moved []`; one leaf differs (`template_version` 1.22.0 ->
+#: 1.23.0). No pair of rendered documents can see a console image or a sampler, so
+#: the reading prices the template alone. **ADR 0162 prices it a MINOR, and
+#: `1.23.0` is proposed above the reading's floor** -- a new look and a changed
+#: decision input are features, and minor covers patch: no manifest, outputs,
+#: capability, lock or secret schema moves. What an operator must KNOW the reading
+#: cannot show: the control project's deploy recreates the console; no database
+#: restarts; **the reconciler is restarted after the checkout moves** (D2179,
+#: D2411) -- the repair of D2805 lives in it. **The trip** confirms the class
+#: against a DEPLOYMENT: `upgrade plan` on every project before the first 1.23.0
+#: deploy -- and a `major` there is a stop condition.
+CURRENT_SESSION = 45
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere
