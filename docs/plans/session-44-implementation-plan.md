@@ -1,6 +1,6 @@
 # Session 44 — The browser SQL editor: the customer's own client in the console, through a relay that holds nothing
 
-**Status: EXECUTING — Runs 1–7 DONE (2026-10-22; rows D2759–D2794, ADRs 0285–0286; NEXT FREE D2795, ADR 0287).** Planned at `8a594de` (Session 43's close, tree
+**Status: EXECUTING — Runs 1–8 DONE (2026-10-23; rows D2759–D2804, ADRs 0285–0287; 1.22.0 tagged on 224b660 and published; NEXT FREE D2805, ADR 0288).** Planned at `8a594de` (Session 43's close, tree
 clean, `main` = `origin/main`) against the host as read that afternoon (§0).
 Rows **D2732–D2758** at planning; the runs add theirs from **D2759**. ADRs
 **0285–0286** are Run 1's. **NEXT FREE after this table: D2759, ADR 0287.**
@@ -434,7 +434,7 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2757** | Stage plan *Measures* and §7: the editor proved live. | Sleeping a project live costs ~70 s down for its names (Session 43: 69.4 / 72.2 s) and `slot3-prod` is the kept customer project; `slot8-prod` sleeps inside the lifecycle instrument, which drives the CLI, not a browser. | **The *asleep* answer is proved offline** (`test_console_sql.py::test_an_asleep_project_opens_no_socket`, the page in Node with a fake `api.js`, every state in `control_states` walked; **the control**: `ready` opens one) **and the `4502` path live** (E1: a door name that matches the grammar and has no router — `pool.slot99.<zone>` — closes `4502`; the same handshake refusal a sleeping door gives, ADR 0268 `:73`). Sleeping `slot3-prod` for the editor is not done. | A live proof of a sentence the control API already proves live (`idle_sleep_live`) is not worth a customer project's outage. | 0195 |
 | **D2758** | — | The walk's console identity: Session 43 invited a NEW walker per walk; the probe owner (`~/s37/probe.json`, its password and TOTP seed in `~/s37/probe-password`, `probe-otpauth`) owns `probe-s37`, which holds `slot3-prod`. | **The editor walk (E1) signs in as the probe owner** (the driver computes the code from the seed with stdlib `hmac`; the seed, the console password and the database passwords live in variables only and are `Secret`-wrapped, D2420; `self_check` refuses a record holding any of them, the console walk's rule) — **no new account, no rotation**. It reads `customer_app` from `~/s39/run11/creds/slot3-prod/` AFTER W1′ (D2749) and `customer_admin` from the same directory. | The editor needs a signed-in member, not a new one; a rotation belongs to the walk that proves rotation. | — |
 
-**Rows added by the runs** (from **D2759**, in execution order; **next free D2795**):
+**Rows added by the runs** (from **D2759**, in execution order; **next free D2805**):
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -474,6 +474,16 @@ D2759.** Rows the runs add go in a second table below it, in execution order.
 | **D2792** | Run 7 step 4: `site/pages/docs/sql-editor.md` (what it is, the two doors, the password stays in the page, the relay records none of it); the first draft named the relay's host. | `test_site.py::test_the_site_names_no_host_address` (Run 7's targeted run: 1,389 passed, **1 failed**) admits only the `www.` and `control.` names on a site page — the guard the site has had since Session 43. | **The page names no host**: it says the editor connects through the relay on its own name, which the console reads from `env.json`; the guard is not widened. The gates passed it on `c947180`. | A page that names a host is one more place an address must be kept true; the console already holds it. | 0283 |
 | **D2793** | Run 4: the live half of `test_console_pg.py` runs the relay in-process and Node in a container on the bridge (D2778). | Session-01 gate shard 4 at `df5ff04`: **pass, fail, fail — even alone**. On Docker Desktop a port newly bound in WSL answers at `host.docker.internal` only once WSL's localhost forwarding has registered it; the Node container sometimes connected first and every session was refused at the handshake, no relay line written. CI's Docker Engine never lost it. | **Test-only repair at `6f90455`**: the `door` fixture retries a TCP connect to each relay port from a container on the bridge (up to 60 s) before the driver runs (`REACH`, `_reachable`). Four runs green; shards 4–6 re-run on it, passed. No product change. | A workstation race is not a product defect, and a test that loses it reads like one. | — |
 | **D2794** | Run 7 step 1: Session 44's paragraph *"the D690 shape of `:1271-1334`"*; Run 7's targeted list. | Session-01 gate shard 9 at `6f90455`: **`test_the_constants_comment_states_the_class_it_proposes` FAILED** — the paragraph said *"`1.22.0` is proposed above that floor"* but never *"ADR 0162 prices it a MINOR"*, and its schema sentence sat in the paragraph before; the proof reads the LAST paragraph only. `test_release_contract` was not in Run 7's targeted list, so the commit carried it (`df5ff04` would have gone red in CI). | **Repaired at `c947180`** (comment only): the last paragraph prices the class in that form and names the five schemas that did not move; `test_release_contract` + `test_gate_contract` (the two readers of the comment) 69 passed; shards 8 and 9 re-run at `c947180`, the first attempts kept (`shard8-attempt1-6f90455.txt`, `shard9-attempt1-df5ff04.txt`). `df5ff04`, `6f90455` and `c947180` pushed together (CI on the head, green). | **A bump's targeted list includes `test_release_contract`** — the class sentence has a reader. | 0162 |
+| **D2795** | Run 8 step 3: E0 *"sign-in, the editor, one `SELECT 1` on each door"* at the deployed commit. | E0 at `4b6c024` **EXIT 4**: sign-in and the editor ok, the pooled door FAILED in 0.4 s with no socket — `slot3-prod` read state **`unknown`** to the probe owner, and `sql.js` opens a door only in `{ready, updating}`. The state is computed from the operation history (`control_states.py`), and a `branch.*`, `restore.create` or `credential.rotate` operation (Session 40's branches, W1's rotation) had no decision, so the history read `unknown` from then on. The Connect page ignores state, so Session 43 never saw it. | **ADR 0287** at `224b660`: `ELSEWHERE` — those five types leave the parent's state unchanged, whatever their status; `test_every_operation_type_is_decided_or_elsewhere` guards the class against `operations.OPERATION_TYPES`; targeted 342 passed, battery 3/3. The operator chose *fix, redeploy four* (no V1 re-run): R3a–d at `224b660` with no database restart; RC1/A1/RA/K1 again (`kit-2026-10-22-s44b`); X0, W0′, E0 green; `slot3-prod` read `ready` after W1′'s rotation and after the branches. | A state machine over a growing operation vocabulary guards the vocabulary, not the types it happened to list. | 0287 |
+| **D2796** | Run 8 step 5: the lifecycle from WSL (`life-start.sh`, the Bash tool's `run_in_background`, as CLAUDE.md §1 prescribed). | **Attempt 1 was KILLED at 17:12:37Z by the workstation's memory reaper** (the harness kills background tasks when the laptop is low on memory), exactly at the K2 pause — after create, sleep, wake, both resizes, the export, its expiry, the idle sleep (1,189.2 s), usage and notifications had all been recorded. Attempt 2 (`--resume --resume-at-export`) stopped at once, exit 4: the export was refused LOCALLY because attempt 1's `export.dump` existed. | **Detached launch measured and adopted**: PowerShell `Start-Process wsl.exe -ArgumentList "-e bash /abs/x.sh" -WindowStyle Hidden` runs to the end with no harness parent (a `bash -lc` argument list is joined and mangled — `-e` and an absolute path; PATH set inside the script). Every long instrument after it (attempts 3–4, the branches, the delete, the external half) ran this way and finished. Attempts kept in `~/s44/run8/life-attempt1/`, `attempt2-*`, `life-attempt3/`. | A long instrument on this laptop runs detached from the harness, never as its background task. CLAUDE.md §1 updated. | — |
+| **D2797** | Run 8 step 5: the idle sleep requested by the reconciler within the window. | **Attempt 3** (17:2xZ, resumed at the export): export again (40,286 B, `pg_restore` 0), expiry ok, the idle setting at 17:34:42 — **no idle sleep requested within 1,620 s**, so it STOPPED at exit 4. `usage show` read samples (latest 18:06:34, unread 0) and no operation began in the window. The decision is SQL (`app.control_request_idle_sleep`, `0008-control-plans-usage.sql:572`: a window of samples awake, read, `requests_counter` unmoved, no customer activity). **NOT DIAGNOSED.** | The operator chose to finish from **attempt 1's record** (its idle sleep requested at 1,189.2 s) with a new `--resume-at-k2` (`k2-mode.py`, count-asserted; the parent kept as `s44-lifecycle.py.before-k2-mode`). Attempt 4 (detached): K2, delete, the second create refused `no_slot`, exit 0 at 18:13:56Z. The samples persist: **Run 9 reads `app.control_usage_samples` for `slot8-prod` after 17:15Z as root**. | A resumed instrument inherits the state its first attempt left in the product — here, a counter the second window may have seen moving. | — |
+| **D2798** | Run 8 step 6: the merge, *"Exit 5 for `documented_path` only"*. | **`notifications_live` and `notifications_retrial_live` FAILED** (`test_session41_reearning` / `test_session42_reearning` `::test_every_finished_operation_was_notified[_by_its_outcome]`): the product listed **4** × *"project.export on slot8-prod succeeded"*, while the record expects **2**. The record is attempt 1's (D2797). Attempt 3 ran two MORE real exports (`6a10739b`, `324bfa0d`; `life-attempt3/lifecycle.json` lists all four). Each finished operation was notified exactly once — the product is correct, the record is short. | **The operator chose to tag with it recorded** (D2728's precedent). Not repaired: the record cannot be completed honestly after the fact. Re-earned at the next lifecycle trip with a single-attempt record. | Finishing from an earlier attempt's record leaves the product holding operations the record never saw; a proof that counts the product's history against the record will see them. | — |
+| **D2799** | Run 4/5's external module `test_session44_sql_editor.py`; §7 `sql_relay_live`. | **Its three refusal proofs FAILED on their first live run** — `TypeError: unhashable type: 'dict'` at `_pooled` (`:203`): `urlsplit(control["routes"]["control"])` assumes a string, but the deployed document's `routes.control` is `{"url": …}` (the launcher `s44-external.sh` itself reads both shapes). The offline fixture shared the proof's belief (D673's class), so nothing offline could see it. The same three refusals were measured live by E1 (foreign Origin 403, outside the grammar 400, unrouted 4502). | **The operator chose to tag with it recorded.** Repaired at Run 9 (`_pooled` reads the route as the deployed document holds it, the fixture made the real shape); re-earned at the next host trip. | A never-executed proof fails on first execution (§7 question 2 — the sixteenth); its fixture must be copied from a real document, never written from the proof's belief. | — |
+| **D2800** | Run 8 steps 3–6: E1 (step 4) before B1 (step 5), the sweep after; `sql_relay_host`'s `test_the_relay_logged_no_payload` reads *"a closed session to pool.slot3"* in the relay's log. | **S1** (19:33–20:57Z) failed that proof's control: **B1's reboot RECREATED the relay** (the project unit's `ExecStopPost` is `project down` = compose down, `systemd/agentic-postgres-project@.service:42`), so its log began empty at 19:29, after E1 (15:31). The proof reads only the current container's log (D2786). V1 had failed the same assertion for the converse reason (no walk yet). The forbidden-word and stray-line assertions passed on every log. | **E0 re-run after the reboot** (every step ok, sessions closed through the relay to both doors), then **a second sweep, S1b** (20:59–22:20Z): `sql_relay_host` passed. S1 is kept in `/home/op/s44-sweep1/` (145 claims, 142 passed, 3 failed). | A proof that reads a container's log must follow the last recreation of that container — the plan's order put the walk before the reboot. | — |
+| **D2801** | Session 32's `workflow_revocation` (`test_a_revoked_agents_run_stops_at_the_boundary_with_no_call`): the run ends `stopped`. | In **S1** the documented race was LOST: the worker claimed step 1 before the revocation landed, the plane refused the call (`unclassified_refusal`), and the run ended **`failed`**. The docstring promises `stopped` at a later boundary in that branch, and it did not hold. It passed in V1 and in S1b. | Recorded; S1b's pass is the evidence. The proof is order-dependent — an open item for the Session 32 module (a later boundary, or both outcomes read by their cause). | A proof that depends on a race needs both arms decided, or it is a coin. | — |
+| **D2802** | Run 8 step 4: E1, the editor walk as the probe owner. | **E1 attempt 1 EXIT 4 at sign-in** (15:29:36Z, 30 s timeout): the executor's own state check had just logged the probe owner in with the same TOTP step, and the driver's `fresh_code()` takes the current step, so the server refused it as a replay. | Kept (`~/s44/sql-attempt1-totp-replay`, `s44-sql-attempt1.txt`, D2724's rule); re-run 45 s later, EXIT 0. Not a product defect — the replay refusal is the product working. | Never log the probe owner in near a walk; a TOTP step is single-use. | — |
+| **D2803** | Sheet K2: installed at the lifecycle's pause. | The operator ran K2's `install` at 16:00:54Z — **early**, by mistake, during the create. | Harmless by construction: the instrument takes only a copy newer than the host's clock at its pause (`s44-lifecycle.py:1189`) and reads none before step 7. K2 was run again at the pause (attempt 4). | A sheet step a human can run early must be inert until its instrument asks for it — this one was. | — |
+| **D2804** | Run 6: the trip scripts *"derived by named substitution"*; Run 8 step 6: the merge *"with the CI artifact's offline half for the deployed SHA"*. | Text the derivation carried: the walker prefix `walk-s43-` is a constant in `tests/external/browser/console_walk.py:236` (W0′/W1′'s walkers were named `walk-s43-…`); `s44-dns.sh` and `s44-free.sh` print `S42-DNS:` / `S42-FREE:`; `s44-hostyaml.py`'s inserted comment said *fourth/D2561* (hand-fixed before H1, D2727's check); `s44-external.sh`'s merge echo says *"322 claims, 149 offline"*; and **its `--offline-input` named `evidence/session-44-offline.json`, the local gate's half at `c947180`**, not 224b660's. | The offline half was corrected before the merge: CI contract run 39801089169's artifact `session-01-evidence` carries `evidence/session-44-offline.json` (checkout `224b660`, 155/155, sha `4e6c70a8`), placed as the input; the local half kept as `session-44-offline-c947180.json`. The rest is cosmetic; the walker prefix is derived from the session at Run 9. | A derived script's literals are read whole before it runs, not only its substitutions. | — |
 
 ---
 
@@ -1482,7 +1492,71 @@ modules with the variables set; **`nslookup sql.agenticpostgresql.com`** →
    reconciler started and read active after the last sheet that stopped it
    (D2178).
 
-**Done.** *(the executor writes it, minute by minute in `~/s44/run8/NOTES.md`.)*
+**Done.** (2026-10-22 13:0xZ – 2026-10-23 07:09Z, host clock; WSL `~/s44/run8/`,
+minute by minute in `NOTES.md`.)
+
+- **Before the first sheet**: `4b6c024` by bundle, `FETCH_HEAD` confirmed, no
+  dependency file moved; five renders (control-prod `APG_SQL_RELAY=1`, host
+  `sql.agenticpostgresql.com`); the host module's `--setup-plan` exit 0;
+  `nslookup sql` → `15.204.231.45`; the Playwright image present.
+- **R1**: `bump minor`, `requires patch`, `changes [image_digest]` on alpha, beta
+  and control — no `--also` (no migration, no API operation; D2791).
+  **R2a–d at `4b6c024`**, each database restarted once (D2731's image): rest down
+  4.7 / 4.4 / 4.0 s, auth 9.7 / 8.5 / 9.0 / 9.5 s (beta, alpha, slot3, control).
+  After R2d the relay first answered `/__apg/healthz` 200 at 13:24:53Z with a
+  Let's Encrypt certificate (YR1, CN/SAN `sql.agenticpostgresql.com`); a foreign
+  Origin's upgrade 403; the console 200 with `connect-src 'self'
+  wss://sql.agenticpostgresql.com`; listeners 22/80/443/5432 only.
+- **RC1, A1, RA, K1** (`kit-2026-10-22-s44`); **V1** 411 passed, 2 failed —
+  `documented_path` and the relay-log proof's control (no walk yet; D2800);
+  **X0** 40/0; **W0′** 9/9 (31.9 s).
+- **E0 failed at `4b6c024`** — D2795: `slot3-prod` read `unknown`.
+  **ADR 0287** fixed at `224b660` (CI contract 39801089169, site 39805265547 green),
+  **R3a–d at `224b660`**, no database restart: auth down 9.7 / 6.9 / 9.0 s, rest and
+  the console never; the relay untouched. RC1/A1/RA/K1 again (`kit-2026-10-22-s44b`),
+  X0 40/0, W0′ 9/9, **E0 EXIT 0** (pooled 1.71 s, direct 1.97 s, the refusals).
+- **W1′**: `customer_app` rotated from the Connect page, link → connection string
+  28.4 s, FCP 1,016–1,084 ms, the creds replaced (`.before-s44` kept); `slot3-prod`
+  still `ready`. **E1** (attempt 1 lost to the executor's TOTP replay, D2802):
+  EXIT 0 in 42 s — sign-in 6.64 s; pooled connect 1.55 s, direct 1.59 s;
+  `app_private` 42501; `pg_sleep(30)` cancelled 57014 in 2.03 s; 5,000 rows capped
+  to the page; 20 × `SELECT 1` median **295.0 ms** in the editor against **197.3 ms**
+  from `psql` on the same workstation (D2750); refusals 403 / 400 / 4502; the
+  password field cleared. Record `~/s44/sql/record.json`.
+- **slot8-prod** (D2748): H1 (both copies, `dc34b173`); DNS × 3 grey and R2 × 2
+  EEUR by the agent through the Cloudflare API; the operator's providers and
+  Infisical; SL1b ALL YES, SL2 29 files, SL3 ready, RC1. **The lifecycle** took four
+  attempts (D2796, D2797): create **1,479.5 s**; wake first answer **17.2 s**; resizes
+  304 / 840 admitted of 4,801 safe; export 40,286 B, `pg_restore` 0; the idle sleep
+  requested **1,189.2 s** after the setting; deleted; the second creation refused
+  `no_slot`. K2 run early by mistake, harmlessly (D2803). The neighbours lost
+  nothing (8,452 s, 0 down; control 13,521 up).
+- **The branches** on `slot3-prod` (detached, exit 0): tmp expired by the
+  reconciler **137.7 s** after `expires_at` (S43 52.3, S42 125.2); the window waited
+  889.7 s to pass T1; dev at T1 (rows 1 / main 1, 2), migrated on dev only; the
+  second branch refused `branch_limit_reached`; dev reset; `slot3-prod` `ready`.
+- **A1′** (slot1–8 `agrees (deleted)`); **B1**: all seven units started by the boot,
+  active by **boot+87 s**, 0 failures by themselves; the relay healthy and dev back
+  by themselves; `--after-reboot` exit 0.
+- **S1** 430 / 3 (D2800, D2801; kept in `/home/op/s44-sweep1/`); E0 again; **S1b**
+  (20:59–22:20Z, suite 432 passed, 1 failed in 1:15:42): host **145 claims, 144
+  passed, 1 failed** (`documented_path`). The laptop slept overnight; WSL's network
+  survived.
+- **The branch `--delete-only`** (06:45:45–06:46:16Z, exit 0): dev's names refuse,
+  listed after 0. **The external half** (06:47–07:00Z, suite 126 / 5): 31 claims,
+  28 passed, 3 failed; **`site_live` PASSED** (D2728 re-earned). **The merge**, with
+  224b660's CI offline half (155/155, D2804): **331 claims, 327 passed, 4 failed** —
+  `documented_path`, `notifications_live` and `notifications_retrial_live` (D2798),
+  `sql_relay_live` (D2799). The operator chose to tag with the three recorded.
+- **Tagged 1.22.0 on `224b660`** (tag object `7102e650`, 07:02Z); `publish-cli`
+  39915227704 green (contract on the tag, build, publish); PyPI
+  `agentic-postgres-cli` `info.version` 1.22.0 (wheel + sdist); `apg --version` →
+  `apg 1.22.0` in a clean `python:3.12-slim`.
+- **SL4** (07:09Z): `slot8-prod`'s identity `4cd30ff8…` revoked (recorded in
+  `/etc/agentic-postgres/slots/slot8-prod/revoked`), its Infisical project kept;
+  the credential written by `nano` and shredded, the directory empty; no
+  `projects/slot8-prod`. **RC1**: the reconciler active.
+- Rows **D2795–D2804**; ADR 0287. **NEXT FREE D2805, ADR 0288.**
 
 ### Run 9 — the close
 
