@@ -4,7 +4,10 @@ Session 45 (ADR 0288, D2830, D2849). Run inside the pinned Playwright image by
 `~/s45/run7/s45-look.sh` (never collected: no `test_` prefix). For each page of
 the site -- the routes derived from `site/pages/**/*.md` by `site_build.route_of`'s
 rule, never typed -- and the console's `/console/` signed out, at 390 x 844 and
-1280 x 800, it waits for `document.fonts.ready` and records:
+1280 x 800, it waits for the `load` event, `document.fonts.ready` and a short settle
+(never `networkidle`: the signed-out console leaves a refused refresh's 401 body
+unread, `services/console/public/api.js` `call()`, and Chromium never reports an
+unread fetch body finished -- measured live, D2858) and records:
 
 - `scrollWidth` against `innerWidth` (the page must not scroll sideways);
 - every request the page ATTEMPTED (Playwright's `request` event fires for a
@@ -40,6 +43,7 @@ from playwright.sync_api import Route, sync_playwright
 VIEWPORTS = ((390, 844), (1280, 800))
 FAMILIES = ("Schibsted Grotesk", "JetBrains Mono")
 FOREIGN = "https://third-party.invalid/planted.png"
+SETTLE_MS = 1500  # after `load` and the fonts: a script's late request is still attempted
 INIT = """window.__violations = [];
 document.addEventListener('securitypolicyviolation',
   (e) => window.__violations.push(e.effectiveDirective));"""
@@ -70,8 +74,9 @@ def write_private(path: Path, content: str) -> None:
 def read(page: Any, url: str, shots: Path | None, name: str) -> dict[str, Any]:
     attempted: list[str] = []
     page.on("request", lambda request: attempted.append(request.url))
-    page.goto(url, wait_until="networkidle")
+    page.goto(url, wait_until="load")
     page.evaluate("document.fonts.ready.then(() => 1)")
+    page.wait_for_timeout(SETTLE_MS)
     fonts = page.evaluate("[...document.fonts].map((f) => [f.family.replace(/\"/g, ''), f.status])")
     statuses: dict[str, str] = {}
     for family, status in fonts:
