@@ -1,13 +1,12 @@
 # 0289 — An absent request series reads zero when the store shows the edge was read for the project
 
-- **Status:** Proposed — accepted when Sheet IR2 reads both witnesses on a live,
-  awake project's store (`docs/plans/session-45-implementation-plan.md` Run 1
-  step 3; either witness absent there is §9's stop, and another witness would
-  be the operator's decision)
+- **Status:** Accepted (on Sheet IR2's reading, 2026-10-23 11:12Z: both
+  witnesses present, each labelled with its project, on `slot3-prod`'s store and
+  on the control `alpha-dev`'s)
 - **Date:** 2026-10-23
 - **Session:** 45, Run 1 (`docs/plans/session-45-implementation-plan.md`,
   D2805, D2812 (1), D2832, D2833, D2845; the operator's answer at planning,
-  2026-10-23)
+  2026-10-23; Sheet IR2)
 - **Affects:** `src/agentic_postgres/usage_reading.py` (`requests_below_400`,
   its two witness queries and its reason sentence, beside
   `REQUESTS_BELOW_400_QUERY`; the module sentence), `bin/reconciler.py` (the
@@ -71,13 +70,25 @@ unread.** The sampler alone changes; no migration.
   third keep branch — the certificate's `cn` equal to this project's domain
   (`rendering._scrape_keep_regex`). It does not depend on any request having
   been answered, so it survives the recreation that removes the request series.
-- **Owed (Sheet IR2, Run 1, root, read-only):** on `slot3-prod`'s store (an
-  awake customer project) and `alpha-dev`'s (the control: a project with no
-  customer door) — `count(up{job="edge"} == 1)`,
-  `count(traefik_tls_certs_not_after)`,
-  `count by (__name__) ({__name__=~"up|traefik_.*"})`, and each witness's raw
-  label set (`project`, `job`, `instance`, `cn` only) and its
-  `count by (project)` form (D2845). **This ADR is accepted on that reading.**
+- **Sheet IR2** (2026-10-23 11:12:10–11:12:14Z, the operator as root,
+  read-only; `/home/op/s45-ir2.txt`, exit 0; the agent's copy WSL
+  `~/s45/run1/s45-ir2.txt`), through each store's own container as
+  `store_value` reads it. On **`slot3-prod`** (12 containers running, the store
+  started 2026-10-22T19:29:51Z): `count(up{job="edge"} == 1)` **1**;
+  `count(traefik_tls_certs_not_after)` **1**; the one `up{job="edge"}` series
+  is labelled `project="slot3-prod"`, `job="edge"`,
+  `instance="apg-edge-proxy:8089"`; the one certificate series
+  `project="slot3-prod"`, `cn="slot3.agenticpostgresql.com"` (the project's own
+  domain — the doors' `pool.`/`direct.` certificates are not kept, as the `cn`
+  branch's equality says); `count by (project) (…)` of each returns one series
+  `{project="slot3-prod"}` with value 1; the request series exists (one). On the
+  **control `alpha-dev`** (10 containers, no customer door): both witnesses 1,
+  `project="alpha-dev"`, `cn="alpha-db.agenticpostgresql.com"`, the same
+  `count by (project)` answers; its request query answers more than one series.
+  `count by (__name__)` read 16 names on each, `up` and
+  `traefik_tls_certs_not_after` among them. **Neither store held the absent
+  case at the read** — both projects had answered requests — so the absent
+  series itself is proved by the lifecycle (decision 4), not here.
 
 ## Decision
 
@@ -94,12 +105,13 @@ unread.** The sampler alone changes; no migration.
      `(None, "the store holds no request answered below 400 and could not show
      the edge was read")`, one constant, unread as today.
 
-   The witness queries keep the `project` label (`count by (project) (…)`,
-   D2845) so `store_value`'s own check — every series must name the project
-   asked about, or the reading reached the wrong store — applies to them too; a
-   bare `count(…)` strips every label and would pass that check vacuously. If
-   IR2 shows a witness series without `project`, the plan's bare form is used
-   and the reason recorded in this section.
+   The witness queries keep the `project` label — **`count by (project)
+   (up{job="edge"} == 1)`** and **`count by (project)
+   (traefik_tls_certs_not_after)`** (D2845) — so `store_value`'s own check —
+   every series must name the project asked about, or the reading reached the
+   wrong store — applies to them too; a bare `count(…)` strips every label and
+   would pass that check vacuously. IR2 read both witness series carrying
+   `project` on both stores, so this form is the one built.
 2. **The reconciler's usage pass calls it** in place of `store_value` for the
    request figure (`bin/reconciler.py:1502-1505`). **`store_value` itself is
    unchanged**, so `doctor usage`'s `requests_total` (`bin/doctor.py:949-962`)

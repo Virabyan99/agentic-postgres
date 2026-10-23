@@ -590,8 +590,7 @@ method).
    reading that did not arrive"* → *"…unless the store shows the edge was read
    for this project"*). Both ADRs indexed in `docs/decisions/README.md`.
 
-**Done, in part (2026-10-23) — Sheet IR2 not yet run; ADR 0289 `Proposed`
-until it is.** Greps (step 0): `woff`, `:has(` only in this plan and the stage
+**Done (2026-10-23).** Greps (step 0): `woff`, `:has(` only in this plan and the stage
 plan's D2810; `traefik_tls_certs_not_after` and `up{job` in Session 14's
 D782–D784 (a stopped edge reads `up` **0, not absent**; `honor_labels: true`
 keeps `job="edge"`; the certificate series is kept by `cn`) — ADR 0289 rests on
@@ -612,15 +611,24 @@ filter shows exactly the chosen status, *All* every row; `<details>` closed
 hidden / open shown; `scrollWidth` 390/390, 600/390 with the control; `Tab` →
 `2px solid rgb(31, 79, 163)` and `:focus-visible`, a mouse click → no ring.
 Playwright's `request` event records blocked attempts too (the look walk reads
-attempts). No §9 stop met by either rig. **Threat item 27** written. **ADR 0288**
-(Accepted) and **ADR 0289** (Proposed) written and indexed; ADRs 0276, 0280,
-0283, 0285 carry the amendment in their status lines. No seventh test moves:
-the live site proof reads only `index.html` routes and page `<link>/<img>/
-<script>` assets. **D2845** (the witnesses keep `project`). **Sheet IR2 is
-owed**: the agent's write of `s45-ir2.sh` (the root, read-only script) was
-refused by the session's permission classifier, so nothing was placed on the
-host; the operator decides how it is run. Rows D2844–D2845; **NEXT FREE D2846,
-ADR 0290.**
+attempts). No §9 stop met by either rig. **Sheet IR2** (the operator, root,
+read-only, 2026-10-23 11:12:10–11:12:14Z, `/home/op/s45-ir2.txt` exit 0; the
+agent's copy `~/s45/run1/s45-ir2.txt`; the script, sha256 `84238cac…`, placed
+by the agent at the operator's word after the session's permission classifier
+had refused the first write): on **`slot3-prod`** (12 containers, store up
+since 2026-10-22T19:29Z) `count(up{job="edge"} == 1)` 1 and
+`count(traefik_tls_certs_not_after)` 1, each series labelled
+`project="slot3-prod"` (`instance="apg-edge-proxy:8089"`; the certificate's
+`cn="slot3.agenticpostgresql.com"`, the doors' certificates not kept), each
+`count by (project)` form one series `{project="slot3-prod"}`; on the **control
+`alpha-dev`** the same (`cn="alpha-db.agenticpostgresql.com"`). Both request
+series were present, so the absent case itself waits for the lifecycle (D2833).
+**No §9 stop.** **D2845 settled**: the witnesses are built as `count by
+(project) (…)`. **Threat item 27** written. **ADR 0288** and **ADR 0289** written
+(both Accepted, 0289 on IR2's reading) and indexed; ADRs 0276, 0280, 0283, 0285
+carry the amendment in their status lines. No seventh test moves: the live site
+proof reads only `index.html` routes and page `<link>/<img>/<script>` assets.
+Rows D2844–D2845; **NEXT FREE D2846, ADR 0290.**
 
 ### Run 2 — D2805 repaired (`usage_reading`, the reconciler, tests first)
 
