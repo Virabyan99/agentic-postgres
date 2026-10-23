@@ -421,6 +421,7 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2850** | Brief `:145`: *"Every page keeps 'Something here wrong or missing? Write to invite@agenticpostgresql.com' above the footer, after a rule."* | Thirteen pages carried the sentence in their own Markdown (`index.md`, `quickstart.md`, the eleven docs pages); `pricing.md` and `ledger.md` did not. With the chrome's feedback line (Run 4), the docs pages showed it twice (seen in the Run 4 screenshots). | **The line is the chrome's** (`_layout`'s `feedback`, `<div class="feedback">`), so every page has it once, the generated pages included; the thirteen pages' own copies were removed, count-asserted (`~/s45/run4/feedback.py`). No test read the sentence. | One place says it, so no page can lose it or say it twice. | 0288 |
 | **D2851** | Run 5 step 1: each feature's chips by **`@chips <row> …` — rows the page's `ledger:` already lists**. | `index.md`'s `ledger:` held nine rows; the fourth feature (*Numbers that name their source*) describes `monitoring`, `usage` and `query_insights`, which it did not list — and `@chips` refuses a row outside the page's list (Run 4). | **The three rows join `index.md`'s `ledger:`** (all `beta`, so reachable): a page names the rows it describes, which is ADR 0283's rule and the reason the list exists. | The list is the page's claim; the block may not claim past it, so the list grows with the page. | 0283 |
 | **D2852** | Run 5 step 1: *"`::: band` … `::: features` with four `::: feature` blocks"*; brief `:158` *"white band"*; `:160` *"See all 43 in What exists"*. | Containers nest one level (D2821, Run 4): `band > features > feature` is three and is refused. A number typed in prose is what the builder exists to prevent (D2821's rule). | **`::: features` stands alone** under its `##`, its white panel from CSS (`main.home > .features`); the ledger band's link reads *"See every concept in What exists"* — the count is in `@ledger-summary`'s generated heading above it. | The vocabulary's own limit and the counts' own rule, each kept rather than widened for one section. | 0288 |
+| **D2853** | D2828: hooks only, *"no behaviour change"*; the sign-in view hides *Code from your app* until the server asks for it (`signInView`, `codeLabel.hidden = true`, shown on `second_factor_required`). | **`app.css`'s `label { display: block }` beats the `hidden` attribute** (an author rule over the user agent's `display: none`), so the field shows from the first paint — in the deployed 1.22.0 too (`224b660`'s `app.css:34`, no `[hidden]` rule). Seen in Run 6's sign-in screenshot, not by any test: neither driver asserts it hidden. | **`[hidden] { display: none !important; }` in `app.css`** restores what the script already says — no script, label or flow changes; guarded by `test_console_look.py::test_a_hidden_field_stays_hidden`. Both drivers' rehearsals pass with it (the editor walk waits for the field after the refusal, as it was written to). | A stylesheet that silently undid a script's state was a behaviour change already made; the pass restores it rather than preserving a defect. | 0288 |
 
 ---
 
@@ -1023,7 +1024,47 @@ selectors of §0); `tests/contract/test_console_*.py`.
 6. **Targeted, once** (the console list, `test_console_look`). Commit, push,
    read CI.
 
-**Done.** —
+**Done (2026-10-23; CI follows the push).** `app.js`, through `h` only:
+`link()` marks the current view `ariaCurrent: "page"`; `STATE_CHIPS` (the nine
+`control_states.STATES` → `state-ready` / `-busy` / `-asleep` / `-gone` /
+`-unknown`) and `stateChip()`, which reads a value the table does not hold, or
+an object's own property name (`Object.hasOwn`), as `state-unknown`; the three
+state places render the chip with the state word unchanged (the overview's
+`·` gone, D2824); `table(columns, rows, numeric)` (Insights' five figures,
+Usage's window maximum right-aligned); `frame()` moves a view's `NAV` into
+`div.side` and the rest into `div.content` inside `div.layout`; `narrow()` draws
+the six sign-in, enrolment and invitation views in `div.panel-narrow`.
+`sql.js`, `pg.js`, `scram.js`, `api.js` untouched. `app.css`: the layout, the
+nav column with the current tab, the chips, the shown-once panel's amber
+border, refusals as the warning callout, `.num`, the narrow panel and the QR's
+padding, the editor by structural selectors, below 900 px the nav a
+horizontal scroller and every table its own scroller, and **D2853** (`[hidden]`
+restored). `site.css`'s three button blocks merged into one selector list.
+**app.css 8,642 B + site.css 20,251 B = 28,893 B** of 30,720. **Driver anchors**
+(`~/s45/run6/anchors.py`): all 25 literals the two drivers select by occur in
+`app.js` as often as at `702671f`; each page keeps one `#main`. **Rehearsals**
+(`~/s45/run6/rehearse.sh`, `rehearse-sql.sh`, derived from Sessions 43/44's,
+the console image built from the tree; the console walk's launcher gained
+`APG_CONSOLE_SQL_RELAY_ORIGIN`, which the console has required since 1.22.0):
+**console walk exit 0, all eleven steps ok, `--leak` 6, `--dry` 0; editor walk
+exit 0, every step ok (cancel `57014` in 1.07 s, the cap at 1,000 rows), `--leak`
+6, `--dry` 0** — no driver changed. **Views rig** (`~/s45/run6/views.py`: the
+built image, the API by fixtures shaped from what `app.js` reads, 16 views × 390
+/ 1280): the first pass found six views scrolling sideways at 390 px (wide
+tables) — fixed; then **32 readings, no sideways scroll, no violation, no
+request off the origin**, the current tab marked on every project and
+organisation view; screenshots in `~/s45/run6/shots/` and the scratchpad for
+the operator. New `tests/contract/test_console_look.py` (6 tests, `pytestmark`
+first). **Battery** (`~/s45/run6/battery6.py`): a state dropped from
+`STATE_CHIPS`, `state-unknown` given `state-ready`'s colours, a `code.secret`
+added to the enrol view, a `style=` in `index.html`, the own-property guard
+removed, the logo built by a script — **6/6 killed, each FAILED**, the control
+`test_console_scram.py::test_every_script_parses` green; restored, `cmp`-equal.
+**Targeted, once**: `ruff` clean; the console list, `test_console_look`,
+`test_console_pg`, `test_look`, `test_site`, `test_site_look`, the registry,
+claims, environment-gates and repository guards **443 passed**
+(`test_console_look` re-run alone after `ruff`'s import fix: 6 passed). Row
+D2853; **NEXT FREE D2854, ADR 0290.**
 
 ### Run 7 — the trip's instruments, written and rehearsed offline
 

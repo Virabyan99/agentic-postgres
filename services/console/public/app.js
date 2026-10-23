@@ -73,6 +73,11 @@ function show(...nodes) {
   main.replaceChildren(...nodes.flat().filter((node) => node !== null && node !== undefined && node !== false));
 }
 
+// A sign-in, enrolment or invitation view: one narrow panel on the ground (ADR 0288).
+function narrow(...nodes) {
+  show(h("div", { className: "panel-narrow" }, nodes));
+}
+
 function refusal(error) {
   if (error instanceof Refusal) {
     const sentence = REFUSALS[error.code] || "The server refused this.";
@@ -96,8 +101,30 @@ function button(text, onclick, properties) {
   return h("button", { type: "button", onclick, ...(properties || {}) }, text);
 }
 
+// The current view's link is marked for the eye and for a screen reader (ADR 0288).
 function link(route, text) {
-  return h("a", { href: route }, text);
+  return h("a", location.hash === route ? { href: route, ariaCurrent: "page" } : { href: route }, text);
+}
+
+// A project's or a branch's state as a chip (ADR 0288, D2827): the state word
+// unchanged, its colour by class. Any value this table does not name -- or that
+// is only a property of every object -- reads as unknown, never as ready
+// (ADR 0195).
+const STATE_CHIPS = {
+  ready: "state-ready",
+  creating: "state-busy",
+  starting: "state-busy",
+  updating: "state-busy",
+  suspending: "state-busy",
+  deleting: "state-busy",
+  sleeping: "state-asleep",
+  deleted: "state-gone",
+  unknown: "state-unknown",
+};
+
+function stateChip(state) {
+  const known = typeof state === "string" && Object.hasOwn(STATE_CHIPS, state);
+  return h("span", { className: "chip " + (known ? STATE_CHIPS[state] : "state-unknown") }, value(state));
 }
 
 // A secret, shown once: in a <code> element with a Copy button. It lives in
@@ -113,10 +140,12 @@ function value(text) {
   return text === null || text === undefined ? "—" : String(text);
 }
 
-function table(columns, rows) {
+// `numeric` names the columns whose cells are right-aligned figures (ADR 0288).
+function table(columns, rows, numeric) {
+  const cell = (name) => (numeric && numeric.has(name) ? { className: "num" } : {});
   return h("table", {},
-    h("thead", {}, h("tr", {}, columns.map(([, title]) => h("th", {}, title)))),
-    h("tbody", {}, rows.map((row) => h("tr", {}, columns.map(([name]) => h("td", {}, row[name] instanceof Node ? row[name] : value(row[name])))))));
+    h("thead", {}, h("tr", {}, columns.map(([name, title]) => h("th", cell(name), title)))),
+    h("tbody", {}, rows.map((row) => h("tr", {}, columns.map(([name]) => h("td", cell(name), row[name] instanceof Node ? row[name] : value(row[name])))))));
 }
 
 // Reads the operation every 2 s until it is terminal, as `apg operation wait`.
@@ -147,7 +176,7 @@ function outcome(row) {
 function enrolFactor() {
   return new Promise((resolve) => {
     const status = h("div", {});
-    show(h("h1", {}, "Set up your second factor"), status);
+    narrow(h("h1", {}, "Set up your second factor"), status);
     call("POST", "/me/totp").then((enrolment) => {
       const [codeLabel, code] = field("Code from your app", {
         inputMode: "numeric", autocomplete: "one-time-code", maxLength: 6,
@@ -190,7 +219,7 @@ async function acceptPage() {
   const token = location.hash.length > 1 ? location.hash.slice(1) : "";
   history.replaceState(null, "", "/accept");
   if (!/^[A-Za-z0-9_-]+$/.test(token)) {
-    show(h("h1", {}, "Invitation"), h("p", {}, "This link holds no invitation. Open the link you were sent."));
+    narrow(h("h1", {}, "Invitation"), h("p", {}, "This link holds no invitation. Open the link you were sent."));
     return;
   }
   let me = null;
@@ -208,7 +237,7 @@ async function acceptPage() {
 
 function joinAsSignedIn(token, me) {
   const message = h("div", {});
-  show(
+  narrow(
     h("h1", {}, "Join with your account"),
     h("p", {}, "You are signed in as ", h("strong", {}, me.username), "."),
     button("Join", async () => {
@@ -257,7 +286,7 @@ function createAccount(token) {
     }
     location.assign("/console/");
   });
-  show(
+  narrow(
     h("h1", {}, "Create your account"),
     h("p", {}, "You were invited. Choose a username and a password."),
     userLabel, displayLabel, passLabel, againLabel, create, message,
@@ -271,7 +300,7 @@ function signInWithNextCode(username, password) {
       inputMode: "numeric", autocomplete: "one-time-code", maxLength: 6,
     });
     const message = h("div", {});
-    show(
+    narrow(
       h("h1", {}, "Sign in"),
       h("p", {}, "Your second factor is on. Wait for the next code in your app and enter it."),
       codeLabel,
@@ -299,7 +328,7 @@ function signInView() {
   });
   codeLabel.hidden = true;
   const message = h("div", {});
-  show(
+  narrow(
     h("h1", {}, "Sign in"),
     userLabel, passLabel, codeLabel,
     button("Sign in", async () => {
@@ -330,14 +359,19 @@ async function signOut() {
   }
 }
 
-// The frame every signed-in view is drawn in: who, where, and the way back.
+// The frame every signed-in view is drawn in: who, where, and the way back. A
+// view's own navigation (`projectNav`, `orgNav`) moves into the layout's first
+// column; everything else is the content (ADR 0288, D2828).
 function frame(me, title, ...body) {
+  const parts = body.flat().filter((node) => node !== null && node !== undefined && node !== false);
+  const navs = parts.filter((node) => node instanceof Node && node.tagName === "NAV");
   show(
     h("header", { className: "bar" },
       link("#/", "Overview"),
       h("span", {}, "Signed in as ", h("strong", {}, me.username), " ", button("Sign out", signOut))),
-    h("h1", {}, title),
-    ...body,
+    h("div", { className: navs.length ? "layout" : "layout single" },
+      navs.length ? h("div", { className: "side" }, navs) : null,
+      h("div", { className: "content" }, h("h1", {}, title), parts.filter((node) => !navs.includes(node)))),
   );
 }
 
@@ -363,7 +397,7 @@ async function overview(me) {
       projects.length === 0
         ? h("p", {}, "No project yet.")
         : h("ul", {}, projects.map((project) => h("li", {},
-          link(`#/projects/${project.key}/connect`, project.key), " ", value(project.state), " · ", value(project.profile)))),
+          link(`#/projects/${project.key}/connect`, project.key), " ", stateChip(project.state), " ", value(project.profile)))),
     ));
   }
   frame(me, "Overview",
@@ -472,6 +506,7 @@ async function branchesView(me, key) {
   }
   const rows = served.branches.map((branch) => ({
     ...branch,
+    state: stateChip(branch.state),
     actions: h("span", {},
       button("Reset", () => request(`/projects/${key}/branches/${encodeURIComponent(branch.name)}/reset`,
         at.value.trim() ? { target_time: at.value.trim() } : {}, `Resetting ${branch.name}`)),
@@ -542,7 +577,7 @@ function usageSection(document) {
   return h("section", {},
     h("h2", {}, value(document.project_key)),
     h("p", { className: "muted" }, `From ${document.window.from} to ${document.window.to}; ${document.samples.present} of ${document.samples.expected} samples recorded.`),
-    table([["name", "Figure"], ["latest", "Latest"], ["max", "Window maximum"]], rows),
+    table([["name", "Figure"], ["latest", "Latest"], ["max", "Window maximum"]], rows, new Set(["max"])),
     h("p", {}, "Requests answered below 400: ", document.requests ? String(document.requests.increase) : "not read in this window"),
     (document.entitlements || []).length
       ? table([["name", "Limit"], ["value", "Value"], ["against", "Against"], ["enforced", "Enforced"]],
@@ -564,7 +599,8 @@ async function insightsView(me, key) {
   } else {
     body = [table([["total_ms", "Total ms"], ["calls", "Calls"], ["mean_ms", "Mean ms"], ["rows_per_call", "Rows/call"],
       ["cache_hit_ratio", "Cache"], ["role", "Role"], ["query", "Statement"]],
-    served.statements.map((statement) => ({ ...statement, query: h("code", {}, statement.query) })))];
+    served.statements.map((statement) => ({ ...statement, query: h("code", {}, statement.query) })),
+    new Set(["total_ms", "calls", "mean_ms", "rows_per_call", "cache_hit_ratio"]))];
   }
   frame(me, `${key}: Query Insights (24 h)`, projectNav(key), ...body, h("p", { className: "muted" }, value(served.tuning)));
 }
@@ -604,7 +640,7 @@ async function projectSettingsView(me, key) {
   const [profileLabel, profile] = choice("Compute size", PROFILES, project.profile);
   const [confirmLabel, confirm] = field(`Type ${key} to delete the project`, {});
   frame(me, `${key}: settings`, projectNav(key),
-    h("p", {}, `State ${value(project.state)}, size ${value(project.profile)}, region ${value(project.region)}.`),
+    h("p", {}, "State ", stateChip(project.state), `, size ${value(project.profile)}, region ${value(project.region)}.`),
     idleLabel,
     button("Save idle sleep", async () => {
       result.replaceChildren();
