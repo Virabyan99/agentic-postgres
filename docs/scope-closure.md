@@ -1815,6 +1815,10 @@ a guard against `operations.OPERATION_TYPES` close the class, not the five types
 
 ### What Session 45 inherits, in order
 
+*Amended 2026-10-23 (D2809): the operator split Session 45 -- items 1 and 5 move
+to Session 46, after Session 45's visual pass (D2808, `docs/design/session-45/`)
+and items 2-4.*
+
 1. **The journey and the person's walk** (D2593): from the site and an
    invitation link, a person, not a driver; `documented_path` is theirs to move.
 2. **`notifications` re-earned** with a lifecycle whose record is one attempt's

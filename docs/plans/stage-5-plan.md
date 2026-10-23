@@ -59,10 +59,12 @@ DIRECTION       HOSTED (D1946). Session 36 paid the preconditions; Session 37
                 packaged CLI (ADRs 0280-0284); Session 44 the SQL editor and
                 its relay (ADRs 0285-0286) and the state of a project whose
                 branch or credential moved (ADR 0287).
-SESSIONS        36-45 (D1945, D2510, D2591-D2593). 36-44 DONE; 45 (the journey,
-                the person's walk, the Stage 5 release, the Stage 6 report --
-                D2593) unplanned. Session 45's walk needs slot9-prod (slot1- to
-                slot8-prod consumed).
+SESSIONS        36-46 (D1945, D2510, D2591-D2593, D2809). 36-44 DONE; 45 (the
+                visual pass of docs/design/session-45/ on the site and the
+                console, notifications re-earned, D2805 decided, 1.23.0 --
+                D2808-D2811) and 46 (the journey, the person's walk, the Stage 5
+                release, the Stage 6 report -- D2593) unplanned. Session 45's
+                lifecycle needs slot9-prod (slot1- to slot8-prod consumed).
 CURRENT_SESSION 44. Moves 44 -> 45, all-or-nothing per session (D690).
 template_version 1.22.0. host.yaml schema 4. Outputs v22, project manifest 11,
                 capability manifest 4, lock 4, project lock 3, api-surface 2,
@@ -113,13 +115,13 @@ EVIDENCE        evidence/session-44.json: 331 claims, 328 passed, 3 failed --
                 no request follows) is Session 45's to decide.
 ADRs            287, next free 0288.   migrations 39.   requirements 424.
                 claims 331, 155 declared offline.
-divergences     D1-D1944 in earlier plans; D1945-D1984 here; D1985-D2041 in
+divergences     D1-D1944 in earlier plans; D1945-D1984 and D2808-D2811 here; D1985-D2041 in
                 Session 36's; D2042-D2144 in Session 37's; D2145-D2324 in
                 Session 38's and its migration plan's; D2325-D2421 in Session
                 39's; D2422-D2509 in Session 40's; D2510-D2560 in Session 41's;
                 D2561-D2649 in Session 42's (D2591-D2596 Sessions 43-45's
                 choices); D2650-D2731 in Session 43's; D2732-D2807 in Session
-                44's. **Next free: D2808.**
+                44's. **Next free: D2812.**
 ```
 
 **Every number in §0 onward was measured on 2026-10-03 at `42bf306`**, or says
@@ -334,6 +336,10 @@ numbers (§N); it has no session numbers.
 | **D1982** | §61: twenty-six ADRs *"before implementation"*. | 245 ADRs; each Stage 4 session wrote its own in its first run (0216–0245). | **Mapped, not written up front**: hierarchy, project/database/branch meaning and the beta and single-node messaging are ADR 0246 and 0247 (36); API versioning, key scopes, the operation model are 37's; compute profiles, sleep/wake, region, deletion/export are 38's; the gateway, endpoint hostnames and the customer roles are 39's; branch implementation, restore semantics and branch TTL are 40's; Query Insights, metric retention, plans, Free/Premium limits, usage aggregation and entitlement enforcement are 41's; the Stage 6 criteria are the decision report in 42. Promotion's ADR is not written (D1962). | An ADR records a decision when its measurement exists; twenty-six written before any rig would be twenty-six guesses. | — |
 | **D1983** | §62: twenty-three inputs Stage 5 *"must consume"* from Stage 4 — sustainable hosted projects, the node envelope, disk/WAL reserve, connection saturation, ClickStack footprint, hosted Studio performance, remote CLI usage, organisation/auth feedback, support-grant experience, workflow and connector load, provisioning and deletion time, restore RTO/RPO, upgrade/cutover, noisy neighbour, admission, pilot feedback, demand for branches, sleep and larger profiles, likely plan limits, user understanding. | **Measured**: the envelope (memory, windows, the neighbour, `auth` under runs), admission behaviour (exit 12), RTO (247 s, D593's band), deploy windows. **Absent because hosting was deferred**: every hosted, pilot, demand and feedback input. ClickStack footprint: never run. | **Recorded as the honest premise: Stage 5 proceeds on the operator's decision, not on Stage 4 demand evidence**, and each session that needs a number measures it on the new host in its Run 1 (profiles in 38, plan limits in 41, ClickStack's footprint in 41, provisioning and deletion time in 38, branch time in 40). Demand questions are the walk's (D1981). | The specification says Stage 5 *"is allowed to revise major assumptions based on this evidence"*; where the evidence is absent, saying so is the revision. | — |
 | **D1984** | §58: the operator must answer sixteen questions without undocumented shell commands (active projects, branches, sleeping projects, owners, plans, entitlements consumed, safe capacity, top consumers, pressure, ClickStack within budget, backups healthy, policy excess, admit or not, support grants, running operations, reconstruction after loss). | `apg fleet` (per project and across the host), `apg doctor` (twelve checks), `doctor capacity\|usage`, `admit.sh`, `dr-kit.sh export\|verify`, the node-loss runbook. | **One operator verb, `apg control status`** (root, the control project's database read through the container), answering the questions the control plane owns — owners, plans, entitlements, operations, sleeping projects, branches — beside the existing `fleet`, `doctor capacity` and `admit` for the node's. Support grants: none, by D1971. Session 42, with the runbook updated for the control project's own restore. | The operator's questions split along the same line as the two refusals (D1954): what the control plane decided and what the node measured. | 0185 (superseded for the control plane, D1950) |
+| **D2808** | §3/§5 *Session 45* (D2593): the journey, the walk and the release; no design work anywhere in Stage 5. | **The operator, 2026-10-23: a visual pass on the site and the console**, from a written design brief (*"the honest instrument"* -- design tokens, two self-hosted typefaces, a logo, components, every site page and console view) and five prototype screens (home, a docs page, pricing, *What exists*, the home at 390 px), committed as **`docs/design/session-45/`** (`design-brief.md`, `*.dc.html`). Option 1 of the two the agent named: **inside the current rules** -- the site stays Markdown built by the project's builder (ADR 0283) with the Ledger check; the console stays hand-written JavaScript through its element helper; no framework, no bundler, no npm, no new behaviour, no third-party byte (D2596). The prototypes are a visual reference, not code: they load Google Fonts and a prototyping runtime's script, neither of which reaches the product. | **Session 45 plans and builds it, BEFORE the walk** (D2809), so the person walks the finished product. A framework for the console (Option 2) is a Stage 6 candidate, not this pass. | A design brief is an input to a plan, read against the tree like any brief (D2811). | — |
+| **D2809** | §3 *"36-45"*; §5 *Session 45* (D2593). | Session 45 already carried the support bundle, `apg control status`, the executable journey, the person's walk, the release and the Stage 6 report; Session 44's close handed it **`notifications` to re-earn** (D2798, D2806 -- its console view returns with it) and **D2805 to decide**; D2808 adds the visual pass. | **The operator, 2026-10-23: split.** **Session 45 -- the visual pass, `notifications` re-earned, D2805 decided, released as 1.23.0** (a lifecycle on a new `slot9-prod` run in ONE attempt, detached from the start, D2796/D2798). **Session 46 -- the journey, the person's walk, the Stage 5 release and `docs/stage-6-decision-report.md`** (Session 45's old text, moved whole). **Stage 5 is sessions 36-46.** | A walk judges what the walker sees: the design lands first. | — |
+| **D2810** | The brief: *"Self-host [the fonts] as woff2 from the repo ... Contract tests must pass unchanged."* | Both policies forbid fonts: **`font-src 'none'`** in ADR 0280's console policy (as ADR 0285 amended it) and in the site's (`site_build.CONTENT_SECURITY_POLICY`), pinned exactly by `tests/contract/test_site.py:28` and `tests/contract/test_console_server.py:39,45`. Self-hosted Schibsted Grotesk and JetBrains Mono need `font-src 'self'`. | **The operator, 2026-10-23: self-host, with an ADR.** Session 45's first run writes the ADR (fonts from the same origin only; `font-src 'self'` on the site and the console, as the documentation page has had since ADR 0069), and the two pinned tests move WITH it -- the brief's *"unchanged"* holds for every other test. The OFL licences are committed beside the fonts. | A brief's *"tests unchanged"* is checked against the tests it would have to move before it is promised. | 0280, 0283 |
+| **D2811** | The design brief, read against the tree at `e16b38e` (the agent, 2026-10-23). | **Holds:** 43 Ledger concepts, 25 `beta` (the brief's headline -- builder-computed, so it moves with the Ledger); the site ships no script; the console already has a *Shown once* panel with a Copy control and a type-the-name confirmation for a branch's deletion; `apg branch create --at` exists; both hero headings pass the forbidden-word check; the status names match `site_build`'s. **Conflicts:** (1) the brief puts *Notifications* in the console's navigation and *"Notices at 80%"* on Pricing -- `notifications` is `planned` (D2806) and the 80% notice is part of it; (2) the brief's console navigation and docs sidebar omit **the SQL editor** (the console's *SQL* tab, `site/pages/docs/sql-editor.md`); (3) the site has **eleven** docs pages, not nine; (4) the brief's console navigation has an *Overview* item and *Plan* under the project -- there is no overview route, and Plan is an organisation view; (5) its project-state names are the brief's, not the state reader's (ADR 0287). | **Session 45's plan resolves each against the tree**: (1) shown only once `notifications` is `beta` again in that session, by the Ledger check; (2)-(3) the SQL editor and every existing page kept -- a visual pass removes nothing; (4) mapped without a new view; (5) mapped from `control_states`, `unknown` never looking like `ready`. | The tree wins over a brief (CLAUDE.md); the disagreement is a row. | — |
 
 ---
 
@@ -442,7 +448,8 @@ so is the failure mode CLAUDE.md §7 names.**
 | **42 — Telemetry, Query Insights and monitoring** (moved from 41, D2510) | §24, §25, §32–§39, §53 (ClickStack), §57 step 15 | The OVH upgrade first (D2511); ClickStack bounded; `pg_stat_statements` and Query Insights; curated monitoring |
 | **43 — The website, onboarding in the browser, and the console** (was 42's first half; web-first since D2591) | §9, §26, §27–§31 (the customer's path), §35, §40–§43 (surfaces), §54–§56 | The public site (landing, hosted customer docs, quickstart, pricing, *request an invitation*) on Cloudflare Pages, off the production host; the invitation as a link; accept, password and TOTP in the browser; the console over `/api/v1` with every customer page; Studio forwarders for workflows and connectors; the customer CLI packaged (`uv tool install` / `pip`), no clone |
 | **44 — The browser SQL editor** (D2592) | §26 (the SQL tab), §54 (navigation) | The customer's own database client in the browser: the customer's own credential held only in the page, a WebSocket relay at the edge that holds none and reaches only that project's public names; ADR 0246's sentence amended; the Ledger's `sql_editor` row out of `not_offered` |
-| **45 — The journey, the walk, and the Stage 5 release** (was 42's second half; D2593) | §48, §57, §58, Appendix C | The support bundle; `apg control status` and the node-loss runbook for the control project; the executable journey, web-first; **the person's walk arranged, through the website**; the bump; `session-45-check.sh`; `docs/stage-6-decision-report.md` |
+| **45 — The visual pass, notifications re-earned, 1.23.0** (D2808, D2809) | §54–§56 (the surfaces' presentation) | The operator's design brief on the site and the console, inside the current rules (`docs/design/session-45/`); the self-hosted typefaces by an ADR (D2810); `notifications` re-earned on `slot9-prod`; D2805 decided; 1.23.0 released |
+| **46 — The journey, the walk, and the Stage 5 release** (was 42's second half; D2593; moved from 45 by D2809) | §48, §57, §58, Appendix C | The support bundle; `apg control status` and the node-loss runbook for the control project; the executable journey, web-first; **the person's walk arranged, through the website**; the bump; `session-45-check.sh`; `docs/stage-6-decision-report.md` |
 | *(cut, with the reason in §1)* | §21 promotion (D1962), in-place restore for customers (D1963), temporary support grants (D1971), §53's optional technologies and PostgreSQL 19 (D1947, D1980), billing (D1967), a management SDK (D1952). *(The SQL editor, cut by D1969, is Session 44's since D2592.)* | — |
 | *(`planned` in the Ledger)* | passkeys, email, wake-on-connect if 39's rig refuses it, storage quotas, egress/provider/embedding metering, autoscaling, HA, multi-region, SLA | — |
 
@@ -458,9 +465,10 @@ so is the failure mode CLAUDE.md §7 names.**
 4. **41 and 42 before 43** (was *41 before 42*, D2510). The console shows
    usage, insights and plans; the journey needs an entitlement refusal to
    exist.
-5. **43 before 44 before 45** (D2591–D2593). The SQL editor is a console page;
-   the journey, the walk and the release read everything the stage built, the
-   editor included.
+5. **43 before 44 before 45 before 46** (D2591–D2593, D2809). The SQL editor
+   is a console page; the design lands before the walk, so the walker judges
+   the finished product; the journey, the walk and the release read everything
+   the stage built, the editor and the design included.
 
 **39 and 40 are independent** and could swap; 39 is first because a branch's
 endpoints are 39's mechanism and Session 40's proof connects to a branch.
@@ -1058,8 +1066,51 @@ budget.
 
 **Proposed family.** `SQL-*` (the plan decides it against the registry).
 
-### Session 45 — The journey, the walk, and the Stage 5 release
+### Session 45 — The visual pass, notifications re-earned, and 1.23.0
 
+> **Added 2026-10-23 (D2808, D2809).** The operator split the old Session 45:
+> this session gives the site and the console their design and closes what
+> Session 44 handed on; **Session 46** is the journey, the walk and the release
+> (its text below, moved whole).
+
+**Builds.** The visual pass of `docs/design/session-45/design-brief.md` (D2808)
+on **the site** (tokens, the self-hosted typefaces, the logo and favicon, the
+template, the header with the release from the builder, the footer,
+builder-generated status chips, the stacked status bar and the counts from the
+Ledger, heading ids and *On this page*, every page -- home, Quickstart, the docs
+index and its pages, Pricing, *What exists* -- and the phone width with a
+`<details>` menu) and **the console** (the same tokens and components on every
+existing view: the shell, state chips, operation rows, the shown-once panel,
+readings that say *not read*, refusals, tables, forms, the sign-in screens; the
+SQL editor by CSS alone); **the fonts' ADR** (D2810); **`notifications`
+re-earned** with a lifecycle on a new `slot9-prod` in one attempt, its console
+view restored (D2806); **D2805 decided** -- whether an absent request series
+after a wake reads as zero requests -- and, if repaired, built with its failing
+test first; **1.23.0** released, deployed on four, swept and tagged (D1425).
+
+**Must not.** Change behaviour, add an endpoint, a flow or a claim the Ledger
+does not hold; ship a byte from another origin (D2596); use a framework, a
+bundler or npm (Option 2 is Stage 6's); copy the prototypes' markup; remove an
+existing page or view (the SQL editor included, D2811); move a contract test
+other than the two D2810 names.
+
+**Measures.** Every page against its prototype screen; every text pair's
+contrast (4.5:1); no request leaving the origin (the browser's own record);
+no horizontal scroll at 390 px; the CSS and font bytes against the brief's
+budget; the sixth-to-seventh re-earning's numbers.
+
+**Closes.** D2798, D2805 (decided), D2806, D2808, D2810, D2811.
+
+**Proposed families.** `UI-*` (the visual pass's offline guards), `LIFE-*` /
+`NOT-*` re-earned.
+
+---
+
+### Session 46 — The journey, the walk, and the Stage 5 release
+
+> **Moved 2026-10-23 (D2809)** from Session 45, whole: the walk is taken on
+> the finished design.
+>
 > **Added 2026-10-18 (D2593)** — the second half of the old Session 43 text
 > (above), moved: the support bundle (D1971), `apg control status` (D1984) and
 > the node-loss runbook updated for the control project, **the executable
@@ -1152,7 +1203,8 @@ the wrong door (CLAUDE.md §7 question 3).
 | 42 | new `INS-*`; `every_service_bounded_live` re-run with ClickStack (moved from 41, D2510) | **Yes** — after the OVH upgrade |
 | 43 | new `CON-*`; the site's Ledger guard; onboarding in the browser; the packaged CLI (D2591) | **Yes** — the console on the host; the site on Cloudflare Pages |
 | 44 | new `SQL-*`; the relay's refusals; the editor as the customer's own client (D2592) | **Yes** |
-| 45 | new `JRN-*`; `documented_path`; every Stage 5 claim in every mode (was 43's second half, D2593) | **Yes** — the release trip |
+| 45 | new `UI-*` (the visual pass, offline); the site's Ledger guard over the generated chips and counts; `notifications` and the lifecycle re-earned on `slot9-prod` (D2808, D2809) | **Yes** — 1.23.0 on four |
+| 46 | new `JRN-*`; `documented_path`; every Stage 5 claim in every mode (was 43's second half, D2593; moved from 45, D2809) | **Yes** — the release trip |
 
 **Three things Stage 5 adds to the model:**
 

@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>What exists</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#F4F6F5;color:#142027;font-family:'Schibsted Grotesk',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:#0B6B4F}a:hover{color:#084E3A}
+*:focus-visible{outline:2px solid #1F4FA3;outline-offset:3px;border-radius:4px}
+.navlink{color:#142027;text-decoration:none;font-weight:500;padding:10px 4px}
+.navlink:hover{color:#0B6B4F}
+.fbtn{font:inherit;cursor:pointer}
+@media (max-width:900px){.nav-links{display:none !important}.page-h{font-size:44px !important}.lrow{grid-template-columns:minmax(0,1fr) !important;gap:8px !important}}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #F4F6F5;">
+
+<header style="border-bottom: 1px solid #D3DBD8; background: #F4F6F5;">
+<nav aria-label="Main" style="max-width: 1200px; margin: 0 auto; padding: 14px 32px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 40px;">
+<a href="Main.dc.html" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: #142027;">
+<svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><rect x="1.5" y="1.5" width="25" height="25" rx="6" fill="none" stroke="#142027" stroke-width="2"></rect><rect x="8" y="7" width="4" height="14" rx="1" fill="#0B6B4F"></rect><rect x="16" y="7" width="4" height="14" rx="1" fill="#142027"></rect></svg>
+<span style="font-weight: 700; font-size: 19px; letter-spacing: -0.01em;">Agentic Postgres</span>
+</a>
+<div class="nav-links" style="display: flex; gap: 28px; flex: 1 1 auto;">
+<a class="navlink" href="Docs.dc.html">Quickstart</a>
+<a class="navlink" href="Docs.dc.html">Docs</a>
+<a class="navlink" href="Pricing.dc.html">Pricing</a>
+<a class="navlink" href="Ledger.dc.html" aria-current="page" style="color: #0B6B4F; box-shadow: inset 0 -2px 0 #0B6B4F;">What exists</a>
+</div>
+<div style="display: flex; gap: 12px; align-items: center; margin-left: auto;">
+<a class="navlink" href="https://control.agenticpostgresql.com/console/">Console</a>
+<a href="mailto:invite@agenticpostgresql.com" style="background: #0B6B4F; color: #FFFFFF; text-decoration: none; font-weight: 600; padding: 12px 18px; border-radius: 8px;">Request an invitation</a>
+</div>
+</nav>
+</header>
+
+<main style="max-width: 1200px; margin: 0 auto; padding: 80px 32px 96px;">
+<h1 class="page-h" style="margin: 0; font-size: 60px; line-height: 1.02; letter-spacing: -0.035em; font-weight: 750;">What exists</h1>
+<p style="margin: 22px 0 0; font-size: 20px; line-height: 1.55; color: #3D4A52; max-width: 36em;">Every concept this product names, and what it is today. A concept is in the beta only when a test that proves it passed against the running service. This page is generated from the same file the product checks itself against.</p>
+
+<div role="group" aria-label="Filter by status" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 44px;">
+<sc-for list="{{filters}}" as="f" hint-placeholder-count="6">
+<sc-if value="{{f.on}}" hint-placeholder-val="{{false}}">
+<button type="button" class="fbtn" onClick="{{f.pick}}" aria-pressed="true" style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 16px; background: #142027; color: #FFFFFF; border: 1px solid #142027; border-radius: 22px; font-weight: 600; font-size: 15px;">{{f.label}}<span style="background: #2F414B; color: #E6ECEA; border-radius: 10px; padding: 2px 8px; font-size: 13px;">{{f.count}}</span></button>
+</sc-if>
+<sc-if value="{{f.off}}" hint-placeholder-val="{{true}}">
+<button type="button" class="fbtn" onClick="{{f.pick}}" aria-pressed="false" style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 16px; background: #FFFFFF; color: #142027; border: 1px solid #C3CDCA; border-radius: 22px; font-weight: 500; font-size: 15px;">{{f.label}}<span style="background: #E8EDEB; color: #3D4A52; border-radius: 10px; padding: 2px 8px; font-size: 13px;">{{f.count}}</span></button>
+</sc-if>
+</sc-for>
+</div>
+<p aria-live="polite" style="margin: 16px 0 0; font-size: 14px; color: #55626B;">Showing {{shown}} of 43 concepts</p>
+
+<div style="margin-top: 24px; background: #FFFFFF; border: 1px solid #C3CDCA; border-radius: 16px; overflow: hidden;">
+<div class="lrow" aria-hidden="true" style="display: grid; grid-template-columns: minmax(0, 1.1fr) 170px minmax(0, 2.8fr); gap: 28px; padding: 14px 28px; border-bottom: 1px solid #C3CDCA; font-size: 14px; color: #55626B; background: #F8FAF9;">
+<span>Concept</span><span>Today</span><span>What you get</span>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="12">
+<div class="lrow" style="display: grid; grid-template-columns: minmax(0, 1.1fr) 170px minmax(0, 2.8fr); gap: 28px; padding: 20px 28px; border-bottom: 1px solid #E8EDEB; align-items: baseline;">
+<strong style="font-weight: 650; font-size: 17px;">{{r.name}}</strong>
+<span>
+<sc-if value="{{r.isBeta}}" hint-placeholder-val="{{true}}"><span style="background: #DCEFE6; color: #0B6B4F; font-size: 13px; font-weight: 600; padding: 4px 9px; border-radius: 4px; white-space: nowrap;">In the beta</span></sc-if>
+<sc-if value="{{r.isVerify}}" hint-placeholder-val="{{false}}"><span style="background: #E1E9F7; color: #1F4FA3; font-size: 13px; font-weight: 600; padding: 4px 9px; border-radius: 4px; white-space: nowrap;">Being verified</span></sc-if>
+<sc-if value="{{r.isPlanned}}" hint-placeholder-val="{{false}}"><span style="background: #F6EBD3; color: #7A4F00; font-size: 13px; font-weight: 600; padding: 4px 9px; border-radius: 4px; white-space: nowrap;">Planned</span></sc-if>
+<sc-if value="{{r.isNot}}" hint-placeholder-val="{{false}}"><span style="background: #E6EAEC; color: #3F4A51; font-size: 13px; font-weight: 600; padding: 4px 9px; border-radius: 4px; white-space: nowrap;">Not offered</span></sc-if>
+<sc-if value="{{r.isMeter}}" hint-placeholder-val="{{false}}"><span style="background: #5D6A72; color: #FFFFFF; font-size: 13px; font-weight: 600; padding: 4px 9px; border-radius: 4px; white-space: nowrap;">Not metered</span></sc-if>
+</span>
+<span style="font-size: 16px; line-height: 1.6; color: #3D4A52;">{{r.what}}</span>
+</div>
+</sc-for>
+</div>
+
+<div style="margin-top: 48px; display: flex; flex-wrap: wrap; gap: 16px 40px; justify-content: space-between; align-items: center; border-top: 2px solid #142027; padding-top: 24px;">
+<p style="margin: 0; font-size: 17px; line-height: 1.55; color: #3D4A52; max-width: 40em;">When the product refuses something because it is not offered yet, the answer is <code style="font-family: 'JetBrains Mono', monospace; font-size: 15px;">not_available</code> and it names the row on this page.</p>
+<a href="Docs.dc.html" style="font-weight: 600; padding: 6px 0;">Read What a refusal means</a>
+</div>
+</main>
+
+<footer style="border-top: 1px solid #D3DBD8;">
+<div style="max-width: 1200px; margin: 0 auto; padding: 24px 32px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; font-size: 14px; color: #55626B;">
+<span>Agentic Postgres 1.22.0, beta</span>
+<span>Something here wrong or missing? Write to <a href="mailto:invite@agenticpostgresql.com">invite@agenticpostgresql.com</a></span>
+</div>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":3900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { filter: 'all' };
+  }
+  renderVals() {
+    var B = 'beta', V = 'verify', P = 'planned', N = 'not', M = 'meter';
+    var data = [
+      ["Accounts", B, "By invitation only. A person who receives an invitation creates an account with a password and signs in to the management API; there is no public signup."],
+      ["Organizations", B, "An organization groups people and projects, with the roles owner, admin, member and viewer. Owners and admins sign in with a second factor (an authenticator app's six-digit codes)."],
+      ["Management API keys", B, "A key reads your organizations and projects through the management API. It is shown once, never opens a database, and stops working when it is revoked or its owner leaves the organization."],
+      ["Management API (/api/v1)", B, "Manages accounts, organizations, members, invitations and keys, and creates and manages your projects, their branches, their connections and their backups."],
+      ["CLI against the hosted service", B, "The apg command signs in with a password and a second factor, or with a key, and acts through the management API only. Published to PyPI as agentic-postgres-cli from release 1.21.0."],
+      ["Web console", B, "Accept an invitation link, set up your second factor, sign in, and see your organizations, projects, connection strings, branches, backups, usage, insights, monitoring, plan, notifications and settings. A project is created with the command-line client in this beta."],
+      ["Create a project", B, "A member creates a project on a slot the operator prepared, and claims its first administrator with a one-time token only they hold. A second project on the Free plan is refused with “plan limit reached”; with no slot ready, “capacity exhausted”. In both cases nothing is created."],
+      ["Delete a project", B, "An admin or owner deletes a project with its data; the slot it ran on is never reissued, and its backups are kept by the operator."],
+      ["Export a project", B, "A member exports a project's own data (the app, api and public schemas) as one archive, downloaded once by the person who asked within 15 minutes."],
+      ["Region", B, "Every project runs in one location, the one server this beta runs on, and each project's record names it."],
+      ["Compute size", B, "A member changes a project's compute size (small, standard or large, all on the Free plan). The change restarts it and says how long the restart was measured to take."],
+      ["Sleep and wake", B, "A member puts a project to sleep and wakes it; its data is kept. While it sleeps its doors refuse connections and its backups stop, so its last restore point is the moment it went to sleep."],
+      ["Sleep when idle", B, "A project may sleep after 15, 30 or 60 minutes with no request and no connection. Off unless you turn it on. It wakes only when someone asks."],
+      ["Pooled connection string", B, "pool.<project domain>, port 5432, TLS required (sslmode=verify-full), reaching the project's own transaction pooler as its application role. The password never left your machine."],
+      ["Direct connection string", B, "direct.<project domain>, port 5432, TLS required, reaching a session pooler as the project's administrator role, for migrations and tables in the public schema."],
+      ["Wake on connect", P, "Not open yet."],
+      ["Branches", B, "A full copy restored from the project's own backups, with its own two passwords and its own two names. One branch per project on the Free plan. A branch is not backed up. An expiry, if you set one, deletes it then."],
+      ["Restore to a new branch", B, "A member restores a project to a point in time inside its backup window, into a new branch; the project itself is never overwritten."],
+      ["Restore a project in place", N, "Not available, by decision. Restore to a new branch instead; your project is never overwritten by a restore."],
+      ["Promote a branch", N, "Not available, by decision. Apply the change to your main branch as a reviewed migration instead."],
+      ["Query Insights", B, "Your statements' calls and time over a window, normalised; no recommendations."],
+      ["Monitoring", B, "A short list of readings, each naming where it comes from."],
+      ["Usage", B, "A project's usage over a window, read every five minutes: database size, backup repository size, branches, connections, requests, agent calls, workflow runs, time awake and asleep. A figure that could not be read is said, never shown as zero."],
+      ["Network egress usage", M, "Not measured. Usage pages will not show network egress, provider calls or embeddings."],
+      ["Free plan", B, "Every organization is on the Free plan during the beta, at no cost: one project, one branch per project, every compute size. Storage and agent calls are shown and not enforced."],
+      ["Premium plan", B, "Defined but not available during the beta. You can ask to be told when it is; nothing is charged, and nothing moves you onto it."],
+      ["Notifications", B, "In-app notifications for an organization: one for every finished operation, and a notice once a day when a project passes 80% of a shown limit. Nothing is emailed."],
+      ["Email", P, "This beta sends no email. Invitations and password resets are handed to you by the person who issued them."],
+      ["Passkeys", P, "Not available yet. Owners and admins will use a password and a one-time code."],
+      ["SQL editor", V, "A SQL editor in the console that connects as your own database role, with your password held only in the page."],
+      ["Temporary support access", N, "The operator of this single node has root on it; support access is not technically bounded in this beta."],
+      ["Autoscaling", N, "Not available. A project's size changes only when you resize it, and a resize restarts it."],
+      ["High availability", N, "Not available. Every project runs on one server; if it fails, your project is down until it is restored from backup."],
+      ["Multiple regions", N, "Not available. Every project runs in one location."],
+      ["Service level agreement", N, "Not available. This beta carries no uptime commitment."],
+      ["Billing", N, "Not available. The beta is free and takes no payment details."],
+      ["PostgreSQL", B, "Projects run PostgreSQL 18 with pgvector."],
+      ["Project isolation", P, "Not open yet. Each project will have its own database cluster, roles, network, volumes and credentials; projects on the server will share only the edge that routes requests."],
+      ["Backups and point-in-time recovery", B, "Continuous to off-site object storage, with a nightly copy to a second provider. The restore window is shown with how recently it was read, and never shown when it could not be read."],
+      ["Agents (MCP)", P, "Not open yet."],
+      ["Workflows", P, "Not open yet."],
+      ["Connectors", P, "Not open yet."],
+      ["Audit log", P, "Not open yet."]
+    ];
+    var self = this;
+    var f = this.state.filter;
+    var count = function (k) { return data.filter(function (d) { return d[1] === k; }).length; };
+    var defs = [
+      ['all', 'All', data.length], [B, 'In the beta', count(B)], [V, 'Being verified', count(V)],
+      [P, 'Planned', count(P)], [N, 'Not offered', count(N)], [M, 'Not metered', count(M)]
+    ];
+    var filters = defs.map(function (d) {
+      return { label: d[1], count: d[2], on: f === d[0], off: f !== d[0], pick: function () { self.setState({ filter: d[0] }); } };
+    });
+    var rows = data.filter(function (d) { return f === 'all' || d[1] === f; }).map(function (d) {
+      return { name: d[0], what: d[2], isBeta: d[1] === B, isVerify: d[1] === V, isPlanned: d[1] === P, isNot: d[1] === N, isMeter: d[1] === M };
+    });
+    return { filters: filters, rows: rows, shown: rows.length };
+  }
+}
+</script>
+</body>
+</html>
