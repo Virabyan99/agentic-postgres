@@ -15,7 +15,9 @@ The console's *Backups* view shows the same reading. When it says the window cou
 
 ## Sleeping stops backups
 
+::: warning
 While a project sleeps its backups stop, so its last restore point is the moment it went to sleep. Waking it starts them again.
+:::
 
 ## Restoring
 

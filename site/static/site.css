@@ -130,7 +130,7 @@ h2 { margin: var(--space-9) 0 var(--space-4); font-size: 40px; line-height: 1.1;
 h3 { font-size: 24px; font-weight: 700; letter-spacing: -0.015em; }
 p, li { color: var(--ink-body); max-width: 75ch; }
 .lead { font-size: 20px; line-height: 1.55; color: var(--text-2); }
-code { font-family: var(--font-mono); font-size: 0.88em; background: var(--surface-hover); padding: 2px 6px; border-radius: var(--radius-chip); }
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--surface-hover); padding: 2px 6px; border-radius: var(--radius-chip); overflow-wrap: anywhere; }
 pre { background: var(--ink); color: var(--on-ink-text); padding: var(--space-4) var(--space-5); border-radius: var(--radius-panel); font-size: 14px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
 pre code { padding: 0; background: none; color: inherit; font-size: inherit; }
 table { width: 100%; border-collapse: collapse; margin: var(--space-5) 0; font-size: 15px; background: var(--surface); }
@@ -250,8 +250,20 @@ pre.terminal { margin: var(--space-3) 0; }
 .note { background: var(--ground); border-radius: var(--radius-control); padding: var(--space-3) var(--space-4); color: var(--text-3); font-size: 15px; }
 .warning { background: var(--warning-bg); color: var(--warning-text); border-radius: var(--radius-control); padding: var(--space-3) var(--space-4); }
 .warning p { color: var(--warning-text); }
-.doors { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
-.doors > * { background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-panel); padding: var(--space-4); }
+.doors { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); margin: var(--space-5) 0; }
+.doors > .feature { background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-panel); padding: var(--space-4) var(--space-5); }
+.doors ul { list-style: none; padding: 0; margin: 0; }
+.doors li { padding: var(--space-2) 0; border-top: 1px solid var(--rule-soft); font-size: 15px; }
+.hero > .lead { grid-column: 1; }
+.hero > .actions { grid-column: 1; margin-top: 0; }
+.hero > .instrument { grid-column: 2; grid-row: 1 / span 2; }
+.actions p, .band-dark p:last-child { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.actions a:first-child { display: inline-flex; align-items: center; min-height: 44px; padding: 12px 20px; border-radius: var(--radius-control); background: var(--accent); color: var(--surface); font-weight: 600; text-decoration: none; }
+.actions a:nth-child(2) { display: inline-flex; align-items: center; min-height: 44px; padding: 12px 20px; border-radius: var(--radius-control); background: var(--surface); color: var(--ink); border: 1px solid var(--border-control); font-weight: 600; text-decoration: none; }
+.band-dark p:last-child a:first-child { display: inline-flex; align-items: center; min-height: 44px; padding: 12px 20px; border-radius: var(--radius-control); background: var(--on-ink-action); color: var(--on-ink-action-text); font-weight: 600; text-decoration: none; }
+main.home > .features { background: var(--surface); padding: var(--space-10); border-radius: var(--radius-large); }
+.steps { counter-reset: step; }
+main.home .steps h3::before, main.docs .steps h2::before { counter-increment: step; content: counter(step); display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin-right: var(--space-3); border-radius: 50%; background: var(--ink); color: var(--surface); font-size: 15px; font-weight: 700; letter-spacing: 0; vertical-align: 4px; }
 
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 
@@ -272,6 +284,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   .hero, .features, .docs-layout, .doors, .spec-tiles, .footer-columns, .prev-next { grid-template-columns: minmax(0, 1fr); }
   .docs-layout article { border-left: 0; padding-left: 0; }
   .docs-layout .sidebar { order: 2; }
+  .hero > .lead, .hero > .actions, .hero > .instrument { grid-column: auto; grid-row: auto; }
+  main.home > .features { padding: var(--space-6); }
   .prev-next .next { grid-column: auto; }
   .band { margin-left: -16px; margin-right: -16px; padding-left: 16px; padding-right: 16px; }
   .band-dark { padding: var(--space-9) var(--space-5); }

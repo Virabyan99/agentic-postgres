@@ -7,7 +7,9 @@ ledger: [branches, restore_to_branch, backups_and_pitr]
 
 A branch is a full copy of a project, restored from the project's own backups, with its own two passwords and its own two doors. One branch per project on the Free plan.
 
+::: warning
 **A branch is not backed up**: deleting it, or losing the server, loses what it holds. An expiry, if you set one, deletes it then.
+:::
 
 ## Making a branch
 

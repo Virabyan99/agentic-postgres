@@ -419,6 +419,8 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2848** | D2813 / D2847: the pins a binary file meets are (a)–(g). | **`test_repository_contract.py::test_no_tracked_file_uses_crlf` (`:393-404`) reads every TRACKED file's bytes and refuses any `\r`** — both `woff2` hold 0x0D by chance (found by running it once the fonts were intent-to-add). A sweep of every whole-tree scan in the suite (`ls-files`, `rglob("*")`) found no other: each filters by suffix or skips an undecodable file. §9's stop again. | **The operator, 2026-10-23: exempt the two fonts by path.** `BINARY_FILES` names them; the test asserts they exist and are the only files skipped, every other tracked file scanned as before; a tracked stray file holding `\r` still FAILED it (control `test_every_text_pair_meets_4_5` passed). `.gitattributes` gains `*.woff2 binary`. ADR 0288 decision 4 gains (h). | The tree's first binary file meets every byte-level guard at once; each exemption names the file, never a kind. | 0288 |
 | **D2849** | D2830 / §2 `UI-LIVE-001`: the look walk asserts *"both families `loaded` (`document.fonts`)"* on every site route and the console's sign-in. | **Measured at Run 4** (the local build served with its own `_headers` policy in the pinned Playwright image, Chromium 153): a browser fetches a face only when the page USES it — `JetBrains Mono` reads **`unloaded`** on `/`, `/pricing/` and `/ledger/` (no code on them) and `loaded` on `/docs/connecting/` and `/quickstart/`, at both widths; `Schibsted Grotesk` `loaded` everywhere; no violation, no request off the origin, `scrollWidth` = `innerWidth` at 390 and 1280. | **Run 7's look walk reads each family as `loaded` or `unloaded` and fails on `error`** (a refused or broken font), and asserts `loaded` for both on at least one page that sets code (`/docs/connecting/`). | A face not asked for is not a font that failed; ADR 0195's third outcome is `error`, not `unloaded`. | 0288 |
 | **D2850** | Brief `:145`: *"Every page keeps 'Something here wrong or missing? Write to invite@agenticpostgresql.com' above the footer, after a rule."* | Thirteen pages carried the sentence in their own Markdown (`index.md`, `quickstart.md`, the eleven docs pages); `pricing.md` and `ledger.md` did not. With the chrome's feedback line (Run 4), the docs pages showed it twice (seen in the Run 4 screenshots). | **The line is the chrome's** (`_layout`'s `feedback`, `<div class="feedback">`), so every page has it once, the generated pages included; the thirteen pages' own copies were removed, count-asserted (`~/s45/run4/feedback.py`). No test read the sentence. | One place says it, so no page can lose it or say it twice. | 0288 |
+| **D2851** | Run 5 step 1: each feature's chips by **`@chips <row> …` — rows the page's `ledger:` already lists**. | `index.md`'s `ledger:` held nine rows; the fourth feature (*Numbers that name their source*) describes `monitoring`, `usage` and `query_insights`, which it did not list — and `@chips` refuses a row outside the page's list (Run 4). | **The three rows join `index.md`'s `ledger:`** (all `beta`, so reachable): a page names the rows it describes, which is ADR 0283's rule and the reason the list exists. | The list is the page's claim; the block may not claim past it, so the list grows with the page. | 0283 |
+| **D2852** | Run 5 step 1: *"`::: band` … `::: features` with four `::: feature` blocks"*; brief `:158` *"white band"*; `:160` *"See all 43 in What exists"*. | Containers nest one level (D2821, Run 4): `band > features > feature` is three and is refused. A number typed in prose is what the builder exists to prevent (D2821's rule). | **`::: features` stands alone** under its `##`, its white panel from CSS (`main.home > .features`); the ledger band's link reads *"See every concept in What exists"* — the count is in `@ledger-summary`'s generated heading above it. | The vocabulary's own limit and the counts' own rule, each kept rather than widened for one section. | 0288 |
 
 ---
 
@@ -936,7 +938,45 @@ green; restored and `cmp`-equal. **Targeted, once**: `ruff` clean;
 7. **Targeted, once** (the site list, `test_site_look`). Commit, push, read CI;
    the live site read as in Run 4.
 
-**Done.** —
+**Done, in part (2026-10-23; the operator's comparison with the prototypes,
+CI and the live read follow).** **Home** (`index.md`): `::: hero` (`::: lead`
+with D2842's `#` heading and the page's existing first paragraph; `::: actions`
+with *Request an invitation*, *Read the quickstart*, *"Already invited? Open the
+console"*; `@restore-example`); *What every project gives you* — `::: features`,
+four `::: feature` blocks with the brief's titles, `@chips` from the page's own
+list (**D2851**: `monitoring`, `usage`, `query_insights` joined it), each
+paragraph and limit an existing page's sentence (`connecting.md`, `branches.md`,
+`backups.md`/`projects.md`, `insights-and-monitoring.md`), a link to its page;
+`::: steps` (the four quickstart steps condensed from `quickstart.md`, numbered
+by a CSS counter); `::: band` with `@ledger-summary`, the page's existing
+*"generated from the same file the product checks itself against"*,
+`@ledger-examples` and *"See every concept in What exists"* (**D2852**); *Free
+during the beta* with `@plan-summary`; `::: band-dark` (*"The beta is
+invite-only."* and the page's existing invitation sentences, *Email for an
+invitation*, *I have an account, open the console*). **Quickstart**: the four
+`##` steps inside `::: steps`, their typed numbers removed (the counter numbers
+them; the menu's *4 steps* still counts the `##`s). **Docs**: *Connecting*'s
+table → `::: doors` with two `::: feature` panels carrying the same facts;
+`::: warning` around three existing sentences (*"A branch is not backed up…"*,
+*"While a project sleeps its backups stop…"*, *"It wakes only when someone
+asks…"*); `docs/index.md`'s hand list (nine pages, no SQL editor) →
+`@docs-index` (ten, by group). **Pricing**: `@pricing`, then *Enforced and
+shown* (`plans-and-usage.md`'s *"Storage and agent calls are shown against usage
+and not enforced."*) and *From the terminal* (`apg plan list` / `show` /
+`notify-me`, `cli.md`'s row), and *"The plans here are generated from the
+product's own plan table."*; *Notices at 80%* waits for the bump (D2834).
+**What exists**: `@ledger`, then the `not_available` line from `refusals.md`'s
+row, linking to *What a refusal means*. CSS: the hero's grid areas, the action
+links as buttons, the steps' counter, the home features' panel, the door
+panels, inline code wrapping anywhere (found at 390 px: `/docs/`'s API address
+made `scrollWidth` 429) — **site.css 20,486 B + app.css 6,263 B = 26,749 B**.
+**Screenshots** (`~/s45/run5/shots/`, 15 routes × 390 / 1280, the build under its
+own policy): **30 readings, no sideways scroll, no violation, no request off the
+origin, no font `error`**; copied to the session scratchpad for the operator.
+**Targeted, once**: `ruff` clean; `build-site.py --check` byte-equal; the site
+list, `test_site_look`, `test_documentation_index`,
+`test_session12_documented_path` and the rest of Run 4's list **471 passed**.
+Rows D2851–D2852; **NEXT FREE D2853, ADR 0290.**
 
 ### Run 6 — the console's look
 

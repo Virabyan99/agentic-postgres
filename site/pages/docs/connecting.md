@@ -7,10 +7,26 @@ ledger: [pooled_endpoint, direct_endpoint, postgresql]
 
 Every project has two doors, both on port 5432 and both requiring TLS (`sslmode=verify-full`):
 
-| Door | Host | Role | For |
-|---|---|---|---|
-| pooled | `pool.` and the project's domain | the application role, `customer_app` | your application: a transaction pooler |
-| direct | `direct.` and the project's domain | the administrator role, `customer_admin` | migrations, and tables in the `public` schema: a session pooler |
+::: doors
+::: feature
+### Pooled
+
+For your application.
+
+- Host: `pool.` and the project's domain
+- Role: the application role, `customer_app`
+- Pooler: a transaction pooler
+:::
+::: feature
+### Direct
+
+For migrations, and tables in the `public` schema.
+
+- Host: `direct.` and the project's domain
+- Role: the administrator role, `customer_admin`
+- Pooler: a session pooler
+:::
+:::
 
 Projects run PostgreSQL 18 with pgvector.
 

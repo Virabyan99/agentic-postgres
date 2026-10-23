@@ -39,7 +39,9 @@ A sleeping project keeps its data. While it sleeps its addresses and its databas
 apg project idle-sleep --project-key KEY --minutes 30
 ```
 
+::: warning
 It wakes only when someone asks; a connection does not wake it.
+:::
 
 ## Changing the size
 
