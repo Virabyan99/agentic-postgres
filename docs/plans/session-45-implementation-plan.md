@@ -951,8 +951,9 @@ green; restored and `cmp`-equal. **Targeted, once**: `ruff` clean;
 7. **Targeted, once** (the site list, `test_site_look`). Commit, push, read CI;
    the live site read as in Run 4.
 
-**Done, in part (2026-10-23; the operator's comparison with the prototypes,
-CI and the live read follow).** **Home** (`index.md`): `::: hero` (`::: lead`
+**Done (2026-10-23; CI follows the push).** **The operator compared the
+screenshots with the prototypes** (both folders, the site's 30 and the
+console's 32) **and asked for no difference.** **Home** (`index.md`): `::: hero` (`::: lead`
 with D2842's `#` heading and the page's existing first paragraph; `::: actions`
 with *Request an invitation*, *Read the quickstart*, *"Already invited? Open the
 console"*; `@restore-example`); *What every project gives you* — `::: features`,
@@ -1065,8 +1066,9 @@ built image, the API by fixtures shaped from what `app.js` reads, 16 views × 39
 / 1280): the first pass found six views scrolling sideways at 390 px (wide
 tables) — fixed; then **32 readings, no sideways scroll, no violation, no
 request off the origin**, the current tab marked on every project and
-organisation view; screenshots in `~/s45/run6/shots/` and the scratchpad for
-the operator. New `tests/contract/test_console_look.py` (6 tests, `pytestmark`
+organisation view; screenshots in `~/s45/run6/shots/` and the scratchpad —
+**the operator compared them with the prototypes and asked for no difference**
+(2026-10-23). New `tests/contract/test_console_look.py` (6 tests, `pytestmark`
 first). **Battery** (`~/s45/run6/battery6.py`): a state dropped from
 `STATE_CHIPS`, `state-unknown` given `state-ready`'s colours, a `code.secret`
 added to the enrol view, a `style=` in `index.html`, the own-property guard
