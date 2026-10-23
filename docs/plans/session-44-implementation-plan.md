@@ -1620,6 +1620,15 @@ minute by minute in `NOTES.md`.)
 - **The handoff** (outside the repository): CLAUDE.md §2 rewritten for Session
   45 and §6's *"A human cannot run SQL through a product surface"* moved to ADR
   0285's sentence (the file copied to the scratchpad first); the project memory.
+- **Targeted, once**: 448 passed (the Ledger, evidence, documentation index,
+  envelope, compute profiles, console pages and server, site, documented path,
+  repository contract, DX record, notifications). No test written, so no battery.
+- **`bin/session-01-check.sh` PASSED on `4d6f892`** in eleven foreground shards
+  (D2554; `~/s44/run9/`, `TMPDIR=~/s44/tmp`, each `timeout 570`): steps 1–3, 5–7;
+  step 8 merged **8,364 = collected, 0 failed, 3 skipped**, evidence written.
+  Shard 7 took 555 s of its 570 -- split it before the next gate.
+- **Pushed**: `e8f0eaa` (CI green: contract 39916818849, site 39919444805);
+  `4d6f892` after the gate (CI green: contract 39927209097, site 39930380522).
 - Rows **D2805–D2807**. **NEXT FREE D2808, ADR 0288.**
 
 ---
