@@ -707,7 +707,9 @@ format` (one file) and `ruff check` clean; `test_usage_sampler`,
 `test_control_projects`, `test_export_upload`, `test_project_retire`,
 `test_restore_promotion_bound`, `test_cli_contract` **903 passed**. The new
 test functions are registered at the bump (Run 8, `USE-IDLE-002`). Row D2846;
-**NEXT FREE D2847, ADR 0290.**
+**NEXT FREE D2847, ADR 0290.** **CI**: `6252690d82cad7f9719353c3d4b557c2f84e3902`
+— `contract` 39947645991 **success** (pushed after `1c7b622`'s `contract`
+39944615696 success).
 
 ### Run 3 — the tokens, the fonts, the logo, the favicon, the two policies
 
@@ -800,7 +802,14 @@ files byte-equal; `test_look`, `test_site`, `test_console_server`,
 `test_console_plane`, `test_reality_ledger`, `test_release_workflows`,
 `test_acceptance_registry`, `test_evidence_claims`, `test_environment_gates`,
 `test_documentation_index`, `test_repository_contract` **468 passed**. Rows
-D2847–D2848; **NEXT FREE D2849, ADR 0290.**
+D2847–D2848; **NEXT FREE D2849, ADR 0290.** **CI**:
+`850231875176ee56804f9febfed7f7dfb4d3a155` — `contract` 39950990942
+**success**, `site` 39954151784 **success**. **The live read** (from WSL,
+`-A agentic-postgres-proof`): `https://agenticpostgresql.com/fonts/schibsted-grotesk.woff2`
+→ 200, `content-type: font/woff2`, `x-content-type-options: nosniff`, 49,112 B,
+sha256 `b29bc789…` (the pinned file); `/favicon.svg` → 200 `image/svg+xml`; the
+apex's policy `… connect-src 'none'; font-src 'self'; …` — Cloudflare Pages
+serves the font type unprompted.
 
 ### Run 4 — the site's template, chrome and builder components
 
