@@ -12,7 +12,7 @@ Everything here is what the beta does today; [What exists](/ledger/) says the sa
 - [Connecting](/docs/connecting/): the pooled and direct doors, passwords, TLS.
 - [Branches](/docs/branches/): copies of a project, and restoring to a point in time.
 - [Backups](/docs/backups/): the restore window, and what sleeping does to it.
-- [Plans and usage](/docs/plans-and-usage/): the Free plan, usage readings, notifications, sleep and size.
+- [Plans and usage](/docs/plans-and-usage/): the Free plan, usage readings, sleep and size.
 - [Query Insights and monitoring](/docs/insights-and-monitoring/): your statements' numbers, and the readings that name their source.
 - [The command-line client](/docs/cli/): `apg`, installed from PyPI.
 - [What a refusal means](/docs/refusals/): every refusal's word, and what to do.

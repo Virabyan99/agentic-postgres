@@ -76,6 +76,16 @@
 # the published package. site_live failed (D2728: Cloudflare Pages refuses the proof's
 # default Python User-Agent) -- no row names it, so nothing moves on it. No trial row
 # remains. Accepted: all eleven executed types.
+#
+# Session 44 (Run 7) moved its own sql_editor to `trial`. Its close (Run 9) read the
+# TAGGED evidence, evidence/session-44.json (328/331, 1.22.0 on 224b660, the external
+# half re-run from e8f0eaa after sql_relay_live's proof was made to read the deployed
+# route, D2799): sql_editor_live, sql_relay_live, sql_relay_host and the editor's
+# offline claims passed, so sql_editor is `beta`. notifications_live and
+# notifications_retrial_live failed (D2798: the lifecycle record, finished from its
+# first attempt, names two of the four exports the product notified), so
+# notifications is `planned` again, target Session 45, its console view and site
+# mentions removed with it. No trial row remains. Accepted: all eleven executed types.
 
 schema_version: 1
 rows:
@@ -218,7 +228,7 @@ rows:
       The console at https://control.agenticpostgresql.com/console/: accept an
       invitation link, set up your second factor, sign in, and see your
       organizations, projects, connection strings, branches, backups, usage,
-      insights, monitoring, plan, notifications and settings. A project is
+      insights, monitoring, plan and settings. A project is
       created with the command-line client in this beta; the console runs no SQL
       on the platform's side, and its SQL editor is your own client.
     today: >-
@@ -921,11 +931,8 @@ rows:
 
   - id: notifications
     concept: Notifications
-    status: beta
-    customer_text: >-
-      In-app notifications for an organization: one for every finished
-      operation, and a notice once a day when a project passes 80% of a shown
-      limit. Nothing is emailed.
+    status: planned
+    customer_text: Not open yet. Notifications will be shown in the console only.
     today: >-
       control_finish_operation writes ONE notification from a fixed template in
       the transaction that finishes the operation -- its type, its project, how
@@ -939,17 +946,17 @@ rows:
       (D2557). Re-earned in Session 42 for slot6-prod's lifecycle, counted
       against every operation the record names by its outcome, a failed one
       included: notifications_retrial_live passed on the tagged evidence (1.20.0
-      on 77303e4, D2581).
+      on 77303e4, D2581). Not re-earned in Session 44: slot8-prod's record was
+      finished from its first attempt and names two of the four exports the
+      product notified once each (D2798). Planned since Session 44's close;
+      Session 45's lifecycle re-earns it.
     today_evidence: null
-    evidence:
-      - notifications_retrial_live
+    evidence: []
     stage5_reality: A table and a list route (D1968).
     eventual: In-app, email and webhook notifications.
-    controls:
-      - GET /v1/organizations/{organization}/notifications
-      - bin/notifications.sh list
+    controls: []
     since_session: 36
-    target_session: 42
+    target_session: 45
 
   - id: email
     concept: Email
@@ -988,18 +995,19 @@ rows:
   # -------------------------------------------------------------------------
   - id: sql_editor
     concept: SQL editor
-    status: trial
+    status: beta
     customer_text: >-
-      Being verified: a SQL editor in the console that connects as your own
-      database role, with your password held only in the page.
+      A SQL editor in the console that connects as your own database role, with
+      your password held only in the page.
     today: >-
       The console's SQL editor is the customer's own PostgreSQL client (ADR
       0285): it speaks the protocol from the page, proves the password with
       SCRAM-SHA-256 and sends it nowhere, through a relay on its own name that
       authenticates nothing, holds nothing and records none of what it carries
-      (ADR 0286). Trialed in Session 44 on 1.22.0: the editor walk in a real
-      browser, the relay asked through its public name, and the relay on the
-      host (sql_editor_live, sql_relay_live, sql_relay_host).
+      (ADR 0286). Earned in Session 44 on 1.22.0 (224b660): the editor walk in a
+      real browser, the relay asked through its public name, and the relay on
+      the host -- sql_editor_live, sql_relay_live (its proof made to read the
+      deployed route, D2799) and sql_relay_host passed on the tagged evidence.
     today_evidence: null
     evidence:
       - sql_editor_live

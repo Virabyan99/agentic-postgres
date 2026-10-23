@@ -41,10 +41,10 @@ the customer, and the session's close moves it to `beta` or back to
 | [Network egress usage](#egress_metering) | `not_metered` | — |
 | [Free plan](#plan_free) | `beta` | 41 |
 | [Premium plan](#plan_premium) | `beta` | 41 |
-| [Notifications](#notifications) | `beta` | 42 |
+| [Notifications](#notifications) | `planned` | 45 |
 | [Email](#email) | `planned` | — |
 | [Passkeys](#passkeys) | `planned` | — |
-| [SQL editor](#sql_editor) | `trial` | 44 |
+| [SQL editor](#sql_editor) | `beta` | 44 |
 | [Temporary support access](#support_access) | `not_offered` | — |
 | [Autoscaling](#autoscaling) | `not_offered` | — |
 | [High availability](#high_availability) | `not_offered` | — |
@@ -147,7 +147,7 @@ the customer, and the session's close moves it to `beta` or back to
 
 `console` · **beta** · since Session 43
 
-**What a customer reads.** The console at https://control.agenticpostgresql.com/console/: accept an invitation link, set up your second factor, sign in, and see your organizations, projects, connection strings, branches, backups, usage, insights, monitoring, plan, notifications and settings. A project is created with the command-line client in this beta; the console runs no SQL on the platform's side, and its SQL editor is your own client.
+**What a customer reads.** The console at https://control.agenticpostgresql.com/console/: accept an invitation link, set up your second factor, sign in, and see your organizations, projects, connection strings, branches, backups, usage, insights, monitoring, plan and settings. A project is created with the command-line client in this beta; the console runs no SQL on the platform's side, and its SQL editor is your own client.
 
 **Today.** Static pages served by the control project's console service (ADR 0280) at /, /accept and /console/, every page a named /api/v1 call, signed in with two __Host- cookies honoured only with the console's header and, for a write, its own origin (ADR 0281). Built in Session 43 and walked on 1.21.0 in a real browser: an invitation link to a working connection string in 26.1 s, the second factor read by a phone, the CSRF rule and the cookies read live, the console bounded on the host -- console_walk_live, console_csrf_live and console_live_host passed on the tagged evidence (1.21.0 on 012ac06).
 
@@ -523,19 +523,15 @@ the customer, and the session's close moves it to `beta` or back to
 
 ## Notifications
 
-`notifications` · **beta** · since Session 36
+`notifications` · **planned** · since Session 36
 
-**What a customer reads.** In-app notifications for an organization: one for every finished operation, and a notice once a day when a project passes 80% of a shown limit. Nothing is emailed.
+**What a customer reads.** Not open yet. Notifications will be shown in the console only.
 
-**Today.** control_finish_operation writes ONE notification from a fixed template in the transaction that finishes the operation -- its type, its project, how it ended, why the server requested it -- never a result member, a URL or a caller value; the reconciler writes the daily limit notice (ADR 0275). GET /v1/organizations/{organization}/notifications (bin/notifications.sh list) lists them newest first. Built in Session 41 and read for slot5-prod's lifecycle, where notifications_live did not pass: it counts one notification per operation of the eleven, and the failed export's operation_failed notification -- written as designed -- stood beside them (D2557). Re-earned in Session 42 for slot6-prod's lifecycle, counted against every operation the record names by its outcome, a failed one included: notifications_retrial_live passed on the tagged evidence (1.20.0 on 77303e4, D2581).
-
-*Customer-facing evidence:* `notifications_retrial_live`.
+**Today.** control_finish_operation writes ONE notification from a fixed template in the transaction that finishes the operation -- its type, its project, how it ended, why the server requested it -- never a result member, a URL or a caller value; the reconciler writes the daily limit notice (ADR 0275). GET /v1/organizations/{organization}/notifications (bin/notifications.sh list) lists them newest first. Built in Session 41 and read for slot5-prod's lifecycle, where notifications_live did not pass: it counts one notification per operation of the eleven, and the failed export's operation_failed notification -- written as designed -- stood beside them (D2557). Re-earned in Session 42 for slot6-prod's lifecycle, counted against every operation the record names by its outcome, a failed one included: notifications_retrial_live passed on the tagged evidence (1.20.0 on 77303e4, D2581). Not re-earned in Session 44: slot8-prod's record was finished from its first attempt and names two of the four exports the product notified once each (D2798). Planned since Session 44's close; Session 45's lifecycle re-earns it.
 
 **Stage 5.** A table and a list route (D1968).
 
 **Eventually (not promised).** In-app, email and webhook notifications.
-
-*Controls:* `GET /v1/organizations/{organization}/notifications`, `bin/notifications.sh list`.
 
 <a id="email"></a>
 
@@ -569,11 +565,11 @@ the customer, and the session's close moves it to `beta` or back to
 
 ## SQL editor
 
-`sql_editor` · **trial** · since Session 43
+`sql_editor` · **beta** · since Session 43
 
-**What a customer reads.** Being verified: a SQL editor in the console that connects as your own database role, with your password held only in the page.
+**What a customer reads.** A SQL editor in the console that connects as your own database role, with your password held only in the page.
 
-**Today.** The console's SQL editor is the customer's own PostgreSQL client (ADR 0285): it speaks the protocol from the page, proves the password with SCRAM-SHA-256 and sends it nowhere, through a relay on its own name that authenticates nothing, holds nothing and records none of what it carries (ADR 0286). Trialed in Session 44 on 1.22.0: the editor walk in a real browser, the relay asked through its public name, and the relay on the host (sql_editor_live, sql_relay_live, sql_relay_host).
+**Today.** The console's SQL editor is the customer's own PostgreSQL client (ADR 0285): it speaks the protocol from the page, proves the password with SCRAM-SHA-256 and sends it nowhere, through a relay on its own name that authenticates nothing, holds nothing and records none of what it carries (ADR 0286). Earned in Session 44 on 1.22.0 (224b660): the editor walk in a real browser, the relay asked through its public name, and the relay on the host -- sql_editor_live, sql_relay_live (its proof made to read the deployed route, D2799) and sql_relay_host passed on the tagged evidence.
 
 *Customer-facing evidence:* `sql_editor_live`, `sql_relay_live`, `sql_relay_host`.
 

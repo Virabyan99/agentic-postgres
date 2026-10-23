@@ -26,7 +26,7 @@ plane, migrations — this page hands to it and does not repeat it.
 
 | | |
 |---|---|
-| `template_version` / `CURRENT_SESSION` | **1.21.0** / **43** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
+| `template_version` / `CURRENT_SESSION` | **1.22.0** / **44** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
 | Released migrations | **39**, fix-forward; every down block raises `AP900` (D912). 0033 adds two prune functions granted to nobody and a size reading (ADR 0213) — nothing removes an agent record unless an operator asks. 0034 is the workflow substrate: four `app_private` tables nobody may read, eight functions granted to `auth_service` and the install granted to nobody (ADR 0227, §17). 0035 adds the approval and attempt tables nobody may read, a run status `compensating`, and the audit reader at nine arguments with a counter beside it (ADR 0230, 0233, 0234). 0036 is connectivity: four `app_private` connector tables nobody may read, `app.emit_event` granted to NOBODY and called only by a project's reviewed definer function, and the connector functions -- seven granted to `auth_service`, the install and the rehearsal's to nobody (ADR 0235-0238, §18). 0037 is `app.require_approval`, granted to nobody (ADR 0242). 0038 adds the approval status `withdrawn`, alone in its file; 0039 adds three prunes and a size reading granted to nobody and the withdrawal granted to `auth_service` (ADR 0248, §5) |
 | Deployed document | outputs schema **v22** (`database.public` and the two customer roles; v21 added `region`, `compute.profile`; v20 added `routes.control`, `control.enabled`); `document_kind: deployed` |
 | Project manifest | schema versions **1–11** accepted; 5 adds `migrations.set`, 6 adds `mcp.capabilities`, 7 adds `connectors` (the facility and the outbound endpoints), 8 adds `migrations.approvals_required` (§19), 9 adds `control` (the control plane, `docs/control-plane.md`), 10 adds `compute` (a named profile, §20), 11 adds `database.public_endpoints` (§21) |
@@ -2320,3 +2320,26 @@ empty password is ignored: create a new connection with no password, move the
 source onto it and delete the old one (D2638). `apg-agent` can open the same forward and meets
 the login. `apg-diag containers` lists the plane under `-- apg-telemetry
 (platform)`.
+
+## 24. The SQL relay
+
+Session 44 (ADRs 0285, 0286). The console's SQL editor is the customer's own
+PostgreSQL client running in the page: it proves the door's password with
+SCRAM-SHA-256 and sends it nowhere. Its bytes reach a door through **the relay**,
+a `sql-relay` service in control-prod's set, behind the edge on its own name,
+`wss://sql.agenticpostgresql.com` (a grey A record to this host; its certificate
+issued by the edge like any other route). The relay authenticates nothing and
+holds nothing: it checks the console's Origin and the door name's grammar, opens
+TLS to the edge's Postgres entrypoint with the door name as SNI, and logs one
+line per session -- never the protocol. Only control-prod runs it; alpha and beta
+render it off.
+
+- **1.22.0 restarts every project's database once** -- the Postgres image's two
+  apt pins moved (D2731): rest was unanswered 4.0-4.7 s per project.
+- Its limits are 192 MiB, 64 processes and half a CPU; its peak on this host
+  read 35.4 MiB. Session, door and source ceilings refuse with `4429`; idle 300 s
+  and total 1,800 s close with `4408`.
+- **A reboot recreates it** (the project unit's stop runs `project down`), so
+  its log starts empty at boot: a proof or a reading of its log follows the
+  last recreation (D2800).
+- `op` cannot read the container (D1375); its peak and its log are root's reads.

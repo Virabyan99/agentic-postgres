@@ -2472,6 +2472,158 @@ ENVELOPE: tuple[Measurement, ...] = (
         ),
         note="Session 42's: V1 37 min 04 s, the sweep's suite 45 min 18 s.",
     ),
+    # ---- Session 44: the relay's rigs of 2026-10-21/22, the sitting of 2026-10-22/23 (1.22.0)
+    Measurement(
+        subject="The SQL relay's footprint (ADR 0286, D2750, D2774)",
+        value=(
+            "the real image under 32 sessions x 2: memory.peak 40.49 MiB, 21 pids (limits set "
+            "from it: 192 MiB, 64 pids, 0.5 CPU); on the deployment host its cgroup's "
+            "memory.peak 35.4 MiB from the reboot to the sweep, the editor's sessions included"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the rig: the operator's development machine (Windows 11, WSL 2, Docker "
+                "Desktop), 2026-10-21; the host: the 11,671 MiB deployment host apg-ovh-01 "
+                "(OVH VPS US-East, Reston VA), 6 vCPU, no swap"
+            ),
+            "224b660, the relay container started by the boot at 2026-10-22 19:29Z, read at 22:15Z",
+            "the rig's docker stats peaks; the host's sql_relay_memory_peak_mib JUnit property",
+        ),
+        note="Rig 44a's 19.5 MiB was an echo server with no TLS (D2774).",
+    ),
+    Measurement(
+        subject="1.22.0's deploy, per project and class (R2a-R2d with a database restart; R3)",
+        value=(
+            "at 4b6c024, each database restarted once (D2731's image): rest unanswered "
+            "beta-dev 4.7 s, alpha-dev 4.4 s, slot3-prod 4.0 s; auth 9.7 / 8.5 / 9.0 s and "
+            "control-prod's 9.5 s (its console 9.7 s, recreated); at 224b660 (ADR 0287, no "
+            "database restart): auth 9.7 / 6.9 / 9.0 s (beta, alpha, control), rest and the "
+            "console never; every deploy exit 0"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 "
+                "vCPU, no swap"
+            ),
+            "2026-10-22 13:05-13:26Z (4b6c024) and 15:08-15:17Z (224b660), one project at a time",
+            "s44-window.py from the workstation, one GET a second per class, answers as taken",
+        ),
+        note="Session 43's release, with no restart: auth 6.6-9.4 s, rest never.",
+    ),
+    Measurement(
+        subject="The relay's certificate on its own name",
+        value=(
+            "a Let's Encrypt certificate (YR1, CN/SAN sql.agenticpostgresql.com) in place by "
+            "the relay's first 200 at 13:24:53Z, 87 s into control-prod's deploy window; no "
+            "retry"
+        ),
+        kind=MACHINE,
+        conditions=(
+            "the deployment host's edge (Traefik, TLS-ALPN), the A record made in Run 1",
+            "4b6c024, 2026-10-22 13:23:26-13:25:26Z",
+            "curl -sI https://sql.agenticpostgresql.com/__apg/healthz, verified, once a second",
+        ),
+        note="Before it, the name refused TLS (D2760).",
+    ),
+    Measurement(
+        subject="The SQL editor against psql, from the same workstation (D2750)",
+        value=(
+            "20 x SELECT 1: median 295.0 ms in the editor, 197.3 ms in psql (157.4-267.8); "
+            "connect through the relay 1.55 s pooled, 1.59 s direct; pg_sleep(30) cancelled "
+            "57014 in 2.03 s; 5,000 rows stopped and shown as 1,000 in 0.87 s; the role's "
+            "connections during the session 2 of 2 (pooled customer_app) and 1 of 2 (direct "
+            "customer_admin)"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the operator's development machine (Windows 11, WSL 2), reaching the "
+                "deployment host over the public internet"
+            ),
+            "Chromium in the pinned Playwright image; psql 18 from the same machine",
+            "224b660, 2026-10-22 15:31Z, slot3-prod, ~/s44/sql/record.json",
+        ),
+        note=(
+            "Named as the workstation's: the gap is the relay's hop and the page's own "
+            "protocol work, measured from one place, not a promise."
+        ),
+    ),
+    Measurement(
+        subject="The sixth re-earning: slot8-prod's lifecycle at 1.22.0",
+        value=(
+            "create 1,479.5 s; wake's first answer 17.2 s; resizes admitted 304 and 840 of "
+            "4,801 safe; the export 40,286 B, pg_restore 0; an idle sleep requested 1,189.2 s "
+            "after the setting; 8,018 MiB available before, 7,532 with the slot live; the "
+            "neighbours through 8,452 s: 0 unanswered"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 "
+                "vCPU, no swap"
+            ),
+            "224b660, 2026-10-22 15:53-18:14Z, organisation lifecycle-s44, four attempts (D2796)",
+            "s44-lifecycle.py from the workstation, detached; s44-probe-start.sh on the host",
+        ),
+        note="Session 43's slot7-prod: create 1,378.0 s, wake 16.6 s.",
+    ),
+    Measurement(
+        subject="Idle sleep after a wake that no request follows (D2805)",
+        value=(
+            "the request counter read unread for 51 min (17:20-18:11Z) after a wake at 17:12Z "
+            "with no request answered below 400 -- no series in the store -- so no idle sleep "
+            "was requested; customer activity was quiet from 17:46Z"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 "
+                "vCPU, no swap"
+            ),
+            "224b660, 2026-10-22, slot8-prod with idle sleep at 15 minutes",
+            "app.control_usage_samples read as root after the sitting (s44-idle-read.sh)",
+        ),
+        note="A finding for Session 45, not a bound: the unread reading fails closed (D2525).",
+    ),
+    Measurement(
+        subject="Branches at 1.22.0 (slot3-prod)",
+        value=(
+            "an expired branch deleted by the reconciler 137.7 s after expires_at (Session 43: "
+            "52.3 s); the restore window's top passed a mark 889.7 s after it was written; "
+            "every unit, the relay and the branch back by themselves after a reboot, all "
+            "active by boot+87 s"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 "
+                "vCPU, no swap"
+            ),
+            "224b660, 2026-10-22 18:15-19:31Z, the reboot booted at 19:28:54Z",
+            "s44-branches.py from the workstation, detached; s44-after-reboot.sh",
+        ),
+        note="The expiry is a reconciler pass's spacing, not a promise.",
+    ),
+    Measurement(
+        subject="The host suite's duration at 1.22.0",
+        value=(
+            "V1 (writing nothing): 411 passed, 2 failed, in 60 min 55 s, three restore drills "
+            "inside; the sweep's suite 430 / 3 in 79 min 51 s, then 432 / 1 in 75 min 42 s; the "
+            "external half 126 / 5 in 12 min 31 s, re-run 129 / 2 in 12 min 11 s"
+        ),
+        kind=MACHINE,
+        conditions=(
+            (
+                "the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 "
+                "vCPU, no swap; the external half from the operator's development machine"
+            ),
+            "4b6c024 (V1) and 224b660 (the sweeps, the external half), 2026-10-22/23",
+            "s44-v1.sh and s44-sweep.sh as root, stdin from /dev/null; s44-external.sh",
+        ),
+        note="Session 43's: V1 40 min 26 s, the sweep's suite 47 min 16 s, external 11 min 04 s.",
+    ),
 )
 
 

@@ -1,7 +1,7 @@
 ---
 title: Plans and usage
-description: The Free plan, usage readings, notifications, sleep and compute size.
-ledger: [plan_free, plan_premium, usage, notifications, sleep, idle_sleep, compute_profiles, region]
+description: The Free plan, usage readings, sleep and compute size.
+ledger: [plan_free, plan_premium, usage, sleep, idle_sleep, compute_profiles, region]
 ---
 # Plans and usage
 
@@ -22,14 +22,6 @@ A project's usage over a window -- its database's size, its backup repository's,
 ```
 apg usage show --hours 24
 apg usage show --organization ORGANIZATION
-```
-
-## Notifications
-
-One for every finished operation, and a notice once a day when a project passes 80% of a shown limit. Nothing is emailed.
-
-```
-apg notifications list --limit 50
 ```
 
 ## Sleep, idle sleep and size

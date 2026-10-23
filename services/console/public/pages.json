@@ -125,12 +125,6 @@
       "calls": ["GET /v1/organizations/{organization}/usage"]
     },
     {
-      "id": "notifications",
-      "path": "/console/#/org/{organization}/notifications",
-      "ledger": ["notifications"],
-      "calls": ["GET /v1/organizations/{organization}/notifications"]
-    },
-    {
       "id": "organization-settings",
       "path": "/console/#/org/{organization}/settings",
       "ledger": ["organizations", "api_keys", "accounts"],

@@ -1763,3 +1763,67 @@ never named itself.
    re-uploaded (a CLI fix is a release of four); the site deploys on every green
    push to `main`, so it can run ahead of the deployed release.
 
+
+## 37. What Session 44 closed, what it left, and what Session 45 inherits
+
+**Session 44 is the browser SQL editor** (D2592): the customer's own PostgreSQL
+client in the console page (`pg.js`, SCRAM-SHA-256 in WebCrypto, no third-party
+script) and a relay on its own name, `wss://sql.agenticpostgresql.com`, that
+authenticates nothing, holds nothing and records none of what it carries. Nine
+runs, `D2732`–`D2804`, ADRs 0285–0287. **`1.22.0` is deployed on four projects,
+swept, merged and tagged on `224b660`** (D1425): first at `4b6c024`, which
+restarted each database once with D2731's repinned image, then at `224b660`
+with ADR 0287 and no restart. **The tag published `agentic-postgres-cli` 1.22.0
+to PyPI.** The lifecycle was re-earned a sixth time on a NEW `slot8-prod`
+(D2748), the branches on `slot3-prod`. The merged evidence reads **331 claims:
+328 passed, 3 failed** -- `documented_path` by decision (D1935),
+`notifications_live` and `notifications_retrial_live` (D2798); the external half
+was re-run from the test-only `e8f0eaa` after `sql_relay_live`'s proof was made
+to read the deployed route (D2799).
+
+**The sentence this session would most want carried forward: a state machine
+over a growing vocabulary guards the vocabulary.** The editor's first live run
+refused the kept project because its state read `unknown` -- every branch,
+restore and rotation since Session 40 had been an operation the state reader
+had no decision for (D2795). The Connect page ignores state, so the console had
+never seen it; the first surface that asked was the first to fail. ADR 0287 and
+a guard against `operations.OPERATION_TYPES` close the class, not the five types.
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **`sql_editor`** (ADRs 0285, 0286) | Built, then walked in a real browser on 1.22.0 through the live relay -- pooled and direct connections, `app_private` refused 42501, a cancel in 2.03 s, the 1,000-row cap, the relay's three refusals (403, 400, 4502), the password field cleared; the relay bounded on the host (`memory.peak` 35.4 MiB) and its log free of the protocol: `sql_editor_live`, `sql_relay_live`, `sql_relay_host` and the six offline `SQL-*` claims passed -- **`beta`**. |
+| **The apt repin** (D2731) | Released and deployed in 1.22.0: every database restarted once (rest down 4.0-4.7 s). |
+| **`site_live`** (D2728) | Re-earned at this trip with the recorder Session 43's close repaired. |
+| **D2795** (ADR 0287) | Found by E0, fixed at `224b660`, redeployed on four with no database restart; `slot3-prod` read `ready` after a rotation and after the branches. |
+| **The sixth re-earning** (D2748) | Every lifecycle and branch claim re-earned at 1.22.0 on `slot8-prod` and `slot3-prod` but the two notification claims (below); at B1 all seven units, the relay and the branch came back by themselves. |
+| **D2797** -- attempt 3's idle window | Diagnosed at the close by a root read (D2805, below). |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **`notifications`** (D2798) | `planned` again, target 45: the lifecycle record was finished from its first attempt (D2796) and names two of the four exports the product notified once each. The console's notifications view and the site's mentions are removed on `main`; the deployed 1.22.0 console still shows the view. **The CLI's `apg notifications list` stays** (published). |
+| **D2805 -- idle sleep after a wake no request follows** | The reconciler reads an absent request series as `unread` (`bin/reconciler.py:1504`), and the SQL fails closed on it (D2525), so a project woken and then left untouched is never idle-slept; D2539 decided the same question for customer activity the other way. The site's sentence (*"sleep after 15, 30 or 60 minutes with no request and no connection"*) does not hold in that case. A product decision and a release. |
+| **D2801** -- `workflow_revocation`'s race | Lost once (S1), passed in V1 and S1b: the proof is order-dependent. |
+| **The walker prefix `walk-s43-`** (D2804) | Follows the driver's record pin (`"session": 43`), which Session 43's console proofs read. Cosmetic. |
+| **The plane's footprint at rest** | `UNMEASURED`. |
+| **Hetzner** (M7 X1/X2) and the store's 443 rule for it (D2640) | Allowed since 2026-10-12; not run. |
+| **`slot1-` … `slot8-prod` consumed**; `lifecycle-s41` … `-s44` remain, empty | **Session 45's walk needs `slot9-prod`.** |
+| `documented_path` | **`failed` by decision** (D1935). |
+
+### What Session 45 inherits, in order
+
+1. **The journey and the person's walk** (D2593): from the site and an
+   invitation link, a person, not a driver; `documented_path` is theirs to move.
+2. **`notifications` re-earned** with a lifecycle whose record is one attempt's
+   (on `slot9-prod`), its console view restored with it.
+3. **D2805 decided** -- whether an absent request series after a wake reads as
+   zero requests -- and, if repaired, released and read live.
+4. **`main` is past the tag** with the console change above (undeployed) and
+   the test-only `e8f0eaa`; Session 45's release prices and deploys them.
+5. **The release and the Stage 6 report** (D2593).
+6. The plan's §10, both lists, and Run 8's rows D2795-D2804 -- among them:
+   a long instrument runs detached from the harness (D2796); a proof that reads
+   a container's log follows the last recreation of that container (D2800).
