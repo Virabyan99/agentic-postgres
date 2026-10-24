@@ -9,6 +9,8 @@ ledger: [accounts, organizations, api_keys, management_api]
 
 There is no public signup. A person who receives an invitation link opens it, chooses a username and a password, and has an account. An invitation works once and expires; an admin or owner can revoke one before it is used.
 
+An invitation to the beta opens an account and no organisation: the first thing to do is *New organisation* on the console's overview, and you are its owner. An invitation into someone's organisation makes you a member of it with the role it names.
+
 ## Organisations and roles
 
 An organisation groups people and projects. Each member has one role: owner, admin, member or viewer. A member creates projects, branches and passwords; an admin or owner also invites people, changes roles and deletes a project; only an owner invites another owner. A viewer reads.

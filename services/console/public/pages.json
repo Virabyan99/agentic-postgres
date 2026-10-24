@@ -102,7 +102,7 @@
     {
       "id": "project-settings",
       "path": "/console/#/projects/{key}/settings",
-      "ledger": ["idle_sleep", "compute_profiles", "sleep", "export", "project_deletion", "region"],
+      "ledger": ["idle_sleep", "compute_profiles", "sleep", "export", "project_deletion", "region", "support_bundle"],
       "calls": [
         "GET /v1/projects/{key}",
         "PUT /v1/projects/{key}/idle-sleep",

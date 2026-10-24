@@ -241,6 +241,19 @@ ENVIRONMENT_VARIABLES = (
     # request URLs, font statuses, the focus ring, the site's digest -- it signs
     # nothing in and holds no secret.
     "APG_LOOK_RECORD_FILE",
+    # Session 46 (ADR 0290, D2867). `APG_WALK_RECORD_FILE` (external) is the
+    # hosted record of a PERSON's walk of the published site from an account
+    # invitation: their own notes, typed into JSON by the agent verbatim and
+    # confirmed by them (D2868) -- read by dx_record's hosted readers, never
+    # holding a secret (the reader refuses one).
+    "APG_WALK_RECORD_FILE",
+    # Session 46 (ADR 0290 §9, D2871-D2873). `APG_JOURNEY_RECORD_FILE`
+    # (external) is the 0600 record `tests/external/browser/journey_walk.py`
+    # wrote while a real Chromium went from a membership link to a project
+    # created in the console: step codes and times, origins, statuses, the
+    # bundle's verdicts and ages -- never a password, seed, token or cookie
+    # value (its self-check exits 6 first). Four 0600 files sit beside it.
+    "APG_JOURNEY_RECORD_FILE",
 )
 
 

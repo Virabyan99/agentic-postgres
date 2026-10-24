@@ -1,6 +1,8 @@
 # 0290 — A walk of the hosted product is recorded from the site, by a person, and is the documented path
 
-- **Status:** Accepted
+- **Status:** Accepted; amended at Run 8: the requirement is `DX-HOSTED-001`,
+  not `DX-002` -- `DX-002` and `DX-003` were already Session 1's (D2928) -- and
+  `documented_path` resolves to Session 46 by it (D2927)
 - **Date:** 2026-10-24
 - **Session:** 46, Run 1 (`docs/plans/session-46-implementation-plan.md`, D2862,
   D2863, D2866–D2868, D2871, D2883, D2889; Run 1's rows D2891, D2893; rig 46b)
@@ -9,8 +11,8 @@
   path; `digest` refuses a hosted record), `docs/hosted-walk.md` (new: the
   arrangement and the statement), `tests/external/test_session46_walk.py` (new,
   `APG_WALK_RECORD_FILE`), `src/agentic_postgres/evidence_claims.py`
-  (`documented_path` → `DX-002`; a new claim `appliance_documented_path` →
-  `DX-001`), `tests/acceptance-registry.yaml` (`DX-002`, Run 8).
+  (`documented_path` → `DX-HOSTED-001`; a new claim `appliance_documented_path` →
+  `DX-001`), `tests/acceptance-registry.yaml` (`DX-HOSTED-001`, Run 8).
 - **Amends:** **ADR 0207** — §1's *"a person who has never seen this repository
   is not available"* and its Consequences' first bullet (*"`documented_path` …
   is answered by Run 6's walk and by nothing else"*). Everything else in 0207
@@ -126,9 +128,11 @@ workstation path (ADR 0207 §4); and the proof is a host-mode proof run as root.
    the first that was not reached, with its `note`, is reported and does not by
    itself fail the claim — *the person stopped* is not *a page was wrong*; a
    page that was wrong is an undocumented step.
-5. **`documented_path` moves to `DX-002`** (external mode,
+5. **`documented_path` moves to `DX-HOSTED-001`** (external mode,
    `APG_WALK_RECORD_FILE`, `tests/external/test_session46_walk.py`). Its node
-   ids change and its `CLAIM_INTRODUCED_IN` row does not: the claim keeps its
+   ids change, and so does its `CLAIM_INTRODUCED_IN` row -- a claim's session is
+   its requirements' (`claim_session`), so it is 46 now and
+   `appliance_documented_path` 12 (D2927, at Run 8): the claim keeps its
    name and its question — *did somebody who did not build this get through the
    documented path* — for the product customers now get. **`DX-001` keeps its
    proof under a new claim, `appliance_documented_path`** (host mode,

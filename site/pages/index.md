@@ -71,13 +71,17 @@ A short list of readings about a project, each with the moment it was read and w
 
 Open the link you were sent: choose a username and a password. The link works once and expires.
 
+### Create your organisation
+
+An invitation to the beta opens an account; *New organisation* on the console's overview makes yours, and you are its owner.
+
 ### Set up your second factor
 
 Owners and admins sign in with a six-digit code from an authenticator app. The console shows a QR code: scan it with the app.
 
-### Open a project
+### Create a project
 
-In this beta a project is created with the command-line client:
+Your organisation's *New project* in the console: a name, a size and the project administrator's username. The page shows a token once -- save it if you will claim the administrator from a terminal -- and links to *Connect* when the project is ready. Or, from a terminal:
 
 ```
 pipx install agentic-postgres-cli

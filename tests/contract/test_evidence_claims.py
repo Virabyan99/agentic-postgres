@@ -1017,7 +1017,10 @@ CLAIM_INTRODUCED_IN = {
     "log_correlation": 11,
     "isolation_matrix": 12,
     "project_removal": 12,
-    "documented_path": 12,
+    # Session 46 moved its requirement to DX-HOSTED-001 (ADR 0290), so it resolves to 46 now;
+    # the clone walk's DX-001 is `appliance_documented_path`'s, at 12 (D2927).
+    "documented_path": 46,
+    "appliance_documented_path": 12,
     "fresh_host": 12,
     # Session 13 Run 6: D697's retrofit, as far as the model allows. **Dated to
     # the sessions their requirements belong to, not to 13** — Session 2's
@@ -1342,6 +1345,14 @@ CLAIM_INTRODUCED_IN = {
     "ui_look_live": 45,
     "idle_after_wake_live": 45,
     "notifications_reearned_live": 45,
+    "support_bundle": 46,
+    "control_status": 46,
+    "console_create": 46,
+    "journey_driver": 46,
+    "support_bundle_live": 46,
+    "control_status_host": 46,
+    "console_create_live": 46,
+    "journey_live": 46,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

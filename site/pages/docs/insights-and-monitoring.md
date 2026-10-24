@@ -36,6 +36,8 @@ Every five minutes the server samples the statements your database roles (`custo
 apg insights show --project-key KEY --hours 24 --limit 20
 ```
 
+The console's *Insights* view shows the same list.
+
 - **Numbers only.** Nothing here tells you what to change: there is no finding, no recommendation and no confidence.
 - **Fewer than two samples** in the window could not be determined: the reason is shown, and the command exits 6.
 - **What is never recorded**: statements the platform's own roles run, a statement inside one of your functions (only the calling statement is timed), and any utility statement such as `ALTER ROLE` or `DO` -- so a password or a block's literal cannot reach an insight.

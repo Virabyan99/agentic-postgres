@@ -60,7 +60,7 @@ def instant(text: str) -> datetime:
 @pytest.fixture(scope="module")
 def idle(record: dict[str, Any]) -> dict[str, Any]:
     """Session 45's record, its idle reading whole."""
-    assert record["session"] == 45, f"a Session {record['session']} record, not 45's (D2833)"
+    assert record["session"] in (45, 46), f"a Session {record['session']} record (D2833, D2885)"
     reading = record["observations"]["idle"]
     assert reading.get("minutes") == IDLE_MINUTES, reading.get("minutes")
     assert isinstance(reading.get("quiet"), dict), "the record holds no quiet reading (D2833)"

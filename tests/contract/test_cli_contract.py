@@ -271,6 +271,10 @@ SHELL_COMMANDS = (
     "bin/session-44-check.sh",
     # Session 45 (ADR 0288-0289): the visual pass and D2805.
     "bin/session-45-check.sh",
+    # Session 46 (ADR 0290-0293): the customer's journey and the person's walk.
+    # Derived from 45's by diff with TWO flags added, `--journey-record-file`
+    # and `--walk-record-file`.
+    "bin/session-46-check.sh",
     # Session 38 (ADR 0257, D2150): customer slots -- prepare, status, revoke.
     # Listed the run it landed (D1014), `git add`ed first (D1188).
     "bin/slot.sh",

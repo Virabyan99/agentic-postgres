@@ -21,7 +21,7 @@ the customer, and the session's close moves it to `beta` or back to
 | [Management API (/api/v1)](#management_api) | `beta` | 39 |
 | [CLI against the hosted service](#cli_remote) | `beta` | 37 |
 | [Web console](#console) | `beta` | 43 |
-| [Create a project](#projects_self_service) | `beta` | 42 |
+| [Create a project](#projects_self_service) | `trial` | 46 |
 | [Delete a project](#project_deletion) | `beta` | 42 |
 | [Export a project](#export) | `beta` | 42 |
 | [Region](#region) | `beta` | 42 |
@@ -46,6 +46,7 @@ the customer, and the session's close moves it to `beta` or back to
 | [Passkeys](#passkeys) | `planned` | — |
 | [SQL editor](#sql_editor) | `beta` | 44 |
 | [Temporary support access](#support_access) | `not_offered` | — |
+| [Support bundle](#support_bundle) | `trial` | 46 |
 | [Autoscaling](#autoscaling) | `not_offered` | — |
 | [High availability](#high_availability) | `not_offered` | — |
 | [Multiple regions](#multi_region) | `not_offered` | — |
@@ -147,13 +148,13 @@ the customer, and the session's close moves it to `beta` or back to
 
 `console` · **beta** · since Session 43
 
-**What a customer reads.** The console at https://control.agenticpostgresql.com/console/: accept an invitation link, set up your second factor, sign in, and see your organizations, projects, connection strings, branches, backups, usage, insights, monitoring, plan, notifications and settings. A project is created with the command-line client in this beta; the console runs no SQL on the platform's side, and its SQL editor is your own client.
+**What a customer reads.** The console at https://control.agenticpostgresql.com/console/: accept an invitation link, set up your second factor, sign in, and see your organizations, projects, connection strings, branches, backups, usage, insights, monitoring, plan, notifications and settings, and create a project; the console runs no SQL on the platform's side, and its SQL editor is your own client.
 
 **Today.** Static pages served by the control project's console service (ADR 0280) at /, /accept and /console/, every page a named /api/v1 call, signed in with two __Host- cookies honoured only with the console's header and, for a write, its own origin (ADR 0281). Built in Session 43 and walked on 1.21.0 in a real browser: an invitation link to a working connection string in 26.1 s, the second factor read by a phone, the CSRF rule and the cookies read live, the console bounded on the host -- console_walk_live, console_csrf_live and console_live_host passed on the tagged evidence (1.21.0 on 012ac06).
 
 *Customer-facing evidence:* `console_server`, `console_session_cookie`, `console_csrf_rule`, `console_scram`, `console_plane`, `console_ledger_map`, `console_walk_live`, `console_csrf_live`, `console_live_host`.
 
-**Stage 5.** Static pages served by the control project, calling /api/v1 only: onboarding, projects, connect, branches, backups, usage, insights, monitoring, plan, notifications and settings; no SQL on the platform's side -- the SQL editor is the customer's own client (ADR 0285). A project is created with the command-line client in this beta.
+**Stage 5.** Static pages served by the control project, calling /api/v1 only: onboarding, projects, connect, branches, backups, usage, insights, monitoring, plan, notifications and settings; no SQL on the platform's side -- the SQL editor is the customer's own client (ADR 0285). A project is created in the console (ADR 0291) or with the command-line client.
 
 **Eventually (not promised).** A full web console with in-browser data tools.
 
@@ -163,19 +164,19 @@ the customer, and the session's close moves it to `beta` or back to
 
 ## Create a project
 
-`projects_self_service` · **beta** · since Session 38
+`projects_self_service` · **trial** · since Session 38
 
-**What a customer reads.** A member of an organization creates a project on a slot the operator prepared, and claims its first administrator with a one-time token only they hold. On the Free plan an organization holds one project; a second is refused with "plan limit reached", and when no slot is ready the request is refused with "capacity exhausted" -- in both cases nothing is created.
+**What a customer reads.** Being verified: a member of an organization creates a project in the console or with the command-line client, on a slot the operator prepared; the console shows a one-time token once, which claims the project's first administrator from a terminal if you want its admin API. On the Free plan an organization holds one project; a second is refused with "plan limit reached", and when no slot is ready the request is refused with "capacity exhausted" -- in both cases nothing is created.
 
-**Today.** POST /v1/projects (bin/project.sh create) records a project.create operation once the organisation's plan admits it (ADR 0274: Free's projects_active, read under the organisation's lock before the slot); the reconciler, a root unit on the host, executes it into a prepared slot through admission and the deploy, and bin/project.sh claim sets the first administrator's password through the project's own reset route. The operator still creates every other project by hand. Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Re-earned a fourth time in Session 42 on 1.20.0 on a new slot, slot6-prod, in a new organisation, its probe samples written as they are taken: lifecycle_fourth_trial_live passed on the tagged evidence (1.20.0 on 77303e4, D2581).
+**Today.** POST /v1/projects (bin/project.sh create) records a project.create operation once the organisation's plan admits it (ADR 0274: Free's projects_active, read under the organisation's lock before the slot); the reconciler, a root unit on the host, executes it into a prepared slot through admission and the deploy, and bin/project.sh claim sets the first administrator's password through the project's own reset route. The operator still creates every other project by hand. Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Re-earned a fourth time in Session 42 on 1.20.0 on a new slot, slot6-prod, in a new organisation, its probe samples written as they are taken: lifecycle_fourth_trial_live passed on the tagged evidence (1.20.0 on 77303e4, D2581). Being verified in Session 46: the console creates a project (ADR 0291) -- the handoff token made in the page, only its SHA-256 sent, shown once at acceptance -- and apg project claim --token-file claims with it; console_create_live reads the journey's creation on slot11-prod, the one the lifecycle continues (D2872).
 
-*Customer-facing evidence:* `lifecycle_fourth_trial_live`.
+*Customer-facing evidence:* `console_create_live`.
 
 **Stage 5.** POST /v1/projects records a project.create operation (member and above, a person only), refused "capacity exhausted" with no slot ready before anything is recorded; the reconciler (Session 38) executes it into a prepared slot through the same admission and deploy, and the first administrator claims the account with a token only its requester holds (ADR 0256, ADR 0260).
 
 **Eventually (not promised).** Placement across a fleet of servers.
 
-*Controls:* `project.create`, `bin/project.sh create`, `bin/project.sh claim`.
+*Controls:* `project.create`, `bin/project.sh create`, `/console/`.
 
 *API operations:* `project.create` -- accepted.
 
@@ -596,6 +597,24 @@ the customer, and the session's close moves it to `beta` or back to
 **Stage 5.** Grants are not built (D1971); a support bundle a member downloads is.
 
 **Eventually (not promised).** Time-bounded, audited support grants.
+
+<a id="support_bundle"></a>
+
+## Support bundle
+
+`support_bundle` · **trial** · since Session 46
+
+**What a customer reads.** Being verified: a project's Settings in the console shows its support bundle -- the latest reading of each of the server's health checks for your project, a verdict and one sentence each, never a file path or a secret, with how old it is -- and the project's recent operations; `apg project diagnostics` writes the same to a new file only you can read.
+
+**Today.** The reconciler runs the doctor on each deployed slot every 900 s and records each check's name, verdict and detail -- never its evidence, a host path or an opaque run in a detail replaced -- through a control-set function granted to nobody (control migration 0010); a stopped database is one asleep row. GET /v1/projects/{key}/diagnostics (a member, a person's session only) serves the readings with their ages, stale past 1,800 s, and the project's newest 50 operations (ADR 0292). Built in Session 46; being verified on slot11-prod's journey: support_bundle_live.
+
+*Customer-facing evidence:* `support_bundle_live`.
+
+**Stage 5.** The doctor's verdicts recorded by the reconciler, read by a member with the project's operations; the control plane holds no credential to the node and reads none itself (ADR 0246, ADR 0292).
+
+**Eventually (not promised).** Support grants and a bundle an operator can attach to a case.
+
+*Controls:* `GET /v1/projects/{key}/diagnostics`, `bin/project.sh diagnostics`, `/console/`.
 
 <a id="autoscaling"></a>
 

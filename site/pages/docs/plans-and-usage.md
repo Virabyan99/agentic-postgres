@@ -17,7 +17,7 @@ apg plan notify-me
 
 ## Usage
 
-A project's usage over a window -- its database's size, its backup repository's, its branches, its connections, the requests it answered, the time it was awake and asleep -- is read every five minutes. A figure that could not be read is said, never shown as zero.
+A project's usage over a window -- its database's size, its backup repository's, its branches, its connections, the requests it answered, the time it was awake and asleep -- is read every five minutes. A figure that could not be read is said, never shown as zero. In the console: a project's *Usage*, and an organisation's *Usage* for all its projects.
 
 ```
 apg usage show --hours 24

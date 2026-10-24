@@ -14,7 +14,7 @@ upgrade surface the product has is `bin/upgrade.sh` (`check`, `plan`,
 `verify`) and `./deploy.sh --through-session N`; what follows is what a person
 does around them.
 
-> **This page is part of release `1.23.0`.** It describes the commands that
+> **This page is part of release `1.24.0`.** It describes the commands that
 > release ships and the sequence a trip on that release executed. A release
 > that moves `VERSION` and does not move this line is a release whose upgrade
 > procedure describes a release that no longer exists, which is what happened
@@ -110,6 +110,7 @@ schema versions that release accepts.
 | 1.21.0 | 43 | 2026-10-20 | 39 | v22 | 1–11 | **the console, its session, the invitation as a link, the public site and the packaged CLI** (ADR 0280-0284): the control project's render enables a `console` service under its own Compose profile (`APG_CONSOLE=1`), so **the control project's deploy starts one new container** on the edge network (192 MiB, 64 processes, a quarter of a core), routed on the control host at `/`, `/accept` and `/console/...`; no other project starts anything new. The control mode's session routes gain a cookie mode for the console (two `__Host-` cookies, `SameSite=Strict`, honoured only with `X-Apg-Console: 1` and, for a write, the console's `Origin`) -- a bearer request is unchanged; an invitation's mint answers `accept_url`, the enrolment `otpauth_qr` (segno pinned), so the `services/auth-api` image moves. Three repairs: `telemetry.sh status` reads a container with no healthcheck (D2636), `provision-host.sh --check` reads the launchers the install installs (D2637), `bootstrap-providers --apply` counts what it created (D2642). **No migration, released or control.** No outputs, manifest, host, capability, lock or secret schema moves. The public site and the CLI's package are published by CI, not by a deploy. A managed project moves to the release with `bin/slot.sh redeploy`, the reconciler stopped (§20). **1.21.0 restarts no database**: measured at the deploy of four (2026-10-21), `auth` unanswered 6.6-9.4 s per project and `rest` never. **A minor**: `upgrade plan` reads `requires minor` only when `api_operation_added` is DECLARED -- the cookie mode and the two answer fields, additive |
 | 1.22.0 | 44 | 2026-10-22 | 39 | v22 | 1–11 | **the browser SQL editor and its relay** (ADR 0285-0286): **every project's database restarts once** -- the Postgres image's two apt pins moved (D2731, D2747), a new image, so each deploy recreates `postgres`. The control project's render enables a `sql-relay` service under its own Compose profile (`APG_SQL_RELAY=1`), so **the control project's deploy starts one new container** on the edge network (192 MiB, 64 processes, half a core), routed on its own name `sql.<zone>` -- one more grey DNS record and one more certificate from the edge's resolver; no other project starts anything new. The console image moves (the editor, its policy naming the relay's origin, read from a new `APG_CONSOLE_SQL_RELAY_ORIGIN`). **No migration, released or control.** No outputs, manifest, host, capability, lock or secret schema moves. A managed project moves to the release with `bin/slot.sh redeploy`, the reconciler stopped (§20). **Proposed as a minor**: `upgrade plan` reads `requires patch` (the lock's images alone -- no rendered document shows the relay) and the minor covers it (D2791) |
 | 1.23.0 | 45 | 2026-10-23 | 39 | v22 | 1–11 | **the visual pass and D2805** (ADR 0288-0289): **no database restarts** -- no Postgres image moves. The console image moves (its two self-hosted typefaces, favicon, stylesheet and `app.js`'s hooks; its policy now `font-src 'self'`), so **the control project's deploy recreates the console**; every new commit recreates `auth`, `mcp` and `storage` as before (D2034). The reconciler's usage sampler reads an absent request series as 0 only when the project's own store shows the edge was read for it (ADR 0289), so **restart the reconciler after the checkout moves** (D2179, D2411) -- the repair takes effect then. **No migration, released or control.** No outputs, manifest, host, capability, lock or secret schema moves. A managed project moves to the release with `bin/slot.sh redeploy`, the reconciler stopped (§20). **Proposed as a minor**: `upgrade plan` reads `requires patch` (the template version alone -- no rendered document shows a console image or a sampler) and the minor covers it |
+| 1.24.0 | 46 | 2026-10-24 | 39 | v22 | 1–11 | **the journey, the console's creation, the support bundle, `control.sh status`** (ADR 0290-0293): **no database restarts** -- no Postgres image moves. **Control migration `0010` on the control project** (the diagnostics table and its two functions, applied by its deploy). The console image moves (`create.js`, `app.js`, `pages.json`), so **the control project's deploy recreates the console**; every new commit recreates `auth`, `mcp` and `storage` as before (D2034). The reconciler gains the diagnostics pass, so **restart the reconciler after the checkout moves** (D2179, D2411). No released migration. No outputs, manifest, host, capability, lock or secret schema moves. A managed project moves to the release with `bin/slot.sh redeploy`, the reconciler stopped (§20). **Proposed as a minor**: `upgrade plan` reads `requires patch` (the template version alone -- no rendered document shows a console image, a control-set migration or a reconciler pass) and the minor covers it |
 
 A row's *what an upgrade meets* is what the trip that deployed it recorded in
 its plan's §5 *Done* paragraph. **A project manifest below the newest schema
@@ -555,7 +556,7 @@ Its sequence is `bin/rotate-signing-key.sh --help`'s seven steps and its
 
 ```bash
 sudo ./deploy.sh --host host.yaml --project project.alpha.yaml \
-     --capabilities capabilities.yaml --through-session 45
+     --capabilities capabilities.yaml --through-session 46
 ```
 
 Nothing after it: no `> file`, no `| tee`. `sudo`'s pty puts a command whose
@@ -789,7 +790,7 @@ manifest that moved *with* an otherwise-minor release);
 a generated client's `init()` will answer `stale_contract` naming both
 digests, which is the client refusing to run against a surface it was not
 generated from, ADR 0204); a secret that gains a **required** member (put the
-value at the provider by hand, `materialize-secrets.sh --session 45`, and
+value at the provider by hand, `materialize-secrets.sh --session 46`, and
 plan again — no command in this repository writes a provider value, D249);
 `document_schema_needs_operator_input` (the deployed document's migrator
 needs a value only you hold; the plan says which).

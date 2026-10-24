@@ -1434,7 +1434,59 @@ from pathlib import Path
 #: D2411) -- the repair of D2805 lives in it. **The trip** confirms the class
 #: against a DEPLOYMENT: `upgrade plan` on every project before the first 1.23.0
 #: deploy -- and a `major` there is a stop condition.
-CURRENT_SESSION = 45
+#:
+#: **Session 46 moves it to 46, all-or-nothing again** (D690): NINE requirements
+#: and nine claims -- `CLAIMS` 339 -> 348 and `OFFLINE_CLAIMS` 160 -> 164, counted
+#: from the tuples (D1628) -- four declared offline, four EXTERNAL and one host,
+#: every offline half written in the run that built its piece (Runs 2-6) and every
+#: live half here. One family joins the registry: `JRN`, the journey. **ADR 0290
+#: moves `documented_path` to `DX-HOSTED-001`**: the person's walk of the published
+#: site from an invitation link, the product customers get; the clone walk keeps
+#: its proof under a new claim, `appliance_documented_path`, `failed` on the
+#: Session 25 record until a person walks the clone (D1935) -- a Session 12 claim
+#: by its requirement, as `documented_path` is 46's now (D2927). **The lifecycle
+#: and the branches are re-earned on the trip** (D2714, D2885): the lifecycle on
+#: `slot11-prod`, continuing the journey's creation in ONE attempt (D2872).
+#:
+#: **The session's subject is the customer's journey.** ADR 0291: the console
+#: creates a project -- the handoff token made in the page, only its SHA-256 sent,
+#: shown once at acceptance -- and `apg project claim --token-file` claims with it,
+#: choosing no creation. ADR 0292: the support bundle -- the reconciler records the
+#: doctor's verdicts, never its evidence, and a member reads them with the project's
+#: operations. ADR 0293: `control.sh status`, root and read-only, its states from the
+#: service's own function. `doctor usage` reads the request series with ADR 0289's
+#: witnesses.
+#:
+#: **No released migration; ONE control-set migration, `0010`** (the diagnostics
+#: table and its two functions, on the control project's deploy). No outputs,
+#: manifest, host, capability, lock or secret schema moves (outputs stay v22, the
+#: project manifest 11, `host.yaml` 4).
+#:
+#: **`VERSION` moves to `1.24.0`.** What moved: the console's files (`create.js`,
+#: `app.js`, `pages.json`), so the console image moves on the control project; the
+#: auth service's control mode (the diagnostics route) and its shared
+#: `control_states`; the reconciler (the diagnostics pass); `bin/control.sh`,
+#: `bin/cloud.py` (`project diagnostics`, `claim --token-file`), `bin/doctor.py`;
+#: the site's pages. No Postgres image moves, so **no database restarts**.
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig: a git worktree
+#: at `4f4b207`, the commit that IS deployed, and a `tar`-piped copy of this
+#: working tree, both rendering the INSTALLED tree's `project.example.yaml`:
+#: `bump minor`, **`requires patch`**, verdict `ok`, `changes []`, `reasons []`,
+#: `operator_digests_moved []`; one leaf differs (`template_version` 1.23.0 ->
+#: 1.24.0). No pair of rendered documents can see a console image, a control-set
+#: migration or a reconciler pass, so the reading prices the template alone.
+#: **ADR 0162 prices it a MINOR, and `1.24.0` is proposed above the reading's
+#: floor** -- a new way to create a project, a new route and a new operator verb
+#: are features, and minor covers patch: no manifest, outputs, capability, lock
+#: or secret schema moves. What an operator must KNOW the reading cannot show:
+#: the control project's deploy applies control migration `0010` and recreates
+#: the console; no database restarts; **the reconciler is restarted after the
+#: checkout moves** (D2179, D2411) -- the diagnostics pass lives in it. **The
+#: trip** confirms the class against a DEPLOYMENT: `upgrade plan` on every
+#: project before the first 1.24.0 deploy -- and a `major` there is a stop
+#: condition.
+CURRENT_SESSION = 46
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

@@ -542,6 +542,22 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "ui_site",
         "ui_console",
         "idle_absent_series",
+        # Session 46 (ADR 0290-0293). FOUR, each a property of a CHECKOUT: the
+        # support bundle's verdicts-never-evidence (`support_bundle`), `control.sh
+        # status` reading only and deriving with the service's function
+        # (`control_status`), the console's creation sending only a digest
+        # (`console_create`), and the journey's record and its reading
+        # (`journey_driver`).
+        #
+        # The session's other FIVE are deliberately not here: four are read from
+        # the workstation (EXTERNAL) -- the journey, the console's creation and the
+        # support bundle live, and the person's hosted walk (`documented_path`,
+        # moved to DX-HOSTED-001) -- and one on the host (`control_status_host`); the clone
+        # walk keeps its host proof under `appliance_documented_path`.
+        "support_bundle",
+        "control_status",
+        "console_create",
+        "journey_driver",
     }
 )
 
@@ -1080,6 +1096,25 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     # D2857: notifications re-earned under a claim of THIS session, so its `trial`
     # row names evidence ADR 0261 admits -- Session 42's proofs on slot9's record.
     "notifications_reearned_live": ("USE-LIVE-007",),
+    # Session 46 (ADR 0290-0293). NINE claims, landing with the constant (D690):
+    # four offline, four external, one host, each requirement its own claim (ADR
+    # 0089). The session's subject: the journey a customer takes, the person's
+    # walk, the console's creation, the support bundle and `control.sh status`.
+    # `appliance_documented_path` is DX-001's -- the clone walk's question kept
+    # under its own name, `failed` on the Session 25 record until a person walks
+    # the clone (D1935) -- while `documented_path` moved to DX-HOSTED-001 (ADR 0290).
+    # A claim's session is its requirements' (`claim_session`), so the nine
+    # Session 46 claims are the eight new names and `documented_path`, and
+    # `appliance_documented_path` -- new as a name -- is Session 12's (D2927).
+    "support_bundle": ("CTL-DIAG-001",),
+    "control_status": ("OPS-CTLSTATUS-001",),
+    "console_create": ("CON-CREATE-001",),
+    "journey_driver": ("JRN-002",),
+    "support_bundle_live": ("CTL-DIAG-002",),
+    "control_status_host": ("OPS-CTLSTATUS-002",),
+    "console_create_live": ("CON-CREATE-002",),
+    "journey_live": ("JRN-001",),
+    "appliance_documented_path": ("DX-001",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined
@@ -1419,7 +1454,10 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     # an offline half proves a path resolves, never that anybody walked it.
     "isolation_matrix": ("DEP-ISO-001",),
     "project_removal": ("DEP-REMOVE-001",),
-    "documented_path": ("DX-001",),
+    # Session 46 (ADR 0290): the person's walk of the PUBLISHED site from an
+    # invitation link -- the product customers get -- not the clone's. DX-001 is
+    # `appliance_documented_path` now; the claim keeps its name and its question.
+    "documented_path": ("DX-HOSTED-001",),
     "fresh_host": ("DEP-001",),
     # -----------------------------------------------------------------------
     # Session 13 Run 6 -- the retrofit D697 asked for, as far as the model allows
