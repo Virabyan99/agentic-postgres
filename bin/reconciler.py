@@ -135,6 +135,12 @@ USAGE_SAMPLE_SECONDS = 300
 #: A cached `backup.sh usage --json` older than this is not the repository's
 #: size: two backups passes (ADR 0273's interval).
 USAGE_BLOCK_MAX_AGE = 2 * BACKUP_RECORD_SECONDS
+#: Session 46 (ADR 0292): each deployed slot's doctor verdicts, this often; the
+#: API serves a reading older than twice this as `stale`. One doctor run per
+#: slot took 6.6-7.7 s on the host (Sheet IR4); its child budget is the backups
+#: pass's.
+DIAGNOSTICS_RECORD_SECONDS = 900
+DIAGNOSTICS_CHILD_SECONDS = 300
 
 #: How long `start` waits for the control database, and how often it asks
 #: (D2348). The unit orders on Docker and the edge, never on the control
@@ -1227,6 +1233,38 @@ class Reconciler:
             "backups " + ", ".join(f"{r['project_key']} {r['repository_status']}" for r in readings)
         )
 
+    def record_diagnostics(self) -> None:
+        """ADR 0292: each deployed slot's doctor verdicts -- never its evidence,
+        which `dispatch.diagnostics_reading` drops. A slot whose doctor gave no
+        reading records nothing (its previous rows age into `stale`) and the
+        journal says why (ADR 0195)."""
+        readings = []
+        for entry in host_config.declared_slots(self.host):
+            try:
+                document = _deployed(entry.key)
+            except Refused:
+                continue
+            reading, why = diagnostics_of(entry.key, document)
+            if reading is None:
+                say(f"{entry.key}: no diagnostics reading: {why}")
+                continue
+            readings.append(reading)
+        if not readings:
+            return
+        try:
+            self.control.call(dispatch.RECORD_DIAGNOSTICS_SQL, readings=json.dumps(readings))
+        except ControlError as error:
+            say(f"the diagnostics readings were not recorded: {error}")
+            return
+        say(
+            "diagnostics "
+            + ", ".join(
+                f"{r['project_key']} asleep" if r.get("asleep")
+                else f"{r['project_key']} {len(r['checks'])} checks"
+                for r in readings
+            )
+        )  # fmt: skip
+
     def record_usage(self) -> None:
         """ADR 0275, ADR 0276: one usage sample per deployed slot, then -- for
         each AWAKE slot -- the control set asked whether it is idle, then the
@@ -1438,6 +1476,26 @@ def backups_of(
         key, info=info, usage=usage, archiver=archiver, mirror=mirror_of(key, document),
         sleeping=False,
     )  # fmt: skip
+
+
+def diagnostics_of(key: str, document: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    """One slot's diagnostics reading (ADR 0292): asleep when its database is
+    stopped -- one row, no doctor run; otherwise `doctor.py --project KEY
+    --json` as the operator runs it, exit 0 and 6 both carrying a document
+    (`bin/fleet.py`'s rule), reduced to verdicts by the dispatch module."""
+    database = document.get("database") or {}
+    running = _quiet(dispatch.running_argv(str(database.get("container", ""))), 60)
+    if running is not None and running.returncode == 0 and running.stdout.strip() == "false":
+        return dispatch.diagnostics_asleep(key), None
+    done = _quiet(
+        [sys.executable, str(REPO_ROOT / "bin" / "doctor.py"), "--project", key, "--json"],
+        DIAGNOSTICS_CHILD_SECONDS,
+    )
+    if done is None:
+        return None, f"the doctor did not finish within {DIAGNOSTICS_CHILD_SECONDS} s"
+    if done.returncode not in (0, 6):
+        return None, f"the doctor refused (exit {done.returncode})"
+    return dispatch.diagnostics_reading(key, _json_of(done, 6))
 
 
 def _json_of(done: subprocess.CompletedProcess | None, *also: int) -> dict[str, Any] | None:
@@ -1698,6 +1756,7 @@ def run(*, once: bool) -> int:
     # the first usage sample after it (its repository bytes come from it).
     backed = recorded - BACKUP_RECORD_SECONDS
     sampled = recorded - USAGE_SAMPLE_SECONDS
+    diagnosed = recorded - DIAGNOSTICS_RECORD_SECONDS
     while True:
         try:
             worked = reconciler.cycle()
@@ -1718,6 +1777,9 @@ def run(*, once: bool) -> int:
         if time.monotonic() - sampled >= USAGE_SAMPLE_SECONDS:
             reconciler.record_usage()
             sampled = time.monotonic()
+        if time.monotonic() - diagnosed >= DIAGNOSTICS_RECORD_SECONDS:
+            reconciler.record_diagnostics()
+            diagnosed = time.monotonic()
         if not worked:
             time.sleep(POLL_SECONDS)
 

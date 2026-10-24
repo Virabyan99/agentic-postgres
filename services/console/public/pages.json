@@ -105,7 +105,8 @@
         "POST /v1/projects/{key}/wake",
         "POST /v1/projects/{key}/export",
         "DELETE /v1/projects/{key}",
-        "GET /v1/operations/{operation}"
+        "GET /v1/operations/{operation}",
+        "GET /v1/projects/{key}/diagnostics"
       ]
     },
     {

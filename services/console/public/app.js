@@ -617,6 +617,21 @@ async function monitoringView(me, key) {
     table([["name", "Signal"], ["reading", "Reading"], ["source", "Source"]], rows));
 }
 
+// Session 46 (ADR 0292): the support bundle as the server recorded it -- what
+// it last saw and when, never "now"; a stale or missing reading says so.
+function supportBundle(served) {
+  const current = served.status === "read" || served.status === "asleep";
+  const said = served.status === "read" ? `Read at ${value(served.read_at)}.` : value(served.reason);
+  const rows = (served.checks || []).map((check) => ({
+    name: check.name,
+    verdict: check.stale ? `${check.verdict} (stale)` : check.verdict,
+    detail: check.detail,
+    age: `${value(check.age_seconds)} s ago`,
+  }));
+  return [h("p", { className: current ? "muted" : "refusal" }, said),
+    ...(rows.length ? [table([["name", "Check"], ["verdict", "Verdict"], ["detail", "Detail"], ["age", "Read"]], rows)] : [])];
+}
+
 async function projectSettingsView(me, key) {
   const project = await call("GET", `/projects/${key}`);
   const result = h("div", {});
@@ -639,6 +654,12 @@ async function projectSettingsView(me, key) {
     { value: "30", label: "after 30 minutes" }, { value: "60", label: "after 60 minutes" }], "never");
   const [profileLabel, profile] = choice("Compute size", PROFILES, project.profile);
   const [confirmLabel, confirm] = field(`Type ${key} to delete the project`, {});
+  const bundle = h("div", {});
+  try {
+    bundle.append(...supportBundle(await call("GET", `/projects/${key}/diagnostics`)));
+  } catch (error) {
+    bundle.append(refusal(error));
+  }
   frame(me, `${key}: settings`, projectNav(key),
     h("p", {}, "State ", stateChip(project.state), `, size ${value(project.profile)}, region ${value(project.region)}.`),
     idleLabel,
@@ -667,6 +688,11 @@ async function projectSettingsView(me, key) {
           h("p", { className: "muted" }, `${value(result_.size_bytes)} bytes, sha256 ${value(result_.sha256)}.`));
       }
     }),
+    h("p", {}, h("strong", {}, "Support bundle"),
+      " — the checks the server last ran on this project's node, each with when it was read. ",
+      "To send it to whoever helps you: ",
+      h("code", {}, `apg project diagnostics --project-key ${key} --output FILE`), "."),
+    bundle,
     h("h2", {}, "Delete"),
     confirmLabel,
     button("Delete the project", () => {

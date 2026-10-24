@@ -250,6 +250,25 @@ no project's database and no telemetry store.
 samples are written by `app.control_record_insights`, granted to nobody, and
 kept 7 days.
 
+### The support bundle (Session 46)
+
+ADR 0292. The control plane runs no doctor -- it holds no credential to the
+node. The reconciler runs `bin/doctor.py --project KEY --json` as root on each
+deployed slot every 900 s, keeps each check's name, verdict and sentence (a
+host path and an opaque value replaced inside the sentence; **the doctor's
+evidence is dropped before anything is sent**) and records them through
+`app.control_record_diagnostics`, granted to nobody; a slot whose database is
+stopped is one `asleep` row and no doctor run.
+
+| Route | What | Who |
+|---|---|---|
+| `GET /v1/projects/{key}/diagnostics` | The checks with each one's `read_at` and age, and the project's newest 50 operations; `status` `read`, `asleep`, `stale` (a reading older than 1,800 s, each verdict kept and marked) or `could_not_determine` (nothing recorded) | member and above; **a person's session only** (a key is `human_session_required`) |
+
+`apg project diagnostics [--project-key KEY] --output FILE` writes the answer
+0600, refused if FILE exists; it exits 6 when the readings are stale or none
+was recorded, and writes the file either way. The console shows the same under
+the project's Settings.
+
 **Idle sleep is offered only while sleeping is** (D2548): the setting answers
 `409 not_available` naming `idle_sleep` while `project.sleep` is not accepted,
 and the reconciler asks the control set for an idle sleep only then. With it

@@ -219,9 +219,13 @@ class Children:
         self.branch_root: Path | None = None
         #: What `branch-runtime.sh start --all` prints (Session 41, D2514).
         self.branch_start_output = ""
+        #: What `doctor.py --project KEY --json` prints (Session 46, ADR 0292).
+        self.doctor_output = ""
 
     @staticmethod
     def label(argv: list[str]) -> str:
+        if len(argv) > 1 and Path(argv[1]).name == "doctor.py":
+            return "doctor"
         name = Path(argv[0]).name
         if name == "deploy.sh":
             return "render-runtime" if "--render-runtime-only" in argv else "deploy"
@@ -260,6 +264,8 @@ class Children:
             out = STORAGE + "\n"
         elif label == "branch start":
             out = self.branch_start_output
+        elif label == "doctor":
+            out = self.doctor_output
         code = self.codes.get(label, 0)
         if label in ("branch create", "branch reset") and code == 0:
             self.branched(argv)
@@ -1520,7 +1526,84 @@ def test_the_reconciler_asks_the_control_set_only_these() -> None:
         "control_record_usage", "control_request_idle_sleep", "control_record_limit_notice",
         # Session 42 (ADR 0278, D2569): the insight sample.
         "control_record_insights",
+        # Session 46 (ADR 0292): the support bundle's verdicts.
+        "control_record_diagnostics",
     }, sorted(called)  # fmt: skip
+
+
+#: Session 46 (ADR 0292): a doctor answer with the evidence IR4 named -- a
+#: mount, a lock holder -- and the mount inside the disk check's detail.
+MOUNT = "/var/lib/docker/volumes/apg-slot1-dev_postgres-data/_data"
+DOCTOR_ANSWER = {
+    "project_key": KEY, "observed_at": "2026-10-24T11:53:57Z", "worst": "ok", "exit_code": 0,
+    "checks": [
+        {"name": "containers", "verdict": "ok", "detail": "12/12 running, none unhealthy",
+         "evidence": {"expected": "12"}},
+        {"name": "disk headroom", "verdict": "ok",
+         "detail": f"81920 MiB free at {MOUNT}, cluster is 42 MiB (1950.5x)",
+         "evidence": {"mount": MOUNT}},
+        {"name": "workflow", "verdict": "ok", "detail": "0 definitions",
+         "evidence": {"heartbeat_holder": "auth-7f3c9a"}},
+    ],
+}  # fmt: skip
+
+
+def test_the_diagnostics_pass_records_verdicts_never_evidence(host: Host) -> None:
+    """ADR 0292: an awake slot's doctor run -- `doctor.py --project KEY --json`,
+    stdin closed, the 300 s child budget -- is recorded as `{name, verdict,
+    detail}` per check through the one writer; neither the mount nor the lock
+    holder reaches the control database. Exit 6 (a check that failed or could
+    not run) carries a document, as the doctor's own rule says."""
+    host.children.deployed("small")
+    host.children.doctor_output = json.dumps(DOCTOR_ANSWER)
+    host.children.codes["doctor"] = 6
+    reconciler = host.module.start()
+    host.database.calls.clear()
+    host.children.calls.clear()
+    reconciler.record_diagnostics()
+    (doctor,) = [call for call in host.children.calls if call["label"] == "doctor"]
+    assert doctor["argv"][1:] == [
+        str(REPO_ROOT / "bin" / "doctor.py"), "--project", KEY, "--json"]  # fmt: skip
+    assert doctor["stdin"] == subprocess.DEVNULL and doctor["timeout"] == 300
+    (recorded,) = host.database.named("control_record_diagnostics")
+    (reading,) = json.loads(recorded["readings"])
+    assert reading["project_key"] == KEY
+    assert [set(check) for check in reading["checks"]] == [{"name", "verdict", "detail"}] * 3
+    assert MOUNT not in recorded["readings"] and "auth-7f3c9a" not in recorded["readings"]
+    assert reading["checks"][1]["detail"].startswith("81920 MiB free at [a host path]")
+
+
+def test_a_sleeping_slot_is_recorded_asleep_without_a_doctor(host: Host) -> None:
+    """A stopped database is one `asleep` reading and no doctor run -- never
+    twelve failures for a project that is asleep on purpose."""
+    host.children.deployed("small")
+    reconciler = host.module.start()
+    host.children.running = "false"
+    host.database.calls.clear()
+    host.children.calls.clear()
+    reconciler.record_diagnostics()
+    assert "doctor" not in host.children.labels()
+    (recorded,) = host.database.named("control_record_diagnostics")
+    assert json.loads(recorded["readings"]) == [{"project_key": KEY, "asleep": True}]
+
+
+@pytest.mark.parametrize(("code", "output"), [(2, "{}"), (0, "not json"), (0, '{"checks": []}')])
+def test_a_doctor_that_gave_no_reading_records_nothing(host: Host, code: int, output: str) -> None:
+    """ADR 0195: a doctor that refused (exit 2), printed no JSON, or printed a
+    document with no check is no reading -- nothing is recorded for its slot
+    (the previous rows age into `stale`), never an empty set that reads as
+    "nothing wrong". The control: the same pass with a real answer records."""
+    host.children.deployed("small")
+    host.children.doctor_output = output
+    host.children.codes["doctor"] = code
+    reconciler = host.module.start()
+    host.database.calls.clear()
+    reconciler.record_diagnostics()
+    assert host.database.named("control_record_diagnostics") == []
+    host.children.doctor_output = json.dumps(DOCTOR_ANSWER)
+    host.children.codes["doctor"] = 0
+    reconciler.record_diagnostics()
+    assert len(host.database.named("control_record_diagnostics")) == 1
 
 
 def test_no_idle_sleep_is_asked_for_while_the_sleep_is_not_accepted(

@@ -4,7 +4,8 @@
 # the caller's organisations, and -- since Session 38 -- the operations that
 # create, sleep, wake, export and delete a project in a prepared slot, and --
 # since Session 40 -- its backups and restore window (ADR 0273), and -- since
-# Session 41 -- whether it sleeps after it has been idle (ADR 0276). A write
+# Session 41 -- whether it sleeps after it has been idle (ADR 0276), and --
+# since Session 46 -- its support bundle (ADR 0292). A write
 # answers 202 with an operation the host's reconciler executes; follow it with
 # bin/operation.sh wait. Nothing here reads a project's health.
 #
@@ -18,7 +19,8 @@
 #   3  no context, no project chosen, no credential, or an unusable file
 #   5  refused by the server (its error word is printed), or the operation failed
 #   6  the server could not be reached, answered something unreadable, or an
-#      outcome could not be determined (backups: the window could not be)
+#      outcome could not be determined (backups: the window could not be;
+#      diagnostics: the readings are stale or none was recorded)
 #   7  export stopped at its own --timeout (the operation continues)
 
 set -euo pipefail
@@ -40,6 +42,7 @@ Usage:
   bin/project.sh export [--project-key KEY] --output FILE [--timeout S] [--interval S] [--json]
   bin/project.sh delete --project-key KEY --confirm KEY [--json]
   bin/project.sh backups [--project-key KEY] [--json]
+  bin/project.sh diagnostics [--project-key KEY] --output FILE [--json]
   bin/project.sh idle-sleep [--project-key KEY] --minutes 15|30|60|never [--json]
 
   list    The projects of the context's organisation (or --organization's;
@@ -64,6 +67,12 @@ Usage:
           window (earliest ... latest) a branch can be restored to with
           bin/branch.sh create --at, or why it could not be read (exit 6).
           A branch is the test that a backup restores.
+  diagnostics
+          The support bundle: the checks the server last ran on the project's
+          node (each verdict, its sentence and its age) and the project's
+          operations, written to FILE (0600, never over an existing file).
+          Exit 6 when the readings are older than 30 minutes or none was
+          recorded -- the file is written either way.
   idle-sleep
           Put the project to sleep after MINUTES with no request answered
           below 400 and no connection by its own database roles, read from
@@ -73,8 +82,8 @@ Usage:
           sleep. Wake it with bin/project.sh wake.
 
 KEY is a project key such as slot1-prod. The endpoint and the credential come
-from the context (bin/login.sh). create, claim, export and delete need a
-person's session; sleep, wake and idle-sleep also accept a key holding
+from the context (bin/login.sh). create, claim, export, delete and
+diagnostics need a person's session; sleep, wake and idle-sleep also accept a key holding
 projects:write.
 USAGE
 }
@@ -99,7 +108,7 @@ python_bin() {
 main() {
   if [ "$#" -eq 0 ]; then
     usage >&2
-    die 2 "a verb is required: list, use, show, status, create, claim, sleep, wake, export, delete, backups or idle-sleep."
+    die 2 "a verb is required: list, use, show, status, create, claim, sleep, wake, export, delete, backups, diagnostics or idle-sleep."
   fi
   local argument
   for argument in "$@"; do
@@ -111,8 +120,8 @@ main() {
     esac
   done
   case "$1" in
-    list | use | show | status | create | claim | sleep | wake | export | delete | backups | idle-sleep) ;;
-    *) die 2 "unknown verb: $1. One of: list use show status create claim sleep wake export delete backups idle-sleep" ;;
+    list | use | show | status | create | claim | sleep | wake | export | delete | backups | diagnostics | idle-sleep) ;;
+    *) die 2 "unknown verb: $1. One of: list use show status create claim sleep wake export delete backups diagnostics idle-sleep" ;;
   esac
   exec "$(python_bin)" "${ROOT_DIR}/bin/cloud.py" project "$@"
 }

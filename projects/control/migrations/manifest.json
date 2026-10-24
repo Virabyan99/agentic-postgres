@@ -102,6 +102,16 @@
         "auth_service"
       ],
       "description": "Query Insights, DB time and monitoring (Session 42; ADR 0278, ADR 0279): control_insight_samples, written by control_record_insights (granted to nobody; the top 50 statements of the customer-facing roles AS READ, the text cut to 2000, older than 7 days deleted by the writer) and read through control_project_insights -- increases with resets read, never a finding or a confidence, fewer than two samples could_not_determine; control_usage_samples.db_time_ms and statements_reset, control_record_usage re-created with the two keys (0008's body plus them), the unread CHECK widened, control_usage_document re-created with DB time (0008's body plus one marked block); control_project_monitoring reading only the usage samples, the backups reading and the insight samples."
+    },
+    {
+      "version": "20261024120010",
+      "name": "control_diagnostics",
+      "template": "templates/0010-control-diagnostics.sql",
+      "placeholders": [
+        "object_owner",
+        "auth_service"
+      ],
+      "description": "The support bundle (Session 46; ADR 0292): control_diagnostic_readings, one row per check per project in the doctor's order -- name, verdict (the doctor's vocabulary, and asleep for a stopped database), a detail the reconciler reduced (a host path and an opaque run replaced inside it, at most 300 characters) and read_at -- written by control_record_diagnostics (granted to nobody; a project's set replaced whole, {checks} or {asleep}, any other member refused AP422, an evidence member included) and read through control_project_diagnostics, member and above."
     }
   ]
 }

@@ -119,6 +119,11 @@ DOOR_MEMBERS = ("host", "port", "user", "database", "sslmode", "connection_limit
 #: Session 40 (ADR 0273): a backups reading older than two of the reconciler's
 #: recording intervals is not a window -- it is `could_not_determine`, with its age.
 BACKUP_READING_MAX_AGE = timedelta(seconds=2 * operations.BACKUP_RECORD_SECONDS)
+#: Session 46 (ADR 0292): a diagnostic reading older than two of the
+#: reconciler's intervals is served `stale` -- its verdict kept, its age said.
+DIAGNOSTICS_READING_MAX_AGE = timedelta(seconds=2 * operations.DIAGNOSTICS_RECORD_SECONDS)
+#: How many of the project's operations the bundle carries, the newest.
+DIAGNOSTICS_OPERATIONS = 50
 
 #: What the surface says beside a window, and to a sleeping project's reader.
 WINDOW_MESSAGE = (
@@ -976,6 +981,18 @@ class ControlService:
         moment = now or datetime.now(UTC)
         return backups_document(key, reading, moment)
 
+    async def project_diagnostics(
+        self, caller: ControlPrincipal, key: str, *, now: datetime | None = None
+    ) -> dict[str, Any]:
+        """Session 46 (ADR 0292): the support bundle -- the doctor's verdicts the
+        reconciler recorded, each with its age, and the project's operations.
+        Member and above; the control set checks the rank again."""
+        row = await self._live_project(caller, key)
+        self.require_role(caller, row["organization_id"], "member")
+        readings = await self.repository.project_diagnostics(caller.user_id, key)
+        history = await self.repository.project_operations(caller.user_id, key)
+        return diagnostics_document(key, readings, history, now or datetime.now(UTC))
+
     def _expiry(self, expires_at: str | None, *, now: datetime | None = None) -> None:
         """At least 15 minutes and at most 7 days ahead, or 422 (ADR 0272)."""
         if expires_at is None:
@@ -1141,6 +1158,49 @@ def _branch(row: dict[str, Any]) -> dict[str, Any]:
         member: (_iso(row[member]) if isinstance(row[member], datetime) else row[member])
         for member in BRANCH_MEMBERS
     }
+
+
+def diagnostics_document(
+    key: str, readings: list[dict[str, Any]], history: list[dict[str, Any]], now: datetime
+) -> dict[str, Any]:
+    """`GET /v1/projects/{key}/diagnostics`'s body (ADR 0292). Four outcomes:
+    `read`; `asleep` (the one row a sleeping slot records); `stale` -- a
+    reading older than `DIAGNOSTICS_READING_MAX_AGE`, each verdict kept and
+    marked, the age said; and `could_not_determine` when nothing was ever
+    recorded -- never an empty list that reads as "nothing is wrong" (ADR 0195).
+    The operations are the newest `DIAGNOSTICS_OPERATIONS`, oldest first."""
+    limit = DIAGNOSTICS_READING_MAX_AGE.total_seconds()
+    checks = []
+    for row in readings:
+        age = (now - row["read_at"]).total_seconds()
+        checks.append({
+            "name": row["check_name"], "verdict": row["verdict"], "detail": row["detail"],
+            "read_at": _iso(row["read_at"]), "age_seconds": int(age), "stale": age > limit,
+        })  # fmt: skip
+    operations_served = [
+        {"type": o["type"], "status": o["status"], "error_code": o["error_code"],
+         "created_at": _iso(o["created_at"])}
+        for o in history[-DIAGNOSTICS_OPERATIONS:]
+    ]  # fmt: skip
+    document: dict[str, Any] = {
+        "project_key": key, "read_at": _iso(now), "checks": checks,
+        "operations": operations_served,
+    }  # fmt: skip
+    if not checks:
+        return {
+            **document, "status": "could_not_determine",
+            "reason": "no reading has been recorded for this project yet",
+        }  # fmt: skip
+    oldest = max(check["age_seconds"] for check in checks)
+    if any(check["stale"] for check in checks):
+        return {
+            **document, "status": "stale",
+            "reason": f"the newest reading is {oldest} seconds old, older than {int(limit)}; "
+            "the server has not been read since",
+        }  # fmt: skip
+    if [check["verdict"] for check in checks] == ["asleep"]:
+        return {**document, "status": "asleep", "reason": checks[0]["detail"]}
+    return {**document, "status": "read", "reason": None}
 
 
 def backups_document(key: str, reading: dict[str, Any] | None, now: datetime) -> dict[str, Any]:

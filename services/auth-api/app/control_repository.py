@@ -394,6 +394,16 @@ class ControlRepository:
         assert row is not None
         return row["monitoring"]
 
+    async def project_diagnostics(self, user: UUID, key: str) -> list[dict[str, Any]]:
+        """Session 46 (ADR 0292): the project's recorded diagnostic readings in
+        the doctor's order, or none when none was recorded."""
+        return await self._rows(
+            user,
+            "SELECT check_name, verdict, detail, read_at "
+            "FROM app.control_project_diagnostics(%s, %s)",
+            (user, key),
+        )
+
     async def organization_usage(
         self, user: UUID, organization: UUID, hours: int
     ) -> dict[str, Any]:

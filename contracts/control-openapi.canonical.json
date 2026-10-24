@@ -3165,6 +3165,74 @@
         "summary": "Set a customer role's database credential"
       }
     },
+    "/v1/projects/{key}/diagnostics": {
+      "get": {
+        "description": "Member and above, a person only. The checks the server last ran on the project's node -- each one's name, verdict and sentence, with when it was read -- and the project's operations: `read`, `asleep`, `stale` (a reading older than 30 minutes, each verdict kept and marked) or `could_not_determine` when nothing was recorded. What the server saw, never what is true now; a host path and an opaque value are replaced inside a sentence before it is recorded.",
+        "operationId": "get_project_diagnostics_v1_projects__key__diagnostics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The bundle."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`human_session_required`: a management key cannot reach this route -- every route that mints a credential, and oneself, needs a person's session."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlRefusedResponse"
+                }
+              }
+            },
+            "description": "`not_found`: the project is not one of the caller's organisations', does not exist, or was deleted -- one answer for each."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "A project's support bundle"
+      }
+    },
     "/v1/projects/{key}/export": {
       "post": {
         "description": "Member and above, a person only. An archive of the project's own schemas; when the operation succeeds, `GET /v1/operations/{id}` returns its `download_url` -- valid at most 15 minutes -- ONCE, to the person who asked.",

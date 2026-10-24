@@ -105,6 +105,11 @@ MAX_EXPIRY_SECONDS: Final = 7 * 86400
 #: `could_not_determine`.
 BACKUP_RECORD_SECONDS: Final = 900
 
+#: Session 46 (ADR 0292): how often the reconciler records each deployed slot's
+#: doctor verdicts; the API serves a reading older than twice this as `stale`.
+#: Equal to `bin/reconciler.py`'s by a test.
+DIAGNOSTICS_RECORD_SECONDS: Final = 900
+
 #: The types the control mode accepts. Equal, by the guard, to the types whose
 #: ledger row accepts: ALL ELEVEN since Session 42's bump -- the six
 #: managed-project types, re-earned a fourth time on a new slot and `beta`

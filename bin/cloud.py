@@ -849,6 +849,34 @@ def project_backups(arguments: argparse.Namespace) -> int:
     raise ClientError(cc.EXIT_UNREACHABLE, "the backups reading answered in an unreadable shape")
 
 
+def project_diagnostics(arguments: argparse.Namespace) -> int:
+    """Session 46 (ADR 0292): the support bundle -- the checks the server last
+    ran on the project's node and its operations -- written to `--output`
+    (0600, refused if it exists, checked before anything is asked). Exit 6
+    when the readings are stale or none was recorded: the file is written
+    either way, because it is what the server said (ADR 0195)."""
+    output = Path(arguments.output)
+    cc.refuse_existing_output(output)
+    current = session()
+    key = _project_key(current, arguments.project_key)
+    served = current.call("GET", f"/projects/{key}/diagnostics")
+    status = served.get("status") if isinstance(served, dict) else None
+    if status not in ("read", "asleep", "stale", "could_not_determine"):
+        raise ClientError(cc.EXIT_UNREACHABLE, "the support bundle answered in an unreadable shape")
+    cc.write_new_private_file(output, (json.dumps(served, indent=2) + "\n").encode("utf-8"))
+    lines = [f"{key}: support bundle written to {output} ({status})"]
+    if status == "could_not_determine":
+        lines.append(f"  the readings could not be determined: {served.get('reason')}")
+    elif status == "stale":
+        lines.append(f"  the readings are not current: {served.get('reason')}")
+    lines.extend(
+        f"  {check['name']}: {check['verdict']} -- {check['detail']}"
+        for check in served.get("checks") or []
+    )
+    emit(served, arguments.json, lines)
+    return cc.EXIT_OK if status in ("read", "asleep") else cc.EXIT_UNREACHABLE
+
+
 #: `--minutes` -> the request's value: 15, 30 or 60 minutes of quiet, or never
 #: (ADR 0276; the request's schema validates them too).
 IDLE_MINUTES = {"15": 15, "30": 30, "60": 60, "never": None}
@@ -1681,6 +1709,11 @@ def parser() -> argparse.ArgumentParser:
     verb = project.add_parser("backups", add_help=False)
     verb.set_defaults(run=project_backups)
     verb.add_argument("--project-key")
+    verb.add_argument("--json", action="store_true")
+    verb = project.add_parser("diagnostics", add_help=False)
+    verb.set_defaults(run=project_diagnostics)
+    verb.add_argument("--project-key")
+    verb.add_argument("--output", required=True)
     verb.add_argument("--json", action="store_true")
     verb = project.add_parser("idle-sleep", add_help=False)
     verb.set_defaults(run=project_idle_sleep)

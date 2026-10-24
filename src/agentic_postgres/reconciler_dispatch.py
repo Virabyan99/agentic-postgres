@@ -214,6 +214,9 @@ RECORD_LIMIT_NOTICE_SQL = (
 #: Session 42 (ADR 0278, D2569): one insight sample per awake slot per usage
 #: pass -- the closed set's fourteenth call, granted to nobody.
 RECORD_INSIGHTS_SQL = "SELECT app.control_record_insights(:'sample'::jsonb);"
+#: Session 46 (ADR 0292): each deployed slot's doctor verdicts every
+#: diagnostics pass -- the fifteenth call, granted to nobody.
+RECORD_DIAGNOSTICS_SQL = "SELECT app.control_record_diagnostics(:'readings'::jsonb);"
 ADOPT_SQL = (
     "SELECT app.control_adopt_project(:'key', :'organization'::uuid, :'slug', :'environment', "
     ":'domain', :'template_version', :'source_commit', nullif(:'region', ''), :'profile', "
@@ -707,6 +710,77 @@ def backup_report_instant(value: str | None) -> str | None:
 
     parsed = restore_drill.instant(value)
     return parsed.isoformat() if parsed else None
+
+
+# ---------------------------------------------------------------------------
+# The support bundle (Session 46, ADR 0292) -- pure: the doctor's answer in,
+# its verdicts out, its evidence nowhere
+# ---------------------------------------------------------------------------
+
+#: The doctor's verdicts (`diagnosis.OK` ... `diagnosis.UNKNOWN`); the control
+#: set adds `asleep` for a stopped database and refuses anything else.
+DIAGNOSTIC_VERDICTS: tuple[str, ...] = ("ok", "warn", "problem", "unknown")
+#: The control set's bounds: a detail's length, a check name's, and how many
+#: checks one reading may carry (the doctor has twelve).
+DIAGNOSTIC_DETAIL_MAX = 300
+DIAGNOSTIC_NAME_MAX = 64
+DIAGNOSTIC_CHECKS_MAX = 32
+#: A host path inside a sentence: a `/` that does not continue a word, a URL's
+#: host or another slash (so `https://x/api`, `11/12` and `/v1` inside a URL
+#: stay). D2897: the disk check names its mount in every verdict.
+_HOST_PATH = re.compile(r"(?<![\w:/.])/(?:[\w.@+-]+/)*[\w.@+-]+")
+#: An opaque run -- a hash, a key, a UUID, a token, a planted canary: 32 or
+#: more token characters with no space, slash or dot between them.
+_OPAQUE = re.compile(r"[A-Za-z0-9_+=-]{32,}")
+
+
+def diagnostic_detail(detail: str) -> str:
+    """A check's sentence as a member may read it: every host path and every
+    opaque run replaced inside it, then bounded -- the counts, times and the
+    project's own public URL kept (D2897)."""
+    text = _HOST_PATH.sub("[a host path]", detail)
+    text = _OPAQUE.sub("[a value not shown]", text)
+    return text[:DIAGNOSTIC_DETAIL_MAX]
+
+
+def diagnostics_reading(key: str, answer: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """`(reading, None)` for `control_record_diagnostics`, or `(None, why)`.
+
+    **The doctor's `evidence` is dropped here and goes nowhere** (ADR 0292):
+    each check becomes `{name, verdict, detail}`, the detail reduced by
+    `diagnostic_detail`. An answer that is not the doctor's document for this
+    project -- another key, no check, a verdict outside the vocabulary, a
+    malformed check -- is no reading at all, never a partial one (ADR 0195)."""
+    if not isinstance(answer, dict):
+        return None, "the doctor printed no JSON object"
+    if answer.get("project_key") != key:
+        return None, f"the doctor answered for another project ({answer.get('project_key')!r})"
+    checks = answer.get("checks")
+    if not isinstance(checks, list):
+        return None, "the doctor's answer is not in the shape asked for: no list of checks"
+    if not checks:
+        return None, "the doctor's answer holds no check"
+    if len(checks) > DIAGNOSTIC_CHECKS_MAX:
+        return None, f"the doctor's answer holds {len(checks)} checks, more than a reading may"
+    reduced = []
+    for check in checks:
+        name = check.get("name") if isinstance(check, dict) else None
+        detail = check.get("detail") if isinstance(check, dict) else None
+        if not (isinstance(name, str) and 0 < len(name) <= DIAGNOSTIC_NAME_MAX):
+            return None, "the doctor's answer is not in the shape asked for: a check's name"
+        if not isinstance(detail, str):
+            return None, f"the doctor's answer is not in the shape asked for: {name}'s detail"
+        if check.get("verdict") not in DIAGNOSTIC_VERDICTS:
+            return None, f"the doctor's answer names an unknown verdict for {name}"
+        reduced.append(
+            {"name": name, "verdict": check["verdict"], "detail": diagnostic_detail(detail)}
+        )
+    return {"project_key": key, "checks": reduced}, None
+
+
+def diagnostics_asleep(key: str) -> dict[str, Any]:
+    """A sleeping slot's reading: one row, its sentence the control set's."""
+    return {"project_key": key, "asleep": True}
 
 
 # ---------------------------------------------------------------------------

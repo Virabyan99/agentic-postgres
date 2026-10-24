@@ -114,6 +114,9 @@ MATRIX: Final[dict[str, str]] = {
     # viewer and above -- the definer function checks the rank.
     "get_project_insights": ACCOUNT,
     "get_project_monitoring": ACCOUNT,
+    # Session 46 (ADR 0292): a project's support bundle, member and above, a
+    # person's session only -- absent from KEY_SCOPES, so a key is refused.
+    "get_project_diagnostics": ACCOUNT,
 }
 
 #: Session 41: the two writes that are SETTINGS, not operations -- no row of

@@ -488,7 +488,8 @@ def control_paths() -> tuple[str, ...]:
     doors and its customer credentials (ADR 0268, ADR 0269); Session 40 its
     branches, restores to a branch and backups (ADR 0271, ADR 0273); Session 41
     plans, usage, notifications and idle sleep (ADR 0274-0276); Session 42 a
-    project's insights and monitoring (ADR 0278, ADR 0279)."""
+    project's insights and monitoring (ADR 0278, ADR 0279); Session 46 its
+    support bundle (ADR 0292)."""
     return (
         "/v1/invitations",
         "/v1/invitations/accept",
@@ -520,6 +521,7 @@ def control_paths() -> tuple[str, ...]:
         "/v1/projects/{key}/compute",
         "/v1/projects/{key}/connections",
         "/v1/projects/{key}/credentials",
+        "/v1/projects/{key}/diagnostics",
         "/v1/projects/{key}/export",
         "/v1/projects/{key}/idle-sleep",
         "/v1/projects/{key}/insights",

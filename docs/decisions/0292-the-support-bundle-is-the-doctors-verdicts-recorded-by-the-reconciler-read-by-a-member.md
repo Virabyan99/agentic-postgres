@@ -86,11 +86,19 @@ closed, timed by the caller; only names, verdicts and evidence **keys** printed
    (`ok`/`warn`/`problem`/`unknown`, `diagnosis`'s vocabulary) and its one-line
    detail. **`evidence` never leaves the reconciler**: it is dropped in the
    process that ran the doctor, before anything is sent to the control
-   database. Run 2 reads every `detail` sentence the twelve probes can produce
-   for a host path or a value a customer must not read, and a guard holds the
-   class: a doctor answer whose `evidence` **and** `detail` carry
-   `test_doctor_redaction`'s planted values records none of them (the detail is
-   replaced by the check's fixed sentence for its verdict when it carries one).
+   database. **Run 2 read every `detail` sentence the twelve probes can
+   produce** (`diagnosis.py`'s `_check` calls; D2897): they are the doctor's own
+   sentences, never a third party's bytes (ADR 0159), and the host values in
+   them are the disk check's `mount` — in **every** verdict, `ok` included
+   (*"N MiB free at <mount>, …"*) — and, in `containers`, the unhealthy
+   containers' names. So the reduction (`reconciler_dispatch.diagnostics_reading`,
+   a pure function and the tested unit) keeps the sentence and **replaces
+   inside it** every host path (`[a host path]`) and every opaque run of 32 or
+   more token characters (`[a value not shown]` — a hash, a key, a UUID, a
+   canary), then bounds it at 300 characters; a route's public URL, a time and
+   a count stay. A guard holds the class: a doctor answer carrying
+   `test_doctor_redaction`'s planted values in its `evidence` and in its
+   `detail`, and a host path in its `detail`, records none of them.
 2. **Control set migration `0010-control-diagnostics.sql`**:
    - `app.control_diagnostic_readings (project_key, check_name, verdict,
      detail, read_at; PRIMARY KEY (project_key, check_name))`, `project_key`
@@ -122,7 +130,10 @@ closed, timed by the caller; only names, verdicts and evidence **keys** printed
    long**: Sheet IR4's wall time per project is what prices it, and above 120 s
    on either project is the plan's stop.
 4. **`GET /v1/projects/{key}/diagnostics`** (member and above; a foreign or
-   missing project the one `not_found`): `{project_key, checks: [{name,
+   missing project the one `not_found`; **a person's session only** — the
+   route is absent from `control_roles.KEY_SCOPES`, so a key is `403
+   human_session_required`: the bundle is the support conversation's page, a
+   person downloads it, D2898): `{project_key, checks: [{name,
    verdict, detail, read_at, stale}], operations: [...]}` — the operations from
    `app.control_project_operations(p_user, p_key)` (`0004:284`, already granted
    to the service). **A reading older than 1,800 s (2 × 900) is served with

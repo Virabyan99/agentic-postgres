@@ -1170,6 +1170,46 @@ def test_insights_and_monitoring_dispatch_to_the_customer_cli(
     assert text.returncode == 0 and "from app.control_backup_readings" in text.stdout, text.stdout
 
 
+def test_diagnostics_writes_a_private_file_once(person: Person, served: Any) -> None:
+    """Session 46 (ADR 0292): `project diagnostics --output FILE` writes what
+    `/v1` serves, 0600, and refuses a FILE that exists (exit 2, the file
+    untouched). No reading recorded is still a bundle -- written, exit 6,
+    "could not be determined" -- never a page of passes; a recorded reading
+    exits 0 and names each check."""
+    _, drive = served
+    _, org = _member(served, "diagnostics-member")
+    key = "slot10-prod"
+    _adopt(drive, org, key, "https://slot10.test/api/app")
+    assert person.login("diagnostics-member").returncode == 0
+
+    first = person.home / "bundle.json"
+    none = person.run("project", "diagnostics", "--project-key", key, "--output", str(first))
+    assert none.returncode == 6, none.stderr
+    assert "could not be determined" in none.stdout
+    assert _mode(first) == 0o600
+    assert json.loads(first.read_text(encoding="utf-8"))["status"] == "could_not_determine"
+
+    before = first.read_bytes()
+    again = person.run("project", "diagnostics", "--project-key", key, "--output", str(first))
+    assert again.returncode == 2 and "already exists" in again.stderr, again.stderr
+    assert first.read_bytes() == before
+
+    checks = [
+        {"name": "tls", "verdict": "ok", "detail": "61d remaining"},
+        {"name": "backup mirror", "verdict": "warn", "detail": "last copied 2 days ago"},
+    ]
+    reading = [{"project_key": key, "checks": checks}]
+    drive.cluster.query(f"SELECT app.control_record_diagnostics('{json.dumps(reading)}'::jsonb)")
+    second = person.home / "bundle-2.json"
+    read = person.run("project", "diagnostics", "--project-key", key, "--output", str(second))
+    assert read.returncode == 0, read.stderr
+    assert _mode(second) == 0o600
+    written = json.loads(second.read_text(encoding="utf-8"))
+    assert written["status"] == "read" and [c["name"] for c in written["checks"]] == [
+        "tls", "backup mirror"]  # fmt: skip
+    assert "backup mirror: warn" in read.stdout, read.stdout
+
+
 # ---------------------------------------------------------------------------
 # Session 43: the invitation as a link (ADR 0282, D2657)
 # ---------------------------------------------------------------------------

@@ -1565,6 +1565,31 @@ async def get_project_monitoring(request: Request, key: str) -> Response:
     return await _guard(run)
 
 
+@router.get(
+    "/projects/{key}/diagnostics",
+    openapi_extra=openapi_docs.described(
+        summary="A project's support bundle",
+        description=(
+            "Member and above, a person only. The checks the server last ran on the project's "
+            "node -- each one's name, verdict and sentence, with when it was read -- and the "
+            "project's operations: `read`, `asleep`, `stale` (a reading older than 30 minutes, "
+            "each verdict kept and marked) or `could_not_determine` when nothing was recorded. "
+            "What the server saw, never what is true now; a host path and an opaque value are "
+            "replaced inside a sentence before it is recorded."
+        ),
+    ),
+    responses={200: openapi_docs.ok("The bundle."), 401: openapi_docs.UNAUTHENTICATED,
+               403: KEY_REFUSED, 404: NOT_YOURS, 422: openapi_docs.INVALID},
+)  # fmt: skip
+async def get_project_diagnostics(request: Request, key: str) -> Response:
+    async def run() -> Response:
+        caller = await _caller(request)
+        _query(request, ())
+        return JSONResponse(await _service(request).project_diagnostics(caller, key))
+
+    return await _guard(run)
+
+
 @router.put(
     "/projects/{key}/idle-sleep",
     openapi_extra=openapi_docs.described(

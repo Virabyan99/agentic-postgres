@@ -52,6 +52,8 @@ TABLES = {
     "control_notifications",
     # Session 42 (ADR 0278): the insight samples.
     "control_insight_samples",
+    # Session 46 (ADR 0292): the support bundle's readings.
+    "control_diagnostic_readings",
 }
 #: Every function the identity service may execute, and no other (ADR 0251).
 GRANTED = {
@@ -106,6 +108,8 @@ GRANTED = {
     # Session 42 (ADR 0278, ADR 0279): insights and monitoring, viewer and above.
     "control_project_insights",
     "control_project_monitoring",
+    # Session 46 (ADR 0292): the support bundle, member and above.
+    "control_project_diagnostics",
 }
 #: Root's, never granted: the operator's three through `bin/control.sh`
 #: (D2068) and the reconciler's (D2093, D2151).
@@ -131,6 +135,8 @@ OPERATOR = {
     "control_record_limit_notice",
     # Session 42 (ADR 0278): the insight sample -- granted to nobody.
     "control_record_insights",
+    # Session 46 (ADR 0292): the doctor's verdicts -- granted to nobody.
+    "control_record_diagnostics",
 }
 #: The helpers that run only inside the functions above.
 HELPERS = {
@@ -365,7 +371,7 @@ def test_the_control_example_renders_as_the_control_plane() -> None:
         assert outputs["control"] == {"enabled": True}
         assert outputs["routes"]["control"] == "https://control.fixture-dev.test/api/v1"
         assert outputs["migrations"]["project_set"]["root"] == "projects/control"
-        assert outputs["migrations"]["project_set"]["count"] == 9  # Session 42: 0009
+        assert outputs["migrations"]["project_set"]["count"] == 10  # Session 46: 0010
         assert outputs["storage"]["enabled"] is False
         values = dict(
             line.split("=", 1)
@@ -376,7 +382,7 @@ def test_the_control_example_renders_as_the_control_plane() -> None:
         assert values["CONTROL_ROUTE_PATH"] == "/api/v1"
         assert values["API_CONTROL_PATH"] == "/api"
         rendered_set = sorted(p.name for p in (directory / "migrations-project").glob("*.sql"))
-        assert len(rendered_set) == 9, rendered_set  # Session 42: 0009
+        assert len(rendered_set) == 10, rendered_set  # Session 46: 0010
     finally:
         # CLAUDE.md §1: a proof that renders deletes what it published.
         shutil.rmtree(directory, ignore_errors=True)

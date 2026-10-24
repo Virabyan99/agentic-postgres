@@ -3,7 +3,9 @@
 **Status: EXECUTING — Run 1 DONE (2026-10-24): the rigs, Sheet IR4 (7.7 s /
 6.6 s), ADRs 0290–0293 accepted, threat items 28–30, `docs/hosted-walk.md`
 (for the operator to read before Run 4; the person's day not yet arranged).
-Rows D2890–D2896 added; NEXT FREE D2897, ADR 0294. Next: Run 2.** Planned at `7b035d9` (Session
+Rows D2890–D2896 added. Run 2 DONE (the support bundle: control 0010, the
+reconciler pass, the route, the CLI, the console; rows D2897–D2901). NEXT FREE
+D2902, ADR 0294. Next: Run 3.** Planned at `7b035d9` (Session
 45's close record, tree clean, `main` = `origin/main`) against the host as read
 that morning (§0). Rows **D2862–D2889** at planning; the runs add theirs from
 **D2890**. ADRs **0290–0293** are Run 1's. **NEXT FREE after this table: D2890,
@@ -391,6 +393,11 @@ the runs add go in a second table below it, in execution order.
 | **D2894** | D2874 / §0: `app.control_record_backups` is the shape — *"definer, REVOKEd, granted to nobody"*. | `0006-control-branches.sql:403-406`: **`SECURITY INVOKER`**, REVOKEd from PUBLIC, granted to nobody, called as `postgres` through `container_exec`. The member reader `control_get_backups` (`:191-211`) is `SECURITY DEFINER` with `control_enter` + `control_require_role(…, 'viewer')`. | **ADR 0292 follows the tree**: `control_record_diagnostics` is `SECURITY INVOKER`, granted to nobody; `control_project_diagnostics` a definer with `control_enter` + `control_require_role(…, 'member')`. | The tree wins. | 0292 |
 | **D2895** | D2865: `claim --token-file` picks *"the operation … by the token's SHA-256 against the creations, never the first row"*; the shown-once line carries `--project-key KEY`. | `GET /v1/operations` serves no `arguments` (`control_service._operation`, `:1234-1250`), so a member cannot read a creation's `handoff_sha256`; a creation's `project_key` is NULL until its slot is allocated (`_projects_held`, `:740-745`). | **ADR 0291 §5: with `--token-file` no creation is chosen** — the CLI requires one visible `succeeded` creation and the `app_route`, and presents the token to the project, **whose reset plane accepts only its own creation's token** (ADR 0260, rig 38c: any other 401); it never deletes a file it did not write. **§3: the panel at acceptance names the operation, not a key**; the Connect view repeats the claim line with the key once the creation succeeded, without the token. Not §9's *guess* stop: the project decides, deterministically. | A choice the client cannot read is a choice the server already makes. | 0291 |
 | **D2896** | D2869: *"Nothing else on the site is pre-walked"*; `docs/hosted-walk.md`'s statement names six goals. | The site documents goals 3–5 with `apg` lines (`docs/branches`, `docs/plans-and-usage`, `docs/insights-and-monitoring`; rig 46b's list) and **no page names the support bundle** (Run 2 builds it). A goal the statement names and no page reaches is a known gap. | **Run 4 reads each of the statement's six goals against the site and makes each reachable by a browser path on a page** (the console view that does it, the CLI line kept as *"or, from a terminal"*), including one sentence on the support bundle (Settings → *Support bundle*; `apg project diagnostics`). D2869's rule — known gaps repaired; the unknown ones are the walk's. | A goal named and undocumented is a finding the builder already holds. | 0290 |
+| **D2897** | ADR 0292 (Run 1): *"the detail is replaced by the check's fixed sentence for its verdict when it carries one"*. | Run 2 read every `detail` the twelve probes produce (`diagnosis.py`'s `_check` calls; `bin/doctor.py`'s probe details): the doctor's own sentences (ADR 0159), the host values in them the disk check's `mount` — **in every verdict, `ok` included** (`diagnosis.py:421-430`) — and the unhealthy containers' names. Whole replacement would blank the disk check on every project, always. | **The reduction keeps the sentence and replaces inside it** every host path (`[a host path]`) and every opaque run of ≥ 32 token characters (`[a value not shown]`), bounded at 300; the project's public URL, times and counts stay (`reconciler_dispatch.diagnostic_detail`). ADR 0292 decision 1 corrected before anything shipped. | The disk check's numbers are the support conversation's first question. | 0292 |
+| **D2898** | D2874: *"member and above"*; keys unaddressed. | `control_roles.KEY_SCOPES` decides which routes a key reaches; absent = `403 human_session_required`. Every other project read (`backups`, `insights`, `monitoring`) is `projects:read`. | **`get_project_diagnostics` is absent from `KEY_SCOPES`** — a person's session only (ADR 0292 decision 4); proved by `test_the_route_serves_the_readings_and_the_operations` with a `projects:read` key. | The bundle is a person's page for a support conversation; automation reads `monitoring`. | 0292 |
+| **D2899** | Run 2's close list: `tests/contract/test_cloud_cli.py` and `bin/build-cli.py --check`; §2's ids for `CTL-DIAG-001` all in `test_control_diagnostics.py` / `test_cloud_cli.py`. | **`test_cloud_cli.py` does not exist** — the CLI's proofs are `tests/contract/test_control_cli.py`; **`bin/build-cli.py` has no `--check`** (`--out` only; `test_cli_package` builds it); the reconciler's simulated host (`Host`, `Children`) lives in `test_reconciler_dispatch.py`. | The CLI case is `test_control_cli.py::test_diagnostics_writes_a_private_file_once`; the reconciler's pass is proved in `test_reconciler_dispatch.py` (its `Children` learns `doctor`); `test_cli_package` ran for the package. **Run 8 registers the node ids Run 2's **Done.** lists**, never §2's proposals. | The tree's names. | — |
+| **D2900** | Run 2 step 6: Settings gains *"a table of check, verdict (chip), detail, age"*; *"no new … heading text (D2829)"*. | The console's chips are `STATE_CHIPS`' five classes for project states, pinned by `test_console_look`; there is no verdict palette and ADR 0288 closes the vocabulary. `test_no_page_names_an_unreachable_row` would refuse `support_bundle` in `pages.json` before the row exists. | **The verdict is text** (`ok`, `warn (stale)`, …) in the table; **the section's label is `<strong>Support bundle</strong>` in a paragraph, no heading**; `pages.json`'s `project-settings` gains the call `GET /v1/projects/{key}/diagnostics` now and **the `support_bundle` Ledger row is added to that view's `ledger` list at Run 8**, with the row. | No new class, no new anchor, no page naming a row that does not exist. | 0288 |
+| **D2901** | §9: *"a test outside the ones this plan names would have to move"* is a stop. | A new control function and route widen three exact allowlists by construction: `test_control_set.py` `TABLES`/`GRANTED`/`OPERATOR` and its render counts (9 → 10), `test_reconciler_dispatch.py::test_the_reconciler_asks_the_control_set_only_these` (D2531's closed set), and `main.control_paths()` read by `test_auth_service_shape.py::test_the_control_mode_serves_exactly_the_declared_paths` (which failed once, as designed, until the path was declared). | **Each widened by exactly the new name** (`control_diagnostic_readings`, `control_project_diagnostics`, `control_record_diagnostics`, `/v1/projects/{key}/diagnostics`) — the pattern every control session since 40 followed; not §9's stop: an allowlist widened to the measured set is not a weakened test (CLAUDE.md §6). | The guards did their job: each named the new thing until it was declared. | — |
 
 ---
 
@@ -675,7 +682,74 @@ backups`.
    FAILED with its control green, restored `cmp`-identical.
 8. Targeted (the lists above), ruff, commit, push, CI.
 
-**Done.**
+**Done (2026-10-24).** Scripts and transcripts in WSL `~/s46/run2/`.
+
+- **Tests first** — 26 written and run red before any product code
+  (`red.txt`): **26 FAILED, 0 ERROR**, each for its reason (the functions, the
+  route, the verb absent). Green after (`green.txt`): 27 passed (the 26 + the
+  interval test).
+- **Control set `0010-control-diagnostics.sql`** (manifest `20261024120010`):
+  `app.control_diagnostic_readings` (`position` keeps the doctor's order;
+  verdict CHECK `ok|warn|problem|unknown|asleep`; detail ≤ 300), FORCE RLS;
+  `control_record_diagnostics(jsonb)` **`SECURITY INVOKER`, granted to nobody**
+  (D2894), a project's set replaced whole, `{checks}` (1–32 of exactly `name`,
+  `verdict`, `detail`) or `{asleep: true}` — anything else, an `evidence`
+  member included, `AP422: invalid_readings`; `control_project_diagnostics(uuid,
+  text)` definer, `control_enter` + `control_require_role(…, 'member')`,
+  granted to `{{auth_service}}`; `AP900` down; no `--` in a literal. **Lock
+  frozen** (10 migrations, follows 20261003120039); **proposal `65645f2c…`**
+  (`--by "claude-opus-5-5 Session 46 executor"`): lint passed, dev apply 49
+  migrations from empty in 23.3 s, exit 0; 17 destructive findings, **none new**
+  against Session 42's `e131442a…`.
+- **The reduction** `reconciler_dispatch.diagnostics_reading` /
+  `diagnostic_detail` / `diagnostics_asleep` (D2897), `RECORD_DIAGNOSTICS_SQL`
+  (the closed set's fifteenth call). **The reconciler**:
+  `DIAGNOSTICS_RECORD_SECONDS = 900` (= `operations.DIAGNOSTICS_RECORD_SECONDS`,
+  held by a test), `DIAGNOSTICS_CHILD_SECONDS = 300`, `diagnostics_of` (a
+  stopped database → `asleep`, no doctor; else `doctor.py --project KEY --json`,
+  exit 0/6 carry a document, anything else records nothing and says why),
+  `record_diagnostics` in `run`'s loop after the usage pass.
+- **The route** `GET /v1/projects/{key}/diagnostics` (`control_service.diagnostics_document`:
+  `read` / `asleep` / `stale` > 1,800 s / `could_not_determine`, each check's
+  `read_at`, `age_seconds`, `stale`; the newest 50 operations); MATRIX `ACCOUNT`,
+  member in the service and in SQL, **not in `KEY_SCOPES`** (D2898);
+  `main.control_paths()` gains it; the control snapshot regenerated (+68 lines),
+  `bin/app-contract.sh --check` clean. `docs/control-plane.md` gains *The
+  support bundle (Session 46)*.
+- **The CLI** `apg project diagnostics [--project-key K] --output FILE [--json]`
+  (`bin/cloud.py`; `bin/project.sh`'s usage, verb list and exit text): the output
+  refused before the request, written 0600, exit 6 for `stale` /
+  `could_not_determine` with the file written.
+- **The console**: `supportBundle(served)` in Settings — a `<strong>` label
+  (no heading, D2829), the status sentence, a table check/verdict/detail/age,
+  a viewer's 403 shown in place; `pages.json` gains the call (D2900).
+- **Battery** (`battery2.py`, `battery2.txt`): **7/7 killed**, every control
+  green, every file restored `cmp`-identical — M1 evidence passed through the
+  reduction (2 targets FAILED), M2 the reader at `viewer`, M3 the writer granted
+  to PUBLIC, M4 asleep folded into a doctor run, M5 `stale` dropped, M6 the
+  CLI's file 0644, M7 the host path kept (the two SQL mutations re-froze the lock
+  inside the battery and restored it).
+- **Targeted, once** (`shard.sh A–D`): A 179 passed + 1 failed
+  (`test_the_control_mode_serves_exactly_the_declared_paths` — the path not yet
+  in `main.control_paths()`, D2901; declared, the module re-run alone: 49
+  passed); B 39 passed; C 97 passed; D 1,147 passed. Ruff clean.
+- **Node ids for Run 8** (`CTL-DIAG-001`), as written:
+  `tests/contract/test_control_diagnostics.py::test_only_verdicts_are_recorded`,
+  `::test_a_planted_value_is_recorded_nowhere`, `::test_a_long_detail_is_bounded`,
+  `::test_an_answer_not_in_the_shape_asked_for_records_nothing`,
+  `::test_a_sleeping_slot_is_one_reading_not_twelve`,
+  `::test_a_fresh_reading_is_read_with_its_ages_and_operations`,
+  `::test_an_old_reading_is_stale`, `::test_no_reading_is_said_never_an_empty_pass`,
+  `::test_the_staleness_bound_is_two_of_the_reconcilers_intervals`,
+  `::test_an_asleep_reading_is_named`, `::test_the_record_function_is_granted_to_nobody`,
+  `::test_the_writer_refuses_evidence_and_unknown_shapes`,
+  `::test_a_stopped_database_reads_asleep`, `::test_a_non_member_is_refused`,
+  `::test_the_route_serves_the_readings_and_the_operations`;
+  `tests/contract/test_reconciler_dispatch.py::test_the_diagnostics_pass_records_verdicts_never_evidence`,
+  `::test_a_sleeping_slot_is_recorded_asleep_without_a_doctor`,
+  `::test_a_doctor_that_gave_no_reading_records_nothing`;
+  `tests/contract/test_control_cli.py::test_diagnostics_writes_a_private_file_once`.
+- Rows **D2897–D2901**. CI: see below.
 
 ### Run 3 — `apg control status`, `control_states` shared, the node-loss runbook
 
