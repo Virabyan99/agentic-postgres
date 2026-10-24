@@ -1486,6 +1486,116 @@ Sampled under:
 
 Session 43's: V1 40 min 26 s, the sweep's suite 47 min 16 s, external 11 min 04 s.
 
+### The visual pass's bytes (ADR 0288)
+
+**two self-hosted typefaces, served from 'self' by the console and copied into the site: schibsted-grotesk.woff2 49,112 B, jetbrains-mono.woff2 29,232 B; the two stylesheets site.css 20,251 B and the console's app.css 8,642 B, 28,893 B together of the plan's 30,720**
+
+Sampled under:
+
+- the committed files at 4f4b207 (git cat-file -s), the release deployed and tagged
+
+**Transfers.** It follows from a setting rather than from a machine, so it holds wherever this deployment runs.
+
+Each typeface 200 font/woff2 from the console at R2d; no third-party byte.
+
+### 1.23.0's deploy, per project and class (R2a-R2d, no database restart)
+
+**rest never unanswered; auth 8.2 s (beta-dev), 10.3 s (alpha-dev), 8.8 s (slot3-prod), 8.7 s (control-prod); the console 8.0 s, recreated; the relay untouched; every deploy exit 0**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap
+- 4f4b207, 2026-10-23 17:18-17:39Z, one project at a time
+- s45-window.py from the workstation, one GET a second per class, answers as taken
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 44's at 224b660, also with no restart: auth 6.9-9.7 s, rest never.
+
+### The seventh re-earning: slot9-prod's lifecycle at 1.23.0, in ONE attempt
+
+**create 1,708.4 s; wake's first answer 19.2 s; resizes admitted 304 and 840 of 4,801 safe; the export 40,286 B, pg_restore 0; 7,479 MiB free with the slot live; the neighbours through 4,216.7 s: 0 unanswered**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap
+- 4f4b207, 2026-10-23 19:52-21:01Z, organisation lifecycle-s45, one attempt (D2837)
+- s45-lifecycle.py from the workstation, detached; s45-probe-start.sh on the host
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 44's slot8-prod: create 1,479.5 s, wake 17.2 s.
+
+### Idle sleep after a wake, left untouched (D2805 decided, ADR 0289)
+
+**woken at 20:33Z, resized twice, exported, then no request to the slot's routes from 20:37:05Z: the reconciler requested the sleep (origin idle) at 20:57:48Z, 1,213 s after the export's finish and 275.6 s after the 15-minute setting; it succeeded in 21.6 s**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap
+- 4f4b207, 2026-10-23, slot9-prod with idle sleep at 15 minutes
+- the lifecycle record's idle reading; Sheet IR3's root read of the store at 20:54Z
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The request series was PRESENT (D2859): this sleep came by the counter read and unmoved; ADR 0289's absent-as-0 reading stays proved offline.
+
+### The SQL editor against psql at 1.23.0, from the same workstation
+
+**20 x SELECT 1: median 224.0 ms in the editor, 160.2 ms in psql (155.7-282.8); sign-in to the first result 9.8 s; pg_sleep cancelled 57014 in 1.77 s; 1,000 rows shown and the rest stopped in 0.95 s**
+
+Sampled under:
+
+- the operator's development machine (Windows 11, WSL 2), reaching the deployment host over the public internet
+- Chromium in the pinned Playwright image; psql 18 from the same machine
+- 4f4b207, 2026-10-23 19:17Z, slot3-prod, ~/s45/sql/record.json
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 44's: 295.0 ms against 197.3 ms -- the workstation's, not a promise.
+
+### The look walk (ui_look_live)
+
+**32 readings, 16 routes at 1280 and 390 wide -- 15 site pages and the console -- in 70.2 s, with no request to a third party; the console walk's first contentful paint 1,036-1,484 ms**
+
+Sampled under:
+
+- the operator's development machine (Windows 11, WSL 2), reaching the site on Cloudflare Pages and the console on the deployment host
+- Chromium 153 in the pinned Playwright image; the driver from 6783f06 (D2858)
+- 4f4b207, 2026-10-24 04:51Z, ~/s45/look/record.json
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The site may run ahead of the deployed release (CI publishes main).
+
+### Branches and the reboot at 1.23.0 (slot3-prod)
+
+**tmp created in 1,193.0 s and deleted by expiry 253.3 s after expires_at; dev at a point in 1,047.1 s, reset in 1,016.2 s; after a reboot every unit started by the boot, all active by boot+97 s, dev and the relay back by themselves**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap
+- 4f4b207, 2026-10-23 21:03-22:15Z; the reboot booted at 2026-10-24 04:47:12Z
+- s45-branches.py from the workstation, detached; s45-after-reboot.sh
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 44's expiry 137.7 s: a reconciler pass's spacing, not a promise.
+
+### The host suite's duration at 1.23.0
+
+**V1 (writing nothing): 412 passed, 1 failed, in 69 min 29 s, a restore drill inside; the sweep's suite 432 / 1 in 34 min 11 s; the external half 138 / 3 in 11 min 41 s, re-run 141 / 0 in 12 min 17 s**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap; the external half from the operator's development machine
+- 4f4b207, 2026-10-23/24 (the external re-run from the test-only d2e9c40, D2860)
+- s45-v1.sh and s45-sweep.sh as root, stdin from /dev/null; s45-external.sh
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 44's: V1 60 min 55 s, the sweep's suite 75-80 min, external 12 min.
+
 ---
 
 ## What was not measured, and why

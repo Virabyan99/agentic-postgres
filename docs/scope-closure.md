@@ -1831,3 +1831,65 @@ and items 2-4.*
 6. The plan's §10, both lists, and Run 8's rows D2795-D2804 -- among them:
    a long instrument runs detached from the harness (D2796); a proof that reads
    a container's log follows the last recreation of that container (D2800).
+
+## 38. What Session 45 closed, what it left, and what Session 46 inherits
+
+**Session 45 is the visual pass** (D2808-D2811): the operator's design brief and
+five prototypes (`docs/design/session-45/`) built inside the current rules -- no
+framework, no npm, no third-party byte -- with two typefaces self-hosted by ADR
+0288 (`font-src 'self'` on the site and the console), the shared tokens, the
+site's chrome and pages and the console's hooks; **`notifications` re-earned**
+on a new `slot9-prod` in ONE lifecycle attempt (D2837); **D2805 decided** by ADR
+0289 (an absent request series reads 0 only with its two witnesses). Ten runs,
+`D2812`–`D2861`, ADRs 0288–0289. **`1.23.0` is deployed on four projects, swept,
+merged and tagged on `4f4b207`** (D1425), with no database restart; **the tag
+published `agentic-postgres-cli` 1.23.0 to PyPI.** The merged evidence reads
+**339 claims: 338 passed, 1 failed** -- `documented_path` by decision (D1935);
+the external half was re-run from the test-only `d2e9c40` after three idle
+proofs were made to measure from the window's start (D2860).
+
+**The sentence this session would most want carried forward: when an
+instrument's premise moves, every reader of the field it moved is a reader to
+grep.** D2833 started the lifecycle's quiet before the export so that a woken
+project could be seen left alone; Sessions 41 and 42's proofs still measured the
+idle sleep from the setting, and failed a correct product. The plan had changed
+the instrument and Session 45's own proof, not the two older readers (D979).
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **The visual pass** (ADR 0288) | Built in Runs 3-6; the look walk read 32 pages at two widths on the live site and console with no third-party request -- `ui_look_live` and the offline `UI-*` claims passed. The operator's side-by-side with the prototypes (D2830): *"I checked them, they all look right to me."* |
+| **`notifications`** (D2798, D2834) | Re-earned on `slot9-prod`'s one-attempt record: `notifications_reearned_live`, `notifications_live` and `notifications_retrial_live` passed -- **`beta`**, its console view back (deployed in 1.23.0). |
+| **D2805** (ADR 0289) | Decided and released: the sampler reads an absent request series as 0 only with `up{job="edge"}` and the project's certificate series. Live, a woken, resized and exported project left untouched was idle-slept by the reconciler (`idle_after_wake_live`); the series was present this time (D2859), so the absent branch itself stays proved offline. |
+| **D2858** -- the look driver | It waited on a network idle the console's unread 401 body never ends; it now waits for the load, the fonts and a settle. |
+| **The seventh re-earning** (D2837) | Every lifecycle and branch claim re-earned at 1.23.0 on `slot9-prod` and `slot3-prod`, the lifecycle in one attempt, detached; at B1 all seven units, the relay and the branch came back by themselves. |
+| **D2860** -- the idle proofs' window | Sessions 41-42's proofs measure from the window's start, Session 45's ends at the request; battery live 4/4. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **ADR 0289's absent-as-0 branch, live** (D2859) | The export recreates nothing at the edge, so the slot's request series survived the lifecycle and the sleep came by the ordinary path. `idle_after_wake_live`'s docstring still says *"the reading of an absent series as 0"* -- an over-claim for this record. |
+| **`doctor usage`'s `requests_total`** | Still reads an absent series as *not measured* (`bin/doctor.py:949-962`): a report, correct as one; ADR 0289 moved only the sampler. |
+| **The brief's Stage 6 candidates** (D2828, D2823) | Not built: the restore-window bar from data, relative ages, refusal links, operation-id rows, a name-matching confirm, a `<details>` menu at phone width, copy buttons, the hero slider, a combined pricing table (D2818), a dynamic count (D2819), docs search. |
+| **The site may run ahead of the deployed release** (D2840) | CI publishes `main`; between a bump's push and the sitting the site names the next release. |
+| **D2801** -- `workflow_revocation`'s race | Passed in this trip's sweep; still order-dependent. |
+| **The walker prefix `walk-s43-`** (D2804) | Cosmetic, follows the driver's record pin. |
+| **The plane's footprint at rest** | `UNMEASURED`. |
+| **Hetzner** (M7 X1/X2) and the store's 443 rule for it (D2640) | Allowed since 2026-10-12; not run. |
+| **`slot1-` … `slot9-prod` consumed**; `lifecycle-s41` … `-s45` remain, empty | **Session 46's walk needs `slot10-prod`.** |
+| `documented_path` | **`failed` by decision** (D1935) -- Session 46's person moves it. |
+
+### What Session 46 inherits, in order
+
+1. **The journey and the person's walk** (D2593): from the site and an
+   invitation link, a person, not a driver, on `slot10-prod`;
+   `documented_path` is theirs to move.
+2. **The Stage 5 release and the Stage 6 report** (D2593), the brief's
+   candidates above among the report's inputs.
+3. Every release re-earns the lifecycle (D2714): Session 46's release needs a
+   slot for it too, or its walk and its re-earning are one -- its plan decides.
+4. The plan's §10, both lists, and Run 9's rows D2858-D2861 -- among them: a
+   host-side dependency ships with the sheet that runs it, and a reader whose
+   waiter cannot run stops rather than judging (D2861).

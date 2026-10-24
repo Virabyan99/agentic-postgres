@@ -26,7 +26,7 @@ plane, migrations — this page hands to it and does not repeat it.
 
 | | |
 |---|---|
-| `template_version` / `CURRENT_SESSION` | **1.22.0** / **44** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
+| `template_version` / `CURRENT_SESSION` | **1.23.0** / **45** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
 | Released migrations | **39**, fix-forward; every down block raises `AP900` (D912). 0033 adds two prune functions granted to nobody and a size reading (ADR 0213) — nothing removes an agent record unless an operator asks. 0034 is the workflow substrate: four `app_private` tables nobody may read, eight functions granted to `auth_service` and the install granted to nobody (ADR 0227, §17). 0035 adds the approval and attempt tables nobody may read, a run status `compensating`, and the audit reader at nine arguments with a counter beside it (ADR 0230, 0233, 0234). 0036 is connectivity: four `app_private` connector tables nobody may read, `app.emit_event` granted to NOBODY and called only by a project's reviewed definer function, and the connector functions -- seven granted to `auth_service`, the install and the rehearsal's to nobody (ADR 0235-0238, §18). 0037 is `app.require_approval`, granted to nobody (ADR 0242). 0038 adds the approval status `withdrawn`, alone in its file; 0039 adds three prunes and a size reading granted to nobody and the withdrawal granted to `auth_service` (ADR 0248, §5) |
 | Deployed document | outputs schema **v22** (`database.public` and the two customer roles; v21 added `region`, `compute.profile`; v20 added `routes.control`, `control.enabled`); `document_kind: deployed` |
 | Project manifest | schema versions **1–11** accepted; 5 adds `migrations.set`, 6 adds `mcp.capabilities`, 7 adds `connectors` (the facility and the outbound endpoints), 8 adds `migrations.approvals_required` (§19), 9 adds `control` (the control plane, `docs/control-plane.md`), 10 adds `compute` (a named profile, §20), 11 adds `database.public_endpoints` (§21) |
@@ -2343,3 +2343,23 @@ render it off.
   its log starts empty at boot: a proof or a reading of its log follows the
   last recreation (D2800).
 - `op` cannot read the container (D1375); its peak and its log are root's reads.
+
+## 25. 1.23.0: one look and two typefaces
+
+Session 45 (ADRs 0288, 0289). The site and the console share one look, and their
+two typefaces are files of this release: `services/console/public/fonts/` holds
+`schibsted-grotesk.woff2` and `jetbrains-mono.woff2`, the console serves them from
+its own origin and the site's build copies them, so both policies read
+`font-src 'self'` and no page asks a third party for a byte. A new upstream
+version of either is a deliberate act -- the ADR's table and the pinned hashes
+move with it.
+
+- **1.23.0 restarts no database**: auth was unanswered 8.2-10.3 s per project,
+  the console 8.0 s, rest never.
+- **Restart the reconciler after the checkout moves** (D2179): it refuses work
+  while HEAD differs from the commit it started at, and it reads `host.yaml`
+  once, at start (D2411). Stop it before a deploy, start it after the last one.
+- **Idle sleep after a wake** (ADR 0289): an absent request series reads as zero
+  requests only while the project's store shows the edge read for it (`up` and
+  the certificate series); without them the sample stays unread and nothing
+  sleeps.

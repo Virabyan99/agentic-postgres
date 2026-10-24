@@ -41,7 +41,7 @@ the customer, and the session's close moves it to `beta` or back to
 | [Network egress usage](#egress_metering) | `not_metered` | — |
 | [Free plan](#plan_free) | `beta` | 41 |
 | [Premium plan](#plan_premium) | `beta` | 41 |
-| [Notifications](#notifications) | `trial` | 45 |
+| [Notifications](#notifications) | `beta` | 45 |
 | [Email](#email) | `planned` | — |
 | [Passkeys](#passkeys) | `planned` | — |
 | [SQL editor](#sql_editor) | `beta` | 44 |
@@ -523,13 +523,13 @@ the customer, and the session's close moves it to `beta` or back to
 
 ## Notifications
 
-`notifications` · **trial** · since Session 45
+`notifications` · **beta** · since Session 45
 
-**What a customer reads.** Being verified: in-app notifications for an organization -- one for every finished operation, and a notice once a day when a project passes 80% of a shown limit. Nothing is emailed.
+**What a customer reads.** In-app notifications for an organization: one for every finished operation, and a notice once a day when a project passes 80% of a shown limit. Nothing is emailed.
 
-**Today.** control_finish_operation writes ONE notification from a fixed template in the transaction that finishes the operation -- its type, its project, how it ended, why the server requested it -- never a result member, a URL or a caller value; the reconciler writes the daily limit notice (ADR 0275). GET /v1/organizations/{organization}/notifications (bin/notifications.sh list) lists them newest first. Built in Session 41; re-earned in Session 42 (notifications_retrial_live passed on the tagged evidence, 1.20.0 on 77303e4); not re-earned in Session 44 (D2798: a record finished from its first attempt). Being verified in Session 45 on slot9-prod's lifecycle, run in ONE attempt (D2837): notifications_reearned_live, Session 42's proofs read again on that record (D2857).
+**Today.** control_finish_operation writes ONE notification from a fixed template in the transaction that finishes the operation -- its type, its project, how it ended, why the server requested it -- never a result member, a URL or a caller value; the reconciler writes the daily limit notice (ADR 0275). GET /v1/organizations/{organization}/notifications (bin/notifications.sh list) lists them newest first. Built in Session 41; re-earned in Session 42 (notifications_retrial_live passed on the tagged evidence, 1.20.0 on 77303e4); not re-earned in Session 44 (D2798: a record finished from its first attempt). Re-earned in Session 45 on 1.23.0 (4f4b207), slot9-prod's lifecycle run in ONE attempt (D2837): notifications_reearned_live and Session 42's proofs read again on that record (D2857), notifications_live and notifications_retrial_live, passed on the tagged evidence -- the console shows them again.
 
-*Customer-facing evidence:* `notifications_reearned_live`.
+*Customer-facing evidence:* `notifications_reearned_live`, `notifications_live`, `notifications_retrial_live`.
 
 **Stage 5.** A table and a list route (D1968).
 

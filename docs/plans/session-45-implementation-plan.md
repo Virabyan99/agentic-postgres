@@ -1,6 +1,6 @@
 # Session 45 — The visual pass, notifications re-earned, D2805 decided, 1.23.0
 
-**Status: PLANNED (2026-10-23).** Planned at `702671f` (the stage plan's split,
+**Status: COMPLETE — Runs 1–10 DONE (2026-10-24; rows D2844–D2861, ADRs 0288–0289; 1.23.0 tagged on 4f4b207 and published; NEXT FREE D2862, ADR 0290).** Planned at `702671f` (the stage plan's split,
 tree clean, `main` = `origin/main`) against the host as read that morning (§0).
 Rows **D2812–D2843** at planning; the runs add theirs from **D2844**. ADRs
 **0288–0289** are Run 1's. **NEXT FREE after this table: D2844, ADR 0290.**
@@ -1413,7 +1413,28 @@ stands.) **NEXT FREE D2862, ADR 0290.**
    `test_console_pages`. `bin/session-01-check.sh` once (generated artefacts
    moved). Commit, push, read CI (`contract` and `site`).
 
-**Done.** —
+**Done.** — 2026-10-24 (scripts `~/s45/run10/`). **The Ledger** from the
+TAGGED evidence (`evidence/session-45.json`, 338 / 339, 1.23.0 on `4f4b207`):
+`notifications_reearned_live`, `notifications_live` and
+`notifications_retrial_live` passed, so **`notifications` → `beta`** naming all
+three, its customer text without *"Being verified"*, its console view kept (it
+shipped in 1.23.0); the header's Session 45 paragraph; **no row `trial`**;
+`docs/reality-ledger.md` regenerated. **The envelope**: `capacity.ENVELOPE`
+gains a Session 45 section of eight rows -- the typefaces' and stylesheets'
+bytes (49,112 / 29,232 B; 20,251 + 8,642 = 28,893 B of 30,720), the release with
+no database restart, the seventh re-earning, the idle sleep after a wake (with
+D2859's note), the editor against psql, the look walk, the branches and the
+reboot, the suites; `UNMEASURED` unchanged (nothing in it was measured);
+`docs/capacity-envelope.md` regenerated. **The documents**:
+`docs/scope-closure.md` **§38**; the stage plan's Status block re-read and
+rewritten (8 count-asserted edits: 45 closed, 46 next with `slot10-prod`,
+CURRENT_SESSION 45, 289 ADRs, 432 requirements, 339 / 160 claims, next free
+D2862); `docs/operator-guide.md`'s release row (1.23.0 / 45) and **§25** (the
+typefaces, *"restart the reconciler after the checkout moves"*, ADR 0289's
+reading); this plan's Status COMPLETE. **Targeted, once**: `test_reality_ledger`,
+`test_evidence_claims`, `test_documentation_index`, `test_capacity_envelope`,
+`test_site`, `test_console_pages`, `test_session12_documented_path` -- **169
+passed**; ruff clean; both renders current.
 
 ---
 
