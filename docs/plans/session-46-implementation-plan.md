@@ -12,7 +12,9 @@ Run 5 DONE (`doctor usage`'s witnesses, the idle docstring, D2801's race read
 by both arms after rig 46d; rows D2912–D2914; CI repair D2915). Run 6 DONE
 (the hosted record path, the journey driver rehearsed, the live modules
 parked; rows D2916–D2920). The operator read the statement 2026-10-24.
-NEXT FREE D2921, ADR 0294. Next: Run 7.** Planned at `7b035d9` (Session
+Run 7 DONE (the trip's instruments derived and rehearsed; the lifecycle
+continues the journey, its rehearsal 27/27; rows D2921–D2926). NEXT FREE
+D2927, ADR 0294. Next: Run 8 (the bump).** Planned at `7b035d9` (Session
 45's close record, tree clean, `main` = `origin/main`) against the host as read
 that morning (§0). Rows **D2862–D2889** at planning; the runs add theirs from
 **D2890**. ADRs **0290–0293** are Run 1's. **NEXT FREE after this table: D2890,
@@ -423,6 +425,12 @@ the runs add go in a second table below it, in execution order.
 | **D2918** | D2829: the walk drivers pin the console's DOM; `test_console_look`'s table lists the two drivers' anchors. | The journey driver selects by fifteen literals the table did not hold (*New project*, *Create project*, *I have saved it*, *Support bundle*, …). | **The table gains them, each counted in `app.js`**, and `journey_walk.py` joins the drivers the guard reads — a product text change that would break the journey now fails offline. | The guard covers every driver, or a third one is unguarded. | 0285 |
 | **D2919** | Run 6 step 4: *"`tests/contract/test_journey_driver.py` (JRN-002: the rehearsal against a stand-in, as `test_console_walk`'s rehearsal does)"*. | No contract test runs a browser driver: `test_console_walk` does not exist, CI has no Playwright, and the drivers import `playwright` at load; the console walks are rehearsed by scripts (`~/s43/run8/rehearse.sh`, `~/s45/run6/rehearse-sql.sh`). | **Split**: `journey_record.py` (pure; the record, the origin rule, `problems`) is what CI holds — over records written through the driver's own `Journey`, and the driver's source read for its step order; `journey_walk.py` is rehearsed by `~/s46/run6/rehearse-journey.sh` (clean 0, `--leak` 6, `--plant-foreign` 5, `--dry` 0). JRN-002's three node ids keep their names. | Hold offline what can run offline; rehearse the browser where a browser is. | 0290 |
 | **D2920** | Run 6 step 3: J9 *"`psql` from the workstation"* in the driver; the record *"the paths of the 0600 files; the walker removed from `probe-s37` after J5"*. | The Playwright image holds no `psql`, and Session 43's connection proof is the live module's (psycopg, the password file); the lifecycle continues as the journey's ACCOUNT (D2872), so it needs that account's password; the lifecycle deletes the project before the external proofs run. | **J9 is the live proof's** (`test_j09_the_string_connects`); the driver writes a fifth 0600 file, `account-password`; **J12 records each check's verdict, detail and age as the page showed them**, which CTL-DIAG-002 reads after the deletion; **the removal from `probe-s37` is the probe owner's act**, Run 7's instrument's, not the driver's (it holds no probe credential). | Each step where the thing it needs is. | 0290, 0292 |
+| **D2921** | D2872: the lifecycle `logout`s, `login`s as the journey's account and continues; Run 7 moves *"any [reader] that assumes the instrument made the creation"*. | The journey's account owns `lifecycle-s46`; the probe is not a member. Sessions 38–42's lifecycle proofs read the lifecycle's organisation **with the probe owner's token** (`test_session38_public_lifecycle.py:319`, `39:205`, `40_reearning:180`, `41_reearning:142,227`, `42_reearning:166,261`) — they would be refused. | **The instrument, as the journey's owner, invites the probe into the organisation as a `viewer`; the probe accepts (`apg login accept --invitation-file`, signed in), then the lifecycle continues as the journey's account.** Every probe-token reader reads on; no proof is edited. Rehearsed (`probe membership ['viewer']`). | Grant the reader what it read before rather than rewrite six proofs. | — |
+| **D2922** | D2885: the session pins widened to 46 — *"the nine of Session 45's §0 plus `test_session45_idle.py`'s and `test_session45_look.py`'s"*. | The browser drivers stamp their own constants — `console_walk.py` 43, `sql_walk.py` 44, `site_look.py` 45 — whatever session runs them; the lifecycle and branches instruments stamp the session they are derived for (`"session": 46`). | **Ten pins widen** (the nine + `test_session45_idle`, which reads the lifecycle record); **`test_session45_look` does not** — its record stays 45 — nor do the console's and the editor's. `park/widen46.py`, applied at Run 8. | Widen a pin where the writer moved. | — |
+| **D2923** | The lifecycle record's `started_at` / `window_started_at` (D2506): *"the instant a proof bounds the run's window by"*. | Under `--from-journey` the creation is made by the journey BEFORE the instrument starts; the proofs that bound the run's creations by `started_at` (38:333, 39:217, 40:192) or `window_started_at` (41:239, 42:273) would miss it and read *no creation*. | **The journey is the run's first phase**: the instrument sets `started_at` and `window_started_at` to the journey record's `started_at`, and keeps its own start as `lifecycle_started_at`. Rehearsed (*"the window begins at the journey"*). | One creation proves both (D2872); the window holds it. | — |
+| **D2924** | The lifecycle's `expiry_control` (Session 38): a second export through its own HTTP session, signed in as the probe. | Under `--from-journey` the probe is a viewer of the lifecycle's organisation (D2921) — a viewer exports nothing — and `code()` reads the acting seed, so the probe's sign-in got the journey's code: **401** (rehearsal run 3, `STOPPED: the expiry control could not sign in`). | **`expiry_control` signs in as the account the lifecycle acts as** (`self.acting`, set by each `login_as`): the probe without a journey, the journey's owner with one. Rehearsed (run 5, the export URL 200 then 403). | A step signs in as whoever the run is acting as. | — |
+| **D2925** | Run 7 step 5: the lifecycle's rehearsal *"Session 41's rehearsal shape, derived"*. | Session 41's harness is three sessions behind the instrument; Session 42's (insights) is the newest — but it kills and resumes the instrument (D2581), which Session 45 removed (D2798). Its driver from `served_app` has no event loop. And D2500's hang, planted at the resize, can no longer be followed by a sample: Session 45 pauses every probe before the export (D2833), seconds after the resizes in a rehearsal. | **`rehearse_lifecycle46.py` from Session 42's harness** (`make-rehearse-lifecycle46.py`, count-asserted): the kill removed; the journey made through the real app over HTTP after a slot is ready; the hang planted at the third rotation and the sleep held 70 s, so the hung sample times out while the probes run. PASSED 27/27. | Rehearse the instrument as it now is. | — |
+| **D2926** | Run 7 step 1: *"every `s45-` script → `s46-` … the session numbers"*. | Session 45's derivation renamed every *"Session 44"* in prose and had to revert one comment by hand (`s45-post-derive.py`): a comment saying Session 44 decided something became false. | **Session 46's derivation renames only the functional strings** (the printed `Session 45 Run 9` headers, the comment `host.yaml` receives); a comment naming Session 45's decision stays true. | History in a comment is a claim too. | — |
 | **D2914** | D2881: the idle module's docstring line about the absent series. | The same docstring also said *"None of these proofs has ever executed"* — false since Session 45's sitting, whose merged evidence passed `idle_after_wake_live`. | **Both sentences corrected** in the one docstring edit. | A docstring is a claim (D2881). | — |
 
 ---
@@ -1234,7 +1242,90 @@ this plan's Run 9 and appendix.
    `rehearse_lifecycle46.py` (Session 41's rehearsal shape, derived); the
    transcriber on a sample note (and on one holding a planted seed — refused).
 
-**Done.**
+**Done (2026-10-24).** On `6a60e84` (Run 6's CI green); everything in WSL
+`~/s46/run7/` (no repository file but this record); the parked edits in
+`~/s46/run7/park/`.
+
+- **`s46-derive.py`** (from `s45-derive.py`, the header split off before any
+  substitution): **25 children** — the 21 `s45-*` scripts and the four launchers
+  (`life-start.sh`, `br-start.sh`, `br-delete.sh`, `ext-start.sh`) — **74 named
+  substitutions**, every count in `derive-counts.txt`, the diffs in
+  `derive-diffs.txt`, no Session 45 name left in a body. **Prose naming Session
+  45 is NOT renamed** (D2926): only the functional strings move — the printed
+  `Session 45 Run 9` headers and the comment `host.yaml` receives.
+- **`s46-post-derive.py`** (each anchor once): `s46-lifecycle.py --from-journey
+  RECORD` (D2872, D2921, D2923, D2924) — the probe's plans and refusal, then
+  logout, login as the journey's account (its 0600 password and seed files),
+  the probe invited into the journey's organisation as a **viewer** and
+  accepting, back as the journey's account, `org use`, `finish_create(<the
+  journey's operation>, None)`, `claim --token-file`; `code()` reads the acting
+  seed, `expiry_control` signs in as the acting account; the run's window starts
+  at the journey's `started_at` (the instrument's own start kept as
+  `lifecycle_started_at`); `create_source: journey`. `s46-hostyaml.py`'s inserted
+  comment names TWO slots (slot10 the person's, slot11 the journey's —
+  `--slot` given twice). `s46-external.sh`: `--journey-record-file`,
+  `--walk-record-file`, the merge's expectation (348 claims, 164 offline; failed:
+  `appliance_documented_path`, and `documented_path` only on a finding).
+  `s46-x0.sh` excludes the two Session 46 modules; `s46-after.sh` reads
+  `/console/create.js`; `life-start.sh` requires the journey's record and passes
+  `--from-journey`.
+- **New**: `s46-journey.sh` (the driver in the pinned Playwright image, live or
+  `--rehearse [--plant-foreign|--leak|--dry]`), `jr-start.sh` (D2796's detached
+  form: the probe mints the membership link, the driver walks, the probe removes
+  the walker from `probe-s37` — D2920 — the link shredded; ONE attempt),
+  `s46-journey-probe.py` (`invite`, `remove`, the product's commands in a private
+  CLI home), `s46-walk-record.py` (the transcriber, below),
+  `make-rehearse-lifecycle46.py` → `rehearse_lifecycle46.py`,
+  `run-rehearse-lifecycle.sh`. **Host-side helpers to copy with their sheet at
+  Run 9** (D2861): `s46-probe-start.sh`, `s46-probe-stop.sh`, `s46-free.sh`,
+  `s46-units.sh`, `s46-hostyaml.py`, `s46-dns.sh`. The walks' Playwright package
+  is `~/s46/walk-home/pw`, installed by `s46-walk.py --check` at W0.
+- **The readers D2872 asked to be grepped** (`create_operation`,
+  `create_seconds`, `create_seconds_source`, `claim_narrowed`, `organization_id`,
+  `probe_organization_id`, the record's `username`): none reads
+  `create_operation`, `create_seconds*` or `claim_narrowed`; the proofs that
+  read the lifecycle's organisation do so **with the probe's token** (Sessions
+  38:319, 39:205, 40:180, 41:142/227, 42:166/261) — kept working by the viewer
+  membership (D2921); those that bound the run by `started_at` /
+  `window_started_at` (38:333, 39:217, 40:192, 41:239, 42:273) — kept working by
+  the window starting at the journey (D2923); the record's `username` stays the
+  probe's. **No proof is edited for the move.**
+- **The session pins** (D2885, D2922): `park/widen46.py TREE` — the nine Session
+  45 widened plus `test_session45_idle`'s (the same lifecycle record), two lines
+  that would pass 100 columns naming their sessions first; applied, formatted,
+  linted and collected in a scratch worktree (10 files, 25 tests collected),
+  then removed. **The browser records' pins do not move**: the drivers stamp
+  their own constants (43, 44, 45), so `test_session45_look` keeps 45.
+- **Rehearsals**:
+  - **the journey** through `s46-journey.sh --rehearse`: exit 0, all twelve
+    steps, origins the console's alone, the bundle 12/12; `--plant-foreign`:
+    exit 5, `https://foreign.rehearsal.test` named;
+  - **the transcriber** on a sample note: written 0600, its routes
+    (`/docs/branches/`, `/quickstart/`) and times (+03:00 → UTC) right, the
+    readings against this checkout's site clean; confirmed, the product's own
+    `dx-record check --path hosted` reads it **exit 5 on the note's one
+    undocumented step** (a finding, as ADR 0290 §4 says) and reports the
+    unreached later goal without failing on it; **a planted base32 seed refused,
+    exit 5, its line named, nothing written, the value echoed nowhere**;
+  - **the lifecycle `--from-journey`** against `rehearse_lifecycle46.py`
+    (derived from Session 42's harness, the kill removed, the journey made
+    through the real app): **PASSED, 27/27 checks, the instrument exit 0 in 391
+    s** — the creation, the organisation and the window the journey's, the probe
+    a viewer, the claim the journey's token, the creation's time its row's, the
+    eleven in order, idle, insights (two passes, 200 calls), notifications one per
+    operation, usage, the second creation `no_slot`, the hung pool sample (D2500),
+    no secret, 0600. It took five runs, each failure the rehearsal's or this
+    run's own, none the product's: the harness used a driver with no loop; POSTed
+    the creation before a slot was ready (the real plane's 409, D2870's order);
+    the instrument's `expiry_control` signed in as the probe with the journey's
+    seed (D2924); and the hang D2500 plants could no longer be followed by a sample
+    under Session 45's quiet (D2925). **Its control** (`--control`: the idle
+    request suppressed): the instrument **stopped, exit 4 after 310 s, *"no idle
+    sleep was requested within 20 s of the setting"***, unfinished, 0600 —
+    `REHEARSAL (control): PASSED`.
+- **Run 6's CI**: `6a60e84` contract 40117078136 success, site 40119011969
+  success.
+- Rows **D2921–D2926**.
 
 ### Run 8 — the bump, the registry, the gate, two rows to `trial`
 
