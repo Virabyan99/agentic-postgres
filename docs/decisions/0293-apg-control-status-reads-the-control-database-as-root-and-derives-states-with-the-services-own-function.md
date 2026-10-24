@@ -78,7 +78,11 @@ Two facts decide the shape:
    `--json` carries it as `{"unread": "<reason>"}`. **Exit 0** when every
    section was read, **6** when any could not be — never 0 with a section
    missing. Not finding the control project at all is exit 6 before any
-   section.
+   section. *(Amended at Run 3, D2904: `status` keeps
+   `control_registry.find_control`'s codes, as the other three verbs do — 6
+   when the search could not finish, 3 when no deployed project enables the
+   facility, 5 for two. D2905: the reason printed is the cluster's `ERROR:`
+   line, never psql's caret under it.)*
 4. **The node-loss runbook restores the control project first** (D2877):
    §0–§5 hold the reconciler stopped (`systemctl disable --now`) until every
    project is back; control-prod is restored and deployed first (the console

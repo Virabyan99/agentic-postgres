@@ -4,8 +4,10 @@
 6.6 s), ADRs 0290–0293 accepted, threat items 28–30, `docs/hosted-walk.md`
 (for the operator to read before Run 4; the person's day not yet arranged).
 Rows D2890–D2896 added. Run 2 DONE (the support bundle: control 0010, the
-reconciler pass, the route, the CLI, the console; rows D2897–D2902). NEXT FREE
-D2903, ADR 0294. Next: Run 3.** Planned at `7b035d9` (Session
+reconciler pass, the route, the CLI, the console; rows D2897–D2902). Run 3
+DONE (`control.sh status`, `control_states` shared, the node-loss runbook
+control-first; rig 46c; rows D2903–D2906). NEXT FREE D2907, ADR 0294. Next:
+Run 4.** Planned at `7b035d9` (Session
 45's close record, tree clean, `main` = `origin/main`) against the host as read
 that morning (§0). Rows **D2862–D2889** at planning; the runs add theirs from
 **D2890**. ADRs **0290–0293** are Run 1's. **NEXT FREE after this table: D2890,
@@ -399,6 +401,10 @@ the runs add go in a second table below it, in execution order.
 | **D2900** | Run 2 step 6: Settings gains *"a table of check, verdict (chip), detail, age"*; *"no new … heading text (D2829)"*. | The console's chips are `STATE_CHIPS`' five classes for project states, pinned by `test_console_look`; there is no verdict palette and ADR 0288 closes the vocabulary. `test_no_page_names_an_unreachable_row` would refuse `support_bundle` in `pages.json` before the row exists. | **The verdict is text** (`ok`, `warn (stale)`, …) in the table; **the section's label is `<strong>Support bundle</strong>` in a paragraph, no heading**; `pages.json`'s `project-settings` gains the call `GET /v1/projects/{key}/diagnostics` now and **the `support_bundle` Ledger row is added to that view's `ledger` list at Run 8**, with the row. | No new class, no new anchor, no page naming a row that does not exist. | 0288 |
 | **D2901** | §9: *"a test outside the ones this plan names would have to move"* is a stop. | A new control function and route widen three exact allowlists by construction: `test_control_set.py` `TABLES`/`GRANTED`/`OPERATOR` and its render counts (9 → 10), `test_reconciler_dispatch.py::test_the_reconciler_asks_the_control_set_only_these` (D2531's closed set), and `main.control_paths()` read by `test_auth_service_shape.py::test_the_control_mode_serves_exactly_the_declared_paths` (which failed once, as designed, until the path was declared). | **Each widened by exactly the new name** (`control_diagnostic_readings`, `control_project_diagnostics`, `control_record_diagnostics`, `/v1/projects/{key}/diagnostics`) — the pattern every control session since 40 followed; not §9's stop: an allowlist widened to the measured set is not a weakened test (CLAUDE.md §6). | The guards did their job: each named the new thing until it was declared. | — |
 | **D2902** | Run 2's targeted list (the modules the change touches, D1486's limit). | **CI on `e29441c` failed** (contract 40095045440; both the Session 1 gate and the offline contract job): `tests/contract/test_fleet.py::test_nothing_in_the_release_reads_the_inventory` — `diagnostics_of`'s docstring cited *"`bin/fleet.py`'s rule"*, and the scan reads docstrings as code (it skips `#` comments and usage blocks only, D968). A module the diff did not touch, found by the full check. | **The docstring names the doctor's own rule instead**; the guard unchanged; `test_fleet` re-run alone, 20 passed. | A reader-naming guard is a class guard; the targeted list could not see it (D1486). | — |
+| **D2903** | D2877: *"then the kept customer projects (`slot3-prod`, `slot10-prod`) by `slot.sh redeploy`"*. | `slot.py::redeploy` refuses a slot that is not `allocated` and one with no deployed document (`bin/slot.py:412-420`); `slot.state()` reads `allocated` only from a deployed document or the reconciler's allocation (`src/agentic_postgres/slot.py:228-233`). A replacement host has neither until the slot's first deploy. | **The runbook's order step 3**: each kept slot restored by §2–§4 with its manifest put back at `/etc/agentic-postgres/slots/<key>/manifest.yaml`, its first deploy by §4's `deploy.sh` on that manifest, **then** `slot.sh redeploy` (the same commit again, nothing recreated; the doors' userlists synced and the registry row refreshed). Documented, not rehearsed — said so in the runbook. | A runbook step the command refuses is a step nobody can take on the worst day. | 0293 |
+| **D2904** | ADR 0293 decision 3: *"Not finding the control project at all is exit 6 before any section."* | `control_registry.find_control(decision=False)` — shared by `registry`, `adopt`, `totp-reset` and the reconciler (D2168) — answers **3** when no deployed project enables the facility, **5** for two, **6** when a document could not be read. | **`status` keeps `find_control`'s codes**, as `registry` does: 6 is the search that could not finish, 3 a host with no control project (a missing prerequisite, the command's documented 3). The ADR's sentence is read as the unreadable case; the usage block says 0 or 6 for the sections only. | One finder, one set of codes, across the four verbs. | 0293 |
+| **D2905** | ADR 0293 decision 3: an unread section printed with *"the cluster's last line"*. | **Rig 46c** (a migrated control cluster, the six SELECTs through `read_section`): every section read in its shape; its control — a SELECT of `app.nowhere` — came back unread with the reason `"                      ^"`: **psql follows the `ERROR:` line with `LINE 1: …` and a caret**, so the last line names nothing. `registry`'s reader (`bin/control.py`, `read_registry`) took the last line too, since Session 37. | **`cluster_said`**: the `ERROR:` line from the word on, else the last line (a connection that failed has no `ERROR:`); used by both readers. The unread-section test's refusal is now psql's real three lines; the battery's *the caret line taken as the reason* is killed by it. | A reason that names nothing is the third outcome with its reason folded away. | — |
+| **D2906** | D2876: *"projects active of the plan's limit"*. | The SQL limit counts projects not deleted **plus** open creations not yet in the registry (`0008-control-plans-usage.sql:239-245`); a creation's `project_key` is NULL until its slot is allocated (D2895). | **`status` prints `projects N of L`** with N = the organisation's registry rows not deleted; open creations appear in *operations pending or running* (`(no project yet)`). The text never claims N is what the limit refuses at. | Each number says what it counts. | 0293 |
 
 ---
 
@@ -780,7 +786,62 @@ whole; how the repository loads `plans` from the service (grep `plans` in
 6. Targeted (+ `test_cli_contract`, `test_disaster_kit`,
    `test_documentation_index`), ruff, commit, push, CI.
 
-**Done.**
+**Done (2026-10-24).** Executed at `e9d0fc8`; scripts in WSL `~/s46/run3/`,
+the rig in `~/s46/rigs/46c/`.
+
+- **`control_states` shared**: `src/agentic_postgres/control_states.py` loads
+  `app.control_states` through `service_source.load` and re-exports
+  `project_state`, `STATES`, `OPERATOR`, `RECONCILER` (no copy of the rules);
+  `SHARED_MODULES` gains it (the stdlib guard and the loaded-equals-listed
+  guard both read it).
+- **`sudo bin/control.sh status [--json]`**: usage, verb list and `case` in the
+  shell (`--help` before root); `bin/control.py` `STATUS_SECTIONS` — six
+  SELECTs (organisations with owners and `projects N of L`, projects with each
+  one's operations oldest first, operations pending/running, branches not
+  deleted, slots by state, notifications in 24 h by kind), each one JSON array
+  through `psql()` as `postgres`; `STATUS_SHAPES` checks every member's type;
+  the state is `control_states.project_state` over the history; a deleted
+  project counted, never listed; an unread section printed *"<heading> --
+  could not be read: <reason>"* and carried as `{"unread": …}`; exit 0 / 6
+  (D2904 keeps `find_control`'s 3/5). `cluster_said` (D2905) is the reason for
+  both `status` and `registry`.
+- **Rig 46c** (a migrated control cluster seeded with one row per table; the
+  six statements through the command's own `read_section` and
+  `status_sections`): every section read in its shape; the project read
+  `sleeping` (create + sleep), owners `["owner-rig"]`, `projects 1 of 1`, slots
+  `{allocated: 1, consumed: 1}`, notifications 1, one open operation; **its
+  control** (a SELECT of `app.nowhere`) came back unread — and showed the
+  reason was psql's caret line (D2905), repaired and re-run green.
+- **Tests first**: `test_control_command.py`
+  `::test_status_runs_only_selects`, `::test_status_states_are_the_services`,
+  `::test_status_names_an_unread_section`, `::test_status_needs_root` — **4
+  FAILED, 0 ERROR** before the code, green after; with
+  `test_auth_service_shape.py::test_every_service_module_the_repository_imports_needs_only_the_standard_library[control_states]`
+  they are `OPS-CTLSTATUS-001`'s node ids for Run 8.
+  `tests/deployment/test_session46_control_status_host.py`
+  (`::test_status_agrees_with_the_registry`, `::test_status_counts_the_slots`)
+  written and **parked** in `~/s46/run7/park/` until Run 8 registers
+  `OPS-CTLSTATUS-002`.
+- **Battery 7/7** killed (each FAILED, controls
+  `test_registry_reports_three_outcomes` + `test_adopt_requires_root_and_a_confirmation`
+  green in the same invocation; files restored by copy and `cmp`): a write
+  slipped into a section; a secret column read; the state computed outside the
+  shared function; an unread section folded to empty; the caret line taken as
+  the reason; root not required; the usage line dropped.
+- **The runbook** (D2877, D2903): §0 gains *the order between projects* — the
+  reconciler held stopped and installed last; control-prod first (`status`
+  exits 0 before the next); the kept slots by §2–§4, first deploy by
+  `deploy.sh` on the slot's manifest, then `slot.sh redeploy`; alpha and beta;
+  `slot.sh status`, the telemetry plane rebuilt empty, `registry` agreeing and
+  `status` 0 before `reconciler.sh install` — *documented, not rehearsed*. §5
+  one sentence; §8's *LAST* kept with why the orders differ. Operator guide
+  §20 gains *Who the customers are: `control.sh status`*.
+- **Targeted**, once: `test_control_command`, `test_auth_service_shape`,
+  `test_cli_contract`, `test_disaster_kit`, `test_documentation_index`,
+  `test_session12_documented_path`, `test_acceptance_registry`, `test_fleet`,
+  `test_container_selectors` — **1069 passed**; `ruff format --check` and
+  `ruff check` clean; shellcheck clean.
+- Rows **D2903–D2906**.
 
 ### Run 4 — the console creates a project; `claim --token-file`; the site browser-first
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""The control plane's operator verbs: adopt, registry, totp-reset (ADR 0251, D2068).
+"""The control plane's operator verbs: adopt, registry, status, totp-reset (ADR 0251, D2068).
 
 Invoked by ``bin/control.sh``, which is the documented entry point.
 
@@ -7,7 +7,7 @@ Invoked by ``bin/control.sh``, which is the documented entry point.
 holds root.** ``adopt`` copies five pointers out of a project's DEPLOYED
 document into ``app.control_projects``; ``registry`` compares every row with
 every deployed document; ``totp-reset`` removes one person's second factor.
-Each calls a function the control set grants to nobody (D2093) -- as the
+Each of those calls a function the control set grants to nobody (D2093) -- as the
 cluster's superuser, through the control project's database container, with
 the container and database read from the control project's deployed document
 (D1184) and every value passed as a ``psql`` variable, never interpolated.
@@ -34,9 +34,17 @@ bootstrap state in the state root -- reads ``prepared (slot)``, agreeing. It is
 the state between a slot's bootstrap and its creation, and it commits nothing.
 Any other key with no row and no document is still a difference.
 
-Exit codes: 0 adopted, reset, or all agree; 2 invalid input; 3 not root, no
-deployed document, no control project, or no docker; 5 the database refused,
-two control projects, or a difference; 6 something could not be read.
+**status** (Session 46, ADR 0293): who the customers are and what state each
+project is in -- organisations, projects, open operations, branches, slots and
+the last day's notifications, one SELECT per section and nothing written. A
+project's state is ``control_states.project_state``, the service's own
+function over the operation history (D704). A section that could not be read
+is printed as such and the others still are; the exit is then 6.
+
+Exit codes: 0 adopted, reset, all agree, or every status section read; 2 invalid
+input; 3 not root, no deployed document, no control project, or no docker; 5 the
+database refused, two control projects, or a difference; 6 something could not
+be read.
 """
 
 from __future__ import annotations
@@ -54,7 +62,13 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from agentic_postgres import bootstrap_state, container_exec, deployed_output, slot  # noqa: E402
+from agentic_postgres import (  # noqa: E402
+    bootstrap_state,
+    container_exec,
+    control_states,
+    deployed_output,
+    slot,
+)
 from agentic_postgres.control_registry import (  # noqa: E402
     CONTROL_SINCE_VERSION,
     FIELDS,
@@ -250,6 +264,18 @@ def adopt(key: str, *, organization: str, confirm: str) -> int:
     return EXIT_OK
 
 
+def cluster_said(done: subprocess.CompletedProcess) -> str:
+    """The cluster's reason for a refusal: its ``ERROR:`` line, from the word on.
+    psql follows that line with the statement and a caret under the fault
+    (rig 46c), so the LAST line names nothing; with no ``ERROR:`` line -- a
+    connection that failed -- the last line is the reason."""
+    lines = (done.stderr or "").strip().splitlines()
+    for line in lines:
+        if "ERROR:" in line:
+            return line[line.index("ERROR:") :]
+    return lines[-1] if lines else "the cluster did not answer"
+
+
 def read_registry(control: Reading) -> list[dict[str, Any]]:
     """`control_registry_rows()`, or OperatorError(6) naming why it could not be read."""
     container, database = target(control.document or {})
@@ -258,12 +284,7 @@ def read_registry(control: Reading) -> list[dict[str, Any]]:
     except (OSError, subprocess.TimeoutExpired) as error:
         raise OperatorError(EXIT_UNKNOWN, f"the registry could not be read: {error}") from error
     if done.returncode != 0:
-        reason = (done.stderr or "").strip().splitlines()
-        raise OperatorError(
-            EXIT_UNKNOWN,
-            "the registry could not be read: "
-            + (reason[-1] if reason else "the cluster did not answer"),
-        )
+        raise OperatorError(EXIT_UNKNOWN, "the registry could not be read: " + cluster_said(done))
     try:
         rows = json.loads(done.stdout.strip())
     except ValueError:
@@ -391,6 +412,259 @@ def totp_reset(username: str, *, confirm: str) -> int:
     )
 
 
+# -- status (ADR 0293) ------------------------------------------------------------
+
+#: `status`'s sections, each ONE SELECT answering one JSON array, run as the
+#: cluster's superuser -- row security does not bind it (`0001:610-613`). No
+#: write, no function of the control set, and no column holding a hash, a key,
+#: a token, an address or a credential: each SELECT names its columns.
+#: `projects` carries each project's operations OLDEST FIRST, in the order the
+#: service reads them (`control_project_operations`, 0004), because the state
+#: is derived from them here, by the service's own function -- never in SQL.
+STATUS_SECTIONS: dict[str, str] = {
+    "organizations": (
+        "SELECT coalesce(json_agg(r ORDER BY r.name, r.id), '[]'::json) FROM ("
+        "SELECT o.id, o.name, o.plan, "
+        "array(SELECT a.username FROM app.control_memberships m "
+        "JOIN app.control_accounts a ON a.user_id = m.user_id "
+        "WHERE m.organization_id = o.id AND m.role = 'owner' ORDER BY a.username) AS owners, "
+        "(SELECT count(*) FROM app.control_projects p "
+        "WHERE p.organization_id = o.id AND p.deleted_at IS NULL) AS projects, "
+        "(SELECT l.value FROM app.control_plan_limits l "
+        "WHERE l.plan = o.plan AND l.entitlement = 'projects_active') AS projects_limit "
+        "FROM app.control_organizations o) r;"
+    ),
+    "projects": (
+        "SELECT coalesce(json_agg(r ORDER BY r.key), '[]'::json) FROM ("
+        "SELECT p.key, o.name AS organization, p.slot, p.profile, p.deleted_at, "
+        "array(SELECT json_build_object('type', op.type, 'status', op.status, "
+        "'error_code', op.error_code, 'created_at', op.created_at) "
+        "FROM app.control_operations op WHERE op.project_key = p.key "
+        "ORDER BY op.created_at, op.id) AS history "
+        "FROM app.control_projects p "
+        "JOIN app.control_organizations o ON o.id = p.organization_id) r;"
+    ),
+    "operations": (
+        "SELECT coalesce(json_agg(r ORDER BY r.created_at, r.id), '[]'::json) FROM ("
+        "SELECT op.id, o.name AS organization, op.project_key, op.type, op.status, op.step, "
+        "op.created_at, op.started_at FROM app.control_operations op "
+        "JOIN app.control_organizations o ON o.id = op.organization_id "
+        "WHERE op.status IN ('pending', 'running')) r;"
+    ),
+    "branches": (
+        "SELECT coalesce(json_agg(r ORDER BY r.project_key, r.name), '[]'::json) FROM ("
+        "SELECT b.project_key, b.name, b.state, b.expires_at FROM app.control_branches b "
+        "WHERE b.state <> 'deleted') r;"
+    ),
+    "slots": (
+        "SELECT coalesce(json_agg(r ORDER BY r.state), '[]'::json) FROM ("
+        "SELECT s.state, count(*) AS slots FROM app.control_slots s GROUP BY s.state) r;"
+    ),
+    "notifications": (
+        "SELECT coalesce(json_agg(r ORDER BY r.kind), '[]'::json) FROM ("
+        "SELECT n.kind, count(*) AS notifications FROM app.control_notifications n "
+        "WHERE n.created_at > now() - interval '24 hours' GROUP BY n.kind) r;"
+    ),
+}
+
+_TEXT = (str,)
+_TEXT_OR_NULL = (str, type(None))
+
+#: The members each section's rows must carry, and their JSON types: a reading
+#: in any other shape is a section that could not be read, never an empty one.
+STATUS_SHAPES: dict[str, dict[str, tuple[type, ...]]] = {
+    "organizations": {
+        "id": _TEXT,
+        "name": _TEXT,
+        "plan": _TEXT,
+        "owners": (list,),
+        "projects": (int,),
+        "projects_limit": (int, type(None)),
+    },
+    "projects": {
+        "key": _TEXT,
+        "organization": _TEXT,
+        "slot": _TEXT_OR_NULL,
+        "profile": _TEXT_OR_NULL,
+        "deleted_at": _TEXT_OR_NULL,
+        "history": (list,),
+    },
+    "operations": {
+        "id": _TEXT,
+        "organization": _TEXT,
+        "project_key": _TEXT_OR_NULL,
+        "type": _TEXT,
+        "status": _TEXT,
+        "step": _TEXT_OR_NULL,
+        "created_at": _TEXT,
+        "started_at": _TEXT_OR_NULL,
+    },
+    "branches": {"project_key": _TEXT, "name": _TEXT, "state": _TEXT, "expires_at": _TEXT_OR_NULL},
+    "slots": {"state": _TEXT, "slots": (int,)},
+    "notifications": {"kind": _TEXT, "notifications": (int,)},
+}
+
+#: One operation of a project's history, as `control_states.project_state` reads it.
+_HISTORY_SHAPE: dict[str, tuple[type, ...]] = {
+    "type": _TEXT,
+    "status": _TEXT,
+    "error_code": _TEXT_OR_NULL,
+    "created_at": _TEXT,
+}
+
+#: What `status` prints above each section.
+STATUS_HEADINGS = {
+    "organizations": "organisations",
+    "projects": "projects",
+    "operations": "operations pending or running",
+    "branches": "branches",
+    "slots": "slots",
+    "notifications": "notifications in the last 24 hours",
+}
+
+
+def _shaped(rows: Any, shape: dict[str, tuple[type, ...]]) -> bool:
+    return isinstance(rows, list) and all(
+        isinstance(row, dict)
+        and all(name in row and isinstance(row[name], kinds) for name, kinds in shape.items())
+        for row in rows
+    )
+
+
+def read_section(container: str, database: str, name: str) -> tuple[list[Any] | None, str | None]:
+    """One section's rows, or None and why it could not be read (ADR 0195)."""
+    try:
+        done = psql(container, database, STATUS_SECTIONS[name])
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return None, f"the cluster did not answer ({type(error).__name__})"
+    if done.returncode != 0:
+        return None, cluster_said(done)
+    try:
+        rows = json.loads(done.stdout.strip())
+    except ValueError:
+        rows = None
+    shaped = _shaped(rows, STATUS_SHAPES[name])
+    if shaped and name == "organizations":
+        shaped = all(all(isinstance(o, str) for o in row["owners"]) for row in rows)
+    if shaped and name == "projects":
+        shaped = all(_shaped(row["history"], _HISTORY_SHAPE) for row in rows)
+    if not shaped:
+        return None, "the reading did not arrive in the shape asked for"
+    return rows, None
+
+
+def _project(row: dict[str, Any]) -> dict[str, Any]:
+    state, managed_by = control_states.project_state(row["history"])
+    last = row["history"][-1] if row["history"] else None
+    return {
+        "key": row["key"],
+        "organization": row["organization"],
+        "slot": row["slot"],
+        "profile": row["profile"],
+        "state": state,
+        "managed_by": managed_by,
+        "last_operation": None
+        if last is None
+        else {name: last[name] for name in ("type", "status", "created_at")},
+    }
+
+
+def status_sections(rows: dict[str, list[Any]]) -> dict[str, Any]:
+    """Each section read, as `--json` carries it."""
+    sections: dict[str, Any] = {}
+    for name, read in rows.items():
+        if name == "projects":
+            sections[name] = {
+                "listed": [_project(row) for row in read if row["deleted_at"] is None],
+                "deleted": sum(1 for row in read if row["deleted_at"] is not None),
+            }
+        elif name == "slots":
+            sections[name] = {row["state"]: row["slots"] for row in read}
+        elif name == "notifications":
+            sections[name] = {row["kind"]: row["notifications"] for row in read}
+        else:
+            sections[name] = read
+    return sections
+
+
+def _counted(counts: dict[str, int], nothing: str) -> str:
+    return ", ".join(f"{name} {count}" for name, count in counts.items()) or nothing
+
+
+def print_status(control: str, sections: dict[str, Any], unread: dict[str, str]) -> None:
+    print(f"status of {control}")
+    for name, heading in STATUS_HEADINGS.items():
+        if name in unread:
+            print(f"{heading} -- could not be read: {unread[name]}")
+            continue
+        value = sections[name]
+        if name == "organizations":
+            print(f"{heading} ({len(value)})")
+            for o in value:
+                limit = "no limit" if o["projects_limit"] is None else o["projects_limit"]
+                owners = ", ".join(o["owners"]) or "none"
+                print(
+                    f"  {o['name']}  {o['plan']}  owners: {owners}"
+                    f"  projects {o['projects']} of {limit}"
+                )
+        elif name == "projects":
+            print(f"{heading} ({len(value['listed'])} listed, {value['deleted']} deleted)")
+            for p in value["listed"]:
+                state = p["state"]
+                if p["managed_by"] == control_states.OPERATOR:
+                    state += " (operator-managed)"
+                last = p["last_operation"]
+                said = (
+                    "none"
+                    if last is None
+                    else f"{last['type']} {last['status']} {last['created_at']}"
+                )
+                print(
+                    f"  {p['key']}  {p['organization']}  {p['slot'] or '-'}  {p['profile'] or '-'}"
+                    f"  {state}  last: {said}"
+                )
+        elif name == "operations":
+            print(f"{heading} ({len(value)})")
+            for op in value:
+                print(
+                    f"  {op['created_at']}  {op['type']} {op['status']}"
+                    f"  {op['project_key'] or '(no project yet)'}  {op['organization']}"
+                )
+        elif name == "branches":
+            print(f"{heading} ({len(value)})")
+            for b in value:
+                print(
+                    f"  {b['project_key']}/{b['name']}  {b['state']}"
+                    f"  expires {b['expires_at'] or 'never'}"
+                )
+        else:
+            print(heading)
+            print(f"  {_counted(value, 'none recorded' if name == 'slots' else 'none')}")
+
+
+def status(*, as_json: bool) -> int:
+    require_root()
+    control = find_control(read_all(), decision=False)
+    container, database = target(control.document or {})
+    rows: dict[str, list[Any]] = {}
+    unread: dict[str, str] = {}
+    for name in STATUS_SECTIONS:
+        read, reason = read_section(container, database, name)
+        if read is None:
+            unread[name] = reason or "the reading did not arrive"
+        else:
+            rows[name] = read
+    sections = status_sections(rows)
+    if as_json:
+        document: dict[str, Any] = {"control_project": control.key}
+        for name in STATUS_SECTIONS:
+            document[name] = {"unread": unread[name]} if name in unread else sections[name]
+        print(json.dumps(document, indent=2))
+    else:
+        print_status(control.key, sections, unread)
+    return EXIT_UNKNOWN if unread else EXIT_OK
+
+
 def parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(prog="control.sh", add_help=False)
     verbs = top.add_subparsers(dest="verb", required=True)
@@ -400,6 +674,8 @@ def parser() -> argparse.ArgumentParser:
     adopt_verb.add_argument("--confirm", required=True)
     registry_verb = verbs.add_parser("registry", add_help=False)
     registry_verb.add_argument("--json", action="store_true")
+    status_verb = verbs.add_parser("status", add_help=False)
+    status_verb.add_argument("--json", action="store_true")
     reset_verb = verbs.add_parser("totp-reset", add_help=False)
     reset_verb.add_argument("--username", required=True)
     reset_verb.add_argument("--confirm", required=True)
@@ -418,6 +694,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         if arguments.verb == "registry":
             return registry(as_json=arguments.json)
+        if arguments.verb == "status":
+            return status(as_json=arguments.json)
         return totp_reset(arguments.username, confirm=arguments.confirm)
     except OperatorError as error:
         print(f"control: {error}", file=sys.stderr)

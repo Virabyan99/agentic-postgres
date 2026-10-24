@@ -2030,6 +2030,21 @@ sudo docker exec -i "$(sudo jq -r '.database.container' "$DOC")" \
 It is a read. Nothing moves an organisation onto a plan: `plan` on
 `app.control_organizations` is root's to change, and the beta changes none.
 
+### Who the customers are: `control.sh status`
+
+Beside `registry` (does each row agree with its deployed document), `sudo
+bin/control.sh status [--json]` (Session 46, ADR 0293) answers *who are my
+customers and what state is each project in*: the organisations (plan,
+owners, projects of the plan's limit), the projects (slot, profile, state,
+last operation; deleted ones counted), the operations pending or running,
+the branches, the slots by state as the control set records them, and the
+last 24 hours' notifications by kind. One SELECT per section through the
+control project's database container, nothing written, no secret column;
+the state is the control plane's own `project_state`, so it is the word the
+console shows. A section that could not be read says *could not be read*
+and why, the others are still printed, and the exit is 6; 0 means every
+section was read.
+
 **The rule that keeps an operator and the reconciler apart is a rule, not a
 lock** (D2178). Before any sheet that deploys, retires, restores or reboots:
 

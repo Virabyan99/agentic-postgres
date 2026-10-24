@@ -3,12 +3,13 @@
 # The control plane's operator verbs (ADR 0251, D2068): what only the person who
 # holds root on the host may do to the control project's registry and accounts.
 #
-# Three verbs. `adopt` writes one project into the registry from that project's
+# Four verbs. `adopt` writes one project into the registry from that project's
 # DEPLOYED document; `registry` compares every registry row with every deployed
-# document and says, per project, whether they agree; `totp-reset` removes one
-# person's second factor. Each calls a function the control set grants to
-# nobody (D2093), as the cluster's superuser, through the control project's
-# database container.
+# document and says, per project, whether they agree; `status` reads who the
+# customers are and what state each project is in (ADR 0293, SELECTs only);
+# `totp-reset` removes one person's second factor. Each write calls a function
+# the control set grants to nobody (D2093), as the cluster's superuser, through
+# the control project's database container.
 #
 # The control project is FOUND, never named: the one deployed document under
 # /etc/agentic-postgres/projects/ that records the control facility enabled.
@@ -18,13 +19,14 @@
 # written through the database container as its superuser.
 #
 # Exit codes (runbook section 2 convention):
-#   0  adopted, reset, or every project agrees
+#   0  adopted, reset, every project agrees, or every status section was read
 #   2  invalid operator input (a malformed key or organisation, a wrong --confirm)
 #   3  missing local prerequisite, not root, no deployed document for the key,
 #      or no deployed project enables the control facility
 #   5  the database refused the call, two deployed projects enable the facility,
 #      or the registry and a deployed document disagree
-#   6  something could not be read -- reported, never read as agreement
+#   6  something could not be read -- reported, never read as agreement or as
+#      an empty section
 
 set -euo pipefail
 
@@ -36,6 +38,7 @@ usage() {
 Usage:
   sudo bin/control.sh adopt --project KEY --organization ORG_ID --confirm CONTROL_KEY
   sudo bin/control.sh registry [--json]
+  sudo bin/control.sh status [--json]
   sudo bin/control.sh totp-reset --username NAME --confirm CONTROL_KEY
 
   adopt       Write project KEY into the control project's registry, under the
@@ -48,6 +51,14 @@ Usage:
               determine: <reason>". --json prints the same as a document.
               Exit 0 when all agree, 5 on a difference, 6 when anything could
               not be determined.
+  status      Who the customers are and what state each project is in, read
+              only: organisations (plan, owners, projects of the plan's
+              limit), projects (slot, profile, state, last operation; deleted
+              ones counted), operations pending or running, branches, slots by
+              state, the last 24 hours' notifications by kind. The state is the
+              control plane's own derivation from the operation history. A
+              section that could not be read says so; exit 0 when every
+              section was read, 6 otherwise. --json prints the same document.
   totp-reset  Remove one person's second factor, so they can enrol again at
               their next login. Prints whether a factor was removed.
 
@@ -79,7 +90,7 @@ python_bin() {
 main() {
   if [ "$#" -eq 0 ]; then
     usage >&2
-    die 2 "a verb is required: adopt, registry or totp-reset."
+    die 2 "a verb is required: adopt, registry, status or totp-reset."
   fi
   # --help anywhere is a read: no root, no docker, no document.
   local argument
@@ -92,8 +103,8 @@ main() {
     esac
   done
   case "$1" in
-    adopt | registry | totp-reset) ;;
-    *) die 2 "unknown verb: $1. One of: adopt registry totp-reset" ;;
+    adopt | registry | status | totp-reset) ;;
+    *) die 2 "unknown verb: $1. One of: adopt registry status totp-reset" ;;
   esac
   command -v docker >/dev/null 2>&1 || die 3 "docker is not installed."
   exec "$(python_bin)" "${ROOT_DIR}/bin/control.py" "$@"

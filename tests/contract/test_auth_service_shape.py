@@ -90,6 +90,8 @@ def test_the_frozen_profile_module_needs_only_the_standard_library() -> None:
 # and the ledger guard reads, so it must import nothing but the standard library.
 #: Session 41 adds "plans" (ADR 0274): the reconciler's limit notices read the
 #: release table through `agentic_postgres.plans`.
+#: Session 46 adds "control_states" (ADR 0293): `control.sh status` derives each
+#: project's state with the service's own `project_state`.
 SHARED_MODULES = (
     "profile",
     "claims",
@@ -98,6 +100,7 @@ SHARED_MODULES = (
     "operations",
     "compute_profiles",
     "plans",
+    "control_states",
 )
 
 

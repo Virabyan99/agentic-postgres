@@ -46,6 +46,43 @@ was then. `bin/dr-kit.sh verify DIR` tells you the export date and release;
 restore is verified against and the `source_commit` the replacement should
 run.
 
+**The order between projects, on the host that runs the control plane**
+(Session 46, D2877, ADR 0293). §2-§4 are per project; between projects the
+order is fixed -- and it is the opposite of a planned move's (§8):
+
+1. **The reconciler stays stopped** until step 5. A replacement built by §1
+   has no reconciler unit, and `sudo bin/reconciler.sh install` enables one at
+   once, so it is installed LAST; if a unit came back with the host, `sudo
+   systemctl disable --now agentic-postgres-reconciler.service` before
+   anything else. An operation run against a half-restored host would fail,
+   quarantine a slot, or record a state a customer then reads.
+2. **control-prod first**, by §2-§4; its deploy brings the console and the SQL
+   relay with it. Without it no customer can sign in, and nobody can be told
+   their project is fine. `sudo bin/control.sh status` must then exit 0: its
+   organisations, projects and operations are the record every later project
+   is checked against.
+3. **The kept customer projects** (`slot3-prod`, `slot10-prod`), each by
+   §2-§4, with the slot's manifest from the kit put back where `slot.sh
+   prepare` writes it (`/etc/agentic-postgres/slots/<key>/manifest.yaml`,
+   0600) and its first deploy by §4's `deploy.sh` on that manifest (ports by
+   §8 step 4's three passes). **Then** `sudo bin/slot.sh redeploy --host
+   /etc/agentic-postgres/host.yaml --slot <key> --confirm <key>`: the same
+   commit again, so nothing is recreated, and the doors' userlists synced and
+   the registry row refreshed under the organisation the registry records.
+   `redeploy` refuses a slot with no deployed document, so it can never be the
+   first deploy (D2903).
+4. **alpha and beta**, by §2-§4.
+5. **Read, then the reconciler.** `sudo bin/slot.sh status --host
+   /etc/agentic-postgres/host.yaml` (every slot as the host reads it); the
+   telemetry plane rebuilt **empty** with `sudo bin/telemetry.sh --host
+   /etc/agentic-postgres/host.yaml up` -- its volumes are not backed up, so its
+   history is lost and the plane is not; `sudo bin/control.sh registry` agrees
+   and `sudo bin/control.sh status` exits 0. Only then `sudo
+   bin/reconciler.sh install`.
+
+This order is documented, not rehearsed: no loss of a host that runs the
+control plane has been measured.
+
 ---
 
 ## 1. The replacement host, by the documented path
@@ -173,7 +210,9 @@ It is the last step because it is the one that cannot be rehearsed without
 taking production's name, and the one that turns a replacement into the
 deployment. ACME on the replacement has already issued for the drill domain;
 the production domain's certificate is issued on first request after the
-record moves -- **never retried in a loop** (5 per hour per hostname).
+record moves -- **never retried in a loop** (5 per hour per hostname). On the
+host that runs the control plane every project's names move the same way,
+and the reconciler starts only after the last (§0's order, step 5).
 
 ---
 
@@ -239,7 +278,10 @@ moves. **`op`'s uid can differ between the hosts** (1000 on one, 1001 on the
 other, where 1000 was `ubuntu`): carry root-owned records in a tar that
 stores owners **by name**, never `--numeric-owner` (D2290).
 
-**Per project, cheapest first and the control project LAST** (D2253):
+**Per project, cheapest first and the control project LAST** (D2253) -- the
+opposite of a loss's order (§0), on purpose: a move keeps the OLD control
+plane answering until the end, so every customer project moves under one that
+works; a loss has none to keep, so it is restored first.
 
 1. **Freeze, on the old host.** `backup.sh … schedule disable`; the row counts
    of the project's tables (the check the move is judged by); `backup.sh …
