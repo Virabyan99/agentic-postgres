@@ -1044,18 +1044,18 @@ def test_a_revoked_agents_run_ends_by_the_cause_of_its_arm(
         return
     assert document["status"] == "failed", json.dumps(document)[:2000]
     assert document["stopped_reason"] == "unclassified_refusal", document["stopped_reason"]
-    refused = next(step for step in document["steps"] if step["outcome"] == "refused")
-    assert refused["reason"] == "unclassified_refusal", refused
-    assert refused["request_id"], f"the refused step records no request id: {refused}"
-    after = [step for step in document["steps"] if step["position"] > refused["position"]]
+    refused_step = next(step for step in document["steps"] if step["outcome"] == "refused")
+    assert refused_step["reason"] == "unclassified_refusal", refused_step
+    assert refused_step["request_id"], f"the refused step records no request id: {refused_step}"
+    after = [step for step in document["steps"] if step["position"] > refused_step["position"]]
     assert all(step["status"] == "queued" for step in after), (
         f"a step ran after the plane refused the revoked agent: {after}"
     )
     served = [row for row in later if row["outcome"] == "served"]
     assert served == [], f"a call was served for the revoked agent after its revocation: {served}"
     print(
-        f"the revoked run failed at step {refused['position']} ({refused['name']}): the plane "
-        "refused the call minted before the revocation"
+        f"the revoked run failed at step {refused_step['position']} ({refused_step['name']}): "
+        "the plane refused the call minted before the revocation"
     )
 
 
