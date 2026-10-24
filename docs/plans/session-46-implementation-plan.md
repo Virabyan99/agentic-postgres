@@ -752,8 +752,8 @@ backups`.
   `tests/contract/test_control_cli.py::test_diagnostics_writes_a_private_file_once`.
 - Rows **D2897–D2902**. **CI**: `e29441c` contract 40095045440 **failure** —
   one test, `test_fleet.py::test_nothing_in_the_release_reads_the_inventory`
-  (D2902: a docstring naming the inventory command); repaired in the next
-  commit, its verdict below.
+  (D2902: a docstring naming the inventory command); repaired at **`4ffa40d`:
+  contract 40097024021 success, site 40098884068 success**.
 
 ### Run 3 — `apg control status`, `control_states` shared, the node-loss runbook
 
