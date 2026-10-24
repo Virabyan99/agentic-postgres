@@ -71,9 +71,9 @@ def test_the_instrument_made_no_request(record: dict[str, Any], idle: dict[str, 
     assert quiet["slot_requests_after_recreation"] == 0, quiet
     assert quiet["before"] == "project.export"
     assert idle["paused_at"] == quiet["from"], (idle["paused_at"], quiet["from"])
-    since = [
-        op for op in record["operations"] if instant(op["created_at"]) >= instant(quiet["from"])
-    ]
+    # D2860: the span ends at the request -- the slot's delete comes after it.
+    begun, asked = instant(quiet["from"]), instant(idle["requested"]["created_at"])
+    since = [op for op in record["operations"] if begun <= instant(op["created_at"]) < asked]
     assert since, "no operation followed the quiet's start: the export was not after it"
     assert {op["type"] for op in since} == {"project.export"}, [op["type"] for op in since]
     assert all(op["status"] == "succeeded" for op in since), [op["status"] for op in since]

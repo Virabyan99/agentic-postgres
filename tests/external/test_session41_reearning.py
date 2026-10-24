@@ -358,6 +358,20 @@ def test_the_organizations_usage_holds_the_slot(record41: dict[str, Any]) -> Non
 # ---------------------------------------------------------------------------
 
 
+def _waited_from_the_window(idle: dict[str, Any], operations: list[dict[str, Any]]) -> float:
+    """D2860: how long after the idle window's start the sleep was requested.
+    Before Session 45 the instrument's quiet began AT the setting, so the window
+    started there (`seconds_from_setting`). A record with a `quiet` reading
+    (D2833) went quiet before the export, and the window restarts at the last
+    export's finish (ADR 0276, D2855); the setting does not restart it."""
+    quiet = idle.get("quiet")
+    if not isinstance(quiet, dict):
+        return float(idle["requested"]["seconds_from_setting"])
+    exports = [instant(o["finished_at"]) for o in operations if o["type"] == "project.export"]
+    start = max([instant(quiet["from"]), *exports])
+    return (instant(idle["requested"]["created_at"]) - start).total_seconds()
+
+
 def test_the_idle_slot_was_put_to_sleep_by_the_reconciler(
     recorder: Recorder, endpoint: str, owner: str, record41: dict[str, Any]
 ) -> None:
@@ -373,7 +387,9 @@ def test_the_idle_slot_was_put_to_sleep_by_the_reconciler(
     assert "its backups stop" in idle["note"], idle["note"]
     requested = idle["requested"]
     seconds = requested["seconds_from_setting"]
-    assert IDLE_MINUTES * 60 - 60 <= seconds <= IDLE_BOUND_SECONDS, seconds
+    waited = _waited_from_the_window(idle, record41["operations"])
+    assert IDLE_MINUTES * 60 - 60 <= waited, waited
+    assert 0 < seconds <= IDLE_BOUND_SECONDS, seconds
     members = {o["requested_by"] for o in record41["operations"]}
     assert len(members) == 1, members
     kinds = [(o["type"], o["origin"]) for o in record41["idle_operations"]]
