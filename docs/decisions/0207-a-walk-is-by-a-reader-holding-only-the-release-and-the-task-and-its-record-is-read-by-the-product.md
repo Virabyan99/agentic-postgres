@@ -1,6 +1,9 @@
 # 0207 — A walk is by a reader whose context holds only the release and the task, and the record it writes is read by the product
 
-- **Status:** accepted
+- **Status:** accepted; amended by ADR 0290 (Session 46): a person now walks the
+  hosted product from its site, and that record is `documented_path` (`DX-002`);
+  this ADR's clone record stands for the appliance, claim
+  `appliance_documented_path` (`DX-001`)
 - **Date:** 2026-09-14
 - **Session:** 25, Run 1 (D1303–D1307, D1312, D1314; and the corrections this
   run measured, D1315–D1327)

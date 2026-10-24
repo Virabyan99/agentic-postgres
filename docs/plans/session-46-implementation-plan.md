@@ -1,6 +1,9 @@
 # Session 46 — The journey, the person's walk, the Stage 5 release, the Stage 6 report
 
-**Status: PLANNED (2026-10-24) — no run started.** Planned at `7b035d9` (Session
+**Status: EXECUTING — Run 1 in part (2026-10-24): the rigs, ADRs 0290–0293
+(0292 Proposed until Sheet IR4), threat items 28–30, `docs/hosted-walk.md`;
+Sheet IR4 handed to the operator; the person's day not yet arranged. Rows
+D2890–D2896 added; NEXT FREE D2897, ADR 0294.** Planned at `7b035d9` (Session
 45's close record, tree clean, `main` = `origin/main`) against the host as read
 that morning (§0). Rows **D2862–D2889** at planning; the runs add theirs from
 **D2890**. ADRs **0290–0293** are Run 1's. **NEXT FREE after this table: D2890,
@@ -381,6 +384,13 @@ the runs add go in a second table below it, in execution order.
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
+| **D2890** | Run 1 step 1(c): `OPTIONS https://slot3.agenticpostgresql.com/auth/reset-password`. | That path is the edge's own `404 page not found` (measured 11:02Z). The claim's target is `routes.app` + `/auth/reset-password` (`bin/cloud.py:739`); slot3-prod's `app` route is `https://slot3.agenticpostgresql.com/api/app` (its deployed document, `~/s45/run9/slot3-prod-outputs.json`). | **Rig 46a(c) read the real route**: `/api/app/auth/reset-password` answers `OPTIONS` **405, `allow: POST`, no `Access-Control-*` header**, with and without `Origin` (11:03Z). Recorded in ADR 0291. | A preflight read at the wrong path measures the edge, not the project. | 0291 |
+| **D2891** | Twelve sentences #8 / D2883: the freeze covers *"`site/`, `src/agentic_postgres/plans.py`, `docs/reality-ledger.yaml`, `VERSION` or `src/agentic_postgres/site_build.py`"*. | `site_build.digest_inputs()` (`site_build.py:677-689`) is every file under `site/`, **the five shared assets under `services/console/public/`** (four font files, `favicon.svg`; ADR 0288), **`services/auth-api/app/plans.py`** (`src/agentic_postgres/plans.py` only `service_source.load`s it), the Ledger, `VERSION`, `site_build.py`. | **The freeze is `digest_inputs()` itself, never a typed list**: Run 7's freeze check and Run 8's text read the function. A console change touching `fonts/` or `favicon.svg` is inside the freeze; `app.js` is not a digest input. | The list that decides the digest is the one the freeze must follow (D2883's own reason). | 0290 |
+| **D2892** | Run 6: the journey's driver in Chromium against the console. | Playwright's `page.wait_for_function("<string>")` evaluates a string in the page and is refused under the console's `script-src 'self'` (*"'unsafe-eval' is not an allowed source of script"*, rig 46a's first run). | **The journey's driver waits with locators and selectors only** (`page.locator(…).wait_for()`), never a string evaluated in the page; Run 6's driver is grepped for `wait_for_function` and `evaluate("` before its first run. | D2858's sibling: the console's policy refuses what a test tool assumes. | 0291 |
+| **D2893** | D2867: *"`commands_run` = every `apg …` line typed, each matching a line in the built pages' code blocks"*. | Rig 46b: 24 code blocks, **42 distinct `apg` lines, 30 `apg <noun> <verb>` prefixes, every one with a placeholder** (`KEY`, `NAME`, `ADMIN`, `OPERATION`, `./app-password`, a sample time); other code lines: `pipx` ×3, `uv` ×1, one connection-string template. | **ADR 0290 §3: an `apg` command matches when one documented line has its `apg <noun> <verb>` and every flag it used** (values free); any other command matches a code line after whitespace is normalised; a third-party client is a goal's note, not a command, and the record holds no connection string. | A byte match would read every honest command as undocumented. | 0290 |
+| **D2894** | D2874 / §0: `app.control_record_backups` is the shape — *"definer, REVOKEd, granted to nobody"*. | `0006-control-branches.sql:403-406`: **`SECURITY INVOKER`**, REVOKEd from PUBLIC, granted to nobody, called as `postgres` through `container_exec`. The member reader `control_get_backups` (`:191-211`) is `SECURITY DEFINER` with `control_enter` + `control_require_role(…, 'viewer')`. | **ADR 0292 follows the tree**: `control_record_diagnostics` is `SECURITY INVOKER`, granted to nobody; `control_project_diagnostics` a definer with `control_enter` + `control_require_role(…, 'member')`. | The tree wins. | 0292 |
+| **D2895** | D2865: `claim --token-file` picks *"the operation … by the token's SHA-256 against the creations, never the first row"*; the shown-once line carries `--project-key KEY`. | `GET /v1/operations` serves no `arguments` (`control_service._operation`, `:1234-1250`), so a member cannot read a creation's `handoff_sha256`; a creation's `project_key` is NULL until its slot is allocated (`_projects_held`, `:740-745`). | **ADR 0291 §5: with `--token-file` no creation is chosen** — the CLI requires one visible `succeeded` creation and the `app_route`, and presents the token to the project, **whose reset plane accepts only its own creation's token** (ADR 0260, rig 38c: any other 401); it never deletes a file it did not write. **§3: the panel at acceptance names the operation, not a key**; the Connect view repeats the claim line with the key once the creation succeeded, without the token. Not §9's *guess* stop: the project decides, deterministically. | A choice the client cannot read is a choice the server already makes. | 0291 |
+| **D2896** | D2869: *"Nothing else on the site is pre-walked"*; `docs/hosted-walk.md`'s statement names six goals. | The site documents goals 3–5 with `apg` lines (`docs/branches`, `docs/plans-and-usage`, `docs/insights-and-monitoring`; rig 46b's list) and **no page names the support bundle** (Run 2 builds it). A goal the statement names and no page reaches is a known gap. | **Run 4 reads each of the statement's six goals against the site and makes each reachable by a browser path on a page** (the console view that does it, the CLI line kept as *"or, from a terminal"*), including one sentence on the support bundle (Settings → *Support bundle*; `apg project diagnostics`). D2869's rule — known gaps repaired; the unknown ones are the walk's. | A goal named and undocumented is a finding the builder already holds. | 0290 |
 
 ---
 
@@ -556,7 +566,66 @@ Playwright image** (`PW_IMAGE`, §0) with the package from `~/s45/walk-home/pw`.
    even when nobody reads it): `test_documentation_index` and the ADR index's
    test (grep `decisions/README` in `tests/`). Commit, push, no CI read.
 
-**Done.**
+**Done (in part, 2026-10-24).** Executed at `1b2e3e1` (tree clean); scripts and
+transcripts in WSL `~/s46/run1/` and `~/s46/rigs/46a`, `46b`.
+
+- **Greps** (step 0, `~/s46/run1/greps.txt`): `handoff` 93 files —
+  `bin/cloud.py` (create/claim), **`bin/project.sh`'s usage also documents
+  `claim`** (`:52-55`, Run 4 moves it with `--token-file`),
+  `test_control_cli.py`, `test_admin_handoff.py`, `reconciler_dispatch.py`,
+  `control_client.py`, `test_session41_reearning.py`; `reset-password` 23
+  (`routes.py`, `main.py`, ADR 0173/0260); `token-file` only this plan;
+  `diagnos` 233 (the doctor's tree — no route, contract or CLI hit, as §0
+  says); `support bundle` 6 (plans, one docstring in
+  `test_generated_client_runtime.py:647`); `control status` 4, all plans;
+  `dx-record` 85 (every session gate since 18 carries `--dx-record-file`);
+  `second-walk` 15 (`dx_record.DOCUMENT_ROOTS`, `test_session12_documented_path.py:45`,
+  `test_documentation_index.py:695`, registry `:3956`, `bin/dx-record.sh:46`);
+  `hosted` 66 — none a reader of the walk record.
+- **Rig 46a** (the console's creation; Chromium in `PW_IMAGE` against a rig
+  server sending `serve.security_headers("wss://sql.agenticpostgresql.com")`
+  imported from the checkout): WebCrypto under the exact policy —
+  `isSecureContext` true, a 43-character base64url token, SHA-256 hex; **the
+  digest equal in Chromium, Node (`NODE_RUNTIME_IMAGE`) and Python** for a fixed
+  input (`7df3c0ae…`) and for the page's random token; **policy control**: an
+  inline script under the same headers did not run; the stub's one logged body
+  **held the digest and not the token**, answered 202. **(c), read-only, live**:
+  slot3-prod's `/api/app/auth/reset-password` answers `OPTIONS` **405, `allow:
+  POST`, no `Access-Control-*` header**, with and without `Origin` (D2890: the
+  plan's path was the edge's 404). The first run found **D2892**
+  (`wait_for_function` refused by the policy).
+- **Rig 46b** (the hosted record against the site, no network):
+  `bin/build-site.py` → **23 files, 16 HTML pages, 16 routes**, one
+  `apg-site-digest` on every page = `site_build.digest()` = `dce4308c…` at
+  `1b2e3e1`; **control**: one letter changed in a prose line of
+  `site/pages/index.md` in a `git archive` copy → `a6939bcb…` (a change inside a
+  link is refused by the builder, exit 3); **24 code blocks, 42 distinct `apg`
+  lines, 30 `apg <noun> <verb>` prefixes**, every one with a placeholder
+  (D2893); other code lines `pipx` ×3, `uv` ×1, one connection-string template.
+  The digest's inputs are wider than §1 named (D2891).
+- **Sheet IR4**: the operator's word given; `/home/op/s46-ir4.sh` written as
+  `op` (sha256 `9d0651d6…`, identical to `~/s46/run1/s46-ir4.sh`; host checkout
+  `4f4b207`). **Not yet run** — its reading accepts ADR 0292 or is §9's stop.
+- **ADRs**: **0290** (the hosted record path, `documented_path` → `DX-002`,
+  `appliance_documented_path` → `DX-001`; amends 0207, whose status line says
+  so), **0291** (the console creates; the token shown once at acceptance; the
+  claim stays the client's, `--token-file` chooses no creation — D2895),
+  **0292** (the support bundle — **Proposed** until IR4; the record function
+  `SECURITY INVOKER` per the tree, D2894), **0293** (`control.sh status`,
+  `control_states` shared). All four indexed in `docs/decisions/README.md`.
+- **Threat items 28–30** in `docs/threat-model.md`'s hosted list (the handoff
+  token in a tab, the support bundle, the walk record); table rows at Run 8.
+- **`docs/hosted-walk.md`** drafted (the statement between
+  `<!-- walk-statement:begin -->` / `end`: the site's address, the invitation,
+  six goals, the notes' plain-text form, no repository path, no command, no
+  hint), indexed in `docs/README.md`. **For the operator to read before Run 4**;
+  **the person and the day: not yet arranged** (the operator, 2026-10-24).
+  D2896: Run 4 makes each of the statement's six goals reachable from a page.
+- **Targeted, once**: `test_documentation_index`,
+  `test_session12_documented_path`, `test_repository_contract`,
+  `test_acceptance_registry`, `test_edge_config`, `test_mcp_catalog` — **375
+  passed**, exit 0.
+- Rows **D2890–D2896**. **Next free D2897, ADR 0294.**
 
 ### Run 2 — the support bundle (0010, the reconciler, the route, the CLI, the console)
 

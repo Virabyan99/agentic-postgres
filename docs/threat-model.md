@@ -570,6 +570,53 @@ was numbered 13 twice (D2673); it continues from 16.
     reviewed, not that those bytes are benign — the same limit `CFG-014`'s
     digest pins have for images; a new upstream version is a deliberate act
     (rig 45a again, the ADR's table, the pinned hashes), never a refresh.
+28. **The handoff token in a browser tab** (Session 46, ADR 0291, D2864,
+    D2865; `THR-CON-HANDOFF` at the bump). From this session the console
+    creates a project, so the token that claims its first administrator is
+    made in a page rather than in a 0600 file. Owed: 32 bytes from
+    `crypto.getRandomValues`, only their SHA-256 sent to `POST /v1/projects`
+    (rig 46a: the stub's logged body held the digest and not the token; the
+    digest equal in Chromium, Node and Python); the token held in one closure
+    of the creation view and shown **once**, the moment the creation is
+    accepted, in the shown-once panel; dropped when the panel is dismissed or
+    the view left; **no storage, no cross-origin call, no policy change** —
+    the console's guards `test_no_script_writes_storage` and
+    `test_only_api_js_calls_fetch` unchanged; the claim made by the CLI,
+    presented to the project's own reset plane, which refuses every token but
+    its own (ADR 0260; rig 46a (c): no project answers a cross-origin
+    preflight). Residual: **a creator who closes the tab before saving the
+    token can claim only through the operator's root reset**; a script on the
+    console's own origin could read the token while the panel shows it —
+    `THR-CON-XSS`'s residual, unchanged.
+29. **The support bundle** (Session 46, ADR 0292, D2874; `THR-CTL-DIAG` at the
+    bump). A member reads the node's verdicts on their own project: what the
+    platform last saw of its containers, routes, certificate, database,
+    migrations, backups, disk, lock, agent record and workflow worker. Owed:
+    the reconciler records `{name, verdict, detail}` only — **the doctor's
+    `evidence` is dropped in the process that ran it** and never reaches the
+    control database; the record function `SECURITY INVOKER` and granted to
+    nobody, the reader a definer scoped to the caller's membership (member and
+    above); every `detail` sentence the twelve probes can produce read in Run 2
+    for a host path or a value, and a guard planting
+    `test_doctor_redaction`'s values in both `evidence` and `detail` that finds
+    none recorded; a stopped database recorded as `asleep`, a reading older
+    than 1,800 s served `stale`. Residual: the bundle is node-derived — **a
+    change to a doctor `detail` sentence is a change to what customers read**,
+    and a member learns, every 15 minutes, which of the platform's checks pass
+    for their project.
+30. **The walk record** (Session 46, ADR 0290, D2867, D2868;
+    `THR-WALK-RECORD` at the bump). A person's notes of their walk are carried
+    by the agent into the record the gate reads. Owed: the person writes their
+    own notes in the statement's plain-text form; the agent transcribes them
+    **verbatim** (`transcribed_by`); the person reads the JSON and confirms it
+    (`confirmed_by_walker_at`) before it reaches the gate; the record holds
+    **no secret** — no password, no invitation link, no factor seed, no
+    connection string, no handoff token — refused by the transcriber and again
+    by the reader (`dx_record`'s hosted path); the agent never holds the
+    invitation link (the operator mints and sends it, Sheet P0); the record
+    lives in WSL, 0600 in a 0700 directory, never committed. Residual: the
+    record is the person's account as typed by the agent; a transcription
+    error the person does not catch at confirmation is carried as theirs.
 
 ## Scope
 

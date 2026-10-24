@@ -111,6 +111,7 @@ Before a deployment exists, and on a machine that is not one.
 | [Reality Ledger](reality-ledger.md) | What each product concept is today — `available`, `beta`, `trial`, `planned`, `not_metered` or `not_offered` — what a customer would read about it, what the appliance does now and the claim that proves it, rendered from `reality-ledger.yaml`, which a program reads **(generated)** |
 | [Evaluation report](evaluation-report.md) | Every case the evaluation harness asks of the agent surface, derived and written counted apart **(generated)** |
 | [The second walk](second-walk.md) | How `DX-001` is answered: who may walk the documented path, the task statement a walker is handed verbatim, the record they write and the five readings the product takes of it |
+| [The hosted walk](hosted-walk.md) | How `documented_path` is answered since Session 46: a person who did not build this, holding the site's address, an invitation link and the statement on this page, walks the hosted product; how their notes become the record (transcribed, confirmed, no secret) and what the claim reads (ADR 0290) |
 | [Security acceptance](security-acceptance.md) | The security requirements and how each is proved |
 | [Threat model](threat-model.md) | What is defended against, and what is not |
 | [Source specification](source-specification.md) | The original brief. **Digest-pinned** — quoted, never edited |
