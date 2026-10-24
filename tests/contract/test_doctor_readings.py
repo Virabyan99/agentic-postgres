@@ -687,3 +687,101 @@ def test_an_empty_tool_call_answer_names_the_current_mcp_process(
     # The caller passes the figure's own sentence, never the default.
     source = DOCTOR_PY.read_text(encoding="utf-8")
     assert "empty=STORE_EMPTY_REASONS[figure]" in source
+
+
+# -- D2880: the doctor reads the request series as the sampler does (ADR 0289) ---------
+
+#: The doctor's request figure and ADR 0289's two witnesses, typed here rather
+#: than read from the modules, so a query that drifts from the decision fails
+#: instead of being followed by the stand-in (D673).
+REQUESTS_TOTAL = "sum(traefik_service_requests_total)"
+USAGE_KEY = "slot3-prod"
+EDGE_READ = f'count by (project) (up{{job="edge",project="{USAGE_KEY}"}} == 1)'
+CERTIFICATE = f'count by (project) (traefik_tls_certs_not_after{{project="{USAGE_KEY}"}})'
+
+
+def _series(value: str, project: str = USAGE_KEY) -> list[dict[str, Any]]:
+    return [{"metric": {"project": project}, "value": [0, value]}]
+
+
+class _Store:
+    """`container_exec.run`'s stand-in: a store query answered from `answers`
+    (None: not answered; absent: no series), anything else refused."""
+
+    def __init__(self, answers: dict[str, list[dict[str, Any]] | None]) -> None:
+        self.answers = answers
+        self.queries: list[str] = []
+
+    def __call__(self, container: str, *argv: str, **kwargs: Any) -> Any:
+        import json
+        import urllib.parse
+
+        if argv[0] != "wget":
+            return subprocess.CompletedProcess(argv, 1, "", "not this test's")
+        assert container == f"apg-{USAGE_KEY}-store-1", container
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(argv[-1]).query)["query"][0]
+        self.queries.append(query)
+        series = self.answers.get(query, [])
+        if series is None:
+            return subprocess.CompletedProcess(argv, 1, "", "wget: connection refused")
+        body = {"status": "success", "data": {"result": series}}
+        return subprocess.CompletedProcess(argv, 0, json.dumps(body), "")
+
+
+def _requests_figure(doctor: Any, monkeypatch: pytest.MonkeyPatch, store: _Store) -> Any:
+    monkeypatch.setattr(doctor.container_exec, "run", store)
+    monkeypatch.setattr(doctor, "probe_repository_bytes", lambda key, root=None: (None, "not here"))
+    document = {"project": {"key": USAGE_KEY}, "database": {}}
+    return doctor.probe_usage(document).requests_total
+
+
+def test_an_absent_request_series_reads_zero_only_with_both_witnesses(
+    doctor: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D2880, ADR 0289 amended: `doctor usage`'s request figure is the
+    sampler's reading -- no request series is **0, measured** when the store
+    shows it read the edge for THIS project and holds its certificate series,
+    each witness asked by the project's name. The control: the same empty
+    answer with the witnesses present is what the sampler reads as 0."""
+    store = _Store({REQUESTS_TOTAL: [], EDGE_READ: _series("1"), CERTIFICATE: _series("1")})
+    figure = _requests_figure(doctor, monkeypatch, store)
+    assert (figure.value, figure.reason) == (0, ""), figure
+    assert store.queries[:3] == [REQUESTS_TOTAL, EDGE_READ, CERTIFICATE], store.queries
+
+
+@pytest.mark.parametrize(
+    "witnesses",
+    [
+        {EDGE_READ: [], CERTIFICATE: _series("1")},
+        {EDGE_READ: _series("1"), CERTIFICATE: []},
+        {EDGE_READ: None, CERTIFICATE: _series("1")},
+        {EDGE_READ: _series("1", "slot5-prod"), CERTIFICATE: _series("1")},
+        {EDGE_READ: _series("0"), CERTIFICATE: _series("1")},
+    ],
+    ids=["no-edge-read", "no-certificate", "edge-unanswered", "another-project", "zero-count"],
+)
+def test_an_absent_request_series_without_a_witness_is_unknown(
+    doctor: Any, monkeypatch: pytest.MonkeyPatch, witnesses: dict[str, Any]
+) -> None:
+    """Either witness missing, unanswered, another project's or not positive:
+    the figure is UNKNOWN, its reason says the store could not show the edge
+    was read -- and the old *"yet"* is gone (ADR 0195: never 0)."""
+    figure = _requests_figure(doctor, monkeypatch, _Store({REQUESTS_TOTAL: [], **witnesses}))
+    assert figure.value is None
+    assert "could not show the edge was read" in figure.reason, figure.reason
+    assert "yet" not in figure.reason, figure.reason
+
+
+def test_a_present_request_series_is_its_value_and_asks_no_witness(
+    doctor: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A series is its own value, 0 included, and the witnesses are never
+    asked; a request query the store did not answer keeps its own reason."""
+    for value in ("57", "0"):
+        store = _Store({REQUESTS_TOTAL: _series(value), EDGE_READ: [], CERTIFICATE: []})
+        figure = _requests_figure(doctor, monkeypatch, store)
+        assert figure.value == int(value)
+        assert EDGE_READ not in store.queries and CERTIFICATE not in store.queries
+    store = _Store({REQUESTS_TOTAL: None, EDGE_READ: _series("1"), CERTIFICATE: _series("1")})
+    figure = _requests_figure(doctor, monkeypatch, store)
+    assert (figure.value, figure.reason) == (None, "the store did not answer the query")

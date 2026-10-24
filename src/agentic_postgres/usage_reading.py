@@ -8,7 +8,7 @@ instant query of the project's own Prometheus through the store container
 `container_exec.run` (ADR 0218) and returns `(value, reason)` -- a value, or
 None with the reason it is not one (ADR 0195). Nothing here returns a zero for
 a reading that did not arrive, unless the store shows the edge was read for
-this project (`requests_below_400`, ADR 0289).
+this project (`requests_below_400`, `requests_total`, ADR 0289).
 """
 
 # ruff: noqa: S608 -- every interpolated value is a derived role name or an instant
@@ -30,6 +30,8 @@ __all__ = [
     "INSIGHT_TEXT",
     "INSTANT",
     "REQUESTS_BELOW_400_QUERY",
+    "REQUESTS_TOTAL_QUERY",
+    "REQUESTS_TOTAL_UNWITNESSED",
     "REQUESTS_UNWITNESSED",
     "activity_sql",
     "cluster_fields",
@@ -40,6 +42,7 @@ __all__ = [
     "durable_counts_sql",
     "insights_sql",
     "requests_below_400",
+    "requests_total",
     "store_value",
 ]
 
@@ -47,6 +50,10 @@ __all__ = [
 #: (its exporter keeps the project's own, `rendering.py`'s keep-regex). A scan's
 #: 404 is not a request a customer is making (Sheet E0, D2525, D2539).
 REQUESTS_BELOW_400_QUERY = 'sum(traefik_service_requests_total{code=~"[123].."})'
+
+#: Every request the edge answered for the project, `doctor usage`'s figure
+#: (`sum`, because each process of the edge mints its own series, D1609).
+REQUESTS_TOTAL_QUERY = "sum(traefik_service_requests_total)"
 
 #: ADR 0289's two witnesses, asked only when the request query answers NO
 #: series (D2805: a recreated service has none until its next request). The
@@ -65,9 +72,15 @@ REQUESTS_UNWITNESSED = (
     "the store holds no request answered below 400 and could not show the edge was read"
 )
 
+#: The same for `doctor usage`'s figure, which counts every answer (D2880).
+REQUESTS_TOTAL_UNWITNESSED = (
+    "the store holds no request series and could not show the edge was read"
+)
+
 #: `store_value`'s reason for an empty request answer: the one case the
 #: witnesses are asked about.
 _REQUESTS_EMPTY = "the store holds no request answered below 400"
+_REQUESTS_TOTAL_EMPTY = "the store holds no request series"
 
 #: What the database prints for `now()` and a timestamptz, as the sampler
 #: passes one back as the next sample's `since`.
@@ -202,21 +215,38 @@ def requests_below_400(project_key: str) -> tuple[int | None, str]:
     because an empty answer is also what a store that never reached the edge
     returns; with either witness missing, unanswered or another project's the
     counter is unread, named (ADR 0195). A request query the store did not
-    answer keeps its own reason. `store_value` is unchanged, so `doctor
-    usage`'s report still reads an absent series as not measured.
+    answer keeps its own reason.
     """
+    return _witnessed(project_key, REQUESTS_BELOW_400_QUERY, _REQUESTS_EMPTY, REQUESTS_UNWITNESSED)
+
+
+def requests_total(project_key: str) -> tuple[int | None, str]:
+    """`doctor usage`'s request figure, read as the idle decision reads its own
+    (D2880, ADR 0289 amended): a series is its value; no series is 0 only with
+    both witnesses, and unread with either missing. One reading of one series,
+    in the report and the decision alike."""
+    return _witnessed(
+        project_key, REQUESTS_TOTAL_QUERY, _REQUESTS_TOTAL_EMPTY, REQUESTS_TOTAL_UNWITNESSED
+    )
+
+
+def _witnessed(
+    project_key: str, query: str, empty: str, unwitnessed: str
+) -> tuple[int | None, str]:
+    """ADR 0289's rule for one request query: its series, or -- when it answers
+    none -- 0 with both witnesses asked for THIS project, else unread."""
     if not naming.TRAEFIK_NAME_PATTERN.match(project_key):
         raise ValueError(
             f"project key {project_key!r} is not a Traefik name and may not be "
             "interpolated into the store's label matcher"
         )
-    value, reason = store_value(project_key, REQUESTS_BELOW_400_QUERY, empty=_REQUESTS_EMPTY)
-    if value is not None or reason != _REQUESTS_EMPTY:
+    value, reason = store_value(project_key, query, empty=empty)
+    if value is not None or reason != empty:
         return value, reason
     for witness in (EDGE_READ_WITNESS_QUERY, CERTIFICATE_WITNESS_QUERY):
         seen, _ = store_value(project_key, witness.format(key=project_key))
         if seen is None or seen < 1:
-            return None, REQUESTS_UNWITNESSED
+            return None, unwitnessed
     return 0, ""
 
 

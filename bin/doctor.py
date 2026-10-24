@@ -942,7 +942,7 @@ def probe_capacity(
 #: restart (D1609). A cumulative counter answering a point-in-time question is
 #: D553's shape; this is its sibling.
 STORE_QUERIES = {
-    "requests_total": "sum(traefik_service_requests_total)",
+    "requests_total": usage_reading.REQUESTS_TOTAL_QUERY,
     "tool_calls_total": "sum(agent_tool_calls_total)",
 }
 
@@ -954,7 +954,9 @@ STORE_QUERIES = {
 #: the current process has served none -- after every recreate, however much
 #: history the store holds. The UNKNOWN stays right; the reason now says why.
 STORE_EMPTY_REASONS = {
-    "requests_total": "the store holds no such series yet",
+    # Read through ADR 0289's witnesses since Session 46 (D2880): this is the
+    # sentence for the bare query, before they are asked.
+    "requests_total": "the store holds no request series",
     "tool_calls_total": (
         "the store holds no such series in the current mcp process (each process "
         "mints its own series, and a recreated mcp has served no call yet)"
@@ -1012,11 +1014,14 @@ def probe_usage(
 
     store: dict[str, tuple[int | None, str]] = {}
     for figure, query in STORE_QUERIES.items():
-        store[figure] = (
-            probe_store(key, query, empty=STORE_EMPTY_REASONS[figure])
-            if key
-            else (None, "no project key")
-        )
+        if not key:
+            store[figure] = (None, "no project key")
+        elif figure == "requests_total":
+            # D2880 (ADR 0289 amended): no series is 0 only with the sampler's
+            # two witnesses -- the report reads it as the decision does.
+            store[figure] = usage_reading.requests_total(key)
+        else:
+            store[figure] = probe_store(key, query, empty=STORE_EMPTY_REASONS[figure])
 
     return capacity_reading.UsageFigures(
         database_bytes=_figure(*database_bytes),

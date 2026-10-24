@@ -10,9 +10,14 @@ before ADR 0289 such a window read the counter `unread` and never slept
 (Session 44's attempt 3). The control set requests an idle sleep only over a
 window whose every sample READ the counter (ADR 0276, `0008`'s window clause),
 so the sleep this record holds -- requested by the reconciler, origin `idle`,
-inside the window and two sample intervals -- is the reading of an absent
-series as 0 with its witnesses. **No SSH, no process door** (D2174). **None of
-these proofs has ever executed.**
+inside the window and two sample intervals -- proves that **a woken project
+left untouched is idle-slept**. It does not say which branch read the
+counter: Session 45's root read found the request series PRESENT (Sheet IR3,
+D2859), so the record proved the ordinary path, and the reading of an ABSENT
+series as 0 with its witnesses is proved offline only
+(`test_usage_sampler.py::test_an_absent_series_with_a_witness_reads_zero`,
+D2881). **No SSH, no process door** (D2174). These proofs passed on Session
+45's evidence (1.23.0 at 4f4b207).
 """
 
 # ruff: noqa: F811 -- the imported names are pytest fixtures.

@@ -1426,3 +1426,59 @@ def test_the_plane_serving_an_approval_step_unasked_finishes_it_succeeded(
         "set_the_embedding" in record.getMessage() and "set_note_embedding" in record.getMessage()
         for record in caplog.records
     )
+
+
+def test_the_planes_refusal_of_a_revoked_agent_fails_the_step_unclassified(
+    monkeypatch: Any,
+) -> None:
+    """**D2882, rig 46d.** When the worker minted the step's token BEFORE the
+    revocation landed, the plane reads the agent's context from PostgREST, is
+    answered `PT401 identity is no longer current`, and raises its structural
+    refusal -- `ToolRefusal(STRUCTURAL_REFUSAL, UPSTREAM_REFUSED)`, a plain
+    exception its `mask_error_details=True` replaces with the framework's
+    opaque `Error calling tool '<name>'`, the same text for a bad signature, a
+    stale identity and a missing privilege (D433). Measured here through the
+    pinned framework: that answer is no named shape, so the step is finished
+    `refused` with `unclassified_refusal` and the run fails -- the other arm of
+    the race the host proof now reads by its cause. The control: an
+    `AgentVisible` refusal through the same server finishes with its token."""
+    from fastmcp import Client, FastMCP
+
+    errors = service_source.load("mcp_errors")
+    tools = service_source.load("mcp_tools")
+    server = FastMCP(name="d2882", mask_error_details=True)
+
+    @server.tool
+    def stale_agent_call() -> dict[str, Any]:
+        raise tools.ToolRefusal(errors.STRUCTURAL_REFUSAL, errors.UPSTREAM_REFUSED)
+
+    @server.tool
+    def scoped_call() -> dict[str, Any]:
+        raise errors.as_tool_error(
+            errors.AgentVisible(errors.SCOPE_NOT_HELD, "a detail", errors.SCOPE_NOT_HELD_REASON)
+        )
+
+    async def reply(name: str) -> dict[str, Any]:
+        async with Client(server) as client:
+            result = await client.call_tool(name, {}, raise_on_error=False)
+        content = [{"type": "text", "text": block.text} for block in result.content]
+        return {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"content": content, "isError": result.is_error},
+        }
+
+    finished = {}
+    for name in ("stale_agent_call", "scoped_call"):
+        answer = asyncio.run(reply(name))
+        repository, _ = drive(
+            step=FakeStep(),
+            send=lambda *a, _answer=answer, **k: (200, sse(_answer), PLANE_ID),
+            monkeypatch=monkeypatch,
+        )
+        finished[name] = repository.one("finish")
+    stale = finished["stale_agent_call"]
+    assert (stale["outcome"], stale["reason"]) == ("refused", "unclassified_refusal"), stale
+    assert str(stale["request_id"]) == PLANE_ID, "the refused call records no request id"
+    scoped = finished["scoped_call"]
+    assert (scoped["outcome"], scoped["reason"]) == ("refused", "scope_not_held"), scoped

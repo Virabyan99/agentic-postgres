@@ -120,7 +120,13 @@ unread.** The sampler alone changes; no migration.
    request figure (`bin/reconciler.py:1502-1505`). **`store_value` itself is
    unchanged**, so `doctor usage`'s `requests_total` (`bin/doctor.py:949-962`)
    keeps reading an absent series as *not measured*: a report, correct as a
-   report; this ADR changes only what a decision reads.
+   report; this ADR changes only what a decision reads. *(Amended in
+   Session 46, D2880: `doctor usage` reads its figure,
+   `sum(traefik_service_requests_total)`, through the same witnesses —
+   `usage_reading.requests_total`, one loop shared with
+   `requests_below_400` — so an absent series reads 0 with both, and
+   without either it is unknown because the store could not show the edge
+   was read; the report and the decision read one series one way.)*
 3. **The control set is unchanged.** A read 0 satisfies
    `app.control_request_idle_sleep`'s window clause as written
    (`requests_counter IS NOT NULL`, `max = min`): three samples reading

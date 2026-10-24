@@ -8,7 +8,9 @@ reconciler pass, the route, the CLI, the console; rows D2897–D2902). Run 3
 DONE (`control.sh status`, `control_states` shared, the node-loss runbook
 control-first; rig 46c; rows D2903–D2906). Run 4 DONE (the console creates a
 project, `claim --token-file`, the site PARKED for Run 8; rows D2907–D2911).
-NEXT FREE D2912, ADR 0294. Next: Run 5.** Planned at `7b035d9` (Session
+Run 5 DONE (`doctor usage`'s witnesses, the idle docstring, D2801's race read
+by both arms after rig 46d; rows D2912–D2914). NEXT FREE D2915, ADR 0294.
+Next: Run 6.** Planned at `7b035d9` (Session
 45's close record, tree clean, `main` = `origin/main`) against the host as read
 that morning (§0). Rows **D2862–D2889** at planning; the runs add theirs from
 **D2890**. ADRs **0290–0293** are Run 1's. **NEXT FREE after this table: D2890,
@@ -411,6 +413,9 @@ the runs add go in a second table below it, in execution order.
 | **D2909** | §2 `CON-CREATE-001`: `tests/contract/test_cloud_cli.py::test_claim_reads_a_token_file`, `::test_claim_picks_the_creation_by_digest`; step 6's mutation *"the claim choosing the first row"*. | `test_cloud_cli.py` does not exist (D2899: the CLI's proofs are `test_control_cli.py`); ADR 0291 §5 (D2895) chooses **no** creation with `--token-file`. | **`test_control_cli.py::test_claim_reads_a_token_file` and `::test_claim_with_a_token_file_chooses_no_creation`** (a reused key's two creations presented once; none visible exit 3); a fifth console node, `test_console_create.py::test_the_overview_offers_new_project`. The battery's sixth mutation is *the token file falling through to the held-file choice*. Run 8 registers these names. | A node id names what it proves. | 0291 |
 | **D2910** | ADR 0291 §3: *"the Connect view repeats the claim line with the key filled once the creation has succeeded"*. | `connectView` serves every project, adopted ones included (alpha, beta, the control project), which no token can claim; the creator is on the creation view when the operation succeeds. | **The creation view shows the line with the key** on success, beside its link to Connect; `connectView` unchanged. ADR 0291 amended in place. | The line belongs where the token was shown. | 0291 |
 | **D2911** | Run 4 step 4 names `quickstart.md`, `projects.md`, `getting-started.md`; D2896: every goal of the statement reachable by a browser path. | Goals 4 and 5 are CLI lines on their pages (`plans-and-usage.md` *Usage*, `insights-and-monitoring.md` *Query Insights*), goal 6 is on no page; **`site/pages/index.md`** repeats the quickstart's steps with *"In this beta a project is created with the command-line client"*; the Ledger's `console` row says the same twice (`customer_text`, `stage5_reality`) — and the Ledger is a site digest input (D2891). | **All parked together** in `~/s46/run4/park/apply.py`: the three named pages, `index.md`, the console's *Usage* and *Insights* sentences, `projects.md`'s *Support information*, the `console` row. Not pushed: a push to `main` publishes the site, and the deployed console creates nothing until Run 9's release. Run 8 applies it with the bump. | A sentence on the site describes the deployed product; it moves when the product does. | 0290, 0291 |
+| **D2912** | D2880: without both witnesses the doctor's figure is UNKNOWN *"with `REQUESTS_UNWITNESSED`'s reason"*. | `REQUESTS_UNWITNESSED` says *"the store holds no request answered below 400 …"* — the sampler's figure; the doctor's is `sum(traefik_service_requests_total)`, every code. | **`REQUESTS_TOTAL_UNWITNESSED`**, the same sentence for the doctor's own figure (*"the store holds no request series and could not show the edge was read"*); both figures go through ONE loop, `usage_reading._witnessed`, each with its own query and sentences. | A reason names the figure it is about. | 0289 |
+| **D2913** | D2882: *"Run 5 reads the plane's refusal of a revoked agent's token first … If it is a named shape, the worker classifies it … If it is not, the proof reads both arms by their cause."* | **Rig 46d**: the plane raises `ToolRefusal(STRUCTURAL_REFUSAL, UPSTREAM_REFUSED)` for its context read's `PT401`; under `mask_error_details=True` (FastMCP 3.4.0) the worker receives `Error calling tool '<name>'` — one text for every structural cause (D433) — and classifies it `terminal`/`unclassified_refusal`. Not a named shape. | **The second arm**: the worker unchanged; the host proof renamed `test_a_revoked_agents_run_ends_by_the_cause_of_its_arm` and reads `stopped` (no call) or `failed` (`unclassified_refusal`, the request id kept, nothing later run, nothing served); `WF-REVOKE-001`'s node id and description moved, the matrix re-rendered; the reading pinned offline in `test_workflow_worker`. A re-mint after an unclassified refusal (to learn of the revocation) was not built: the reading did not call for a product change. | The plane says nothing on purpose; the proof reads what it does say. | — |
+| **D2914** | D2881: the idle module's docstring line about the absent series. | The same docstring also said *"None of these proofs has ever executed"* — false since Session 45's sitting, whose merged evidence passed `idle_after_wake_live`. | **Both sentences corrected** in the one docstring edit. | A docstring is a claim (D2881). | — |
 
 ---
 
@@ -970,7 +975,12 @@ the rig in `~/s46/rigs/46c/`.
   `test_deployment_module_shape`, `test_reality_ledger` — **999 passed**;
   `test_control_cli` 22 passed (after the rename); `ruff format --check`,
   `ruff check`, shellcheck clean.
-- Rows **D2907–D2911**.
+- Rows **D2907–D2911**. **CI on `0dc2b27`: contract 40110202674 success, site
+  40112231015 success.** The live site read after `site`
+  (`curl -A agentic-postgres-proof`): `/` and `/quickstart/` 200, both
+  `apg-site-digest` **`dce4308c…`** — unchanged, as it must be with the pages
+  parked; the quickstart still says *"In this beta a project is created with the
+  command-line client"* until Run 8 applies the park.
 
 ### Run 5 — the small repairs: `doctor usage`'s witnesses, the docstring, D2801
 
@@ -990,7 +1000,71 @@ reads.
    accepted; (D2882's repair reverted) — each FAILED, controls green.
 5. Targeted, ruff, commit, push, CI.
 
-**Done.**
+**Done (2026-10-24).** Executed on `0dc2b27` (Run 4's CI green); scripts in WSL
+`~/s46/run5/`, the rig in `~/s46/rigs/46d/`.
+
+- **D2880 — `doctor usage` reads the request series with ADR 0289's
+  witnesses.** `usage_reading._witnessed(key, query, empty, unwitnessed)` is
+  the one loop (its series; no series → both witnesses asked for THIS project
+  → 0, else unread); `requests_below_400` (the sampler's, unchanged in
+  behaviour) and the new **`requests_total`** (`REQUESTS_TOTAL_QUERY =
+  sum(traefik_service_requests_total)`) both call it. `bin/doctor.py`'s
+  `probe_usage` reads `requests_total` through it; `STORE_QUERIES` names the
+  shared query; the *"yet"* is gone (`REQUESTS_TOTAL_UNWITNESSED`, D2912). ADR
+  0289 amended in place. **Tests first**: `test_doctor_readings.py`
+  `::test_an_absent_request_series_reads_zero_only_with_both_witnesses`,
+  `::test_an_absent_request_series_without_a_witness_is_unknown` (five
+  witness cases), `::test_a_present_request_series_is_its_value_and_asks_no_witness`
+  — **6 FAILED, 0 ERROR** on *"the store holds no such series yet"*, the
+  present-series test passing before and after (unchanged behaviour, its own
+  control); green after.
+- **D2881 — the docstring.** `tests/external/test_session45_idle.py` now says
+  the record proves *a woken project left untouched is idle-slept*, that IR3
+  found the series present (D2859), and that the absent branch is proved
+  offline (`test_usage_sampler::test_an_absent_series_with_a_witness_reads_zero`);
+  its *"None of these proofs has ever executed"* replaced — they passed on
+  Session 45's evidence (D2914).
+- **D2882 — the reading, then the arm.** **Rig 46d** (FastMCP **3.4.0**, the
+  pinned framework, in-memory, `mask_error_details=True` as `mcp_runtime`
+  builds it): a tool raising the plane's own
+  `ToolRefusal(STRUCTURAL_REFUSAL, UPSTREAM_REFUSED)` — what the plane raises
+  when PostgREST answers its context read `PT401 identity is no longer
+  current` for a revoked agent (`mcp_upstream`'s measured table) — reaches the
+  worker as **`Error calling tool 'stale_agent_call'`**, `isError: true`, which
+  `workflow_worker.classify` reads **`terminal`, `unclassified_refusal`**;
+  control: an `AgentVisible` refusal through the same server reads
+  `scope_not_held`; and a plane 401 reads `token`. **Not a named shape** — the
+  mask gives one text to a bad signature, a stale identity and a missing
+  privilege (D433) — **so the second arm**: no product change; the host proof
+  is renamed **`test_session32_workflows.py::test_a_revoked_agents_run_ends_by_the_cause_of_its_arm`**
+  and reads both arms by their cause (stopped: `agent_not_active`, the boundary
+  `token_refused` with no request id, no audit row after the revocation;
+  failed: `unclassified_refusal`, the refused step carrying the plane's request
+  id, no later step run, no call SERVED after the revocation; anything else
+  fails; the arm printed). `WF-REVOKE-001`'s node id and description moved
+  with it; `docs/acceptance-matrix.md` and `docs/product-contract.md`
+  re-rendered. The offline pin:
+  `test_workflow_worker.py::test_the_planes_refusal_of_a_revoked_agent_fails_the_step_unclassified`
+  (the plane's refusal through the framework, then the worker: `refused`,
+  `unclassified_refusal`, the request id kept; control `scope_not_held`). Not
+  taken: a worker that re-mints after an unclassified refusal to learn the
+  agent was revoked — a product change the reading did not call for (D2913).
+- **Battery 3/3** killed (FAILED; controls green in the same invocation;
+  restored by copy, `cmp`): the witness loop skipped in the doctor (control
+  `test_the_store_query_sums_across_instances`); a single witness accepted
+  (same control); the masked refusal read as a named boundary — the plan's
+  *"D2882's repair reverted"*, there being no repair (control
+  `test_a_refused_mint_stops_the_run_and_makes_no_call`).
+- **Targeted**, once: `test_doctor_readings`, `test_usage_sampler`,
+  `test_workflow_worker`, `test_acceptance_registry`, `test_documentation_index`,
+  `test_deployment_module_shape`, `test_environment_gates`,
+  `test_container_selectors`, `test_fleet`, `test_doctor_redaction`,
+  `test_session12_documented_path` — **246 passed**; the other readers of
+  `usage_reading` and the doctor (`test_honest_readers`, `test_capacity_reading`,
+  `test_insights_reading`, `test_diagnosis`, `test_reconciler_dispatch`,
+  `test_control_diagnostics`) — **175 passed**; the renamed host proof collects;
+  `ruff format --check`, `ruff check` clean.
+- Rows **D2912–D2914**.
 
 ### Run 6 — the hosted walk record; the journey's driver and proofs
 

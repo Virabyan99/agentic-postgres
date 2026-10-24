@@ -966,27 +966,39 @@ def test_the_rehearsal_recorded_a_new_holder_and_no_lost_step(
 
 
 # ---------------------------------------------------------------------------
-# WF-REVOKE-001 -- a revoked agent's run stops, and its twin's completes
+# WF-REVOKE-001 -- a revoked agent's run ends by its arm's cause, and its twin's completes
 # ---------------------------------------------------------------------------
 
 
-def test_a_revoked_agents_run_stops_at_the_boundary_with_no_call(
+def test_a_revoked_agents_run_ends_by_the_cause_of_its_arm(
     project_b: dict[str, Any],
     beta_agents: dict[str, ProbeAgent],
     beta_admin: str,
     api_call: Callable[..., Any],
     psql: Callable[..., tuple[int, str, str]],
 ) -> None:
-    """**A race, and this says so** (§10). The run is enqueued and the agent
-    revoked through `PATCH /admin/agents/{id}` in the same second; the loop
-    polls every 5 s, so it almost always finds the run after the revocation
-    and the mint for step 1 is refused. If it claimed step 1 first, the run
-    stops at a later boundary. Either way: `stopped`, `agent_not_active`, the
-    boundary step `token_refused` with NO request id -- no call was made
-    (D1696) -- and no audit row for this agent after the revocation.
+    """**A race, with both arms decided** (§10; D2801, D2882). The run is
+    enqueued and the agent revoked through `PATCH /admin/agents/{id}` in the
+    same second; the loop polls every 5 s.
 
-    The offline proof `test_a_refused_mint_stops_the_run_and_makes_no_call`
-    pins the boundary exactly; this proves the deployment does what it says.
+    * **The worker found the run after the revocation** (the usual arm): the
+      mint is refused, the run ends `stopped` with `agent_not_active`, the
+      boundary step `token_refused` with NO request id -- no call was made
+      (D1696) -- and the audit holds no row for this agent after the
+      revocation. `test_a_refused_mint_stops_the_run_and_makes_no_call` pins it.
+    * **The worker minted step 1's token first** (S1's arm, D2801): the token
+      was valid when minted, so the call reaches the plane, whose PostgREST
+      context read is refused `PT401` for the now-revoked agent; the plane
+      answers its structural refusal, masked to the same opaque text for every
+      cause (D433), which the worker cannot classify (rig 46d). The run ends
+      `failed` with `unclassified_refusal`, the refused step carries the
+      plane's request id (a call WAS made, and refused), no later step ran,
+      and no call was SERVED for this agent after the revocation.
+      `test_the_planes_refusal_of_a_revoked_agent_fails_the_step_unclassified`
+      pins it.
+
+    Any other ending fails here. The arm is printed, so the sweep's output says
+    which one the deployment took.
     """
     agent = beta_agents["revocable"]
     token = agent.token()
@@ -1018,17 +1030,33 @@ def test_a_revoked_agents_run_stops_at_the_boundary_with_no_call(
         assert time.monotonic() < deadline, f"the revoked run never ended: {document}"
         time.sleep(2)
 
-    assert document["status"] == "stopped", json.dumps(document)[:2000]
-    assert document["stopped_reason"] == "agent_not_active", document["stopped_reason"]
-    boundary = next(step for step in document["steps"] if step["outcome"] == "token_refused")
-    assert boundary["request_id"] is None, (
-        f"the refused step carries a request id, so a call was made: {boundary}"
-    )
     later = _audit(
         psql, project_b, f"agent_id = '{agent.agent_id}' AND started_at > '{revoked_at}'"
     )
-    assert later == [], f"the revoked agent reached the audit after its revocation: {later}"
-    print(f"the revoked run stopped at step {boundary['position']} ({boundary['name']})")
+    if document["status"] == "stopped":
+        assert document["stopped_reason"] == "agent_not_active", document["stopped_reason"]
+        boundary = next(step for step in document["steps"] if step["outcome"] == "token_refused")
+        assert boundary["request_id"] is None, (
+            f"the refused step carries a request id, so a call was made: {boundary}"
+        )
+        assert later == [], f"the revoked agent reached the audit after its revocation: {later}"
+        print(f"the revoked run stopped at step {boundary['position']} ({boundary['name']})")
+        return
+    assert document["status"] == "failed", json.dumps(document)[:2000]
+    assert document["stopped_reason"] == "unclassified_refusal", document["stopped_reason"]
+    refused = next(step for step in document["steps"] if step["outcome"] == "refused")
+    assert refused["reason"] == "unclassified_refusal", refused
+    assert refused["request_id"], f"the refused step records no request id: {refused}"
+    after = [step for step in document["steps"] if step["position"] > refused["position"]]
+    assert all(step["status"] == "queued" for step in after), (
+        f"a step ran after the plane refused the revoked agent: {after}"
+    )
+    served = [row for row in later if row["outcome"] == "served"]
+    assert served == [], f"a call was served for the revoked agent after its revocation: {served}"
+    print(
+        f"the revoked run failed at step {refused['position']} ({refused['name']}): the plane "
+        "refused the call minted before the revocation"
+    )
 
 
 def test_an_unrevoked_agents_identical_run_completes(

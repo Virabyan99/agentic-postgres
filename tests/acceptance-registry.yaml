@@ -5095,7 +5095,7 @@
   priority: P0
   target_session: 32
   test_nodeids:
-    - tests/deployment/test_session32_workflows.py::test_a_revoked_agents_run_stops_at_the_boundary_with_no_call
+    - tests/deployment/test_session32_workflows.py::test_a_revoked_agents_run_ends_by_the_cause_of_its_arm
     - tests/deployment/test_session32_workflows.py::test_an_unrevoked_agents_identical_run_completes
   description: >-
     **A revoked agent's run stops at its next step boundary and makes no
@@ -5105,8 +5105,14 @@
     NO request id -- no call reached the plane (D1696) -- and the audit holds
     no row for the agent after the revocation. This is a race and says so:
     the boundary depends on the loop's poll, and the offline proof pins it
-    exactly. The control is an identical agent nobody revoked, whose
-    identical run completes.
+    exactly. **The other arm, decided in Session 46 (D2801, D2882, rig 46d)**:
+    when the worker minted the step's token before the revocation landed, the
+    call reaches the plane, which refuses the now-revoked agent with its
+    masked structural refusal; the run ends `failed` with
+    `unclassified_refusal`, the refused step carries the plane's request id,
+    no later step runs and no call is served for the agent after the
+    revocation. Any other ending fails. The control is an identical agent
+    nobody revoked, whose identical run completes.
 
 - id: REC-WF-001
   priority: P0
