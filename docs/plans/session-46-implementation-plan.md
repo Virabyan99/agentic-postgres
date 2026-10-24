@@ -13,8 +13,13 @@ by both arms after rig 46d; rows D2912–D2914; CI repair D2915). Run 6 DONE
 (the hosted record path, the journey driver rehearsed, the live modules
 parked; rows D2916–D2920). The operator read the statement 2026-10-24.
 Run 7 DONE (the trip's instruments derived and rehearsed; the lifecycle
-continues the journey, its rehearsal 27/27; rows D2921–D2926). NEXT FREE
-D2927, ADR 0294. Next: Run 8 (the bump).** Planned at `7b035d9` (Session
+continues the journey, its rehearsal 27/27; rows D2921–D2926). Run 8 DONE
+(`55467b5`: the bump to 46 and 1.24.0, nine requirements and claims, the
+gate, two Ledger rows `trial`; both gates passed in shards; rows D2927–D2929
+— the hosted walk is `DX-HOSTED-001`, `DX-002` being Session 1's). The
+site's digest inputs are FROZEN from that push until the person confirms
+(D2883). NEXT FREE D2930, ADR 0294. Next: Run 9 (the sitting), after the
+operator names the person's day.** Planned at `7b035d9` (Session
 45's close record, tree clean, `main` = `origin/main`) against the host as read
 that morning (§0). Rows **D2862–D2889** at planning; the runs add theirs from
 **D2890**. ADRs **0290–0293** are Run 1's. **NEXT FREE after this table: D2890,
@@ -431,6 +436,9 @@ the runs add go in a second table below it, in execution order.
 | **D2924** | The lifecycle's `expiry_control` (Session 38): a second export through its own HTTP session, signed in as the probe. | Under `--from-journey` the probe is a viewer of the lifecycle's organisation (D2921) — a viewer exports nothing — and `code()` reads the acting seed, so the probe's sign-in got the journey's code: **401** (rehearsal run 3, `STOPPED: the expiry control could not sign in`). | **`expiry_control` signs in as the account the lifecycle acts as** (`self.acting`, set by each `login_as`): the probe without a journey, the journey's owner with one. Rehearsed (run 5, the export URL 200 then 403). | A step signs in as whoever the run is acting as. | — |
 | **D2925** | Run 7 step 5: the lifecycle's rehearsal *"Session 41's rehearsal shape, derived"*. | Session 41's harness is three sessions behind the instrument; Session 42's (insights) is the newest — but it kills and resumes the instrument (D2581), which Session 45 removed (D2798). Its driver from `served_app` has no event loop. And D2500's hang, planted at the resize, can no longer be followed by a sample: Session 45 pauses every probe before the export (D2833), seconds after the resizes in a rehearsal. | **`rehearse_lifecycle46.py` from Session 42's harness** (`make-rehearse-lifecycle46.py`, count-asserted): the kill removed; the journey made through the real app over HTTP after a slot is ready; the hang planted at the third rotation and the sleep held 70 s, so the hung sample times out while the probes run. PASSED 27/27. | Rehearse the instrument as it now is. | — |
 | **D2926** | Run 7 step 1: *"every `s45-` script → `s46-` … the session numbers"*. | Session 45's derivation renamed every *"Session 44"* in prose and had to revert one comment by hand (`s45-post-derive.py`): a comment saying Session 44 decided something became false. | **Session 46's derivation renames only the functional strings** (the printed `Session 45 Run 9` headers, the comment `host.yaml` receives); a comment naming Session 45's decision stays true. | History in a comment is a claim too. | — |
+| **D2927** | §2: *"`CLAIM_INTRODUCED_IN` … gains a row at 46 for each new claim; **`documented_path`'s row stays where it is**"*; ADR 0290 §5 *"its `CLAIM_INTRODUCED_IN` row does not [change]"*. | A claim's session is DERIVED: `claim_session` is the max of its requirements' `target_session`s (`evidence_claims.py:1663-1679`), and `test_a_claim_resolves_to_the_session_that_introduced_it` holds the table to it. The hosted walk's requirement is a Session 46 one; DX-001 is Session 12's. | **`documented_path` → 46, `appliance_documented_path` → 12** in `CLAIM_INTRODUCED_IN`; the Session 46 gate's table names `documented_path` (external) and not `appliance_documented_path`; every gate from 12 on answers for `appliance_documented_path` in `documented_path`'s place (the same node ids). ADR 0290 §5 and its status line amended; the bump's paragraph and `CLAIMS`' comment say so. Session 46's claims stay nine — four offline, four external, one host. | The registry decides a claim's session, not a table. | 0290, 0089 |
+| **D2928** | §2, ADR 0290, D2867: the hosted walk's requirement is **`DX-002`**. | `DX-002` is Session 1's (*"Operator commands document themselves …"*, `acceptance-registry.yaml:208`) and `DX-003` is taken too; the registry then held two `DX-002`s (`test_ids_are_unique` FAILED in Run 8's targeted list). | **The hosted walk is `DX-HOSTED-001`** (the `DX-WALK-001` form; the regex admits it). Renamed in the registry, `CLAIMS`, the bump's paragraph, the walk's module, `THR-WALK-RECORD`, ADR 0207's status line and ADR 0290 (status amended). Session 1's `DX-002` keeps its ids and stays in `UNCLAIMED_BY_HISTORY`. The plan's prose keeps `DX-002` where it was written; this row is the correction. | An id is the registry's to give. | 0290 |
+| **D2929** | §7: *"Host: S1 … `--live-slot-outputs` `slot11-prod`'s K2 copy"*. | `--live-slot-outputs` is the KEPT slot's document (`endpoints_host_live`, `branch_host_live`: `slot3-prod`); the DELETED slot's K2 copy is `--slot-outputs` (`reconciler_live`). | **The gate's usage names them so**: `--slot-outputs` = `slot11-prod`'s K2 copy (the slot the eighth re-earning deletes), `--live-slot-outputs` = `slot3-prod`'s. Run 9's sweep sheet follows the usage. | A flag names what its proofs read. | — |
 | **D2914** | D2881: the idle module's docstring line about the absent series. | The same docstring also said *"None of these proofs has ever executed"* — false since Session 45's sitting, whose merged evidence passed `idle_after_wake_live`. | **Both sentences corrected** in the one docstring edit. | A docstring is a claim (D2881). | — |
 
 ---
@@ -1367,7 +1375,72 @@ this plan's Run 9 and appendix.
    **From this push the site's digest inputs are frozen until the person's
    record is confirmed** (D2883).
 
-**Done.**
+**Done.** (`55467b5`, 2026-10-24/25.) Scripts in WSL `~/s46/run8/`.
+
+- **The constant and the version** (`bump46.py`, `session-paragraph46.py`,
+  `docs46.py`): `CURRENT_SESSION = 46`, `VERSION` `1.24.0`, `README.md:7`; 17
+  `--session 45` literals moved (pool-operations 1, upgrade-guide 2,
+  api-operations 4, operator-guide 7, README 2); both guides' release lines and
+  the upgrade table's 1.24.0 row. **The price** (`upgrade46.sh`, D1624's rig: a
+  worktree at `4f4b207` against a copy of this tree, the INSTALLED tree's
+  `project.example.yaml`): `bump minor`, **`requires patch`**, verdict `ok`,
+  `changes []`, one leaf (`template_version` 1.23.0 → 1.24.0); ADR 0162 prices
+  it a MINOR. The example client regenerated (its template version). The
+  paragraph's price and schema sentences had to sit on one comment line each:
+  `test_release_contract` reads them by regex, and a wrap had split both.
+- **The registry** (`registry46.py`, `claims46.py`, `unpark46.py`): nine
+  requirements (CTL-DIAG-001/002, OPS-CTLSTATUS-001/002, CON-CREATE-001/002,
+  JRN-001/002, **DX-HOSTED-001** — D2928), node ids from `--collect-only`; the
+  regex gains `JRN`. **Counted from the tuples**: requirements 432 → 441,
+  `CLAIMS` 339 → 348, `OFFLINE_CLAIMS` 160 → 164. `documented_path` →
+  `DX-HOSTED-001`, `appliance_documented_path` → `DX-001`; `CLAIM_INTRODUCED_IN`
+  by the registry (D2927). Run 7's three parked modules landed; the roster gained
+  `APG_JOURNEY_RECORD_FILE` and `APG_WALK_RECORD_FILE`; `park/widen46.py` widened
+  ten session pins (D2922).
+- **The gate** (`derive46.py`): `bin/session-46-check.sh` from 45's, the header
+  and usage rewritten whole; **the diff read whole — 32 hunks**: the header,
+  `SESSION`, the two variables, the usage comment, the external synopsis, the
+  three modes (offline FOUR, host ONE — `control_status_host`, `--dx-record-file`
+  deciding `appliance_documented_path` — external FOUR, 45's "never executed"
+  sentences made past), the flag entries (`--dx-record-file`, 36/37-to-46, the
+  SSH list + D2873, `slot11-prod`, `s46-branches.py`, the two new entries), two
+  parser arms, the `=` refusal, the existence checks and the two exports. Flag
+  tokens 69 → 71 (exactly the two), parser arms 36 → 38. `SHELL_COMMANDS`;
+  `test_session_forty_six_gate_modes.py` from 45's with its claim table and the
+  two export tests.
+- **The Ledger** (`ledger46.py`): `projects_self_service` → `trial`
+  (`console_create_live`), `support_bundle` new at `trial` (`support_bundle_live`),
+  each `target_session` 46 and *"Being verified"*; the header's paragraph;
+  `pages.json`'s project-settings and `projects.md` name `support_bundle`; Run 4's
+  parked site pages landed (`apply.py`, count-asserted). `build-site --check`:
+  23 files, digest `74e18442…`.
+- **The threat rows** (`threats46.py`): `THR-CON-HANDOFF`, `THR-CTL-DIAG`,
+  `THR-WALK-RECORD` (items 28–30 point at them).
+- **The derived documents** (`regen.sh`): matrix and product contract updated;
+  bounds, catalog, evaluation, app and MCP contracts, the client and the lock
+  current.
+- **Battery** (`battery8.py`): **8/8 KILLED**, each FAILED (never ERROR), the
+  control `test_websockets_is_locked` PASSED in each invocation, five files
+  cmp-identical, the unmutated killers 10 passed — the gate's literal; the
+  journey's and the walk's exports dropped; a `trial` row naming `ui_look_live`;
+  `JRN` out of the regex; `documented_path` left on DX-001 (FAILED by the
+  introduced-in check AND the gate's table); `support_bundle` undeclared; the
+  journey's roster entry dropped.
+- **Targeted** (`targeted8.sh`, ruff + shellcheck first): A 1,143 passed + the
+  release contract re-run (2 passed) after the two failures it found (D2928's
+  duplicate and the wrapped price); B 464 passed, 49 skipped (the live modules
+  without records).
+- **The gates, in shards, once, on `55467b5` with the tree clean**
+  (`make-gates46.py` from `~/s45/run8`'s scripts — `~/s45/run10` holds only the
+  session-01 half — timed by the close's shards): **`bin/session-01-check.sh`
+  PASSED** — steps 1-3, 5-7, 11 shards, step 8 exit 0: **8,549 = collected, 3
+  skipped**; **`bin/session-46-check.sh --mode offline` PASSED** — steps A and B,
+  12 shards (the longest 437 s), step 9 exit 0: **8,558 = collected, 3
+  skipped**; `evidence/session-46-offline.json` **164 claims, 164 passed**,
+  `checkout_commit` `55467b5`.
+- **Pushed** `0362947..55467b5`. **From this push the site's digest inputs are
+  FROZEN until the person confirms their record** (D2883).
+- Rows **D2927–D2929**.
 
 ### Run 9 — the sitting: the release, the dry runs, the person's walk, the journey, the re-earning, the sweep, the tag
 
