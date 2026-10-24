@@ -11,7 +11,8 @@
 #
 # The project's first administrator is handed over by hash (ADR 0260): `create`
 # keeps a token in the private state directory and sends only its SHA-256;
-# `claim` presents the token to the PROJECT, never to the control plane.
+# `claim` presents the token to the PROJECT, never to the control plane -- or,
+# with --token-file, the token the console showed once (ADR 0291).
 #
 # Exit codes (runbook section 2 convention):
 #   0  done
@@ -36,7 +37,7 @@ Usage:
   bin/project.sh show [--project-key KEY] [--json]
   bin/project.sh status [--project-key KEY] [--json]
   bin/project.sh create --name NAME --profile small|standard|large --admin-username USER [--organization ID] [--json]
-  bin/project.sh claim [--project-key KEY] [--password-file FILE]
+  bin/project.sh claim [--project-key KEY] [--token-file FILE] [--password-file FILE]
   bin/project.sh sleep [--project-key KEY] [--json]
   bin/project.sh wake [--project-key KEY] [--json]
   bin/project.sh export [--project-key KEY] --output FILE [--timeout S] [--interval S] [--json]
@@ -57,6 +58,9 @@ Usage:
   claim   Once the creation has succeeded: set the administrator's password,
           from FILE (0600) or a prompt, by presenting the handoff token to the
           project itself; the token file is removed when the project accepts it.
+          --token-file FILE: the token the console showed once, saved by you
+          (0600); the project accepts only its own creation's token, and the
+          file is yours, so it is left in place.
   sleep   Stop the project's containers, keeping them and its data.
   wake    Start them again.
   export  Archive the project's own data: waits for the operation, downloads

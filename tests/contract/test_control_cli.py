@@ -695,6 +695,115 @@ def test_the_claim_picks_the_creation_whose_token_is_held(
     assert kept  # the first creation's token existed; removing it was the proof's move
 
 
+def test_claim_reads_a_token_file(
+    person: Person, served: Any, accepting: None, project_address: Elsewhere
+) -> None:
+    """Session 46 (ADR 0291 §5): `claim --token-file FILE` reads the token the
+    console showed from a private file -- a 0644 file and a symlink are refused
+    (exit 3) with nothing presented -- and presents THAT token to the project's
+    own `/auth/reset-password`, never a handoff file this CLI holds. A refused
+    claim and an accepted one both leave the file where it was (the CLI never
+    deletes a file it did not write); the token is printed nowhere. The
+    control: the held file's own token differs from the file's, so presenting
+    the held one would show here."""
+    _, drive = served
+    _, org = _member(served, "tokenfile-member")
+    _ready_slot(drive)
+    assert person.login("tokenfile-member").returncode == 0
+    operation, held_token = _created(person)
+    key = "slot1-prod"
+    elsewhere = project_address
+    _adopt(drive, org, key, f"{elsewhere.base}/{org}/api/app")
+    _finish(drive, operation["id"], "succeeded", result={"project_key": key}, project_key=key)
+    password = person.private("file.password", "the console creator's choice")
+    reset = f"/{org}/api/app/auth/reset-password"
+    shown = "console-shown-token-" + "x" * 23
+    assert shown != held_token
+
+    def claim(path: Path) -> Any:
+        return person.run(
+            "project", "claim", "--project-key", key, "--token-file", str(path),
+            "--password-file", str(password), trust=elsewhere.certificate,
+        )  # fmt: skip
+
+    def presented() -> list[dict[str, Any]]:
+        return [json.loads(body) for method, path, body in elsewhere.requests if path == reset]
+
+    before = len(presented())
+    wide = person.private("wide.token", shown, mode=0o644)
+    refused = claim(wide)
+    assert refused.returncode == 3 and "0644" in refused.stderr, refused.stderr
+    link = person.home / "linked.token"
+    link.symlink_to(person.private("real.token", shown))
+    assert claim(link).returncode == 3
+    assert len(presented()) == before, "a refused file reached the project"
+
+    token_file = person.private("console.token", shown)
+    elsewhere.answer("POST", reset, 401, b'{"error": "authentication_failed"}')
+    rejected = claim(token_file)
+    assert rejected.returncode == 5 and "authentication_failed" in rejected.stderr
+    assert token_file.exists()
+
+    elsewhere.answer("POST", reset, 200, b'{"credential_version": 2}')
+    claimed = claim(token_file)
+    assert claimed.returncode == 0, claimed.stderr
+    assert presented()[-1] == {"reset_token": shown, "password": "the console creator's choice"}
+    assert all(sent["reset_token"] != held_token for sent in presented()[before:])
+    assert token_file.exists(), "the CLI deleted a file it did not write"
+    assert (person.state / "handoffs" / operation["id"]).exists(), "a held file was touched"
+    assert "spent" in claimed.stdout
+    assert shown not in claimed.stdout + claimed.stderr
+
+
+def test_claim_with_a_token_file_chooses_no_creation(
+    person: Person, served: Any, accepting: None, project_address: Elsewhere
+) -> None:
+    """ADR 0291 §5, D2895: with `--token-file` no creation is chosen -- a key
+    reused after a deletion, with two succeeded creations and no held file,
+    is presented ONCE (the held-file path refuses that case, exit 3), because
+    the project's reset plane accepts only its own creation's token. A key with
+    no succeeded creation visible is exit 3 and presents nothing."""
+    _, drive = served
+    _, org = _member(served, "nochoice-member")
+    _premium(served, org)
+    assert person.login("nochoice-member").returncode == 0
+    key = "slot1-prod"
+    elsewhere = project_address
+    _adopt(drive, org, key, f"{elsewhere.base}/{org}/api/app")
+    handoffs = person.state / "handoffs"
+    for _ in range(2):
+        _ready_slot(drive)
+        operation, _token = _created(person)
+        _finish(drive, operation["id"], "succeeded", result={"project_key": key}, project_key=key)
+        (handoffs / operation["id"]).unlink()
+    password = person.private("nochoice.password", "a choice")
+    reset = f"/{org}/api/app/auth/reset-password"
+    elsewhere.answer("POST", reset, 200, b'{"credential_version": 2}')
+    token_file = person.private("console.token", "console-shown-token-" + "y" * 23)
+    before = len([1 for method, path, body in elsewhere.requests if path == reset])
+
+    held = person.run(
+        "project", "claim", "--project-key", key, "--password-file", str(password),
+        trust=elsewhere.certificate,
+    )  # fmt: skip
+    assert held.returncode == 3 and f"no handoff token for {key}" in held.stderr, held.stderr
+    claimed = person.run(
+        "project", "claim", "--project-key", key, "--token-file", str(token_file),
+        "--password-file", str(password), trust=elsewhere.certificate,
+    )  # fmt: skip
+    assert claimed.returncode == 0, claimed.stderr
+    assert len([1 for method, path, body in elsewhere.requests if path == reset]) == before + 1
+
+    other = "slot2-prod"
+    _adopt(drive, org, other, f"{elsewhere.base}/{org}/api/app")
+    none = person.run(
+        "project", "claim", "--project-key", other, "--token-file", str(token_file),
+        "--password-file", str(password), trust=elsewhere.certificate,
+    )  # fmt: skip
+    assert none.returncode == 3 and f"no succeeded creation of {other}" in none.stderr
+    assert len([1 for method, path, body in elsewhere.requests if path == reset]) == before + 1
+
+
 def test_export_downloads_once_without_following_a_redirect(
     person: Person, served: Any, accepting: None, elsewhere: Elsewhere
 ) -> None:

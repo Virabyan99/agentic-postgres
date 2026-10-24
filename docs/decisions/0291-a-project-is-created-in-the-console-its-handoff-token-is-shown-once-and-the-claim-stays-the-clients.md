@@ -103,7 +103,10 @@ over the zone. Both widen surfaces that hold more than this step needs.
    reconciler allocates its slot), so the Connect view repeats the claim line
    with the key filled once the creation has succeeded — **without the token**,
    which the page no longer holds. The token is dropped when the panel is
-   dismissed or the view is left.
+   dismissed or the view is left. *(Amended at Run 4, D2910: the line with the
+   key is shown by the creation view itself once the operation has succeeded,
+   beside its link to Connect; the Connect view, which every project shares —
+   adopted ones no token can claim included — is unchanged.)*
 4. **No cross-origin call, no storage, no policy change.** The page calls
    `/api/v1` and nothing else (`test_only_api_js_calls_fetch` stands);
    `test_no_script_writes_storage` stands; the console's policy — ADR 0285's,

@@ -60,6 +60,7 @@ LISTED = (
     "/console/scram.js",
     "/console/pg.js",
     "/console/sql.js",
+    "/console/create.js",
     "/console/pages.json",
     "/console/fonts/schibsted-grotesk.woff2",
     "/console/fonts/jetbrains-mono.woff2",

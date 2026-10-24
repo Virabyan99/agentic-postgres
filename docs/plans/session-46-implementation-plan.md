@@ -6,8 +6,9 @@
 Rows D2890–D2896 added. Run 2 DONE (the support bundle: control 0010, the
 reconciler pass, the route, the CLI, the console; rows D2897–D2902). Run 3
 DONE (`control.sh status`, `control_states` shared, the node-loss runbook
-control-first; rig 46c; rows D2903–D2906). NEXT FREE D2907, ADR 0294. Next:
-Run 4.** Planned at `7b035d9` (Session
+control-first; rig 46c; rows D2903–D2906). Run 4 DONE (the console creates a
+project, `claim --token-file`, the site PARKED for Run 8; rows D2907–D2911).
+NEXT FREE D2912, ADR 0294. Next: Run 5.** Planned at `7b035d9` (Session
 45's close record, tree clean, `main` = `origin/main`) against the host as read
 that morning (§0). Rows **D2862–D2889** at planning; the runs add theirs from
 **D2890**. ADRs **0290–0293** are Run 1's. **NEXT FREE after this table: D2890,
@@ -405,6 +406,11 @@ the runs add go in a second table below it, in execution order.
 | **D2904** | ADR 0293 decision 3: *"Not finding the control project at all is exit 6 before any section."* | `control_registry.find_control(decision=False)` — shared by `registry`, `adopt`, `totp-reset` and the reconciler (D2168) — answers **3** when no deployed project enables the facility, **5** for two, **6** when a document could not be read. | **`status` keeps `find_control`'s codes**, as `registry` does: 6 is the search that could not finish, 3 a host with no control project (a missing prerequisite, the command's documented 3). The ADR's sentence is read as the unreadable case; the usage block says 0 or 6 for the sections only. | One finder, one set of codes, across the four verbs. | 0293 |
 | **D2905** | ADR 0293 decision 3: an unread section printed with *"the cluster's last line"*. | **Rig 46c** (a migrated control cluster, the six SELECTs through `read_section`): every section read in its shape; its control — a SELECT of `app.nowhere` — came back unread with the reason `"                      ^"`: **psql follows the `ERROR:` line with `LINE 1: …` and a caret**, so the last line names nothing. `registry`'s reader (`bin/control.py`, `read_registry`) took the last line too, since Session 37. | **`cluster_said`**: the `ERROR:` line from the word on, else the last line (a connection that failed has no `ERROR:`); used by both readers. The unread-section test's refusal is now psql's real three lines; the battery's *the caret line taken as the reason* is killed by it. | A reason that names nothing is the third outcome with its reason folded away. | — |
 | **D2906** | D2876: *"projects active of the plan's limit"*. | The SQL limit counts projects not deleted **plus** open creations not yet in the registry (`0008-control-plans-usage.sql:239-245`); a creation's `project_key` is NULL until its slot is allocated (D2895). | **`status` prints `projects N of L`** with N = the organisation's registry rows not deleted; open creations appear in *operations pending or running* (`(no project yet)`). The text never claims N is what the limit refuses at. | Each number says what it counts. | 0293 |
+| **D2907** | Run 4 step 2: the `newProject` view's name *"`maxLength` 64"*. | `CreateProjectRequest.name` is `^[A-Za-z0-9 ._-]{1,48}$` (`services/auth-api/app/models.py:653`). | **`maxLength: 48`**, and `test_the_overview_offers_new_project` reads the bound from the model's pattern, so the two cannot drift. | A field longer than the server accepts is a refusal the page invites. | 0291 |
+| **D2908** | Run 4 step 1: *"`tests/contract/test_console_create.py` in the Node image"*. | `app.js` builds the DOM on load (`document.getElementById("main")`), so Node cannot import it; the tree's answer for page logic a test must drive is a DOM-free module the view imports (`sql.js`, Session 44, rig 44e). The console server serves a fixed file list, and three tests pin the served scripts exactly: `serve.py` `ROUTES`, `test_console_server.py` `LISTED`, `test_console_scram.py::test_every_script_parses`. | **`services/console/public/create.js`** holds the decisions (`newToken`, `digest`, `createProject`, `claimLine`); `app.js` draws. The three lists widened by exactly `create.js` — D2901's rule: an allowlist widened to the measured set, each guard naming the new file until it was declared. | Test the decisions where they can run; draw them where they must. | 0291 |
+| **D2909** | §2 `CON-CREATE-001`: `tests/contract/test_cloud_cli.py::test_claim_reads_a_token_file`, `::test_claim_picks_the_creation_by_digest`; step 6's mutation *"the claim choosing the first row"*. | `test_cloud_cli.py` does not exist (D2899: the CLI's proofs are `test_control_cli.py`); ADR 0291 §5 (D2895) chooses **no** creation with `--token-file`. | **`test_control_cli.py::test_claim_reads_a_token_file` and `::test_claim_with_a_token_file_chooses_no_creation`** (a reused key's two creations presented once; none visible exit 3); a fifth console node, `test_console_create.py::test_the_overview_offers_new_project`. The battery's sixth mutation is *the token file falling through to the held-file choice*. Run 8 registers these names. | A node id names what it proves. | 0291 |
+| **D2910** | ADR 0291 §3: *"the Connect view repeats the claim line with the key filled once the creation has succeeded"*. | `connectView` serves every project, adopted ones included (alpha, beta, the control project), which no token can claim; the creator is on the creation view when the operation succeeds. | **The creation view shows the line with the key** on success, beside its link to Connect; `connectView` unchanged. ADR 0291 amended in place. | The line belongs where the token was shown. | 0291 |
+| **D2911** | Run 4 step 4 names `quickstart.md`, `projects.md`, `getting-started.md`; D2896: every goal of the statement reachable by a browser path. | Goals 4 and 5 are CLI lines on their pages (`plans-and-usage.md` *Usage*, `insights-and-monitoring.md` *Query Insights*), goal 6 is on no page; **`site/pages/index.md`** repeats the quickstart's steps with *"In this beta a project is created with the command-line client"*; the Ledger's `console` row says the same twice (`customer_text`, `stage5_reality`) — and the Ledger is a site digest input (D2891). | **All parked together** in `~/s46/run4/park/apply.py`: the three named pages, `index.md`, the console's *Usage* and *Insights* sentences, `projects.md`'s *Support information*, the `console` row. Not pushed: a push to `main` publishes the site, and the deployed console creates nothing until Run 9's release. Run 8 applies it with the bump. | A sentence on the site describes the deployed product; it moves when the product does. | 0290, 0291 |
 
 ---
 
@@ -887,7 +893,84 @@ the rig in `~/s46/rigs/46c/`.
 7. Targeted (console, CLI, site lists), ruff, commit, push, CI (`contract`,
    `site`); the live site read (`curl -A agentic-postgres-proof`) after `site`.
 
-**Done.**
+**Done (2026-10-24).** Executed on `ff50592` (Run 3's CI green: contract
+40105940769, site 40108018884); scripts in WSL `~/s46/run4/`, the parked site in
+`~/s46/run4/park/`.
+
+- **The console** (D2864, D2865, ADR 0291): `services/console/public/create.js`
+  (new, DOM-free, imports nothing — `sql.js`'s pattern, D2908): `newToken()`
+  (32 bytes of `crypto.getRandomValues`, base64url, no padding), `digest()`
+  (SHA-256 hex of the UTF-8), `createProject({call, wait, accepted, …})` —
+  the body `{organization, name, profile, admin_username, handoff_sha256}`,
+  `accepted(token, operation)` on the 202 **before** `wait`, a refusal thrown
+  unchanged; `claimLine`, `CLAIM_SENTENCE`. `app.js`: the overview's CLI
+  sentence removed, *New project* per organisation for owner/admin/member,
+  `newProjectView` (name `maxLength` 48 — D2907 — profile, administrator's
+  username; the token drawn only by `accepted` through `once`, with the claim
+  line and *I have saved it* removing the panel; on success the key, a link to
+  Connect and the claim line with the key — D2910), refusals through
+  `refusal(error)`, the route `#/org/<id>/new-project`. `pages.json` gains the
+  view (`projects_self_service`; `POST /v1/projects`, `GET
+  /v1/operations/{operation}`); `serve.py` serves `/console/create.js`. No
+  storage, no new origin, the policy unchanged.
+- **`apg project claim --token-file FILE`** (ADR 0291 §5, D2895): read first,
+  through `control_client.read_private_file` (regular, owned, 0600, no
+  symlink); with it no creation is chosen and no held file is read — one
+  succeeded creation visible and the `app_route` required, then the token to
+  the project's own reset route (`_present`, shared with the held-file path);
+  the caller's file is never removed (*"the token in FILE is spent; remove the
+  file"*). `bin/project.sh`'s usage names the flag.
+- **Tests first** — **7 FAILED, 0 ERROR** (`create.js` moved aside for the
+  red run; the CLI's two by argparse's refusal of the flag), green after:
+  `tests/contract/test_console_create.py` (Node 22 in `NODE_RUNTIME_IMAGE`,
+  `--network none`) `::test_only_the_digest_is_sent`,
+  `::test_the_token_is_shown_once_at_acceptance`, `::test_no_storage_is_touched`,
+  `::test_a_refusal_is_the_servers`, `::test_the_overview_offers_new_project`;
+  `tests/contract/test_control_cli.py::test_claim_reads_a_token_file`,
+  `::test_claim_with_a_token_file_chooses_no_creation` — `CON-CREATE-001`'s
+  node ids for Run 8 (D2909). Widened by exactly `create.js`: `serve.py`
+  `ROUTES`, `test_console_server.py` `LISTED`, `test_console_scram.py`'s
+  parsed scripts (D2908). The first full run of `test_control_cli.py` failed
+  ONE test on a fixture collision (`file-member`, already made by
+  `test_a_symlinked_or_wide_file_is_refused` in the module's cluster) —
+  renamed `tokenfile-member`, the module re-run: 22 passed.
+- **Battery 6/6** killed (each FAILED, the control green in the same
+  invocation — `test_console_scram::test_the_browser_verifier_equals_the_clis`
+  for `create.js`, `test_control_cli::test_the_claim_picks_the_creation_whose_token_is_held`
+  for `cloud.py`; restored by copy, `cmp`): the token sent; the panel shown
+  after the wait; a storage write; the refusal replaced; `--token-file`
+  accepting 0644; the token file falling through to the held-file choice (the
+  plan's *"the claim choosing the first row"*, which ADR 0291 §5 leaves nothing
+  to choose — D2909).
+- **The walk drivers rehearsed offline** (Session 45's two rehearsals moved by
+  substitution, the console image rebuilt from this tree): the console walk
+  exit 0 (26 s), `--leak` 6, `--dry` 0; the editor walk exit 0 (19 s),
+  `--leak` 6, `--dry` 0 — Session 45's outcomes exactly; **no driver change**.
+  The console walk loads this `app.js` in Chromium under the console's policy,
+  so the `create.js` import resolves there.
+- **The site, PARKED** (D2869, D2896, D2911): `~/s46/run4/park/apply.py TREE`
+  (count-asserted) + `park/site/pages/quickstart.md` — the quickstart
+  browser-first (accept → *New organisation* → factor → *New project*, the
+  token once, *up to half an hour* → Connect / the SQL editor; *Or, from a
+  terminal* keeps the CLI lines and names `--token-file`); `projects.md`
+  (creating in the console, the claim optional, a new *Support information*
+  section: Settings → *Support bundle*, `apg project diagnostics`);
+  `getting-started.md` (an account invitation joins no organisation);
+  `plans-and-usage.md` (the console's *Usage*); `insights-and-monitoring.md`
+  (the console's *Insights*); `index.md` (the same steps); the Ledger's
+  `console` row (`customer_text` and `stage5_reality`). Checked in a scratch
+  worktree at `ff50592`: `render-reality-ledger --write`, `build-site --check`
+  **23 files, two builds byte-equal, digest `3e92df10…`** (from `dce4308c…`),
+  `test_site`, `test_site_look`, `test_reality_ledger`, `test_console_pages`
+  51 passed, 1 skipped (no evidence file in a checkout); the worktree removed,
+  the diff kept as `park/site.diff`. **Run 8 applies it** with the bump and
+  adds `support_bundle` to `projects.md`'s `ledger` list with the row.
+- **Targeted**, once: the nine `test_console_*` modules, `test_cli_contract`,
+  `test_acceptance_registry`, `test_environment_gates`,
+  `test_deployment_module_shape`, `test_reality_ledger` — **999 passed**;
+  `test_control_cli` 22 passed (after the rename); `ruff format --check`,
+  `ruff check`, shellcheck clean.
+- Rows **D2907–D2911**.
 
 ### Run 5 — the small repairs: `doctor usage`'s witnesses, the docstring, D2801
 

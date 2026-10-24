@@ -38,6 +38,12 @@
       "calls": ["POST /v1/organizations"]
     },
     {
+      "id": "new-project",
+      "path": "/console/#/org/{organization}/new-project",
+      "ledger": ["projects_self_service"],
+      "calls": ["POST /v1/projects", "GET /v1/operations/{operation}"]
+    },
+    {
       "id": "connect",
       "path": "/console/#/projects/{key}/connect",
       "ledger": ["pooled_endpoint", "direct_endpoint", "postgresql"],

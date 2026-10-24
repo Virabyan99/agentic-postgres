@@ -11,6 +11,7 @@
 // a fragment route. A feature the Ledger does not offer has no control here.
 
 import { call, Refusal, relayOrigin } from "/console/api.js";
+import { CLAIM_SENTENCE, claimLine, createProject } from "/console/create.js";
 import { connect } from "/console/pg.js";
 import { newPassword, verifier } from "/console/scram.js";
 import { DEADLINE_SENTENCE, doors, openDoor, runStatement } from "/console/sql.js";
@@ -394,6 +395,9 @@ async function overview(me) {
     sections.push(h("section", {},
       h("h2", {}, organization.name, " ", h("small", {}, organization.role)),
       orgNav(organization.id),
+      ["owner", "admin", "member"].includes(organization.role)
+        ? h("p", {}, link(`#/org/${organization.id}/new-project`, "New project"))
+        : null,
       projects.length === 0
         ? h("p", {}, "No project yet.")
         : h("ul", {}, projects.map((project) => h("li", {},
@@ -403,9 +407,6 @@ async function overview(me) {
   frame(me, "Overview",
     organizations.length === 0 ? h("p", {}, "You belong to no organisation yet.") : sections,
     h("p", {}, link("#/new", "New organisation")),
-    h("p", { className: "muted" },
-      "Creating a project is done with the command-line client in this beta: ",
-      h("code", {}, "apg project create"), " then ", h("code", {}, "apg project claim"), "."),
   );
 }
 
@@ -421,6 +422,53 @@ function newOrganization(me) {
         message.replaceChildren(refusal(error));
       }
     }), message);
+}
+
+// Session 46 (ADR 0291): a project created here. The token is made and
+// digested by create.js; it reaches this view only through `accepted`, is drawn
+// once in the shown-once panel the moment the creation is recorded -- before the
+// ~25-minute wait -- and is dropped with the panel.
+function newProjectView(me, org) {
+  const [nameLabel, name] = field("Name", { maxLength: 48 });
+  const [profileLabel, profile] = choice("Profile", PROFILES, "small");
+  const [adminLabel, admin] = field("Administrator's username", { maxLength: 63, autocomplete: "off" });
+  const status = h("p", { className: "muted" });
+  const result = h("div", {});
+  const create = button("Create project", async () => {
+    result.replaceChildren();
+    create.disabled = true;
+    try {
+      const final = await createProject({
+        call,
+        wait: (id) => waitFor(id, status),
+        accepted: (token, operation) => {
+          const panel = h("div", {},
+            once("The project administrator's handoff token:", token),
+            h("p", {}, "Operation ", h("code", {}, operation.id), " is recorded. ", CLAIM_SENTENCE),
+            h("p", {}, h("code", {}, claimLine(null))),
+            button("I have saved it", () => panel.remove()));
+          result.append(panel);
+        },
+        organization: org,
+        name: name.value.trim(),
+        profile: profile.value,
+        adminUsername: admin.value.trim(),
+      });
+      if (final.status !== "succeeded") {
+        result.append(outcome(final));
+        return;
+      }
+      const key = final.project_key;
+      result.append(
+        h("p", {}, "Your project ", h("code", {}, value(key)), " is ready. ", link(`#/projects/${key}/connect`, "Connect to it")),
+        h("p", { className: "muted" }, "To claim its administrator from a terminal: ", h("code", {}, claimLine(key))));
+    } catch (error) {
+      result.append(refusal(error));
+    } finally {
+      create.disabled = false;
+    }
+  });
+  frame(me, "New project", nameLabel, profileLabel, adminLabel, create, status, result);
 }
 
 // -- a project's views --------------------------------------------------------
@@ -919,6 +967,7 @@ const VIEWS = [
   [/^#\/org\/([^/]+)\/usage$/, orgUsageView, UUID],
   [/^#\/org\/([^/]+)\/notifications$/, notificationsView, UUID],
   [/^#\/org\/([^/]+)\/settings$/, orgSettingsView, UUID],
+  [/^#\/org\/([^/]+)\/new-project$/, newProjectView, UUID],
 ];
 
 async function route() {

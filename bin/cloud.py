@@ -697,9 +697,18 @@ def project_create(arguments: argparse.Namespace) -> int:
 
 def project_claim(arguments: argparse.Namespace) -> int:
     """The token presented to the PROJECT (its `routes.app`, read from the
-    registry), never to the control plane; the file removed once accepted."""
+    registry), never to the control plane; the file removed once accepted.
+
+    `--token-file` (Session 46, ADR 0291 §5, D2895): the token the console
+    showed once, from the caller's own private file, read before anything is
+    asked. No creation is chosen and no held file is looked for -- the
+    project's reset plane holds only its own creation's hash and refuses any
+    other token -- and the file is the caller's, so it is never removed."""
     current = person_session()
     key = _project_key(current, arguments.project_key)
+    given = None
+    if arguments.token_file:
+        given = cc.read_private_file(Path(arguments.token_file)).decode("utf-8").strip()
     record = current.call("GET", f"/projects/{key}")
     if not record.get("app_route"):
         raise ClientError(cc.EXIT_PREREQUISITE, f"{key} has no application address yet")
@@ -714,6 +723,8 @@ def project_claim(arguments: argparse.Namespace) -> int:
     ]
     if not created:
         raise ClientError(cc.EXIT_PREREQUISITE, f"no succeeded creation of {key} is visible")
+    if given is not None:
+        return _present(arguments, key, app, given, None)
     # D2316/D2345: a key reused after a deletion has more than one succeeded
     # creation. The token names the creation: the one whose handoff file this
     # CLI holds is the one to claim -- never the first row, never a guess.
@@ -731,7 +742,14 @@ def project_claim(arguments: argparse.Namespace) -> int:
             f"{len(held)} succeeded creations of {key} have a token here",
         )
     (path,) = held
-    token = cc.read_private_file(path).decode("utf-8").strip()
+    return _present(arguments, key, app, cc.read_private_file(path).decode("utf-8").strip(), path)
+
+
+def _present(
+    arguments: argparse.Namespace, key: str, app: str, token: str, held: Path | None
+) -> int:
+    """The token to the project's own reset route. A held file is this CLI's
+    and goes once the project accepted it; a `--token-file` is the caller's."""
     password = read_password(
         arguments.password_file, f"new password for {key}'s administrator: ", confirm=True
     )
@@ -740,8 +758,11 @@ def project_claim(arguments: argparse.Namespace) -> int:
     )
     if status != 200:
         raise cc.refusal(status, body)
-    path.unlink()
+    if held is not None:
+        held.unlink()
     print(f"claimed: {key}'s administrator now has the password you chose; sign in at {app}")
+    if held is None:
+        print(f"  the token in {arguments.token_file} is spent; remove the file")
     return cc.EXIT_OK
 
 
@@ -1689,6 +1710,7 @@ def parser() -> argparse.ArgumentParser:
     verb = project.add_parser("claim", add_help=False)
     verb.set_defaults(run=project_claim)
     verb.add_argument("--project-key")
+    verb.add_argument("--token-file")
     verb.add_argument("--password-file")
     for name, run in (("status", project_status), ("sleep", project_sleep),
                       ("wake", project_wake)):  # fmt: skip
