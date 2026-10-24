@@ -257,3 +257,68 @@ def test_check_reads_blocked_by_and_prints_which_way_it_is_wrong(tmp_path: Path)
     clean = run("check", "--record", str(a_record_file(tmp_path)))
     assert clean.returncode == 0, clean.stdout + clean.stderr
     assert "blocked_by: none" in clean.stdout, clean.stdout
+
+
+# -- Session 46 (ADR 0290): the hosted record through the same command --------------------
+
+
+def a_hosted_record_file(tmp_path: Path, **overrides: object) -> Path:
+    """A clean hosted record against THIS checkout's site: its digest, its
+    banner, two of its routes, a command its quickstart gives."""
+    site = dx_record.hosted_site()
+    goals = [{"goal": name, "reached": True, "at": "2026-10-30T10:40:00Z"} for name in site.goals]
+    document: dict[str, object] = {
+        "path": "hosted",
+        "followed_by": {
+            "kind": "person",
+            "identity": "a recruited reader",
+            "instructed_by": "the operator",
+            "context": "the site's URL, an account invitation link and the statement",
+        },
+        "started_at": "2026-10-30T10:00:00Z",
+        "completed_at": "2026-10-30T11:30:00Z",
+        "release": f"Release {site.version}",
+        "site_commit": "a" * 40,
+        "site_digest": site.digest,
+        "documents_read": ["/", "/quickstart/"],
+        "commands_run": ["pipx install agentic-postgres-cli"],
+        "files_edited": [],
+        "goals": goals,
+        "timeline": dict.fromkeys(dx_record.TIMELINE_FIELDS),
+        "undocumented_steps": [],
+        "reached_success_criterion": True,
+        "transcribed_by": {"kind": "agent", "identity": "the executor's session"},
+        "confirmed_by_walker_at": "2026-10-31T09:00:00Z",
+    }
+    document.update(overrides)
+    path = tmp_path / "hosted.json"
+    path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    return path
+
+
+def test_check_reads_a_hosted_record_against_the_site_built_here(tmp_path: Path) -> None:
+    """ADR 0290 §3 through the product's own command: a clean hosted record is
+    exit 0 with every reading printed `none`; one finding -- another build's
+    digest, a command no page gives -- is exit 5 naming it. `--path` must agree
+    with the record's own `path`, else exit 2."""
+    clean = run("check", "--path", "hosted", "--record", str(a_hosted_record_file(tmp_path)))
+    assert clean.returncode == 0, clean.stdout + clean.stderr
+    assert "the site, routes, commands, secrets and hands: none" in clean.stdout
+    moved = run("check", "--record", str(a_hosted_record_file(tmp_path, site_digest="e" * 64)))
+    assert moved.returncode == 5 and "the site moved after the walk" in moved.stdout
+    unnamed = a_hosted_record_file(tmp_path, commands_run=["apg project nuke --project-key K"])
+    found = run("check", "--record", str(unnamed))
+    assert found.returncode == 5 and "apg project nuke" in found.stdout
+    disagree = run("check", "--path", "clone", "--record", str(a_hosted_record_file(tmp_path)))
+    assert disagree.returncode == 2 and "hosted" in disagree.stderr
+
+
+def test_digest_is_refused_for_a_hosted_record(tmp_path: Path) -> None:
+    """A hosted record names site routes, never repository files: there is
+    nothing to digest, and the record is left as it was (exit 2)."""
+    path = a_hosted_record_file(tmp_path)
+    before = path.read_bytes()
+    assert run("digest", "--path", "hosted", "--record", str(path)).returncode == 2
+    refused = run("digest", "--record", str(path))
+    assert refused.returncode == 2 and "hosted" in refused.stderr
+    assert path.read_bytes() == before

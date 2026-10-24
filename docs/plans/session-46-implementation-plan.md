@@ -9,8 +9,10 @@ DONE (`control.sh status`, `control_states` shared, the node-loss runbook
 control-first; rig 46c; rows D2903–D2906). Run 4 DONE (the console creates a
 project, `claim --token-file`, the site PARKED for Run 8; rows D2907–D2911).
 Run 5 DONE (`doctor usage`'s witnesses, the idle docstring, D2801's race read
-by both arms after rig 46d; rows D2912–D2914). NEXT FREE D2915, ADR 0294.
-Next: Run 6.** Planned at `7b035d9` (Session
+by both arms after rig 46d; rows D2912–D2914; CI repair D2915). Run 6 DONE
+(the hosted record path, the journey driver rehearsed, the live modules
+parked; rows D2916–D2920). The operator read the statement 2026-10-24.
+NEXT FREE D2921, ADR 0294. Next: Run 7.** Planned at `7b035d9` (Session
 45's close record, tree clean, `main` = `origin/main`) against the host as read
 that morning (§0). Rows **D2862–D2889** at planning; the runs add theirs from
 **D2890**. ADRs **0290–0293** are Run 1's. **NEXT FREE after this table: D2890,
@@ -416,6 +418,11 @@ the runs add go in a second table below it, in execution order.
 | **D2912** | D2880: without both witnesses the doctor's figure is UNKNOWN *"with `REQUESTS_UNWITNESSED`'s reason"*. | `REQUESTS_UNWITNESSED` says *"the store holds no request answered below 400 …"* — the sampler's figure; the doctor's is `sum(traefik_service_requests_total)`, every code. | **`REQUESTS_TOTAL_UNWITNESSED`**, the same sentence for the doctor's own figure (*"the store holds no request series and could not show the edge was read"*); both figures go through ONE loop, `usage_reading._witnessed`, each with its own query and sentences. | A reason names the figure it is about. | 0289 |
 | **D2913** | D2882: *"Run 5 reads the plane's refusal of a revoked agent's token first … If it is a named shape, the worker classifies it … If it is not, the proof reads both arms by their cause."* | **Rig 46d**: the plane raises `ToolRefusal(STRUCTURAL_REFUSAL, UPSTREAM_REFUSED)` for its context read's `PT401`; under `mask_error_details=True` (FastMCP 3.4.0) the worker receives `Error calling tool '<name>'` — one text for every structural cause (D433) — and classifies it `terminal`/`unclassified_refusal`. Not a named shape. | **The second arm**: the worker unchanged; the host proof renamed `test_a_revoked_agents_run_ends_by_the_cause_of_its_arm` and reads `stopped` (no call) or `failed` (`unclassified_refusal`, the request id kept, nothing later run, nothing served); `WF-REVOKE-001`'s node id and description moved, the matrix re-rendered; the reading pinned offline in `test_workflow_worker`. A re-mint after an unclassified refusal (to learn of the revocation) was not built: the reading did not call for a product change. | The plane says nothing on purpose; the proof reads what it does say. | — |
 | **D2915** | Run 5's targeted list (the modules the change touches). | **CI on `e8d3f2f` failed** (contract 40112618062, both jobs): `tests/contract/test_suite_shape.py::test_no_local_shadows_a_module_level_function` — the renamed revocation proof's failed arm bound a local `refused`, hiding the module's own `refused()` helper inside that function (D1509's class). A guard over the whole suite, which a list derived from the diff could not see (D1486, as D2902). | **The local is `refused_step`**; the guard unchanged; `test_suite_shape` re-run alone, 3 passed. | The class guard did its job; the targeted list again missed a whole-suite scan. | — |
+| **D2916** | ADR 0290 §3: a command matches *"a line in the built pages' code blocks"*. | The site gives commands in sentences too: the parked quickstart and `projects.md` give `apg project claim … --token-file FILE` only as inline code (Run 4); a person typing it honestly would read as undocumented. | **`hosted_site()` reads every fenced line and every inline code span** of the pages. A span is code a page shows; reading it widens nothing a page did not give. | The rule is *on the site*, not *in a fence*. | 0290 |
+| **D2917** | Run 6 steps 2 and 4: write `tests/external/test_session46_walk.py` and `test_session46_journey.py`. | `test_environment_gates` requires every variable a test reads to be in `tests/conftest.py`'s roster AND supplied by a session gate; `APG_WALK_RECORD_FILE` and `APG_JOURNEY_RECORD_FILE` are exported by `bin/session-46-check.sh`, which is Run 8's. | **Both written, compiled and linted in the tree, then PARKED in `~/s46/run7/park/`** with the roster lines (`ROSTER.md`); Run 8 lands them with the gate — Session 43's console modules' path (D2715). | A module whose gate does not exist yet fails a guard that is right to fail. | — |
+| **D2918** | D2829: the walk drivers pin the console's DOM; `test_console_look`'s table lists the two drivers' anchors. | The journey driver selects by fifteen literals the table did not hold (*New project*, *Create project*, *I have saved it*, *Support bundle*, …). | **The table gains them, each counted in `app.js`**, and `journey_walk.py` joins the drivers the guard reads — a product text change that would break the journey now fails offline. | The guard covers every driver, or a third one is unguarded. | 0285 |
+| **D2919** | Run 6 step 4: *"`tests/contract/test_journey_driver.py` (JRN-002: the rehearsal against a stand-in, as `test_console_walk`'s rehearsal does)"*. | No contract test runs a browser driver: `test_console_walk` does not exist, CI has no Playwright, and the drivers import `playwright` at load; the console walks are rehearsed by scripts (`~/s43/run8/rehearse.sh`, `~/s45/run6/rehearse-sql.sh`). | **Split**: `journey_record.py` (pure; the record, the origin rule, `problems`) is what CI holds — over records written through the driver's own `Journey`, and the driver's source read for its step order; `journey_walk.py` is rehearsed by `~/s46/run6/rehearse-journey.sh` (clean 0, `--leak` 6, `--plant-foreign` 5, `--dry` 0). JRN-002's three node ids keep their names. | Hold offline what can run offline; rehearse the browser where a browser is. | 0290 |
+| **D2920** | Run 6 step 3: J9 *"`psql` from the workstation"* in the driver; the record *"the paths of the 0600 files; the walker removed from `probe-s37` after J5"*. | The Playwright image holds no `psql`, and Session 43's connection proof is the live module's (psycopg, the password file); the lifecycle continues as the journey's ACCOUNT (D2872), so it needs that account's password; the lifecycle deletes the project before the external proofs run. | **J9 is the live proof's** (`test_j09_the_string_connects`); the driver writes a fifth 0600 file, `account-password`; **J12 records each check's verdict, detail and age as the page showed them**, which CTL-DIAG-002 reads after the deletion; **the removal from `probe-s37` is the probe owner's act**, Run 7's instrument's, not the driver's (it holds no probe credential). | Each step where the thing it needs is. | 0290, 0292 |
 | **D2914** | D2881: the idle module's docstring line about the absent series. | The same docstring also said *"None of these proofs has ever executed"* — false since Session 45's sitting, whose merged evidence passed `idle_after_wake_live`. | **Both sentences corrected** in the one docstring edit. | A docstring is a claim (D2881). | — |
 
 ---
@@ -1113,7 +1120,85 @@ shape, the record shape, `--rehearse`); `tests/external/test_session43_console.p
    `confirmed_by_walker_at` absent — each FAILED, controls green.
 6. Targeted, ruff, commit, push, CI.
 
-**Done.**
+**Done (2026-10-24).** Executed on `9d140ca` (Run 5's repair); scripts in WSL
+`~/s46/run6/`; the parked modules in `~/s46/run7/park/`. **The operator read
+`docs/hosted-walk.md`'s statement on 2026-10-24 and accepts it as written**
+(owed before Run 4); the person's day is still owed before Run 9.
+
+- **`dx_record`'s hosted path** (ADR 0290, D2867): `PATHS`, `HOSTED_REQUIRED_FIELDS`,
+  `TIMELINE_FIELDS`, `HostedSite`; `load` takes its required fields from the
+  record's `path` (absent → the clone's, unchanged); `shape_problems` and
+  `followed_by_problems` dispatch on `path` (an unknown one is a shape problem;
+  the hosted walker a `person` whose context names the site, the invitation and
+  the statement) — **the clone path byte-for-byte as it was, its nine tests
+  untouched and passing throughout**. New: `statement_goals(tree)` (the six
+  goals read from the statement between its markers, never typed),
+  `hosted_site()` (`site_build`'s digest, the pages' routes, every fenced line
+  AND every inline code span — D2916 — the VERSION, the goals),
+  `hosted_shape_problems`, `hosted_unnamed_commands` (an `apg` command by
+  `apg <noun> <verb>` + its flags, values free; any other by whitespace-
+  normalised equality), `hosted_secrets` (the four shapes, named by place,
+  never echoed), `hosted_problems` (the site, release, routes, commands, files,
+  secrets, goals against the statement, the criterion against goal 1, the
+  hands). `bin/dx-record.py check [--path clone|hosted]` reads a hosted record
+  against the site this checkout builds (exit 0 / 5; `--path` disagreeing with
+  the record exit 2); `digest` refuses a hosted record (exit 2); the usage
+  names `--path`.
+- **Tests first for this half**: 10 hosted cases in `test_dx_record.py` — **10
+  FAILED, 0 ERROR** (the first attempt built its site at module level and
+  ERRORED at collection — the wrong red, repaired to a per-test site before
+  any code was written), the clone's 9 passing; `test_dx_record_command.py`
+  `::test_check_reads_a_hosted_record_against_the_site_built_here`,
+  `::test_digest_is_refused_for_a_hosted_record` — **2 FAILED** (`--path`
+  unknown; `digest` rewrote a hosted record); all green after.
+- **The journey** (D2919, D2920): `tests/external/browser/journey_record.py`
+  (pure — `STEPS` J1–J8, J10–J13; `DRY_STEPS`; `Journey` (step, saw, leaks);
+  `origin_of`; `allowed_origins`; `problems`) and `journey_walk.py` (Playwright,
+  `console_walk.py`'s shape, importing its TOTP helpers and `sql_walk`'s
+  `FakeBackend`/`settle`/`tables`): J1–J13 as the plan names them; five 0600
+  files beside the record (`handoff-token`, `password`, `totp-seed`,
+  `account-password`, `record.json`); `--rehearse` (a stand-in API whose state
+  moves as the plane's: a member needs no factor, an owner does; the creation
+  runs then succeeds with `slot11-prod`; the bundle is unread before its first
+  pass), `--leak`, `--plant-foreign`, `--dry`; exit 0/2/4/5/6.
+  `tests/contract/test_journey_driver.py` (JRN-002) —
+  `::test_the_rehearsal_reaches_every_step` (a record written through the
+  driver's `Journey` reads clean, full and dry; the driver's source takes
+  exactly `STEPS`, each once, in order), `::test_a_foreign_request_is_named`,
+  `::test_a_missing_step_fails_the_record` — written after the code (the
+  battery below is their red).
+- **The rehearsal** (`~/s46/run6/rehearse-journey.sh`: the console image built
+  from this tree, Chromium **153.0.8010.12** in the pinned Playwright image):
+  clean **exit 0, all twelve steps `ok`** (31 s; J5's factor wait ~20-35 s),
+  origins **only** the console's, `token_length` 43, the token gone after
+  dismissal, `string` verify-full and holding the password, the editor `[["1"]]`,
+  five views read, the bundle 12 checks / 12 aged; **`--leak` exit 6, no record
+  written; `--plant-foreign` exit 5 naming `https://foreign.rehearsal.test`;
+  `--dry` exit 0, J1–J5**. It found two driver defects before any host did: the
+  *Profile* select's accessible name carries its options (an exact label match
+  never found it — `sql_walk` selects *Door* by substring for the same reason),
+  and J12's wait spanning a `goto` and a `reload` lost the response body to the
+  reload (one navigation per wait now).
+- **`test_console_look`'s anchor table** gains the journey's fifteen literals,
+  counted in `app.js`, and `journey_walk.py` joins its driver list (D2918).
+- **Parked for Run 8** (D2917): `tests/external/test_session46_walk.py` (DX-002's
+  four + its no-SSH proof), `tests/external/test_session46_journey.py` (J1–J14,
+  CON-CREATE-002's three, CTL-DIAG-002's two, the no-SSH proof), the roster lines
+  (`ROSTER.md`) — compiled and linted in the tree, then removed from it.
+- **Battery 7/7** killed (FAILED; controls green in the same invocation;
+  restored by copy, `cmp`): a record missing J8; a request off the origin; the
+  digest of another build; a hosted record with `kind: agent`; a command not on
+  the site (its flags unread); `confirmed_by_walker_at` absent; a secret let
+  through.
+- **Targeted**, once — with the whole-suite scans D2902 and D2915 were missed by
+  (`test_suite_shape`, `test_fleet`): `test_dx_record`, `test_dx_record_command`,
+  `test_journey_driver`, `test_console_look`, `test_cli_contract`,
+  `test_acceptance_registry`, `test_environment_gates`,
+  `test_deployment_module_shape`, `test_suite_shape`, `test_fleet`,
+  `test_printed_commands`, `test_secret_store_files`, `test_documentation_index`,
+  `test_session12_documented_path`, `test_site` — **1055 passed**; ruff,
+  shellcheck clean.
+- Rows **D2916–D2920**.
 
 ### Run 7 — the trip's instruments, written and rehearsed offline
 

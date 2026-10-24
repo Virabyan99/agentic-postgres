@@ -29,7 +29,7 @@ readonly ROOT_DIR
 usage() {
   cat <<'USAGE'
 Usage: bin/apg.sh dx-record digest --record FILE
-       bin/apg.sh dx-record check  --record FILE [--project-slug SLUG]
+       bin/apg.sh dx-record check  --record FILE [--project-slug SLUG] [--path clone|hosted]
 
 Read the record a second walk writes, the way the sweep will read it.
 
@@ -49,6 +49,11 @@ Read the record a second walk writes, the way the sweep will read it.
                       written before the field existed; the record's own value
                       is used otherwise, and either way it is validated before
                       it becomes a directory prefix.
+  --path clone|hosted Which walk the record is (ADR 0290); it must agree with the
+                      record's own `path`, absent for the clone walk. A hosted
+                      record -- a person's walk of the published site -- is
+                      read against the site this checkout builds; digest
+                      refuses it.
   --help              Show this message.
 
 A source edit is decided by PATH: anything under `projects/<slug>/` is the

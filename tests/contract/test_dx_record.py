@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -408,3 +409,270 @@ def test_the_command_scan_reads_a_script_and_never_a_flag() -> None:
     # what the release ships -- so a verb the documentation invents has nowhere
     # to hide (`normalise`'s own docstring, D1305/D1323).
     assert dx_record.normalise("bin/apg.sh no-such-verb") == "bin/no-such-verb.sh"
+
+
+# ---------------------------------------------------------------------------
+# Session 46 (ADR 0290, D2867): the hosted record -- a person, the site, an
+# invitation link. The clone path above is untouched; these read the second.
+# ---------------------------------------------------------------------------
+
+HOSTED_GOALS = ("connect", "your own SQL", "a branch", "usage", "slowest queries", "support page")
+HOSTED_LINES = (
+    "pipx install agentic-postgres-cli",
+    "apg login password --endpoint https://control.agenticpostgresql.com/api/v1 --username NAME",
+    "apg project claim --project-key KEY --token-file FILE",
+    "apg project diagnostics --project-key KEY --output ./support.json",
+)
+
+
+def _hosted_site() -> Any:
+    """A site of five routes and four documented lines -- built per call, so a
+    reader that is absent fails the test that asks for it, not the module."""
+    return dx_record.HostedSite(
+        digest="d" * 64,
+        version="1.24.0",
+        routes=frozenset({"/", "/quickstart/", "/docs/", "/docs/connecting/", "/docs/projects/"}),
+        lines=HOSTED_LINES,
+        goals=HOSTED_GOALS,
+    )
+
+
+def _goals(**reached: bool) -> list[dict[str, object]]:
+    goals: list[dict[str, object]] = []
+    for name in HOSTED_GOALS:
+        done = reached.get(name.replace(" ", "_"), True)
+        goal: dict[str, object] = {
+            "goal": name,
+            "reached": done,
+            "at": "2026-10-30T10:40:00Z" if done else None,
+        }
+        if not done:
+            goal["note"] = "stopped here"
+        goals.append(goal)
+    return goals
+
+
+def a_hosted_record(**overrides: object) -> dx_record.Record:
+    """A person who walked the site from an invitation link and needed nothing else."""
+    document: dict[str, object] = {
+        "path": "hosted",
+        "followed_by": {
+            "kind": "person",
+            "identity": "a recruited reader",
+            "instructed_by": "the operator",
+            "context": "the site's URL, an account invitation link and the statement, nothing else",
+        },
+        "started_at": "2026-10-30T10:00:00Z",
+        "completed_at": "2026-10-30T11:30:00Z",
+        "release": "Release 1.24.0",
+        "site_commit": "a" * 40,
+        "site_digest": "d" * 64,
+        "documents_read": ["/", "/quickstart/", "/docs/connecting/"],
+        "commands_run": [],
+        "files_edited": [],
+        "goals": _goals(),
+        "timeline": {
+            "link_opened": "2026-10-30T10:00:00Z",
+            "account_created": "2026-10-30T10:03:00Z",
+            "factor_enrolled": "2026-10-30T10:06:00Z",
+            "organization_created": "2026-10-30T10:05:00Z",
+            "creation_accepted": "2026-10-30T10:08:00Z",
+            "connection_string": None,
+        },
+        "undocumented_steps": [],
+        "reached_success_criterion": True,
+        "transcribed_by": {"kind": "agent", "identity": "the executor's session"},
+        "confirmed_by_walker_at": "2026-10-31T09:00:00Z",
+    }
+    document.update(overrides)
+    return dx_record.Record(path=Path("/dev/null"), document=document)
+
+
+def _all_findings(record: dx_record.Record) -> list[str]:
+    return [
+        *dx_record.shape_problems(record),
+        *dx_record.followed_by_problems(record),
+        *dx_record.blocked_by_problems(record),
+        *dx_record.hosted_problems(record, _hosted_site()),
+    ]
+
+
+def test_a_hosted_record_the_site_produces_is_clean() -> None:
+    """The control for everything below: a person's record, every route a built
+    route, a browser-only walk (no command), every goal reached, transcribed by
+    the agent and confirmed after the walk -- no finding from any reader. A
+    command the site gives, with its own values, is also clean."""
+    assert _all_findings(a_hosted_record()) == []
+    typed = a_hosted_record(
+        commands_run=[
+            "pipx install  agentic-postgres-cli",
+            "apg project claim --project-key slot10-prod --token-file /home/p/token",
+        ]
+    )
+    assert _all_findings(typed) == []
+
+
+def test_the_clone_path_is_read_as_before_and_an_unknown_path_is_a_shape_problem(
+    tmp_path: Path,
+) -> None:
+    """ADR 0290 §1: no `path` is the clone walk, loaded and shaped exactly as
+    ADR 0207 reads it; `hosted` needs its own fields (an absent one named,
+    never assumed); any other `path` is a shape problem."""
+    clone = a_record()
+    assert "path" not in clone.document
+    assert dx_record.shape_problems(clone) == []
+    hosted = tmp_path / "hosted.json"
+    document = dict(a_hosted_record().document)
+    del document["confirmed_by_walker_at"]
+    hosted.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(dx_record.RecordIncomplete, match="confirmed_by_walker_at"):
+        dx_record.load(hosted)
+    elsewhere = a_hosted_record(path="elsewhere")
+    assert any("path is 'elsewhere'" in p for p in dx_record.shape_problems(elsewhere))
+
+
+def test_a_hosted_walker_is_a_person_holding_the_site_an_invitation_and_the_statement() -> None:
+    """ADR 0290 §2, §6: `kind` must be `person` -- an agent's or a driver's walk
+    does not count for this path -- and `context` names the site, the
+    invitation and the statement (it need not name a clone)."""
+    agent = a_hosted_record(
+        followed_by={**a_hosted_record().document["followed_by"], "kind": "agent"}  # type: ignore[dict-item]
+    )
+    assert any("must be 'person'" in p for p in dx_record.followed_by_problems(agent))
+    vague = a_hosted_record(
+        followed_by={  # type: ignore[dict-item]
+            **a_hosted_record().document["followed_by"],
+            "context": "the site and the statement",
+        }
+    )
+    assert any("invitation" in p for p in dx_record.followed_by_problems(vague))
+    assert dx_record.followed_by_problems(a_hosted_record()) == []
+
+
+def test_the_site_read_is_the_site_built_here() -> None:
+    """ADR 0290 §3, the site and the routes: another build's digest is *the
+    site moved after the walk*; a route the build does not produce is named,
+    never dropped; the release must be the banner this checkout prints."""
+    moved = dx_record.hosted_problems(a_hosted_record(site_digest="e" * 64), _hosted_site())
+    assert any("the site moved after the walk" in p for p in moved), moved
+    wrong = dx_record.hosted_problems(
+        a_hosted_record(documents_read=["/", "/docs/nowhere/"]), _hosted_site()
+    )
+    assert any("/docs/nowhere/" in p for p in wrong), wrong
+    older = dx_record.hosted_problems(a_hosted_record(release="Release 1.23.0"), _hosted_site())
+    assert any("Release 1.23.0" in p for p in older), older
+
+
+def test_a_command_matches_a_site_line_by_noun_verb_and_flags() -> None:
+    """ADR 0290 §3, the commands: an `apg` command matches a documented line
+    with its `apg <noun> <verb>` and every flag it used, values free; a flag no
+    line gives, or a verb no line gives, is unnamed; any other command matches
+    a documented line after whitespace is normalised."""
+
+    def unnamed(*commands: str) -> list[str]:
+        return dx_record.hosted_unnamed_commands(list(commands), _hosted_site())
+
+    assert unnamed("apg project claim --project-key slot10-prod --token-file ~/token") == []
+    assert unnamed("apg project claim --project-key=slot10-prod --token-file=~/token") == []
+    assert unnamed("apg project claim --project-key slot10-prod --force") == [
+        "apg project claim --project-key slot10-prod --force"
+    ]
+    assert unnamed("apg project nuke --project-key slot10-prod") != []
+    assert unnamed("pipx install agentic-postgres-cli") == []
+    assert unnamed("curl https://agenticpostgresql.com") != []
+    findings = dx_record.hosted_problems(
+        a_hosted_record(commands_run=["apg project nuke --project-key K"]), _hosted_site()
+    )
+    assert any("apg project nuke" in p for p in findings), findings
+
+
+def test_no_secret_reaches_the_record_and_none_is_echoed() -> None:
+    """ADR 0290 §3, no secret: a connection string with a password, an
+    invitation link, an otpauth URI and a 43-character base64url run are each
+    refused where they sit -- named by their place, the value never printed.
+    The control: a site commit (40 hex) and digest (64 hex) are not tokens."""
+    planted = {
+        "postgresql://u:hunter2-pass@pool.example:5432/db": "a connection string",
+        "https://control.example/accept#tok": "an invitation link",
+        "otpauth://totp/x?secret=ABC": "an otpauth URI",
+        "k" * 43: "a 43-character",
+    }
+    for value, said in planted.items():
+        goals = _goals()
+        goals[2]["note"] = f"I used {value}"
+        findings = dx_record.hosted_problems(a_hosted_record(goals=goals), _hosted_site())
+        hits = [p for p in findings if "goals[2].note" in p]
+        assert hits and said in hits[0], (said, findings)
+        assert value not in " ".join(findings), "a secret was echoed"
+    assert dx_record.hosted_problems(a_hosted_record(), _hosted_site()) == []
+
+
+def test_the_hands_are_the_persons_and_the_transcribers() -> None:
+    """ADR 0290 §3, the hands, and D2868: the agent transcribes, the person
+    confirms -- and the confirmation comes after the walk ended. A file edited
+    is a finding on this path, whatever it was."""
+    by_person = a_hosted_record(transcribed_by={"kind": "person", "identity": "x"})
+    assert any("transcribed_by" in p for p in dx_record.hosted_problems(by_person, _hosted_site()))
+    early = a_hosted_record(confirmed_by_walker_at="2026-10-30T11:00:00Z")
+    assert any(
+        "confirmed_by_walker_at" in p for p in dx_record.hosted_problems(early, _hosted_site())
+    )
+    edited = a_hosted_record(files_edited=["site/pages/quickstart.md"])
+    assert any(
+        "edits no product file" in p for p in dx_record.hosted_problems(edited, _hosted_site())
+    )
+
+
+def test_the_goals_are_the_statements_in_its_order() -> None:
+    """ADR 0290 §2, §4: the goals are the statement's six, in its order, read
+    from `docs/hosted-walk.md` itself; the criterion is the first goal; a goal
+    not reached carries the person's note, and a later goal not reached is not
+    by itself a finding. The control: the statement's own list is six names."""
+    assert dx_record.statement_goals(REPO_ROOT) == HOSTED_GOALS
+    swapped = _goals()
+    swapped[0], swapped[1] = swapped[1], swapped[0]
+    assert any(
+        "goals" in p
+        for p in dx_record.hosted_problems(a_hosted_record(goals=swapped), _hosted_site())
+    )
+    disagree = a_hosted_record(reached_success_criterion=False, blocked_by="the creation failed")
+    assert any(
+        "reached_success_criterion" in p
+        for p in dx_record.hosted_problems(disagree, _hosted_site())
+    )
+    silent = _goals(usage=False)
+    del silent[3]["note"]
+    assert any("note" in p for p in dx_record.shape_problems(a_hosted_record(goals=silent)))
+    stopped = a_hosted_record(goals=_goals(support_page=False))
+    assert _all_findings(stopped) == []
+
+
+def test_the_site_at_this_checkout_is_what_the_reader_reads() -> None:
+    """`hosted_site()` is the site this checkout builds: its digest is
+    `site_build.digest()`, its routes the pages' routes, its lines include a
+    command the quickstart gives, its version the VERSION file."""
+    from agentic_postgres import site_build
+
+    site = dx_record.hosted_site()
+    assert site.digest == site_build.digest()
+    assert site.routes == frozenset(page.route for page in site_build.pages())
+    assert "pipx install agentic-postgres-cli" in site.lines
+    assert site.version == (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    assert site.goals == dx_record.statement_goals(REPO_ROOT)
+
+
+def test_every_hosted_reader_is_total_over_a_malformed_record() -> None:
+    """A list where an object belongs, a string where a list does: each reader
+    names it and returns, never a `TypeError` (the module's rule)."""
+    broken = a_hosted_record(
+        goals="all of them",
+        timeline=["x"],
+        documents_read="/",
+        commands_run="apg",
+        transcribed_by="me",
+        followed_by=["person"],
+        site_digest=7,
+    )
+    assert dx_record.shape_problems(broken)
+    assert dx_record.followed_by_problems(broken)
+    dx_record.hosted_problems(broken, _hosted_site())

@@ -37,7 +37,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shlex
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -243,7 +245,13 @@ def load(path: Path) -> Record:
     if not isinstance(document, dict):
         raise RecordUnreadable(f"{path} is a {type(document).__name__}, not a JSON object")
 
-    missing = [field for field in REQUIRED_FIELDS if field not in document]
+    # ADR 0290 §1: no `path` is the clone walk, read as ever; `hosted` has
+    # its own fields; any other value is left to `shape_problems` to name.
+    kind = document.get("path", CLONE)
+    required = (
+        HOSTED_REQUIRED_FIELDS if kind == HOSTED else REQUIRED_FIELDS if kind == CLONE else ()
+    )
+    missing = [field for field in required if field not in document]
     if missing:
         raise RecordIncomplete(
             f"{path} is missing {missing}. An absent answer is not a favourable one, and a "
@@ -259,6 +267,13 @@ def shape_problems(record: Record) -> list[str]:
     failures with different remedies: a missing field is a question nobody
     answered, and a field of the wrong type is an answer to another question.
     """
+    kind = record.document.get("path", CLONE)
+    if kind == HOSTED:
+        return hosted_shape_problems(record)
+    if kind != CLONE:
+        return [
+            f"path is {kind!r}; it is absent (the clone walk) or one of {list(PATHS)} (ADR 0290)"
+        ]
     problems: list[str] = []
     for field in ("commands_run", "files_edited", "undocumented_steps"):
         if not isinstance(record.document.get(field), list):
@@ -310,6 +325,8 @@ def followed_by_problems(record: Record) -> list[str]:
         problems.append(
             f"followed_by.kind is {member['kind']!r}; it must be one of {list(FOLLOWED_BY_KINDS)}"
         )
+    if record.document.get("path") == HOSTED:
+        return problems + _hosted_followed_by_problems(member)
     context = member.get("context")
     if isinstance(context, str):
         lowered = context.lower()
@@ -498,3 +515,381 @@ def missing_documents(record: Record) -> list[str]:
     it was measured against.
     """
     return [relative for relative in DOCUMENT_ROOTS if relative not in record.documents_read]
+
+
+# ---------------------------------------------------------------------------
+# The hosted record (Session 46, ADR 0290)
+# ---------------------------------------------------------------------------
+#
+# A person who did not build Stage 5 walks the PUBLISHED site from an account
+# invitation link -- no clone, no `bin/`, no repository file -- so the clone
+# reading above cannot describe the walk at all: its documents are repository
+# files, its commands scripts, its context a clone. A record with `path:
+# "hosted"` is read here instead, by the same rule: every reader is total over
+# a malformed record, names its problem and returns.
+
+#: The two record paths. A record without `path` is the clone walk, read by
+#: everything above exactly as ADR 0207 reads it (ADR 0290 §1).
+CLONE = "clone"
+HOSTED = "hosted"
+PATHS = (CLONE, HOSTED)
+
+#: What a hosted record must carry (ADR 0290 §2). `blocked_by` is ADR 0207's
+#: and stays optional, read by :func:`blocked_by_problems` for both paths.
+HOSTED_REQUIRED_FIELDS = (
+    "path",
+    "followed_by",
+    "started_at",
+    "completed_at",
+    "release",
+    "site_commit",
+    "site_digest",
+    "documents_read",
+    "commands_run",
+    "files_edited",
+    "goals",
+    "timeline",
+    "undocumented_steps",
+    "reached_success_criterion",
+    "transcribed_by",
+    "confirmed_by_walker_at",
+)
+
+#: What a hosted walker held, each of which `followed_by.context` must name.
+HOSTED_CONTEXT_WORDS = ("site", "invitation", "statement")
+
+#: The moments the statement asks the person to note (D2866): each an instant,
+#: or null for *not noted* -- never a zero (D600).
+TIMELINE_FIELDS = (
+    "link_opened",
+    "account_created",
+    "factor_enrolled",
+    "organization_created",
+    "creation_accepted",
+    "connection_string",
+)
+
+#: The statement the person is handed, and its markers (ADR 0290 §6).
+STATEMENT = "docs/hosted-walk.md"
+_STATEMENT_BEGIN = "<!-- walk-statement:begin -->"
+_STATEMENT_END = "<!-- walk-statement:end -->"
+#: One goal line of the statement's notes form: `  1 connect:  reached at ...`.
+_GOAL_LINE = re.compile(r"^\s+(\d+) ([^:]+):")
+
+_SHA1 = re.compile(r"^[0-9a-f]{40}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+#: What no record may hold (ADR 0290 §3, D2868): the transcriber refuses them
+#: first and this reader refuses them again. Each names its place, never its
+#: value. The 43-character run is a handoff token's shape (`token_urlsafe(32)`).
+_SECRETS = (
+    (
+        re.compile(r"postgres(?:ql)?://[^/\s:@]+:[^@\s]+@", re.IGNORECASE),
+        "a connection string with a password",
+    ),
+    (re.compile(r"/accept#"), "an invitation link"),
+    (re.compile(r"otpauth://", re.IGNORECASE), "an otpauth URI"),
+    (
+        re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])"),
+        "a 43-character base64url run (a handoff token's shape)",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class HostedSite:
+    """What a hosted record is read against: the site this checkout builds."""
+
+    digest: str
+    version: str
+    routes: frozenset[str]
+    lines: tuple[str, ...]
+    goals: tuple[str, ...]
+
+
+def statement_goals(tree: Path) -> tuple[str, ...]:
+    """The goals of the statement's notes form, in its order, read from the
+    statement itself -- never a typed copy. Empty when the statement or its
+    markers are missing, which :func:`hosted_problems` then reports."""
+    path = tree / STATEMENT
+    if not path.is_file():
+        return ()
+    text = path.read_text(encoding="utf-8")
+    if _STATEMENT_BEGIN not in text or _STATEMENT_END not in text:
+        return ()
+    statement = text.split(_STATEMENT_BEGIN, 1)[1].split(_STATEMENT_END, 1)[0]
+    if "GOALS:" not in statement:
+        return ()
+    goals: list[str] = []
+    for line in statement.split("GOALS:", 1)[1].splitlines()[1:]:
+        match = _GOAL_LINE.match(line)
+        if not match:
+            break
+        goals.append(match.group(2).strip())
+    return tuple(goals)
+
+
+def hosted_site() -> HostedSite:
+    """The site at this checkout: `site_build`'s digest and routes, every line a
+    page shows as code -- each fenced line and each inline code span, the
+    second because a page gives a command in a sentence too (D2916) -- the
+    VERSION the banner prints, and the statement's goals."""
+    from agentic_postgres import site_build
+
+    lines: list[str] = []
+    for page in site_build.pages():
+        fenced = False
+        for raw in page.body.splitlines():
+            if raw.startswith("```"):
+                fenced = not fenced
+                continue
+            if fenced:
+                if raw.strip():
+                    lines.append(_spaced(raw))
+                continue
+            lines.extend(_spaced(span) for span in re.findall(r"`([^`]+)`", raw))
+    root = site_build.REPO_ROOT
+    return HostedSite(
+        digest=site_build.digest(),
+        version=(root / "VERSION").read_text(encoding="utf-8").strip(),
+        routes=frozenset(page.route for page in site_build.pages()),
+        lines=tuple(dict.fromkeys(lines)),
+        goals=statement_goals(root),
+    )
+
+
+def _spaced(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _instant(value: Any) -> datetime | None:
+    """An ISO 8601 instant in UTC, or None."""
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None or moment.utcoffset() != timedelta(0):
+        return None
+    return moment
+
+
+def hosted_shape_problems(record: Record) -> list[str]:
+    """`shape_problems` for the hosted path: every member the right type."""
+    document = record.document
+    problems: list[str] = []
+    for field in ("commands_run", "files_edited", "undocumented_steps", "documents_read"):
+        value = document.get(field)
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            problems.append(f"{field} is a {type(value).__name__}, not a list of strings")
+    if not isinstance(record.reached_success_criterion, bool):
+        problems.append(
+            f"reached_success_criterion is {record.reached_success_criterion!r}, not true or false"
+        )
+    for field in ("started_at", "completed_at", "confirmed_by_walker_at"):
+        if _instant(document.get(field)) is None:
+            problems.append(f"{field} is {document.get(field)!r}, not an ISO 8601 instant in UTC")
+    if not isinstance(document.get("release"), str) or not document["release"].strip():
+        problems.append(f"release is {document.get('release')!r}, not the banner's text")
+    for field, pattern, what in (
+        ("site_commit", _SHA1, "40 lowercase hex"),
+        ("site_digest", _SHA256, "64 lowercase hex"),
+    ):
+        value = document.get(field)
+        if not isinstance(value, str) or not pattern.match(value):
+            problems.append(f"{field} is {value!r}, not {what}")
+    goals = document.get("goals")
+    if not isinstance(goals, list):
+        problems.append(f"goals is a {type(goals).__name__}, not a list of the statement's goals")
+    else:
+        for index, goal in enumerate(goals):
+            problems.extend(_goal_problems(index, goal))
+    timeline = document.get("timeline")
+    if not isinstance(timeline, dict) or set(timeline) != set(TIMELINE_FIELDS):
+        problems.append(f"timeline must be an object of exactly {list(TIMELINE_FIELDS)}")
+    else:
+        for field in TIMELINE_FIELDS:
+            if timeline[field] is not None and _instant(timeline[field]) is None:
+                problems.append(
+                    f"timeline.{field} is {timeline[field]!r}; an instant, or null for not noted"
+                )
+    transcribed = document.get("transcribed_by")
+    if not isinstance(transcribed, dict) or not all(
+        isinstance(transcribed.get(field), str) and transcribed[field].strip()
+        for field in ("kind", "identity")
+    ):
+        problems.append("transcribed_by must be an object of a non-empty kind and identity")
+    return problems
+
+
+def _goal_problems(index: int, goal: Any) -> list[str]:
+    if not isinstance(goal, dict):
+        return [f"goals[{index}] is a {type(goal).__name__}, not an object"]
+    problems: list[str] = []
+    if not isinstance(goal.get("goal"), str):
+        problems.append(f"goals[{index}].goal is {goal.get('goal')!r}, not a goal's name")
+    if not isinstance(goal.get("reached"), bool):
+        problems.append(f"goals[{index}].reached is {goal.get('reached')!r}, not true or false")
+    if goal.get("at") is not None and _instant(goal.get("at")) is None:
+        problems.append(f"goals[{index}].at is {goal.get('at')!r}; an instant, or null")
+    note = goal.get("note")
+    if goal.get("reached") is False and (not isinstance(note, str) or not note.strip()):
+        problems.append(
+            f"goals[{index}] was not reached and carries no note: the person's words on why "
+            "are the record's point"
+        )
+    return problems
+
+
+def _hosted_followed_by_problems(member: dict[str, Any]) -> list[str]:
+    """ADR 0290 §2, §6: a person, holding the site, an invitation and the statement."""
+    problems: list[str] = []
+    if member.get("kind") != "person":
+        problems.append(
+            f"followed_by.kind is {member.get('kind')!r}; on the hosted path it must be "
+            "'person' -- an agent's or a driver's walk is the journey's, never this record's"
+        )
+    context = member.get("context")
+    if isinstance(context, str):
+        lowered = context.lower()
+        for word in HOSTED_CONTEXT_WORDS:
+            if word not in lowered:
+                problems.append(
+                    f"followed_by.context does not mention the {word}; a hosted walker holds "
+                    "the site's URL, an invitation link and the statement, and the record says so"
+                )
+    return problems
+
+
+def hosted_unnamed_commands(commands: list[str], site: HostedSite) -> list[str]:
+    """Commands typed that no line of the site gives (ADR 0290 §3).
+
+    An `apg` command matches a documented line with its `apg <noun> <verb>` --
+    the words before its first flag -- and every flag it used, values free
+    (D2893: the site's lines carry placeholders). Any other command matches a
+    documented line after whitespace is normalised.
+    """
+    shapes = [shape for shape in map(_apg_shape, site.lines) if shape is not None]
+    spaced = set(site.lines)
+    unnamed: list[str] = []
+    for command in commands:
+        shape = _apg_shape(command)
+        if shape is None:
+            if _spaced(command) not in spaced:
+                unnamed.append(command)
+            continue
+        words, flags = shape
+        if not any(words == known and flags <= given for known, given in shapes):
+            unnamed.append(command)
+    return unnamed
+
+
+def _apg_shape(line: str) -> tuple[tuple[str, ...], frozenset[str]] | None:
+    try:
+        words = shlex.split(line)
+    except ValueError:
+        return None
+    if not words or words[0] != "apg":
+        return None
+    flags = [word.split("=", 1)[0] for word in words[1:] if word.startswith("-")]
+    leading: list[str] = []
+    for word in words[1:]:
+        if word.startswith("-"):
+            break
+        leading.append(word)
+    return tuple(leading[:2]), frozenset(flags)
+
+
+def _strings(value: Any, place: str) -> list[tuple[str, str]]:
+    if isinstance(value, str):
+        return [(place, value)]
+    if isinstance(value, dict):
+        return [found for key, item in value.items() for found in _strings(item, f"{place}.{key}")]
+    if isinstance(value, list):
+        return [
+            found
+            for index, item in enumerate(value)
+            for found in _strings(item, f"{place}[{index}]")
+        ]
+    return []
+
+
+def hosted_secrets(record: Record) -> list[str]:
+    """Every place a secret's shape sits in the record, the value never echoed."""
+    found: list[str] = []
+    for key, value in record.document.items():
+        for place, text in _strings(value, key):
+            for pattern, what in _SECRETS:
+                if pattern.search(text):
+                    found.append(f"{place} holds {what}; describe it instead (D2868)")
+    return found
+
+
+def hosted_problems(record: Record, site: HostedSite) -> list[str]:
+    """The hosted readings (ADR 0290 §3): the site, the routes, the commands,
+    no secret, the hands -- plus the goals against the statement and the
+    criterion against the first goal. Total over a malformed record."""
+    document = record.document
+    problems: list[str] = []
+    walked = document.get("site_digest")
+    if walked != site.digest:
+        shown = walked[:12] if isinstance(walked, str) else repr(walked)
+        problems.append(
+            f"the site moved after the walk: walked at {shown}, this checkout builds "
+            f"{site.digest[:12]}"
+        )
+    release = document.get("release")
+    if release != f"Release {site.version}":
+        problems.append(
+            f"release is {release!r}; this checkout's banner says 'Release {site.version}'"
+        )
+    routes = document.get("documents_read")
+    for route in routes if isinstance(routes, list) else []:
+        if isinstance(route, str) and route not in site.routes:
+            problems.append(f"documents_read names {route!r}, which the site does not have")
+    commands = document.get("commands_run")
+    for command in hosted_unnamed_commands(
+        [c for c in commands if isinstance(c, str)] if isinstance(commands, list) else [], site
+    ):
+        problems.append(f"a command no page of the site gives: {command}")
+    edited = document.get("files_edited")
+    if isinstance(edited, list) and edited:
+        problems.append(f"a hosted walk edits no product file, and this one names {edited}")
+    problems.extend(hosted_secrets(record))
+    goals = document.get("goals")
+    names = (
+        tuple(g.get("goal") for g in goals if isinstance(g, dict))
+        if isinstance(goals, list)
+        else ()
+    )
+    if not site.goals:
+        problems.append(f"{STATEMENT} names no goals between its markers: nothing to read against")
+    elif names != site.goals:
+        problems.append(
+            f"goals are {list(names)}; the statement's are {list(site.goals)}, in that order"
+        )
+    first = goals[0] if isinstance(goals, list) and goals and isinstance(goals[0], dict) else {}
+    if record.reached_success_criterion != first.get("reached"):
+        problems.append(
+            "reached_success_criterion does not equal the first goal's reached: the criterion "
+            "is the working connection string"
+        )
+    transcribed = document.get("transcribed_by")
+    if not isinstance(transcribed, dict) or transcribed.get("kind") != "agent":
+        problems.append(
+            "transcribed_by.kind must be 'agent': the agent types the person's notes (D2868)"
+        )
+    started, completed = (
+        _instant(document.get("started_at")),
+        _instant(document.get("completed_at")),
+    )
+    confirmed = _instant(document.get("confirmed_by_walker_at"))
+    if started and completed and started > completed:
+        problems.append("started_at is after completed_at")
+    if completed and confirmed and confirmed < completed:
+        problems.append(
+            "confirmed_by_walker_at is before completed_at: the person confirms the typed "
+            "record after the walk, never before it"
+        )
+    return problems

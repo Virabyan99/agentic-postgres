@@ -17,6 +17,12 @@ Exit codes (runbook §2 convention):
   3  the record names a document this checkout does not have -- the reading is
      being made from the wrong checkout, which is not the record's fault
   5  the record is readable and one of the five readings has findings
+
+**A hosted record** (`path: "hosted"`, Session 46, ADR 0290) is a person's walk
+of the published site from an invitation link. `check` reads it against the
+site THIS checkout builds -- its digest, its routes, every line it shows as code
+-- and the statement's goals; `digest` refuses it (exit 2): it names routes,
+never repository files.
 """
 
 from __future__ import annotations
@@ -46,7 +52,7 @@ def report(title: str, findings: list[str]) -> None:
         print(f"  - {finding}")
 
 
-def check(record_path: Path, slug_override: str | None) -> int:
+def check(record_path: Path, slug_override: str | None, path: str | None = None) -> int:
     try:
         record = dx_record.load(record_path)
     except dx_record.RecordUnreadable as problem:
@@ -55,6 +61,13 @@ def check(record_path: Path, slug_override: str | None) -> int:
     except dx_record.RecordIncomplete as problem:
         print(f"dx-record: {problem}", file=sys.stderr)
         return 2
+
+    kind = record.document.get("path", dx_record.CLONE)
+    if path is not None and path != kind:
+        print(f"dx-record: --path {path}, and the record says it is {kind!r}", file=sys.stderr)
+        return 2
+    if kind == dx_record.HOSTED:
+        return check_hosted(record_path, record)
 
     if slug_override:
         record = dx_record.Record(
@@ -133,6 +146,56 @@ def check(record_path: Path, slug_override: str | None) -> int:
     return 0
 
 
+def check_hosted(record_path: Path, record: dx_record.Record) -> int:
+    """ADR 0290 §3's readings, against the site this checkout builds."""
+    shape = dx_record.shape_problems(record)
+    if shape:
+        report("record shape", shape)
+        print(
+            "dx-record: the record's shape is wrong, so the readings below would be answering "
+            "a different question.",
+            file=sys.stderr,
+        )
+        return 2
+    site = dx_record.hosted_site()
+    print(f"record: {record_path}")
+    print("path: hosted (a person's walk of the site, ADR 0290)")
+    print(f"release: {record.document.get('release')}")
+    walked = str(record.document.get("site_digest"))[:12]
+    print(f"site walked: {walked}, built here: {site.digest[:12]}")
+    print(f"reached the success criterion: {record.reached_success_criterion}")
+    print()
+
+    followed_by = dx_record.followed_by_problems(record)
+    blocked_by = dx_record.blocked_by_problems(record)
+    readings = dx_record.hosted_problems(record, site)
+    later = [
+        f"{goal['goal']}: {goal.get('note')}"
+        for goal in record.document["goals"][1:]
+        if goal.get("reached") is False
+    ]
+    report("followed_by", followed_by)
+    report("blocked_by", blocked_by)
+    report("the site, routes, commands, secrets and hands", readings)
+    report("undocumented steps the walker recorded", record.undocumented_steps)
+    report("goals after the first not reached (reported, not findings)", later)
+
+    findings = bool(followed_by or blocked_by or readings or record.undocumented_steps)
+    if record.reached_success_criterion is not True:
+        findings = True
+        print()
+        print("dx-record: the record says the person did not reach a working connection string.")
+    print()
+    if findings:
+        print(
+            "dx-record: this record does not close documented_path. Every finding above is "
+            "the site's, not the person's."
+        )
+        return 5
+    print("dx-record: clean.")
+    return 0
+
+
 def digest(record_path: Path) -> int:
     """Rewrite `documents_read` from this tree, and say what was digested.
 
@@ -151,6 +214,13 @@ def digest(record_path: Path) -> int:
         return 2
     if not isinstance(raw, dict):
         print(f"dx-record: {record_path} is not a JSON object", file=sys.stderr)
+        return 2
+    if raw.get("path") == dx_record.HOSTED:
+        print(
+            f"dx-record: {record_path} is a hosted record; it names site routes, never "
+            "repository files, so there is nothing to digest",
+            file=sys.stderr,
+        )
         return 2
 
     computed = dx_record.digests(REPO_ROOT, list(dx_record.DOCUMENT_ROOTS))
@@ -181,14 +251,20 @@ def main() -> int:
     checker = subparsers.add_parser("check")
     checker.add_argument("--record", type=Path, required=True)
     checker.add_argument("--project-slug", default=None)
+    checker.add_argument("--path", choices=dx_record.PATHS, default=None)
 
     digester = subparsers.add_parser("digest")
     digester.add_argument("--record", type=Path, required=True)
+    digester.add_argument("--path", choices=dx_record.PATHS, default=None)
 
     arguments = parser.parse_args()
 
     if arguments.verb == "check":
-        return check(arguments.record, arguments.project_slug)
+        return check(arguments.record, arguments.project_slug, arguments.path)
+    if arguments.path == dx_record.HOSTED:
+        print("dx-record: digest is the clone walk's; a hosted record has nothing to digest",
+              file=sys.stderr)  # fmt: skip
+        return 2
     return digest(arguments.record)
 
 

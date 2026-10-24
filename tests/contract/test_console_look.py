@@ -27,7 +27,8 @@ CSS = PUBLIC / "app.css"
 PAGES = (PUBLIC / "index.html", PUBLIC / "accept.html")
 
 #: Each literal the drivers (`tests/external/browser/console_walk.py`,
-#: `sql_walk.py`) select by, and how often it occurred in `app.js` at
+#: `sql_walk.py`, and since Session 46 `journey_walk.py`) select by, and how
+#: often it occurred in `app.js` at
 #: `702671f` -- counted at Run 6 (`~/s45/run6/anchors.py`).
 ANCHORS = {
     '"Create your account"': 2, '"Username"': 3, '"Display name"': 1, '"Password"': 3,
@@ -37,6 +38,12 @@ ANCHORS = {
     '"New password for the pooled door (customer_app)"': 1, 'role: "status"': 1,
     'h("textarea"': 1, 'className: "result"': 1, '"Door"': 2, '"Connect"': 2, '"Run"': 1,
     '"Cancel"': 1, '"Disconnect"': 1, 'className: "once"': 1, 'h("h1"': 7, 'h("h2"': 10,
+    # Session 46 (D2918): the journey driver's (`journey_walk.py`), counted at Run 6.
+    '"New organisation"': 2, '"Name"': 5, '"Create"': 1, '"New project"': 2,
+    '"Profile"': 1, '"Administrator\'s username"': 1, '"Create project"': 1,
+    '"I have saved it"': 1, '"Connect to it"': 1, '"Support bundle"': 1,
+    '"Set up your second factor"': 1, '"Something was refused"': 1, '"Plan"': 2,
+    '"Notifications"': 2, 'className: "content"': 1,
 }  # fmt: skip
 
 
@@ -125,7 +132,8 @@ def test_the_drivers_anchors_are_unchanged() -> None:
     for page in PAGES:
         assert page.read_text(encoding="utf-8").count('id="main"') == 1, page.name
     drivers = "".join((REPO_ROOT / "tests" / "external" / "browser" / name).read_text("utf-8")
-                      for name in ("console_walk.py", "sql_walk.py"))  # fmt: skip
+                      for name in ("console_walk.py", "sql_walk.py",
+                                   "journey_walk.py"))  # fmt: skip
     for anchor in ANCHORS:
         literal = re.search(r'"([^"]+)"', anchor)
         if literal and literal.group(1) not in ("qr", "secret", "status", "result", "once"):
