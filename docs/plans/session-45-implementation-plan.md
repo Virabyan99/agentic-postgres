@@ -429,6 +429,7 @@ Rows the runs add go in a second table below it, in execution order.
 | **D2858** | Run 7: the look driver rehearsed clean (32 readings) against a local build and console image; L0 is a dry run of the same driver against the live site and console. | **L0 exited 4 at 4f4b207: the console's `/console/` failed at both widths, the 30 site pages read.** The driver waited `goto(..., wait_until="networkidle")`; the signed-out console calls `/api/v1/me` (401), then `POST /api/v1/sessions/refresh` (401), and `api.js` `call()` never reads the refused refresh's body -- **Chromium never reports an unread fetch body finished**, so the page never goes idle (measured live with a control: the same 401 fetched from the page with its body READ finishes, UNREAD never does; curl over HTTP/2 and HTTP/1.1 receives the 33-byte body in ~0.7 s -- the server is not the cause). The rehearsal's console had no API behind `/api/v1` (404, no refresh), so it could not see it: the fixture did not share the live answer (D673's class). The product is not wrong for a user (the body is released with the response). | **The operator, 2026-10-23: fix the driver.** A test-only commit: `site_look.read` waits for `load`, `document.fonts.ready` and `SETTLE_MS` 1,500 -- every ATTEMPTED request is still recorded (the `request` event), so the claim stays as strict. Measured as a pair live, one invocation: 4f4b207's driver exit 4 (30 shots, no console), the repaired exit 0 (32, both console widths); Run 7's rehearsal again exit 0 with the planted foreign request named on `/` at both widths. **The deployment stays 4f4b207** (no redeploy, D2799's precedent); `s45-look.sh` accepts a committed checkout ahead of the deployed commit by `tests/` and `docs/` only. `api.js` is untouched (a §9 stop). | A browser's notion of "idle" is a third party's; a walk waits on what it measures. A rehearsal's stand-in that answers less than the live service hides the live service's path. | -- |
 | **D2859** | D2833 / Run 7: the export is *"the last recreation before the idle step"*, so after the quiet the slot's request counter has NO series and the idle sleep is ADR 0289's absent-as-0 reading; `test_session45_idle.py`'s docstring says the sleep *"is the reading of an absent series as 0 with its witnesses"*; Sheet IR3 expects `sum(traefik_service_requests_total{code=~"[123].."})` → **0 series**. | **Sheet IR3 at 20:54:43Z (inside the window, before the request): the request series is PRESENT**; the two witnesses one series each, `project=slot9-prod`. slot9-prod's store had run since **20:33:55Z** -- the large resize -- and the instrument's own requests (the resize probes, the export's) followed that recreation before the quiet began at 20:37:05: **the export recreates nothing at the edge**, so the counter was read and unmoved. The idle sleep came at 20:57:48 (origin `idle`, 275.6 s after the setting, 1,213 s after the export's finish) by the ORDINARY path, not by the repaired one. D2805's case -- a recreation with no request after it -- did not arise in this lifecycle. | **Recorded, and the claim's evidence says which** (the plan's own Sheet IR3 sentence). `idle_after_wake_live`'s proofs read only the record (quiet, origin, window, usage) and pass on either path: what this sitting proves is *a woken project left untouched is idle-slept at 1.23.0* (Session 44's attempt 3 was not) and the witnesses live on slot9 (IR3); **ADR 0289's absent-as-0 branch stays proved offline only** (Run 2's `test_usage_sampler` cases). The docstring's last sentence over-claims for this record -- the close decides whether the claim's text moves. | A premise about what an operation recreates is a third-party fact about the edge; the root read that was planned to confirm it is what found it false. | 0289 |
 | **D2860** | D2833 (the quiet begins before the export) and D2855 (*"no earlier than the window after the last export's finish"*), written for `test_session45_idle.py` alone; §7: the merge fails `documented_path` only. | **The external half at 4f4b207's records (from 6783f06, 05:53-06:05Z) failed THREE idle proofs; the product slept correctly.** (1) `test_session41_reearning.py:376` and `test_session42_reearning.py:300` assert `15 × 60 − 60 <= seconds_from_setting`: true only while the instrument's quiet began AT the setting (Sessions 41-44). D2833 moved the quiet to 20:37:05, 16 minutes before the setting (20:53:13); the window restarts at the last export's finish, not at the setting, so the reconciler rightly asked at 20:57:48 -- **275.6 s after the setting, 1,213 s after the export**. The plan moved the instrument and missed the two older readers of the field (D979). (2) `test_session45_idle.py::test_the_instrument_made_no_request` -- never executed before -- read every operation from the quiet's start with no end, so the slot's `project.delete` (21:01:19, after the request) joined the two exports; its docstring says *"to the request"*. Merge: 339 claims, 335 passed; `idle_sleep_live`, `idle_sleep_retrial_live`, `idle_after_wake_live` failed beside `documented_path`. | **The operator, 2026-10-24: repair and re-run the external half.** A test-only commit: the two re-earning proofs measure the lower bound from the window's start -- `seconds_from_setting` for a record with no `quiet` reading (unchanged for Sessions 41-44), the later of `quiet.from` and the last export's finish for one with it -- the upper bound `0 < seconds_from_setting <= 1,620` kept; the Session 45 proof's span ends at the request. Battery live against the record, one invocation: controls green before and after, four mutations KILLED as FAILED (the span unbounded; the window from the setting, each module; the start at `set_at`); the start at `quiet.from` alone survives on this record (1,243 s) -- uninformative here (D493). (The battery's first pass ERRORed: separate pytest processes reused a spent TOTP code, `second_factor_invalid`; it now waits a step between runs.) **The deployment, the sweep and the tag stay 4f4b207** (D2799's precedent); the first external run kept in `~/s45/run9/external-1/`. | A reader of a field an instrument change moves is a reader to grep; a span a docstring bounds is a span the code bounds. | 0276 |
+| **D2861** | Run 9 step 5 / Sheet B1: `s45-after-reboot.sh` waits for the units with `/home/op/s45-units.sh`, then reads whether the boot started each. | **`s45-units.sh` had never been copied to the host**, and the first read ran while the boot was still under way: `UNITS_EXIT=127`, `multi-user.target` at mono 0, and every unit judged *"NOT the boot"* -- the reader went on without its waiter and folded *could not determine* into seven failures (ADR 0195's class). | Copied at 04:48Z and re-read: the verdict compares the boot's own monotonic timestamps, so a later read is the same reading -- **all seven started by the boot**. The early read kept as `after-reboot-1-early.txt`. | A host-side dependency ships with the sheet that runs it; a reader whose waiter cannot run stops, it does not judge. | -- |
 
 ---
 
@@ -1328,7 +1329,63 @@ Playwright image present.
 10. **The operator's side-by-side** (D2830): L1's screenshots beside the five
     prototypes; the operator's verdict recorded verbatim in the **Done.**
 
-**Done.** —
+**Done.** — 2026-10-23/24, **deployed, swept and tagged on `4f4b207`** (D1425;
+the raw record `~/s45/run9/NOTES.md`, scripts `~/s45/run7/` + `~/s45/run9/`).
+**The move**: a bundle `224b660..4f4b207` (FETCH_HEAD confirmed), the host
+checkout detached at `4f4b207`, clean, no dependency file moved; renders ×5 exit
+0. **R1** minor / requires patch / changes `[]` on all three. **R2a-d** exit 0
+each with **no database restart** (D2836): rest **never** down, auth down 8.2,
+10.3, 8.8, 8.7 s; the console recreated, down 8.0 s; the relay untouched. The
+console's policy `font-src 'self'`, both typefaces 200 `font/woff2` (49,112 /
+29,232 B), the favicon 200; RC1. **A1** registry agrees ×4; **RA** the declared
+manifest admitted (0), the injected one refused (12); **K1**
+`kit-2026-10-23-s45` (sha equal). **V1** 412 passed / 1 failed
+(`documented_path`) / 8 skipped in 1:09:29. **X0** 40 passed / 44 skipped.
+**W0′** 9/9; **E0** exit 0; **L0 exit 4** -- **D2858** (the driver waited on a
+network idle the console's unread 401 body never ends; the operator: fix the
+driver; `adc35b7` test-only, CI green, L0 then exit 0, 32 pages). **W1′** 11/11
+(customer_app rotated, link to connection string 26.1 s); **E1** exit 0
+(SELECT 1 median 224.0 ms vs psql 160.2; cancel 57014 1.77 s). **The
+re-earning (D2837)**: H1 (the inserted comment corrected first), three grey A
+records and two EEUR buckets by the agent through the Cloudflare API, the
+operator's providers, SL1b all yes, SL2 (29 files), SL3 ready, RC1; **the
+lifecycle in ONE attempt, detached** (19:52 → 21:01Z, exit 0): create 1,708.4
+s, wake first answer 19.2 s, resizes 304 / 840 admitted of 4,801 safe, the
+export read, **the idle sleep requested by the reconciler** (origin `idle`,
+20:57:48, 1,213 s after the export's finish), notifications 14 (each operation
+once), deleted, the second creation refused `no_slot`; **IR3** found the request
+series present (**D2859**: the absent-as-0 branch stays proved offline). The
+neighbours lost nothing (4,216.7 s, 0 down). **The branches** on slot3-prod
+(21:03 → 22:15Z, exit 0): `tmp` expired by itself 253.3 s after `expires_at`;
+`dev` at T1 (1,047.1 s), migrated on dev only; a second branch refused
+`branch_limit_reached`; reset (1,016.2 s), the old password refused. **A1′**
+agrees ×4 + slot1-9 `agrees (deleted)`. **B1** booted 04:47:12Z: **all seven
+units started by the boot**, NRestarts 0, all active by boot+97 s; 50 healthy
+containers; the relay and `dev` back by themselves (**D2861**: the first read
+came before its waiter was on the host). **E0 again** exit 0 and **L1** exit 0
+(32 pages, 15 routes, the record `~/s45/look/record.json`), both from `6783f06`
+(past `4f4b207` by `tests/` and `docs/` only). **S1, the one sweep** (launched
+detached by `s45-launch.sh`, 04:56 → 05:34Z): suite **432 passed / 1 failed in
+34:11**; host **144 / 1** (`documented_path`); `sql_relay_host`,
+`console_live_host`, `branch_host_live` passed -- no second sweep. **The branch
+deleted** (exit 0, both names refuse). **The external half** from `6783f06`
+failed three idle proofs on proof defects -- **D2860** (the operator: repair,
+re-run; `d2e9c40` test-only, battery live 4/4, CI contract 40069691208 success);
+**re-run from `d2e9c40`: 141 passed / 0 failed / 7 skipped, external 34 / 0**
+(the first run kept in `~/s45/run9/external-1/`). **The merge** with `4f4b207`'s
+CI half (contract 39974644732, 160 / 160): **339 claims, 338 passed, 1 failed --
+`documented_path`** (D1935); `notifications_live` and
+`notifications_retrial_live` **re-earned**; `idle_after_wake_live`,
+`ui_look_live`, `sql_relay_live`, `site_live` passed; `evidence/session-45.json`.
+**The tag** `1.23.0` (object `8d880308`) on `4f4b207`, pushed 06:45Z;
+**publish-cli 40071462285 success**; PyPI `info.version` 1.23.0; `apg --version`
+→ `apg 1.23.0` in a clean `python:3.12-slim` (the first install ~15 s before the
+simple index caught up). **SL4**: slot9-prod's identity `37de262b` revoked, the
+credential shredded, no `slot9-prod` under `projects/`; **RC1** the reconciler
+active. **The operator's side-by-side** (D2830), L1's 32 screenshots beside the
+five prototypes: *"I checked them, they all look right to me."* (The wordmark's
+thin outline in the pricing and console shots was pointed out; the verdict above
+stands.) **NEXT FREE D2862, ADR 0290.**
 
 ### Run 10 — the close
 
