@@ -1434,7 +1434,18 @@ typefaces, *"restart the reconciler after the checkout moves"*, ADR 0289's
 reading); this plan's Status COMPLETE. **Targeted, once**: `test_reality_ledger`,
 `test_evidence_claims`, `test_documentation_index`, `test_capacity_envelope`,
 `test_site`, `test_console_pages`, `test_session12_documented_path` -- **169
-passed**; ruff clean; both renders current.
+passed**; ruff clean; both renders current. **The gate, once**, on the
+committed `a0f8183`, Run 8's foreground shards (`~/s45/run10/gate01-*.sh`, the
+selection recomputed on the commit: 8,443, unchanged), each `timeout 570`,
+`TMPDIR=~/s45/tmp`: **`bin/session-01-check.sh` PASSED** -- steps 1-7 passed,
+12 shards (457, 756, 1,328, 112, 49, 69, 886, 539, 1,088, 1,338 + 2 skipped,
+1,400 + 1 skipped, 418), merged **8,443 = collected**, 0 failures, 0 errors,
+**3 skipped**, step 8 exit 0. **Pushed**; CI green on
+`a0f8183a0cac0633a45fb0dda2458d706862ae73`: **contract 40076024837, site
+40077672819**. The handoff (outside the repository): the launch folder's
+`CLAUDE.md` §2 and §3.0 rewritten for Session 46's planner (the old copy in the
+session scratchpad); the project memory's state file. **Session 45 is
+complete. NEXT FREE D2862, ADR 0290.**
 
 ---
 
