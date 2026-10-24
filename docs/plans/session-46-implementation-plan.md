@@ -4,8 +4,8 @@
 6.6 s), ADRs 0290–0293 accepted, threat items 28–30, `docs/hosted-walk.md`
 (for the operator to read before Run 4; the person's day not yet arranged).
 Rows D2890–D2896 added. Run 2 DONE (the support bundle: control 0010, the
-reconciler pass, the route, the CLI, the console; rows D2897–D2901). NEXT FREE
-D2902, ADR 0294. Next: Run 3.** Planned at `7b035d9` (Session
+reconciler pass, the route, the CLI, the console; rows D2897–D2902). NEXT FREE
+D2903, ADR 0294. Next: Run 3.** Planned at `7b035d9` (Session
 45's close record, tree clean, `main` = `origin/main`) against the host as read
 that morning (§0). Rows **D2862–D2889** at planning; the runs add theirs from
 **D2890**. ADRs **0290–0293** are Run 1's. **NEXT FREE after this table: D2890,
@@ -398,6 +398,7 @@ the runs add go in a second table below it, in execution order.
 | **D2899** | Run 2's close list: `tests/contract/test_cloud_cli.py` and `bin/build-cli.py --check`; §2's ids for `CTL-DIAG-001` all in `test_control_diagnostics.py` / `test_cloud_cli.py`. | **`test_cloud_cli.py` does not exist** — the CLI's proofs are `tests/contract/test_control_cli.py`; **`bin/build-cli.py` has no `--check`** (`--out` only; `test_cli_package` builds it); the reconciler's simulated host (`Host`, `Children`) lives in `test_reconciler_dispatch.py`. | The CLI case is `test_control_cli.py::test_diagnostics_writes_a_private_file_once`; the reconciler's pass is proved in `test_reconciler_dispatch.py` (its `Children` learns `doctor`); `test_cli_package` ran for the package. **Run 8 registers the node ids Run 2's **Done.** lists**, never §2's proposals. | The tree's names. | — |
 | **D2900** | Run 2 step 6: Settings gains *"a table of check, verdict (chip), detail, age"*; *"no new … heading text (D2829)"*. | The console's chips are `STATE_CHIPS`' five classes for project states, pinned by `test_console_look`; there is no verdict palette and ADR 0288 closes the vocabulary. `test_no_page_names_an_unreachable_row` would refuse `support_bundle` in `pages.json` before the row exists. | **The verdict is text** (`ok`, `warn (stale)`, …) in the table; **the section's label is `<strong>Support bundle</strong>` in a paragraph, no heading**; `pages.json`'s `project-settings` gains the call `GET /v1/projects/{key}/diagnostics` now and **the `support_bundle` Ledger row is added to that view's `ledger` list at Run 8**, with the row. | No new class, no new anchor, no page naming a row that does not exist. | 0288 |
 | **D2901** | §9: *"a test outside the ones this plan names would have to move"* is a stop. | A new control function and route widen three exact allowlists by construction: `test_control_set.py` `TABLES`/`GRANTED`/`OPERATOR` and its render counts (9 → 10), `test_reconciler_dispatch.py::test_the_reconciler_asks_the_control_set_only_these` (D2531's closed set), and `main.control_paths()` read by `test_auth_service_shape.py::test_the_control_mode_serves_exactly_the_declared_paths` (which failed once, as designed, until the path was declared). | **Each widened by exactly the new name** (`control_diagnostic_readings`, `control_project_diagnostics`, `control_record_diagnostics`, `/v1/projects/{key}/diagnostics`) — the pattern every control session since 40 followed; not §9's stop: an allowlist widened to the measured set is not a weakened test (CLAUDE.md §6). | The guards did their job: each named the new thing until it was declared. | — |
+| **D2902** | Run 2's targeted list (the modules the change touches, D1486's limit). | **CI on `e29441c` failed** (contract 40095045440; both the Session 1 gate and the offline contract job): `tests/contract/test_fleet.py::test_nothing_in_the_release_reads_the_inventory` — `diagnostics_of`'s docstring cited *"`bin/fleet.py`'s rule"*, and the scan reads docstrings as code (it skips `#` comments and usage blocks only, D968). A module the diff did not touch, found by the full check. | **The docstring names the doctor's own rule instead**; the guard unchanged; `test_fleet` re-run alone, 20 passed. | A reader-naming guard is a class guard; the targeted list could not see it (D1486). | — |
 
 ---
 
@@ -749,7 +750,10 @@ backups`.
   `::test_a_sleeping_slot_is_recorded_asleep_without_a_doctor`,
   `::test_a_doctor_that_gave_no_reading_records_nothing`;
   `tests/contract/test_control_cli.py::test_diagnostics_writes_a_private_file_once`.
-- Rows **D2897–D2901**. CI: see below.
+- Rows **D2897–D2902**. **CI**: `e29441c` contract 40095045440 **failure** —
+  one test, `test_fleet.py::test_nothing_in_the_release_reads_the_inventory`
+  (D2902: a docstring naming the inventory command); repaired in the next
+  commit, its verdict below.
 
 ### Run 3 — `apg control status`, `control_states` shared, the node-loss runbook
 

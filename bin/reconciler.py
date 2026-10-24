@@ -1482,7 +1482,8 @@ def diagnostics_of(key: str, document: dict[str, Any]) -> tuple[dict[str, Any] |
     """One slot's diagnostics reading (ADR 0292): asleep when its database is
     stopped -- one row, no doctor run; otherwise `doctor.py --project KEY
     --json` as the operator runs it, exit 0 and 6 both carrying a document
-    (`bin/fleet.py`'s rule), reduced to verdicts by the dispatch module."""
+    (the doctor's own rule: 6 is a check that failed or could not run),
+    reduced to verdicts by the dispatch module."""
     database = document.get("database") or {}
     running = _quiet(dispatch.running_argv(str(database.get("container", ""))), 60)
     if running is not None and running.returncode == 0 and running.stdout.strip() == "false":
