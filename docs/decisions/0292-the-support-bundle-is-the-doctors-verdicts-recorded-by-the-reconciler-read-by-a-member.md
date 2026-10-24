@@ -1,8 +1,8 @@
 # 0292 — The support bundle is the doctor's verdicts, recorded by the reconciler, read by a member
 
-- **Status:** Proposed — accepted on Sheet IR4's reading (the doctor timed on
-  `slot3-prod` and `control-prod`; a run above 120 s on either is the plan's §9
-  stop)
+- **Status:** Accepted (on Sheet IR4's reading, 2026-10-24 11:53Z: the doctor
+  took 7.7 s on `slot3-prod` and 6.6 s on `control-prod`, twelve checks each —
+  under the plan's 120 s stop)
 - **Date:** 2026-10-24
 - **Session:** 46, Run 1 (`docs/plans/session-46-implementation-plan.md`, D2874,
   D2875; Run 1's row D2894; Sheet IR4)
@@ -54,6 +54,30 @@ wins, D2894) — and members read it through `app.control_get_backups(p_user,
 p_key)`, a **`SECURITY DEFINER`** reader that enters as the caller
 (`control_enter`) and requires a role (`control_require_role(…, 'viewer')`,
 `:191-211`).
+
+### Measured (Sheet IR4, 2026-10-24 11:53Z, root, read-only, checkout `4f4b207`)
+
+`bin/doctor.py --project KEY --json` from the host checkout's `.venv`, `stdin`
+closed, timed by the caller; only names, verdicts and evidence **keys** printed
+(`/home/op/s46-ir4.txt`):
+
+| Project | Exit | Wall | Checks | Worst |
+|---|---|---|---|---|
+| `slot3-prod` | 0 | **7.7 s** | 12 | ok |
+| `control-prod` | 0 | **6.6 s** | 12 | ok |
+
+- **Twelve checks, one of them `route health`** (the routes probe yields one
+  check on both): `containers`, `route health`, `tls`, `database`,
+  `migrations`, `backup repository`, `wal archiver`, `backup mirror`, `disk
+  headroom`, `capability drift`, `agent record`, `workflow` — D1971's *"twelve
+  readings"* is the tree's count.
+- **The evidence keys confirm why evidence is never recorded**: `disk headroom`
+  carries `mount` (a host path), `workflow` carries `heartbeat_holder`, `route
+  health` carries `url`, and `agent record` carries row counts of the project's
+  own audit — the operator's view of the node.
+- **The pass's price**: at ~7 s a project, one diagnostics pass over the
+  declared slots costs well under the 300 s child budget per slot, and the
+  loop's claim of the next operation waits that long once every 900 s.
 
 ## Decision
 

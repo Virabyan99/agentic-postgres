@@ -1,9 +1,9 @@
 # Session 46 — The journey, the person's walk, the Stage 5 release, the Stage 6 report
 
-**Status: EXECUTING — Run 1 in part (2026-10-24): the rigs, ADRs 0290–0293
-(0292 Proposed until Sheet IR4), threat items 28–30, `docs/hosted-walk.md`;
-Sheet IR4 handed to the operator; the person's day not yet arranged. Rows
-D2890–D2896 added; NEXT FREE D2897, ADR 0294.** Planned at `7b035d9` (Session
+**Status: EXECUTING — Run 1 DONE (2026-10-24): the rigs, Sheet IR4 (7.7 s /
+6.6 s), ADRs 0290–0293 accepted, threat items 28–30, `docs/hosted-walk.md`
+(for the operator to read before Run 4; the person's day not yet arranged).
+Rows D2890–D2896 added; NEXT FREE D2897, ADR 0294. Next: Run 2.** Planned at `7b035d9` (Session
 45's close record, tree clean, `main` = `origin/main`) against the host as read
 that morning (§0). Rows **D2862–D2889** at planning; the runs add theirs from
 **D2890**. ADRs **0290–0293** are Run 1's. **NEXT FREE after this table: D2890,
@@ -566,7 +566,7 @@ Playwright image** (`PW_IMAGE`, §0) with the package from `~/s45/walk-home/pw`.
    even when nobody reads it): `test_documentation_index` and the ADR index's
    test (grep `decisions/README` in `tests/`). Commit, push, no CI read.
 
-**Done (in part, 2026-10-24).** Executed at `1b2e3e1` (tree clean); scripts and
+**Done (2026-10-24; recorded in part at `b46d3ba`, IR4 after it).** Executed at `1b2e3e1` (tree clean); scripts and
 transcripts in WSL `~/s46/run1/` and `~/s46/rigs/46a`, `46b`.
 
 - **Greps** (step 0, `~/s46/run1/greps.txt`): `handoff` 93 files —
@@ -605,12 +605,16 @@ transcripts in WSL `~/s46/run1/` and `~/s46/rigs/46a`, `46b`.
   The digest's inputs are wider than §1 named (D2891).
 - **Sheet IR4**: the operator's word given; `/home/op/s46-ir4.sh` written as
   `op` (sha256 `9d0651d6…`, identical to `~/s46/run1/s46-ir4.sh`; host checkout
-  `4f4b207`). **Not yet run** — its reading accepts ADR 0292 or is §9's stop.
+  `4f4b207`). **Run by the operator at 11:53Z** (`/home/op/s46-ir4.txt`, read
+  by the agent as `op`): **`slot3-prod` exit 0, 7.7 s; `control-prod` exit 0,
+  6.6 s**; twelve checks each (`route health` is one), every one `ok`; the
+  evidence keys include `mount`, `heartbeat_holder` and `url` — the values ADR
+  0292 never records. **Under §9's 120 s: no stop; ADR 0292 Accepted.**
 - **ADRs**: **0290** (the hosted record path, `documented_path` → `DX-002`,
   `appliance_documented_path` → `DX-001`; amends 0207, whose status line says
   so), **0291** (the console creates; the token shown once at acceptance; the
   claim stays the client's, `--token-file` chooses no creation — D2895),
-  **0292** (the support bundle — **Proposed** until IR4; the record function
+  **0292** (the support bundle — accepted on IR4; the record function
   `SECURITY INVOKER` per the tree, D2894), **0293** (`control.sh status`,
   `control_states` shared). All four indexed in `docs/decisions/README.md`.
 - **Threat items 28–30** in `docs/threat-model.md`'s hosted list (the handoff
