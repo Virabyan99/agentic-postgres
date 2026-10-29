@@ -27,6 +27,7 @@
         "GET /v1/me",
         "GET /v1/organizations",
         "GET /v1/projects",
+        "GET /v1/operations",
         "POST /v1/me/totp",
         "POST /v1/me/totp/confirm"
       ]
@@ -38,10 +39,39 @@
       "calls": ["POST /v1/organizations"]
     },
     {
+      "id": "organization",
+      "path": "/console/#/org/{organization}",
+      "ledger": ["accounts", "organizations", "projects_self_service", "management_api"],
+      "calls": ["GET /v1/organizations", "GET /v1/projects", "GET /v1/operations"]
+    },
+    {
+      "id": "activity",
+      "path": "/console/#/org/{organization}/activity",
+      "ledger": ["projects_self_service"],
+      "calls": ["GET /v1/operations"]
+    },
+    {
+      "id": "operation",
+      "path": "/console/#/operations/{operation}",
+      "ledger": ["projects_self_service"],
+      "calls": [
+        "GET /v1/operations/{operation}",
+        "GET /v1/organizations",
+        "GET /v1/projects",
+        "GET /v1/projects/{key}"
+      ]
+    },
+    {
       "id": "new-project",
       "path": "/console/#/org/{organization}/new-project",
       "ledger": ["projects_self_service"],
       "calls": ["POST /v1/projects", "GET /v1/operations/{operation}"]
+    },
+    {
+      "id": "project-overview",
+      "path": "/console/#/projects/{key}",
+      "ledger": ["accounts", "organizations", "projects_self_service", "management_api"],
+      "calls": ["GET /v1/projects/{key}"]
     },
     {
       "id": "connect",
@@ -152,6 +182,12 @@
         "POST /v1/organizations/{organization}/keys",
         "DELETE /v1/organizations/{organization}/keys/{key_id}"
       ]
+    },
+    {
+      "id": "help",
+      "path": "/console/#/help",
+      "ledger": ["support_bundle", "console"],
+      "calls": []
     }
   ]
 }

@@ -1,6 +1,8 @@
 // The console's views (ADR 0280). Two pages share this file: `/accept`, where
 // an invitation link becomes an account (ADR 0282), and `/console/`, whose
-// views are fragment routes (`#/`, `#/projects/<key>/connect`, ...).
+// views are fragment routes (`#/`, `#/projects/<key>/connect`, ...). The
+// components are `ui.js`'s, the shell `nav.js`'s, the refusals' words
+// `messages.js`'s, a long operation's progress `progress.js`'s (ADR 0295).
 //
 // Rules this file keeps, each held by tests/contract/test_console_pages.py:
 // every value from the server is set with `textContent` or a DOM property,
@@ -12,31 +14,17 @@
 
 import { call, Refusal, relayOrigin } from "/console/api.js";
 import { CLAIM_SENTENCE, claimLine, createProject } from "/console/create.js";
+import { refusal, sentence } from "/console/messages.js";
+import { begin, current, frame, isCurrent, loadContext, mayCreate, narrow, PAGES, setPage, show, useActions } from "/console/nav.js";
 import { connect } from "/console/pg.js";
+import { CURRENT, describe, DONE, formatDuration, limitText, operationSeconds, STOPPED, stepStates, TERMINAL, typicalRange } from "/console/progress.js";
 import { newPassword, verifier } from "/console/scram.js";
 import { DEADLINE_SENTENCE, doors, openDoor, runStatement } from "/console/sql.js";
+import {
+  busyButton, button, card, choice, codeBlock, emptyState, field, h, inlineCopy, link, once, siteDomain, siteLink,
+  skeleton, stateChip, table, value,
+} from "/console/ui.js";
 
-// What each refusal means, in the words the documentation uses.
-const REFUSALS = {
-  authentication_failed: "The username or the password is not right, or the session has ended.",
-  authorization_failed: "Your role in this organisation does not allow this.",
-  second_factor_required: "Enter the six-digit code from your authenticator app.",
-  second_factor_invalid: "That code is wrong, or it was already used. Wait for the next one.",
-  invitation_invalid: "This invitation is used, expired, revoked or unknown. Ask for a new one.",
-  username_taken: "That username is taken. Choose another; the invitation is still good.",
-  factor_enabled: "A second factor is already enabled for this account.",
-  human_session_required: "Only a signed-in person may do this, not a management key.",
-  not_found: "Nothing by that name here, or it is not yours to see.",
-  plan_limit_reached: "The organisation already holds its plan's projects; nothing was recorded.",
-  capacity_exhausted: "No room on this server; nothing was recorded.",
-  conflict: "Another operation is in flight; nothing was recorded.",
-  branch_limit_reached: "The project already has its plan's branches, or one is being made; nothing was recorded.",
-  not_available: "That is not offered yet.",
-  invalid_request: "The request named something this cannot act on.",
-  console_unconfigured: "The console is not configured on this server.",
-};
-
-const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
 const KEY = /^[a-z][a-z0-9-]{1,62}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // The server's BRANCH_PATTERN (services/auth-api/app/models.py); `main` is the project.
@@ -45,115 +33,30 @@ const ROLES = ["owner", "admin", "member", "viewer"];
 const PROFILES = ["small", "standard", "large"];
 const KEY_SCOPES = ["organizations:read", "members:read", "projects:read", "projects:write", "operations:read"];
 
-const main = document.getElementById("main");
-
-// -- building blocks ---------------------------------------------------------
-
-// One element, its properties and its children -- strings become text nodes.
-function h(tag, properties, ...children) {
-  const element = document.createElement(tag);
-  for (const [name, value] of Object.entries(properties || {})) {
-    if (name.startsWith("on")) {
-      element.addEventListener(name.slice(2), value);
-    } else {
-      element[name] = value;
-    }
-  }
-  for (const child of children.flat()) {
-    if (child !== null && child !== undefined && child !== false) {
-      element.append(typeof child === "string" || typeof child === "number" ? document.createTextNode(String(child)) : child);
-    }
-  }
-  return element;
-}
-
-// Flattened, as `h` flattens its children: a view hands over a list of
-// sections as one argument, and `replaceChildren` would print an array as the
-// text "[object HTMLElement]" instead of inserting its elements (D2713).
-function show(...nodes) {
-  main.replaceChildren(...nodes.flat().filter((node) => node !== null && node !== undefined && node !== false));
-}
-
-// A sign-in, enrolment or invitation view: one narrow panel on the ground (ADR 0288).
-function narrow(...nodes) {
-  show(h("div", { className: "panel-narrow" }, nodes));
-}
-
-function refusal(error) {
-  if (error instanceof Refusal) {
-    const sentence = REFUSALS[error.code] || "The server refused this.";
-    const named = error.body && error.body.row ? [" (Ledger row ", h("code", {}, error.body.row), ")"] : [];
-    return h("p", { className: "refusal", role: "alert" }, h("code", {}, error.code), " ", sentence, ...named);
-  }
-  return h("p", { className: "refusal", role: "alert" }, "The server could not be reached.");
-}
-
-function field(label, properties) {
-  const input = h("input", properties);
-  return [h("label", {}, label, input), input];
-}
-
-function choice(label, options, selected) {
-  const select = h("select", {}, options.map((option) => h("option", { value: option.value ?? option, selected: (option.value ?? option) === selected }, option.label ?? option)));
-  return [h("label", {}, label, select), select];
-}
-
-function button(text, onclick, properties) {
-  return h("button", { type: "button", onclick, ...(properties || {}) }, text);
-}
-
-// The current view's link is marked for the eye and for a screen reader (ADR 0288).
-function link(route, text) {
-  return h("a", location.hash === route ? { href: route, ariaCurrent: "page" } : { href: route }, text);
-}
-
-// A project's or a branch's state as a chip (ADR 0288, D2827): the state word
-// unchanged, its colour by class. Any value this table does not name -- or that
-// is only a property of every object -- reads as unknown, never as ready
-// (ADR 0195).
-const STATE_CHIPS = {
-  ready: "state-ready",
-  creating: "state-busy",
-  starting: "state-busy",
-  updating: "state-busy",
-  suspending: "state-busy",
-  deleting: "state-busy",
-  sleeping: "state-asleep",
-  deleted: "state-gone",
-  unknown: "state-unknown",
+// Each operation type in the customer's words: the tracker's title and the
+// activity list's first column.
+const OPERATION_TITLES = {
+  "project.create": "Creating a project",
+  "project.sleep": "Putting a project to sleep",
+  "project.wake": "Waking a project",
+  "project.resize": "Resizing a project",
+  "project.export": "Exporting a database",
+  "project.delete": "Deleting a project",
+  "credential.rotate": "Setting a new password",
+  "branch.create": "Creating a branch",
+  "restore.create": "Restoring to a branch",
+  "branch.reset": "Resetting a branch",
+  "branch.delete": "Deleting a branch",
 };
 
-function stateChip(state) {
-  const known = typeof state === "string" && Object.hasOwn(STATE_CHIPS, state);
-  return h("span", { className: "chip " + (known ? STATE_CHIPS[state] : "state-unknown") }, value(state));
-}
+// -- operations ----------------------------------------------------------------
 
-// A secret, shown once: in a <code> element with a Copy button. It lives in
-// this element only, and is gone when the view is left.
-function once(label, secret) {
-  return h("div", { className: "once" },
-    h("p", {}, label, h("strong", {}, " Shown once — copy it now.")),
-    h("code", { className: "secret" }, secret),
-    button("Copy", () => navigator.clipboard.writeText(secret)));
-}
-
-function value(text) {
-  return text === null || text === undefined ? "—" : String(text);
-}
-
-// `numeric` names the columns whose cells are right-aligned figures (ADR 0288).
-function table(columns, rows, numeric) {
-  const cell = (name) => (numeric && numeric.has(name) ? { className: "num" } : {});
-  return h("table", {},
-    h("thead", {}, h("tr", {}, columns.map(([name, title]) => h("th", cell(name), title)))),
-    h("tbody", {}, rows.map((row) => h("tr", {}, columns.map(([name]) => h("td", cell(name), row[name] instanceof Node ? row[name] : value(row[name])))))));
-}
-
-// Reads the operation every 2 s until it is terminal, as `apg operation wait`.
+// Reads the operation every 2 s until it is terminal, as `apg operation wait`,
+// saying what it is doing in words -- never a percentage (ADR 0296).
 async function waitFor(operationId, status) {
   for (;;) {
     const row = await call("GET", `/operations/${encodeURIComponent(operationId)}`);
-    status.textContent = `Operation ${row.status}` + (row.step ? `, ${row.step}` : "") + (row.progress !== undefined && row.progress !== null ? ` (${row.progress}%)` : "");
+    status.textContent = describe(row, Date.now());
     if (TERMINAL.has(row.status)) {
       return row;
     }
@@ -167,6 +70,18 @@ function outcome(row) {
   }
   const reason = row.result && row.result.reason ? ` (${row.result.reason})` : "";
   return h("p", { className: "refusal" }, `The operation ${row.status}: `, h("code", {}, value(row.error_code)), reason);
+}
+
+// What an operation acts on, in a few words.
+function subjectWords(row) {
+  const subject = row.subject || {};
+  if (typeof subject.name === "string") {
+    return subject.name;
+  }
+  if (typeof subject.branch === "string") {
+    return `${subject.branch} on ${value(row.project_key)}`;
+  }
+  return value(row.project_key);
 }
 
 // -- the second factor, shared by onboarding and sign-in --------------------
@@ -183,7 +98,7 @@ function enrolFactor() {
         inputMode: "numeric", autocomplete: "one-time-code", maxLength: 6,
       });
       const message = h("div", {});
-      const confirm = button("Confirm", async () => {
+      const confirm = busyButton("Confirm", async () => {
         message.replaceChildren();
         try {
           await call("POST", "/me/totp/confirm", { totp_code: code.value.trim() });
@@ -193,7 +108,7 @@ function enrolFactor() {
         }
         enrolment = null;
         resolve();
-      });
+      }, { busy: "Confirming…" });
       status.replaceChildren(
         h("p", {}, "Scan this with your authenticator app, then enter the code it shows."),
         h("img", { src: enrolment.otpauth_qr, alt: "QR code for your authenticator app", className: "qr" }),
@@ -241,14 +156,14 @@ function joinAsSignedIn(token, me) {
   narrow(
     h("h1", {}, "Join with your account"),
     h("p", {}, "You are signed in as ", h("strong", {}, me.username), "."),
-    button("Join", async () => {
+    busyButton("Join", async () => {
       try {
         await call("POST", "/invitations/accept", { invitation_token: token });
         location.assign("/console/");
       } catch (error) {
         message.replaceChildren(refusal(error));
       }
-    }),
+    }, { busy: "Joining…" }),
     message,
   );
 }
@@ -259,7 +174,7 @@ function createAccount(token) {
   const [passLabel, password] = field("Password", { type: "password", autocomplete: "new-password" });
   const [againLabel, again] = field("Password again", { type: "password", autocomplete: "new-password" });
   const message = h("div", {});
-  const create = button("Create your account", async () => {
+  const create = busyButton("Create your account", async () => {
     message.replaceChildren();
     if (password.value !== again.value) {
       message.replaceChildren(h("p", { className: "refusal" }, "The two passwords differ."));
@@ -286,7 +201,7 @@ function createAccount(token) {
       again.value = "";
     }
     location.assign("/console/");
-  });
+  }, { busy: "Creating your account…" });
   narrow(
     h("h1", {}, "Create your account"),
     h("p", {}, "You were invited. Choose a username and a password."),
@@ -305,7 +220,7 @@ function signInWithNextCode(username, password) {
       h("h1", {}, "Sign in"),
       h("p", {}, "Your second factor is on. Wait for the next code in your app and enter it."),
       codeLabel,
-      button("Sign in", async () => {
+      busyButton("Sign in", async () => {
         try {
           await signIn(username, password, code.value.trim());
         } catch (error) {
@@ -313,13 +228,13 @@ function signInWithNextCode(username, password) {
           return;
         }
         resolve();
-      }),
+      }, { busy: "Signing in…" }),
       message,
     );
   });
 }
 
-// -- /console/: sign-in, the frame, the views ---------------------------------
+// -- /console/: sign-in, the views ---------------------------------------------
 
 function signInView() {
   const [userLabel, username] = field("Username", { autocomplete: "username" });
@@ -332,7 +247,7 @@ function signInView() {
   narrow(
     h("h1", {}, "Sign in"),
     userLabel, passLabel, codeLabel,
-    button("Sign in", async () => {
+    busyButton("Sign in", async () => {
       message.replaceChildren();
       try {
         await signIn(username.value.trim(), password.value, code.value.trim() || undefined);
@@ -346,7 +261,7 @@ function signInView() {
       password.value = "";
       location.hash = "#/";
       route();
-    }),
+    }, { busy: "Signing in…" }),
     message,
   );
 }
@@ -360,31 +275,51 @@ async function signOut() {
   }
 }
 
-// The frame every signed-in view is drawn in: who, where, and the way back. A
-// view's own navigation (`projectNav`, `orgNav`) moves into the layout's first
-// column; everything else is the content (ADR 0288, D2828).
-function frame(me, title, ...body) {
-  const parts = body.flat().filter((node) => node !== null && node !== undefined && node !== false);
-  const navs = parts.filter((node) => node instanceof Node && node.tagName === "NAV");
-  show(
-    h("header", { className: "bar" },
-      link("#/", "Overview"),
-      h("span", {}, "Signed in as ", h("strong", {}, me.username), " ", button("Sign out", signOut))),
-    h("div", { className: navs.length ? "layout" : "layout single" },
-      navs.length ? h("div", { className: "side" }, navs) : null,
-      h("div", { className: "content" }, h("h1", {}, title), parts.filter((node) => !navs.includes(node)))),
-  );
+useActions({ signOut });
+
+// The organisation's creations still running (ADR 0296), or null when they
+// could not be read -- said, never shown as none.
+async function openCreations(organization) {
+  try {
+    const served = await call("GET", `/operations?organization=${encodeURIComponent(organization)}&status=open`);
+    return (served.operations || []).filter((operation) => operation.type === "project.create");
+  } catch (error) {
+    return null;
+  }
 }
 
-function projectNav(key) {
-  const views = [["connect", "Connect"], ["sql", "SQL"], ["branches", "Branches"], ["backups", "Backups"], ["usage", "Usage"],
-    ["insights", "Insights"], ["monitoring", "Monitoring"], ["settings", "Settings"]];
-  return h("nav", { className: "tabs" }, views.map(([view, text]) => link(`#/projects/${key}/${view}`, text)));
+// What a creation is doing now, in a few words: its current step and how
+// long it has run.
+function creationNow(operation) {
+  const now = Date.now();
+  const running = stepStates(operation, now).find((step) => step.state === CURRENT);
+  const elapsed = formatDuration(operationSeconds(operation, now));
+  return (running ? running.label : "Waiting to start") + (elapsed ? `, ${elapsed} so far` : "");
 }
 
-function orgNav(org) {
-  const views = [["plan", "Plan"], ["usage", "Usage"], ["notifications", "Notifications"], ["settings", "Members and keys"]];
-  return h("nav", { className: "tabs" }, views.map(([view, text]) => link(`#/org/${org}/${view}`, text)));
+// An organisation's projects, and the ones being created, as one table.
+function projectList(projects, creating) {
+  const rows = [
+    ...(creating || []).map((operation) => ({
+      project: h("span", {}, h("strong", {}, subjectWords(operation)),
+        h("span", { className: "small muted sub" }, "Being created: " + creationNow(operation))),
+      state: stateChip("creating"),
+      profile: value((operation.subject || {}).profile),
+      open: link(`#/operations/${operation.id}`, "Follow"),
+    })),
+    ...projects.map((project) => ({
+      project: link(`#/projects/${project.key}`, project.key),
+      state: stateChip(project.state),
+      profile: value(project.profile),
+      open: link(`#/projects/${project.key}/connect`, "Connect"),
+    })),
+  ];
+  return [
+    rows.length
+      ? table([["project", "Project"], ["state", "State"], ["profile", "Size"], ["open", ""]], rows)
+      : emptyState("No project yet."),
+    creating === null ? h("p", { className: "muted" }, "Projects being created could not be read just now.") : null,
+  ];
 }
 
 async function overview(me) {
@@ -392,36 +327,140 @@ async function overview(me) {
   const sections = [];
   for (const organization of organizations) {
     const projects = (await call("GET", "/projects?organization=" + encodeURIComponent(organization.id))).projects;
-    sections.push(h("section", {},
+    const creating = await openCreations(organization.id);
+    sections.push(h("section", { className: "card" },
       h("h2", {}, organization.name, " ", h("small", {}, organization.role)),
-      orgNav(organization.id),
-      ["owner", "admin", "member"].includes(organization.role)
-        ? h("p", {}, link(`#/org/${organization.id}/new-project`, "New project"))
-        : null,
-      projects.length === 0
-        ? h("p", {}, "No project yet.")
-        : h("ul", {}, projects.map((project) => h("li", {},
-          link(`#/projects/${project.key}/connect`, project.key), " ", stateChip(project.state), " ", value(project.profile)))),
+      projectList(projects, creating),
+      h("p", { className: "card-actions" },
+        ["owner", "admin", "member"].includes(organization.role)
+          ? link(`#/org/${organization.id}/new-project`, "New project")
+          : null,
+        link(`#/org/${organization.id}`, "Open this organisation")),
     ));
   }
-  frame(me, "Overview",
-    organizations.length === 0 ? h("p", {}, "You belong to no organisation yet.") : sections,
-    h("p", {}, link("#/new", "New organisation")),
+  frame(me, "Projects", { action: link("#/new", "New organisation") },
+    organizations.length === 0 ? emptyState("You belong to no organisation yet. Ask for an invitation, or make one.") : sections,
   );
+}
+
+async function organizationView(me, org) {
+  const [served, creating] = await Promise.all([
+    call("GET", "/projects?organization=" + encodeURIComponent(org)), openCreations(org)]);
+  const here = current().organization;
+  frame(me, "Projects", { action: mayCreate(here) ? link(`#/org/${org}/new-project`, "New project") : null },
+    card(projectList(served.projects, creating)),
+    h("p", {}, link(`#/org/${org}/activity`, "Everything that happened in this organisation")));
+}
+
+async function activityView(me, org) {
+  const served = await call("GET", "/operations?organization=" + encodeURIComponent(org));
+  const rows = (served.operations || []).map((operation) => ({
+    when: value(operation.created_at),
+    what: OPERATION_TITLES[operation.type] || value(operation.type),
+    subject: subjectWords(operation),
+    status: value(operation.status),
+    open: link(`#/operations/${operation.id}`, TERMINAL.has(operation.status) ? "Details" : "Follow"),
+  }));
+  frame(me, "Activity",
+    rows.length
+      ? card(table([["when", "When"], ["what", "What"], ["subject", "On"], ["status", "Status"], ["open", ""]], rows))
+      : emptyState("Nothing has happened in this organisation yet."));
+}
+
+// The tracker's content for one reading of the operation: the steps, done /
+// current / to come, with the time each took; the whole's elapsed and typical
+// time; the server's limit; the outcome once it is over.
+function trackerParts(row) {
+  const now = Date.now();
+  const states = stepStates(row, now);
+  const elapsed = formatDuration(operationSeconds(row, now));
+  const typical = typicalRange(row.expected);
+  const limit = limitText(row.expected);
+  const over = TERMINAL.has(row.status);
+  const words = { [DONE]: "done", [CURRENT]: "in progress", [STOPPED]: "stopped here", "to come": "to come" };
+  const steps = states.map((step) => {
+    let time = "";
+    if (step.state === CURRENT && step.seconds !== null) {
+      time = `about ${formatDuration(step.seconds)} so far`;
+    } else if ((step.state === DONE || step.state === STOPPED) && step.seconds !== null) {
+      time = formatDuration(step.seconds);
+    } else if (step.state === "to come" && step.typical_seconds !== null) {
+      time = step.typical_seconds < 1 ? "usually under a second" : `usually ${formatDuration(step.typical_seconds)}`;
+    }
+    return h("li", { className: step.state === "to come" ? "todo" : step.state },
+      h("span", { className: "mark", "aria-hidden": "true" }, step.state === DONE ? "✓" : ""),
+      h("div", {}, h("strong", {}, step.label), h("span", { className: "sr" }, `, ${words[step.state]}`),
+        step.state === CURRENT ? h("div", { className: "indeterminate", "aria-hidden": "true" }) : null),
+      h("span", { className: "time" }, time));
+  });
+  return [
+    h("p", { className: "meta-row" },
+      h("span", {}, "Status ", h("b", {}, value(row.status))),
+      h("span", {}, "On ", h("b", {}, subjectWords(row))),
+      elapsed ? h("span", {}, over ? "Took about " : "Running for about ", h("b", {}, elapsed)) : null,
+      typical ? h("span", {}, "Usually ", h("b", {}, typical)) : null),
+    states.length
+      ? card(h("ol", { className: "steps" }, steps))
+      : h("p", {}, "Step: ", h("code", {}, value(row.step))),
+    limit && !over ? h("p", { className: "muted" }, `If it has not finished ${limit} after it started, the server stops it.`) : null,
+    row.type === "project.create"
+      ? h("p", { className: "muted" }, "The handoff value for the administrator was shown once, when the creation was recorded, and cannot be shown again. You do not need it to connect.")
+      : null,
+    over ? outcome(row) : null,
+    over && row.status === "succeeded" && row.project_key ? h("p", {}, link(`#/projects/${row.project_key}`, "Open the project")) : null,
+    over && typeof row.download_url === "string" ? once("The download link:", row.download_url) : null,
+  ];
+}
+
+// `#/operations/<id>` (ADR 0296 decision 5): read from the API on every load,
+// then every 2 s while it runs and this page is open. Nothing is kept that a
+// refresh could lose.
+async function operationView(me, id, turn) {
+  let row = await call("GET", `/operations/${encodeURIComponent(id)}`);
+  // A creation names its slot's key before the project is registered: until it
+  // succeeds there is no project to read, only its organisation.
+  const creating = row.type === "project.create" && row.status !== "succeeded";
+  await loadContext(call, { organization: row.organization_id, projectKey: creating ? null : row.project_key });
+  if (!isCurrent(turn)) {
+    return;
+  }
+  setPage("operation");
+  const tracker = h("div", { className: "stack" });
+  const note = h("p", { className: "muted" });
+  const draw = () => tracker.replaceChildren(...trackerParts(row).filter(Boolean));
+  draw();
+  frame(me, OPERATION_TITLES[row.type] || "Operation", tracker, note);
+  while (!TERMINAL.has(row.status)) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (!isCurrent(turn)) {
+      return;
+    }
+    try {
+      row = await call("GET", `/operations/${encodeURIComponent(id)}`);
+      note.textContent = "";
+    } catch (error) {
+      note.textContent = "The operation could not be read just now; this page tries again in two seconds.";
+      continue;
+    }
+    if (!isCurrent(turn)) {
+      return;
+    }
+    draw();
+  }
 }
 
 function newOrganization(me) {
   const [nameLabel, name] = field("Name", { maxLength: 64 });
   const message = h("div", {});
-  frame(me, "New organisation", nameLabel,
-    button("Create", async () => {
+  frame(me, "New organisation", card(nameLabel,
+    busyButton("Create", async () => {
       try {
         const created = await call("POST", "/organizations", { name: name.value.trim() });
         location.hash = `#/org/${created.id}/settings`;
       } catch (error) {
         message.replaceChildren(refusal(error));
       }
-    }), message);
+    }, { busy: "Creating…" }), message));
 }
 
 // Session 46 (ADR 0291): a project created here. The token is made and
@@ -433,10 +472,9 @@ function newProjectView(me, org) {
   const [profileLabel, profile] = choice("Profile", PROFILES, "small");
   const [adminLabel, admin] = field("Administrator's username", { maxLength: 63, autocomplete: "off" });
   const status = h("p", { className: "muted" });
-  const result = h("div", {});
-  const create = button("Create project", async () => {
+  const result = h("div", { className: "stack" });
+  const create = busyButton("Create project", async () => {
     result.replaceChildren();
-    create.disabled = true;
     try {
       const final = await createProject({
         call,
@@ -447,7 +485,8 @@ function newProjectView(me, org) {
             h("p", {}, "Operation ", h("code", {}, operation.id), " is recorded. ", CLAIM_SENTENCE),
             h("p", {}, h("code", {}, claimLine(null))),
             button("I have saved it", () => panel.remove()));
-          result.append(panel);
+          result.append(panel,
+            h("p", {}, link(`#/operations/${operation.id}`, "Follow it on its own page"), "; it keeps going if you close this one."));
         },
         organization: org,
         name: name.value.trim(),
@@ -464,14 +503,26 @@ function newProjectView(me, org) {
         h("p", { className: "muted" }, "To claim its administrator from a terminal: ", h("code", {}, claimLine(key))));
     } catch (error) {
       result.append(refusal(error));
-    } finally {
-      create.disabled = false;
     }
-  });
-  frame(me, "New project", nameLabel, profileLabel, adminLabel, create, status, result);
+  }, { busy: "Creating…" });
+  frame(me, "New project", card(nameLabel, profileLabel, adminLabel, create, status), result);
 }
 
 // -- a project's views --------------------------------------------------------
+
+async function projectOverviewView(me, key) {
+  const project = await call("GET", `/projects/${key}`);
+  const pages = [["connect", "/connect"], ["sql-editor", "/sql"], ["branches", "/branches"], ["backups", "/backups"],
+    ["project-usage", "/usage"], ["insights", "/insights"], ["monitoring", "/monitoring"], ["project-settings", "/settings"]];
+  frame(me, "Overview", { chip: stateChip(project.state), action: link(`#/projects/${key}/connect`, "Get the connection string") },
+    card(h("dl", { className: "facts" },
+      h("div", {}, h("dt", {}, "Key"), h("dd", {}, inlineCopy(key))),
+      h("div", {}, h("dt", {}, "Size"), h("dd", {}, value(project.profile))),
+      h("div", {}, h("dt", {}, "Region"), h("dd", {}, value(project.region))),
+      h("div", {}, h("dt", {}, "Release"), h("dd", {}, value(project.template_version))))),
+    card(h("ul", { className: "links" }, pages.map(([page, suffix]) => h("li", {},
+      h("a", { href: `#/projects/${key}${suffix}` }, PAGES[page].label), h("span", { className: "muted" }, " — " + PAGES[page].purpose))))));
+}
 
 function door(found) {
   return `postgresql://${found.user}@${found.host}:${found.port}/${found.database}?sslmode=verify-full`;
@@ -483,7 +534,7 @@ function withPassword(found, password) {
 
 async function connectView(me, key) {
   const served = await call("GET", `/projects/${key}/connections`);
-  const result = h("div", {});
+  const result = h("div", { className: "stack" });
   const rotate = (role, doorName) => async () => {
     result.replaceChildren();
     const status = h("p", { className: "muted" }, "Setting a new password…");
@@ -499,10 +550,8 @@ async function connectView(me, key) {
       const found = served[doorName];
       result.append(
         once(`The new password for ${role}:`, password),
-        h("p", {}, "The connection string with it:"),
-        h("code", { className: "secret" }, withPassword(found, password)),
-        h("p", {}, "Or with psql:"),
-        h("code", { className: "secret" }, `psql "${withPassword(found, password)}"`),
+        codeBlock(withPassword(found, password), { label: "The connection string with it", secret: true }),
+        codeBlock(`psql "${withPassword(found, password)}"`, { label: "Or with psql", secret: true }),
         h("p", { className: "muted" }, "The previous password no longer works."),
       );
     } catch (error) {
@@ -511,22 +560,21 @@ async function connectView(me, key) {
       password = null;
     }
   };
-  frame(me, key, projectNav(key),
-    h("p", {}, "Two doors, both TLS (", h("code", {}, "sslmode=verify-full"), ") on port 5432."),
-    table([["door", "Door"], ["role", "Role"], ["string", "Connection string"]], [
-      { door: "pooled", role: served.pooled.user, string: h("code", {}, door(served.pooled)) },
-      { door: "direct", role: served.direct.user, string: h("code", {}, door(served.direct)) },
-    ]),
-    h("p", {}, "The password is not stored anywhere you can read it back. Set a new one to see it once:"),
-    button("New password for the pooled door (customer_app)", rotate("customer_app", "pooled")),
-    button("New password for the direct door (customer_admin)", rotate("customer_admin", "direct")),
-    h("p", {}, link(`#/projects/${key}/sql`, "Open the SQL editor")),
+  frame(me, "Connect",
+    card(h("p", {}, "Two doors, both TLS (", h("code", {}, "sslmode=verify-full"), ") on port 5432."),
+      ["pooled", "direct"].map((name) => h("div", { className: "door" },
+        h("p", {}, h("strong", {}, `The ${name} door`), ", as ", h("code", {}, served[name].user)),
+        inlineCopy(door(served[name]))))),
+    card(h("p", {}, "The password is not stored anywhere you can read it back. Set a new one to see it once:"),
+      busyButton("New password for the pooled door (customer_app)", rotate("customer_app", "pooled"), { busy: "Setting a new password…" }),
+      busyButton("New password for the direct door (customer_admin)", rotate("customer_admin", "direct"), { busy: "Setting a new password…" }),
+      h("p", {}, link(`#/projects/${key}/sql`, "Open the SQL editor"))),
     result);
 }
 
 async function branchesView(me, key) {
   const served = await call("GET", `/projects/${key}/branches`);
-  const result = h("div", {});
+  const result = h("div", { className: "stack" });
   const [nameLabel, name] = field("Branch name", { maxLength: 12 });
   const [atLabel, at] = field("Restore to (optional, e.g. 2026-10-20T09:30:00Z)", {});
   const [confirmLabel, confirm] = field("To delete a branch, type its name here first", { maxLength: 12 });
@@ -555,10 +603,10 @@ async function branchesView(me, key) {
   const rows = served.branches.map((branch) => ({
     ...branch,
     state: stateChip(branch.state),
-    actions: h("span", {},
-      button("Reset", () => request(`/projects/${key}/branches/${encodeURIComponent(branch.name)}/reset`,
-        at.value.trim() ? { target_time: at.value.trim() } : {}, `Resetting ${branch.name}`)),
-      button("Delete", async () => {
+    actions: h("span", { className: "row-actions" },
+      busyButton("Reset", () => request(`/projects/${key}/branches/${encodeURIComponent(branch.name)}/reset`,
+        at.value.trim() ? { target_time: at.value.trim() } : {}, `Resetting ${branch.name}`), { busy: "Resetting…" }),
+      busyButton("Delete", async () => {
         if (confirm.value !== branch.name) {
           result.replaceChildren(h("p", { className: "refusal" }, `Type ${branch.name} in the field below first; a branch is not backed up, and nothing was sent.`));
           return;
@@ -572,27 +620,29 @@ async function branchesView(me, key) {
         } catch (error) {
           result.append(refusal(error));
         }
-      })),
+      }, { busy: "Deleting…" })),
   }));
-  frame(me, `${key}: branches`, projectNav(key),
-    table([["name", "Name"], ["state", "State"], ["reached_point", "Reached"], ["expires_at", "Expires"],
-      ["pool_host", "Pooled host"], ["actions", ""]], rows),
+  frame(me, "Branches",
+    card(rows.length
+      ? table([["name", "Name"], ["state", "State"], ["reached_point", "Reached"], ["expires_at", "Expires"],
+        ["pool_host", "Pooled host"], ["actions", ""]], rows)
+      : emptyState("No branch yet. Make one below."),
     h("p", { className: "muted" }, value(served.notice)),
-    confirmLabel,
-    h("h2", {}, "New branch"), nameLabel, atLabel,
-    button("Create the branch", () => {
-      const branch = name.value.trim();
-      if (!BRANCH.test(branch) || branch === "main") {
-        result.replaceChildren(h("p", { className: "refusal" }, "A branch name is 2 to 12 lowercase letters and digits, starting with a letter, and not main."));
-        return;
-      }
-      const target = at.value.trim();
-      if (target) {
-        request(`/projects/${key}/restores`, { branch, target_time: target }, `Restoring into ${branch}`);
-      } else {
-        request(`/projects/${key}/branches`, { branch }, `Branching into ${branch}`);
-      }
-    }),
+    confirmLabel),
+    card(h("h2", {}, "New branch"), nameLabel, atLabel,
+      busyButton("Create the branch", async () => {
+        const branch = name.value.trim();
+        if (!BRANCH.test(branch) || branch === "main") {
+          result.replaceChildren(h("p", { className: "refusal" }, "A branch name is 2 to 12 lowercase letters and digits, starting with a letter, and not main."));
+          return;
+        }
+        const target = at.value.trim();
+        if (target) {
+          await request(`/projects/${key}/restores`, { branch, target_time: target }, `Restoring into ${branch}`);
+        } else {
+          await request(`/projects/${key}/branches`, { branch }, `Branching into ${branch}`);
+        }
+      }, { busy: "Creating the branch…" })),
     result);
 }
 
@@ -608,7 +658,7 @@ async function backupsView(me, key) {
   } else {
     body = [h("p", { className: "refusal" }, "The restore window could not be determined: ", value(served.reason))];
   }
-  frame(me, `${key}: backups`, projectNav(key), ...body);
+  frame(me, "Backups", card(...body));
 }
 
 const USAGE_FIGURES = ["database_bytes", "repository_bytes", "branch_count", "branch_bytes", "customer_connections"];
@@ -622,7 +672,7 @@ function usageSection(document) {
     const figure = figures[name] || {};
     return { name, latest: figure.latest === null || figure.latest === undefined ? "not read in this window" : `${figure.latest} at ${figure.latest_at}`, max: figure.max };
   });
-  return h("section", {},
+  return h("section", { className: "card" },
     h("h2", {}, value(document.project_key)),
     h("p", { className: "muted" }, `From ${document.window.from} to ${document.window.to}; ${document.samples.present} of ${document.samples.expected} samples recorded.`),
     table([["name", "Figure"], ["latest", "Latest"], ["max", "Window maximum"]], rows, new Set(["max"])),
@@ -634,7 +684,7 @@ function usageSection(document) {
 }
 
 async function projectUsageView(me, key) {
-  frame(me, `${key}: usage (24 h)`, projectNav(key), usageSection(await call("GET", `/projects/${key}/usage?hours=24`)));
+  frame(me, "Usage", usageSection(await call("GET", `/projects/${key}/usage?hours=24`)));
 }
 
 async function insightsView(me, key) {
@@ -643,14 +693,14 @@ async function insightsView(me, key) {
   if (served.status === "could_not_determine") {
     body = [h("p", { className: "refusal" }, "Insights could not be determined: ", value(served.reason))];
   } else if (!(served.statements || []).length) {
-    body = [h("p", {}, "No statement of yours ran in this window.")];
+    body = [emptyState("No statement of yours ran in this window.")];
   } else {
     body = [table([["total_ms", "Total ms"], ["calls", "Calls"], ["mean_ms", "Mean ms"], ["rows_per_call", "Rows/call"],
       ["cache_hit_ratio", "Cache"], ["role", "Role"], ["query", "Statement"]],
     served.statements.map((statement) => ({ ...statement, query: h("code", {}, statement.query) })),
     new Set(["total_ms", "calls", "mean_ms", "rows_per_call", "cache_hit_ratio"]))];
   }
-  frame(me, `${key}: Query Insights (24 h)`, projectNav(key), ...body, h("p", { className: "muted" }, value(served.tuning)));
+  frame(me, "Slowest queries", card(...body, h("p", { className: "muted" }, value(served.tuning))));
 }
 
 async function monitoringView(me, key) {
@@ -660,15 +710,15 @@ async function monitoringView(me, key) {
     reading: "unread" in signal ? `not read: ${signal.unread}` : `${signal.value} ${signal.unit} (at ${signal.observed_at})`,
     source: signal.source,
   }));
-  frame(me, `${key}: monitoring`, projectNav(key),
-    h("p", { className: "muted" }, `Read at ${value(served.read_at)}. Each reading names where it comes from.`),
-    table([["name", "Signal"], ["reading", "Reading"], ["source", "Source"]], rows));
+  frame(me, "Monitoring",
+    card(h("p", { className: "muted" }, `Read at ${value(served.read_at)}. Each reading names where it comes from.`),
+      table([["name", "Signal"], ["reading", "Reading"], ["source", "Source"]], rows)));
 }
 
 // Session 46 (ADR 0292): the support bundle as the server recorded it -- what
 // it last saw and when, never "now"; a stale or missing reading says so.
 function supportBundle(served) {
-  const current = served.status === "read" || served.status === "asleep";
+  const fresh = served.status === "read" || served.status === "asleep";
   const said = served.status === "read" ? `Read at ${value(served.read_at)}.` : value(served.reason);
   const rows = (served.checks || []).map((check) => ({
     name: check.name,
@@ -676,13 +726,13 @@ function supportBundle(served) {
     detail: check.detail,
     age: `${value(check.age_seconds)} s ago`,
   }));
-  return [h("p", { className: current ? "muted" : "refusal" }, said),
+  return [h("p", { className: fresh ? "muted" : "refusal" }, said),
     ...(rows.length ? [table([["name", "Check"], ["verdict", "Verdict"], ["detail", "Detail"], ["age", "Read"]], rows)] : [])];
 }
 
 async function projectSettingsView(me, key) {
   const project = await call("GET", `/projects/${key}`);
-  const result = h("div", {});
+  const result = h("div", { className: "stack" });
   async function operate(method, path, body, what) {
     result.replaceChildren();
     const status = h("p", { className: "muted" }, what + "…");
@@ -708,48 +758,48 @@ async function projectSettingsView(me, key) {
   } catch (error) {
     bundle.append(refusal(error));
   }
-  frame(me, `${key}: settings`, projectNav(key),
-    h("p", {}, "State ", stateChip(project.state), `, size ${value(project.profile)}, region ${value(project.region)}.`),
-    idleLabel,
-    button("Save idle sleep", async () => {
-      result.replaceChildren();
-      try {
-        const minutes = idle.value === "never" ? null : Number(idle.value);
-        const answer = await call("PUT", `/projects/${key}/idle-sleep`, { minutes });
-        result.append(h("p", {}, "Saved. ", value(answer.note)));
-      } catch (error) {
-        result.append(refusal(error));
-      }
-    }),
-    profileLabel,
-    button("Resize", () => operate("PUT", `/projects/${key}/compute`, { profile: profile.value }, "Resizing")),
-    h("h2", {}, "Sleep and wake"),
-    button("Sleep", () => operate("POST", `/projects/${key}/sleep`, undefined, "Putting to sleep")),
-    button("Wake", () => operate("POST", `/projects/${key}/wake`, undefined, "Waking")),
-    h("h2", {}, "Export"),
-    button("Export the database", async () => {
-      const final = await operate("POST", `/projects/${key}/export`, undefined, "Exporting");
-      if (final && final.status === "succeeded" && typeof final.download_url === "string") {
-        const result_ = final.result || {};
-        result.append(
-          once("The download link:", final.download_url),
-          h("p", { className: "muted" }, `${value(result_.size_bytes)} bytes, sha256 ${value(result_.sha256)}.`));
-      }
-    }),
-    h("p", {}, h("strong", {}, "Support bundle"),
+  frame(me, "Settings", { chip: stateChip(project.state) },
+    card(h("p", {}, "State ", stateChip(project.state), `, size ${value(project.profile)}, region ${value(project.region)}.`),
+      idleLabel,
+      busyButton("Save idle sleep", async () => {
+        result.replaceChildren();
+        try {
+          const minutes = idle.value === "never" ? null : Number(idle.value);
+          const answer = await call("PUT", `/projects/${key}/idle-sleep`, { minutes });
+          result.append(h("p", {}, "Saved. ", value(answer.note)));
+        } catch (error) {
+          result.append(refusal(error));
+        }
+      }, { busy: "Saving…" }),
+      profileLabel,
+      busyButton("Resize", () => operate("PUT", `/projects/${key}/compute`, { profile: profile.value }, "Resizing"), { busy: "Resizing…" })),
+    card(h("h2", {}, "Sleep and wake"),
+      busyButton("Sleep", () => operate("POST", `/projects/${key}/sleep`, undefined, "Putting to sleep"), { busy: "Putting to sleep…" }),
+      busyButton("Wake", () => operate("POST", `/projects/${key}/wake`, undefined, "Waking"), { busy: "Waking…" })),
+    card(h("h2", {}, "Export"),
+      busyButton("Export the database", async () => {
+        const final = await operate("POST", `/projects/${key}/export`, undefined, "Exporting");
+        if (final && final.status === "succeeded" && typeof final.download_url === "string") {
+          const result_ = final.result || {};
+          result.append(
+            once("The download link:", final.download_url),
+            h("p", { className: "muted" }, `${value(result_.size_bytes)} bytes, sha256 ${value(result_.sha256)}.`));
+        }
+      }, { busy: "Exporting…" })),
+    card(h("p", {}, h("strong", {}, "Support bundle"),
       " — the checks the server last ran on this project's node, each with when it was read. ",
       "To send it to whoever helps you: ",
       h("code", {}, `apg project diagnostics --project-key ${key} --output FILE`), "."),
-    bundle,
-    h("h2", {}, "Delete"),
-    confirmLabel,
-    button("Delete the project", () => {
-      if (confirm.value !== key) {
-        result.replaceChildren(h("p", { className: "refusal" }, "Type the project's key exactly; nothing was sent."));
-        return;
-      }
-      operate("DELETE", `/projects/${key}`, undefined, "Deleting");
-    }),
+    bundle),
+    card(h("h2", {}, "Delete"),
+      confirmLabel,
+      busyButton("Delete the project", async () => {
+        if (confirm.value !== key) {
+          result.replaceChildren(h("p", { className: "refusal" }, "Type the project's key exactly; nothing was sent."));
+          return;
+        }
+        await operate("DELETE", `/projects/${key}`, undefined, "Deleting");
+      }, { busy: "Deleting…" })),
     result);
 }
 
@@ -763,35 +813,37 @@ async function planView(me, org) {
     value: Array.isArray(entitlement.value) ? entitlement.value.join(", ") : value(entitlement.value),
     enforced: entitlement.enforced ? "enforced" : "shown, not enforced",
   }));
-  frame(me, "Plan", orgNav(org),
-    h("p", {}, `This organisation is on ${held.plan} (${held.status}); projects held ${held.projects_active.held} of ${held.projects_active.limit}.`),
-    plans.plans.map((document) => h("section", {},
+  frame(me, "Plan and usage",
+    card(h("p", {}, `This organisation is on ${held.plan} (${held.status}); projects held ${held.projects_active.held} of ${held.projects_active.limit}.`),
+      h("p", {}, link(`#/org/${org}/usage`, "Each project's usage in the last 24 hours"), " · ",
+        h("a", { href: siteLink("/pricing/") }, "Compare the plans"))),
+    plans.plans.map((document) => h("section", { className: "card" },
       h("h2", {}, `${document.plan} (${document.status})`),
       table([["name", "Entitlement"], ["value", "Value"], ["unit", "Unit"], ["enforced", ""]], entitlementRows(document)),
-      document.status !== "active" ? button("Notify me", async () => {
+      document.status !== "active" ? busyButton("Notify me", async () => {
         try {
           const answer = await call("POST", `/organizations/${org}/plan-interest`, { plan: document.plan });
           message.replaceChildren(h("p", {}, answer.recorded ? "Recorded. " : "Already recorded. ", value(answer.note)));
         } catch (error) {
           message.replaceChildren(refusal(error));
         }
-      }) : null)),
+      }, { busy: "Recording…" }) : null)),
     message,
     h("p", { className: "muted" }, value(plans.note)));
 }
 
 async function orgUsageView(me, org) {
   const served = await call("GET", `/organizations/${org}/usage?hours=24`);
-  frame(me, "Usage (24 h)", orgNav(org),
-    served.projects.length ? served.projects.map(usageSection) : h("p", {}, "No project in this window."));
+  frame(me, "Usage",
+    served.projects.length ? served.projects.map(usageSection) : emptyState("No project in this window."));
 }
 
 async function notificationsView(me, org) {
   const served = await call("GET", `/organizations/${org}/notifications?limit=50`);
-  frame(me, "Notifications", orgNav(org),
+  frame(me, "Notifications",
     served.notifications.length
-      ? table([["created_at", "When"], ["project", "Project"], ["kind", "Kind"], ["text", "What happened"]], served.notifications)
-      : h("p", {}, "Nothing yet."));
+      ? card(table([["created_at", "When"], ["project", "Project"], ["kind", "Kind"], ["text", "What happened"]], served.notifications))
+      : emptyState("Nothing yet. A notification is written when a project finishes an operation, falls asleep, or nears a limit."));
 }
 
 async function orgSettingsView(me, org) {
@@ -800,7 +852,7 @@ async function orgSettingsView(me, org) {
     call("GET", `/organizations/${org}/invitations`).catch(() => ({ invitations: [] })),
     call("GET", `/organizations/${org}/keys`).catch(() => ({ keys: [] })),
   ]);
-  const result = h("div", {});
+  const result = h("div", { className: "stack" });
   const act = (work) => async () => {
     result.replaceChildren();
     try {
@@ -815,55 +867,77 @@ async function orgSettingsView(me, org) {
     return {
       ...member,
       role,
-      actions: h("span", {},
-        button("Change role", act(() => call("PATCH", `/organizations/${org}/members/${member.user_id}`, { role: role.value }))),
-        button("Remove", act(() => call("DELETE", `/organizations/${org}/members/${member.user_id}`)))),
+      actions: h("span", { className: "row-actions" },
+        busyButton("Change role", act(() => call("PATCH", `/organizations/${org}/members/${member.user_id}`, { role: role.value })), { busy: "Changing…" }),
+        busyButton("Remove", act(() => call("DELETE", `/organizations/${org}/members/${member.user_id}`)), { busy: "Removing…" })),
     };
   });
   const [inviteRoleLabel, inviteRole] = choice("Role", ROLES, "member");
   const [keyNameLabel, keyName] = field("Key name", { maxLength: 64 });
   const scopes = KEY_SCOPES.map((scope) => h("input", { type: "checkbox", value: scope }));
-  frame(me, "Members and keys", orgNav(org),
-    h("h2", {}, "Members"),
-    table([["username", "Username"], ["display_name", "Name"], ["role", "Role"], ["actions", ""]], memberRows),
-    h("h2", {}, "Invite someone"),
-    inviteRoleLabel,
-    button("Make an invitation link", async () => {
-      result.replaceChildren();
-      try {
-        const minted = await call("POST", "/invitations", { organization_id: org, role: inviteRole.value });
-        result.append(once("Send this link to the person you invite:", minted.accept_url),
-          h("p", { className: "muted" }, `It expires ${minted.expires_at} and works once.`));
-      } catch (error) {
-        result.append(refusal(error));
-      }
-    }),
-    table([["role", "Role"], ["issued_at", "Issued"], ["expires_at", "Expires"], ["accepted_at", "Accepted"], ["revoked_at", "Revoked"], ["actions", ""]],
-      invitations.invitations.map((invitation) => ({
-        ...invitation,
-        actions: invitation.accepted_at || invitation.revoked_at ? "" :
-          button("Revoke", act(() => call("DELETE", `/organizations/${org}/invitations/${invitation.id}`))),
-      }))),
-    h("h2", {}, "Management keys"),
-    table([["name", "Name"], ["scopes", "Scopes"], ["last_used_at", "Last used"], ["revoked_at", "Revoked"], ["actions", ""]],
-      keys.keys.map((key) => ({
-        ...key,
-        scopes: key.scopes.join(", "),
-        actions: key.revoked_at ? "" : button("Revoke", act(() => call("DELETE", `/organizations/${org}/keys/${key.key_id}`))),
-      }))),
-    keyNameLabel,
-    h("fieldset", {}, h("legend", {}, "Scopes"), KEY_SCOPES.map((scope, index) => h("label", { className: "inline" }, scopes[index], " ", scope))),
-    button("Make a key", async () => {
-      result.replaceChildren();
-      try {
-        const chosen = scopes.filter((box) => box.checked).map((box) => box.value);
-        const minted = await call("POST", `/organizations/${org}/keys`, { name: keyName.value.trim(), scopes: chosen });
-        result.append(once("The key:", minted.key));
-      } catch (error) {
-        result.append(refusal(error));
-      }
-    }),
+  frame(me, "Members and keys",
+    card(h("h2", {}, "Members"),
+      table([["username", "Username"], ["display_name", "Name"], ["role", "Role"], ["actions", ""]], memberRows)),
+    card(h("h2", {}, "Invite someone"),
+      inviteRoleLabel,
+      busyButton("Make an invitation link", async () => {
+        result.replaceChildren();
+        try {
+          const minted = await call("POST", "/invitations", { organization_id: org, role: inviteRole.value });
+          result.append(once("Send this link to the person you invite:", minted.accept_url),
+            h("p", { className: "muted" }, `It expires ${minted.expires_at} and works once.`));
+        } catch (error) {
+          result.append(refusal(error));
+        }
+      }, { busy: "Making the link…" }),
+      table([["role", "Role"], ["issued_at", "Issued"], ["expires_at", "Expires"], ["accepted_at", "Accepted"], ["revoked_at", "Revoked"], ["actions", ""]],
+        invitations.invitations.map((invitation) => ({
+          ...invitation,
+          actions: invitation.accepted_at || invitation.revoked_at ? "" :
+            busyButton("Revoke", act(() => call("DELETE", `/organizations/${org}/invitations/${invitation.id}`)), { busy: "Revoking…" }),
+        })))),
+    card(h("h2", {}, "Management keys"),
+      table([["name", "Name"], ["scopes", "Scopes"], ["last_used_at", "Last used"], ["revoked_at", "Revoked"], ["actions", ""]],
+        keys.keys.map((key) => ({
+          ...key,
+          scopes: key.scopes.join(", "),
+          actions: key.revoked_at ? "" : busyButton("Revoke", act(() => call("DELETE", `/organizations/${org}/keys/${key.key_id}`)), { busy: "Revoking…" }),
+        }))),
+      keyNameLabel,
+      h("fieldset", {}, h("legend", {}, "Scopes"), KEY_SCOPES.map((scope, index) => h("label", { className: "inline" }, scopes[index], " ", scope))),
+      busyButton("Make a key", async () => {
+        result.replaceChildren();
+        try {
+          const chosen = scopes.filter((box) => box.checked).map((box) => box.value);
+          const minted = await call("POST", `/organizations/${org}/keys`, { name: keyName.value.trim(), scopes: chosen });
+          result.append(once("The key:", minted.key));
+        } catch (error) {
+          result.append(refusal(error));
+        }
+      }, { busy: "Making the key…" })),
     result);
+}
+
+// -- help (ADR 0298; Run 7 completes it) ------------------------------------------
+
+function helpView(me) {
+  const address = `invite@${siteDomain()}`;
+  const docs = [["Getting started", "/docs/getting-started/"], ["Connecting your application", "/docs/connecting/"],
+    ["The SQL editor", "/docs/sql-editor/"], ["Branches", "/docs/branches/"], ["Backups", "/docs/backups/"],
+    ["Plans and usage", "/docs/plans-and-usage/"], ["What a refusal means", "/docs/refusals/"], ["All the documentation", "/docs/"]];
+  frame(me, "Help",
+    card(h("h2", {}, "Ask a person"),
+      h("p", {}, "Write to the people who run this service; a person reads every message."),
+      inlineCopy(address),
+      h("p", {}, h("a", { href: `mailto:${address}` }, "Write an email"))),
+    card(h("h2", {}, "What to send"),
+      h("ul", {},
+        h("li", {}, "The project's key, if it is about a project."),
+        h("li", {}, "What the page said, and the word in small type under it."),
+        h("li", {}, "The support bundle, from the project's Settings page.")),
+      h("p", {}, "Never send a password, a key or a link you were shown once: nobody here will ask for one.")),
+    card(h("h2", {}, "Read the documentation"),
+      h("ul", { className: "links" }, docs.map(([title, path]) => h("li", {}, h("a", { href: siteLink(path) }, title))))));
 }
 
 // -- the SQL editor (Session 44, ADR 0285) -------------------------------------
@@ -896,7 +970,7 @@ function resultView(result) {
 async function sqlView(me, key) {
   const found = await doors(call, key);
   if (!found.offered) {
-    frame(me, key, projectNav(key), h("p", {}, REFUSALS.not_available));
+    frame(me, "SQL editor", h("p", {}, sentence("not_available")));
     return;
   }
   const relay = await relayOrigin();
@@ -942,7 +1016,7 @@ async function sqlView(me, key) {
       closeEditor();
     }
   };
-  frame(me, key, projectNav(key),
+  frame(me, "SQL editor",
     h("p", {}, "Your own client: it connects as your database role with the password you type here, which stays in this page."),
     connectForm,
     statement,
@@ -955,6 +1029,7 @@ async function sqlView(me, key) {
 // -- the router ----------------------------------------------------------------
 
 const VIEWS = [
+  [/^#\/projects\/([^/]+)$/, projectOverviewView, KEY],
   [/^#\/projects\/([^/]+)\/connect$/, connectView, KEY],
   [/^#\/projects\/([^/]+)\/sql$/, sqlView, KEY],
   [/^#\/projects\/([^/]+)\/branches$/, branchesView, KEY],
@@ -963,15 +1038,34 @@ const VIEWS = [
   [/^#\/projects\/([^/]+)\/insights$/, insightsView, KEY],
   [/^#\/projects\/([^/]+)\/monitoring$/, monitoringView, KEY],
   [/^#\/projects\/([^/]+)\/settings$/, projectSettingsView, KEY],
+  [/^#\/org\/([^/]+)$/, organizationView, UUID],
+  [/^#\/org\/([^/]+)\/activity$/, activityView, UUID],
   [/^#\/org\/([^/]+)\/plan$/, planView, UUID],
   [/^#\/org\/([^/]+)\/usage$/, orgUsageView, UUID],
   [/^#\/org\/([^/]+)\/notifications$/, notificationsView, UUID],
   [/^#\/org\/([^/]+)\/settings$/, orgSettingsView, UUID],
   [/^#\/org\/([^/]+)\/new-project$/, newProjectView, UUID],
+  [/^#\/operations\/([^/]+)$/, operationView, UUID],
 ];
+
+// Each view's page (`pages.json`'s id, `nav.js`'s PAGES) and what its route's
+// argument names: a project, an organisation, or an operation (whose view
+// reads its own context, so the operation is read once per reading).
+const PLACES = new Map([
+  [projectOverviewView, ["project-overview", "project"]], [connectView, ["connect", "project"]],
+  [sqlView, ["sql-editor", "project"]], [branchesView, ["branches", "project"]],
+  [backupsView, ["backups", "project"]], [projectUsageView, ["project-usage", "project"]],
+  [insightsView, ["insights", "project"]], [monitoringView, ["monitoring", "project"]],
+  [projectSettingsView, ["project-settings", "project"]], [organizationView, ["organization", "organization"]],
+  [activityView, ["activity", "organization"]], [planView, ["plan", "organization"]],
+  [orgUsageView, ["organization-usage", "organization"]], [notificationsView, ["notifications", "organization"]],
+  [orgSettingsView, ["organization-settings", "organization"]], [newProjectView, ["new-project", "organization"]],
+  [operationView, ["operation", "operation"]],
+]);
 
 async function route() {
   closeEditor();
+  const turn = begin();
   if (location.hash === "#/sign-in") {
     signInView();
     return;
@@ -989,22 +1083,47 @@ async function route() {
     signInView();
     return;
   }
+  show(skeleton());
   try {
-    if (location.hash === "#/new") {
-      newOrganization(me);
+    if (location.hash === "#/new" || location.hash === "#/help") {
+      await loadContext(call);
+      if (!isCurrent(turn)) {
+        return;
+      }
+      setPage(location.hash === "#/new" ? "new-organization" : "help");
+      if (location.hash === "#/new") {
+        newOrganization(me);
+      } else {
+        helpView(me);
+      }
       return;
     }
     for (const [pattern, view, argument] of VIEWS) {
       const found = location.hash.match(pattern);
       if (found) {
+        const [page, names] = PLACES.get(view);
         if (!argument.test(found[1])) {
+          await loadContext(call);
+          setPage("missing");
           frame(me, "Not found", h("p", {}, "That address names nothing here."));
           return;
         }
-        await view(me, found[1]);
+        if (names !== "operation") {
+          await loadContext(call, names === "project" ? { projectKey: found[1] } : { organization: found[1] });
+          if (!isCurrent(turn)) {
+            return;
+          }
+          setPage(page);
+        }
+        await view(me, found[1], turn);
         return;
       }
     }
+    await loadContext(call);
+    if (!isCurrent(turn)) {
+      return;
+    }
+    setPage("overview");
     await overview(me);
   } catch (error) {
     frame(me, "Something was refused", refusal(error));

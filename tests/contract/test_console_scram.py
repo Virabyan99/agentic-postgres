@@ -84,8 +84,11 @@ def test_every_script_parses(tmp_path: Path) -> None:
     names = sorted(script.stem for script in PUBLIC.glob("*.js"))
     # `pg` and `sql` since Session 44 (ADR 0285): the SQL editor's wire client
     # and its DOM-free decisions. `create` since Session 46 (ADR 0291): the
-    # creation's DOM-free decisions.
-    assert names == ["api", "app", "create", "pg", "scram", "sql"], names
+    # creation's DOM-free decisions. `messages`, `nav`, `progress` and `ui` since
+    # Session 47 (ADR 0295 decision 3): the refusals' words, the shell, a long
+    # operation's progress (DOM-free) and the components.
+    assert names == ["api", "app", "create", "messages", "nav", "pg", "progress", "scram", "sql",
+                     "ui"], names  # fmt: skip
     for script in PUBLIC.glob("*.js"):
         shutil.copy(script, tmp_path / f"{script.stem}.mjs")
     checks = " && ".join(f"node --check /c/{name}.mjs" for name in names)

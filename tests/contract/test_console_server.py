@@ -61,6 +61,11 @@ LISTED = (
     "/console/pg.js",
     "/console/sql.js",
     "/console/create.js",
+    # Session 47 (ADR 0295 decision 3): exactly the four new modules.
+    "/console/ui.js",
+    "/console/nav.js",
+    "/console/messages.js",
+    "/console/progress.js",
     "/console/pages.json",
     "/console/fonts/schibsted-grotesk.woff2",
     "/console/fonts/jetbrains-mono.woff2",

@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, reality_ledger
+from agentic_postgres import REPO_ROOT, reality_ledger, site_build
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
 
@@ -138,3 +138,51 @@ def test_only_api_js_calls_fetch() -> None:
     api = _scripts()["api.js"]
     assert '"X-Apg-Console"' in api and 'credentials: "same-origin"' in api
     assert 'redirect: "error"' in api
+
+
+#: One entry of `nav.js`'s PAGES table: its id, label, purpose and help path.
+PAGE_ENTRY = re.compile(
+    r'^  "([a-z-]+)": \{ label: "([^"]+)", group: [^,]+,(?: item: "[a-z-]+",)? '
+    r'purpose: "([^"]*)", help: "([^"]+)" \},$',
+    re.MULTILINE,
+)
+
+
+def test_every_view_has_a_page_and_a_built_help_route() -> None:
+    """Session 47 (ADR 0295, ADR 0298; the brief's page template): every
+    signed-in view in `pages.json` has an entry in the shell's PAGES table --
+    a label, one line of purpose, and a help path -- and every site path a
+    console module links to (each page's help, a refusal's next action, the
+    Help page's documents) is a route the site build produces. The shell draws
+    each page's help link from that table, through the site's derived origin."""
+    nav = _scripts()["nav.js"]
+    pages = {page: (label, purpose, help_path) for page, label, purpose, help_path
+             in PAGE_ENTRY.findall(nav)}  # fmt: skip
+    assert len(pages) >= 20, f"the PAGES table parsed to {sorted(pages)}"
+    for view in _pages()["views"]:
+        if view["id"] in ("accept", "sign-in"):
+            continue
+        assert view["id"] in pages, f"{view['id']} has no entry in nav.js's PAGES"
+        label, purpose, _ = pages[view["id"]]
+        assert label and purpose.endswith("."), view["id"]
+    built = {
+        "/" + name[: -len("index.html")]
+        for name in site_build.build()
+        if name.endswith("index.html")
+    }
+    assert "/docs/" in built and "/pricing/" in built, sorted(built)[:10]
+    linked = {help_path for _, _, help_path in pages.values()}
+    for name in ("app.js", "messages.js"):
+        linked |= set(
+            re.findall(r'"(/(?:docs|pricing|quickstart|ledger)/[^"]*)"', _scripts()[name])
+        )
+    assert len(linked) >= 8, sorted(linked)
+    for path in sorted(linked):
+        assert path in built, f"a console page links to {path}, which the site does not build"
+    assert (
+        'h("a", { className: "help-link", href: siteLink(page.help) }, "Help with this page")'
+        in nav
+    )
+    # The site's origin is this host's minus its first label -- never a typed domain.
+    for name, text in _scripts().items():
+        assert "agenticpostgresql" not in text and "nomipg" not in text, name

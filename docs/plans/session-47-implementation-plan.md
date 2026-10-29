@@ -317,6 +317,16 @@ runs add go in a second table below it, in execution order.
 | **D2996** | ADR 0297: `branch_limit_reached` carries `limit` and `plan`. | Two readers produce it: the route's own (Python, D2430) and the control set's under the lock (`AP409`), which carries the word alone. | **The route's reader carries `limit` and `plan`**; the set's concurrent-request answer stays the bare word, and the model's two members are optional. The four route pins in `test_control_branches` moved to the full body. | The set's answer is a race's; it is rarely seen and still correct. | 0297 |
 | **D2997** | — | `test_control_projects::test_plan_limit_reached_is_produced_only_by_the_entitlement_readers` reads every file that contains the word; 0011 re-creates `control_request_operation` from 0008's text. | **`PLAN_LIMIT_PRODUCERS` gains `0011-control-operation-steps.sql`** (exactly the new name, D2901); a docstring in `models.py` that only mentioned the word was reworded instead of widening. | A re-created reader is the same reader; a mention is not a producer. | 0297 |
 | **D2998** | D2992: `src/agentic_postgres/operation_steps.py` re-exports the service's module, which joins `SHARED_MODULES`. | **CI on `6e5555c` failed** (contract 40913637017, both jobs, 1 test of ~8,570): `test_repository_contract::test_no_module_is_imported_only_by_its_own_tests` — the re-export had no caller outside tests (D204); `plans` has one (the reconciler), this did not. Run 3's targeted list lacked that module. | **The re-export removed**; the two test modules load the service's module by `service_source.load("operation_steps")` (as `test_connection_snippets` does); `SHARED_MODULES` back to its eight (it means *loaded by `src/`*). ADR 0296 amended. **`test_repository_contract` joins every run's targeted list when a module is added.** | A module nothing calls is a feature that does not exist. | 0296 |
+| **D2999** | Brief §2: the mark leads to Projects. | `index.html`'s mark linked `https://agenticpostgresql.com/` (Run 10's domain list counted `index.html:13`). | **`index.html`'s mark → `/console/#/`**; `accept.html` keeps the site link. Run 10's list loses `index.html:13`. | Inside the console the mark is home. | 0295 |
+| **D3000** | Brief screen 3: *"stops by itself after 30 min on one step"*. | The reconciler's bound is per **operation**, from its claim (`bin/reconciler.py:371-372`). | The tracker says *"If it has not finished 30 minutes after it started, the server stops it"* (60 for the three branch types). | Say what the server does. | 0296 |
+| **D3001** | Brief §2: *Notifications* with an unread count. | A count needs a notifications read on every page; nothing reads one yet. | Run 4: a link without a count (below 900 px in the Menu's organisation group); **Run 7 decides the count**. | Not drawn until it can be read. | 0298 |
+| **D3002** | Brief: the organisation's *Projects*, the project's *Overview*. | `#/` was titled *Overview* and the drivers waited for it. | **`#/` is *Projects*** (every organisation), `#/org/<id>` one organisation, **`#/projects/<KEY>` the project's *Overview***; the three drivers rewritten and rehearsed. | The brief's names. | 0295 |
+| **D3003** | Brief: one item, *Plan and usage*. | Two routes, `#/org/X/plan` and `#/org/X/usage`. | The item opens the plan page, which links to usage; both mark the item. | No route lost. | 0295 |
+| **D3004** | Plan: each view's calls listed in `pages.json`. | The shell reads organisations, projects and a project on every page; `test_console_create` pins `new-project`'s calls exactly; the guard reads the union. | The shell's reads listed under `overview`, `organization` and `operation`; **per-view listing is CON-NAV-001's** (Run 12 registers it). | The guard is the union; the claim is the per-view. | 0295 |
+| **D3005** | ADR 0296: the tracker reads the operation on every load. | (a) A requester's read of a succeeded export takes its `download_url` once (D2164); (b) a running creation's `project_key` names an unregistered project, so `GET /projects/{key}` is 404. | The tracker shows the export link once when it has it and never reads an operation only for context; **until a creation succeeds the shell reads only its organisation**. Run 5 keeps both. | A context read must not spend a one-time value or meet a 404. | 0296 |
+| **D3006** | ADR 0295 decision 6: every action a busy button; a dialog component. | The editor's Connect/Run/Cancel/Disconnect stay plain (Run 6 rebuilds the editor); *I have saved it* is a text pin in `test_console_create`; no dialog yet. | Busy buttons on every other action; **Run 5 moves the *I have saved it* pin, Run 6 the editor, Run 9 adds the dialog for delete**. | Each in the run that owns its view. | 0295 |
+| **D3007** | Brief §1: plain language. | Activity and the tracker print raw ISO times (`2026-10-29T17:00:17.735753+00:00`; seen in the 390 px look). | **Run 5 formats every time** (a relative age with the absolute time beside it). | A machine's timestamp is not a sentence. | 0296 |
+| **D3008** | Brief §2: below 900 px the navigation folds into one *Menu*. | The closed Menu left ~160 px empty: `.shell`'s `min-height` was shared between both rows of the one-column grid. | **`grid-template-rows: auto 1fr`** under 900 px; re-read in the look rig at 390. | A closed menu takes its summary's height. | 0295 |
 
 ---
 
@@ -571,7 +581,45 @@ D2997) → the module alone 10 passed. Rows **D2992–D2997**. NEXT FREE D2998.
    `test_reality_ledger`), `test_environment_gates`, `test_suite_shape`,
    `test_fleet`. The battery.
 
-**Done.**
+**Done.** 2026-10-29, built by a delegated agent from this plan, ADR 0295 and the
+approved brief, then reviewed in the main session (scripts and outputs WSL
+`~/s47/run4/`). **Modules** (ADR 0295 decision 3): `ui.js` (281 lines: `h`
+flattening to any depth — the D2713 class found again by the look pass —, copy and
+busy buttons, code blocks, callout, banner, empty state, skeleton, toast, tabs,
+`STATE_CHIPS` unchanged, `siteDomain` from the host name, one `aria-live` region),
+`nav.js` (284: the shell — top bar with Help, Notifications and the account menu
+holding Sign out; the left navigation with both switchers; the breadcrumb; the page
+template with *Help with this page* to a site route; `loadContext`; a route turn
+counter that stops polls), `messages.js` (106: the 16 existing words as `{sentence,
+action, link}`), `progress.js` (166, DOM-free: durations, elapsed, the typical
+range, step states, a status line with no percent); `app.js` draws through them,
+`waitFor` prints words not a percent. **Routes** (no new Ledger row): `#/org/<UUID>`
+(projects + open creations by `subject.name`), `#/org/<UUID>/activity`,
+`#/operations/<id>` (the first tracker), `#/projects/<KEY>` (the project's Overview),
+`#/help`; `#/` is *Projects* (D3002). `ROUTES`, `LISTED` and the parse set widened by
+exactly the four files; **budgets split** (`app.css` 21,261 B of 40,960; `site.css`
+20,251 of 30,720; together 41,512 B, which the old joint budget would have refused);
+**`ANCHORS` counted across every console script** and re-counted, `STATE_CHIPS` read
+from `ui.js`; a new `test_console_pages::test_every_view_has_a_page_and_a_built_help_route`
+(every help path a route `site_build.build()` produces; no script holds a domain) and
+a new module **`test_console_progress`** (5, in the pinned Node image against the
+server's own `operation_steps.expected` for all eleven types) — **Run 12 registers
+both node ids**. **Battery 7/7** (a module dropped from `ROUTES`, `app.css` over
+budget, a label renamed without the count, a step-state off-by-one, an unknown state
+drawn ready, the help link removed, a help path the site does not build), controls
+green, files restored byte-equal. **Rehearsed twice, all three drivers green**
+(`console_walk` 11/11, `--leak` exit 6; `sql_walk` all steps, `--leak` 6;
+`journey_walk` j01–j13, `--leak` 6, `--plant-foreign` 5) against the console image
+built from this tree. **The main session's review**: a rule scan of every console
+script (no markup sink, storage, script-built SVG, typed domain, foreign fetch or
+socket) clean; the look at 390 px found the closed Menu taking ~160 px (D3008,
+fixed, re-read) and raw ISO times (D3007, Run 5); **targeted re-run by the main
+session**: the console set + `test_look` 97 passed; `test_reality_ledger`,
+`test_acceptance_registry`, `test_documentation_index`, `test_environment_gates`,
+`test_fleet`, `test_suite_shape`, `test_repository_contract` 357 passed, 1 failed —
+`test_available_and_beta_rows_name_evidence_that_resolves`, D2945's decided
+`plans_live` reading against `session-46.json` (CI skips it). Rows **D2999–D3008**.
+NEXT FREE D3009.
 
 ### Run 5 — long operations, creation and refusals
 

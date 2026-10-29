@@ -172,6 +172,8 @@ class Fixtures:
             }
             self.organizations.append(created)
             return 201, created, headers
+        if (method, path) == ("GET", "/operations"):
+            return 200, {"operations": []}, headers
         if (method, path) == ("GET", "/projects"):
             return 200, {"projects": [self._project()] if self.polls >= 3 else []}, headers
         if (method, path) == ("POST", "/projects"):
@@ -460,7 +462,7 @@ def walk(arguments: argparse.Namespace) -> int:
                 page.get_by_label("Password", exact=True).fill(password)
                 page.get_by_label("Password again").fill(password)
                 page.get_by_role("button", name="Create your account").click()
-                heading(page, "Overview")
+                heading(page, "Projects")
                 write_private(out / "account-password", password + "\n")
 
             journey.step("j02", j02)
@@ -505,7 +507,7 @@ def walk(arguments: argparse.Namespace) -> int:
                 next_code, _ = fresh_code(seed, after_step=step)
                 page.get_by_label("Code from your app").fill(next_code)
                 page.get_by_role("button", name="Sign in").click()
-                heading(page, "Overview")
+                heading(page, "Projects")
 
             journey.step("j05", j05)
             journey.held += [cookie["value"] for cookie in context.cookies()]
@@ -639,16 +641,17 @@ def run_the_rest(
     def j11() -> dict[str, Any]:
         views: dict[str, Any] = {}
         for name, route, title in (
-            ("usage", f"#/projects/{key}/usage", f"{key}: usage (24 h)"),
-            ("insights", f"#/projects/{key}/insights", f"{key}: Query Insights (24 h)"),
-            ("monitoring", f"#/projects/{key}/monitoring", f"{key}: monitoring"),
-            ("plan", f"#/org/{organization}/plan", "Plan"),
+            ("usage", f"#/projects/{key}/usage", "Usage"),
+            ("insights", f"#/projects/{key}/insights", "Slowest queries"),
+            ("monitoring", f"#/projects/{key}/monitoring", "Monitoring"),
+            ("plan", f"#/org/{organization}/plan", "Plan and usage"),
             ("notifications", f"#/org/{organization}/notifications", "Notifications"),
         ):
             page.goto(f"{base}/console/{route}")
             said = heading(page, title, "Something was refused")
-            content = page.locator("#main .content").inner_text()
-            body = content.split(said, 1)[-1].strip()
+            # Session 47 (ADR 0295): the page template draws the title, the
+            # purpose and the help link; what the VIEW drew is `.page-body`.
+            body = page.locator("#main .page-body").inner_text().strip()
             views[name] = {"read": said == title and bool(body), "words": len(body.split())}
         if not all(view["read"] for view in views.values()):
             raise RuntimeError(f"a view rendered nothing: {views}")
@@ -671,7 +674,7 @@ def run_the_rest(
                     page.reload(wait_until="load")
             first = False
             record["source_commit"] = got.value.json().get("source_commit")
-            heading(page, f"{key}: settings")
+            heading(page, "Settings")
             page.locator("#main strong", has_text="Support bundle").wait_for()
             rows = page.locator("#main table tbody tr").all()
             cells = [[c.inner_text().strip() for c in r.locator("td").all()] for r in rows]
@@ -691,7 +694,9 @@ def run_the_rest(
 
     def j13() -> None:
         page.goto(f"{base}/console/")
-        heading(page, "Overview")
+        heading(page, "Projects")
+        # Session 47 (ADR 0295): Sign out is in the account menu.
+        page.locator("details.account > summary").click()
         page.get_by_role("button", name="Sign out").click()
         heading(page, "Sign in")
         record["cookies_after_sign_out"] = len(

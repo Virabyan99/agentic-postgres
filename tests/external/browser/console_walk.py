@@ -168,6 +168,8 @@ class Fixtures:
                     ]
                 },
             )
+        elif method == "GET" and path == "/operations":
+            status, answer = 200, {"operations": []}
         elif method == "GET" and path == "/projects":
             status, answer = 200, {"projects": [{"key": self.project, "state": "ready",
                                                  "profile": "small"}]}  # fmt: skip
@@ -298,7 +300,7 @@ def walk(arguments: argparse.Namespace) -> int:
                 code, _ = fresh_code(seed, after_step=confirm_step)
                 page.get_by_label("The next code from your app").fill(code)
                 page.get_by_role("button", name="Sign in").click()
-                page.get_by_role("heading", name="Overview").wait_for()
+                page.get_by_role("heading", level=1, name="Projects", exact=True).wait_for()
 
             walker.step("sign in with the next code", sign_in)
             walker.record["overview"] = [h.inner_text() for h in page.locator("#main h2").all()]
@@ -364,6 +366,9 @@ def walk(arguments: argparse.Namespace) -> int:
                     return (response.request.method == "DELETE"
                             and response.url.endswith("/sessions/current"))  # fmt: skip
 
+                page.get_by_role("heading", level=1, name="Projects", exact=True).wait_for()
+                # Session 47 (ADR 0295): Sign out is in the account menu.
+                page.locator("details.account > summary").click()
                 with page.expect_response(is_sign_out) as ended:
                     page.get_by_role("button", name="Sign out").click()
                 page.get_by_role("heading", name="Sign in").wait_for()

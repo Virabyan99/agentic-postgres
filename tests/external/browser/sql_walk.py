@@ -290,6 +290,8 @@ class Fixtures:
                     ]
                 },
             )
+        elif method == "GET" and path == "/operations":
+            status, answer = 200, {"operations": []}
         elif method == "GET" and path == "/projects":
             status, answer = (
                 200,
@@ -475,7 +477,7 @@ def walk(arguments: argparse.Namespace) -> int:
                 code, _ = fresh_code(seed_of(probe["totp_seed"]))
                 page.get_by_label("Code from your app").fill(code)
                 page.get_by_role("button", name="Sign in").click()
-                page.get_by_role("heading", name="Overview").wait_for()
+                page.get_by_role("heading", level=1, name="Projects", exact=True).wait_for()
 
             walker.step("sign in", sign_in)
             # What the page showed, as the console walk records it: a fixture that put a
@@ -612,6 +614,9 @@ def walk(arguments: argparse.Namespace) -> int:
 
             def sign_out() -> None:
                 page.goto(f"{walker.base}/console/")
+                page.get_by_role("heading", level=1, name="Projects", exact=True).wait_for()
+                # Session 47 (ADR 0295): Sign out is in the account menu.
+                page.locator("details.account > summary").click()
                 page.get_by_role("button", name="Sign out").click()
                 page.get_by_role("heading", name="Sign in").wait_for()
 

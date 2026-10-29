@@ -68,6 +68,12 @@ ROUTES: dict[str, tuple[Path, str]] = {
     "/console/sql.js": (PUBLIC / "sql.js", JAVASCRIPT),
     # Session 46 (ADR 0291): the creation's DOM-free decisions.
     "/console/create.js": (PUBLIC / "create.js", JAVASCRIPT),
+    # Session 47 (ADR 0295 decision 3): the components, the shell, the
+    # refusals' words, and a long operation's progress (DOM-free).
+    "/console/ui.js": (PUBLIC / "ui.js", JAVASCRIPT),
+    "/console/nav.js": (PUBLIC / "nav.js", JAVASCRIPT),
+    "/console/messages.js": (PUBLIC / "messages.js", JAVASCRIPT),
+    "/console/progress.js": (PUBLIC / "progress.js", JAVASCRIPT),
     "/console/pages.json": (PUBLIC / "pages.json", JSON),
     # Session 45 (ADR 0288): one copy of the shared assets, which the site's
     # builder copies (D2814) -- the files rig 45a made, pinned by sha256.

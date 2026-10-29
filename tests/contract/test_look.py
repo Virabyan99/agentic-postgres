@@ -3,7 +3,8 @@
 `UI-TOKENS-001` and `UI-FONTS-001`'s offline half. The two stylesheets carry
 ONE token block, byte-equal, light only; every text pair the brief names meets
 WCAG AA 4.5:1 by the formula, computed from the tokens as parsed; every
-interactive element shows a focus ring; the two files fit the brief's budget.
+interactive element shows a focus ring; each file fits its own budget (ADR
+0295 decision 4: the site's 30,720 B, the console's 40,960 B, each alone).
 The two typefaces are the files rig 45a made from `google/fonts` at one pinned
 commit -- their sha256 written here from ADR 0288's table, so a changed byte
 fails offline (threat item 27) -- each beside its OFL licence, and the only
@@ -58,7 +59,9 @@ TEXT_PAIRS = (
 
 #: The elements a person can reach with the keyboard on either surface.
 FOCUSABLE = ("a", "button", "input", "select", "textarea", "summary")
-BUDGET = 30_720
+#: ADR 0295 decision 4: one budget per stylesheet, each measured alone.
+SITE_BUDGET = 30_720
+CONSOLE_BUDGET = 40_960
 BLOCK = re.compile(r"/\* tokens: begin.*?/\* tokens: end \*/\n", re.DOTALL)
 
 
@@ -154,9 +157,12 @@ def test_every_interactive_element_shows_focus() -> None:
 
 
 def test_the_stylesheets_fit_the_budget() -> None:
-    """The brief's ~30 KB for the two stylesheets together, fonts excluded."""
-    total = SITE_CSS.stat().st_size + CONSOLE_CSS.stat().st_size
-    assert 0 < total <= BUDGET, total
+    """ADR 0295 decision 4 (superseding ADR 0288's joint budget): each file
+    alone within its own budget, fonts excluded -- the site's unchanged at
+    30,720 B, the console's 40,960 B. Neither borrows what the other leaves."""
+    for path, budget in ((SITE_CSS, SITE_BUDGET), (CONSOLE_CSS, CONSOLE_BUDGET)):
+        size = path.stat().st_size
+        assert 0 < size <= budget, (path.name, size, budget)
 
 
 # ---------------------------------------------------------------------------

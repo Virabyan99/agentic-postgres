@@ -159,7 +159,7 @@ console.log(JSON.stringify({ clean, planted: touched }));
     out = _node(tmp_path, driver)
     assert out["clean"] == 0, out["planted"]
     assert out["planted"] == ["localStorage.setItem"]
-    for name in ("create.js", "app.js"):
+    for name in ("create.js", "app.js", "nav.js", "ui.js", "messages.js", "progress.js"):
         text = (PUBLIC / name).read_text(encoding="utf-8")
         for store in ("localStorage", "sessionStorage", "indexedDB", "document.cookie", "caches."):
             assert store not in text, f"{name} touches {store}"
@@ -178,7 +178,12 @@ def test_a_refusal_is_the_servers(tmp_path: Path) -> None:
     view = _view("newProjectView")
     assert "catch (error)" in view and "refusal(error)" in view
     app = (PUBLIC / "app.js").read_text(encoding="utf-8")
-    refusals = app[app.index("const REFUSALS") : app.index("};", app.index("const REFUSALS"))]
+    assert 'import { refusal, sentence } from "/console/messages.js";' in app
+    # Since Session 47 (ADR 0295 decision 3, ADR 0297) the words live in messages.js.
+    words = (PUBLIC / "messages.js").read_text(encoding="utf-8")
+    refusals = words[
+        words.index("const REFUSALS") : words.index("};", words.index("const REFUSALS"))
+    ]
     for code in ("plan_limit_reached", "capacity_exhausted", "conflict", "not_available"):
         assert f"  {code}:" in refusals, code
 
