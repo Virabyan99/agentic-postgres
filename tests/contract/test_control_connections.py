@@ -156,12 +156,16 @@ def test_a_viewer_reads_the_two_doors_and_no_password(drive: Any) -> None:
     assert answered.status_code == 200, answered.text
     body = answered.json()
     recorded = doors(key)
-    assert set(body) == {"project", "pooled", "direct", "password", "snippets"}
+    assert set(body) == {"project", "pooled", "direct", "password", "snippets", "where"}
     assert body["project"] == key
     for door in ("pooled", "direct"):
         assert body[door] == {m: recorded[door][m] for m in control_service.DOOR_MEMBERS}
     assert body["password"] == connection_snippets.PASSWORD_PLACEHOLDER
     assert body["snippets"] == connection_snippets.snippets(recorded)
+    # Session 47 Run 6 (ADR 0295 decision 7): a `where` line per served client,
+    # in the snippets' order -- never one for a client the body has no text for.
+    assert list(body["where"]) == list(body["snippets"]) == list(connection_snippets.CLIENTS)
+    assert body["where"] == connection_snippets.where()
     assert answered.headers["cache-control"] == "no-store"
 
     # A key that reads projects reads them; one that does not, does not.

@@ -1,0 +1,11 @@
+{
+  "name": "apg-snippet-drizzle",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Session 47 Run 6: the image the served Drizzle snippet is executed in (tests/contract/test_connection_snippets.py). Test-only; not a deployment fixture.",
+  "dependencies": {
+    "drizzle-orm": "0.45.4",
+    "pg": "8.16.3"
+  }
+}

@@ -3021,7 +3021,7 @@
     },
     "/v1/projects/{key}/connections": {
       "get": {
-        "description": "Viewer and above, or a key holding `projects:read`. The pooled door (transaction mode, `customer_app`) and the direct door (a session, `customer_admin`) as the project's deploy recorded them, and a snippet per client measured through them. Every snippet's password is a placeholder: the password is the file your CLI wrote, and this plane never held it. `not_available` naming `pooled_endpoint` for a project without public doors.",
+        "description": "Viewer and above, or a key holding `projects:read`. The pooled door (transaction mode, `customer_app`) and the direct door (a session, `customer_admin`) as the project's deploy recorded them, a snippet per client executed through them, and `where`: for each client, the file its snippet goes in and what to install. Every snippet's password is a placeholder: the password is the file your CLI wrote, and this plane never held it. `not_available` naming `pooled_endpoint` for a project without public doors.",
         "operationId": "get_connections_v1_projects__key__connections_get",
         "parameters": [
           {
@@ -3041,7 +3041,7 @@
                 "schema": {}
               }
             },
-            "description": "The two doors and the snippets."
+            "description": "The two doors, the snippets and where each goes."
           },
           "401": {
             "content": {

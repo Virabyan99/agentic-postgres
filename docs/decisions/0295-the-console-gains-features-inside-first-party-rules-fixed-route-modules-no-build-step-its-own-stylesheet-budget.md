@@ -112,7 +112,15 @@ stays (decision 5).
    console fills it **only inside the shown-once panel**, in the page.
    `tests/contract/test_connection_snippets.py` runs each new client's text in its
    client's image, pinned by digest, against a TLS Postgres rig with
-   `sslmode=verify-full`. A snippet nobody ran does not ship.
+   `sslmode=verify-full`. A snippet nobody ran does not ship. *Measured at Run 6
+   (D3020–D3028)*: every served client — psql, Prisma 6, node-pg, psycopg, Drizzle,
+   Go pgx, `.env` — runs through Traefik and the two customer poolers with
+   `verify-full`, and the same text against a misnamed host is refused; **the
+   psycopg snippet served since Session 39 never verified** (`psycopg[binary]`'s
+   bundled OpenSSL cannot read `sslrootcert=system`) and now uses `certifi`;
+   Drizzle is served for the pooled door only (its migrator needs CREATE on the
+   database, which the customer roles do not hold); each snippet carries a
+   `where` line (its file, its install command).
 8. **The editor's state is at the top** (D2957): a state bar (door, role, state,
    *Disconnect*); the credentials form hidden while connected; the statement above
    the results; results with a sticky header, the row count and the time. ADR

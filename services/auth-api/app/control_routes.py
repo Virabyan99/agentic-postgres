@@ -1036,13 +1036,14 @@ async def rotate_credential(request: Request, key: str) -> Response:
         description=(
             "Viewer and above, or a key holding `projects:read`. The pooled door (transaction "
             "mode, `customer_app`) and the direct door (a session, `customer_admin`) as the "
-            "project's deploy recorded them, and a snippet per client measured through them. "
+            "project's deploy recorded them, a snippet per client executed through them, and "
+            "`where`: for each client, the file its snippet goes in and what to install. "
             "Every snippet's password is a placeholder: the password is the file your CLI "
             "wrote, and this plane never held it. `not_available` naming `pooled_endpoint` for "
             "a project without public doors."
         ),
     ),
-    responses={200: openapi_docs.ok("The two doors and the snippets."),
+    responses={200: openapi_docs.ok("The two doors, the snippets and where each goes."),
                401: openapi_docs.UNAUTHENTICATED, 403: FACTOR_GATE, 404: NOT_YOURS,
                409: {"model": NotAvailableResponse,
                      "description": "`not_available`: the project has no public doors."}},

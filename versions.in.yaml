@@ -177,6 +177,13 @@ images:
   CLICKHOUSE_IMAGE: docker.io/clickhouse/clickhouse-server:26.8.30.8-alpine
   HYPERDX_IMAGE: docker.io/hyperdx/hyperdx:2.41.0
   MONGO_IMAGE: docker.io/library/mongo:5.0.32-focal
+  # Session 47 Run 6 (ADR 0295 decision 7, D2956): the Go toolchain the served
+  # `go-pgx` connection snippet is compiled and run in, by
+  # tests/contract/test_connection_snippets.py ONLY -- no service, no deploy
+  # reads it. Go 1.26 (1.26.10 measured inside it), Debian bookworm like the
+  # Python base; the fixture's go.mod pins pgx v5.11.0 and go.sum every module.
+  # Added with `--update --add-images` (D2609) so no locked image moved with it.
+  GO_RUNTIME_IMAGE: docker.io/library/golang:1.26-bookworm
 
 # Minimum versions required for a *feature*, not for an image.
 #

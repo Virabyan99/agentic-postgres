@@ -335,6 +335,18 @@ runs add go in a second table below it, in execution order.
 | **D3014** | ADR 0295 d6: every input labelled. | Run 4's `field()` put the hint inside the `<label>`, so the accessible name became label + hint (it broke `get_by_label("Name", exact=True)`). | The hint is **outside** the label, tied by `aria-describedby`. | A label names; a hint describes. | 0295 |
 | **D3015** | D3005 (a): never read an operation for context. | Inline `waitFor` (Connect, Branches, Settings) kept polling after the page was left — it could spend an export's one-time link. | `waitFor` takes the route turn and stops; Settings and Branches link to the tracker; Connect's rotate does not (its password is shown on that page). | A poll belongs to its page. | 0296 |
 | **D3016** | ADR 0291 d3: the panel shows the operation's id. | The id is in the address (`#/operations/<id>`). | **ADR 0291 amended** (Session 47 Run 5); `journey_walk` j06 reads the id from the URL. | The address is the record. | 0291 |
+| **D3020** | `connection_snippets`' docstring: psycopg's `sslrootcert=system` was measured (rig 39c). | Rig 39c passed an explicit CA file. **`sslrootcert=system` fails on any machine with `psycopg[binary]`** (3.2.12 and 3.3.4): its bundled OpenSSL's OPENSSLDIR is its build directory (`/host/tmp/libpq.build`). **The psycopg snippet served since Session 39 never verified a certificate.** | **The snippet uses `sslrootcert=certifi.where()`** (executed: verified, query, prepare; misnamed host refused); `test_each_client_verifies_the_server`'s psycopg assertion replaced by the stricter executed one. ADR 0295 decision 7 records it. | *A value that looked measured and was not* (§7). | 0295 |
+| **D3021** | — | `services/clients/psycopg/entrypoint.sh` sets `PGSSLROOTCERT=system` in its `verify-full` mode with psycopg[binary] 3.2.12 — the same defect, in a deployment fixture. | **Run 10 repairs it** (its small repairs) and reads which proof uses that mode; untouched by Run 6. | One defect, two places; the second is a fixture's. | — |
+| **D3022** | D2956: Drizzle with its migrations. | `drizzle-orm`'s `migrate()` runs `CREATE SCHEMA IF NOT EXISTS` first and is refused (`permission denied for database`) — the customer roles have no CREATE on the database (ADR 0269). | **Drizzle ships for the pooled door**; its migrations' SQL goes through psql's direct line (the snippet's comment says so), and `test_drizzles_own_migrator_is_refused_on_the_direct_door` proves the refusal. Granting CREATE to `customer_admin` is the operator's alternative, not taken. | Ship what runs; say what does not. | 0269 |
+| **D3023** | — | Prisma Client does not read `.env`; `directUrl` is Prisma 6's model (7 not measured); `migrate` returns P3005 on a non-empty `public`. | `where` says `node --env-file=.env` and pins `@6`; **Run 8's connecting page says how to baseline** a database that already has tables. | The install line is what was run. | — |
+| **D3024** | Brief: an `.env` block for every client. | node-postgres reads `sslrootcert=system` as a file path (ENOENT); psycopg[binary] as D3020. | The `.env` block names only its two measured readers, psql 16+ and Go pgx; the others use their own snippet. | No reader that did not run. | — |
+| **D3025** | — | Go needs an image: **`GO_RUNTIME_IMAGE` (golang 1.26-bookworm, Go 1.26.10, by digest)**, read only by tests; `versions.env` feeds every render's `versions_lock_sha256`. | Added with `bin/lock-versions.sh --update --add-images` (the other 15 pins byte-equal); **the next release's outputs move in that field** (Run 12's bump expects it). | A pin, not a guess. | — |
+| **D3026** | Brief: does pgx need an exec mode? | pgx's default (cached prepared statements) works through the transaction pooler because the pooler keeps 100 prepared statements per connection (`max_prepared_statements`); `simple_protocol` works too. | No `default_query_exec_mode`; the battery proves the dependency on the pooler's setting. | The pooler's setting is the fact. | — |
+| **D3027** | — | psql 17 has no `\parse`; *psql 16+* (for `sslrootcert=system`) is from PostgreSQL's release notes, not a run on 15. | The psql harness uses `\bind`; the `where` line says 16+ and cites it. | Said where it comes from. | — |
+| **D3028** | The rig = production's path. | The rig omits the label routers through the socket proxy (it writes the same routers in a file), ACME (a private CA) and the 5432→8432 publication; it adds a `lenient` TLS option (`sniStrict` off) for the wrong-host name only; clients run as root to install the CA. | Accepted and stated in the test's docstring. | A rig names what it leaves out. | 0295 |
+| **D3029** | — | Mutation (c) (`max_prepared_statements = 0`) first killed only go-pgx: one sequential connection never switches server connection. | The node-pg, drizzle and prisma harnesses run **3 parallel rounds**; (c) now kills all four. | A survivor named a weak test. | — |
+| **D3030** | — | `bin/cloud.py endpoint show` does not print `where`; the packaged CLI changes only in a release of four. | **Run 12** decides whether the CLI shows `where` at the bump; the console renders it (Run 6's console half told). | The console first; the CLI with the release. | — |
+| **D3031** | — | CI (p0) and the session-01 gate now build five client images, a golang pull among them; a cache-cold run unmeasured. | **Read on this commit's CI**; if a job's time moves past its limit, a row. | Measured on the next push. | — |
 
 ---
 
@@ -698,7 +710,34 @@ D3017 (D3020+ reserved for Run 6's server half).
 3. Targeted: the console set, `test_console_sql`, `test_connection_snippets`,
    `test_control_connections`, `bin/app-contract.sh --check`. The battery.
 
-**Done.**
+**Done (server half).** 2026-10-29, built by a delegated agent, reviewed and re-run in
+the main session (WSL `~/s47/run6/`). `connection_snippets.CLIENTS` = psql, prisma,
+node-pg, psycopg, **drizzle, go-pgx, env**; the connections document gains **`where:
+{client: {file, install}}`** (snapshot: two descriptions; `app-contract --check` 0).
+**Every snippet executed** (`test_connection_snippets.py`, `requires_docker`, images
+built at test time from `tests/fixtures/snippet-clients/{drizzle,go-pgx,psycopg}`
+with locked dependencies, `GO_RUNTIME_IMAGE` pinned) through Traefik with the
+edge's `postgres` TLS option in front of the two customer poolers from
+`compose.yaml`'s own entrypoints, `verify-full` against a private CA, a query, a
+prepared statement, and a migration on the direct door where the client has one;
+**the same text against a misnamed host refused** for every door. **Found: the
+psycopg snippet served since Session 39 never verified a certificate (D3020)** —
+now `certifi`. Drizzle pooled only (D3022). **Battery** (a) a value instead of the
+placeholder, (b/b2) `verify-full` dropped, (c) the pooler's prepared statements off,
+(c2) pgx forced to the simple protocol, (d) a `where` line missing, (e) psycopg back
+to `system` — all killed, controls green. **Main-session re-run**: the snippet and
+connections tests **50 passed, none skipped**; the shape, registry, repository and
+every `versions.env` reader **599 passed**; `lock-versions --check` 0. New node ids
+for Run 12 (all in `test_connection_snippets.py`):
+`test_every_served_client_says_where_it_goes_and_what_to_install`,
+`test_each_install_line_names_exactly_what_its_executed_image_pins`,
+`test_the_rig_is_the_products_poolers_behind_the_edges_tls`,
+`test_each_served_snippet_runs_through_its_doors_with_verified_tls[*]` (7),
+`test_each_served_snippet_refuses_a_certificate_for_another_name[*]` (11),
+`test_the_misnamed_door_answers_a_client_that_does_not_verify`,
+`test_drizzles_own_migrator_is_refused_on_the_direct_door`. Rows **D3020–D3031**.
+
+**Done (console half).**
 
 ### Run 7 — notifications, help and onboarding
 

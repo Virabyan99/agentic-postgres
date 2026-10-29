@@ -820,8 +820,9 @@ class ControlService:
         return {"organization": row["organization_id"], "endpoints": endpoints, "snippets": served}
 
     async def connections(self, caller: ControlPrincipal, key: str) -> dict[str, Any]:
-        """A project's two public doors and a snippet per measured client
-        (ADR 0268 item 6). Names no password: none exists in this plane."""
+        """A project's two public doors, a snippet per executed client and, for
+        each, where it goes and what to install (ADR 0268 item 6, ADR 0295
+        decision 7). Names no password: none exists in this plane."""
         doors = await self._doors(caller, key, "viewer")
         endpoints = doors["endpoints"]
         return {
@@ -832,6 +833,7 @@ class ControlService:
             },
             "password": connection_snippets.PASSWORD_PLACEHOLDER,
             "snippets": doors["snippets"],
+            "where": connection_snippets.where(),
         }
 
     async def rotate_credential(
