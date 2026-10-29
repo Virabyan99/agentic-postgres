@@ -18,8 +18,15 @@ continues the journey, its rehearsal 27/27; rows D2921–D2926). Run 8 DONE
 gate, two Ledger rows `trial`; both gates passed in shards; rows D2927–D2929
 — the hosted walk is `DX-HOSTED-001`, `DX-002` being Session 1's). The
 site's digest inputs are FROZEN from that push until the person confirms
-(D2883). NEXT FREE D2930, ADR 0294. Next: Run 9 (the sitting), after the
-operator names the person's day.** Planned at `7b035d9` (Session
+(D2883). Run 9 DONE (2026-10-26→29, the sitting): deployed ×4 at `55467b5`, a
+PERSON walked on `slot10-prod` (kept) — goal 1 reached, 11 undocumented steps,
+`documented_path` does not close; the journey created `slot11-prod`, the
+lifecycle continued it (attempt 2, the operator's choice), branches, B1, one
+sweep, the external half re-run from the test-only `a34c906`: **348 claims,
+343 passed, 5 failed**; **tagged and PUBLISHED 1.24.0**; SL4. Rows
+D2930–D2943; owed: D2942's ADR (main's CI red on the runner image), D2940's
+three claims and D2933/D2941/D2943 to Session 47. NEXT FREE D2944, ADR 0294.
+Next: Run 10 (M7 X1/X2).** Planned at `7b035d9` (Session
 45's close record, tree clean, `main` = `origin/main`) against the host as read
 that morning (§0). Rows **D2862–D2889** at planning; the runs add theirs from
 **D2890**. ADRs **0290–0293** are Run 1's. **NEXT FREE after this table: D2890,
@@ -439,6 +446,20 @@ the runs add go in a second table below it, in execution order.
 | **D2927** | §2: *"`CLAIM_INTRODUCED_IN` … gains a row at 46 for each new claim; **`documented_path`'s row stays where it is**"*; ADR 0290 §5 *"its `CLAIM_INTRODUCED_IN` row does not [change]"*. | A claim's session is DERIVED: `claim_session` is the max of its requirements' `target_session`s (`evidence_claims.py:1663-1679`), and `test_a_claim_resolves_to_the_session_that_introduced_it` holds the table to it. The hosted walk's requirement is a Session 46 one; DX-001 is Session 12's. | **`documented_path` → 46, `appliance_documented_path` → 12** in `CLAIM_INTRODUCED_IN`; the Session 46 gate's table names `documented_path` (external) and not `appliance_documented_path`; every gate from 12 on answers for `appliance_documented_path` in `documented_path`'s place (the same node ids). ADR 0290 §5 and its status line amended; the bump's paragraph and `CLAIMS`' comment say so. Session 46's claims stay nine — four offline, four external, one host. | The registry decides a claim's session, not a table. | 0290, 0089 |
 | **D2928** | §2, ADR 0290, D2867: the hosted walk's requirement is **`DX-002`**. | `DX-002` is Session 1's (*"Operator commands document themselves …"*, `acceptance-registry.yaml:208`) and `DX-003` is taken too; the registry then held two `DX-002`s (`test_ids_are_unique` FAILED in Run 8's targeted list). | **The hosted walk is `DX-HOSTED-001`** (the `DX-WALK-001` form; the regex admits it). Renamed in the registry, `CLAIMS`, the bump's paragraph, the walk's module, `THR-WALK-RECORD`, ADR 0207's status line and ADR 0290 (status amended). Session 1's `DX-002` keeps its ids and stays in `UNCLAIMED_BY_HISTORY`. The plan's prose keeps `DX-002` where it was written; this row is the correction. | An id is the registry's to give. | 0290 |
 | **D2929** | §7: *"Host: S1 … `--live-slot-outputs` `slot11-prod`'s K2 copy"*. | `--live-slot-outputs` is the KEPT slot's document (`endpoints_host_live`, `branch_host_live`: `slot3-prod`); the DELETED slot's K2 copy is `--slot-outputs` (`reconciler_live`). | **The gate's usage names them so**: `--slot-outputs` = `slot11-prod`'s K2 copy (the slot the eighth re-earning deletes), `--live-slot-outputs` = `slot3-prod`'s. Run 9's sweep sheet follows the usage. | A flag names what its proofs read. | — |
+| **D2930** | Sheet H1: *"the agent runs s46-hostyaml.py on both copies"* of `host.yaml`. | `/home/op/etc-host.yaml` was Session 45's PRE-H1 copy (`dc34b173`) while `/etc` and the checkout held `0311cc2e`: a candidate built from it would have dropped slot9's declaration. | **The operator refreshed it from `/etc` first** (H1 part a); `h1.sh` refuses unless the checkout's copy equals the fresh one. Both candidates `3f220201`, identical. | A copy is read against its source before it is edited. | — |
+| **D2931** | Sheet PR: the person's record at `~/s46/walk/record.json`. | W1′ had written the CONSOLE walk's record there (2026-10-26), and `s46-external.sh` passed that one path as both `--console-record-file` and `--walk-record-file`. | **The person's notes and record live in `~/s46/person/`** (0700); the launcher's `--walk-record-file` repointed before the walk. | Two records, two paths. | — |
+| **D2932** | `slot.sh status` for a declared, unprepared slot. | It reads *"not prepared: no the slot manifest, the bootstrap state, an active secret generation"*: the labels (`slot.py:235`) carry their article after "no". | **Recorded; cosmetic** — the next session that touches `slot.py` words it. | — | — |
+| **D2933** | Sheet SL1: *"DNS three grey A records"* per slot (D2870). | The person's branch on `slot10-prod` was refused: `branch-runtime` exit 5 *"testbranch.pool.slot10… resolves to no A record … create the two wildcard records (operator guide §22)"*. **No slot since Session 40 had `*.pool`/`*.direct`** — only `slot3-prod`, by hand; the console offers a branch on every slot. | **The four wildcards added** for slot10 and slot11 at the operator's word (the harness refused the agent's first attempt as a DNS change). **Session 47**: the slot sheet names five records and `s46-dns.sh`'s successor checks the wildcards before `ready`. | What a customer is offered, every slot must be able to do. | — |
+| **D2934** | §8: no secret value in the conversation. | The person generated a management key and the operator relayed it into the conversation (*"now I want you to test it"*). | **Never used, never stored** (removed from the saved verdict); the person revoked it in the console; recorded. The statement already says *"never write a secret into your notes"* — a key in a relayed message is the same class. | A credential in a transcript is spent. | — |
+| **D2935** | The transcriber (`s46-walk-record.py`, rehearsed in Run 7). | A real form: the person kept the template's other half on three goals (*"reached at <time> / not reached: <why> …"*), which `goals()` read as REACHED; the secret screen refused *"generate password is confusing"* twice. | **Repaired before transcribing, the person's text untouched**: each half read with its placeholder removed, exactly one filled or exit 5; `--allow-match` takes an EXACT matched text the transcriber read (two used). The person's correction (*"I didnt use commands"*) applied verbatim with a `corrections[]` entry. | A rehearsal's notes are the author's; a person's are not. | 0290 |
+| **D2936** | ADR 0290: `documented_path` is a person's to move. | **The first person's walk**: account, factor, organisation, a project created in the console and their own application connected (goal 1 reached); usage and slowest queries found; no support page found; the branch refused (D2933). **11 steps no page told them** — the handoff token and `apg project claim`, no progress during creation, the creation vanishing after a refresh, Overview's "no project", Notifications' purpose, Connect for a newcomer, no copy buttons, the SQL editor's layout and state. The operator: *"the UI and UX part of the console … looks and feels terrible while using"*. | **Recorded, never argued**: `dx-record check --path hosted` exit 5, *"does not close documented_path"*. The 11 and the operator's agreement are **inputs to the Stage 6 report** (Run 12); a second walker after a console rework is the operator's choice (§10). | Findings are the site's, not the person's. | 0290 |
+| **D2937** | CLAUDE.md: *"host helpers to copy at Run 9: s46-probe-start/stop, s46-free, s46-units, …"*; D2861. | Only `s46-hostyaml.py`, `s46-dns.sh`, `s46-v1.sh` and `s46-r2shape.py` were copied: `life-start.sh` refused at its own precondition (the sums), and the sweep's `s46-launch.sh`/`s46-sweep.sh` and the two records it declares were absent too. | **Copied when each was needed, sums compared**; nothing ran on a missing helper. **Next trip**: Run 9's first op step copies EVERY `/home/op` path the trip's WSL scripts name (`grep -oh '/home/op/…'`), read back by sum. | A list in a handoff is not a copy. | — |
+| **D2938** | D2872: *"the lifecycle continues from it (--from-journey, ONE attempt)"*. | **Attempt 1 stopped at its first live check** (exit 4): the journey driver names the administrator `journey.admin` (`journey_walk.py:713`); the lifecycle signed in as its own default `lifecycle.admin` after claiming with the journey's token. The rehearsal's fake accepted any username (§7 question 6). | **The operator chose attempt 2 on slot11** over a fresh slot: `--from-journey` refuses the default name; `--claimed-password-file` + `--attempt-one-record` reuse attempt 1's claim (the token spent) and the probe's join, both carried as observations; attempt 1 kept whole. Attempt 2 exit 0. | One attempt is the rule; the operator decides the exception, and the record names it. | — |
+| **D2939** | Run 7: the trip's instruments rehearsed (`rehearse_lifecycle46` 27/27). | `s46-branches.py`'s `Branches` builds its own state and never set `seed_text`, which the lifecycle's `code()` reads since Session 46: the branches' first start died in login (exit 1) before any operation. Only the lifecycle was rehearsed. | **One line set it**; an AST scan showed `code()` is the only Session 46 attribute reader the branches call; the aborted files kept. | A subclass inherits its parent's new readers. | — |
+| **D2940** | §7: *"exit 5 for the expected claims only"*; D2872, D2920, D2921. | **The external half failed 13 claims** (335/13), 11 unexpected, four causes in the journey mode — none the product's behaviour: (1) five Sessions 38–42 proofs CREATE in the record's organisation as the probe, which D2921 made only its viewer (403 by design; D2921 reasoned about proofs that READ); (2) two notification proofs count the record's operations, not the journey's own rotation; (3) *"refused by the plan while a slot was ready"* cannot follow a journey that consumed the slot; (4) J9 connects to the journey's project after the lifecycle deleted it (D2920 named the order). The external half was never rehearsed on a journey-mode record. | **The operator's choice**: (1) and (2) repaired TEST-ONLY at `a34c906` (`creator`, the organisation owner's token; `journey_phase_operations` from `/v1`), the external half re-run from it: **343/5**. **`plans_live`, `journey_live`, `console_create_live` stay FAILED at 1.24.0** — Session 47 re-earns them with a new journey on a fresh slot, ordered: the plan refusal before the journey, J9 inside the journey's record before the deletion. | A mode that changes who owns a thing changes every proof that writes to it. | — |
+| **D2941** | The hosted walk's proofs (`test_session46_walk.py`). | `test_the_record_names_the_deployed_site` requires `site_commit` to be an ancestor of the EXTERNAL checkout: it failed from `55467b5` (the live site was published from the docs commit `0e80edc`, the SAME digest `74e18442`) and passed from `a34c906`. `test_every_command_is_on_the_site` fails an EMPTY `commands_run` — a person who used no terminal. | **Recorded** (the claim fails on the 11 findings regardless); Session 47 reads the site's identity by DIGEST and admits an empty list. | A reading must not depend on where it was run from. | 0290 |
+| **D2942** | CLAUDE.md: CI is the full check. | **`a34c906`'s CI failed** one test in both jobs: `test_systemd_analyze_accepts_the_units` — `systemd-analyze` on the RUNNER reports the runner image's OWN units (`xfs_scrub_all.service`, `walinuxagent.service`: *"Support for option CPUAccounting= has been removed"*). GitHub's image moved after `55467b5`'s green run; every push now fails it. The release is unaffected: `publish-cli` verifies the TAGGED commit's own `contract` run. | **Repaired with an ADR at the close** (a contract test changes only with one): `_EXPECTED_OFF_HOST` classifies a message about a unit file the repository does not ship — widened to a measured set, never to "any warning". | A fact about the machine running the test is not a fact about the unit. | — |
+| **D2943** | The operator, 2026-10-29: move the domain to `nomipg.com` (purchased). | Measured at `55467b5`: 312 lines in 79 tracked files, **9 code files** (`site_build.py`'s origin and CSP, `naming.py`, `capacity.py`, the console's two pages, `login.sh`, `build-cli.py`, the store's compose, the control example); every project's names come from the host's manifests and `host.yaml`. The move is a release of five (slot10's connection strings change), the zone and ~25 records, Pages, Email Routing, and 301s from the old name. | **Not mid-sitting** (D1425): planned as **Session 47** with D2933, D2940's three claims and D2941. Open: the domain alone or a rename too (*Agentic Postgres* on 81 lines, `agentic-postgres-cli`, `apg`); whether the store keeps its name. | Measure a move before pricing it. | — |
 | **D2914** | D2881: the idle module's docstring line about the absent series. | The same docstring also said *"None of these proofs has ever executed"* — false since Session 45's sitting, whose merged evidence passed `idle_after_wake_live`. | **Both sentences corrected** in the one docstring edit. | A docstring is a claim (D2881). | — |
 
 ---
@@ -1499,7 +1520,71 @@ operator**.
     ~15 s — the simple index lags).
 12. **SL4** — `slot11-prod`'s identity revoked after the tag; **RC1** active.
 
-**Done.**
+**Done.** (2026-10-26 → 2026-10-29; tagged **1.24.0 on `55467b5`**, the
+test-only `a34c906`.) The operator named the day *"today"* on 10-26; the person
+walked on 10-28, the host unmoved between. Scripts and `NOTES.md` in WSL
+`~/s46/run9/`; rows **D2930–D2943**.
+
+- **The release** (10-26): `4f4b207..55467b5` bundled under a temporary ref,
+  `FETCH_HEAD` confirmed, the checkout detached at `55467b5`; no dependency and
+  no Postgres-image input moved. Renders ×5 and setup-plan exit 0. **R1** ×3
+  `bump minor`, `requires patch`, `ok`, `changes []`. **R2** with windows: beta
+  43 migrations, alpha 39, slot3 by `slot.sh redeploy`, control (ledger 49,
+  **0010** in 11.1 ms) — **rest never down, auth 8.3–9.6 s, the console 7.1 s**;
+  the relay untouched, CSP unchanged. The support bundle live: 401 without a
+  session, 12 checks as the probe. **A1** agrees ×4; **RA** admitted/refused 12;
+  **K1** `kit-2026-10-26-s46`; **CS** exit 0; **V1 414/1** in 40:56 (DX-001,
+  D1935); **X0 40/0**. **W0′** 9/9, **E0**, **L0** 32 pages in 66 s, **W1′**
+  (link to string 26.1 s; FCP 1,036–1,296 ms), **E1** (SELECT 1 median 205.0 ms,
+  psql 161.7). **H1** both slots (D2930), DNS GO.
+- **`slot10-prod` and the person's walk** (10-28): SL1–SL3 (R2 tokens, B2
+  mirror, `--apply` *"created 16"* = the plan's 17 less the grant, the six
+  secrets, SL1b ALL YES, SL2 29 files) → `ready`. **P0** (the first code refused
+  — another authenticator entry; the host's clock read NTP-synced), the
+  invitation `3e4f973e` sent with the statement; **the agent never read the
+  link**. The creation looked hung at *"backup (90%)"*: the full backup then the
+  mirror, done 08:31:38Z. **A1″** allocated, agrees. The notes came back in
+  three messages, then the whole form; transcribed (D2935), the person
+  confirmed at 18:03Z with one correction; **`dx-record check` exit 5 — 11
+  undocumented steps** (D2936). Their branch was refused (D2933); the key they
+  relayed revoked (D2934). `slot10-prod` is KEPT.
+- **`slot11-prod`, the journey and the eighth re-earning**: SL1′–SL3′ after
+  A1″; the four branch wildcards (D2933). **J1** exit 0: created in the browser in
+  **1,565.5 s**, the support bundle 12 checks, the walker removed. **The
+  lifecycle**: the first launch refused at a missing helper (D2937); attempt 1
+  exit 4 (D2938); **attempt 2 exit 0** in 54 min — administrator 200/200, connect
+  3.7/4.8 s, rotation, insights canary, sleep 404 ×39, **wake 18.7 s**, resizes
+  304/840 of 4,497 safe admitted, export 40,339 B (`api`, `app`, `public`), the
+  URL 200 then 403, **the idle sleep by the reconciler**, usage, K2, deleted,
+  `no_slot`; the slot's names down: sleep ~70 s, wake ~17 s, resizes 8–17 s. **The
+  neighbours lost nothing** (life2 1,732 samples ×15, control 5,191: zero down).
+  **A1′** five live, slot1–9 and 11 deleted. **The branches on `slot3-prod`**
+  (after D2939) exit 0: `tmp` expired by the reconciler 606.6 s after
+  `expires_at`; the window waited 878.5 s past T1; `dev` at T1 holds row 1 (main
+  1, 2); a migration on `dev` only; `branch_limit_reached`; `dev` reset. `tmp`'s
+  create ~21 min and each recovery ~10 min: slot3's last full was 10-25 (3½ days
+  of WAL).
+- **B1** (21:29:45Z): **all eight units started by the boot, active by
+  boot+81 s** (S45 97 s); slot10's read apart (the script's list is seven); the
+  relay and `dev` back by themselves. **E0** again (its `--dry` refused its own
+  earlier record first) and **L1** (79 s, the record written).
+- **S1** (the one sweep): `GATE_46_HOST_EXIT=5`, **95 claims passed**, failed
+  only `appliance_documented_path`; suite 434/1 in **80 min** (S45 34; V1 41).
+  `dev` deleted (`--delete-only`). **The external half** 335/13 (D2940, kept in
+  `external-1/`) → the test-only **`a34c906`** → re-run: **348 claims, 343
+  passed, 5 failed** (`appliance_documented_path`, `documented_path`,
+  `plans_live`, `journey_live`, `console_create_live`); external suite 161/5 in
+  14:45; offline **164/164 = `55467b5`'s CI artifact** (the Run 8 shard copy
+  equal in count, kept). `a34c906`'s own CI failed on the runner image (D2942).
+- **The tag**: **1.24.0 on `55467b5`** (tag object `3305c68e`); **publish-cli
+  40845399896** passed its verify, build and trusted publishing; PyPI
+  `info.version` **1.24.0**; `apg --version` → `apg 1.24.0` from a clean
+  `python:3.12-slim` on the first attempt. **SL4**: slot11's identity
+  `b5b590a7` revoked, the credential shredded, no `slot11-prod` directory; the
+  reconciler idle.
+- **Owed by this run** to the close and Session 47: D2942's ADR and repair
+  (main's CI is red until it lands); D2933's slot sheet; D2940's three claims;
+  D2941; D2943's domain move.
 
 ### Run 10 — the old host retired (M7 X1/X2)
 
