@@ -425,6 +425,57 @@ _EXPECTED_OFF_HOST = (
     re.compile(r"Command /usr/local/libexec/agentic-postgres/\S+ is not executable"),
 )
 
+#: Where the machine running the test keeps its OWN units (ADR 0294, D2942).
+#: `verify` loads the machine's units while resolving ours and reports what it
+#: finds in them -- GitHub's runner image began shipping units that set the
+#: removed `CPUAccounting=` after 55467b5's green run, and every push failed on
+#: a file this repository has never seen. Measured: `/usr/lib/systemd/system/`.
+_MACHINE_UNIT_DIRS = ("/usr/lib/systemd/system/", "/lib/systemd/system/", "/etc/systemd/system/")
+_LOCATED = re.compile(r"^(?P<path>/\S+?):\d+: ")
+
+
+def _about_a_unit_the_repository_does_not_ship(line: str) -> bool:
+    """A message located in one of the machine's unit files that is not ours.
+
+    Located means `verify`'s own `<path>:<line>: ` prefix. A unit the
+    repository ships is never classified away, even installed on the machine
+    under its own name: a message about it is a message about our unit.
+    """
+    located = _LOCATED.match(line.strip())
+    if located is None:
+        return False
+    path = located["path"]
+    return path.startswith(_MACHINE_UNIT_DIRS) and Path(path).name not in UNITS
+
+
+def _unexplained(stderr: str) -> list[str]:
+    return [
+        line
+        for line in stderr.splitlines()
+        if line.strip()
+        and not any(pattern.search(line) for pattern in _EXPECTED_OFF_HOST)
+        and not _about_a_unit_the_repository_does_not_ship(line)
+    ]
+
+
+def test_the_classifier_explains_only_what_is_not_about_our_units() -> None:
+    """ADR 0294: the runner's own units are explained; ours never are."""
+    removed = "Support for option CPUAccounting= has been removed and it is ignored"
+    machine = [
+        f"/usr/lib/systemd/system/xfs_scrub_all.service:26: {removed}",
+        f"/usr/lib/systemd/system/system-xfs_scrub.slice:15: {removed}",
+        f"/usr/lib/systemd/system/walinuxagent.service:21: {removed}",
+    ]
+    kept = [
+        f"{SYSTEMD / 'agentic-postgres-edge.service'}:12: {removed}",
+        f"/etc/systemd/system/agentic-postgres-project@.service:9: {removed}",
+        "/usr/lib/systemd/system/agentic-postgres-telemetry.service:3: Unknown key name 'Foo'",
+        f"/opt/vendor/agentic-postgres-extra.service:4: {removed}",
+        "Failed to parse the unit file",
+    ]
+    assert _unexplained("\n".join(machine)) == []
+    assert _unexplained("\n".join(machine + kept)) == kept
+
 
 def test_systemd_analyze_accepts_the_units() -> None:
     """The real check, run when the tool exists.
@@ -446,11 +497,7 @@ def test_systemd_analyze_accepts_the_units() -> None:
     if result.returncode == 0:
         return
 
-    unexplained = [
-        line
-        for line in result.stderr.splitlines()
-        if line.strip() and not any(pattern.search(line) for pattern in _EXPECTED_OFF_HOST)
-    ]
+    unexplained = _unexplained(result.stderr)
     assert not unexplained, "systemd-analyze reported real problems:\n" + "\n".join(unexplained)
 
 
