@@ -205,6 +205,62 @@ def owner(endpoint: str, probe: dict[str, Any], fresh_totp_code: Any) -> Iterato
     _only(own, endpoint)
 
 
+@pytest.fixture(scope="module")
+def creator(
+    request: pytest.FixtureRequest, endpoint: str, record: dict[str, Any], fresh_totp_code: Any
+) -> Iterator[str]:
+    """The token of the account that OWNS the record's organisation -- the one a
+    creation in it needs. The probe owner's, except for a run that continued a
+    journey's creation (D2872): that organisation is the journey's account's, and
+    the probe is only its viewer (D2921), whose creation is a 403 by design."""
+    if record.get("create_source") != "journey":
+        yield request.getfixturevalue("owner")
+        return
+    path = Path(record["journey_record"])
+    journey = json.loads(path.read_text(encoding="utf-8"))
+    assert journey["organization"] == record["organization_id"], journey["organization"]
+    files = {
+        member: path.parent / journey[member] for member in ("account_password_file", "seed_file")
+    }
+    for member, file in files.items():
+        assert stat.S_IMODE(file.stat().st_mode) == 0o600, f"{member} {file} is not 0600"
+    password = Secret(files["account_password_file"].read_text(encoding="utf-8").strip("\n"))
+    seed = Secret(files["seed_file"].read_text(encoding="utf-8").strip())
+    own = Recorder()
+    status, body = own.json("POST", f"{endpoint}/sessions", {
+        "username": journey["account"], "password": password, "totp_code": fresh_totp_code(seed),
+    })  # fmt: skip
+    assert status == 200, (status, body.get("error"))
+    yield Secret(body["access_token"])
+    own.send("DELETE", f"{endpoint}/sessions/current",
+             {"refresh_token": body["refresh_token"]}, body["access_token"])  # fmt: skip
+    _only(own, endpoint)
+
+
+def journey_phase_operations(
+    recorder: Recorder, endpoint: str, token: str, record: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """For a run that continued a journey's creation (D2872): the slot's finished
+    operations made in the journey's own phase -- from the window's start (the
+    journey's) to the lifecycle's own start -- that the record does not name
+    (the console's rotation, Run 9). Read from `/v1`, never from the record; `[]`
+    for any other run."""
+    if record.get("create_source") != "journey":
+        return []
+    organization, key = record["organization_id"], record["project_key"]
+    status, listed = recorder.json(
+        "GET", f"{endpoint}/operations?organization={organization}", None, token
+    )
+    assert status == 200, status
+    start = datetime.fromisoformat(record["window_started_at"])
+    end = datetime.fromisoformat(record["lifecycle_started_at"])
+    named = {o["id"] for o in record["operations"]}
+    return [row for row in listed["operations"]
+            if row.get("project_key") == key and row["id"] not in named
+            and row["status"] in ("succeeded", "failed")
+            and start <= datetime.fromisoformat(row["created_at"]) < end]  # fmt: skip
+
+
 def _only(recorder: Recorder, *urls: str) -> None:
     allowed = {("https", urlsplit(url).hostname or "") for url in urls}
     assert recorder.hosts() <= allowed, sorted(recorder.hosts() - allowed)
@@ -300,7 +356,7 @@ def test_the_refused_resize_changed_nothing(
 def test_the_second_creation_was_refused_without_a_row(
     recorder: Recorder,
     endpoint: str,
-    owner: str,
+    creator: str,
     probe: dict[str, Any],
     record: dict[str, Any],
 ) -> None:
@@ -320,12 +376,12 @@ def test_the_second_creation_was_refused_without_a_row(
     status, body = recorder.json("POST", f"{endpoint}/projects", {
         "organization": organization, "name": "Lifecycle s38 again", "profile": "small",
         "admin_username": "again.admin", "handoff_sha256": "0" * 64,
-    }, owner)  # fmt: skip
+    }, creator)  # fmt: skip
     assert (status, body.get("error"), body.get("reason")) == (
         409, "capacity_exhausted", "no_slot",
     ), (status, body)  # fmt: skip
     status, listed = recorder.json(
-        "GET", f"{endpoint}/operations?organization={organization}", None, owner
+        "GET", f"{endpoint}/operations?organization={organization}", None, creator
     )
     assert status == 200, status
     # Within the record's own run (D2343): the probe organisation holds every

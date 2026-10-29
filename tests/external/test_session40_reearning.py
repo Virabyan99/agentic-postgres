@@ -34,6 +34,7 @@ from tests.external.test_session38_public_lifecycle import (  # noqa: F401 -- fi
     _only,
     _read_back,
     control,
+    creator,
     endpoint,
     owner,
     probe,
@@ -162,7 +163,7 @@ def test_the_export_holds_the_three_customer_schemas(
 def test_the_second_creation_was_refused_without_a_row(
     recorder: Recorder,
     endpoint: str,
-    owner: str,
+    creator: str,
     probe: dict[str, Any],
     record40: dict[str, Any],
 ) -> None:
@@ -181,12 +182,12 @@ def test_the_second_creation_was_refused_without_a_row(
     status, body = recorder.json("POST", f"{endpoint}/projects", {
         "organization": organization, "name": "Lifecycle s40 again", "profile": "small",
         "admin_username": "again.admin", "handoff_sha256": "0" * 64,
-    }, owner)  # fmt: skip
+    }, creator)  # fmt: skip
     assert (status, body.get("error"), body.get("reason")) == (
         409, "capacity_exhausted", "no_slot",
     ), (status, body)  # fmt: skip
     status, listed = recorder.json(
-        "GET", f"{endpoint}/operations?organization={organization}", None, owner
+        "GET", f"{endpoint}/operations?organization={organization}", None, creator
     )
     assert status == 200, status
     start, end = (datetime.fromisoformat(record40[k]) for k in ("started_at", "finished_at"))

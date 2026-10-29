@@ -39,7 +39,9 @@ from tests.external.test_session38_public_lifecycle import (  # noqa: F401 -- fi
     _only,
     _read_back,
     control,
+    creator,
     endpoint,
+    journey_phase_operations,
     owner,
     probe,
     record,
@@ -213,7 +215,7 @@ def test_both_routes_were_probed_through_every_window(record41: dict[str, Any]) 
 
 
 def test_the_second_creation_after_the_deletion_was_refused_by_capacity(
-    recorder: Recorder, endpoint: str, owner: str, record41: dict[str, Any]
+    recorder: Recorder, endpoint: str, creator: str, record41: dict[str, Any]
 ) -> None:
     """ADR 0274 sentence 4: the lifecycle's OWN organisation -- within its plan
     once the slot was deleted, a deleted project held against nothing -- asked
@@ -228,12 +230,12 @@ def test_the_second_creation_after_the_deletion_was_refused_by_capacity(
     status, body = recorder.json("POST", f"{endpoint}/projects", {
         "organization": organization, "name": "Lifecycle s41 again", "profile": "small",
         "admin_username": "again.admin", "handoff_sha256": "0" * 64,
-    }, owner)  # fmt: skip
+    }, creator)  # fmt: skip
     assert (status, body.get("error"), body.get("reason")) == (
         409, "capacity_exhausted", "no_slot",
     ), (status, body)  # fmt: skip
     status, listed = recorder.json(
-        "GET", f"{endpoint}/operations?organization={organization}", None, owner
+        "GET", f"{endpoint}/operations?organization={organization}", None, creator
     )
     assert status == 200, status
     start = instant(record41.get("window_started_at") or record41["started_at"])
@@ -430,7 +432,7 @@ def _expected_notifications(record41: dict[str, Any]) -> Counter:
 
 
 def test_every_finished_operation_was_notified(
-    recorder: Recorder, endpoint: str, owner: str, record41: dict[str, Any]
+    recorder: Recorder, endpoint: str, owner: str, creator: str, record41: dict[str, Any]
 ) -> None:
     """ADR 0275: every finished operation of the slot -- the eleven and the idle
     sleep and its wake -- has exactly ONE notification, its kind the outcome's
@@ -438,6 +440,13 @@ def test_every_finished_operation_was_notified(
     operation's type, project and status; the refused creations, which wrote no
     operation, wrote none. Listed after the deletion, and asked again now."""
     expected = _expected_notifications(record41)
+    # D2872 (Run 9): a run that continued a journey's creation also notified the journey's
+    # own operations on the slot (the console's rotation), which its record does not name.
+    for row in journey_phase_operations(recorder, endpoint, creator, record41):
+        kind = KIND_OF_ORIGIN.get(row.get("origin") or "member", "operation_succeeded")
+        if row["status"] == "failed":
+            kind = "operation_failed"
+        expected[(kind, f"{row['type']} on {record41['project_key']} {row['status']}")] += 1
     key = record41["project_key"]
     for listing in (record41["observations"]["notifications_after_delete"], None):
         if listing is None:
