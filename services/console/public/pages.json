@@ -29,7 +29,9 @@
         "GET /v1/projects",
         "GET /v1/operations",
         "POST /v1/me/totp",
-        "POST /v1/me/totp/confirm"
+        "POST /v1/me/totp/confirm",
+        "GET /v1/organizations/{organization}/plan",
+        "GET /v1/organizations/{organization}/usage"
       ]
     },
     {
@@ -42,7 +44,13 @@
       "id": "organization",
       "path": "/console/#/org/{organization}",
       "ledger": ["accounts", "organizations", "projects_self_service", "management_api"],
-      "calls": ["GET /v1/organizations", "GET /v1/projects", "GET /v1/operations"]
+      "calls": [
+        "GET /v1/organizations",
+        "GET /v1/projects",
+        "GET /v1/operations",
+        "GET /v1/organizations/{organization}/plan",
+        "GET /v1/organizations/{organization}/usage"
+      ]
     },
     {
       "id": "activity",
@@ -65,7 +73,12 @@
       "id": "new-project",
       "path": "/console/#/org/{organization}/new-project",
       "ledger": ["projects_self_service"],
-      "calls": ["POST /v1/projects", "GET /v1/operations/{operation}"]
+      "calls": [
+        "POST /v1/projects",
+        "GET /v1/operations/{operation}",
+        "GET /v1/organizations/{organization}/plan",
+        "GET /v1/operations"
+      ]
     },
     {
       "id": "project-overview",
@@ -102,7 +115,8 @@
         "POST /v1/projects/{key}/restores",
         "POST /v1/projects/{key}/branches/{branch}/reset",
         "DELETE /v1/projects/{key}/branches/{branch}",
-        "GET /v1/operations/{operation}"
+        "GET /v1/operations/{operation}",
+        "GET /v1/organizations/{organization}/plan"
       ]
     },
     {

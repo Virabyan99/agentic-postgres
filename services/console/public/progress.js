@@ -7,6 +7,11 @@
 // `now` (milliseconds, the browser's clock). An elapsed time is the browser's
 // clock against the server's, so the page says "about". A value the operation
 // does not carry is `null`, never 0 (ADR 0195).
+//
+// Since Session 47 Run 5 it also words every time a page draws (D3007: a
+// relative age, the absolute local time beside it -- never the server's ISO
+// text), decides whether a new project may start (D2951), and derives the
+// getting-started checklist from API readings alone (ADR 0298 decision 4).
 
 export const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
 
@@ -163,4 +168,144 @@ export function describe(operation, now) {
     ? `${states[running].label} (step ${running + 1} of ${states.length})`
     : operation.step ? `Operation ${operation.status}, ${operation.step}` : `Operation ${operation.status}`;
   return doing + (elapsed ? `, about ${elapsed} so far` : "") + (typical ? `; usually ${typical}.` : ".");
+}
+
+// -- times, in words (D3007) ------------------------------------------------------
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// "14 min ago", "3 h ago", "2 days ago", "just now"; a time ahead of `now`
+// (an expiry) reads "in 14 min". From the browser's clock against the
+// server's time, so it is a rough age; null when `at` is not a time.
+export function relativeAge(at, now) {
+  const then = instant(at);
+  const clock = instant(now);
+  if (then === null || clock === null) {
+    return null;
+  }
+  const seconds = (clock - then) / 1000;
+  const ahead = seconds < 0;
+  const size = Math.abs(seconds);
+  if (size < 45) {
+    return ahead ? "in a moment" : "just now";
+  }
+  let words;
+  if (size < 3600) {
+    words = `${Math.max(1, Math.round(size / 60))} min`;
+  } else if (size < 86400) {
+    words = `${Math.floor(size / 3600)} h`;
+  } else {
+    words = plural(Math.floor(size / 86400), "day");
+  }
+  return ahead ? `in ${words}` : `${words} ago`;
+}
+
+// The absolute time in the browser's own time zone: "29 Oct 2026, 14:13".
+// null when `at` is not a time.
+export function absoluteTime(at) {
+  const then = instant(at);
+  if (then === null) {
+    return null;
+  }
+  const date = new Date(then);
+  const two = (number) => String(number).padStart(2, "0");
+  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}, ${two(date.getHours())}:${two(date.getMinutes())}`;
+}
+
+// The machine form for a <time datetime>, from the same instant; null when
+// `at` is not a time.
+export function machineTime(at) {
+  const then = instant(at);
+  return then === null ? null : new Date(then).toISOString();
+}
+
+// -- may a new project start? (D2951, ADR 0297 decision 6) -------------------------
+
+// Null when it may; otherwise why not: a creation of the organisation's is
+// still open (its name), or the plan's projects are all held. `creating` is
+// the open creations (null when they could not be read) and `plan` the
+// organisation's plan document (null when unread). What could not be read
+// blocks nothing: the server decides, and its refusal is worded.
+export function creationBlocked({ creating, plan }) {
+  const open = Array.isArray(creating) ? creating : [];
+  const counted = plan && plan.projects_active;
+  const held = counted && typeof counted.held === "number" ? counted.held : null;
+  const limit = counted && typeof counted.limit === "number" ? counted.limit : null;
+  if (open.length) {
+    const subject = open[0].subject || {};
+    return { reason: "creating", name: typeof subject.name === "string" ? subject.name : null, operation: open[0].id || null, held, limit };
+  }
+  if (held !== null && limit !== null && held >= limit) {
+    return { reason: "limit", name: null, operation: null, held, limit };
+  }
+  return null;
+}
+
+// -- the getting-started checklist (ADR 0298 decision 4) -------------------------
+
+export const NOT_YET = "not yet";
+export const NOT_READ = "not read";
+
+// Lists read one per organisation, each an array or null when that reading
+// failed: what was found, and whether any could not be read.
+function gathered(lists) {
+  const all = Array.isArray(lists) ? lists : [null];
+  return {
+    items: all.filter(Array.isArray).flat(),
+    unread: all.some((list) => !Array.isArray(list)),
+  };
+}
+
+function found(items, unread) {
+  if (items.length) {
+    return DONE;
+  }
+  return unread ? NOT_READ : NOT_YET;
+}
+
+// The five steps from an invitation to a connected application, each `done`,
+// `current` (a project being created), `not yet`, or `not read` -- a reading
+// the console could not make is said, never counted either way. Every input
+// is what the API served: `me` (`GET /v1/me`, null when unread),
+// `organizations` (the list, or null), and per organisation `projects`,
+// `creating` (its open creations), `operations` (all of them) and `usage`
+// (`GET .../usage`'s project documents), each an array or null. Nothing is
+// remembered between calls.
+export function checklist({ me, organizations, projects, creating, operations, usage }) {
+  const factor = me && me.second_factor && typeof me.second_factor.enabled === "boolean"
+    ? (me.second_factor.enabled ? DONE : NOT_YET)
+    : NOT_READ;
+  const organization = Array.isArray(organizations) ? (organizations.length ? DONE : NOT_YET) : NOT_READ;
+  const held = gathered(projects);
+  const open = gathered(creating);
+  let project = found(held.items, held.unread);
+  if (project !== DONE && open.items.length) {
+    project = CURRENT;
+  } else if (project === NOT_YET && open.unread) {
+    project = NOT_READ;
+  }
+  const history = gathered(operations);
+  const made = history.items.filter((operation) => operation && operation.type === "credential.rotate" && operation.status === "succeeded");
+  const password = found(made, history.unread);
+  const read = gathered(usage);
+  const seen = read.items.filter((served) => {
+    const figure = served && served.status === "read" && served.figures ? served.figures.customer_connections : null;
+    return Boolean(figure) && ((typeof figure.max === "number" && figure.max > 0) || (typeof figure.latest === "number" && figure.latest > 0));
+  });
+  const unreadUsage = read.unread || read.items.some((served) => !served || served.status !== "read");
+  let connection = NOT_YET;
+  if (seen.length) {
+    connection = DONE;
+  } else if (!held.items.length) {
+    connection = held.unread ? NOT_READ : NOT_YET;
+  } else if (unreadUsage) {
+    connection = NOT_READ;
+  }
+  return [
+    { item: "factor", state: factor },
+    { item: "organization", state: organization },
+    { item: "project", state: project },
+    { item: "password", state: password },
+    { item: "connection", state: connection },
+  ];
 }

@@ -14,15 +14,18 @@
 
 import { call, Refusal, relayOrigin } from "/console/api.js";
 import { CLAIM_SENTENCE, claimLine, createProject } from "/console/create.js";
-import { refusal, sentence } from "/console/messages.js";
+import { refusal, said, sentence } from "/console/messages.js";
 import { begin, current, frame, isCurrent, loadContext, mayCreate, narrow, PAGES, setPage, show, useActions } from "/console/nav.js";
 import { connect } from "/console/pg.js";
-import { CURRENT, describe, DONE, formatDuration, limitText, operationSeconds, STOPPED, stepStates, TERMINAL, typicalRange } from "/console/progress.js";
+import {
+  checklist, creationBlocked, CURRENT, describe, DONE, formatDuration, limitText, NOT_READ, NOT_YET, operationSeconds,
+  STOPPED, stepStates, TERMINAL, typicalRange,
+} from "/console/progress.js";
 import { newPassword, verifier } from "/console/scram.js";
 import { DEADLINE_SENTENCE, doors, openDoor, runStatement } from "/console/sql.js";
 import {
-  busyButton, button, card, choice, codeBlock, emptyState, field, h, inlineCopy, link, once, siteDomain, siteLink,
-  skeleton, stateChip, table, value,
+  banner, busyButton, button, callout, card, choice, codeBlock, emptyState, field, h, inlineCopy, link, once, siteDomain,
+  siteLink, skeleton, stateChip, table, value, when,
 } from "/console/ui.js";
 
 const KEY = /^[a-z][a-z0-9-]{1,62}$/;
@@ -49,27 +52,57 @@ const OPERATION_TITLES = {
   "branch.delete": "Deleting a branch",
 };
 
+// An operation's status in words: the tracker's and the activity list's.
+const OPERATION_STATUS = {
+  pending: "Waiting to start", running: "Running", succeeded: "Finished", failed: "Failed", cancelled: "Cancelled",
+};
+
 // -- operations ----------------------------------------------------------------
 
+function pause(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 // Reads the operation every 2 s until it is terminal, as `apg operation wait`,
-// saying what it is doing in words -- never a percentage (ADR 0296).
-async function waitFor(operationId, status) {
+// saying what it is doing in words -- never a percentage (ADR 0296). It stops,
+// answering null, as soon as the person leaves the page (`turn`), so a page no
+// one is reading reads nothing -- an export's link is taken by one read (D3005).
+async function waitFor(operationId, status, turn) {
   for (;;) {
     const row = await call("GET", `/operations/${encodeURIComponent(operationId)}`);
+    if (!isCurrent(turn)) {
+      return null;
+    }
     status.textContent = describe(row, Date.now());
     if (TERMINAL.has(row.status)) {
       return row;
     }
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await pause(2000);
+    if (!isCurrent(turn)) {
+      return null;
+    }
   }
 }
 
+// The tracker of an operation started on this page, linked once it is recorded.
+function followLink(operation) {
+  return h("p", { className: "small" }, link(`#/operations/${operation.id}`, "Follow it on its own page"),
+    "; it keeps going if you leave this one.");
+}
+
+// A finished operation that did not succeed, in the words of its error code
+// (ADR 0297): what happened, what to do, the word in small type.
 function outcome(row) {
   if (row.status === "succeeded") {
     return h("p", {}, "Done.");
   }
-  const reason = row.result && row.result.reason ? ` (${row.result.reason})` : "";
-  return h("p", { className: "refusal" }, `The operation ${row.status}: `, h("code", {}, value(row.error_code)), reason);
+  if (row.status === "cancelled") {
+    return h("p", { className: "refusal" }, "The operation was cancelled before it finished; nothing more will happen.");
+  }
+  if (typeof row.error_code === "string" && row.error_code) {
+    return said(row.error_code, row.result);
+  }
+  return h("p", { className: "refusal" }, "The operation failed, and the server recorded no reason.");
 }
 
 // What an operation acts on, in a few words.
@@ -289,12 +322,14 @@ async function openCreations(organization) {
 }
 
 // What a creation is doing now, in a few words: its current step and how
-// long it has run.
+// long it has run, and how long one usually takes.
 function creationNow(operation) {
   const now = Date.now();
   const running = stepStates(operation, now).find((step) => step.state === CURRENT);
   const elapsed = formatDuration(operationSeconds(operation, now));
-  return (running ? running.label : "Waiting to start") + (elapsed ? `, ${elapsed} so far` : "");
+  const typical = typicalRange(operation.expected);
+  return (running ? running.label : "Waiting to start") + (elapsed ? `, ${elapsed} so far` : "") +
+    (typical ? `; usually ${typical}` : "");
 }
 
 // An organisation's projects, and the ones being created, as one table.
@@ -322,43 +357,223 @@ function projectList(projects, creating) {
   ];
 }
 
-async function overview(me) {
+// The organisation's plan document, or null when it could not be read.
+function readPlan(organization) {
+  return call("GET", `/organizations/${organization}/plan`).catch(() => null);
+}
+
+// One organisation's readings for its Projects page, each read from the API on
+// every load (ADR 0296, ADR 0298): its projects (a refusal of these refuses the
+// page), its open creations, its plan, all its operations and its projects'
+// usage over the longest window the API serves. Each of the last four is null
+// when it could not be read -- said by what draws it, never shown as none.
+async function readOrganization(organization) {
+  const id = encodeURIComponent(organization);
+  const [projects, creating, plan, operations, usage] = await Promise.all([
+    call("GET", "/projects?organization=" + id).then((served) => served.projects || []),
+    openCreations(organization),
+    readPlan(organization),
+    call("GET", "/operations?organization=" + id).then((served) => served.operations || []).catch(() => null),
+    call("GET", `/organizations/${organization}/usage?hours=720`).then((served) => served.projects || []).catch(() => null),
+  ]);
+  return { projects, creating, plan, operations, usage };
+}
+
+function planName(plan) {
+  const name = plan && typeof plan.plan === "string" ? plan.plan : "";
+  return name ? name.charAt(0).toUpperCase() + name.slice(1) : "Your";
+}
+
+function count(number, word, words) {
+  return `${number} ${number === 1 ? word : words}`;
+}
+
+// The links every limit says: the site's plans and the organisation's own page.
+function planLinks(organization) {
+  return [h("a", { href: siteLink("/pricing/") }, "See plans"), " · ", h("a", { href: `#/org/${organization}/plan` }, "Your plan")];
+}
+
+// A limit the customer can see coming (ADR 0297 decision 6): from the plan's
+// `projects_active` alone, when it is full or one short of full.
+function projectLimitBanner(organization, plan, creating) {
+  const counted = plan && plan.projects_active;
+  if (!counted || typeof counted.held !== "number" || typeof counted.limit !== "number") {
+    return null;
+  }
+  const { held, limit } = counted;
+  if (held < limit && !(limit > 1 && held === limit - 1)) {
+    return null;
+  }
+  const open = (creating || []).find((operation) => operation.subject && typeof operation.subject.name === "string");
+  let why = "One more project fills it.";
+  if (held >= limit) {
+    why = open
+      ? `${open.subject.name} is being created, so it already counts. A new project cannot start.`
+      : "A new project cannot start until one is deleted, or on a plan with more projects.";
+  }
+  return banner(h("strong", {}, `${planName(plan)} plan: ${held} of ${count(limit, "project", "projects")}.`), " ", why, " ",
+    planLinks(organization));
+}
+
+function isFull(blocked) {
+  return blocked.held !== null && blocked.limit !== null && blocked.held >= blocked.limit;
+}
+
+// Why New project cannot start now (D2951), in a sentence.
+function blockedWords(blocked, plan) {
+  const name = blocked.name || "A project";
+  if (blocked.reason === "creating" && isFull(blocked)) {
+    return `${planName(plan)} plan holds ${count(blocked.limit, "project", "projects")}, and ${name} is being created.`;
+  }
+  if (blocked.reason === "creating") {
+    return `${name} is being created. Another project can start once it has finished.`;
+  }
+  return `${planName(plan)} plan holds ${count(blocked.limit, "project", "projects")}, and all of them are in use.`;
+}
+
+// The New project action of an organisation the person may create in: a link,
+// or -- while a creation is open or the plan is full -- a disabled button that
+// says why beside it.
+function newProjectAction(organization, blocked, plan) {
+  if (!organization || !["owner", "admin", "member"].includes(organization.role)) {
+    return null;
+  }
+  if (blocked) {
+    return h("button", { type: "button", disabled: true, title: blockedWords(blocked, plan) }, "New project");
+  }
+  return link(`#/org/${organization.id}/new-project`, "New project");
+}
+
+// -- the getting-started checklist (ADR 0298 decision 4) ----------------------
+
+const CHECKLIST_TITLES = {
+  factor: "Turn on a second factor",
+  organization: "Join or create an organisation",
+  project: "Create a project",
+  password: "Make a password for a door",
+  connection: "Connect your application",
+};
+const CHECK_WORDS = { [DONE]: "done", [CURRENT]: "in progress", [NOT_YET]: "not yet", [NOT_READ]: "not read" };
+
+// What one item says under its title, and where it leads.
+function checkDetail(item, state, me, organizations, readings) {
+  const projects = readings.flatMap((reading) => reading.projects || []);
+  const creating = readings.flatMap((reading) => reading.creating || []);
+  if (state === NOT_READ) {
+    return ["Not read just now; this page reads it again when you open it.", null];
+  }
+  if (item === "factor") {
+    if (state === DONE) {
+      return ["On", null];
+    }
+    return [me.second_factor && me.second_factor.required ? "Your role needs one; the console asks for it when you sign in." : "Not on. The console asks for one when your role needs it.", null];
+  }
+  if (item === "organization") {
+    if (state === DONE) {
+      return [organizations.map((organization) => organization.name).join(", "), null];
+    }
+    return ["Accept an invitation, or make your own.", link("#/new", "Create one")];
+  }
+  if (item === "project") {
+    if (state === DONE) {
+      return [projects.map((project) => project.key).join(", "), null];
+    }
+    if (state === CURRENT) {
+      const first = creating[0];
+      return [`${subjectWords(first)} is being created`, link(`#/operations/${first.id}`, "Follow")];
+    }
+    const where = organizations.find((organization) => mayCreate(organization));
+    return ["Not yet.", where ? link(`#/org/${where.id}/new-project`, "New project") : null];
+  }
+  if (item === "password") {
+    if (state === DONE) {
+      return ["Made", null];
+    }
+    const ready = projects.find((project) => project.state === "ready");
+    return ready ? ["Not yet.", link(`#/projects/${ready.key}/connect`, "Connect")] : ["Once the project is ready.", null];
+  }
+  if (state === DONE) {
+    return ["Seen", null];
+  }
+  return ["Not seen yet.", h("a", { href: siteLink("/docs/connecting/") }, "How")];
+}
+
+// From the invitation to a connected application, each step read from the API
+// on this load -- the same on any device; nothing is remembered in the tab. Gone
+// once every step is done.
+function checklistCard(me, organizations, readings) {
+  const states = checklist({
+    me, organizations,
+    projects: readings.map((reading) => reading.projects),
+    creating: readings.map((reading) => reading.creating),
+    operations: readings.map((reading) => reading.operations),
+    usage: readings.map((reading) => reading.usage),
+  });
+  if (states.every((entry) => entry.state === DONE)) {
+    return null;
+  }
+  return card(h("h2", {}, "Getting started"),
+    h("p", { className: "small muted" }, "From your invitation to a connected application. Each step is read from your account, so it is the same on any device."),
+    h("ol", { className: "checklist" }, states.map(({ item, state }) => {
+      const [detail, action] = checkDetail(item, state, me, organizations, readings);
+      return h("li", { className: state === DONE ? "done" : state === CURRENT ? "current" : state === NOT_READ ? "unread" : "todo" },
+        h("span", { className: "mark", "aria-hidden": "true" }, state === DONE ? "✓" : ""),
+        h("div", {}, h("strong", {}, CHECKLIST_TITLES[item]), h("span", { className: "sr" }, `, ${CHECK_WORDS[state]}`),
+          h("span", { className: "sub" }, detail)),
+        action || h("span", {}));
+    })));
+}
+
+// One organisation on the Projects page: its limit, its projects and the ones
+// being created, and what can be done next.
+function organizationSection(organization, reading) {
+  const blocked = creationBlocked(reading);
+  return h("section", { className: "card" },
+    h("h2", {}, organization.name, " ", h("small", {}, organization.role)),
+    projectLimitBanner(organization.id, reading.plan, reading.creating),
+    projectList(reading.projects, reading.creating),
+    h("p", { className: "card-actions" },
+      newProjectAction(organization, blocked, reading.plan),
+      link(`#/org/${organization.id}`, "Open this organisation")),
+    blocked && !isFull(blocked) && mayCreate(organization) ? h("p", { className: "small muted" }, blockedWords(blocked, reading.plan)) : null);
+}
+
+async function overview(me, turn) {
   const organizations = (await call("GET", "/organizations")).organizations;
-  const sections = [];
-  for (const organization of organizations) {
-    const projects = (await call("GET", "/projects?organization=" + encodeURIComponent(organization.id))).projects;
-    const creating = await openCreations(organization.id);
-    sections.push(h("section", { className: "card" },
-      h("h2", {}, organization.name, " ", h("small", {}, organization.role)),
-      projectList(projects, creating),
-      h("p", { className: "card-actions" },
-        ["owner", "admin", "member"].includes(organization.role)
-          ? link(`#/org/${organization.id}/new-project`, "New project")
-          : null,
-        link(`#/org/${organization.id}`, "Open this organisation")),
-    ));
+  const readings = await Promise.all(organizations.map((organization) => readOrganization(organization.id)));
+  if (!isCurrent(turn)) {
+    return;
   }
   frame(me, "Projects", { action: link("#/new", "New organisation") },
-    organizations.length === 0 ? emptyState("You belong to no organisation yet. Ask for an invitation, or make one.") : sections,
+    checklistCard(me, organizations, readings),
+    organizations.length === 0
+      ? emptyState("You belong to no organisation yet. Ask for an invitation, or make one.", link("#/new", "New organisation"))
+      : organizations.map((organization, index) => organizationSection(organization, readings[index])),
   );
 }
 
-async function organizationView(me, org) {
-  const [served, creating] = await Promise.all([
-    call("GET", "/projects?organization=" + encodeURIComponent(org)), openCreations(org)]);
+async function organizationView(me, org, turn) {
+  const reading = await readOrganization(org);
+  if (!isCurrent(turn)) {
+    return;
+  }
   const here = current().organization;
-  frame(me, "Projects", { action: mayCreate(here) ? link(`#/org/${org}/new-project`, "New project") : null },
-    card(projectList(served.projects, creating)),
+  const blocked = creationBlocked(reading);
+  frame(me, "Projects", { action: newProjectAction(here, blocked, reading.plan) },
+    projectLimitBanner(org, reading.plan, reading.creating),
+    blocked && !isFull(blocked) && mayCreate(here) ? h("p", { className: "muted" }, blockedWords(blocked, reading.plan)) : null,
+    checklistCard(me, current().organizations, [reading]),
+    card(projectList(reading.projects, reading.creating)),
     h("p", {}, link(`#/org/${org}/activity`, "Everything that happened in this organisation")));
 }
 
 async function activityView(me, org) {
   const served = await call("GET", "/operations?organization=" + encodeURIComponent(org));
   const rows = (served.operations || []).map((operation) => ({
-    when: value(operation.created_at),
+    when: when(operation.created_at),
     what: OPERATION_TITLES[operation.type] || value(operation.type),
     subject: subjectWords(operation),
-    status: value(operation.status),
+    status: OPERATION_STATUS[operation.status] || value(operation.status),
     open: link(`#/operations/${operation.id}`, TERMINAL.has(operation.status) ? "Details" : "Follow"),
   }));
   frame(me, "Activity",
@@ -370,22 +585,65 @@ async function activityView(me, org) {
 // The tracker's content for one reading of the operation: the steps, done /
 // current / to come, with the time each took; the whole's elapsed and typical
 // time; the server's limit; the outcome once it is over.
-function trackerParts(row) {
+// A step's usual time, in words.
+function usually(seconds) {
+  return seconds < 1 ? "usually under a second" : `usually about ${formatDuration(seconds)}`;
+}
+
+// Where a finished operation leads (the brief's screens 3-4): a created
+// project to Connect -- and, optionally, the claim with its key -- a deleted
+// one back to the projects, an export to its link (shown once: the requester's
+// read takes it, D3005), the rest to what they changed.
+function onward(row) {
+  if (row.status !== "succeeded") {
+    return [outcome(row)];
+  }
+  const key = row.project_key;
+  if (row.type === "project.create") {
+    return [h("p", {}, "Your project ", h("code", {}, value(key)), " is ready. ", link(`#/projects/${key}/connect`, "Connect to it")),
+      h("p", { className: "small muted" }, "Optional: to claim its administrator from a terminal, run ", h("code", {}, claimLine(key)), ".")];
+  }
+  if (row.type === "project.delete") {
+    return [h("p", {}, "The project was deleted. ", link("#/", "Back to your projects"))];
+  }
+  if (row.type === "project.export") {
+    return typeof row.download_url === "string"
+      ? [h("p", {}, "The export is ready."), once("The download link:", row.download_url)]
+      : [h("p", {}, "The export is ready. Its download link was shown once, to the page that asked for it.")];
+  }
+  if (row.type === "credential.rotate") {
+    return [h("p", {}, "The new password is set. ", link(`#/projects/${key}/connect`, "Go to Connect"))];
+  }
+  if ((typeof row.type === "string" && row.type.startsWith("branch.")) || row.type === "restore.create") {
+    return [h("p", {}, "Done. ", link(`#/projects/${key}/branches`, "See the branches"))];
+  }
+  return [h("p", {}, "Done. ", key ? link(`#/projects/${key}`, "Open the project") : null)];
+}
+
+// The tracker's content for one reading of the operation: the steps, done /
+// current / to come, each with its time; the whole's start, elapsed and typical
+// time; the server's bound (D3000); the outcome once it is over. No percentage
+// anywhere: the current step has an indeterminate bar (ADR 0296 decision 5).
+// `shownHere` is true on the page that showed a creation's token; anywhere
+// else the tracker says once that it was shown and is not needed (decision 6).
+function trackerParts(row, shownHere) {
   const now = Date.now();
   const states = stepStates(row, now);
   const elapsed = formatDuration(operationSeconds(row, now));
   const typical = typicalRange(row.expected);
   const limit = limitText(row.expected);
   const over = TERMINAL.has(row.status);
+  const began = row.started_at || row.created_at || null;
   const words = { [DONE]: "done", [CURRENT]: "in progress", [STOPPED]: "stopped here", "to come": "to come" };
   const steps = states.map((step) => {
     let time = "";
-    if (step.state === CURRENT && step.seconds !== null) {
-      time = `about ${formatDuration(step.seconds)} so far`;
+    if (step.state === CURRENT) {
+      time = (step.seconds !== null ? `about ${formatDuration(step.seconds)} so far` : "just started") +
+        (step.typical_seconds !== null ? `, ${usually(step.typical_seconds)}` : "");
     } else if ((step.state === DONE || step.state === STOPPED) && step.seconds !== null) {
       time = formatDuration(step.seconds);
     } else if (step.state === "to come" && step.typical_seconds !== null) {
-      time = step.typical_seconds < 1 ? "usually under a second" : `usually ${formatDuration(step.typical_seconds)}`;
+      time = usually(step.typical_seconds);
     }
     return h("li", { className: step.state === "to come" ? "todo" : step.state },
       h("span", { className: "mark", "aria-hidden": "true" }, step.state === DONE ? "✓" : ""),
@@ -394,59 +652,71 @@ function trackerParts(row) {
       h("span", { className: "time" }, time));
   });
   return [
-    h("p", { className: "meta-row" },
-      h("span", {}, "Status ", h("b", {}, value(row.status))),
+    row.type === "project.create" && !shownHere
+      ? callout("", null, h("p", {}, h("strong", {}, "The handoff token was shown once, when the creation started, and cannot be shown again."),
+        " You do not need it to connect."))
+      : null,
+    card(h("p", { className: "meta-row" },
+      h("span", {}, h("b", {}, OPERATION_STATUS[row.status] || value(row.status))),
       h("span", {}, "On ", h("b", {}, subjectWords(row))),
+      began ? h("span", {}, "Started ", h("b", {}, when(began, "absolute"))) : null,
       elapsed ? h("span", {}, over ? "Took about " : "Running for about ", h("b", {}, elapsed)) : null,
       typical ? h("span", {}, "Usually ", h("b", {}, typical)) : null),
+    limit && !over ? h("p", { className: "small muted" }, `If it has not finished ${limit} after it started, the server stops it.`) : null),
     states.length
-      ? card(h("ol", { className: "steps" }, steps))
-      : h("p", {}, "Step: ", h("code", {}, value(row.step))),
-    limit && !over ? h("p", { className: "muted" }, `If it has not finished ${limit} after it started, the server stops it.`) : null,
-    row.type === "project.create"
-      ? h("p", { className: "muted" }, "The handoff value for the administrator was shown once, when the creation was recorded, and cannot be shown again. You do not need it to connect.")
-      : null,
-    over ? outcome(row) : null,
-    over && row.status === "succeeded" && row.project_key ? h("p", {}, link(`#/projects/${row.project_key}`, "Open the project")) : null,
-    over && typeof row.download_url === "string" ? once("The download link:", row.download_url) : null,
+      ? card(h("h2", {}, "Steps"), h("ol", { className: "steps" }, steps))
+      : row.step ? h("p", {}, "Step: ", h("code", {}, row.step)) : null,
+    over ? onward(row) : null,
   ];
+}
+
+// Reads the operation every 2 s while the page that shows it is current, and
+// redraws the tracker from each reading; the last reading is answered. A read
+// that fails is said and tried again -- never drawn as a state.
+async function follow(id, turn, parts, first) {
+  let row = first || null;
+  for (;;) {
+    if (row) {
+      parts.tracker.replaceChildren(...trackerParts(row, parts.shownHere).flat().filter(Boolean));
+      if (TERMINAL.has(row.status)) {
+        return row;
+      }
+      await pause(2000);
+    }
+    if (!isCurrent(turn)) {
+      return row;
+    }
+    try {
+      row = await call("GET", `/operations/${encodeURIComponent(id)}`);
+      parts.note.textContent = "";
+    } catch (error) {
+      parts.note.textContent = "The operation could not be read just now; this page tries again in two seconds.";
+      if (!row) {
+        await pause(2000);
+      }
+    }
+    if (!isCurrent(turn)) {
+      return row;
+    }
+  }
 }
 
 // `#/operations/<id>` (ADR 0296 decision 5): read from the API on every load,
 // then every 2 s while it runs and this page is open. Nothing is kept that a
 // refresh could lose.
 async function operationView(me, id, turn) {
-  let row = await call("GET", `/operations/${encodeURIComponent(id)}`);
+  const row = await call("GET", `/operations/${encodeURIComponent(id)}`);
   // A creation names its slot's key before the project is registered: until it
-  // succeeds there is no project to read, only its organisation.
+  // succeeds there is no project to read, only its organisation (D3005).
   const creating = row.type === "project.create" && row.status !== "succeeded";
   await loadContext(call, { organization: row.organization_id, projectKey: creating ? null : row.project_key });
   if (!isCurrent(turn)) {
     return;
   }
   setPage("operation");
-  const tracker = h("div", { className: "stack" });
-  const note = h("p", { className: "muted" });
-  const draw = () => tracker.replaceChildren(...trackerParts(row).filter(Boolean));
-  draw();
-  frame(me, OPERATION_TITLES[row.type] || "Operation", tracker, note);
-  while (!TERMINAL.has(row.status)) {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    if (!isCurrent(turn)) {
-      return;
-    }
-    try {
-      row = await call("GET", `/operations/${encodeURIComponent(id)}`);
-      note.textContent = "";
-    } catch (error) {
-      note.textContent = "The operation could not be read just now; this page tries again in two seconds.";
-      continue;
-    }
-    if (!isCurrent(turn)) {
-      return;
-    }
-    draw();
-  }
+  const parts = { tracker: h("div", { className: "stack" }), note: h("p", { className: "muted" }), shownHere: false };
+  frame(me, OPERATION_TITLES[row.type] || "Operation", parts.tracker, parts.note);
+  await follow(id, turn, parts, row);
 }
 
 function newOrganization(me) {
@@ -463,49 +733,99 @@ function newOrganization(me) {
     }, { busy: "Creating…" }), message));
 }
 
-// Session 46 (ADR 0291): a project created here. The token is made and
-// digested by create.js; it reaches this view only through `accepted`, is drawn
-// once in the shown-once panel the moment the creation is recorded -- before the
-// ~25-minute wait -- and is dropped with the panel.
-function newProjectView(me, org) {
-  const [nameLabel, name] = field("Name", { maxLength: 48 });
+// The handoff token's panel (ADR 0291; ADR 0296 decision 6; the brief's
+// screen 3): what the token is, that it is NOT needed to connect, that it is
+// shown once; the terminal claim behind a disclosure marked optional. Closing
+// it replaces the whole panel -- the token with it -- by a one-line record.
+function tokenPanel(token, administrator) {
+  const panel = h("section", { className: "token-panel" },
+    h("h2", {}, "Save the administrator's handoff token now, if you want it"),
+    h("p", {}, "This token lets someone using the command line take over the project's administrator account",
+      administrator ? [" (", h("code", {}, administrator), ")"] : null, ". ",
+      h("strong", {}, "You do not need it to connect"), ", from the console or from your application. ",
+      "It is shown once, now, and never again."),
+    once("The handoff token:", token),
+    h("details", {},
+      h("summary", {}, "Using it from a terminal (optional)"),
+      h("p", { className: "small" }, CLAIM_SENTENCE),
+      codeBlock(claimLine(null), { label: "Terminal" })),
+    h("p", {}, button("I've saved it, or I don't need it", () => panel.replaceWith(
+      h("p", { className: "once-done" }, "The handoff token was shown once and is not shown again. You do not need it to connect.")))));
+  return panel;
+}
+
+// Why New project cannot start here now (the brief's screen 5): the refusal
+// the server would give, said before the form, with what would change it.
+function blockedCallout(org, blocked, plan) {
+  const full = isFull(blocked);
+  return callout("warn", blockedWords(blocked, plan),
+    h("p", {}, full
+      ? `A new project can start once ${blocked.reason === "creating" ? blocked.name || "it" : "one"} is deleted, or on a plan with more projects. Nothing was recorded.`
+      : "A new project can start once the creation has finished. Nothing was recorded."),
+    h("p", { className: "card-actions" },
+      blocked.operation ? link(`#/operations/${blocked.operation}`, `Follow ${blocked.name || "it"}`) : null,
+      planLinks(org)),
+    full ? h("p", {}, h("code", { className: "word" }, "plan_limit_reached")) : null);
+}
+
+// Session 46 (ADR 0291), Session 47 (ADR 0296, ADR 0297): a project created
+// here. The form is refused before it is filled while the organisation has a
+// creation open or its plan full (D2951); the fields and the button are
+// disabled while the request runs. The token is made and digested by
+// create.js; it reaches this view only through `accepted`, the moment the
+// creation is recorded -- before the ~25-minute wait. Then the address becomes
+// the creation's tracker (`#/operations/<id>`, without a new route turn, so a
+// refresh resumes it from the API) and the token is drawn once, in its panel,
+// above the tracker; it is dropped with the panel.
+async function newProjectView(me, org, turn) {
+  const [plan, creating] = await Promise.all([readPlan(org), openCreations(org)]);
+  if (!isCurrent(turn)) {
+    return;
+  }
+  const blocked = creationBlocked({ creating, plan });
+  const [nameLabel, name] = field("Name", { maxLength: 48 }, "Letters, digits, spaces, dots, dashes and underscores. Only your organisation sees it.");
   const [profileLabel, profile] = choice("Profile", PROFILES, "small");
-  const [adminLabel, admin] = field("Administrator's username", { maxLength: 63, autocomplete: "off" });
-  const status = h("p", { className: "muted" });
-  const result = h("div", { className: "stack" });
+  const [adminLabel, admin] = field("Administrator's username", { maxLength: 63, autocomplete: "off" },
+    "The first user of the project's own sign-in (its API), not your console account.");
+  const inputs = [name, profile, admin];
+  const message = h("div", {});
+  const parts = { tracker: h("div", { className: "stack" }, skeleton()), note: h("p", { className: "muted" }), shownHere: true };
   const create = busyButton("Create project", async () => {
-    result.replaceChildren();
+    message.replaceChildren();
+    inputs.forEach((input) => { input.disabled = true; });
     try {
-      const final = await createProject({
+      await createProject({
         call,
-        wait: (id) => waitFor(id, status),
+        wait: (id) => follow(id, turn, parts, null),
         accepted: (token, operation) => {
-          const panel = h("div", {},
-            once("The project administrator's handoff token:", token),
-            h("p", {}, "Operation ", h("code", {}, operation.id), " is recorded. ", CLAIM_SENTENCE),
-            h("p", {}, h("code", {}, claimLine(null))),
-            button("I have saved it", () => panel.remove()));
-          result.append(panel,
-            h("p", {}, link(`#/operations/${operation.id}`, "Follow it on its own page"), "; it keeps going if you close this one."));
+          history.pushState(null, "", `#/operations/${operation.id}`);
+          setPage("operation");
+          frame(me, OPERATION_TITLES["project.create"], tokenPanel(token, admin.value.trim()), parts.tracker, parts.note);
         },
         organization: org,
         name: name.value.trim(),
         profile: profile.value,
         adminUsername: admin.value.trim(),
       });
-      if (final.status !== "succeeded") {
-        result.append(outcome(final));
-        return;
-      }
-      const key = final.project_key;
-      result.append(
-        h("p", {}, "Your project ", h("code", {}, value(key)), " is ready. ", link(`#/projects/${key}/connect`, "Connect to it")),
-        h("p", { className: "muted" }, "To claim its administrator from a terminal: ", h("code", {}, claimLine(key))));
     } catch (error) {
-      result.append(refusal(error));
+      inputs.forEach((input) => { input.disabled = false; });
+      message.replaceChildren(refusal(error, { organization: org }));
     }
-  }, { busy: "Creating…" });
-  frame(me, "New project", card(nameLabel, profileLabel, adminLabel, create, status), result);
+  }, { busy: "Starting the creation…" });
+  if (blocked) {
+    inputs.forEach((input) => { input.disabled = true; });
+    create.disabled = true;
+  }
+  frame(me, "New project",
+    projectLimitBanner(org, plan, creating),
+    blocked ? blockedCallout(org, blocked, plan) : null,
+    card(nameLabel, profileLabel, h("p", { className: "small muted" }, "You can change the size later, in the project's Settings."),
+      adminLabel, create, message),
+    card(h("h2", {}, "What happens next"),
+      h("p", {}, "A new project takes a while: most of it is the first full backup, which makes sure your data can be restored from the start. ",
+        "The page shows each step, and how long it usually takes, as soon as the creation is recorded."),
+      h("p", {}, "You can close the page. The project shows on ", link(`#/org/${org}`, "Projects"), " while it is being created, and ",
+        link(`#/org/${org}/notifications`, "Notifications"), " says when it started and when it finished.")));
 }
 
 // -- a project's views --------------------------------------------------------
@@ -532,7 +852,7 @@ function withPassword(found, password) {
   return `postgresql://${found.user}:${encodeURIComponent(password)}@${found.host}:${found.port}/${found.database}?sslmode=verify-full`;
 }
 
-async function connectView(me, key) {
+async function connectView(me, key, turn) {
   const served = await call("GET", `/projects/${key}/connections`);
   const result = h("div", { className: "stack" });
   const rotate = (role, doorName) => async () => {
@@ -542,7 +862,12 @@ async function connectView(me, key) {
     let password = newPassword();
     try {
       const answer = await call("POST", `/projects/${key}/credentials`, { role, verifier: await verifier(password) });
-      const final = await waitFor(answer.operation.id, status);
+      // No link to the tracker here: the password is shown on THIS page once the
+      // rotation succeeds, and a person who left would never see it.
+      const final = await waitFor(answer.operation.id, status, turn);
+      if (final === null) {
+        return;
+      }
       if (final.status !== "succeeded") {
         result.append(outcome(final));
         return;
@@ -572,8 +897,25 @@ async function connectView(me, key) {
     result);
 }
 
-async function branchesView(me, key) {
-  const served = await call("GET", `/projects/${key}/branches`);
+// The plan's branch limit against the project's live branches (ADR 0297
+// decision 6): a banner when the project holds all it may. The plan's number
+// is the `branches_total` entitlement `GET .../plan` serves.
+function branchLimitBanner(organization, plan, held) {
+  const entitlement = plan && Array.isArray(plan.entitlements)
+    ? plan.entitlements.find((entry) => entry.name === "branches_total")
+    : null;
+  const limit = entitlement && typeof entitlement.value === "number" ? entitlement.value : null;
+  if (limit === null || held < limit) {
+    return null;
+  }
+  return banner(h("strong", {}, `${planName(plan)} plan: ${held} of ${count(limit, "branch", "branches")} on this project.`),
+    " A new branch cannot be made until one is deleted. ", planLinks(organization));
+}
+
+async function branchesView(me, key, turn) {
+  const organization = current().organization;
+  const [served, plan] = await Promise.all([call("GET", `/projects/${key}/branches`),
+    organization ? readPlan(organization.id) : Promise.resolve(null)]);
   const result = h("div", { className: "stack" });
   const [nameLabel, name] = field("Branch name", { maxLength: 12 });
   const [atLabel, at] = field("Restore to (optional, e.g. 2026-10-20T09:30:00Z)", {});
@@ -591,10 +933,14 @@ async function branchesView(me, key) {
         once("customer_app's password (the pooled door):", app),
         once("customer_admin's password (the direct door):", admin),
         h("p", { className: "muted" }, "They work once the operation succeeds."),
+        followLink(answer.operation),
       );
-      result.append(outcome(await waitFor(answer.operation.id, status)));
+      const final = await waitFor(answer.operation.id, status, turn);
+      if (final !== null) {
+        result.append(outcome(final));
+      }
     } catch (error) {
-      result.append(refusal(error));
+      result.append(refusal(error, { organization: organization ? organization.id : null }));
     } finally {
       app = null;
       admin = null;
@@ -602,6 +948,8 @@ async function branchesView(me, key) {
   }
   const rows = served.branches.map((branch) => ({
     ...branch,
+    reached_point: when(branch.reached_point, "absolute"),
+    expires_at: when(branch.expires_at),
     state: stateChip(branch.state),
     actions: h("span", { className: "row-actions" },
       busyButton("Reset", () => request(`/projects/${key}/branches/${encodeURIComponent(branch.name)}/reset`,
@@ -616,13 +964,18 @@ async function branchesView(me, key) {
         result.append(status);
         try {
           const answer = await call("DELETE", `/projects/${key}/branches/${encodeURIComponent(branch.name)}`);
-          result.append(outcome(await waitFor(answer.operation.id, status)));
+          result.append(followLink(answer.operation));
+          const final = await waitFor(answer.operation.id, status, turn);
+          if (final !== null) {
+            result.append(outcome(final));
+          }
         } catch (error) {
           result.append(refusal(error));
         }
       }, { busy: "Deleting…" })),
   }));
   frame(me, "Branches",
+    organization ? branchLimitBanner(organization.id, plan, served.branches.length) : null,
     card(rows.length
       ? table([["name", "Name"], ["state", "State"], ["reached_point", "Reached"], ["expires_at", "Expires"],
         ["pool_host", "Pooled host"], ["actions", ""]], rows)
@@ -650,8 +1003,9 @@ async function backupsView(me, key) {
   const served = await call("GET", `/projects/${key}/backups`);
   let body;
   if (served.status === "window") {
-    body = [h("p", {}, "Restorable from ", h("strong", {}, served.earliest), " to ", h("strong", {}, served.latest), "."),
-      h("p", {}, `Last full backup ${value(served.last_full_at)}; read ${value(served.observed_at)}.`),
+    body = [h("p", {}, "Restorable from ", h("strong", {}, when(served.earliest, "absolute")), " to ",
+      h("strong", {}, when(served.latest, "absolute")), "."),
+    h("p", {}, "Last full backup ", when(served.last_full_at), "; read ", when(served.observed_at), "."),
       served.message ? h("p", { className: "muted" }, served.message) : null];
   } else if (served.status === "sleeping") {
     body = [h("p", {}, "The project is sleeping. ", value(served.message))];
@@ -670,11 +1024,19 @@ function usageSection(document) {
   const figures = document.figures || {};
   const rows = USAGE_FIGURES.map((name) => {
     const figure = figures[name] || {};
-    return { name, latest: figure.latest === null || figure.latest === undefined ? "not read in this window" : `${figure.latest} at ${figure.latest_at}`, max: figure.max };
+    return {
+      name,
+      latest: figure.latest === null || figure.latest === undefined
+        ? "not read in this window"
+        : h("span", {}, String(figure.latest), ", ", when(figure.latest_at)),
+      max: figure.max,
+    };
   });
+  const window_ = document.window || {};
   return h("section", { className: "card" },
     h("h2", {}, value(document.project_key)),
-    h("p", { className: "muted" }, `From ${document.window.from} to ${document.window.to}; ${document.samples.present} of ${document.samples.expected} samples recorded.`),
+    h("p", { className: "muted" }, "From ", when(window_.from, "absolute"), " to ", when(window_.to, "absolute"),
+      `; ${document.samples.present} of ${document.samples.expected} samples recorded.`),
     table([["name", "Figure"], ["latest", "Latest"], ["max", "Window maximum"]], rows, new Set(["max"])),
     h("p", {}, "Requests answered below 400: ", document.requests ? String(document.requests.increase) : "not read in this window"),
     (document.entitlements || []).length
@@ -707,11 +1069,13 @@ async function monitoringView(me, key) {
   const served = await call("GET", `/projects/${key}/monitoring`);
   const rows = (served.signals || []).map((signal) => ({
     name: signal.name,
-    reading: "unread" in signal ? `not read: ${signal.unread}` : `${signal.value} ${signal.unit} (at ${signal.observed_at})`,
+    reading: "unread" in signal
+      ? `not read: ${signal.unread}`
+      : h("span", {}, `${signal.value} ${signal.unit}, `, when(signal.observed_at)),
     source: signal.source,
   }));
   frame(me, "Monitoring",
-    card(h("p", { className: "muted" }, `Read at ${value(served.read_at)}. Each reading names where it comes from.`),
+    card(h("p", { className: "muted" }, "Read ", when(served.read_at), ". Each reading names where it comes from."),
       table([["name", "Signal"], ["reading", "Reading"], ["source", "Source"]], rows)));
 }
 
@@ -719,28 +1083,33 @@ async function monitoringView(me, key) {
 // it last saw and when, never "now"; a stale or missing reading says so.
 function supportBundle(served) {
   const fresh = served.status === "read" || served.status === "asleep";
-  const said = served.status === "read" ? `Read at ${value(served.read_at)}.` : value(served.reason);
+  const line = served.status === "read" ? ["Read ", when(served.read_at), "."] : value(served.reason);
   const rows = (served.checks || []).map((check) => ({
     name: check.name,
     verdict: check.stale ? `${check.verdict} (stale)` : check.verdict,
     detail: check.detail,
     age: `${value(check.age_seconds)} s ago`,
   }));
-  return [h("p", { className: fresh ? "muted" : "refusal" }, said),
+  return [h("p", { className: fresh ? "muted" : "refusal" }, line),
     ...(rows.length ? [table([["name", "Check"], ["verdict", "Verdict"], ["detail", "Detail"], ["age", "Read"]], rows)] : [])];
 }
 
-async function projectSettingsView(me, key) {
+async function projectSettingsView(me, key, turn) {
   const project = await call("GET", `/projects/${key}`);
   const result = h("div", { className: "stack" });
+  // Each operation is followed here while the page is open, and on its own
+  // page (D2975) from the link; leaving this page stops this page's reading.
   async function operate(method, path, body, what) {
     result.replaceChildren();
     const status = h("p", { className: "muted" }, what + "…");
     result.append(status);
     try {
       const answer = await call(method, path, body);
-      const final = await waitFor(answer.operation.id, status);
-      result.append(outcome(final));
+      result.append(followLink(answer.operation));
+      const final = await waitFor(answer.operation.id, status, turn);
+      if (final !== null) {
+        result.append(outcome(final));
+      }
       return final;
     } catch (error) {
       result.append(refusal(error));
@@ -838,12 +1207,62 @@ async function orgUsageView(me, org) {
     served.projects.length ? served.projects.map(usageSection) : emptyState("No project in this window."));
 }
 
+// What makes a notification (ADR 0297 decision 5; the brief's screen 8).
+const NOTICE_KINDS = [
+  ["Started", "A project creation, a branch, a restore or a branch reset began."],
+  ["Finished", "An operation succeeded, or failed and said why."],
+  ["Asleep", "A project went to sleep after its idle time."],
+  ["Expired", "A branch reached its expiry time and was deleted."],
+  ["Limit near", "A project passed 80% of a limit your plan shows."],
+];
+
+// One notification in plain words, with a link onward: the operation that
+// wrote it (`#/operations/<id>`, D2953), or the page that acts on it. A kind
+// this page does not know reads the server's own text.
+function noticeWords(notice, org) {
+  const title = OPERATION_TITLES[notice.operation_type] || "An operation";
+  const key = typeof notice.project === "string" ? notice.project : null;
+  const on = key ? ` on ${key}` : "";
+  const operation = (words) => (notice.operation_id ? link(`#/operations/${notice.operation_id}`, words) : null);
+  if (notice.kind === "operation_started") {
+    return [h("strong", {}, `${title}${on} started.`), " ", operation("Follow it")];
+  }
+  if (notice.kind === "operation_succeeded" && notice.operation_type === "project.create" && key) {
+    return [h("strong", {}, `Your project ${key} is ready.`), " ", link(`#/projects/${key}/connect`, "Connect to it")];
+  }
+  if (notice.kind === "operation_succeeded") {
+    return [h("strong", {}, `${title}${on} finished.`), " ", operation("Details")];
+  }
+  if (notice.kind === "operation_failed") {
+    return [h("strong", {}, `${title}${on} failed.`), " ", operation("See what happened")];
+  }
+  if (notice.kind === "idle_sleep") {
+    return [h("strong", {}, `${key || "A project"} went to sleep after its idle time.`), " ",
+      key ? link(`#/projects/${key}/settings`, "Wake it from Settings") : null];
+  }
+  if (notice.kind === "branch_expired") {
+    return [h("strong", {}, `A branch${on} reached its expiry time and was deleted.`), " ",
+      key ? link(`#/projects/${key}/branches`, "See the branches") : null];
+  }
+  if (notice.kind === "limit_approaching") {
+    return [h("strong", {}, `${key || "A project"} is near a limit your plan shows.`), " ", value(notice.text), " ",
+      link(`#/org/${org}/plan`, "Your plan")];
+  }
+  return [value(notice.text), " ", operation("Details")];
+}
+
 async function notificationsView(me, org) {
   const served = await call("GET", `/organizations/${org}/notifications?limit=50`);
   frame(me, "Notifications",
+    card(h("p", {}, "A notification is written here when something happens to one of this organisation's projects. ",
+      h("strong", {}, "Nothing is emailed"), ": this page is where they appear."),
+    h("h2", {}, "What makes a notification"),
+    h("dl", { className: "kinds" }, NOTICE_KINDS.map(([kind, meaning]) => [h("dt", {}, kind), h("dd", {}, meaning)]))),
     served.notifications.length
-      ? card(table([["created_at", "When"], ["project", "Project"], ["kind", "Kind"], ["text", "What happened"]], served.notifications))
-      : emptyState("Nothing yet. A notification is written when a project finishes an operation, falls asleep, or nears a limit."));
+      ? card(h("h2", {}, "Latest"),
+        h("ul", { className: "feed" }, served.notifications.map((notice) => h("li", {},
+          h("span", {}, noticeWords(notice, org)), when(notice.created_at)))))
+      : emptyState("Nothing yet. The first notification appears when a project's operation starts."));
 }
 
 async function orgSettingsView(me, org) {
@@ -885,7 +1304,7 @@ async function orgSettingsView(me, org) {
         try {
           const minted = await call("POST", "/invitations", { organization_id: org, role: inviteRole.value });
           result.append(once("Send this link to the person you invite:", minted.accept_url),
-            h("p", { className: "muted" }, `It expires ${minted.expires_at} and works once.`));
+            h("p", { className: "muted" }, "It expires ", when(minted.expires_at), " and works once."));
         } catch (error) {
           result.append(refusal(error));
         }
@@ -893,6 +1312,10 @@ async function orgSettingsView(me, org) {
       table([["role", "Role"], ["issued_at", "Issued"], ["expires_at", "Expires"], ["accepted_at", "Accepted"], ["revoked_at", "Revoked"], ["actions", ""]],
         invitations.invitations.map((invitation) => ({
           ...invitation,
+          issued_at: when(invitation.issued_at),
+          expires_at: when(invitation.expires_at),
+          accepted_at: when(invitation.accepted_at),
+          revoked_at: when(invitation.revoked_at),
           actions: invitation.accepted_at || invitation.revoked_at ? "" :
             busyButton("Revoke", act(() => call("DELETE", `/organizations/${org}/invitations/${invitation.id}`)), { busy: "Revoking…" }),
         })))),
@@ -901,6 +1324,8 @@ async function orgSettingsView(me, org) {
         keys.keys.map((key) => ({
           ...key,
           scopes: key.scopes.join(", "),
+          last_used_at: key.last_used_at ? when(key.last_used_at) : "never",
+          revoked_at: when(key.revoked_at),
           actions: key.revoked_at ? "" : busyButton("Revoke", act(() => call("DELETE", `/organizations/${org}/keys/${key.key_id}`)), { busy: "Revoking…" }),
         }))),
       keyNameLabel,
@@ -1124,7 +1549,7 @@ async function route() {
       return;
     }
     setPage("overview");
-    await overview(me);
+    await overview(me, turn);
   } catch (error) {
     frame(me, "Something was refused", refusal(error));
   }

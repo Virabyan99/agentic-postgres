@@ -9,7 +9,10 @@
 // runs, so a second click sends nothing); the code block, which always carries
 // a copy button; the shown-once panel; the state chip (ADR 0288's STATE_CHIPS,
 // unchanged); callout, banner, empty state, skeleton, toast and tabs; and the
-// site's origin, derived from this page's host, never typed.
+// site's origin, derived from this page's host, never typed. Since Session 47
+// Run 5: a time as words (`when`, D3007).
+
+import { absoluteTime, machineTime, relativeAge } from "/console/progress.js";
 
 // One element, its properties and its children -- strings become text nodes.
 // A property whose name holds a dash (`aria-selected`, `data-x`) is an
@@ -37,6 +40,26 @@ export function h(tag, properties, ...children) {
 
 export function value(text) {
   return text === null || text === undefined ? "—" : String(text);
+}
+
+// A time the server served, as a person reads it (D3007): by default the
+// relative age ("14 min ago") with the absolute local time as its title;
+// `absolute` shows the local time with the age as its title. The machine form
+// is the element's `datetime`. A missing time is the dash; one that is not a
+// time is said to be unreadable, never printed raw.
+export function when(at, style) {
+  if (at === null || at === undefined) {
+    return h("span", {}, "—");
+  }
+  const machine = machineTime(at);
+  if (machine === null) {
+    return h("span", {}, "an unreadable time");
+  }
+  const relative = relativeAge(at, Date.now());
+  const absolute = absoluteTime(at);
+  return style === "absolute"
+    ? h("time", { dateTime: machine, title: relative }, absolute)
+    : h("time", { dateTime: machine, title: absolute }, relative);
 }
 
 // -- the site, derived from this page's host -----------------------------------
@@ -84,9 +107,19 @@ export function icon(name) {
 
 // -- controls --------------------------------------------------------------------
 
+// A labelled input. A hint is OUTSIDE the label, tied to the input by
+// `aria-describedby`, so the field's accessible name stays its label alone.
+let hints = 0;
+
 export function field(label, properties, hint) {
-  const input = h("input", properties);
-  return [h("label", {}, label, hint ? h("span", { className: "hint" }, hint) : null, input), input];
+  if (!hint) {
+    const input = h("input", properties);
+    return [h("label", {}, label, input), input];
+  }
+  hints += 1;
+  const id = `hint-${hints}`;
+  const input = h("input", { ...properties, "aria-describedby": id });
+  return [h("div", { className: "field" }, h("label", {}, label, input), h("p", { className: "hint", id }, hint)), input];
 }
 
 export function choice(label, options, selected) {

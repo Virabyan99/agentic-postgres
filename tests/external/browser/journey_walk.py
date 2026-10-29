@@ -40,6 +40,7 @@ import secrets
 import sys
 import time
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -53,6 +54,26 @@ REHEARSAL_RELAY = "wss://sql.rehearsal.test"
 REHEARSAL_SITE = "https://site.rehearsal.test"
 FOREIGN = "https://foreign.rehearsal.test"
 DIGEST_META = re.compile(r'<meta name="apg-site-digest" content="([0-9a-f]{64})">')
+#: A creation's steps as the stand-in serves them (the plane's own are
+#: `operation_steps.STEPS["project.create"]`; the tracker draws whatever is served).
+CREATION_STEPS = [
+    ("allocate", "Reserving a server slot"),
+    ("admit", "Checking there is room on the server"),
+    ("deploy-1", "Starting the database"),
+    ("admin", "Creating your administrator"),
+    ("ports", "Opening the two connection doors"),
+    ("deploy-2", "Starting the API and storage"),
+    ("unit", "Making it start again after a reboot"),
+    ("backup", "Taking the first full backup"),
+    ("registry", "Recording the project"),
+]
+#: The operation the console shows as its tracker's address (ADR 0296 decision 5).
+TRACKER = re.compile(r"#/operations/([0-9a-f-]{36})$")
+
+
+def ago(seconds: float) -> str:
+    """A time `seconds` before now, in the plane's ISO form."""
+    return (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -192,22 +213,40 @@ class Fixtures:
                 headers,
             )
         if (method, path) == ("GET", f"/operations/{self.operation}"):
+            # Shaped as the plane serves an operation since Session 47 Run 3
+            # (ADR 0296): its step log, its subject and what is expected of it.
             self.polls += 1
-            if self.polls < 3:
-                return (
-                    200,
-                    {
-                        "id": self.operation,
-                        "status": "running",
-                        "step": "deploy",
-                        "progress": 40,
-                        "project_key": None,
-                    },
-                    headers,
-                )
+            done = self.polls >= 3
+            began = [("allocate", 30), ("admit", 29), ("deploy-1", 28)]
+            if done:
+                began += [(step, 5) for step, _ in CREATION_STEPS[3:]]
             return (
                 200,
-                {"id": self.operation, "status": "succeeded", "progress": 100, "project_key": key},
+                {
+                    "id": self.operation,
+                    "organization_id": self.created_in,
+                    "type": "project.create",
+                    "status": "succeeded" if done else "running",
+                    "step": "registry" if done else "deploy-1",
+                    "progress": 100 if done else 30,
+                    "project_key": key,
+                    "error_code": None,
+                    "created_at": ago(31),
+                    "started_at": ago(30),
+                    "finished_at": ago(0) if done else None,
+                    "steps": [
+                        {"step": step, "started_at": ago(seconds)} for step, seconds in began
+                    ],
+                    "subject": {"name": "Journey s46", "profile": "small"},
+                    "expected": {
+                        "steps": [
+                            {"step": step, "label": label, "typical_seconds": 1.0}
+                            for step, label in CREATION_STEPS
+                        ],
+                        "typical_seconds": {"low": 1375.9, "high": 1708.4},
+                        "bound_seconds": 1800,
+                    },
+                },
                 headers,
             )
         if (method, path) == ("GET", "/operations/credential-rehearsal"):
@@ -299,9 +338,18 @@ class Fixtures:
                 headers,
             )
         if method == "GET" and path.endswith("/plan") and path.startswith("/organizations/"):
+            # As the plane counts (D2981): the probe's organisation holds slot3,
+            # the journey's holds its creation from the moment it is recorded.
+            org = path.split("/")[2]
+            held = int(org in (self.organizations[0]["id"], self.created_in))
             return (
                 200,
-                {"plan": "free", "status": "active", "projects_active": {"held": 1, "limit": 1}},
+                {
+                    "plan": "free",
+                    "status": "active",
+                    "entitlements": [],
+                    "projects_active": {"held": held, "limit": 1},
+                },
                 headers,
             )
         if (
@@ -573,13 +621,16 @@ def run_the_rest(
         token = page.locator(".once code.secret").first.inner_text().strip()
         journey.held.append(token)
         write_private(out / "handoff-token", token + "\n")
-        operation = (
-            page.locator("#main p", has_text="is recorded").locator("code").first.inner_text()
-        )
+        # Session 47 Run 5 (ADR 0296 decision 5): on acceptance the address IS
+        # the creation's tracker, so the operation is read from it.
+        tracked = TRACKER.search(page.url)
+        if not tracked:
+            raise RuntimeError("the accepted creation's address is not its tracker")
         record["token_length"] = len(token)
-        page.get_by_role("button", name="I have saved it").click()
+        page.get_by_role("button", name="I've saved it, or I don't need it").click()
+        page.locator("#main .once-done").wait_for()
         record["token_gone_after_dismissal"] = token not in page.content()
-        return operation.strip()
+        return tracked.group(1)
 
     record["operation_id"] = journey.step("j06", j06)
     accepted = time.monotonic()

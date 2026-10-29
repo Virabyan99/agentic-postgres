@@ -34,23 +34,25 @@ PUBLIC = REPO_ROOT / "services" / "console" / "public"
 PROGRESS = PUBLIC / "progress.js"
 NODE = LOCK["NODE_RUNTIME_IMAGE"]
 IMPORT = (
-    "import { describe, elapsedSeconds, formatDuration, limitText, operationSeconds, "
-    'stepStates, typicalRange } from "/console/progress.js";\n'
+    "import { absoluteTime, checklist, creationBlocked, describe, elapsedSeconds, formatDuration, "
+    "limitText, machineTime, operationSeconds, relativeAge, stepStates, typicalRange } "
+    'from "/console/progress.js";\n'
 )
 #: The browser's clock in every reading below: a fixed instant, so each
 #: elapsed time is a number this test knows.
 NOW = datetime(2026, 10, 29, 12, 0, 0, tzinfo=UTC)
 
 
-def _node(tmp_path: Path, driver: str) -> Any:
+def _node(tmp_path: Path, driver: str, zone: str = "UTC") -> Any:
+    """`zone` is the browser's time zone (`TZ`): a local time is the reader's."""
     directory = tmp_path / "console"
     directory.mkdir(parents=True)
     shutil.copy(PROGRESS, directory / "progress.js")
     (directory / "package.json").write_text('{"type": "module"}\n', encoding="utf-8")
     (directory / "driver.js").write_text(IMPORT + driver, encoding="utf-8")
     done = subprocess.run(
-        ["docker", "run", "--rm", "--network", "none", "-v", f"{directory}:/console:ro", NODE,
-         "node", "/console/driver.js"],
+        ["docker", "run", "--rm", "--network", "none", "-e", f"TZ={zone}",
+         "-v", f"{directory}:/console:ro", NODE, "node", "/console/driver.js"],
         capture_output=True, text=True, check=False, timeout=120,
     )  # fmt: skip
     assert done.returncode == 0, done.stderr[-3000:]
@@ -236,3 +238,173 @@ def test_progress_is_dom_free_and_keeps_nothing() -> None:
         assert word not in code, word
     top = re.findall(r"^(?:export )?(let|var|const|function|class)\b", code, re.MULTILINE)
     assert "let" not in top and "var" not in top and "class" not in top, top
+
+
+# -- Session 47 Run 5: times, the New project gate, the checklist ---------------
+
+
+def test_every_time_is_an_age_and_a_local_time(tmp_path: Path) -> None:
+    """D3007: a time reads as an age -- *just now*, *14 min ago*, *3 h ago*,
+    *2 days ago*, *in 14 min* for one ahead of the clock -- with the absolute
+    time in the READER's zone beside it (the same instant reads 18:13 in UTC
+    and 14:13 in New York), and a machine form for `<time datetime>`. What is
+    not a time is null, never printed."""
+    at = "2026-10-29T18:13:00.735753+00:00"
+    ages = [_iso(10), _iso(14 * 60 + 10), _iso(3 * 3600 + 400), _iso(2 * 86400 + 60),
+            _iso(86400), _iso(-14 * 60), "not a time", None]  # fmt: skip
+    driver = (
+        f"const now = {_now_ms()};\n"
+        f"const ages = {json.dumps(ages)}.map((at) => relativeAge(at, now));\n"
+        f'const absolute = [absoluteTime("{at}"), absoluteTime("nope"), absoluteTime(undefined)];\n'
+        f'const machine = [machineTime("{at}"), machineTime("nope")];\n'
+        "console.log(JSON.stringify({ ages, absolute, machine }));\n"
+    )
+    utc = _node(tmp_path / "utc", driver)
+    east = _node(tmp_path / "east", driver, zone="America/New_York")
+    assert utc["ages"] == ["just now", "14 min ago", "3 h ago", "2 days ago", "1 day ago",
+                           "in 14 min", None, None]  # fmt: skip
+    assert utc["absolute"] == ["29 Oct 2026, 18:13", None, None]
+    assert east["absolute"] == ["29 Oct 2026, 14:13", None, None]
+    assert utc["machine"] == ["2026-10-29T18:13:00.735Z", None]
+
+
+#: Every time member a control document serves, by name.
+TIME_MEMBERS = ("created_at", "started_at", "finished_at", "expires_at", "reached_point", "read_at",
+                "observed_at", "latest_at", "issued_at", "accepted_at", "revoked_at",
+                "last_used_at", "last_full_at")  # fmt: skip
+
+
+def _function(text: str, head: str) -> str:
+    """One top-level function of a script, from its head to its closing brace."""
+    body = text[text.index(head) :]
+    return body[: body.index("\n}\n")]
+
+
+def test_no_page_draws_a_raw_time() -> None:
+    """D3007 (*"2026-10-29T17:00:17.735753+00:00"* seen in the 390 px look): in
+    `app.js` every read of a served time is drawn through `ui.js`'s `when` --
+    or only tested (`||`, `?`, `&&`), never drawn -- no template interpolates
+    one, and every table column named by a time member is given a `when` cell.
+    The restore window and the usage window are drawn the same way. `when`
+    itself reads `progress.js`'s words and puts the machine form only in the
+    element's `datetime`."""
+    app = (PUBLIC / "app.js").read_text(encoding="utf-8")
+    code = "\n".join(line for line in app.splitlines() if not line.lstrip().startswith("//"))
+    members = "|".join(TIME_MEMBERS)
+    reads = list(re.finditer(rf"\b[\w.]*\.({members})\b", code))
+    assert len(reads) >= 15, len(reads)
+    for read in reads:
+        drawn = re.search(r"when\(\s*$", code[: read.start()])
+        tested = re.match(r"\s*(\|\||\?|&&)", code[read.end() :])
+        line = code[: read.start()].count("\n") + 1
+        assert drawn or tested, f"app.js line {line} draws {read.group(0)} raw"
+    template = rf"\$\{{[^}}]*\b({members}|earliest|latest|window)\b[^}}]*\}}"
+    assert not re.search(template, code), re.search(template, code)
+    for member in set(re.findall(rf'\["({members})", "', code)):
+        assert re.search(rf"\b{member}: [^,\n]*when\(", code), f"the {member} column is drawn raw"
+    for read in ("when(served.earliest", "when(served.latest", "when(window_.from",
+                 "when(window_.to"):  # fmt: skip
+        assert read in code, read
+    ui = (PUBLIC / "ui.js").read_text(encoding="utf-8")
+    assert 'h("time", { dateTime: machine, title: absolute }, relative)' in ui
+    assert "relativeAge(at, Date.now())" in ui and "absoluteTime(at)" in ui
+
+
+def test_new_project_waits_for_an_open_creation_and_a_full_plan(tmp_path: Path) -> None:
+    """D2951, ADR 0297 decision 6 (the person's double create): *New project*
+    is refused before it is filled while the organisation has a creation open
+    -- named by its `subject` -- or `held >= limit`; a plan with room and no
+    open creation lets it start; what could not be read blocks nothing (the
+    server decides and its refusal is worded). Seeded with a RUNNING creation,
+    never only a finished one (D2982). The Projects views and the form draw
+    from this one decision: a disabled button, disabled fields."""
+    creating = [{"id": "op-1", "type": "project.create", "status": "running",
+                 "subject": {"name": "notes-app", "profile": "small"}}]  # fmt: skip
+    full = {"plan": "free", "projects_active": {"held": 1, "limit": 1}}
+    room = {"plan": "premium", "projects_active": {"held": 1, "limit": 3}}
+    driver = (
+        f"const creating = {json.dumps(creating)};\n"
+        f"const full = {json.dumps(full)};\n"
+        f"const room = {json.dumps(room)};\n"
+        "console.log(JSON.stringify([creationBlocked({ creating, plan: full }), "
+        "creationBlocked({ creating, plan: room }), creationBlocked({ creating: [], plan: full }), "
+        "creationBlocked({ creating: [], plan: room }), creationBlocked({ creating: null, plan: null }), "
+        "creationBlocked({ creating, plan: null })]));\n"
+    )
+    out = _node(tmp_path, driver)
+    assert out[0] == {"reason": "creating", "name": "notes-app", "operation": "op-1", "held": 1,
+                      "limit": 1}  # fmt: skip
+    assert out[1]["reason"] == "creating" and out[1]["limit"] == 3
+    assert out[2] == {"reason": "limit", "name": None, "operation": None, "held": 1, "limit": 1}
+    assert out[3] is None and out[4] is None
+    assert out[5]["reason"] == "creating" and out[5]["held"] is None
+    app = (PUBLIC / "app.js").read_text(encoding="utf-8")
+    for head in ("function organizationSection(", "async function organizationView("):
+        assert "creationBlocked(reading)" in _function(app, head), head
+    action = _function(app, "function newProjectAction(")
+    assert 'if (blocked) {\n    return h("button", { type: "button", disabled: true,' in action
+    form = _function(app, "async function newProjectView(")
+    assert "const blocked = creationBlocked({ creating, plan });" in form
+    assert (
+        "if (blocked) {\n    inputs.forEach((input) => { input.disabled = true; });\n"
+        "    create.disabled = true;" in form
+    )
+    assert "inputs.forEach((input) => { input.disabled = true; });\n    try {" in form
+
+
+def test_the_checklist_is_derived_from_the_api_alone(tmp_path: Path) -> None:
+    """ADR 0298 decision 4: each of the five steps is read from what the API
+    served on this load -- the factor from `GET /v1/me`, an organisation, a
+    project (or one being created: *current*), a password made (a SUCCEEDED
+    `credential.rotate`; a failed one is not), a connection seen (a usage
+    sample's `customer_connections` above 0) -- and a reading that failed is
+    *not read*, never done or not done (ADR 0195). The same readings give the
+    same answer twice: nothing is remembered. The page passes the API's
+    readings and nothing else."""
+    me_on = {"username": "a", "second_factor": {"required": True, "enabled": True}}
+    me_off = {"username": "a", "second_factor": {"required": False, "enabled": False}}
+    orgs = [{"id": "o", "name": "Example", "role": "owner"}]
+    project = [{"key": "slot3-prod", "state": "ready"}]
+    rotate_ok = [{"type": "credential.rotate", "status": "succeeded"}]
+    rotate_failed = [{"type": "credential.rotate", "status": "failed"}]
+    seen = [{"status": "read", "figures": {"customer_connections": {"latest": 0, "max": 2}}}]
+    quiet = [{"status": "read", "figures": {"customer_connections": {"latest": 0, "max": 0}}}]
+    unsampled = [{"status": "could_not_determine", "figures": {}}]
+    creating = [{"id": "op-1", "subject": {"name": "notes-app"}}]
+    cases = {
+        "all": {"me": me_on, "organizations": orgs, "projects": [project], "creating": [[]],
+                "operations": [rotate_ok], "usage": [seen]},
+        "fresh": {"me": me_off, "organizations": orgs, "projects": [[]], "creating": [creating],
+                  "operations": [rotate_failed], "usage": [[]]},
+        "quiet": {"me": me_on, "organizations": orgs, "projects": [project], "creating": [[]],
+                  "operations": [[]], "usage": [quiet]},
+        "unread": {"me": None, "organizations": None, "projects": [None], "creating": [None],
+                   "operations": [None], "usage": [None]},
+        "unsampled": {"me": me_on, "organizations": orgs, "projects": [project], "creating": [None],
+                      "operations": [rotate_ok], "usage": [unsampled]},
+        "nothing": {"me": me_off, "organizations": [], "projects": [], "creating": [],
+                    "operations": [], "usage": []},
+    }  # fmt: skip
+    driver = (
+        f"const cases = {json.dumps(cases)};\n"
+        "const out = {};\n"
+        "for (const [name, readings] of Object.entries(cases)) out[name] = checklist(readings).map((entry) => entry.state);\n"
+        "out.again = JSON.stringify(checklist(cases.fresh)) === JSON.stringify(checklist(cases.fresh));\n"
+        "console.log(JSON.stringify(out));\n"
+    )
+    out = _node(tmp_path, driver)
+    assert out["all"] == ["done"] * 5
+    assert out["fresh"] == ["not yet", "done", "current", "not yet", "not yet"]
+    assert out["quiet"] == ["done", "done", "done", "not yet", "not yet"]
+    assert out["unread"] == ["not read"] * 5
+    assert out["unsampled"] == ["done", "done", "done", "done", "not read"]
+    assert out["nothing"] == ["not yet"] * 5
+    assert out["again"] is True
+    app = (PUBLIC / "app.js").read_text(encoding="utf-8")
+    card = _function(app, "function checklistCard(")
+    for member in ("projects", "creating", "operations", "usage"):
+        assert f"{member}: readings.map((reading) => reading.{member})," in card, member
+    assert "me, organizations," in card
+    reading = _function(app, "async function readOrganization(")
+    assert 'call("GET", "/operations?organization=" + id)' in reading
+    assert 'call("GET", `/organizations/${organization}/usage?hours=720`)' in reading

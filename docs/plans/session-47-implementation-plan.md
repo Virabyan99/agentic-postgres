@@ -327,6 +327,14 @@ runs add go in a second table below it, in execution order.
 | **D3006** | ADR 0295 decision 6: every action a busy button; a dialog component. | The editor's Connect/Run/Cancel/Disconnect stay plain (Run 6 rebuilds the editor); *I have saved it* is a text pin in `test_console_create`; no dialog yet. | Busy buttons on every other action; **Run 5 moves the *I have saved it* pin, Run 6 the editor, Run 9 adds the dialog for delete**. | Each in the run that owns its view. | 0295 |
 | **D3007** | Brief §1: plain language. | Activity and the tracker print raw ISO times (`2026-10-29T17:00:17.735753+00:00`; seen in the 390 px look). | **Run 5 formats every time** (a relative age with the absolute time beside it). | A machine's timestamp is not a sentence. | 0296 |
 | **D3008** | Brief §2: below 900 px the navigation folds into one *Menu*. | The closed Menu left ~160 px empty: `.shell`'s `min-height` was shared between both rows of the one-column grid. | **`grid-template-rows: auto 1fr`** under 900 px; re-read in the look rig at 390. | A closed menu takes its summary's height. | 0295 |
+| **D3009** | ADR 0297: the API's words, the relay's closes and `console_unconfigured`. | `api.js` makes two words itself: `console_unconfigured` and `unexpected_answer`. | The console's own words are **derived from `api.js`'s literals** too: 22 `REFUSALS` (20 API + 2) and 8 `CLOSES` (4400, 4408, 4413, 4429, 4502, 1000, 1006, 1011). | Every word a page can show has a sentence. | 0297 |
+| **D3010** | ADR 0298 d4: the project's `GET /v1/projects/{key}/usage`. | The checklist reads `GET /v1/organizations/{org}/usage?hours=720` — the same per-project documents, one call per organisation. | Kept; a connection older than 30 days reads *"not seen yet"*. | One call, the longest window. | 0298 |
+| **D3011** | Brief screen 2: *"usually 23 to 28 minutes"* before submitting. | `expected` is served only on an operation; the console holds no copy (ADR 0296 d4). | New project's *What happens next* states no number; the tracker shows the served range from its first reading. **Serving `expected` by type before a request is a control-plane widening — a Stage 6 candidate, not this session's.** | No second source of the number. | 0296 |
+| **D3012** | ADR 0297: every word, the relay's closes included, worded by `messages.js`. | The editor still words closes through `sql.js` `endSentence` (which also has 1009, not in the derived set). | `messages.js` has `CLOSES`/`closeWords()`; **Run 6 switches the editor and decides 1009**. | The editor is Run 6's. | 0297 |
+| **D3013** | D3007: every time formatted. | Branches' restore label shows an RFC 3339 example (an input format). | **Run 9** gives it a `datetime-local` input converted in the page. | An input format is not a displayed time, but it reads like one. | 0295 |
+| **D3014** | ADR 0295 d6: every input labelled. | Run 4's `field()` put the hint inside the `<label>`, so the accessible name became label + hint (it broke `get_by_label("Name", exact=True)`). | The hint is **outside** the label, tied by `aria-describedby`. | A label names; a hint describes. | 0295 |
+| **D3015** | D3005 (a): never read an operation for context. | Inline `waitFor` (Connect, Branches, Settings) kept polling after the page was left — it could spend an export's one-time link. | `waitFor` takes the route turn and stops; Settings and Branches link to the tracker; Connect's rotate does not (its password is shown on that page). | A poll belongs to its page. | 0296 |
+| **D3016** | ADR 0291 d3: the panel shows the operation's id. | The id is in the address (`#/operations/<id>`). | **ADR 0291 amended** (Session 47 Run 5); `journey_walk` j06 reads the id from the URL. | The address is the record. | 0291 |
 
 ---
 
@@ -619,7 +627,7 @@ session**: the console set + `test_look` 97 passed; `test_reality_ledger`,
 `test_fleet`, `test_suite_shape`, `test_repository_contract` 357 passed, 1 failed —
 `test_available_and_beta_rows_name_evidence_that_resolves`, D2945's decided
 `plans_live` reading against `session-46.json` (CI skips it). Rows **D2999–D3008**.
-NEXT FREE D3009.
+**CI on `c0f9b40`: contract 40923498193 success, site 40927940714 success.**
 
 ### Run 5 — long operations, creation and refusals
 
@@ -634,7 +642,49 @@ NEXT FREE D3009.
 5. Targeted: the console set, `test_console_create`, `test_console_refusals`.
    The battery.
 
-**Done.**
+**Done.** 2026-10-29, built by a delegated agent from this plan, ADRs 0291/0295–0298
+and the approved brief, reviewed in the main session (WSL `~/s47/run5/`).
+`progress.js` gains formatted times (`relativeAge`, `absoluteTime` in the browser's
+zone), `creationBlocked` and the API-only `checklist` (a failed reading is *not
+read*); `ui.js` `when()` draws `<time datetime title>`; **`messages.js` complete** —
+22 words + 8 closes, each `{sentence, action, link}`, `plan_limit_reached` and
+`branch_limit_reached` worded with their number (D2996). **Projects and organisation
+pages**: the checklist (hidden when all five are done), a per-organisation limit
+banner linking to `/pricing/` and the Plan page, *New project* disabled with its
+reason, pending creations with their step, elapsed and usual time. **`#/operations/<id>`
+for all eleven types**: status, subject, start, elapsed, *usually about N to M
+minutes*, D3000's bound sentence, named steps done/current/to come with their times,
+an indeterminate bar, **no percent anywhere**, the outcome in words with *Connect to
+it*. **The creation**: fields disabled while it starts; refused before the form when
+the plan is full; on acceptance the address becomes `#/operations/<id>`, the token
+panel says *"You do not need it to connect"* and shown-once, the claim behind *Using
+it from a terminal (optional)*; *I've saved it, or I don't need it* leaves a one-line
+record; after a refresh one sentence says the token is gone and not needed. **ADR 0291
+amended.** Notifications: an opening paragraph (*nothing is emailed*), *What makes a
+notification*, each kind a sentence with a link. **Every time on every page
+formatted** (D3007). New `test_console_refusals` (4 tests) derives the set from the
+server's modules and `api.js` by AST/literals; `test_console_progress` +4; pins moved
+in `test_console_create`; `ANCHORS` re-counted; `journey_walk` j06 reads the id from
+the address (`console_walk`, `sql_walk` unchanged). **Battery 14/14** (an entry
+dropped, an entry for no word, a close dropped; the checklist typed or reading
+storage; a percent drawn; a raw time drawn twice; New project enabled while blocked
+twice; the token kept after dismissal; the branch number dropped; ago/in swapped),
+controls green, restored byte-equal. **Rehearsed twice, all green** (`console_walk`
+11/11, `sql_walk` 35/35, `journey_walk` j01–j13 with `token_gone_after_dismissal`
+true; `--leak` 6, `--plant-foreign` 5, `--dry` 0). The agent's look found and fixed a
+squeezed step label at 390 px, tabular spacing in a date and *Your plan* running into
+its link. **Main-session review**: rule scan clean (`app.css` 23,930 B); the 390 px
+tracker with the token panel and the 1280 px Projects page read as the approved
+design; **targeted re-run**: console set + `test_look` 105 passed; the registry,
+ledger, documentation, gates, fleet, shape and repository modules 357 passed + D2945's
+decided failure. New node ids for Run 12: `test_console_refusals.py::`
+`test_every_word_the_api_can_answer_has_an_entry`, `test_every_close_code_has_an_entry`,
+`test_each_entry_says_what_happened_and_what_to_do`,
+`test_a_refusal_is_drawn_with_its_number_its_action_and_its_word`;
+`test_console_progress.py::` `test_every_time_is_an_age_and_a_local_time`,
+`test_no_page_draws_a_raw_time`, `test_new_project_waits_for_an_open_creation_and_a_full_plan`,
+`test_the_checklist_is_derived_from_the_api_alone`. Rows **D3009–D3016**. NEXT FREE
+D3017 (D3020+ reserved for Run 6's server half).
 
 ### Run 6 — Connect and the SQL editor
 

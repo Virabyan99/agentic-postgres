@@ -35,23 +35,26 @@ PAGES = (PUBLIC / "index.html", PUBLIC / "accept.html")
 #: `sql_walk.py`, and since Session 46 `journey_walk.py`) select by, and how
 #: often it occurs across every console module (`public/*.js`) -- re-counted
 #: at Session 47 Run 4 (`~/s47/run4/anchors.py`), when the shell moved into
-#: `nav.js` and the components into `ui.js` (ADR 0295, D2968).
+#: `nav.js` and the components into `ui.js` (ADR 0295, D2968); and at Run 5
+#: (`~/s47/run5/anchors.py`), when the creation became the tracker's and the
+#: Projects pages gained the checklist, the banners and the Notifications feed.
 ANCHORS = {
     '"Create your account"': 2, '"Username"': 3, '"Display name"': 1, '"Password"': 3,
     '"Password again"': 1, 'className: "qr"': 1, 'className: "secret"': 3,
     '"Code from your app"': 2, '"Confirm"': 1, '"The next code from your app"': 1,
-    '"Sign in"': 4, '"Projects"': 4, '"Sign out"': 1, 'className: "account"': 1,
+    '"Sign in"': 4, '"Projects"': 5, '"Sign out"': 1, 'className: "account"': 1,
     '"New password for the pooled door (customer_app)"': 1, 'role: "status"': 1,
-    'h("textarea"': 1, 'className: "result"': 1, '"Door"': 1, '"Connect"': 4, '"Run"': 1,
-    '"Cancel"': 1, '"Disconnect"': 1, 'className: "once"': 1, 'h("h1"': 7, 'h("h2"': 13,
+    'h("textarea"': 1, 'className: "result"': 1, '"Door"': 1, '"Connect"': 5, '"Run"': 1,
+    '"Cancel"': 1, '"Disconnect"': 1, 'className: "once"': 1, 'h("h1"': 7, 'h("h2"': 19,
     # Session 46 (D2918): the journey driver's (`journey_walk.py`).
-    '"New organisation"': 3, '"Name"': 5, '"Create"': 1, '"New project"': 4,
+    '"New organisation"': 4, '"Name"': 5, '"Create"': 1, '"New project"': 5,
     '"Profile"': 1, '"Administrator\'s username"': 1, '"Create project"': 1,
-    '"I have saved it"': 1, '"Connect to it"': 1, '"Support bundle"': 1,
+    # Session 47 Run 5 (ADR 0291 amended): the panel's button, the J6 dismissal.
+    "\"I've saved it, or I don't need it\"": 1, '"Connect to it"': 2, '"Support bundle"': 1,
     '"Set up your second factor"': 1, '"Something was refused"': 1,
     # Session 47 (ADR 0295): the page titles J11 and J12 read, and the body J11 reads.
     '"Usage"': 4, '"Slowest queries"': 2, '"Monitoring"': 2, '"Plan and usage"': 2,
-    '"Notifications"': 3, '"Settings"': 2, 'className: "page-body"': 1,
+    '"Notifications"': 4, '"Settings"': 2, 'className: "page-body"': 1,
 }  # fmt: skip
 
 

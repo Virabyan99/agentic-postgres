@@ -116,9 +116,15 @@ def test_the_token_is_shown_once_at_acceptance(tmp_path: Path) -> None:
     """ADR 0291 §3: `accepted` is called once with the token and the recorded
     operation the moment the server answers, BEFORE the wait -- the order of
     events is call, accepted, wait -- and the wait follows that operation.
-    The view draws the token from `accepted` alone, through `once` (the
-    shown-once panel), with the claim line and an *I have saved it* that removes
-    the panel; its link to Connect comes from the finished operation's key."""
+    The view draws the token from `accepted` alone, into `tokenPanel` (the
+    shown-once panel, `once`), with the claim line behind a disclosure marked
+    optional and an *I've saved it, or I don't need it* that REPLACES the panel
+    -- the token with it -- by a one-line record (ADR 0291 amended at Session
+    47 Run 5; ADR 0296 decision 6). On acceptance the address becomes the
+    creation's tracker, the wait is the tracker's reader, and the link to
+    Connect -- with the optional claim line, key filled -- comes from the
+    finished operation's key; after a refresh the tracker says the token was
+    shown once and is not needed to connect."""
     out = _node(tmp_path, STANDINS + "console.log(JSON.stringify(await run(false)));\n")
     assert out["events"] == ["call", "accepted", "wait"], out["events"]
     assert out["operations"] == [{"id": OPERATION, "status": "pending", "project_key": None}]
@@ -127,11 +133,24 @@ def test_the_token_is_shown_once_at_acceptance(tmp_path: Path) -> None:
 
     view = _view("newProjectView")
     accepted = view[view.index("accepted:") : view.index("organization:")]
-    assert "once(" in accepted and "token" in accepted, accepted
-    assert "claimLine(" in accepted and "CLAIM_SENTENCE" in accepted
-    assert 'button("I have saved it", () => panel.remove())' in accepted
+    assert "tokenPanel(token, " in accepted, accepted
+    assert 'history.pushState(null, "", `#/operations/${operation.id}`);' in accepted
+    assert "wait: (id) => follow(id, turn, parts, null)," in view
     assert view.count("token") == accepted.count("token"), "the token is used outside the panel"
-    assert "#/projects/${key}/connect" in view and "claimLine(key)" in view
+    panel = _view("tokenPanel")
+    assert 'once("The handoff token:", token)' in panel and "CLAIM_SENTENCE" in panel
+    assert '"Using it from a terminal (optional)"' in panel and "claimLine(null)" in panel
+    assert '"You do not need it to connect"' in panel and "It is shown once" in panel
+    assert "button(\"I've saved it, or I don't need it\", () => panel.replaceWith(" in panel
+    record = panel[panel.index("panel.replaceWith(") : panel.index("return panel;")]
+    assert not re.search(r"[(,]\s*token\b", record), "the one-line record holds the token"
+    assert "panel.remove()" not in panel and '"I have saved it"' not in view
+    onward = _view("onward")
+    assert "#/projects/${key}/connect" in onward and "claimLine(key)" in onward
+    assert '"Connect to it"' in onward
+    tracker = _view("trackerParts")
+    assert 'row.type === "project.create" && !shownHere' in tracker
+    assert "You do not need it to connect." in tracker
 
 
 def test_no_storage_is_touched(tmp_path: Path) -> None:
@@ -176,9 +195,9 @@ def test_a_refusal_is_the_servers(tmp_path: Path) -> None:
     assert out["events"] == ["call"] and out["tokens"] == [] and out["waited"] == []
 
     view = _view("newProjectView")
-    assert "catch (error)" in view and "refusal(error)" in view
+    assert "catch (error)" in view and "refusal(error, { organization: org })" in view
     app = (PUBLIC / "app.js").read_text(encoding="utf-8")
-    assert 'import { refusal, sentence } from "/console/messages.js";' in app
+    assert 'import { refusal, said, sentence } from "/console/messages.js";' in app
     # Since Session 47 (ADR 0295 decision 3, ADR 0297) the words live in messages.js.
     words = (PUBLIC / "messages.js").read_text(encoding="utf-8")
     refusals = words[
@@ -196,18 +215,32 @@ def test_the_overview_offers_new_project() -> None:
     allows (`CreateProjectRequest.name`, read from models.py)."""
     app = (PUBLIC / "app.js").read_text(encoding="utf-8")
     assert "command-line client in this beta" not in app
-    overview = _view("overview")
-    assert "#/org/${organization.id}/new-project" in overview and '"New project"' in overview
-    assert '["owner", "admin", "member"].includes(organization.role)' in overview
+    # Since Session 47 Run 5 (D2951, ADR 0297 decision 6) the action is one
+    # helper the Projects pages share: the link, or a disabled button while a
+    # creation is open or the plan is full; each organisation's section on the
+    # overview draws it.
+    action = _view("newProjectAction")
+    assert "#/org/${organization.id}/new-project" in action and '"New project"' in action
+    assert '["owner", "admin", "member"].includes(organization.role)' in action
+    assert "disabled: true" in action
+    assert "newProjectAction(organization, blocked, reading.plan)" in _view("organizationSection")
+    assert "organizationSection(organization, readings[index])" in _view("overview")
     assert "[/^#\\/org\\/([^/]+)\\/new-project$/, newProjectView, UUID]," in app
     pages = json.loads((PUBLIC / "pages.json").read_text(encoding="utf-8"))["views"]
     (view,) = [v for v in pages if v["id"] == "new-project"]
     assert view["path"] == "/console/#/org/{organization}/new-project"
-    assert view["calls"] == ["POST /v1/projects", "GET /v1/operations/{operation}"]
+    # The creation and the operation it follows; since Session 47 Run 5 the
+    # plan and the open creations that refuse the form before it is filled.
+    assert view["calls"] == [
+        "POST /v1/projects",
+        "GET /v1/operations/{operation}",
+        "GET /v1/organizations/{organization}/plan",
+        "GET /v1/operations",
+    ]
     assert view["ledger"] == ["projects_self_service"]
     longest = re.search(
         r"name: str = Field\(pattern=r\"\^\[A-Za-z0-9 \._-\]\{1,(\d+)\}\$\"\)",
         MODELS.read_text("utf-8"),
     )
     assert longest, "CreateProjectRequest.name's pattern moved"
-    assert f'field("Name", {{ maxLength: {longest.group(1)} }})' in _view("newProjectView")
+    assert f'field("Name", {{ maxLength: {longest.group(1)} }}, ' in _view("newProjectView")

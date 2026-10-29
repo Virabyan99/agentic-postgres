@@ -260,6 +260,44 @@ button.copy.copied { color: var(--on-ink-action-text); background: var(--on-ink-
 .indeterminate::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: 3px; background: var(--chip-verify-text); animation: slide 1.8s ease-in-out infinite; }
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
 
+.steps .time { white-space: normal; text-align: right; max-width: 14rem; }
+.meta-row b time { font-variant-numeric: normal; }
+@media (max-width: 600px) {
+  .steps li { grid-template-columns: 28px minmax(0, 1fr); row-gap: 2px; }
+  .steps .time { grid-column: 2; text-align: left; max-width: none; }
+}
+
+/* Session 47 Run 5: the checklist, the token panel, the refusal before a form,
+   the feed and the kinds of notification. */
+.checklist { list-style: none; margin: 0; padding: 0; display: grid; }
+.checklist li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: var(--space-3); align-items: start; padding: 10px 0; border-bottom: 1px solid var(--rule-soft); }
+.checklist li:last-child { border-bottom: 0; }
+.checklist .sub { color: var(--text-3); font-size: 13px; overflow-wrap: anywhere; }
+.checklist li.unread .mark { border-style: dashed; }
+.checklist > li > a { font-size: 14px; }
+.token-panel { display: grid; gap: var(--space-3); padding: var(--space-5); background: var(--warning-bg); border: 2px solid var(--once-border); border-radius: var(--radius-panel); }
+.token-panel h2 { margin: 0; font-size: 18px; }
+.token-panel > p { margin: 0; }
+.token-panel .once { padding: var(--space-4); }
+.token-panel summary { cursor: pointer; font-weight: 600; }
+.token-panel details p { margin: var(--space-2) 0; }
+.once-done { margin: 0; padding: var(--space-3) var(--space-4); background: var(--surface-sunk); border: 1px solid var(--rule); border-radius: var(--radius-control); color: var(--text-2); }
+.callout .card-actions { margin: var(--space-3) 0 var(--space-2); }
+.callout .word { font-size: 12px; color: inherit; background: none; border: 0; padding: 0; }
+.callout p { margin: 0 0 var(--space-2); }
+select[disabled] { background: var(--surface-sunk); color: var(--text-3); }
+.field label { margin-bottom: var(--space-1); }
+.field .hint { margin: 0 0 var(--space-3); max-width: 28rem; font-size: 13px; color: var(--text-3); }
+.head-actions > button { margin: 0; }
+.feed { list-style: none; margin: 0; padding: 0; display: grid; }
+.feed li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-1) var(--space-4); padding: 10px 0; border-bottom: 1px solid var(--rule-soft); }
+.feed li:last-child { border-bottom: 0; }
+.feed time { color: var(--text-3); font-size: 13px; white-space: nowrap; }
+.kinds { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-2) var(--space-4); margin: 0; }
+.kinds dt { font-weight: 600; }
+.kinds dd { margin: 0; color: var(--text-2); }
+time[title] { text-decoration: underline dotted var(--rule); text-underline-offset: 3px; }
+
 /* Skeleton, toast. */
 .skeleton { display: grid; gap: var(--space-4); max-width: 960px; margin: 0 auto; }
 .sk { height: 14px; border-radius: 4px; background: linear-gradient(90deg, var(--surface-hover) 0%, var(--surface-sunk) 50%, var(--surface-hover) 100%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }

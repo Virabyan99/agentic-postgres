@@ -159,3 +159,22 @@ over the zone. Both widen surfaces that hold more than this step needs.
   (D2884).
 - The CLI's two claim paths read the same project and present to the same
   route; only where the token comes from differs.
+
+## Amendment, Session 47 Run 5 (2026-10-29; ADR 0296 decisions 5-6, D2948, D3006)
+
+Decision 3's panel and decision 1's wait are re-drawn by the approved brief's
+screens 3-4; what is shown, when, and what is sent are unchanged. **On
+acceptance the address becomes the creation's tracker** (`#/operations/<id>`,
+by `history.pushState`, so the same route turn keeps polling and a refresh
+resumes from the API), and the operation is followed by the tracker's own
+reader instead of `waitFor`; the operation's id is in the address rather than
+in a sentence. The panel says first that **the token is not needed to
+connect**, that it is shown once, and puts the claim line behind a disclosure
+marked *optional*. Its button reads ***I've saved it, or I don't need it***
+and **replaces the whole panel -- the token with it -- by a one-line record**
+(`panel.replaceWith(...)`, where it was `panel.remove()` beside *I have saved
+it*); the tracker stays. After a refresh the tracker says once that the token
+was shown and cannot be shown again, and *"You do not need it to connect."*
+The claim line with the key filled is drawn by the tracker once the creation
+has succeeded, beside *Connect to it* (Run 4's D2910 placement, moved with the
+view). `test_console_create`'s text pins moved in the same change.
