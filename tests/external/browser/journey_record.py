@@ -31,10 +31,12 @@ from urllib.parse import urlsplit
 
 T = TypeVar("T")
 
-#: The steps the driver takes, in order. **J9** (the string connects) is the live
-#: proof's, from the 0600 password file, as Session 43's walk left it; **J14**
-#: (the project deleted, its names refused) is the lifecycle record's, which
-#: continues from this journey's creation (D2872).
+#: The steps the driver takes, in order. **J9** (the string connects) is not the
+#: driver's: the trip's launcher reads it from the workstation with the proof
+#: module's own connection (`read_the_string`, from the 0600 password file) after
+#: the driver exits and before the lifecycle deletes the project, into
+#: `CONNECTED_FILE` (D2945); **J14** (the project deleted, its names refused) is
+#: the lifecycle record's, which continues from this journey's creation (D2872).
 STEPS: tuple[tuple[str, str], ...] = (
     ("j01", "the membership link opened the console"),
     ("j02", "the account was made, signed in"),
@@ -49,6 +51,9 @@ STEPS: tuple[tuple[str, str], ...] = (
     ("j12", "the support bundle listed the checks with their ages"),
     ("j13", "signed out"),
 )
+
+#: J9's reading, 0600, beside the record (D2945).
+CONNECTED_FILE = "connected.json"
 
 #: A `--dry` journey stops before the creation: a slot is consumed by J6 alone.
 DRY_STEPS = STEPS[:5]

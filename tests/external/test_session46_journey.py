@@ -12,11 +12,17 @@ with the four secrets a later step needs in 0600 files beside it. The lifecycle
 then continued from that creation (`--from-journey`, D2872) and deleted the
 project, so **J14 and the creation's identity are read from the lifecycle
 record** (`APG_LIFECYCLE_RECORD_FILE`), and the bundle from what the browser
-read while the project lived.
+read while the project lived. **J9 -- the string connects -- is read while the
+project lives too** (D2945): Run 9's live J9 ran after the deletion and could
+only fail (D2940 (4)), so the trip's launcher calls `read_the_string` (this
+module's own `_connect`) right after the driver exits and writes its reading
+beside the record; J9 and `test_the_string_connected` read that file, bounded
+by J8 and the lifecycle's deletion.
 
 The reading of the journey record is `journey_record.problems`, the one the
 driver itself ran (JRN-002 holds it offline). **No SSH, no process door**
-(D2174). **None of these proofs has ever executed.**
+(D2174). Run 9 executed these proofs once (D2940): all passed but the two
+connections.
 """
 
 # ruff: noqa: F811 -- the imported names are pytest fixtures.
@@ -29,6 +35,7 @@ import os
 import re
 import stat
 import urllib.request
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -87,6 +94,10 @@ def lifecycle() -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def instant(text: str) -> datetime:
+    return datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+
+
 def _beside(journey: dict[str, Any], member: str) -> Path:
     return _private(Path(journey["_directory"]) / str(journey[member]))
 
@@ -105,6 +116,48 @@ def _connect(journey: dict[str, Any]) -> Any:
         user=string["user"], password=password, sslmode="verify-full",
         sslrootcert=str(ROOTS), connect_timeout=15, autocommit=True,
     )  # fmt: skip
+
+
+def read_the_string(journey: dict[str, Any]) -> dict[str, Any]:
+    """J9's reading, taken by `_connect` itself from this workstation while the
+    project lives -- right after the driver exits, before the lifecycle that
+    continues the creation deletes it (D2940 (4), D2945). The trip's launcher
+    calls this and writes what it returns, 0600, as `journey_record.CONNECTED_FILE`
+    beside the record; the two proofs below read that file."""
+    string = journey["string"]
+    with _connect(journey) as connection:
+        info = connection.info
+        return {
+            "at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "host": string["host"], "port": string["port"],
+            "database": string["database"], "user": string["user"],
+            "sslmode": "verify-full", "sslrootcert": str(ROOTS),
+            "select_1": list(connection.execute("select 1").fetchone()),
+            "current_user": connection.execute("select current_user").fetchone()[0],
+            "ssl_in_use": bool(info.pgconn.ssl_in_use),
+        }  # fmt: skip
+
+
+def _connected(journey: dict[str, Any], lifecycle: dict[str, Any]) -> dict[str, Any]:
+    """J9's reading, beside the record: about this record's string, verified
+    against the system roots, taken after Connect showed the string (J8) and
+    before the lifecycle asked for the project's deletion."""
+    path = _private(Path(journey["_directory"]) / journey_record.CONNECTED_FILE)
+    reading = json.loads(path.read_text(encoding="utf-8"))
+    string = journey["string"]
+    assert [reading[k] for k in ("host", "port", "database", "user")] == [
+        string[k] for k in ("host", "port", "database", "user")
+    ], reading
+    assert (reading["sslmode"], reading["sslrootcert"], reading["ssl_in_use"]) == (
+        "verify-full", str(ROOTS), True,
+    ), reading  # fmt: skip
+    deletions = [o for o in lifecycle["operations"] if o["type"] == "project.delete"]
+    assert deletions, "the lifecycle recorded no deletion to bound the reading by"
+    assert instant(_step(journey, "j08")["at"]) <= instant(reading["at"]), reading["at"]
+    assert instant(reading["at"]) < instant(deletions[0]["created_at"]), (
+        reading["at"], deletions[0]["created_at"],
+    )  # fmt: skip
+    return reading
 
 
 # ---------------------------------------------------------------------------
@@ -168,11 +221,11 @@ def test_j08_connect_set_a_password_and_showed_the_string(journey: dict[str, Any
     assert journey["string"]["holds_the_password"] is True
 
 
-def test_j09_the_string_connects(journey: dict[str, Any]) -> None:
+def test_j09_the_string_connects(journey: dict[str, Any], lifecycle: dict[str, Any]) -> None:
     """The password the page showed opens the pooled door over TLS, verified
-    against the system roots -- from this workstation."""
-    with _connect(journey) as connection:
-        assert connection.execute("select 1").fetchone() == (1,)
+    against the system roots -- from this workstation, while the project lived
+    (D2945: the lifecycle deletes it before this half runs)."""
+    assert _connected(journey, lifecycle)["select_1"] == [1]
 
 
 def test_j10_the_sql_editor_answered(journey: dict[str, Any]) -> None:
@@ -233,9 +286,8 @@ def test_the_token_was_shown_once(journey: dict[str, Any]) -> None:
     assert token not in json.dumps(journey)
 
 
-def test_the_string_connected(journey: dict[str, Any]) -> None:
-    with _connect(journey) as connection:
-        assert connection.execute("select current_user").fetchone() == (journey["string"]["user"],)
+def test_the_string_connected(journey: dict[str, Any], lifecycle: dict[str, Any]) -> None:
+    assert _connected(journey, lifecycle)["current_user"] == journey["string"]["user"]
 
 
 # ---------------------------------------------------------------------------
