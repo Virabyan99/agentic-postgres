@@ -172,4 +172,7 @@ page-level horizontal scroll (only code blocks and tables scroll, in their own b
 
 ## Approval
 
-*(Sheet D1: the operator's words and the date go here; revisions are listed above them.)*
+**Sheet D1, 2026-10-29: the operator — *"Approved"*** (asked to click through all ten
+screens on a laptop and a phone at
+https://claude.ai/artifact/YYuCFX7YiqkTfEdu8jh2jG, version 1; the design as committed
+in `20b923d`). No revision. Runs 3–9 build this design.

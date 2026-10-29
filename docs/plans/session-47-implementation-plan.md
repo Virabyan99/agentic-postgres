@@ -477,7 +477,21 @@ alone: 24 passed. Rows **D2981–D2990**. **NEXT FREE: D2991, ADR 0300.**
    the brief's *Approval* section; revisions repeat until approved. Commit, push,
    no CI read.
 
-**Done.**
+**Done.** 2026-10-29. The brief (`docs/design/session-47/design-brief.md`) and the
+prototype (`prototypes/console.html`, ten screens, the console's own token block and
+typefaces, example data) committed `20b923d`; published as a private page,
+https://claude.ai/artifact/YYuCFX7YiqkTfEdu8jh2jG, with the two `woff2` files inlined
+(the page host admits no other font source; the console's own bytes). Screenshots of
+all ten screens at 390 × 844 and 1280 × 800 from the pinned Playwright image, WSL
+`~/s47/run2/shots/`: no overflow, the typeface loaded, no console error, no request off
+the origin. The one look found every screen drawn at once (`.page-inner`'s `display:
+grid` beat `[hidden]`; the console's own `[hidden]` rule added) and a focus ring
+around `<main>` after a screen change (removed); re-shot clean. New text pairs 8.61,
+7.33, 5.34:1. **Switchers placed at the top of the left navigation, not the top bar**
+(the brief's §2 says why). Found: **D2991** — the snippets are already the server's;
+ADR 0295 and Runs 4/6 amended. **Sheet D1: the operator, 2026-10-29, *"Approved"*** —
+no revision. Targeted: `test_documentation_index`, `test_acceptance_registry`,
+`test_repository_contract`, 308 passed. NEXT FREE D2992.
 
 ### Run 3 — operations and notices made visible (the control plane)
 
