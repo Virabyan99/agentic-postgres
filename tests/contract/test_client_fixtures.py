@@ -508,11 +508,21 @@ def _tls_block(name: str) -> str:
     return source[start:end]
 
 
+#: The authorities each libpq fixture's `verify-full` names (D3021): psql's libpq
+#: is the system's and reads `system` (libpq 16+); psycopg[binary]'s bundled
+#: OpenSSL cannot (D3020: its OPENSSLDIR is its build directory), so its image's
+#: own Debian bundle is named by path -- measured in the fixture's own image
+#: (`~/s47/run10/rig`: verified and connected; `system` refused with the same
+#: authority present; an untrusted CA and a misnamed host refused).
+LIBPQ_ROOTS = {"psql": "system", "psycopg": "/etc/ssl/certs/ca-certificates.crt"}
+
+
 @pytest.mark.parametrize("name", ["psql", "psycopg"])
 def test_the_libpq_fixtures_take_the_tls_input_and_default_to_disable(name: str) -> None:
     """The entrypoint's own block, EXECUTED by `sh` for each value: unset and
     `disable` are the platform transports' `disable` (DBX-001..004 unchanged);
-    `verify-full` adds the system's authorities; anything else exits 2."""
+    `verify-full` adds the authorities that fixture's libpq can read
+    (`LIBPQ_ROOTS`, D3021 -- psycopg never `system`); anything else exits 2."""
     program = _tls_block(name) + '\nprintf "%s|%s" "$PGSSLMODE" "${PGSSLROOTCERT:-}"\n'
 
     def run(value: str | None) -> subprocess.CompletedProcess:
@@ -526,7 +536,7 @@ def test_the_libpq_fixtures_take_the_tls_input_and_default_to_disable(name: str)
 
     assert run(None).stdout == "disable|"
     assert run("disable").stdout == "disable|"
-    assert run("verify-full").stdout == "verify-full|system"
+    assert run("verify-full").stdout == f"verify-full|{LIBPQ_ROOTS[name]}"
     refused = run("require")
     assert refused.returncode == 2 and "must be disable or verify-full" in refused.stderr
 

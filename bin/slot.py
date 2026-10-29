@@ -9,7 +9,7 @@ credential beyond the one `bootstrap-providers` already reads** (D2150):
   declaration and the `small` profile, through the product's own
   `config.load_project_manifest`. It refuses a slot that is not declared, is
   already prepared, is occupied, or is consumed. The provider half -- buckets,
-  tokens, the Infisical project and identity, the DNS record, the secrets -- is
+  tokens, the Infisical project and identity, the five DNS records, the secrets -- is
   the operator's provisioning sheet, which runs the existing commands against
   this manifest; a wrapper that pretended to do the console half would be the
   first fake-complete command.
@@ -178,7 +178,8 @@ def prepare(host_path: Path, key: str) -> int:
         f"{naming.backup_mirror_bucket_name(key, backup['mirror'].get('bucket'))}"
     )
     print(f"  Infisical project  {key}  (identity {key}-runtime)")
-    print("Next, on the provisioning sheet: the buckets and tokens, the DNS record,")
+    print("Next, on the provisioning sheet: the buckets and tokens, the five DNS records")
+    print(f"({entry.domain}, pool., direct., *.pool., *.direct.: grey, no AAAA; D2960),")
     print(f"`bootstrap-providers.sh --project {directory / slot.MANIFEST} --plan`, then --apply,")
     print("`materialize-secrets`, and `slot.sh status` until it reads ready.")
     return EXIT_OK

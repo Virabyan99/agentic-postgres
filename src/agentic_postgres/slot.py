@@ -14,8 +14,10 @@ The readings, and the files they read under `SLOT_ROOT/<key>/`:
 * **prepared** -- `manifest.yaml` (written by `bin/slot.sh prepare`), the
   project's `bootstrap-state.json` (written by `bootstrap-providers --apply`)
   and an active secret generation (written by `materialize-secrets`);
-* **dns** -- the slot's A record is the host's address and it has no AAAA
-  (D2148; read by `bin/slot.py`, which runs `dig`);
+* **dns** -- the slot's FIVE names are the host's address alone and none has
+  an AAAA: its domain, `pool.` and `direct.` below it, and the two branch
+  wildcards read at `dnsprobe.pool.` and `dnsprobe.direct.` (D2148, ADR 0268,
+  D2960; read by `bin/slot.py` and the reconciler, which run `dig`);
 * **allocated** -- a deployed document for the key, or the `allocated` marker
   the reconciler writes when it takes the slot (its content the operation's
   id);
@@ -119,7 +121,8 @@ def slot_manifest(host: dict[str, Any], slot: host_config.DeclaredSlot) -> dict[
     customer's own SQL is not this session's); `compute: small`. The profile
     owns every memory and pool member, so none is written here (D2198).
     Schema 11 with `database.public_endpoints.enabled: true` (ADR 0268): the
-    slot's `pool.` and `direct.` names, which is why it needs three records.
+    slot's `pool.` and `direct.` names, and a branch's below them (ADR 0271),
+    which is why it needs five records (D2960).
     """
     defaults = host_config.slot_defaults(host)
     if defaults is None:
@@ -241,12 +244,14 @@ def state(readings: Readings) -> tuple[str, str]:
         return "undetermined", f"could not read {', '.join(unread)}"
     missing = [name for name, value in prepared.items() if not value]
     if missing:
-        return "declared", f"not prepared: no {', '.join(missing)}"
+        # D2932: each label carries its own article, so the sentence names them
+        # after a verb rather than after "no".
+        return "declared", f"not prepared: missing {', '.join(missing)}"
     if r.dns is None:
-        return "undetermined", "the DNS record could not be read"
+        return "undetermined", "a DNS record could not be read"
     if not r.dns:
-        return "prepared", "the DNS record is missing or does not name this host"
-    return "ready", "prepared, and its DNS record names this host"
+        return "prepared", "a DNS record is missing or does not name this host"
+    return "ready", "prepared, and its five DNS records name this host"
 
 
 def _exists(path: Path) -> bool | None:
@@ -331,18 +336,34 @@ def dns_reading(domain: str, expected_ipv4: str | None) -> tuple[bool | None, st
     return True, f"{domain} A {expected_ipv4}, no AAAA"
 
 
+#: The label the two branch wildcards are read at (D2960): `*.pool.<domain>`
+#: answers for any name below `pool.<domain>`, so one probe name per door reads
+#: the record every branch's doors need, with no branch existing. A valid branch
+#: name, so its names derive exactly as a branch's do (`naming.
+#: branch_endpoint_hosts`); an explicit record by this name would read the same.
+WILDCARD_PROBE = "dnsprobe"
+
+
 def slot_dns(
     domain: str,
     expected_ipv4: str | None,
     dns: Callable[[str, str | None], tuple[bool | None, str]],
 ) -> tuple[bool | None, str]:
-    """A slot's THREE records read as one (ADR 0268, D2335): its domain and its
-    two public Postgres names, `pool.` and `direct.` below it (`naming.
-    endpoint_hosts`). True only when every one is this host alone with no
-    AAAA. A name that is determinately wrong decides False -- the first, by
-    that order, is the reason -- whatever another could not be read; with none
-    wrong, one unread is None (ADR 0195), never a guessed answer."""
-    names = (domain, *naming.endpoint_hosts(domain))
+    """A slot's FIVE records read as one (ADR 0268, D2335, D2960): its domain,
+    its two public Postgres names `pool.` and `direct.` below it (`naming.
+    endpoint_hosts`), and the two branch wildcards `*.pool.` and `*.direct.`,
+    read at `dnsprobe.pool.` and `dnsprobe.direct.` (`naming.
+    branch_endpoint_hosts`) -- the console offers a branch on every slot, so a
+    slot without them is not ready (D2933). True only when every one is this
+    host alone with no AAAA. A name that is determinately wrong decides False --
+    the first, by that order, is the reason -- whatever another could not be
+    read; with none wrong, one unread is None (ADR 0195), never a guessed
+    answer."""
+    names = (
+        domain,
+        *naming.endpoint_hosts(domain),
+        *naming.branch_endpoint_hosts(domain, WILDCARD_PROBE),
+    )
     readings = [(name, *dns(name, expected_ipv4)) for name in names]
     for _name, answer, reason in readings:
         if answer is False:

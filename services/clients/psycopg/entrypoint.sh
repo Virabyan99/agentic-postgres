@@ -27,16 +27,21 @@ done
 # transports' setting -- an `internal: true` network with no route off the host,
 # and a cluster that serves no certificate (DBX-001..004 are unchanged).
 # `verify-full` is the public door's (ADR 0268): libpq checks the edge's
-# certificate against this machine's authorities (`sslrootcert=system`, libpq
-# 16 and later) and the name it asked for. Anything else is refused rather than
-# passed through.
+# certificate against this image's authorities and the name it asked for.
+# NOT `sslrootcert=system` (D3020, D3021): psycopg[binary]'s bundled libpq has
+# its own OpenSSL, whose OPENSSLDIR is its build directory, so `system` reads
+# no authority at all and every verify-full connection is refused. The image's
+# own Debian bundle (the base image's ca-certificates) is named by path, which
+# that OpenSSL reads as a file; certifi is not installed here, and adding it
+# would be a second lock entry for the same roots. Anything else is refused
+# rather than passed through.
 case "${APG_SSLMODE:-disable}" in
     disable)
         PGSSLMODE=disable
         ;;
     verify-full)
         PGSSLMODE=verify-full
-        PGSSLROOTCERT=system
+        PGSSLROOTCERT=/etc/ssl/certs/ca-certificates.crt
         export PGSSLROOTCERT
         ;;
     *)

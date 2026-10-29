@@ -374,7 +374,8 @@ def test_the_site_is_the_commits_build(built: dict[str, bytes], recorder: Record
     alone passes) -- names the build digest recomputed from this tree, and
     carries the site's policy; the 404 page is the build's."""
     digest = site_build.digest()
-    origins = (site_build.SITE_URL, "https://www.agenticpostgresql.com")
+    # `www.` below the build's own apex, never a typed domain (ADR 0299, D2962).
+    origins = (site_build.SITE_URL, f"https://www.{urlsplit(site_build.SITE_URL).hostname}")
     for origin in origins:
         for route in _routes(built):
             headers, body = _settled(recorder, f"{origin}{route}")

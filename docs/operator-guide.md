@@ -1976,13 +1976,16 @@ next (D1510):
    /etc/agentic-postgres/slots/KEY/manifest.yaml --plan`, read, then
    `--apply` -- an Infisical project and a machine identity of its own -- with
    the operator's credential placed and **shredded by hand** after (D2061).
-3. **Three grey-cloud A records naming this host's address -- the slot's
-   domain, `pool.<domain>` and `direct.<domain>` -- and NO AAAA record**
-   (D2148, ADR 0268): a slot's manifest has public endpoints, and each name
-   gets its own certificate. A wildcard or a proxied record is not
-   accepted.
+3. **Five grey-cloud A records naming this host's address -- the slot's
+   domain, `pool.<domain>`, `direct.<domain>`, and the two branch wildcards
+   `*.pool.<domain>` and `*.direct.<domain>` -- and NO AAAA record**
+   (D2148, ADR 0268, D2960): a slot's manifest has public endpoints, each
+   name gets its own certificate, and the console offers a branch on every
+   slot (§22). The first three are exact names (a wildcard does not stand in
+   for them); no record is proxied.
 4. `sudo bin/slot.sh status --host /etc/agentic-postgres/host.yaml` reads the slot `ready` -- the manifest, the
-   bootstrap state and all three A records are there -- exit 0. `prepared` names what
+   bootstrap state and all five A records are there, the wildcards read at
+   `dnsprobe.pool.<domain>` and `dnsprobe.direct.<domain>` -- exit 0. `prepared` names what
    is missing; `undetermined` (exit 6) is a DNS answer that could not be read,
    never `ready`. Only a `ready` slot is ever given to a creation.
 
@@ -2218,11 +2221,14 @@ the verifier on stdin, then the sync above. The previous password stops at the
 operation's success. Nothing the operator holds can recover a customer's
 password; a customer who lost it rotates again.
 
-### A slot with doors: three records
+### A slot with doors: five records
 
 A slot's manifest has the facility, so `bin/slot.sh status` reads it `ready`
-only when **three** grey A records name this host and no AAAA exists: the
-slot's domain, `pool.<domain>` and `direct.<domain>` (§20 step 3).
+only when **five** grey A records name this host and no AAAA exists: the
+slot's domain, `pool.<domain>` and `direct.<domain>`, and the branch wildcards
+`*.pool.<domain>` and `*.direct.<domain>`, read at `dnsprobe.pool.<domain>`
+and `dnsprobe.direct.<domain>` (§20 step 3, §22; D2960). A wildcard that could
+not be read is `undetermined` (exit 6), never `ready`.
 
 ## 22. Branches
 

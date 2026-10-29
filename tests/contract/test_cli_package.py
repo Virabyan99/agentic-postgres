@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import re
 import shutil
 import subprocess
 import sys
@@ -95,6 +96,30 @@ def test_the_version_is_the_release(staged: Path) -> None:
     assert 'name = "agentic-postgres-cli"' in pyproject
     assert 'requires-python = ">=3.11"' in pyproject
     assert 'apg = "apg_cli.cli:main"' in pyproject
+
+
+def test_the_package_names_the_sites_own_addresses(staged: Path) -> None:
+    """ADR 0299, D2962's rule: the README's API endpoint, its documentation
+    link and the Homepage are `site_build`'s own constants -- the build cannot
+    import `site_build` (the publish job's Python has no `yaml`), so the typed
+    copies are held equal to it here, and the domain moves in both together
+    or this fails. Every `https://` the two files name is one of these or the
+    repository."""
+    from agentic_postgres import site_build
+
+    readme = (staged / "README.md").read_text(encoding="utf-8")
+    pyproject = (staged / "pyproject.toml").read_text(encoding="utf-8")
+    assert f"--endpoint {site_build.CONTROL_ENDPOINT} " in readme
+    assert f"{site_build.SITE_URL}/docs/cli/" in readme
+    assert f'Homepage = "{site_build.SITE_URL}/"' in pyproject
+    named = {url.rstrip(".,") for url in re.findall(r"https://[^\s\"'`]+", readme + pyproject)}
+    allowed = {
+        site_build.CONTROL_ENDPOINT,
+        f"{site_build.SITE_URL}/docs/cli/",
+        f"{site_build.SITE_URL}/",
+        "https://github.com/Virabyan99/agentic-postgres",
+    }
+    assert named <= allowed, sorted(named - allowed)
 
 
 def test_an_out_inside_the_repository_is_refused(tmp_path: Path) -> None:

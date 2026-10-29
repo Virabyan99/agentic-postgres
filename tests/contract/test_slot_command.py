@@ -125,6 +125,9 @@ def test_status_derives_each_state_from_what_exists(
     code, row = _status(command, capsys)
     assert (code, row["state"]) == (0, "declared")
     assert "bootstrap state" in row["reason"]
+    # D2932: the labels carry their own articles, so never "no the ...".
+    assert row["reason"].startswith("not prepared: missing the bootstrap state"), row
+    assert "no the" not in row["reason"] and "no an" not in row["reason"], row
     _prepared(command)
     command.dns_reading = lambda domain, expected: (False, "no A record")
     assert _status(command, capsys)[1]["state"] == "prepared"
@@ -175,21 +178,31 @@ def test_an_unreadable_dns_reading_is_undetermined_never_ready(
     assert slot.state(readings)[0] == "ready"
 
 
-def test_a_slot_is_ready_only_when_all_three_records_are(
+def test_a_slot_is_ready_only_when_all_five_records_are(
     command: Any, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """ADR 0268 (D2335, D2342): a slot with public endpoints has THREE grey
-    records -- its domain, `pool.` and `direct.` below it -- and is `ready` only
-    when every one is this host alone. Each name wrong in turn keeps it
-    `prepared` with THAT name in the reason; an unreadable name with none wrong
-    is `undetermined` (exit 6); a wrong name decides even beside an unreadable
-    one. Control: all three right -> `ready`. The slot's manifest asks for the
-    door it is read for: schema 11, `public_endpoints.enabled: true`."""
+    """ADR 0268 (D2335, D2342) and D2960: a slot with public endpoints has FIVE
+    grey records -- its domain, `pool.` and `direct.` below it, and the branch
+    wildcards `*.pool.` and `*.direct.`, read at `dnsprobe.pool.` and
+    `dnsprobe.direct.` -- and is `ready` only when every one is this host alone.
+    Each name wrong in turn keeps it `prepared` with THAT name in the reason; an
+    unreadable name with none wrong -- each wildcard's included -- is
+    `undetermined` (exit 6, ADR 0195); a wrong name decides even beside an
+    unreadable one. Control: all five right -> `ready`, asked in that order. The
+    slot's manifest asks for the door it is read for: schema 11,
+    `public_endpoints.enabled: true`. The names are typed here, never derived by
+    the function under test (D2960: the wildcards are what the slot lacked)."""
     assert command.main(["prepare", "--host", str(HOST), "--slot", KEY]) == 0
     _prepared(command)
     capsys.readouterr()
     domain = "slot1.example.test"
-    names = (domain, f"pool.{domain}", f"direct.{domain}")
+    names = (
+        domain,
+        f"pool.{domain}",
+        f"direct.{domain}",
+        f"dnsprobe.pool.{domain}",
+        f"dnsprobe.direct.{domain}",
+    )
     asked: list[str] = []
 
     def reading(wrong: str | None = None, unread: str | None = None) -> Any:
@@ -208,9 +221,13 @@ def test_a_slot_is_ready_only_when_all_three_records_are(
         code, row = _status(command, capsys)
         assert (code, row["state"]) == (0, "prepared"), (wrong, row)
         assert wrong in row["reason"], (wrong, row["reason"])
-    command.dns_reading = reading(unread=f"direct.{domain}")
-    code, row = _status(command, capsys)
-    assert (code, row["state"]) == (6, "undetermined") and "direct." in row["reason"], row
+    for unread in names:
+        command.dns_reading = reading(unread=unread)
+        code, row = _status(command, capsys)
+        assert (code, row["state"]) == (6, "undetermined"), (unread, row)
+        assert unread in row["reason"], (unread, row["reason"])
+    command.dns_reading = reading(wrong=f"dnsprobe.direct.{domain}", unread=domain)
+    assert _status(command, capsys)[1]["state"] == "prepared"
     command.dns_reading = reading(wrong=f"pool.{domain}", unread=domain)
     assert _status(command, capsys)[1]["state"] == "prepared"
     asked.clear()

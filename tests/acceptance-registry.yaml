@@ -7098,15 +7098,17 @@
     - tests/contract/test_capacity_probe.py::test_the_candidate_slot_is_not_named_prepared
     - tests/contract/test_control_command.py::test_a_prepared_slot_agrees
     - tests/contract/test_deploy_command.py::test_a_disabled_storage_route_is_not_observed
-    - tests/contract/test_slot_command.py::test_a_slot_is_ready_only_when_all_three_records_are
+    - tests/contract/test_slot_command.py::test_a_slot_is_ready_only_when_all_five_records_are
   description: >-
     **A prepared slot's readers** (D2305, D2307, D2312): admission charges a
     declared, prepared slot nothing and names it on the committed line, while an
     undeclared directory without a document is still undetermined and the
     candidate is never named prepared; the registry reads a prepared slot
     `prepared (slot)` and agrees; the deploy does not observe a storage route
-    the manifest switched off; and a slot is `ready` only when its domain and
-    both door names resolve to this host.
+    the manifest switched off; and a slot is `ready` only when its domain, both
+    door names and both branch wildcards (read at `dnsprobe.pool.` and
+    `dnsprobe.direct.`, D2960) resolve to this host, an unread one
+    `undetermined`.
 
 - id: LIFE-LIVE-003
   priority: P0

@@ -470,7 +470,7 @@ SQL_RELAY_SERVICE = "sql-relay"
 
 def sql_relay_zone(control_domain: str) -> str:
     """The zone the door names live under: the control domain without its first
-    label (`control.agenticpostgresql.com` -> `agenticpostgresql.com`), ADR 0286.
+    label (`control.nomipg.com` -> `nomipg.com`), ADR 0286.
 
     Refused when fewer than two labels remain: a relay whose zone is a bare TLD
     would admit door names under every domain in it."""

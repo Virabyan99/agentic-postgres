@@ -5,7 +5,8 @@
 D2871-D2874. Run from the workstation after the trip's journey (Run 7's
 launcher): `tests/external/browser/journey_walk.py` drove a real Chromium from a
 membership invitation link the probe owner minted to a project created in the
-console on `slot11-prod`, and wrote ONE record (`APG_JOURNEY_RECORD_FILE`, 0600)
+console on the session's fresh slot (`JOURNEYS`: Session 46's `slot11-prod`,
+Session 47's `slot13-prod`, D2969), and wrote ONE record (`APG_JOURNEY_RECORD_FILE`, 0600)
 -- step codes and times, origins, statuses, the bundle's verdicts and ages,
 never a password, seed, token or cookie value (its self-check refuses one) --
 with the four secrets a later step needs in 0600 files beside it. The lifecycle
@@ -47,7 +48,7 @@ from tests.external.redaction import Secret
 from tests.external.test_session38_public_lifecycle import control, endpoint  # noqa: F401
 from tests.external.test_session39_public_endpoints import ROOTS
 
-from agentic_postgres import naming
+from agentic_postgres import naming, site_build
 
 pytestmark = [
     pytest.mark.p0,
@@ -58,12 +59,30 @@ pytestmark = [
     ),
 ]
 
-SITE = "https://agenticpostgresql.com"
+#: The published site (ADR 0283): the build's own constant, so the move to
+#: `nomipg.com` (ADR 0299) moves this proof with it.
+SITE = site_build.SITE_URL
 USER_AGENT = "agentic-postgres-proof"  # D2728
+#: The journeys these proofs read, by the record's own `session` (D2969): each
+#: session's journey ran on its own fresh slot -- Session 46's on `slot11-prod`
+#: (D2870), Session 47's on `slot13-prod` (D2970) -- with the account prefix
+#: `journey-s<N>-` and the organisation `lifecycle-s<N>` its driver stamps.
+#: WIDENED by a row, never derived from the record: a record naming any other
+#: session or slot fails here.
+JOURNEYS: dict[int, str] = {46: "slot11-prod", 47: "slot13-prod"}
 DIGEST_META = re.compile(r'<meta name="apg-site-digest" content="([0-9a-f]{64})">')
 #: A host path in a bundle's detail (the reduction replaces one, D2897).
 HOST_PATH = re.compile(r"(?<![\w:/.])/(?:[\w.@+-]+/)*[\w.@+-]+")
 TOKEN = re.compile(r"^[A-Za-z0-9_-]{43}$")
+
+
+def session_of(journey: dict[str, Any]) -> int:
+    """The record's own session, which must be one of `JOURNEYS` (D2969)."""
+    session = journey.get("session")
+    assert type(session) is int and session in JOURNEYS, (
+        f"the record's session is {session!r}, not one of {sorted(JOURNEYS)}"
+    )
+    return session
 
 
 def _private(path: Path) -> Path:
@@ -181,7 +200,8 @@ def test_j01_the_invitation_link_opened_the_console(journey: dict[str, Any]) -> 
 
 def test_j02_the_account_was_made(journey: dict[str, Any]) -> None:
     _step(journey, "j02")
-    assert str(journey.get("account", "")).startswith("journey-s46-"), journey.get("account")
+    prefix = f"journey-s{session_of(journey)}-"
+    assert str(journey.get("account", "")).startswith(prefix), (prefix, journey.get("account"))
 
 
 def test_j03_the_overview_named_the_organisation_it_joined(journey: dict[str, Any]) -> None:
@@ -192,7 +212,7 @@ def test_j03_the_overview_named_the_organisation_it_joined(journey: dict[str, An
 def test_j04_a_new_organisation_was_made(journey: dict[str, Any]) -> None:
     _step(journey, "j04")
     assert re.fullmatch(r"[0-9a-f-]{36}", journey["organization"]), journey["organization"]
-    assert journey["organization_name"] == "lifecycle-s46"
+    assert journey["organization_name"] == f"lifecycle-s{session_of(journey)}"
 
 
 def test_j05_the_owners_factor_was_enrolled(journey: dict[str, Any]) -> None:
@@ -209,9 +229,10 @@ def test_j06_a_project_was_asked_for_in_the_console(journey: dict[str, Any]) -> 
 
 
 def test_j07_the_creation_succeeded(journey: dict[str, Any]) -> None:
-    """Followed in the page to `succeeded`; the project is slot11-prod (D2870)."""
+    """Followed in the page to `succeeded`; the project is the slot that
+    session's journey was given (D2870, D2970, D2969)."""
     _step(journey, "j07")
-    assert journey["project_key"] == "slot11-prod", journey["project_key"]
+    assert journey["project_key"] == JOURNEYS[session_of(journey)], journey["project_key"]
     assert journey["create_seconds"] > 0
 
 

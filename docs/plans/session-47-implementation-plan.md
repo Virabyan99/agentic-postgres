@@ -353,6 +353,26 @@ runs add go in a second table below it, in execution order.
 | **D3032** | ADR 0295 decision 8: `sql.js`' decisions are not edited. | Routing closes through `messages.js` (D3012) needed `sql.js`'s close table removed and `endSentence`/`openDoor`/`runStatement` taking the page's `closeSentence` (as they take `call`, `connect`); `test_every_ending_has_a_sentence` moved with it. | **Kept to exactly that**; the protocol decisions untouched; ADR 0295 decision 8 notes it. | The wording moved; the wire did not. | 0295 |
 | **D3033** | — | One rehearsal pass of `console_walk` timed out once at *reload: the password is gone* (30 s), at 23:19 — the minute the server half was committed (contention likely, not proven); four repeats green. | The stand-in now loads its module once; **watch at Run 11's rehearsals**. | An unexplained failure is written down. | — |
 | **D3034** | Session 40 (D2467): the suite jobs' limit is 30 minutes. | **CI on `8f953b3` was CANCELLED, not failed**: *Session 2 offline contract* reached 30:00 (19:21:04 → 19:51:04); *Session 1 gate* passed in 26:40. The jobs ran 21.7–28.9 min on `c0f9b40`/`ae2da7e`; the executed snippets (five client images, a golang pull) took the offline job over. | **Both suite jobs' `timeout-minutes` 45** (`.github/workflows/ci.yml`, commented); every test that reads `ci.yml` re-run (370 passed). D3031 answered. | A limit the suite outgrows cancels proof, not failure. | — |
+| **D3040** | Run 8: `docs/connecting.md`, `docs/sql-editor.md`, `docs/plans-and-usage.md`, `docs/support.md`. | The site's pages are `site/pages/docs/*.md` (ADR 0298 names them). | Written there. | The tree's paths. | 0298 |
+| **D3041** | Runnable Debian/Ubuntu install lines. | The site build refuses the word `sudo` in any page (`OPERATOR_TEXT`, ADR 0283). | The page says *"As root:"*; **the second walk is watched for this step** — if the walker stumbles, admitting `sudo apt` lines is an ADR 0283 change for Stage 6. | The build's rule stands until a person shows its cost. | 0283 |
+| **D3042** | Cite the official URLs. | `ALLOWED_ORIGINS` refuses a third-party link. | The URLs are code-span text without a scheme. | No foreign link from the site. | 0283 |
+| **D3043** | psql 16+ from the distribution. | **Measured in containers 2026-10-29**: Debian 13 17.11, Ubuntu 26.04 18.6, Ubuntu 24.04 16.15 — fine; **Debian 12 15.19 and Ubuntu 22.04 14.24 too old**; PGDG gives 18.6 on both, and PGDG on 22.04 needs `gnupg` (exit 255 without). | Two measured line-sets per OS; macOS/Windows cited (postgresql.org download pages, read 2026-10-29). | Run on each, or cite. | — |
+| **D3044** | — | Run 8 confirms D3019 from the docs side: the console's string lacks `sslrootcert=system`. | **Folded into D3019** (Run 9 measures and labels); the site's own string carries `&sslrootcert=system` for psql/pgx readers. | One decision, one row. | — |
+| **D3045** | Walk goal 2: *create a table* in the editor. | **Only the direct door's role may create** (in `public`; measured on pinned pg18 from `customer_statements`); the pooled role reads `permission denied for schema public`. The editor opens on the pooled door. | Quickstart and the editor page say *make tables on the direct door*; **Run 7 adds the console's side** — a hint at the editor's door choice and `42501` on `CREATE` worded with *"use the direct door"*. | The walk's own goal must not meet an unexplained refusal. | 0285 |
+| **D3046** | ADR 0298: `invite@` at the product's domain. | Markdown has no substitution. | A new `@contact` block renders `INVITATION_ADDRESS` (ADR 0298 amended; ADR 0288's block list widened by one). The page literals that still type the domain are D3063's. | The address is derived. | 0298 |
+| **D3047** | — | Prisma's current baselining docs are v7 (`--to-schema`); the served snippet pins Prisma 6. | **Measured Prisma 6.19.1**: `migrate deploy` on a non-empty `public` → P3005; after `db pull`, `migrate diff --from-empty`, `migrate resolve --applied 0_init`, the next migration applies and rows are kept. The page uses those lines. | The version served. | — |
+| **D3048** | — | `sslrootcert=system` never run on macOS or Windows (D3020's class: a library whose default store may be empty). | The page says *we have not run it there*. | Said, not assumed. | — |
+| **D3049** | — | The site's nav counts every `## ` of the quickstart (*9 steps* for 8; already off by one before). | **Run 12** fixes the count in `site_build`. | A count must count. | 0283 |
+| **D3060** | D2960: read `dnsprobe.pool.`/`dnsprobe.direct.`. | `naming.branch_endpoint_hosts` derives branch names. | The probe is derived as a branch name (`slot.WILDCARD_PROBE = "dnsprobe"`); the test types the five names; a wrong name decides `prepared`, an unread one (none wrong) `undetermined` (exit 6). Readers reach it through `slot.observe` — unchanged. | One derivation for a branch's names. | 0195 |
+| **D3061** | D3021: repair the fixture with `certifi`, as the snippet. | The fixture image has no `certifi` and a hash-locked requirements file; **measured** (rig `~/s47/run10/rig/`): the old `system` mode failed **closed** (`certificate verify failed` even with the CA trusted). | `PGSSLROOTCERT=/etc/ssl/certs/ca-certificates.crt` (the image's Debian bundle) — connects; `system`, an untrusted CA and a misnamed host each refused. No proof uses that mode today. | No second source of roots in a locked image. | — |
+| **D3062** | A.6: `bin/build-cli.py`'s domain lines are harmless now. | The publish job's bare Python cannot import `site_build`; nothing tied its literals to it. | **Parked with `site_build`**; new `test_cli_package::test_the_package_names_the_sites_own_addresses` holds them equal. | The package names what the site names. | 0299 |
+| **D3063** | Run 10: *"site text parked with Run 8's"*. | **Run 8's park leaves 7 page literals** of the old domain (`index.md:13,127` incl. a `mailto:`, `quickstart.md:68`, `docs/cli.md:20`, `docs/index.md:12`, `docs/getting-started.md:28,36`); with both parks applied `build-site` refuses (exit 3) on the mailto. | **Run 12 moves the seven** when it applies the parks (Run 8's, then Run 10's), and `build-site --check` must exit 0 before the bump is committed. | Two parks that do not compose are one unfinished move. | 0299 |
+| **D3064** | §0: *"tests pin it in 19 files"*. | `test_session43_console:377`, `test_session46_walk:36`, `test_session46_journey:61` pin the site literally (a list of literal pins could not see the first). | All three derived from `site_build.SITE_URL` in the live tree — no park entry needed. | Derived pins move themselves. | 0299 |
+| **D3065** | D2969: widen the journey pins. | `tests/external/browser/journey_record.py` stamps `"session": 46` (~:106) and `problems()` refuses `!= 46` (~:158); `journey_walk.py` defaults name `journey-s46-`, `lifecycle-s46`, *Journey s46* and the old domains; `site_look.py:159-160` defaults; `accept.html:13`'s brand link (parked). | Widened in the proofs now; **Run 11 moves the console-lane items** (journey record and walk defaults for Session 47, `site_look` defaults) with the trip's instruments; `accept.html` stays byte-identical until Run 10's park moves it. | The record a Session 47 journey writes must pass its own check. | 0290 |
+| **D3066** | D2962: read the constant. | Over the real build the guard passes even when it reads the literal (vacuous). | The parked guard reads `naming.sql_relay_zone(CONTROL_DOMAIN)`; a **planted-host test** proves it finds names; `FORMER_ZONE` still holds `secrets.`, `alpha-db.`, `beta-db.`. | A guard is proved by what it catches. | 0299 |
+| **D3067** | — | Renaming the slot test moves `LIFE-SLOT-002`. | Node id and text moved; the matrix and the product contract regenerated. | The registry follows the test. | — |
+| **D3068** | *"every other test that pins the old domain"*. | Synthetic slot/zone inputs (`test_branch_*`, `test_capacity_probe`, `test_control_diagnostics`, `test_naming:551`, `test_sql_relay*`, `test_dx_record:425,585`) are not the deployment's. | Left; the move does not make them vacuous. | An example is not a pin. | — |
+| **D3069** | Coordinate ADR 0290's two amendments. | — | Run 10's is a separate dated section; Run 8's park applies over it (exit 0). | Two amendments, two sections. | 0290 |
 
 ---
 
@@ -807,7 +827,36 @@ Rows **D3017–D3019, D3032–D3034**. NEXT FREE D3035 (D3040+ Run 8's, D3060+ R
    `bin/build-site.py --check`, `test_documentation_index`,
    `test_session12_documented_path`, `test_dx_record`, `test_reality_ledger`.
 
-**Done.**
+**Done.** 2026-10-30, written by a delegated agent in a scratch worktree and **parked**
+in WSL `~/s47/run8/park/` (`apply.py TREE`: count-asserted anchors, whole-file copies
+only over the sha256 recorded at `99c14b8`, refuses re-apply with exit 3, a changed
+base with 5, a partial state with 4; regenerates `docs/reality-ledger.md`); the live
+tree untouched. **13 files, +573/−69**: `site/pages/quickstart.md` (eight steps in the
+console's words, the tracker's nine steps and *23 to 28 minutes*, the token not needed
+to connect), `site/pages/docs/connecting.md` (**generated from the server's own
+`connection_snippets`** by `~/s47/run8/gen/make_connecting.py`: the seven clients with
+their `where` lines, Prisma's `node --env-file` and P3005 baselining, psycopg's
+`certifi`, Drizzle's migrations through psql, per-OS psql measured in containers),
+`site/pages/docs/sql-editor.md` (the state bar, the form while disconnected, the limits
+read from the code, every close sentence), `site/pages/docs/support.md` (new, in
+*Reference*), `plans-and-usage.md` (notifications and the limit banners),
+`site_build.py` (`DOCS_GROUPS` + the `@contact` block; the domain constants untouched
+— Run 10's), the Ledger's `console`/`projects_self_service`/`notifications` texts (no
+status moved), `docs/hosted-walk.md` (goal 2 *run SQL you write yourself*, `slot12-prod`,
+`https://nomipg.com`) with `HOSTED_GOALS`, four new `test_site` tests, ADRs 0290 and 0298
+amended. Measured on the way: psql per OS (D3043), Prisma 6 baselining (D3047), the
+customer roles' grants (D3045). **Battery 7/7.** **Main-session proof**: applied to a
+fresh worktree of `99c14b8` → exit 0, again → **exit 3**; `build-site --check` 0;
+`test_site`, `test_console_pages`, `test_dx_record`, `test_documentation_index`,
+`test_reality_ledger` **112 passed, 1 skipped** (no evidence in a fresh checkout).
+**Run 12 applies the park before the bump's push** (it refuses if the quickstart,
+connecting or sql-editor page changed since `99c14b8`: regenerate `connecting.md` with
+the generator, rebase the others), registers `test_site.py::`
+`test_the_connecting_page_shows_the_code_the_server_serves`,
+`test_the_quickstart_says_what_the_creation_tracker_says`,
+`test_the_sql_editor_page_says_what_the_editor_says`,
+`test_the_support_page_gives_the_address_the_build_derives`, and only then lets the
+console's Help link `/docs/support/`. Rows **D3040–D3049**.
 
 ### Run 9 — the quality floors
 
@@ -837,7 +886,29 @@ Rows **D3017–D3019, D3032–D3034**. NEXT FREE D3035 (D3040+ Run 8's, D3060+ R
    `test_dx_record`, `test_slot*`, `test_reconciler_dispatch`,
    `test_console_server`, `test_cli_contract`, `test_cli_package`. The battery.
 
-**Done.**
+**Done.** 2026-10-30, by a delegated agent, reviewed and re-run in the main session
+(WSL `~/s47/run10/`). **Live tree (committed)**: **D2960** — `slot_dns` reads five
+names, `ready` requires all five, an unread one is the third outcome (D3060); `bin/slot.py
+prepare` prints the five records; operator guide §20/§21 say five; the slot test renamed
+`…_all_five_records_are` (LIFE-SLOT-002 moved, D3067). **D2932**'s wording. **D2961** —
+the walk proof reads the site by its digest alone, admits an empty `documents_read`
+and `commands_run` (ADR 0290 amended). **D2969** — the journey proof's pins read the
+record's session (`JOURNEYS = {46: slot11-prod, 47: slot13-prod}`). **D3021** — the
+psycopg fixture's `verify-full` mode repaired with the image's CA bundle, measured
+with three controls (D3061). The domain in `bin/login.sh`'s usage, `naming.py`'s
+docstring and the control example's comment; three literal site pins derived from
+`site_build.SITE_URL` (D3064). New module `test_session46_proof_readings` (4) and
+`test_cli_package::test_the_package_names_the_sites_own_addresses`. **Parked** (WSL
+`~/s47/run10/park/apply.py`, 10 replacements in `site_build.py`, `test_site.py`
+(+ a planted-host test, D3066), `accept.html`, `bin/build-cli.py` (D3062)): proved after
+Run 8's park in a worktree (exit 0, re-apply exit 3) — **with a stand-in for D3063's
+seven page literals, which Run 12 must move**. **Battery 7/7.** **Main-session re-run**:
+ruff, `ruff check`, shellcheck 0; 261 passed (slot, reconciler, branch runtime, client
+fixtures, compose, proof readings, CLI package, site) and 1,280 passed (naming, CLI
+contract, documentation, documented path, registry, gates, admission, shape, fleet,
+repository). Rows **D3060–D3069**. **Owed**: Run 11 — the journey record's and walk's
+Session 47 defaults (D3065), `s47-dns.sh` reading five names; Run 12 — both parks, then
+D3063's literals, then `build-site --check`.
 
 ### Run 11 — the trip's instruments (WSL `~/s47/`)
 

@@ -189,3 +189,22 @@ workstation path (ADR 0207 §4); and the proof is a host-mode proof run as root.
   no secret.
 - `dx-record digest` has nothing to compute for a hosted record (the digest is
   the page's) and says so with exit 2; `check` reads either path.
+
+## Amendment — 2026-10-30 (Session 47, Run 10; D2941, D2961)
+
+**Decision 3's site reading no longer holds `site_commit` against the
+checkout.** The live proof identifies the site by its digest alone: the
+record's `site_digest` equals `site_build.digest()` at the reading's checkout
+and the published page's `apg-site-digest` meta. The clause *"the live proof
+also holds `site_commit` an ancestor of, or equal to, the checkout's `HEAD`"* is
+withdrawn: it made the reading depend on where it ran (Session 46 Run 9: the
+site was published from the docs commit `0e80edc`, digest `74e18442`, the same
+digest `55467b5` builds; the check failed from a `55467b5` checkout and passed
+from `a34c906`). `site_commit`
+stays a required, shaped member of the record. **An empty `documents_read` and
+an empty `commands_run` are admitted** (a person who listed no page and typed
+no command, as the first person's record holds); every route the record does
+name must still be a route the build produces, and every command a line the
+site gives. `dx_record`'s readers already read both lists this way; the change
+is `tests/external/test_session46_walk.py`'s. Everything else in this ADR,
+and any other amendment, stands.

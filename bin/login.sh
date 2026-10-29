@@ -45,7 +45,7 @@ Usage:
                 included; log in again with a code.
 
 URL is the control project's routes.control, e.g.
-https://control.agenticpostgresql.com/api/v1 (https only; http only for
+https://control.nomipg.com/api/v1 (https only; http only for
 127.0.0.1 and localhost). A login refuses while a session is held: end it with
 bin/logout.sh first.
 USAGE

@@ -10,8 +10,12 @@ the walker can see the verdict the sweep will reach).
 Read against the site THIS checkout builds -- which, while the site is frozen
 from the bump's push to the confirmation (D2883), is the site the person read
 -- and against the published site itself, whose `apg-site-digest` meta must be
-the record's. **No SSH, no process door** (D2174). **None of these proofs has
-ever executed.**
+the record's. **The site is identified by its digest alone** (D2941, D2961): the
+record's `site_commit` is not read against the checkout's history, because a
+reading must not depend on where it ran (Run 9 read the same digest from a
+docs commit that was not the external checkout's ancestor). The published
+site's address is `site_build.SITE_URL`, never a second literal. **No SSH, no
+process door** (D2174). Run 9 executed these proofs once (D2941).
 """
 
 from __future__ import annotations
@@ -19,13 +23,12 @@ from __future__ import annotations
 import ast
 import os
 import re
-import subprocess
 import urllib.request
 from pathlib import Path
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, dx_record
+from agentic_postgres import dx_record, site_build
 
 pytestmark = [
     pytest.mark.p0,
@@ -33,7 +36,9 @@ pytestmark = [
     pytest.mark.requires_environment("APG_WALK_RECORD_FILE"),
 ]
 
-SITE = "https://agenticpostgresql.com"
+#: The published site (ADR 0283): the build's own constant, so the move to
+#: `nomipg.com` (ADR 0299) moves this proof with it.
+SITE = site_build.SITE_URL
 #: The User-Agent every live read of the site sends (D2728: Pages refuses urllib's own).
 USER_AGENT = "agentic-postgres-proof"
 DIGEST_META = re.compile(r'<meta name="apg-site-digest" content="([0-9a-f]{64})">')
@@ -77,8 +82,9 @@ def test_the_record_names_the_deployed_site(
     walk: dx_record.Record, site: dx_record.HostedSite
 ) -> None:
     """The site the person read is the site this checkout builds (its digest)
-    and the site published now (its meta), and its commit is this checkout's
-    or an ancestor of it; the release is the banner's."""
+    and the site published now (its meta) -- identified by the digest alone,
+    never by where `site_commit` sits in this checkout's history (D2961); the
+    release is the banner's."""
     assert walk.document["site_digest"] == site.digest, (walk.document["site_digest"], site.digest)
     request = urllib.request.Request(  # noqa: S310 -- the site's own name, https
         f"{SITE}/", headers={"User-Agent": USER_AGENT}
@@ -88,22 +94,18 @@ def test_the_record_names_the_deployed_site(
     assert published and published.group(1) == walk.document["site_digest"], (
         published.group(1) if published else None
     )
-    ancestor = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "merge-base", "--is-ancestor",
-         str(walk.document["site_commit"]), "HEAD"],
-        capture_output=True, check=False, timeout=30,
-    )  # fmt: skip
-    assert ancestor.returncode == 0, f"{walk.document['site_commit']} is not this checkout's"
     assert walk.document["release"] == f"Release {site.version}"
 
 
 def test_every_command_is_on_the_site(walk: dx_record.Record, site: dx_record.HostedSite) -> None:
     """ADR 0290 §3: every command typed is a line the site gives (an `apg`
     command by its noun, verb and flags), every page named is a page the site
-    has."""
+    has. A person who typed no command and listed no page is admitted (D2961:
+    the first person's record held both empty) -- what is NAMED must still be
+    the site's."""
     assert dx_record.hosted_unnamed_commands(walk.commands_run, site) == []
     routes = walk.document["documents_read"]
-    assert routes and set(routes) <= site.routes, sorted(set(routes) - site.routes)
+    assert set(routes) <= site.routes, sorted(set(routes) - site.routes)
 
 
 def test_the_walker_confirmed_the_record(walk: dx_record.Record) -> None:

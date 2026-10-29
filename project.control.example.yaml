@@ -32,7 +32,7 @@ migrations:
 project:
   slug: fixture-control
   environment: dev
-  # `control.<zone>`, the deployment's own shape (control.agenticpostgresql.com):
+  # `control.<zone>`, the deployment's own shape (control.nomipg.com, ADR 0299):
   # the SQL relay's name is `sql.<zone>`, derived by dropping the first label,
   # and a zone of one label is refused (Session 44, ADR 0286, D2775).
   domain: control.fixture-dev.test
