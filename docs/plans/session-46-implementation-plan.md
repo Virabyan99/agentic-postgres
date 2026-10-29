@@ -25,8 +25,11 @@ lifecycle continued it (attempt 2, the operator's choice), branches, B1, one
 sweep, the external half re-run from the test-only `a34c906`: **348 claims,
 343 passed, 5 failed**; **tagged and PUBLISHED 1.24.0**; SL4. Rows
 D2930–D2943; owed: D2942's ADR (main's CI red on the runner image), D2940's
-three claims and D2933/D2941/D2943 to Session 47. NEXT FREE D2944, ADR 0294.
-Next: Run 10 (M7 X1/X2).** Planned at `7b035d9` (Session
+three claims and D2933/D2941/D2943 to Session 47. Run 10 DONE (2026-10-29,
+M7): Sheets X0–X3 — the old host's three rehome identities revoked, the
+Infisical Cloud organisation emptied, the Hetzner server deleted, the store's
+443 rule for `62.238.99.122` removed; row D2944. NEXT FREE D2945, ADR 0294.
+Next: Run 11 (the close).** Planned at `7b035d9` (Session
 45's close record, tree clean, `main` = `origin/main`) against the host as read
 that morning (§0). Rows **D2862–D2889** at planning; the runs add theirs from
 **D2890**. ADRs **0290–0293** are Run 1's. **NEXT FREE after this table: D2890,
@@ -460,6 +463,7 @@ the runs add go in a second table below it, in execution order.
 | **D2941** | The hosted walk's proofs (`test_session46_walk.py`). | `test_the_record_names_the_deployed_site` requires `site_commit` to be an ancestor of the EXTERNAL checkout: it failed from `55467b5` (the live site was published from the docs commit `0e80edc`, the SAME digest `74e18442`) and passed from `a34c906`. `test_every_command_is_on_the_site` fails an EMPTY `commands_run` — a person who used no terminal. | **Recorded** (the claim fails on the 11 findings regardless); Session 47 reads the site's identity by DIGEST and admits an empty list. | A reading must not depend on where it was run from. | 0290 |
 | **D2942** | CLAUDE.md: CI is the full check. | **`a34c906`'s CI failed** one test in both jobs: `test_systemd_analyze_accepts_the_units` — `systemd-analyze` on the RUNNER reports the runner image's OWN units (`xfs_scrub_all.service`, `walinuxagent.service`: *"Support for option CPUAccounting= has been removed"*). GitHub's image moved after `55467b5`'s green run; every push now fails it. The release is unaffected: `publish-cli` verifies the TAGGED commit's own `contract` run. | **Repaired with an ADR at the close** (a contract test changes only with one): `_EXPECTED_OFF_HOST` classifies a message about a unit file the repository does not ship — widened to a measured set, never to "any warning". | A fact about the machine running the test is not a fact about the unit. | — |
 | **D2943** | The operator, 2026-10-29: move the domain to `nomipg.com` (purchased). | Measured at `55467b5`: 312 lines in 79 tracked files, **9 code files** (`site_build.py`'s origin and CSP, `naming.py`, `capacity.py`, the console's two pages, `login.sh`, `build-cli.py`, the store's compose, the control example); every project's names come from the host's manifests and `host.yaml`. The move is a release of five (slot10's connection strings change), the zone and ~25 records, Pages, Email Routing, and 301s from the old name. | **Not mid-sitting** (D1425): planned as **Session 47** with D2933, D2940's three claims and D2941. Open: the domain alone or a rename too (*Agentic Postgres* on 81 lines, `agentic-postgres-cli`, `apg`); whether the store keeps its name. | Measure a move before pricing it. | — |
+| **D2944** | `docs/secret-store.md` §1: the console's temporary rule is *"removed on the same sheet"*. | X3's first `ufw status numbered` (2026-10-29) still listed `443/tcp ALLOW IN 217.113.25.22 # operator console, temporary` — opened for X1's console reading and not deleted after it. Nothing reads the store's rules at a sheet's end. | **Removed at X3** (`ufw delete allow from 217.113.25.22 … 443`, read back). A console sheet ends with `sudo ufw status numbered` read for the rule's absence, not with the delete alone. | A rule whose removal is not read is an open door by assumption. | — |
 | **D2914** | D2881: the idle module's docstring line about the absent series. | The same docstring also said *"None of these proofs has ever executed"* — false since Session 45's sitting, whose merged evidence passed `idle_after_wake_live`. | **Both sentences corrected** in the one docstring edit. | A docstring is a claim (D2881). | — |
 
 ---
@@ -1596,7 +1600,30 @@ walked on 10-28, the host unmoved between. Scripts and `NOTES.md` in WSL
    outcomes, dated); `docs/secret-store.md` §1 (the rule gone); CLAUDE.md §2's
    OLD HOST row (at the close). Commit, push, no CI read.
 
-**Done.**
+**Done (2026-10-29).** Notes: WSL `~/s46/run10/NOTES.md`. **X0** (the agent
+as `op`, 09:08Z; X0b the operator's root read): `ubuntu-4gb-hel1-4` up 22
+days, the three project units `disabled`/`inactive`, the backup timers
+disabled, only the edge's two containers running, all six volumes present,
+checkout `c3eec1dc6` clean — M6's final state, not a stop. **X1** (the
+operator on the old host, ~09:18Z, the store's control-plane credential
+written with nano and shredded after): the old checkout's `destroy()` was
+read first — it revokes only the state's runtime identity and removes the
+local credential files and state, leaving the project (its `--help` omits
+the `--operator-credential-file` it requires). `--destroy` ×3 revoked
+alpha-dev `7b9ad42d-…`, beta-dev `a9ae62e0-…`, control-prod `19d0270a-…`.
+Read at the store's console: each project ONE runtime identity, OVH's —
+alpha `78c86daf-…`, beta `4098f0cc-…`, control `c9216fa8-…`
+(`control-prod-runtime-20261009T193446Z`), each equal to the
+`runtime_identity_id` of OVH's deployed document. The first reading of
+control named `b4b9b7e5-…`, another identity; re-read against the document
+before X2. **X2** (the operator, consoles): the three Infisical Cloud
+projects and four Cloud identities deleted, the organisation read empty;
+the Hetzner server deleted with its volumes (10:33:51Z: a connect to
+`62.238.99.122:22` timed out at 20 s, OVH's answered). **X3** (the operator
+on the store): `ufw delete allow from 62.238.99.122 … 443` — 443 is
+admitted from `15.204.231.45` only; the console rule left open since X1's
+reading was removed on the same sheet (D2944). The migration plan's Run M7
+**Done.** and `docs/secret-store.md` §1 record it.
 
 ### Run 11 — the close (Stage 5's)
 

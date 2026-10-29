@@ -831,6 +831,17 @@ projects, M6b's A/B restart at 2026-10-09 21:28Z: **not before 2026-10-12 ~21:30
 a clean reading then (units active, last night's backup and mirror units `success`, `healthz` 200
 × 3). Their outcomes are this run's last Done.
 
+**Done -- Sheets X1 and X2 (2026-10-29, Session 46 Run 10; its plan's Run 10 Done is the
+detail).** Read first by Sheet X0: the old host as M6 left it (units disabled, six volumes).
+**X1**: `bootstrap-providers --destroy` × 3 on the old host revoked the rehome-minted identities
+alpha-dev `7b9ad42d-…`, beta-dev `a9ae62e0-…`, control-prod `19d0270a-…`; the projects
+`e96b88d8-…`, `89807f3a-…`, `ec433e2b-…` stay. At the store's console each project holds ONE
+runtime identity, OVH's: `78c86daf-…`, `4098f0cc-…`, `c9216fa8-…`. **X2**: the three Infisical
+Cloud projects and four Cloud identities deleted, the Cloud organisation read empty; the Hetzner
+server `ubuntu-4gb-hel1-4` (`62.238.99.122`) deleted with its volumes. **X3** (Session 46's
+addition, D2879): the store's 443 rule for `62.238.99.122` removed. **M7 is complete: nothing old
+can read a value, and the old host no longer exists.**
+
 ---
 
 ## 7. Evidence

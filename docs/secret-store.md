@@ -28,7 +28,7 @@ and the edge runs on the host network, where ufw applies (D2250):
 |---|---|
 | 22/tcp | anywhere, key-only (`PasswordAuthentication no`) |
 | 80/tcp | anywhere: Let's Encrypt's HTTP-01 challenge and a redirect |
-| 443/tcp | the hosts that read secrets only — today `15.204.231.45` (and the old host `62.238.99.122` until M7's X1/X2 retire it, D2640) |
+| 443/tcp | the hosts that read secrets only — `15.204.231.45` (the old host's rule for `62.238.99.122` was removed when M7 retired it, 2026-10-29) |
 
 The console is reached for a sitting and closed after it: a ufw rule for the
 operator's own address, removed on the same sheet (the way Run M1 reached it).
@@ -41,6 +41,7 @@ each one:
 sudo ufw allow from <your address> to any port 443 proto tcp comment 'operator console, temporary'
 # ... the console at https://secrets.agenticpostgresql.com ...
 sudo ufw delete allow from <your address> to any port 443 proto tcp
+sudo ufw status numbered   # read: no 'operator console' rule is left (D2944)
 ```
 
 (An SSH tunnel to `127.0.0.1:443` with the name pinned in the workstation's hosts file is
