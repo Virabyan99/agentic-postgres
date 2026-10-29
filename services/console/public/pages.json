@@ -179,7 +179,10 @@
       "id": "notifications",
       "path": "/console/#/org/{organization}/notifications",
       "ledger": ["notifications"],
-      "calls": ["GET /v1/organizations/{organization}/notifications"]
+      "calls": [
+        "GET /v1/organizations/{organization}/notifications",
+        "GET /v1/organizations/{organization}/plan"
+      ]
     },
     {
       "id": "organization-settings",

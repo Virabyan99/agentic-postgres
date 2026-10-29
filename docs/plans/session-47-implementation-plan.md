@@ -373,6 +373,15 @@ runs add go in a second table below it, in execution order.
 | **D3067** | — | Renaming the slot test moves `LIFE-SLOT-002`. | Node id and text moved; the matrix and the product contract regenerated. | The registry follows the test. | — |
 | **D3068** | *"every other test that pins the old domain"*. | Synthetic slot/zone inputs (`test_branch_*`, `test_capacity_probe`, `test_control_diagnostics`, `test_naming:551`, `test_sql_relay*`, `test_dx_record:425,585`) are not the deployment's. | Left; the move does not make them vacuous. | An example is not a pin. | — |
 | **D3069** | Coordinate ADR 0290's two amendments. | — | Run 10's is a separate dated section; Run 8's park applies over it (exit 0). | Two amendments, two sections. | 0290 |
+| **D3070** | Brief §2: Notifications with an **unread** count (D3001). | The server keeps no read state (*"In-app only; no read state"*) and the console holds no storage (ADR 0281). | **No count on the link.** The page says *"N in the last 24 hours"* (counting only what the API served; *at least N* when the page read its full 50; undatable notices counted apart) and *"nothing here is marked unread"*. | A number on a link reads as unread. | 0297 |
+| **D3071** | — | Since Session 43, Members and keys folded a refused invitations or keys read into an empty list (`.catch(() => ({invitations: []}))`). | Drawn as its refusal (ADR 0195). | A report may not fail closed. | 0195 |
+| **D3072** | Run 4: each page's help link. | Members and keys pointed at `/docs/cli/`. | → `/docs/getting-started/` (documents invitations and keys); a test pins every page's help route to a site page naming its label (`TOPIC`: 6 declared aliases). | The link must reach the answer. | 0298 |
+| **D3073** | D3045: offer the direct door on a refused creation. | The same 42501 on `app_private` is refused on both doors (the pooled walk's own refused read meets it). | The offer only for 42501 **on schema public on the pooled door**; the match reads PostgreSQL's English message, so a localised server shows no offer — fails closed, the refusal still said. | Offer only what would help. | 0285 |
+| **D3074** | — | The support page exists only once Run 8's park is applied. | **Run 12's switch**: `nav.js` `PAGES.help.help` `"/docs/"` → `"/docs/support/"`, enforced by a test that requires exactly the support route when the site builds it (proved with the park applied). | A forcing function, not a reminder. | 0298 |
+| **D3075** | — | Notifications draws the limit banner (brief §4). | `pages.json`'s notifications view lists `GET /v1/organizations/{organization}/plan` (an existing route). | The guard reads the union. | — |
+| **D3076** | ADR 0298 d4: the checklist hides when every item is done. | A member whose role needs no second factor has no voluntary enrolment control in the console, so *Turn on a second factor* stays *not yet* and the checklist never hides for them. | **Open → Run 9**: the item reads *not required for your role* when `second_factor.required` is false. | A step a person cannot take is not theirs. | 0298 |
+| **D3077** | — | `journey_walk`'s usage fixture serves `status: "read"` with 0 samples, which the server never sends. | The console draws the empty state for any document with no sample, so both render; Run 11 aligns the fixture. | Fixtures say what production says. | — |
+| **D3078** | Brief §1: plain language. | The `limit_approaching` notification shows the server template's machine word (*"storage_gb is at 4.1 of 5"*; seen in the 390 px look). | **Run 9** words entitlements in the console (*"Storage: 4.1 of 5 GB"*, *"Agent calls today"*), from `plans` names, never the raw key. | A key is not a sentence. | 0297 |
 
 ---
 
@@ -814,7 +823,33 @@ Rows **D3017–D3019, D3032–D3034**. NEXT FREE D3035 (D3040+ Run 8's, D3060+ R
 3. Empty states with the next action.
 4. Targeted: the console set, `test_site`. The battery.
 
-**Done.**
+**Done.** 2026-10-30, by a delegated agent (Opus 5.5), reviewed and re-run in the main
+session (WSL `~/s47/run7/`). **Notifications**: the intro paragraph, the limit banner,
+*Latest* (each a sentence, a time and a link — the tracker, the project or activity),
+*What makes a notification*, an empty state; **no count on the link** (D3070). **Help**:
+`invite@` + the derived site domain with copy, what to send (the organisation's keys
+copyable, the small word, a support bundle from Settings), never a password, the docs
+by task (12 built routes); every page's help route pinned to its page (D3072).
+**Empty states with one action** on Projects, the organisation, Activity,
+Notifications, Branches, Backups, both Usages, Slowest queries, Monitoring, Members
+and keys, Connect; skeletons pinned. **D3045 in the console**: the door choice says *to
+create tables, connect on the direct door*; a 42501 on schema public on the pooled door
+offers *Connect on the direct door* (disconnects, selects direct, focuses the empty
+password, keeps the statement — nothing filled, ADR 0285; D3073). Members and keys no
+longer hides a refused read (D3071). **Battery 12/12. Rehearsed twice, green**
+(`console_walk` 12/12, `sql_walk` 36, `journey_walk` j01–j13; no selector changed).
+**Main-session review**: rule scan clean; the refused-on-pooled editor (1280) and
+Notifications (390) read as the brief — the look found *storage_gb* in a notice
+(D3078, Run 9); **re-run** 124 passed; 357 + D2945's decided failure. New node ids for
+Run 12: `test_console_pages.py::` `test_each_help_link_points_at_the_page_that_documents_it`,
+`test_the_help_page_asks_a_person_and_links_the_support_route_the_site_builds`,
+`test_every_view_that_can_be_empty_says_what_will_appear_and_its_next_action`,
+`test_every_view_waits_under_a_skeleton`,
+`test_the_notifications_link_carries_no_count_and_no_read_state_is_kept`,
+`test_every_notification_kind_is_a_sentence_with_a_link`;
+`test_console_progress.py::test_the_notification_count_is_of_what_the_api_served`;
+`test_console_sql.py::test_a_creation_refused_on_the_pooled_door_offers_the_direct_door`.
+Rows **D3070–D3078**. NEXT FREE D3079.
 
 ### Run 8 — the site aligned, PARKED
 

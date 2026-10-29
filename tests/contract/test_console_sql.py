@@ -332,6 +332,62 @@ def test_the_editor_hides_its_form_while_connected() -> None:
     assert "disconnect, status);" in editor  # the status line sits in the bar
 
 
+def test_a_creation_refused_on_the_pooled_door_offers_the_direct_door(tmp_path: Path) -> None:
+    """D3045 (Session 47 Run 7): only the direct door's role may create, in
+    `public`; the pooled role is refused `permission denied for schema public`
+    (42501, measured on pinned PostgreSQL 18 at Run 8). The door choice says
+    which door creates tables; that refusal -- and only it -- is answered with
+    what happened and an offer to connect on the direct door. The same code on
+    the direct door, another schema (`app_private`, refused on both doors) or
+    another code is not offered it. The offer disconnects and chooses the direct
+    door; the password is the person's to enter again -- nothing is filled in
+    (ADR 0285) -- and `sql.js` words the refusal exactly as before."""
+    driver = (
+        DOM
+        + r"""
+const { needsDirectDoor, DIRECT_DOOR_HINT, CREATE_ON_POOLED } = await import("/console/messages.js");
+const { runStatement } = await import("/console/sql.js");
+const publicRefusal = { code: "42501", message: "permission denied for schema public" };
+const cases = {
+  pooledPublic: [publicRefusal, "pooled"],
+  directPublic: [publicRefusal, "direct"],
+  pooledPrivate: [{ code: "42501", message: "permission denied for schema app_private" }, "pooled"],
+  pooledOther: [{ code: "42P07", message: "relation \"notes\" already exists" }, "pooled"],
+  pooledNone: [null, "pooled"],
+  disconnected: [publicRefusal, null],
+};
+const out = {};
+for (const [name, [error, door]] of Object.entries(cases)) out[name] = needsDirectDoor(error, door);
+const refusing = { async *query() { const e = new Error(publicRefusal.message); e.code = publicRefusal.code; throw e; } };
+out.said = await runStatement(refusing, "x", () => {}, () => "close");
+out.hint = DIRECT_DOOR_HINT;
+out.offer = CREATE_ON_POOLED;
+console.log(JSON.stringify(out));
+"""
+    )
+    out = _node(tmp_path, driver)
+    assert out["pooledPublic"] is True
+    for name in ("directPublic", "pooledPrivate", "pooledOther", "pooledNone", "disconnected"):
+        assert out[name] is False, name
+    assert out["said"] == "permission denied for schema public (42501)"
+    assert out["hint"] == "To create tables, connect on the direct door."
+    assert out["offer"]["action"] == "Connect on the direct door"
+    editor = _editor()
+    assert 'h("p", { className: "hint", id: "door-hint" }, DIRECT_DOOR_HINT)' in editor
+    assert 'doorChoice.setAttribute("aria-describedby", "door-hint");' in editor
+    assert 'h("h2", {}, "Connect the editor"), doorField, passwordField, connectButton' in editor
+    assert "if (failed && needsDirectDoor(refused, connectedTo)) {" in editor
+    assert "connectedTo = connected ? door.name : null;" in editor
+    assert "watching(session.query(text), (error) => { refused = error; })" in editor
+    offer = editor[editor.index("const directDoorOffer = () =>") :]
+    offer = offer[: offer.index("})));") + 5]
+    assert 'doorChoice.value = "direct";' in offer and "closeEditor();" in offer
+    assert "password.focus();" in offer and "password.value" not in offer
+    # sql.js keeps its protocol: it words the refusal and knows no door.
+    sql = (PUBLIC / "sql.js").read_text(encoding="utf-8")
+    assert "42501" not in sql and "DirectDoor" not in sql
+
+
 def test_the_editors_actions_are_busy_buttons_and_its_first_statement_changes_nothing() -> None:
     """D3006: Connect, Run, Cancel and Disconnect are busy buttons (Cancel
     pressable only while a statement runs); the first statement is filled in

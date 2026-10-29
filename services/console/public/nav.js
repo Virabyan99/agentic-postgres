@@ -33,7 +33,7 @@ export const PAGES = {
   "plan": { label: "Plan and usage", group: "organization", item: "plan", purpose: "What this organisation's plan includes, and what it holds now.", help: "/docs/plans-and-usage/" },
   "organization-usage": { label: "Usage", group: "organization", item: "plan", purpose: "Each project's size, branches and connections over the last 24 hours.", help: "/docs/plans-and-usage/" },
   "notifications": { label: "Notifications", group: "organization", item: "notifications", purpose: "What happened to this organisation's projects. Nothing is emailed.", help: "/docs/plans-and-usage/" },
-  "organization-settings": { label: "Members and keys", group: "organization", item: "organization-settings", purpose: "Who belongs to this organisation, the invitations, and the management keys.", help: "/docs/cli/" },
+  "organization-settings": { label: "Members and keys", group: "organization", item: "organization-settings", purpose: "Who belongs to this organisation, the invitations, and the management keys.", help: "/docs/getting-started/" },
   "project-overview": { label: "Overview", group: "project", item: "project-overview", purpose: "This project's state, and where to go next.", help: "/docs/projects/" },
   "connect": { label: "Connect", group: "project", item: "connect", purpose: "Connect psql, your application or a database tool to this project, in three steps.", help: "/docs/connecting/" },
   "sql-editor": { label: "SQL editor", group: "project", item: "sql-editor", purpose: "Run SQL you write yourself, as your own database role, from this page.", help: "/docs/sql-editor/" },
@@ -43,6 +43,10 @@ export const PAGES = {
   "insights": { label: "Slowest queries", group: "project", item: "insights", purpose: "The statements your roles ran in the last 24 hours, slowest in total first.", help: "/docs/insights-and-monitoring/" },
   "monitoring": { label: "Monitoring", group: "project", item: "monitoring", purpose: "Ten readings about this project, each naming where it comes from.", help: "/docs/insights-and-monitoring/" },
   "project-settings": { label: "Settings", group: "project", item: "project-settings", purpose: "Sleep, size, export, the support bundle and deletion.", help: "/docs/projects/" },
+  // The site's support page (ADR 0298 decision 1, D2958) is PARKED until Run
+  // 12 applies it: this entry's help path is the console's ONE link to it, and
+  // moves to "/docs/support/" in the same change -- test_console_pages fails
+  // until it does, once the site builds that route.
   "help": { label: "Help", group: null, purpose: "Ask a person, or read the documentation.", help: "/docs/" },
   "missing": { label: "Not found", group: null, purpose: "", help: "/docs/" },
 };
@@ -156,6 +160,10 @@ function initials(name) {
   return (letters.slice(0, 2) || "?").toUpperCase();
 }
 
+// Notifications carries no count (D3001): the server keeps no read state and
+// this console keeps nothing, so an unread count cannot be read -- and a number
+// on this link would be read as one. The Notifications page says how many
+// arrived in the last 24 hours, worded as exactly that.
 function topBar(me) {
   const organization = context.organization;
   return [

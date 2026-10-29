@@ -35,7 +35,7 @@ PROGRESS = PUBLIC / "progress.js"
 NODE = LOCK["NODE_RUNTIME_IMAGE"]
 IMPORT = (
     "import { absoluteTime, checklist, creationBlocked, describe, elapsedSeconds, formatDuration, "
-    "limitText, machineTime, operationSeconds, relativeAge, stepStates, typicalRange } "
+    "limitText, machineTime, operationSeconds, recentNotices, relativeAge, stepStates, typicalRange } "
     'from "/console/progress.js";\n'
 )
 #: The browser's clock in every reading below: a fixed instant, so each
@@ -408,3 +408,40 @@ def test_the_checklist_is_derived_from_the_api_alone(tmp_path: Path) -> None:
     reading = _function(app, "async function readOrganization(")
     assert 'call("GET", "/operations?organization=" + id)' in reading
     assert 'call("GET", `/organizations/${organization}/usage?hours=720`)' in reading
+
+
+def test_the_notification_count_is_of_what_the_api_served(tmp_path: Path) -> None:
+    """D3001 (Session 47 Run 7): with no read state on the server and none in
+    the console, the Notifications page counts what the API served in the 24
+    hours before the browser's clock -- worded as exactly that, never as
+    *unread*. A notification older than the window is not counted; one whose
+    time cannot be read is counted apart (ADR 0195); when every notification
+    read is in the window and the page read as many as it asked for, there may
+    be more, so the count is *at least*. The same readings give the same words
+    twice: nothing is remembered."""
+    day = 24 * 3600
+    cases = {
+        "some": ([_iso(60), _iso(3600), _iso(day - 5), _iso(day + 5), _iso(9 * day)], 50),
+        "none": ([_iso(day + 60)], 50),
+        "full": ([_iso(n * 60) for n in range(3)], 3),
+        "full_but_older": ([_iso(60), _iso(120), _iso(day * 2)], 3),
+        "undated": ([_iso(60), "not a time", None], 50),
+        "empty": ([], 50),
+    }
+    driver = (
+        f"const cases = {json.dumps(cases)};\n"
+        f"const now = {_now_ms()};\n"
+        "const out = {};\n"
+        "for (const [name, [times, asked]] of Object.entries(cases)) out[name] = recentNotices(times.map((t) => ({ created_at: t })), now, asked);\n"
+        "out.again = recentNotices([{ created_at: cases.some[0][0] }], now, 50) === recentNotices([{ created_at: cases.some[0][0] }], now, 50);\n"
+        "console.log(JSON.stringify(out));\n"
+    )
+    out = _node(tmp_path, driver)
+    assert out["some"] == "3 in the last 24 hours."
+    assert out["none"] == out["empty"] == "None in the last 24 hours."
+    assert out["full"] == "At least 3 in the last 24 hours."
+    assert out["full_but_older"] == "2 in the last 24 hours."
+    assert out["undated"] == "1 in the last 24 hours. 2 more could not be dated."
+    assert out["again"] is True
+    for words in out.values():
+        assert "unread" not in str(words).lower() and "new" not in str(words).lower()

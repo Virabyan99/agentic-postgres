@@ -236,3 +236,25 @@ export function closeSentence(code) {
 // The editor's session limits, said beside Run: the relay's IDLE_SECONDS and
 // TOTAL_SECONDS (ADR 0286), held to them by tests/contract/test_console_sql.py.
 export const SESSION_LIMITS = "A session ends after 5 idle minutes, or after 30 minutes in all.";
+
+// D3045: only the direct door's role may create (in `public`; measured on
+// pinned PostgreSQL 18 from the customer roles' own grants); the pooled door's
+// role reads and writes what it made and creates nothing, and PostgreSQL
+// refuses it `permission denied for schema public` (42501). The hint beside the
+// editor's door choice, and what a creation refused on the pooled door says,
+// with the offer to connect on the direct door -- whose password the person
+// enters again: the editor stores none (ADR 0285).
+export const DIRECT_DOOR_HINT = "To create tables, connect on the direct door.";
+export const CREATE_ON_POOLED = {
+  sentence: "The pooled door's role may read and write your tables but may not create them. Only the direct door's role creates tables, in the public schema.",
+  action: "Connect on the direct door",
+};
+
+// True for exactly that refusal: a statement on the pooled door refused 42501
+// for the `public` schema. The same code on the direct door, another code, or
+// another schema -- `app_private` is refused on both doors -- is not offered
+// the direct door, which would refuse it too.
+export function needsDirectDoor(error, door) {
+  return door === "pooled" && Boolean(error) && error.code === "42501" &&
+    typeof error.message === "string" && /\bschema public\b/.test(error.message);
+}

@@ -39,7 +39,9 @@ PAGES = (PUBLIC / "index.html", PUBLIC / "accept.html")
 #: (`~/s47/run5/anchors.py`), when the creation became the tracker's and the
 #: Projects pages gained the checklist, the banners and the Notifications feed;
 #: and at Run 6 (`~/s47/run6c/anchors.py`), when Connect became three steps and
-#: the editor gained its state bar (D2956, D2957).
+#: the editor gained its state bar (D2956, D2957); and at Run 7
+#: (`~/s47/run7/anchors.py`), when a project's usage before its first sample
+#: became an empty state under the project's own heading (one more `h2`).
 ANCHORS = {
     '"Create your account"': 2, '"Username"': 3, '"Display name"': 1, '"Password"': 3,
     '"Password again"': 1, 'className: "qr"': 1, 'className: "secret"': 3,
@@ -47,7 +49,7 @@ ANCHORS = {
     '"Sign in"': 4, '"Projects"': 5, '"Sign out"': 1, 'className: "account"': 1,
     'role: "status"': 1,
     'h("textarea"': 1, 'className: "result"': 1, '"Door"': 2, '"Connect"': 6, '"Run"': 1,
-    '"Cancel"': 1, '"Disconnect"': 1, 'className: "once"': 2, 'h("h1"': 7, 'h("h2"': 25,
+    '"Cancel"': 1, '"Disconnect"': 1, 'className: "once"': 2, 'h("h1"': 7, 'h("h2"': 26,
     # Session 47 Run 6 (D2956, D2957): Connect's step 2 and its shown-once box,
     # the client tabs, the editor's Copy as CSV.
     '"Make a new password for the pooled door"': 1, '"Your new password for the pooled door"': 1,

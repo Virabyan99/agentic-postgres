@@ -309,3 +309,33 @@ export function checklist({ me, organizations, projects, creating, operations, u
     { item: "connection", state: connection },
   ];
 }
+
+// -- the notifications' count (D3001) ---------------------------------------------
+
+export const RECENT_HOURS = 24;
+
+// How many of the notifications read were written in the 24 hours before
+// `now`, as a sentence: a count of what the API served, never an UNREAD count
+// -- the server keeps no read state ("In-app only; no read state") and this
+// console keeps nothing (ADR 0281). `asked` is the page's `limit`: when every
+// notification read falls in the window there may be more, and the count says
+// "at least". A time that cannot be read is counted apart, never in or out of
+// the window (ADR 0195).
+export function recentNotices(notifications, now, asked) {
+  const list = Array.isArray(notifications) ? notifications : [];
+  let recent = 0;
+  let undated = 0;
+  for (const notice of list) {
+    const age = elapsedSeconds(notice ? notice.created_at : null, now);
+    if (age === null) {
+      undated += 1;
+    } else if (age <= RECENT_HOURS * 3600) {
+      recent += 1;
+    }
+  }
+  const more = typeof asked === "number" && recent > 0 && recent === list.length && list.length >= asked;
+  const head = recent === 0
+    ? `None in the last ${RECENT_HOURS} hours.`
+    : `${more ? "At least " : ""}${recent} in the last ${RECENT_HOURS} hours.`;
+  return undated ? `${head} ${undated} more could not be dated.` : head;
+}

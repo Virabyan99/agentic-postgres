@@ -16,11 +16,12 @@ import { call, Refusal, relayOrigin } from "/console/api.js";
 import { connectionString, csv, fillPassword, guide, parts } from "/console/copies.js";
 import { CLAIM_SENTENCE, claimLine, createProject } from "/console/create.js";
 import { closeSentence, refusal, said, sentence, SESSION_LIMITS } from "/console/messages.js";
+import { CREATE_ON_POOLED, DIRECT_DOOR_HINT, needsDirectDoor } from "/console/messages.js";
 import { begin, current, frame, isCurrent, loadContext, mayCreate, narrow, PAGES, setPage, show, useActions } from "/console/nav.js";
 import { connect } from "/console/pg.js";
 import {
   checklist, creationBlocked, CURRENT, describe, DONE, formatDuration, limitText, NOT_READ, NOT_YET, operationSeconds,
-  STOPPED, stepStates, TERMINAL, typicalRange,
+  recentNotices, STOPPED, stepStates, TERMINAL, typicalRange,
 } from "/console/progress.js";
 import { newPassword, verifier } from "/console/scram.js";
 import { DEADLINE_SENTENCE, doors, openDoor, runStatement } from "/console/sql.js";
@@ -333,8 +334,24 @@ function creationNow(operation) {
     (typical ? `; usually ${typical}` : "");
 }
 
-// An organisation's projects, and the ones being created, as one table.
-function projectList(projects, creating) {
+// The next action of an organisation with no project (the brief's §3): create
+// the first one when the person may and it can start now; the members page,
+// which says who can, when they may not; nothing while a creation cannot start
+// (the page says why beside New project). Its name differs from New project,
+// the page's own action, so each link names one control.
+function firstProjectAction(organization, blocked) {
+  if (!organization) {
+    return null;
+  }
+  if (!mayCreate(organization)) {
+    return link(`#/org/${organization.id}/settings`, "See who can create one");
+  }
+  return blocked ? null : link(`#/org/${organization.id}/new-project`, "Create your first project");
+}
+
+// An organisation's projects, and the ones being created, as one table; with
+// neither, an empty state with `next`, the action that makes the first.
+function projectList(projects, creating, next) {
   const rows = [
     ...(creating || []).map((operation) => ({
       project: h("span", {}, h("strong", {}, subjectWords(operation)),
@@ -353,7 +370,7 @@ function projectList(projects, creating) {
   return [
     rows.length
       ? table([["project", "Project"], ["state", "State"], ["profile", "Size"], ["open", ""]], rows)
-      : emptyState("No project yet."),
+      : emptyState("No project yet. A project is a PostgreSQL database with two connection doors, backed up from the start.", next),
     creating === null ? h("p", { className: "muted" }, "Projects being created could not be read just now.") : null,
   ];
 }
@@ -532,7 +549,7 @@ function organizationSection(organization, reading) {
   return h("section", { className: "card" },
     h("h2", {}, organization.name, " ", h("small", {}, organization.role)),
     projectLimitBanner(organization.id, reading.plan, reading.creating),
-    projectList(reading.projects, reading.creating),
+    projectList(reading.projects, reading.creating, firstProjectAction(organization, blocked)),
     h("p", { className: "card-actions" },
       newProjectAction(organization, blocked, reading.plan),
       link(`#/org/${organization.id}`, "Open this organisation")),
@@ -564,8 +581,17 @@ async function organizationView(me, org, turn) {
     projectLimitBanner(org, reading.plan, reading.creating),
     blocked && !isFull(blocked) && mayCreate(here) ? h("p", { className: "muted" }, blockedWords(blocked, reading.plan)) : null,
     checklistCard(me, current().organizations, [reading]),
-    card(projectList(reading.projects, reading.creating)),
+    card(projectList(reading.projects, reading.creating, firstProjectAction(here, blocked))),
     h("p", {}, link(`#/org/${org}/activity`, "Everything that happened in this organisation")));
+}
+
+// The next action of an organisation whose activity or notifications are
+// empty: to start the first operation there is to create a project.
+function firstOperationAction(org) {
+  const here = current().organization;
+  return here && mayCreate(here)
+    ? link(`#/org/${org}/new-project`, "Create a project")
+    : link(`#/org/${org}`, "See the projects");
 }
 
 async function activityView(me, org) {
@@ -580,7 +606,8 @@ async function activityView(me, org) {
   frame(me, "Activity",
     rows.length
       ? card(table([["when", "When"], ["what", "What"], ["subject", "On"], ["status", "Status"], ["open", ""]], rows))
-      : emptyState("Nothing has happened in this organisation yet."));
+      : emptyState("Nothing has happened in this organisation yet. Creating a project, a branch or a password each appears here as an operation you can follow.",
+        firstOperationAction(org)));
 }
 
 // The tracker's content for one reading of the operation: the steps, done /
@@ -901,7 +928,8 @@ function guideLine(served, client) {
 function snippetTabs(served) {
   const clients = Object.keys(served.snippets || {});
   if (!clients.length) {
-    return emptyState("The server serves no code for this project's doors; the connection string below works with any PostgreSQL client.");
+    return emptyState("The server serves no code for this project's doors; the connection string below works with any PostgreSQL client.",
+      h("a", { href: siteLink("/docs/connecting/") }, "Connecting, in the documentation"));
   }
   return tabs(clients.map((client) => ({
     label: clientLabel(client),
@@ -1125,7 +1153,8 @@ async function branchesView(me, key, turn) {
     card(rows.length
       ? table([["name", "Name"], ["state", "State"], ["reached_point", "Reached"], ["expires_at", "Expires"],
         ["pool_host", "Pooled host"], ["actions", ""]], rows)
-      : emptyState("No branch yet. Make one below."),
+      : emptyState("No branch yet. A branch is a copy of this project's database to try things on; it is not backed up.",
+        button("Make a branch", () => name.focus(), { className: "secondary" })),
     h("p", { className: "muted" }, value(served.notice)),
     confirmLabel),
     card(h("h2", {}, "New branch"), nameLabel, atLabel,
@@ -1155,6 +1184,11 @@ async function backupsView(me, key) {
       served.message ? h("p", { className: "muted" }, served.message) : null];
   } else if (served.status === "sleeping") {
     body = [h("p", {}, "The project is sleeping. ", value(served.message))];
+  } else if (served.status === "could_not_determine" && !("observed_at" in served)) {
+    // Before a first reading: the one undetermined answer that names no
+    // reading's time at all (`backups_document`, ADR 0273).
+    body = [emptyState("No backup reading has been recorded for this project yet. The window it can be restored to appears here once the server records the first one.",
+      button("Read it again", () => route(), { className: "secondary" }))];
   } else {
     body = [h("p", { className: "refusal" }, "The restore window could not be determined: ", value(served.reason))];
   }
@@ -1164,6 +1198,14 @@ async function backupsView(me, key) {
 const USAGE_FIGURES = ["database_bytes", "repository_bytes", "branch_count", "branch_bytes", "customer_connections"];
 
 function usageSection(document) {
+  // Before data: no sample in the window -- the server's own "could not
+  // determine" (`_usage`, ADR 0275), never shown as zeros.
+  if (!(document.samples && document.samples.present > 0) && typeof document.project_key === "string") {
+    return h("section", { className: "card" },
+      h("h2", {}, document.project_key),
+      emptyState("No usage sample was recorded for this project in this window. The server records samples while the project is awake; they appear here as it does.",
+        link(`#/projects/${document.project_key}/connect`, "Connect your application")));
+  }
   if (document.status === "could_not_determine") {
     return h("p", { className: "refusal" }, `${document.project_key}: usage could not be determined: ${value(document.reason)}`);
   }
@@ -1201,7 +1243,8 @@ async function insightsView(me, key) {
   if (served.status === "could_not_determine") {
     body = [h("p", { className: "refusal" }, "Insights could not be determined: ", value(served.reason))];
   } else if (!(served.statements || []).length) {
-    body = [emptyState("No statement of yours ran in this window.")];
+    body = [emptyState("No statement of yours ran in the last 24 hours. The statements your roles run appear here, slowest in total first.",
+      link(`#/projects/${key}/sql`, "Run one in the SQL editor"))];
   } else {
     body = [table([["total_ms", "Total ms"], ["calls", "Calls"], ["mean_ms", "Mean ms"], ["rows_per_call", "Rows/call"],
       ["cache_hit_ratio", "Cache"], ["role", "Role"], ["query", "Statement"]],
@@ -1213,16 +1256,25 @@ async function insightsView(me, key) {
 
 async function monitoringView(me, key) {
   const served = await call("GET", `/projects/${key}/monitoring`);
-  const rows = (served.signals || []).map((signal) => ({
+  const signals = served.signals || [];
+  const rows = signals.map((signal) => ({
     name: signal.name,
     reading: "unread" in signal
       ? `not read: ${signal.unread}`
       : h("span", {}, `${signal.value} ${signal.unit}, `, when(signal.observed_at)),
     source: signal.source,
   }));
+  // Before data: no signal has a reading yet -- each still names why, below.
+  const before = signals.every((signal) => "unread" in signal);
   frame(me, "Monitoring",
-    card(h("p", { className: "muted" }, "Read ", when(served.read_at), ". Each reading names where it comes from."),
-      table([["name", "Signal"], ["reading", "Reading"], ["source", "Source"]], rows)));
+    before
+      ? emptyState("No reading has been taken for this project yet. Each one appears here, naming where it comes from, once the server reads it.",
+        button("Read them again", () => route(), { className: "secondary" }))
+      : null,
+    rows.length
+      ? card(h("p", { className: "muted" }, "Read ", when(served.read_at), ". Each reading names where it comes from."),
+        table([["name", "Signal"], ["reading", "Reading"], ["source", "Source"]], rows))
+      : null);
 }
 
 // Session 46 (ADR 0292): the support bundle as the server recorded it -- what
@@ -1350,7 +1402,10 @@ async function planView(me, org) {
 async function orgUsageView(me, org) {
   const served = await call("GET", `/organizations/${org}/usage?hours=24`);
   frame(me, "Usage",
-    served.projects.length ? served.projects.map(usageSection) : emptyState("No project in this window."));
+    served.projects.length
+      ? served.projects.map(usageSection)
+      : emptyState("No project of this organisation recorded usage in the last 24 hours. Each project's size, branches and connections appear here once it does.",
+        link(`#/org/${org}`, "See the projects")));
 }
 
 // What makes a notification (ADR 0297 decision 5; the brief's screen 8).
@@ -1363,13 +1418,16 @@ const NOTICE_KINDS = [
 ];
 
 // One notification in plain words, with a link onward: the operation that
-// wrote it (`#/operations/<id>`, D2953), or the page that acts on it. A kind
-// this page does not know reads the server's own text.
+// wrote it (`#/operations/<id>`, D2953), or -- when it names none -- the page
+// that acts on it: its project, else the organisation's activity. A kind this
+// page does not know reads the server's own text, and still links onward.
 function noticeWords(notice, org) {
   const title = OPERATION_TITLES[notice.operation_type] || "An operation";
   const key = typeof notice.project === "string" ? notice.project : null;
   const on = key ? ` on ${key}` : "";
-  const operation = (words) => (notice.operation_id ? link(`#/operations/${notice.operation_id}`, words) : null);
+  const operation = (words) => (typeof notice.operation_id === "string" && notice.operation_id
+    ? link(`#/operations/${notice.operation_id}`, words)
+    : link(key ? `#/projects/${key}` : `#/org/${org}/activity`, key ? `Open ${key}` : "See the activity"));
   if (notice.kind === "operation_started") {
     return [h("strong", {}, `${title}${on} started.`), " ", operation("Follow it")];
   }
@@ -1384,38 +1442,98 @@ function noticeWords(notice, org) {
   }
   if (notice.kind === "idle_sleep") {
     return [h("strong", {}, `${key || "A project"} went to sleep after its idle time.`), " ",
-      key ? link(`#/projects/${key}/settings`, "Wake it from Settings") : null];
+      key ? link(`#/projects/${key}/settings`, "Wake it from Settings") : link(`#/org/${org}`, "See the projects")];
   }
   if (notice.kind === "branch_expired") {
     return [h("strong", {}, `A branch${on} reached its expiry time and was deleted.`), " ",
-      key ? link(`#/projects/${key}/branches`, "See the branches") : null];
+      key ? link(`#/projects/${key}/branches`, "See the branches") : link(`#/org/${org}`, "See the projects")];
   }
   if (notice.kind === "limit_approaching") {
     return [h("strong", {}, `${key || "A project"} is near a limit your plan shows.`), " ", value(notice.text), " ",
-      link(`#/org/${org}/plan`, "Your plan")];
+      planLinks(org)];
   }
   return [value(notice.text), " ", operation("Details")];
 }
 
+// How many the page asks for: the newest, as `apg notifications list` does.
+const NOTICES_READ = 50;
+
+// The brief's screen 8: what notifications are and that nothing is emailed;
+// a limit near or reached, as on Projects; the latest, each a sentence with a
+// link and its time, under how many arrived in the last 24 hours (D3001: a
+// count of what the API served -- there is no read state to count unread
+// against); then what makes one.
 async function notificationsView(me, org) {
-  const served = await call("GET", `/organizations/${org}/notifications?limit=50`);
+  const [served, plan] = await Promise.all([
+    call("GET", `/organizations/${org}/notifications?limit=${NOTICES_READ}`),
+    readPlan(org),
+  ]);
+  const notices = served.notifications || [];
   frame(me, "Notifications",
-    card(h("p", {}, "A notification is written here when something happens to one of this organisation's projects. ",
-      h("strong", {}, "Nothing is emailed"), ": this page is where they appear."),
-    h("h2", {}, "What makes a notification"),
-    h("dl", { className: "kinds" }, NOTICE_KINDS.map(([kind, meaning]) => [h("dt", {}, kind), h("dd", {}, meaning)]))),
-    served.notifications.length
+    card(h("p", {}, "A notification is written here when something happens to one of this organisation's projects: an operation starts or finishes, a project goes to sleep, a branch expires, or a limit is near. ",
+      h("strong", {}, "Nothing is emailed"), ": this page is where they appear.")),
+    projectLimitBanner(org, plan, null),
+    notices.length
       ? card(h("h2", {}, "Latest"),
-        h("ul", { className: "feed" }, served.notifications.map((notice) => h("li", {},
+        h("p", { className: "small muted" }, recentNotices(notices, Date.now(), NOTICES_READ),
+          " The server does not record which ones you have read, so nothing here is marked unread."),
+        h("ul", { className: "feed" }, notices.map((notice) => h("li", {},
           h("span", {}, noticeWords(notice, org)), when(notice.created_at)))))
-      : emptyState("Nothing yet. The first notification appears when a project's operation starts."));
+      : emptyState("No notification yet. One appears here when a project's creation, a branch, a restore or a reset starts, and when an operation finishes.",
+        firstOperationAction(org)),
+    card(h("h2", {}, "What makes a notification"),
+      h("dl", { className: "kinds" }, NOTICE_KINDS.map(([kind, meaning]) => [h("dt", {}, kind), h("dd", {}, meaning)]))));
+}
+
+// The organisation's invitations: refused, none yet (with where to make one),
+// or the table with `revoke` on each still open.
+function invitationList(served, start, revoke) {
+  if (served.refused) {
+    return refusal(served.refused);
+  }
+  const invitations = served.invitations || [];
+  if (!invitations.length) {
+    return emptyState("No invitation yet. An invitation is a link that works once, for the role you choose above.",
+      button("Choose a role", start, { className: "secondary" }));
+  }
+  return table([["role", "Role"], ["issued_at", "Issued"], ["expires_at", "Expires"], ["accepted_at", "Accepted"], ["revoked_at", "Revoked"], ["actions", ""]],
+    invitations.map((invitation) => ({
+      ...invitation,
+      issued_at: when(invitation.issued_at),
+      expires_at: when(invitation.expires_at),
+      accepted_at: when(invitation.accepted_at),
+      revoked_at: when(invitation.revoked_at),
+      actions: invitation.accepted_at || invitation.revoked_at ? "" : revoke(invitation),
+    })));
+}
+
+// The organisation's management keys, the same way.
+function keyList(served, start, revoke) {
+  if (served.refused) {
+    return refusal(served.refused);
+  }
+  const keys = served.keys || [];
+  if (!keys.length) {
+    return emptyState("No management key yet. A key lets a script or the command-line client act for this organisation, with only the scopes you choose below.",
+      button("Name a new key", start, { className: "secondary" }));
+  }
+  return table([["name", "Name"], ["scopes", "Scopes"], ["last_used_at", "Last used"], ["revoked_at", "Revoked"], ["actions", ""]],
+    keys.map((key) => ({
+      ...key,
+      scopes: key.scopes.join(", "),
+      last_used_at: key.last_used_at ? when(key.last_used_at) : "never",
+      revoked_at: when(key.revoked_at),
+      actions: key.revoked_at ? "" : revoke(key),
+    })));
 }
 
 async function orgSettingsView(me, org) {
+  // A list this person may not read is said as its refusal, never drawn as
+  // an empty one (ADR 0195): a viewer's "no invitation" would be a guess.
   const [members, invitations, keys] = await Promise.all([
     call("GET", `/organizations/${org}/members`),
-    call("GET", `/organizations/${org}/invitations`).catch(() => ({ invitations: [] })),
-    call("GET", `/organizations/${org}/keys`).catch(() => ({ keys: [] })),
+    call("GET", `/organizations/${org}/invitations`).catch((error) => ({ refused: error })),
+    call("GET", `/organizations/${org}/keys`).catch((error) => ({ refused: error })),
   ]);
   const result = h("div", { className: "stack" });
   const act = (work) => async () => {
@@ -1455,25 +1573,11 @@ async function orgSettingsView(me, org) {
           result.append(refusal(error));
         }
       }, { busy: "Making the link…" }),
-      table([["role", "Role"], ["issued_at", "Issued"], ["expires_at", "Expires"], ["accepted_at", "Accepted"], ["revoked_at", "Revoked"], ["actions", ""]],
-        invitations.invitations.map((invitation) => ({
-          ...invitation,
-          issued_at: when(invitation.issued_at),
-          expires_at: when(invitation.expires_at),
-          accepted_at: when(invitation.accepted_at),
-          revoked_at: when(invitation.revoked_at),
-          actions: invitation.accepted_at || invitation.revoked_at ? "" :
-            busyButton("Revoke", act(() => call("DELETE", `/organizations/${org}/invitations/${invitation.id}`)), { busy: "Revoking…" }),
-        })))),
+      invitationList(invitations, () => inviteRole.focus(), (invitation) => busyButton("Revoke",
+        act(() => call("DELETE", `/organizations/${org}/invitations/${invitation.id}`)), { busy: "Revoking…" }))),
     card(h("h2", {}, "Management keys"),
-      table([["name", "Name"], ["scopes", "Scopes"], ["last_used_at", "Last used"], ["revoked_at", "Revoked"], ["actions", ""]],
-        keys.keys.map((key) => ({
-          ...key,
-          scopes: key.scopes.join(", "),
-          last_used_at: key.last_used_at ? when(key.last_used_at) : "never",
-          revoked_at: when(key.revoked_at),
-          actions: key.revoked_at ? "" : busyButton("Revoke", act(() => call("DELETE", `/organizations/${org}/keys/${key.key_id}`)), { busy: "Revoking…" }),
-        }))),
+      keyList(keys, () => keyName.focus(), (key) => busyButton("Revoke",
+        act(() => call("DELETE", `/organizations/${org}/keys/${key.key_id}`)), { busy: "Revoking…" })),
       keyNameLabel,
       h("fieldset", {}, h("legend", {}, "Scopes"), KEY_SCOPES.map((scope, index) => h("label", { className: "inline" }, scopes[index], " ", scope))),
       busyButton("Make a key", async () => {
@@ -1489,26 +1593,57 @@ async function orgSettingsView(me, org) {
     result);
 }
 
-// -- help (ADR 0298; Run 7 completes it) ------------------------------------------
+// -- help (ADR 0298 decisions 2 and 3; D2958; the brief's screen 10) --------------
+//
+// Ask a person at `invite@` the site's own domain -- derived from this page's
+// host, never typed (ADR 0299) -- with what to send and what never to send;
+// then the documentation by task, each link a route the site build produces
+// (test_console_pages reads them). The site's support page is this page's own
+// help link, `PAGES.help` in nav.js: the one place Run 12 points at
+// /docs/support/ when it applies the parked site pages.
+
+// The documentation by task, grouped as the site's docs are (DOCS_GROUPS).
+const HELP_TASKS = [
+  ["Start", [["From your invitation to a connected application", "/quickstart/"],
+    ["Accounts, organisations, roles and invitations", "/docs/getting-started/"],
+    ["Work from a terminal with the command-line client", "/docs/cli/"]]],
+  ["Use a project", [["Create, sleep, resize, export or delete a project", "/docs/projects/"],
+    ["Connect your application, with code for each language", "/docs/connecting/"],
+    ["Run SQL in the browser", "/docs/sql-editor/"],
+    ["Make a branch, or restore to a point in time", "/docs/branches/"],
+    ["Backups, and how far back you can restore", "/docs/backups/"]]],
+  ["Watch and plan", [["Plans, usage and notifications", "/docs/plans-and-usage/"],
+    ["Slowest queries and monitoring", "/docs/insights-and-monitoring/"]]],
+  ["When something is refused", [["What each refusal means, and what to do", "/docs/refusals/"],
+    ["All the documentation", "/docs/"]]],
+];
+
+// Up to `most` of the current organisation's projects, as `draw` makes each.
+function someProjects(draw, most) {
+  const projects = (current().projects || []).slice(0, most);
+  return projects.length ? [": ", projects.map((project, index) => [index ? ", " : "", draw(project.key)])] : null;
+}
 
 function helpView(me) {
   const address = `invite@${siteDomain()}`;
-  const docs = [["Getting started", "/docs/getting-started/"], ["Connecting your application", "/docs/connecting/"],
-    ["The SQL editor", "/docs/sql-editor/"], ["Branches", "/docs/branches/"], ["Backups", "/docs/backups/"],
-    ["Plans and usage", "/docs/plans-and-usage/"], ["What a refusal means", "/docs/refusals/"], ["All the documentation", "/docs/"]];
   frame(me, "Help",
     card(h("h2", {}, "Ask a person"),
-      h("p", {}, "Write to the people who run this service; a person reads every message."),
-      inlineCopy(address),
-      h("p", {}, h("a", { href: `mailto:${address}` }, "Write an email"))),
+      h("p", {}, "Write to the people who run this service. A person reads every message."),
+      h("p", {}, inlineCopy(address)),
+      h("p", { className: "small" }, h("a", { href: `mailto:${address}` }, "Write an email"), " from your own mail app, or copy the address.")),
     card(h("h2", {}, "What to send"),
       h("ul", {},
-        h("li", {}, "The project's key, if it is about a project."),
-        h("li", {}, "What the page said, and the word in small type under it."),
-        h("li", {}, "The support bundle, from the project's Settings page.")),
-      h("p", {}, "Never send a password, a key or a link you were shown once: nobody here will ask for one.")),
+        h("li", {}, "The project's key, if it is about a project", someProjects((key) => inlineCopy(key), 3), "."),
+        h("li", {}, "What you did, and what the page said. The word in small type under a message, such as ",
+          h("code", {}, "plan_limit_reached"), ", tells whoever helps exactly what the server answered."),
+        h("li", {}, "A support bundle, from the project's Settings page",
+          someProjects((key) => link(`#/projects/${key}/settings`, key), 3),
+          ". It holds the server's latest health checks for the project and its recent operations, and no data and no passwords.")),
+      callout("warn", null, h("p", {}, h("strong", {}, "Never send a password, a key, or a link you were shown once."),
+        " Nobody here will ask for one."))),
     card(h("h2", {}, "Read the documentation"),
-      h("ul", { className: "links" }, docs.map(([title, path]) => h("li", {}, h("a", { href: siteLink(path) }, title))))));
+      HELP_TASKS.map(([group, tasks]) => [h("h3", {}, group),
+        h("ul", { className: "links" }, tasks.map(([task, path]) => h("li", {}, h("a", { href: siteLink(path) }, task))))])));
 }
 
 // -- the SQL editor (Session 44, ADR 0285; D2957, the brief's screen 7) ----------
@@ -1545,6 +1680,19 @@ function took(milliseconds) {
   return milliseconds < 1000 ? `${Math.round(milliseconds)} ms` : `${(milliseconds / 1000).toFixed(1)} s`;
 }
 
+// A statement's results as the session yields them, with any refusal seen on
+// its way to `runStatement` -- which words it exactly as before (sql.js and
+// pg.js are untouched): the page needs only the refusal's code and message to
+// know whether to offer the direct door (D3045).
+async function* watching(results, seen) {
+  try {
+    yield* results;
+  } catch (error) {
+    seen(error);
+    throw error;
+  }
+}
+
 // One result: how many rows and how long, Copy as CSV (built in the page,
 // copies.js), then the rows in a box of their own with a sticky header.
 function resultView(result, milliseconds) {
@@ -1576,7 +1724,11 @@ async function sqlView(me, key) {
   const results = h("div", { className: "stack" });
   const say = (text) => { status.textContent = text; };
   let running = false;
+  let connectedTo = null;
   const [doorLabel, doorChoice] = choice("Door", found.doors.map((door) => ({ value: door.name, label: `${door.name} — ${door.user}` })), "pooled");
+  // D3045: the door choice says which door creates tables.
+  doorChoice.setAttribute("aria-describedby", "door-hint");
+  const doorField = h("div", { className: "field" }, doorLabel, h("p", { className: "hint", id: "door-hint" }, DIRECT_DOOR_HINT));
   const [passwordField, password] = field("Password", { type: "password", autocomplete: "off" },
     ["The password you made for this door on ", link(`#/projects/${key}/connect`, "Connect"),
       ". It is used once to connect, then cleared from this page; it is never stored."]);
@@ -1621,7 +1773,19 @@ async function sqlView(me, key) {
       event.preventDefault();
       connectButton.click();
     },
-  }, h("h2", {}, "Connect the editor"), doorLabel, passwordField, connectButton);
+  }, h("h2", {}, "Connect the editor"), doorField, passwordField, connectButton);
+  // A creation refused on the pooled door (D3045): what happened, and one
+  // action -- disconnect, choose the direct door, and ask for ITS password,
+  // which the person enters (nothing is filled in; ADR 0285). The statement
+  // stays in the editor for when they are connected again.
+  const directDoorOffer = () => callout("warn", null,
+    h("p", {}, CREATE_ON_POOLED.sentence),
+    h("p", { className: "card-actions" }, button(CREATE_ON_POOLED.action, () => {
+      closeEditor();
+      doorChoice.value = "direct";
+      showConnected(null, "Disconnected from the pooled door. Enter the direct door's password, then connect.");
+      password.focus();
+    })));
   const cancel = busyButton("Cancel", async () => {
     if (running && editor) {
       await editor.cancel();
@@ -1639,8 +1803,10 @@ async function sqlView(me, key) {
     cancel.disabled = false;
     const began = performance.now();
     let failed;
+    let refused = null;
+    const watched = { query: (text) => watching(session.query(text), (error) => { refused = error; }) };
     try {
-      failed = await runStatement(session, statement.value,
+      failed = await runStatement(watched, statement.value,
         (result) => results.append(resultView(result, performance.now() - began)), closeSentence);
     } finally {
       running = false;
@@ -1655,6 +1821,9 @@ async function sqlView(me, key) {
       return;
     }
     say(failed || `Done in ${took(performance.now() - began)}.`);
+    if (failed && needsDirectDoor(refused, connectedTo)) {
+      results.append(directDoorOffer());
+    }
   }, { busy: "Running…" });
   const work = h("div", { className: "card stack" },
     h("label", { htmlFor: "statement" }, "Statement"), statement,
@@ -1664,6 +1833,7 @@ async function sqlView(me, key) {
   // The one place the editor's state is drawn (ADR 0295 decision 8).
   function showConnected(door, words) {
     const connected = door !== null;
+    connectedTo = connected ? door.name : null;
     connectForm.hidden = connected;
     work.hidden = !connected;
     disconnect.hidden = !connected;
