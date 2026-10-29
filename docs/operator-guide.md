@@ -26,7 +26,7 @@ plane, migrations — this page hands to it and does not repeat it.
 
 | | |
 |---|---|
-| `template_version` / `CURRENT_SESSION` | **1.23.0** / **45** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
+| `template_version` / `CURRENT_SESSION` | **1.24.0** / **46** — the two numbers have come apart three times (1.0.1, 1.6.1, 1.6.2), each time because an outsider's reading produced repairs rather than a plane; 26, 27 and 29 are skipped in the registry the way 19 is, so the session number goes 25 → 28 → 30. `1.3.0`–`1.5.0` were releases without tags (D1311) |
 | Released migrations | **39**, fix-forward; every down block raises `AP900` (D912). 0033 adds two prune functions granted to nobody and a size reading (ADR 0213) — nothing removes an agent record unless an operator asks. 0034 is the workflow substrate: four `app_private` tables nobody may read, eight functions granted to `auth_service` and the install granted to nobody (ADR 0227, §17). 0035 adds the approval and attempt tables nobody may read, a run status `compensating`, and the audit reader at nine arguments with a counter beside it (ADR 0230, 0233, 0234). 0036 is connectivity: four `app_private` connector tables nobody may read, `app.emit_event` granted to NOBODY and called only by a project's reviewed definer function, and the connector functions -- seven granted to `auth_service`, the install and the rehearsal's to nobody (ADR 0235-0238, §18). 0037 is `app.require_approval`, granted to nobody (ADR 0242). 0038 adds the approval status `withdrawn`, alone in its file; 0039 adds three prunes and a size reading granted to nobody and the withdrawal granted to `auth_service` (ADR 0248, §5) |
 | Deployed document | outputs schema **v22** (`database.public` and the two customer roles; v21 added `region`, `compute.profile`; v20 added `routes.control`, `control.enabled`); `document_kind: deployed` |
 | Project manifest | schema versions **1–11** accepted; 5 adds `migrations.set`, 6 adds `mcp.capabilities`, 7 adds `connectors` (the facility and the outbound endpoints), 8 adds `migrations.approvals_required` (§19), 9 adds `control` (the control plane, `docs/control-plane.md`), 10 adds `compute` (a named profile, §20), 11 adds `database.public_endpoints` (§21) |
@@ -2378,3 +2378,36 @@ move with it.
   requests only while the project's store shows the edge read for it (`up` and
   the certificate series); without them the sample stays unread and nothing
   sleeps.
+
+## 26. 1.24.0: the console creates, the support bundle, control status
+
+Session 46 (ADRs 0290-0294). A member creates a project in the console (ADR
+0291): the handoff token is made in the page, only its SHA-256 reaches the
+control plane, and the page shows it once at acceptance; `apg project claim
+--token-file` claims with it. The reconciler records each deployed slot's
+support bundle (ADR 0292) and `bin/control.sh status` reads the control database
+as root (ADR 0293).
+
+- **1.24.0 restarts no database**: auth was unanswered 8.3-9.6 s per project,
+  the console 7.1 s, rest never.
+- **The support bundle's pass**: the reconciler runs the doctor on every
+  deployed slot every 900 s and records each check's name, verdict and detail
+  (never its evidence or a host path) through control migration 0010's function;
+  `GET /v1/projects/{key}/diagnostics` serves them to a member with their ages,
+  stale past 1,800 s. A reconciler that is stopped records nothing, and the
+  bundle says how old its reading is.
+- **`sudo bin/control.sh status`**: organisations, projects (listed and
+  deleted, with their states), pending and running operations, branches,
+  slots and the last day's notifications, read from the control database as
+  root with the service's own state function. It writes nothing.
+- **Every release redeploys the kept customer projects**: `slot3-prod` (the
+  probe's) and `slot10-prod` (the first person's, theirs -- never touched by a
+  proof) move with `bin/slot.sh redeploy`, the reconciler stopped, like the
+  other projects. A release that changes their connection strings (the domain
+  move, D2943) is told to the person before it is deployed.
+- **A slot needs five DNS records** (D2933): `slotN`, `pool.slotN`,
+  `direct.slotN` and the branch wildcards `*.pool.slotN`, `*.direct.slotN`;
+  without the wildcards every branch on the slot is refused at
+  `branch-runtime`'s DNS check (§22).
+- **A secret store console sitting ends with `sudo ufw status numbered`** read
+  for no `operator console` rule left (D2944, `docs/secret-store.md` §1).

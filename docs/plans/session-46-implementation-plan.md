@@ -1,6 +1,6 @@
 # Session 46 — The journey, the person's walk, the Stage 5 release, the Stage 6 report
 
-**Status: EXECUTING — Run 1 DONE (2026-10-24): the rigs, Sheet IR4 (7.7 s /
+**Status: COMPLETE (2026-10-29) — Run 1 DONE (2026-10-24): the rigs, Sheet IR4 (7.7 s /
 6.6 s), ADRs 0290–0293 accepted, threat items 28–30, `docs/hosted-walk.md`
 (for the operator to read before Run 4; the person's day not yet arranged).
 Rows D2890–D2896 added. Run 2 DONE (the support bundle: control 0010, the
@@ -28,8 +28,13 @@ D2930–D2943; owed: D2942's ADR (main's CI red on the runner image), D2940's
 three claims and D2933/D2941/D2943 to Session 47. Run 10 DONE (2026-10-29,
 M7): Sheets X0–X3 — the old host's three rehome identities revoked, the
 Infisical Cloud organisation emptied, the Hetzner server deleted, the store's
-443 rule for `62.238.99.122` removed; row D2944. NEXT FREE D2945, ADR 0294.
-Next: Run 11 (the close).** Planned at `7b035d9` (Session
+443 rule for `62.238.99.122` removed; row D2944. Run 11 DONE (2026-10-29,
+the close of Session 46, not of Stage 5): D2942 repaired (ADR 0294; main
+green on `24d926e`); **the operator made Session 47 Stage 5's last session**
+(D2945) -- the three claims re-earned there on one slot under `nomipg.com`,
+the Ledger moves, the stage close and Run 12's report with it; the envelope,
+scope-closure §39, the operator guide's §26 and the stage plan's Status
+written. NEXT FREE D2946, ADR 0295.** Planned at `7b035d9` (Session
 45's close record, tree clean, `main` = `origin/main`) against the host as read
 that morning (§0). Rows **D2862–D2889** at planning; the runs add theirs from
 **D2890**. ADRs **0290–0293** are Run 1's. **NEXT FREE after this table: D2890,
@@ -464,6 +469,7 @@ the runs add go in a second table below it, in execution order.
 | **D2942** | CLAUDE.md: CI is the full check. | **`a34c906`'s CI failed** one test in both jobs: `test_systemd_analyze_accepts_the_units` — `systemd-analyze` on the RUNNER reports the runner image's OWN units (`xfs_scrub_all.service`, `walinuxagent.service`: *"Support for option CPUAccounting= has been removed"*). GitHub's image moved after `55467b5`'s green run; every push now fails it. The release is unaffected: `publish-cli` verifies the TAGGED commit's own `contract` run. | **Repaired with an ADR at the close** (a contract test changes only with one): `_EXPECTED_OFF_HOST` classifies a message about a unit file the repository does not ship — widened to a measured set, never to "any warning". | A fact about the machine running the test is not a fact about the unit. | — |
 | **D2943** | The operator, 2026-10-29: move the domain to `nomipg.com` (purchased). | Measured at `55467b5`: 312 lines in 79 tracked files, **9 code files** (`site_build.py`'s origin and CSP, `naming.py`, `capacity.py`, the console's two pages, `login.sh`, `build-cli.py`, the store's compose, the control example); every project's names come from the host's manifests and `host.yaml`. The move is a release of five (slot10's connection strings change), the zone and ~25 records, Pages, Email Routing, and 301s from the old name. | **Not mid-sitting** (D1425): planned as **Session 47** with D2933, D2940's three claims and D2941. Open: the domain alone or a rename too (*Agentic Postgres* on 81 lines, `agentic-postgres-cli`, `apg`); whether the store keeps its name. | Measure a move before pricing it. | — |
 | **D2944** | `docs/secret-store.md` §1: the console's temporary rule is *"removed on the same sheet"*. | X3's first `ufw status numbered` (2026-10-29) still listed `443/tcp ALLOW IN 217.113.25.22 # operator console, temporary` — opened for X1's console reading and not deleted after it. Nothing reads the store's rules at a sheet's end. | **Removed at X3** (`ufw delete allow from 217.113.25.22 … 443`, read back). A console sheet ends with `sudo ufw status numbered` read for the rule's absence, not with the delete alone. | A rule whose removal is not read is an open door by assumption. | — |
+| **D2945** | D2884 / ADR 0254: a Ledger row moves with the NEWEST merged evidence; *"no row `trial` at the close"*; D2940: `plans_live`, `journey_live`, `console_create_live` left failed to Session 47; the stage plan: Session 46 is Stage 5's last. | Read at the close against `evidence/session-46.json`: `projects_self_service` names `console_create_live` (failed), and **`plan_free` and `plan_premium` name `plans_live` (failed)** -- D2940 deferred the claims without pricing the rows that cite them. Moved as the rules read, the close would remove the console's creation and its site steps (D2884) and make both plans `planned` while the control plane enforces Free -- all of it working at 1.24.0, every failure a proof's order (D2940 (3), (4)). | **The operator's decision (2026-10-29, after first choosing to re-earn now on a `slot12-prod`): Session 47 is Stage 5's LAST session.** It is a release anyway (the domain move, D2943, and the console's UX rework, the operator's first priority), every release re-earns on a fresh slot (D2714), and that slot's names are under `nomipg.com` -- a `slot12` made now under the old domain would be provisioned twice. So **Session 46 closes as a session, not the stage**: the three rows stay as they stand, the workstation's reading of them against `session-46.json` failing and reported (as `documented_path` is); the Ledger moves, scope-closure's stage section, the stage plan's Status and the Stage 6 report (Run 12) move to Session 47's close. Kept for 47: `s46-lifecycle.py --plans-only` / `--plans-record` (the refusal recorded while the slot is ready, before the journey; rehearsed live) and J9 read while the project lives (test-only `24d926e`). Nothing was provisioned for `slot12`. | Price a deferral by what reads the deferred thing. | 0254 |
 | **D2914** | D2881: the idle module's docstring line about the absent series. | The same docstring also said *"None of these proofs has ever executed"* — false since Session 45's sitting, whose merged evidence passed `idle_after_wake_live`. | **Both sentences corrected** in the one docstring edit. | A docstring is a claim (D2881). | — |
 
 ---
@@ -1627,6 +1633,16 @@ reading was removed on the same sheet (D2944). The migration plan's Run M7
 
 ### Run 11 — the close (Stage 5's)
 
+0. **Session 46 closes as a session; Stage 5 closes at Session 47 (D2945,
+   the operator's decision 2026-10-29).** D2942 repaired first (ADR 0294,
+   `2ec2c83`; CI green on `24d926e`, which also carries J9 read while the
+   project lives, test-only, for Session 47's journey). Steps 1, 3 and 4 below
+   and Run 12 are **Session 47's close**, not this run's: this run writes the
+   envelope's Session 46 section, scope-closure's Session 46 section (what 46
+   closed and left, what 47 inherits), the operator guide's release row, the
+   stage plan's Status (Stage 5 extended to Session 47), this plan's Status,
+   and the handoff -- with the Session 47 planning prompt the operator asked
+   for (the console's UX first).
 1. **The Ledger** from the TAGGED evidence (`evidence/session-46.json`):
    `projects_self_service` and `support_bundle` per D2884; the five rows of
    D2878; **every row re-read against the evidence, one line each in the
@@ -1658,9 +1674,35 @@ reading was removed on the same sheet (D2944). The migration plan's Run M7
    `test_console_pages`, `test_session12_documented_path`.
    `bin/session-01-check.sh` once (generated artefacts moved). Commit, push, CI.
 
-**Done.**
+**Done (2026-10-29) -- as step 0 rewrote it (D2945).** Notes: WSL
+`~/s46/run11/NOTES.md`. **D2942**: ADR 0294 -- `systemd-analyze`'s messages
+located in one of the machine's unit directories, in a file that is not one of
+the repository's `UNITS`, are off-host; ours never are, at the checkout path or
+installed, nor an unlocated line; the classifier a named function with its own
+test on the three measured lines and five it keeps; battery 4/4 killed (M2,
+*any directory is the machine's*, survived first: the kept list had no foreign
+file outside the machine's directories -- added) with `test_units_parse` the
+control; `2ec2c83`. **The Ledger read** against `evidence/session-46.json`
+found `projects_self_service`, `plan_free` and `plan_premium` citing the three
+failed claims (D2945); the operator chose first to re-earn them now on a
+`slot12-prod`, then -- before anything was provisioned -- **to make Session 47
+Stage 5's last session**. Built for 47 and kept: J9 read while the project
+lives (test-only `24d926e`: `read_the_string`, `CONNECTED_FILE`; read live on
+`slot3-prod`'s pooled door, seven refusals checked) and `s46-lifecycle.py
+--plans-only` / `--plans-record` (rehearsed live: `plan_limit_reached`,
+creations 8 → 8; the carry and its two refusals checked). CI: `6f09548` red
+(D2942), **`24d926e` contract 40862745736 green**. **Written**: the envelope's
+Session 46 section (eight readings) and one `UNMEASURED` row (`control.sh
+status`'s wall time, the bundle's pass per slot); `docs/scope-closure.md`
+**§39**; `docs/operator-guide.md` 1.24.0 / 46 and **§26**; the stage plan's
+Status (Stage 5 to Session 47); this Status; the Session 47 planning prompt
+(the launch folder's `session-47-planning-prompt.md`, the console's UX first,
+at the operator's request). **Not run**: `bin/session-01-check.sh` -- its suite
+reads the Ledger against `session-46.json`, where `plan_free` and
+`plan_premium` fail by D2945's decision; the targeted modules and CI are the
+check. Row D2945.
 
-### Run 12 — the Stage 6 decision report
+### Run 12 — the Stage 6 decision report (MOVED to Session 47's close, D2945)
 
 1. **`~/s46/run12/fill.py`** (the Session 35 filler's method,
    `~/s35r11/s35-r11-fill.py`): every number read from

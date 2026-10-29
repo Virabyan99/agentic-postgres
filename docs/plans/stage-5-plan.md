@@ -38,15 +38,21 @@ shape those take.
 ## Status — read this first
 
 ```
-STAGE 5 IS EXECUTING. SESSION 45 CLOSED 2026-10-24: 1.23.0 -- the visual
-                pass (self-hosted typefaces, one look on the site and the
-                console), notifications re-earned, D2805 decided (ADR 0289),
-                the seventh re-earning -- deployed on four projects with no
-                database restart, swept, merged and TAGGED on 4f4b207 (D1425);
-                agentic-postgres-cli 1.23.0 PUBLISHED to PyPI from the tag.
-                docs/plans/session-45-implementation-plan.md is its record;
-                docs/scope-closure.md §38 what it closed, left and hands
-                Session 46. This plan was written 2026-10-03 at 42bf306.
+STAGE 5 IS EXECUTING. SESSION 46 CLOSED 2026-10-29: 1.24.0 -- a PERSON
+                walked the hosted product (ADR 0290), the console creates a
+                project (ADR 0291), the support bundle (ADR 0292), `apg control
+                status` (ADR 0293), the journey, the eighth re-earning --
+                deployed on four projects with no database restart, swept,
+                merged and TAGGED on 55467b5 (D1425); agentic-postgres-cli
+                1.24.0 PUBLISHED to PyPI from the tag. The old Hetzner host
+                RETIRED (M7, Session 46 Run 10). **SESSION 47 IS STAGE 5'S LAST
+                SESSION** (the operator, 2026-10-29, D2945): the console's UX
+                rework first, the domain move to nomipg.com (D2943), one slot
+                that re-earns plans_live, journey_live and console_create_live,
+                then the stage close and the Stage 6 decision report.
+                docs/plans/session-46-implementation-plan.md is Session 46's
+                record; docs/scope-closure.md §39 what it closed, left and
+                hands Session 47. This plan was written 2026-10-03 at 42bf306.
 DIRECTION       HOSTED (D1946). Session 36 paid the preconditions; Session 37
                 built the control plane (ADRs 0251-0255); Session 38 managed
                 projects (ADRs 0256-0261) and the move (ADRs 0262-0267);
@@ -60,15 +66,19 @@ DIRECTION       HOSTED (D1946). Session 36 paid the preconditions; Session 37
                 its relay (ADRs 0285-0286) and the state of a project whose
                 branch or credential moved (ADR 0287); Session 45 the shared
                 look and self-hosted typefaces (ADR 0288) and the absent
-                request series read with its witnesses (ADR 0289).
-SESSIONS        36-46 (D1945, D2510, D2591-D2593, D2809). 36-45 DONE; 46 (the
-                journey, the person's walk, the Stage 5 release, the Stage 6
-                report -- D2593) unplanned. Session 46's walk needs
-                slot10-prod (slot1- to slot9-prod consumed).
-CURRENT_SESSION 45. Moves 45 -> 46, all-or-nothing per session (D690).
-template_version 1.23.0. host.yaml schema 4. Outputs v22, project manifest 11,
+                request series read with its witnesses (ADR 0289); Session 46
+                the hosted walk, the console's creation, the support bundle,
+                control status (ADRs 0290-0293) and the runner's own units
+                classified (ADR 0294).
+SESSIONS        36-47 (D1945, D2510, D2591-D2593, D2809, D2945). 36-46 DONE;
+                47 unplanned -- its planning prompt is in the launch folder
+                (session-47-planning-prompt.md). Its re-earning needs
+                slot12-prod, named under the new domain (slot1-9 and slot11
+                consumed; slot10-prod the person's, KEPT).
+CURRENT_SESSION 46. Moves 46 -> 47, all-or-nothing per session (D690).
+template_version 1.24.0. host.yaml schema 4. Outputs v22, project manifest 11,
                 capability manifest 4, lock 4, project lock 3, api-surface 2,
-                control set 9.
+                control set 10.
 POSTGRESQL      18.4 STAYS -- the operator, 2026-10-03 (D1947). Measured that
                 day on Docker Hub: postgres 19beta4 is the newest 19 tag; no
                 19rc, no 19 GA, no pgvector pg19 image.
@@ -76,21 +86,17 @@ HOST            OVH VPS US-East (Reston VA), apg-ovh-01, 15.204.231.45 -- the
                 move of 2026-10-08..10 (D2223, D2251), UPGRADED 2026-10-18 to
                 6 vCPU, 11,671 MiB, 95 GiB, no swap (D2628). alpha-dev,
                 beta-dev, control-prod (with the console and the SQL relay on
-                sql.agenticpostgresql.com) and slot3-prod (the one live
-                customer project, no branch) at 1.23.0 on 4f4b207, beside the
-                telemetry plane (ADR 0277, charged 3,552 MiB); slot1- to
-                slot9-prod CONSUMED and revoked (the next lifecycle needs
-                slot10-prod). The edge publishes 80, 443 and 5432. A reboot
-                brings all seven units back by themselves, the relay and a
-                branch with them. The Hetzner CX23 holds the stopped copies
-                until M7's X1/X2 (allowed since 2026-10-12, not run).
-                Secrets: a self-hosted Infisical (ADR 0262).
+                sql.agenticpostgresql.com), slot3-prod (the probe's customer
+                project) and slot10-prod (the first person's, KEPT) at 1.24.0
+                on 55467b5, beside the telemetry plane (ADR 0277). The edge
+                publishes 80, 443 and 5432. A reboot brings all eight units
+                back by themselves. The Hetzner host is GONE (M7, 2026-10-29).
+                Secrets: a self-hosted Infisical (ADR 0262), 443 admitted from
+                15.204.231.45 only.
 SITE            https://agenticpostgresql.com (and www) on Cloudflare Pages,
                 deployed by CI on every green push to main (ADR 0283); the
                 console at https://control.agenticpostgresql.com/console/.
-                The site and the console serve their two typefaces from
-                'self' (ADR 0288); main is past the 1.23.0 tag with test-only
-                and documentation commits.
+                The move to nomipg.com is Session 47's (D2943).
 CONTROL PLANE   PYTHON, DOGFOODED -- the operator, 2026-10-03 (D1950): the
                 control plane is a project the product itself deploys, with
                 its own migration set and the existing auth service. No
@@ -101,28 +107,29 @@ ACCOUNTS        INVITE-ONLY -- the operator, 2026-10-03 (D1951). No public signu
 OBSERVABILITY   ClickStack ADDED, bounded, on-host -- the operator, 2026-10-03,
                 reversing D1519 for Stage 5 (D1964). The per-project collector
                 and Prometheus stay; one source per customer-visible metric.
-EVIDENCE        evidence/session-45.json: 339 claims, 338 passed, 1 failed --
-                documented_path (D1935); the external half re-run from the
-                test-only d2e9c40 (D2860). Ledger: accounts, organizations,
-                api_keys, cli_remote, management_api, console, sql_editor,
-                notifications, pooled_endpoint, direct_endpoint, postgresql,
-                branches, restore_to_branch, backups_and_pitr, usage,
-                plan_free, plan_premium, the six managed-project rows,
-                idle_sleep, query_insights and monitoring `beta`; no row
-                `trial`; ACCEPTED_TYPES = all eleven executed types.
-ADRs            289, next free 0290.   migrations 39.   requirements 432.
-                claims 339, 160 declared offline.
+EVIDENCE        evidence/session-46.json: 348 claims, 343 passed, 5 failed --
+                appliance_documented_path (D1935), documented_path (the
+                person's 11, D2936), plans_live, journey_live,
+                console_create_live (a proof's order, D2940; re-earned in
+                Session 47, D2945). Ledger as Session 46's bump left it:
+                projects_self_service and support_bundle `trial`; plan_free
+                and plan_premium `beta` naming the failed plans_live -- the
+                workstation's reading against session-46.json fails them,
+                reported; every Ledger move is Session 47's close.
+ADRs            294, next free 0295.   migrations 39.   requirements 441.
+                claims 348, 164 declared offline.
 divergences     D1-D1944 in earlier plans; D1945-D1984 and D2808-D2811 here; D1985-D2041 in
                 Session 36's; D2042-D2144 in Session 37's; D2145-D2324 in
                 Session 38's and its migration plan's; D2325-D2421 in Session
                 39's; D2422-D2509 in Session 40's; D2510-D2560 in Session 41's;
                 D2561-D2649 in Session 42's (D2591-D2596 Sessions 43-45's
                 choices); D2650-D2731 in Session 43's; D2732-D2807 in Session
-                44's; D2812-D2861 in Session 45's. **Next free: D2862.**
+                44's; D2812-D2861 in Session 45's; D2862-D2945 in Session
+                46's. **Next free: D2946.**
 ```
 
 **Every number in §0 onward was measured on 2026-10-03 at `42bf306`**, or says
-whose it is. **The Status block above is re-read at each session's close.** (Re-read and rewritten at Session 45's close, 2026-10-24.)
+whose it is. **The Status block above is re-read at each session's close.** (Re-read and rewritten at Session 46's close, 2026-10-29.)
 
 ---
 

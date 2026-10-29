@@ -1596,6 +1596,117 @@ Sampled under:
 
 Session 44's: V1 60 min 55 s, the sweep's suite 75-80 min, external 12 min.
 
+### 1.24.0's deploy, per project and class (R2a-R2d, no database restart)
+
+**rest never unanswered; auth 8.5 s (beta-dev), 9.6 s (alpha-dev), 8.5 s (slot3-prod), 8.3 s (control-prod); the console 7.1 s, recreated; the relay untouched; every deploy exit 0**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap
+- 55467b5, 2026-10-26 08:31-08:38Z, one project at a time
+- s46-window.py from the workstation, one GET a second per class, answers as taken
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 45's at 4f4b207, also with no restart: auth 8.2-10.3 s, console 8.0 s.
+
+### The first person's walk of the hosted product (DX-HOSTED-001, ADR 0290)
+
+**the invitation link opened at 08:00Z; the account at +2 min, the organisation +3, the second factor +8, the creation accepted in the console +13, a working connection string +20, their own application connected +30; finished +40, with 11 steps no page told them (D2936)**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap, serving slot10-prod's creation
+- the person's own browser and clock (UTC+4), read to the minute
+- 55467b5, 2026-10-28, their confirmed record ~/s46/person/record.json
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+A person's times, not a driver's: no two walks are the same measurement.
+
+### The journey (JRN-001): a membership link to a project made in the console
+
+**the link to the account 5.1 s, the account 4.7 s, a new organisation 1.2 s, the owner's factor 8.6 s, the creation accepted 0.8 s and followed to succeeded in 1,565.5 s, Connect 42.8 s, the SQL editor's SELECT 1 2.9 s, five readings 4.2 s, the support bundle (12 checks, aged) 1.2 s, sign-out 6.4 s**
+
+Sampled under:
+
+- the operator's development machine (Windows 11, WSL 2), reaching the deployment host over the public internet
+- Chromium in the pinned Playwright image; the driver from 55467b5
+- 55467b5, 2026-10-28 18:28-18:55Z, slot11-prod, ~/s46/journey/record.json
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 45's slot9-prod create by the CLI: 1,708.4 s.
+
+### The eighth re-earning: slot11-prod's lifecycle at 1.24.0, from the journey
+
+**continued from the journey's creation in its second attempt (D2938); wake's first answer 18.7 s; resizes admitted 304 and 840 of 4,497 safe; the export 40,339 B; 6,905 MiB free with the slot live; the idle sleep requested by the reconciler at 15 minutes; the neighbours: 0 unanswered**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap
+- 55467b5, 2026-10-28 19:09-20:02Z, the journey's organisation, attempt 2
+- s46-lifecycle.py --from-journey from the workstation, detached; s46-probe-start.sh
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 45's slot9-prod: wake 19.2 s, resizes of 4,801 safe.
+
+### The SQL editor against psql at 1.24.0, from the same workstation
+
+**20 x SELECT 1: median 205.0 ms in the editor, 161.7 ms in psql (159.2-173.9); the console walk's invitation link to a working connection string 26.1 s, its first contentful paint 1,036-1,296 ms**
+
+Sampled under:
+
+- the operator's development machine (Windows 11, WSL 2), reaching the deployment host over the public internet
+- Chromium in the pinned Playwright image; psql 18 from the same machine
+- 55467b5, 2026-10-26 10:08-10:32Z, slot3-prod, ~/s46/sql/record.json
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 45's: 224.0 ms against 160.2 ms -- the workstation's, not a promise.
+
+### The support bundle's reading on the host (ADR 0292)
+
+**12 checks, every one ok, read as a member 81 s after the reconciler's first pass following its restart, with the project's last 40 operations; unauthenticated 401**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap
+- 55467b5, 2026-10-26 08:40:05Z, slot3-prod, the probe owner's session
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The doctor runs per slot every 900 s; a reading older than 1,800 s reads stale.
+
+### Branches and the reboot at 1.24.0 (slot3-prod)
+
+**tmp deleted by the reconciler's expiry 606.6 s after expires_at; after a reboot all eight units active by boot+81 s, each started by the boot, dev and the relay back by themselves**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap
+- 55467b5, 2026-10-28 20:06-21:24Z; the reboot booted at 21:29:45Z
+- s46-branches.py from the workstation, detached; s46-after-reboot.sh
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 45's expiry 253.3 s and boot+97 s: a reconciler pass's spacing.
+
+### The host suite's duration at 1.24.0
+
+**V1 (writing nothing): 414 passed, 1 failed, 8 skipped in 40 min 56 s; the sweep's suite 434 / 1 in 80 min 14 s; the external half 161 / 5, re-run from the test-only a34c906 (D2940)**
+
+Sampled under:
+
+- the 11,671 MiB deployment host apg-ovh-01 (OVH VPS US-East, Reston VA), 6 vCPU, no swap; the external half from the operator's development machine
+- 55467b5, 2026-10-26 (V1) and 2026-10-28/29 (the sweep, the external half)
+- s46-v1.sh and s46-sweep.sh as root, stdin from /dev/null; s46-external.sh
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Session 45's: V1 69 min 29 s, the sweep's suite 34 min 11 s.
+
 ---
 
 ## What was not measured, and why
@@ -1616,6 +1727,12 @@ ADR 0255's client waits on a 429 silently; the two boots after it took ~30 s lon
 E1 read the plane under load and was torn down; after T1 installed it no sheet took its containers' docker stats at rest (op cannot reach the Docker socket, D1375), and a free -m difference across the day's other changes is not its footprint.
 
 *Unblocked by: a root docker stats --no-stream of the four apg-telemetry containers, idle.*
+
+### `control.sh status`'s wall time and the support bundle's pass per slot
+
+Session 46's Sheet CS read `control.sh status` exit 0 and its counts, untimed; the reconciler records each doctor pass's verdicts, not how long the pass took, and Sheet IR4's timing was of the doctor alone.
+
+*Unblocked by: `time` around Sheet CS, and the pass's start and end in the reconciler.*
 
 ### The deployment's own numbers, on the deployment
 

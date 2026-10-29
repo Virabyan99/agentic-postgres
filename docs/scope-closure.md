@@ -1893,3 +1893,67 @@ the instrument and Session 45's own proof, not the two older readers (D979).
 4. The plan's §10, both lists, and Run 9's rows D2858-D2861 -- among them: a
    host-side dependency ships with the sheet that runs it, and a reader whose
    waiter cannot run stops rather than judging (D2861).
+
+## 39. What Session 46 closed, what it left, and what Session 47 inherits
+
+**Session 46 is the person's walk and the Stage 5 release** (D2862-D2889): a
+PERSON the operator recruited walked the hosted product from the site and an
+account invitation on `slot10-prod` (kept, theirs); the console creates a
+project (ADR 0291); the support bundle (ADR 0292) and `apg control status` (ADR
+0293); the journey from a membership link to a deleted project; the eighth
+re-earning continued from the journey's creation; the old Hetzner host retired
+(M7). Eleven runs, `D2862`–`D2945`, ADRs 0290–0294. **`1.24.0` is deployed on
+four projects, swept, merged and tagged on `55467b5`** (D1425), with no database
+restart; **the tag published `agentic-postgres-cli` 1.24.0 to PyPI.** The merged
+evidence reads **348 claims: 343 passed, 5 failed** -- `appliance_documented_path`
+(D1935), `documented_path` (the person's 11 findings, D2936), and `plans_live`,
+`journey_live`, `console_create_live`, each failed by a proof's ORDER in the
+journey mode, not by the product (D2940). **Stage 5 does not close here: the
+operator made Session 47 its last session** (D2945) -- the domain move, the
+console's UX rework and one fresh slot that re-earns the three.
+
+**The sentence this session would most want carried forward: price a deferral by
+what reads the deferred thing.** D2940 left three claims failed to the next
+session and read only the claims; at the close, three Ledger rows cited them, and
+the rules would have removed working features to stay true (D2945).
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **A person walked** (ADR 0290, DX-HOSTED-001) | The first person ever: account, second factor, organisation, a project created in the console and their own application connected in 30 minutes by their clock; their record confirmed in their words (`~/s46/person/record.json`). `documented_path` does not close -- the 11 steps no page told them are the site's findings, not theirs (D2936). |
+| **The console creates a project** (ADR 0291) | Built and released; the token made in the page, only its SHA-256 sent, shown once. The person and the journey both created through it; `console_create` passed offline. Its live claim failed on the proof's order (D2940 (4)). |
+| **The support bundle** (ADR 0292) | `support_bundle` and `support_bundle_live` passed: the doctor's twelve verdicts recorded by the reconciler, read by a member, no host path, aged. |
+| **`apg control status`** (ADR 0293) | `control_status` and `control_status_host` passed. |
+| **The eighth re-earning** | Every lifecycle and branch claim re-earned at 1.24.0: the lifecycle continued the journey's creation on `slot11-prod` (its second attempt, D2938); branches on `slot3-prod`; at B1 all eight units came back by themselves by boot+81 s. |
+| **M7 -- the old Hetzner host retired** (Run 10) | Its rehome identities revoked, the Infisical Cloud organisation emptied, the server deleted, the store's 443 rule for it removed; the store admits 443 from `15.204.231.45` only (D2944: a console sitting ends with `ufw status numbered` read). |
+| **D2942** (ADR 0294) | `systemd-analyze`'s messages about the CI runner's own unit files are classified by FILE; main's CI green again on `24d926e`. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **`plans_live`, `journey_live`, `console_create_live`** (D2940, D2945) | Proof order only. Their fixes are made: `s46-lifecycle.py --plans-only` / `--plans-record` (the refusal recorded while the slot is ready, before the journey) and J9 read while the project lives (test-only `24d926e`). **Re-earned in Session 47 on its one slot under `nomipg.com`.** |
+| **The three Ledger rows that cite them** (D2945) | `projects_self_service` (`trial`, `console_create_live`), `plan_free` and `plan_premium` (`beta`, `plans_live`): left as they stand; the workstation's reading of them against `evidence/session-46.json` fails and is reported. Every Ledger move of D2884, D2878 and D2875 is Session 47's close. |
+| **`documented_path`** (D2936) | The person's 11 findings, and the operator's verdict on the console's UX -- **Session 47's first priority**, with a second person's walk after the rework. |
+| **D2933** -- branch wildcards | No slot sheet since Session 40 created `*.pool` / `*.direct`; added for `slot10` and `slot11` by hand. The slot sheet must name five records. |
+| **D2941** -- the walk proofs | Read the site by digest, admit an empty `commands_run`. |
+| **D2943** -- the domain | `nomipg.com`, bought; measured, not moved. |
+| **The Stage 6 decision report** (Run 12) | Moved to Session 47's close with the stage close (D2945). |
+| **`control.sh status`'s wall time, the bundle's pass per slot, the plane at rest** | `UNMEASURED`. |
+| **`slot1-` … `slot9-prod`, `slot11-prod` consumed; `slot10-prod` allocated (the person's, KEPT)** | **Session 47's re-earning needs `slot12-prod`**, its names under the new domain. |
+
+### What Session 47 inherits, in order
+
+1. **The console's UX/UI, the operator's first priority**: the person's
+   findings (D2936; their own words in `~/s46/person/`), a design brief and
+   prototypes the operator approves before the build, and a second person's
+   walk; the planning prompt is in the launch folder
+   (`session-47-planning-prompt.md`).
+2. **The domain move to `nomipg.com`** (D2943), a release of five --
+   `slot10-prod`'s connection strings change and its person is told.
+3. **The three claims re-earned** on one fresh slot with five DNS records
+   (D2933, D2945), the lifecycle in one attempt from the journey.
+4. **Stage 5's close**: the Ledger (D2884, D2878, D2875), this file's stage
+   section with §28's lists re-audited, the stage plan's Status, then the Stage
+   6 decision report.
