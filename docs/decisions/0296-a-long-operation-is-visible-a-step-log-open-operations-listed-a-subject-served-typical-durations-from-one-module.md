@@ -8,8 +8,8 @@
   (new; control set 10 → 11), `services/auth-api/app/control_routes.py`
   (`GET /v1/operations` gains `status`), `control_service.py`, `control_repository.py`,
   `models.py`, `contracts/control-openapi.canonical.json`, new
-  `services/auth-api/app/operation_steps.py` (a shared module, ADR 0084) and its
-  re-export `src/agentic_postgres/operation_steps.py` (D2992),
+  `services/auth-api/app/operation_steps.py` (the service's own module; its tests
+  load it by `service_source.load`, ADR 0084 — D2992, D2998),
   `services/console/public/progress.js` and the tracker view. Tests: new
   `tests/contract/test_control_operation_steps.py`, `test_operation_steps.py`;
   widened `test_control_set`, `test_control_routes`, `test_auth_service_shape`
@@ -72,9 +72,10 @@ absent from the whole row. The request role selecting the table directly:
    the route's own answer to a bad query, as for a missing `organization` (D2993);
    absent, the list is unchanged. Filtered in the service over the existing
    reader — no new SQL argument.
-4. **`services/auth-api/app/operation_steps.py`** (standard library only, a
-   `SHARED_MODULE` like `plans`, re-exported by `src/agentic_postgres/
-   operation_steps.py`, D2992): per operation type, the ordered steps, a plain
+4. **`services/auth-api/app/operation_steps.py`** (standard library only; the
+   service's module, loaded by its tests through `service_source.load` as
+   `connection_snippets` is — no `src/` re-export, which nothing but a test would
+   import, D204, D2998): per operation type, the ordered steps, a plain
    label each (*"Taking the first full backup"*, never `backup`), the measured
    **typical time** as a range (`low`, `high`, each citing its envelope record),
    **per-step seconds where a per-step measurement exists** (`project.create`'s,

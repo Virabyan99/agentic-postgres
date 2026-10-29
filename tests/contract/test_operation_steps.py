@@ -12,10 +12,13 @@ import ast
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, capacity, operation_steps, operations
+from agentic_postgres import REPO_ROOT, capacity, operations, service_source
 from agentic_postgres import reconciler_dispatch as dispatch
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
+
+#: The service's own table (ADR 0084): no module outside the tests re-exports it (D204).
+operation_steps = service_source.load("operation_steps")
 
 
 def _reconciler_constant(name: str) -> object:

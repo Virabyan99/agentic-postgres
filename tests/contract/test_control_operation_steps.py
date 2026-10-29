@@ -27,9 +27,12 @@ from typing import Any
 import control_cluster as cc
 import pytest
 
-from agentic_postgres import REPO_ROOT, operation_steps, operations
+from agentic_postgres import REPO_ROOT, operations, service_source
 
 pytestmark = [pytest.mark.contract, pytest.mark.database, pytest.mark.security, pytest.mark.p0]
+
+#: The service's own table (ADR 0084): no module outside the tests re-exports it (D204).
+operation_steps = service_source.load("operation_steps")
 
 TEMPLATES = REPO_ROOT / "projects" / "control" / "migrations" / "templates"
 SCHEMA = REPO_ROOT / "schemas" / "operation-arguments.schema.json"
