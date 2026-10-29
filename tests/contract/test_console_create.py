@@ -197,7 +197,11 @@ def test_a_refusal_is_the_servers(tmp_path: Path) -> None:
     view = _view("newProjectView")
     assert "catch (error)" in view and "refusal(error, { organization: org })" in view
     app = (PUBLIC / "app.js").read_text(encoding="utf-8")
-    assert 'import { refusal, said, sentence } from "/console/messages.js";' in app
+    # Since Session 47 Run 6 (D3012) the editor's close words come from there too.
+    assert (
+        'import { closeSentence, refusal, said, sentence, SESSION_LIMITS } from "/console/messages.js";'
+        in app
+    )
     # Since Session 47 (ADR 0295 decision 3, ADR 0297) the words live in messages.js.
     words = (PUBLIC / "messages.js").read_text(encoding="utf-8")
     refusals = words[

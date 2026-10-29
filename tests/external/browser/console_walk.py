@@ -7,7 +7,10 @@ the page's own QR text, signs in, takes the live CSRF readings with its real
 session (statuses only), rotates a project's `customer_app` password from the
 Connect page, reads the password and the pooled string once, reloads to see
 them gone, signs out, and writes ONE record the external proofs read through
-`APG_CONSOLE_RECORD_FILE`.
+`APG_CONSOLE_RECORD_FILE`. Since Session 47 Run 6 (D2956) Connect is three
+steps: the record also names the client tabs served, how many snippets held
+the new password (inside the shown-once box) and how many values outside it
+did (0), and that *I have saved the password* removed it before the reload.
 
 **The record holds no secret** (D2416): every password, the TOTP seed, the
 invitation token and the cookie values stay in variables, and before the
@@ -28,6 +31,7 @@ import argparse
 import base64
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 import secrets
@@ -41,6 +45,19 @@ from urllib.parse import parse_qs, urlsplit
 from playwright.sync_api import Page, Route, sync_playwright
 
 STEP_SECONDS = 30
+#: The server's snippet module, standard library only (its own docstring):
+#: the rehearsal serves what it builds. The checkout is beside this driver.
+SNIPPETS = (
+    Path(__file__).resolve().parents[3] / "services" / "auth-api" / "app" / "connection_snippets.py"
+)
+
+
+def snippet_module() -> Any:
+    spec = importlib.util.spec_from_file_location("connection_snippets", SNIPPETS)
+    assert spec is not None and spec.loader is not None, SNIPPETS
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def totp(seed: bytes, at: float) -> str:
@@ -116,6 +133,9 @@ class Fixtures:
         self.account: dict[str, Any] | None = None
         self.factor = False
         self.confirm_step: int | None = None
+        # Loaded once, before the browser starts: a stand-in that read the file
+        # on every request could fail inside the route handler mid-walk.
+        self.snippets = snippet_module()
 
     def handle(self, route: Route) -> None:
         request = route.request
@@ -174,12 +194,22 @@ class Fixtures:
             status, answer = 200, {"projects": [{"key": self.project, "state": "ready",
                                                  "profile": "small"}]}  # fmt: skip
         elif method == "GET" and path == f"/projects/{self.project}/connections":
-            door = {"port": 5432, "user": "customer_app", "database": "slot3"}
+            door = {"port": 5432, "user": "customer_app", "database": "slot3",
+                    "sslmode": "verify-full", "connection_limit": 2}  # fmt: skip
+            pooled = {**door, "host": f"pool.{self.project}.example.test"}
+            direct = {
+                **door,
+                "user": "customer_admin",
+                "host": f"direct.{self.project}.example.test",
+            }
+            # The server's own snippets and `where` lines (Session 47 Run 6),
+            # built by its module from these doors -- never retyped here.
+            served = self.snippets
             status, answer = 200, {
-                "pooled": {**door, "host": f"pool.{self.project}.example.test"},
-                "direct": {**door, "user": "customer_admin",
-                           "host": f"direct.{self.project}.example.test"},
-                "password": "the file `credential` wrote", "snippets": {}}  # fmt: skip
+                "project": self.project, "pooled": pooled, "direct": direct,
+                "password": served.PASSWORD_PLACEHOLDER,
+                "snippets": served.snippets({"enabled": True, "pooled": pooled, "direct": direct}),
+                **({"where": served.where()} if hasattr(served, "where") else {})}  # fmt: skip
         elif method == "POST" and path == f"/projects/{self.project}/credentials":
             assert body["role"] == "customer_app" and body["verifier"].startswith(
                 "SCRAM-SHA-256$4096:"
@@ -329,12 +359,21 @@ def walk(arguments: argparse.Namespace) -> int:
             else:
 
                 def rotate() -> tuple[str, str]:
+                    # Session 47 Run 6 (D2956): Connect is three steps; the pooled
+                    # door is chosen by default, its step 2 makes customer_app's password.
                     page.goto(f"{walker.base}/console/#/projects/{arguments.project}/connect")
+                    make = page.get_by_role(
+                        "button", name="Make a new password for the pooled door"
+                    )
+                    make.wait_for()
+                    walker.record["clients"] = [
+                        tab.inner_text().strip() for tab in page.locator("#main [role=tab]").all()
+                    ]
+                    make.click()
                     page.get_by_role(
-                        "button", name="New password for the pooled door (customer_app)"
-                    ).click()
-                    page.locator(".once code.secret").wait_for(timeout=300_000)
-                    shown = page.locator("#main code.secret").all()
+                        "heading", name="Your new password for the pooled door"
+                    ).wait_for(timeout=300_000)
+                    shown = page.locator("#main .once code.secret").all()
                     return shown[0].inner_text().strip(), shown[1].inner_text().strip()
 
                 rotated, string = walker.step("rotate customer_app from Connect", rotate)
@@ -348,11 +387,28 @@ def walk(arguments: argparse.Namespace) -> int:
                 walker.record["string_port"] = parts.port
                 walker.record["string_user"] = parts.username
                 walker.record["string_database"] = parts.path.lstrip("/")
+                # The snippets that hold it: inside the shown-once box only (D2956).
+                held = page.locator("#main .held code.secret").all()
+                walker.record["snippets_holding_the_password"] = sum(
+                    1 for code in held if rotated in (code.text_content() or "")
+                )
+                walker.record["password_outside_the_panel"] = page.evaluate(
+                    "(p) => [...document.querySelectorAll('#main code')].filter((c) =>"
+                    " !c.closest('.once, .held') && c.textContent.includes(p)).length",
+                    rotated,
+                )
+
+                def saved_gone() -> None:
+                    page.get_by_role("button", name="I have saved the password").click()
+                    page.locator("#main .once-done").wait_for()
+                    walker.record["password_gone_after_saved"] = rotated not in page.content()
+
+                walker.step("saved: the password is gone", saved_gone)
 
                 def reload_gone() -> None:
                     page.reload(wait_until="load")
                     page.get_by_role(
-                        "button", name="New password for the pooled door (customer_app)"
+                        "button", name="Make a new password for the pooled door"
                     ).wait_for()
                     walker.record["password_gone_after_reload"] = rotated not in page.content()
 

@@ -83,7 +83,8 @@ stays (decision 5).
    `ROUTES` entry of `serve.py` and an entry of `test_console_server.py`'s `LISTED`
    and `test_every_script_parses`'s set, widened in the same commit (D2908's
    method): `ui.js` (the components), `nav.js` (the shell, the switchers, the
-   breadcrumb), `messages.js` (ADR 0297), and the **DOM-free** `progress.js` (ADR 0296), tested
+   breadcrumb), `messages.js` (ADR 0297), and the **DOM-free** `progress.js` (ADR 0296)
+   and `copies.js` (a door's string and parts, the password fill, CSV — D3017), tested
    in the pinned Node image. Connect's snippets are the server's (decision 7,
    D2991), not a console module. Static `import` only — no dynamic `import()`, no `eval`, no
    `Function`.
@@ -126,7 +127,10 @@ stays (decision 5).
    the results; results with a sticky header, the row count and the time. ADR
    0285's rules hold — the password read once, the input cleared, never stored.
    `sql.js`'s decisions are not edited except by a test that moves with a clause of
-   this ADR.
+   this ADR. *Run 6 (D3032)*: its close table removed and `endSentence`, `openDoor`
+   and `runStatement` take the page's `closeSentence` from `messages.js`, as they
+   take `call` and `connect` — the wording moved, the protocol did not;
+   `test_every_ending_has_a_sentence` moved with it.
 9. **The look is proved in a browser** as ADR 0288 decision 9 proves the site:
    `tests/external/browser/console_look.py` reads every signed-in console page at
    both widths — no overflow, every request to the page's own origin or the relay,

@@ -335,7 +335,10 @@ runs add go in a second table below it, in execution order.
 | **D3014** | ADR 0295 d6: every input labelled. | Run 4's `field()` put the hint inside the `<label>`, so the accessible name became label + hint (it broke `get_by_label("Name", exact=True)`). | The hint is **outside** the label, tied by `aria-describedby`. | A label names; a hint describes. | 0295 |
 | **D3015** | D3005 (a): never read an operation for context. | Inline `waitFor` (Connect, Branches, Settings) kept polling after the page was left — it could spend an export's one-time link. | `waitFor` takes the route turn and stops; Settings and Branches link to the tracker; Connect's rotate does not (its password is shown on that page). | A poll belongs to its page. | 0296 |
 | **D3016** | ADR 0291 d3: the panel shows the operation's id. | The id is in the address (`#/operations/<id>`). | **ADR 0291 amended** (Session 47 Run 5); `journey_walk` j06 reads the id from the URL. | The address is the record. | 0291 |
-| **D3020** | `connection_snippets`' docstring: psycopg's `sslrootcert=system` was measured (rig 39c). | Rig 39c passed an explicit CA file. **`sslrootcert=system` fails on any machine with `psycopg[binary]`** (3.2.12 and 3.3.4): its bundled OpenSSL's OPENSSLDIR is its build directory (`/host/tmp/libpq.build`). **The psycopg snippet served since Session 39 never verified a certificate.** | **The snippet uses `sslrootcert=certifi.where()`** (executed: verified, query, prepare; misnamed host refused); `test_each_client_verifies_the_server`'s psycopg assertion replaced by the stricter executed one. ADR 0295 decision 7 records it. | *A value that looked measured and was not* (§7). | 0295 |
+| **D3017** | D2991: ten console modules. | Connect's password fill and the editor's CSV need DOM-free, Node-tested code that fits no existing module. | **`copies.js`** (a door's string and parts, `fillPassword`, `guide`, `csv`; no snippet text); `ROUTES`, `LISTED` and the parse set widened in the same change; **ADR 0295 decision 3's list is eleven files**. | Pure code is tested in Node. | 0295 |
+| **D3018** | D3012: decide `1009`. | The old `sql.js` worded 1009; the page refuses to send over 1 MiB, the relay sends 64 KiB chunks and `max_size` is 1 MiB. | **Not in `CLOSES`**: it cannot arrive; a code with no entry is still worded, with its number. | Word what can happen. | 0297 |
+| **D3019** | Brief: copy on every value. | The console's own connection string is `…?sslmode=verify-full` **without `sslrootcert=system`**: libpq then reads `~/.postgresql/root.crt` and psql refuses it on most machines; but node-pg reads `sslrootcert=system` as a file path (D3024), so adding it breaks Node. | **Run 9 measures** which clients take the bare string (rig 47-run6's harness) and labels the generic string for them, pointing everyone else to their tab; the J9 and console proofs read that string, so it moves with them. | One string cannot suit every client; say which. | 0295 |
+: psycopg's `sslrootcert=system` was measured (rig 39c). | Rig 39c passed an explicit CA file. **`sslrootcert=system` fails on any machine with `psycopg[binary]`** (3.2.12 and 3.3.4): its bundled OpenSSL's OPENSSLDIR is its build directory (`/host/tmp/libpq.build`). **The psycopg snippet served since Session 39 never verified a certificate.** | **The snippet uses `sslrootcert=certifi.where()`** (executed: verified, query, prepare; misnamed host refused); `test_each_client_verifies_the_server`'s psycopg assertion replaced by the stricter executed one. ADR 0295 decision 7 records it. | *A value that looked measured and was not* (§7). | 0295 |
 | **D3021** | — | `services/clients/psycopg/entrypoint.sh` sets `PGSSLROOTCERT=system` in its `verify-full` mode with psycopg[binary] 3.2.12 — the same defect, in a deployment fixture. | **Run 10 repairs it** (its small repairs) and reads which proof uses that mode; untouched by Run 6. | One defect, two places; the second is a fixture's. | — |
 | **D3022** | D2956: Drizzle with its migrations. | `drizzle-orm`'s `migrate()` runs `CREATE SCHEMA IF NOT EXISTS` first and is refused (`permission denied for database`) — the customer roles have no CREATE on the database (ADR 0269). | **Drizzle ships for the pooled door**; its migrations' SQL goes through psql's direct line (the snippet's comment says so), and `test_drizzles_own_migrator_is_refused_on_the_direct_door` proves the refusal. Granting CREATE to `customer_admin` is the operator's alternative, not taken. | Ship what runs; say what does not. | 0269 |
 | **D3023** | — | Prisma Client does not read `.env`; `directUrl` is Prisma 6's model (7 not measured); `migrate` returns P3005 on a non-empty `public`. | `where` says `node --env-file=.env` and pins `@6`; **Run 8's connecting page says how to baseline** a database that already has tables. | The install line is what was run. | — |
@@ -347,6 +350,9 @@ runs add go in a second table below it, in execution order.
 | **D3029** | — | Mutation (c) (`max_prepared_statements = 0`) first killed only go-pgx: one sequential connection never switches server connection. | The node-pg, drizzle and prisma harnesses run **3 parallel rounds**; (c) now kills all four. | A survivor named a weak test. | — |
 | **D3030** | — | `bin/cloud.py endpoint show` does not print `where`; the packaged CLI changes only in a release of four. | **Run 12** decides whether the CLI shows `where` at the bump; the console renders it (Run 6's console half told). | The console first; the CLI with the release. | — |
 | **D3031** | — | CI (p0) and the session-01 gate now build five client images, a golang pull among them; a cache-cold run unmeasured. | **Read on this commit's CI**; if a job's time moves past its limit, a row. | Measured on the next push. | — |
+| **D3032** | ADR 0295 decision 8: `sql.js`' decisions are not edited. | Routing closes through `messages.js` (D3012) needed `sql.js`'s close table removed and `endSentence`/`openDoor`/`runStatement` taking the page's `closeSentence` (as they take `call`, `connect`); `test_every_ending_has_a_sentence` moved with it. | **Kept to exactly that**; the protocol decisions untouched; ADR 0295 decision 8 notes it. | The wording moved; the wire did not. | 0295 |
+| **D3033** | — | One rehearsal pass of `console_walk` timed out once at *reload: the password is gone* (30 s), at 23:19 — the minute the server half was committed (contention likely, not proven); four repeats green. | The stand-in now loads its module once; **watch at Run 11's rehearsals**. | An unexplained failure is written down. | — |
+| **D3034** | Session 40 (D2467): the suite jobs' limit is 30 minutes. | **CI on `8f953b3` was CANCELLED, not failed**: *Session 2 offline contract* reached 30:00 (19:21:04 → 19:51:04); *Session 1 gate* passed in 26:40. The jobs ran 21.7–28.9 min on `c0f9b40`/`ae2da7e`; the executed snippets (five client images, a golang pull) took the offline job over. | **Both suite jobs' `timeout-minutes` 45** (`.github/workflows/ci.yml`, commented); every test that reads `ci.yml` re-run (370 passed). D3031 answered. | A limit the suite outgrows cancels proof, not failure. | — |
 
 ---
 
@@ -737,7 +743,47 @@ for Run 12 (all in `test_connection_snippets.py`):
 `test_the_misnamed_door_answers_a_client_that_does_not_verify`,
 `test_drizzles_own_migrator_is_refused_on_the_direct_door`. Rows **D3020–D3031**.
 
-**Done (console half).**
+**Done (console half).** 2026-10-29, built by a delegated agent, reviewed and re-run in
+the main session (WSL `~/s47/run6c/`). **Connect** in three numbered steps: the door
+(two radio cards, pooled *Recommended*, two lines of use each, *both doors always
+exist*); **the password** (made in the browser, only its SCRAM verifier sent, shown
+once, replacing the old one — the rotate flow unchanged) in a shown-once panel with
+the password and its connection string, both copyable, then *I have saved the
+password*; **the code**: one tab per served client in the served order (7), each a
+code block with copy and the server's `where` line; the password filled only inside
+an amber *held* box and only into its own door's placeholders (`copies.js`
+`fillPassword`); *What the connection string means* (each part with copy); *No psql
+yet?*. **The editor**: a state bar at the top (connected or not, door, user,
+database, *Disconnect*, one live status), **one state function** (`showConnected`) —
+connected hides the credentials form, not connected shows it alone; the password
+read once, cleared, never stored (ADR 0285); a first statement that changes
+nothing; Connect/Run/Cancel/Disconnect busy buttons; results with count, time,
+*Copy as CSV* (RFC 4180, `copies.js`) and a sticky header; the session limits beside
+*Run* tied by a test to the relay's and `pg.js`'s numbers; **every close worded by
+`messages.js`** (D3012, D3018, D3032). Tests: new `test_console_connect` (7) and
+`test_console_sql` +4, pins moved, `ANCHORS` re-counted, `console_walk`'s stand-in
+built from the server's own module (7 snippets + `where`). **Battery 10/10.**
+**Rehearsed twice, green** (`console_walk` 12/12 — `password_outside_the_panel` 0,
+`password_gone_after_reload` true; `sql_walk` 36/36 — `form_hidden_while_connected`
+true; `journey_walk` j01–j13; controls as before) after one unexplained earlier
+timeout (D3033). 48 screenshots: no overflow, no console error, own origin only.
+**Main-session review**: rule scan clean (`app.css` 28,705 B); Connect after a password
+(390) and the connected editor with results (1280) read as the brief; **re-run**:
+console set + `test_look` 116 passed; the registry/ledger/documentation/gates/fleet/
+shape/repository modules 357 + D2945's decided failure. **CI on `8f953b3` cancelled at
+the 30-minute limit (D3034)** — limit raised to 45 in this commit, whose CI covers the
+server half too. New node ids for Run 12: `test_console_connect.py::`
+`test_the_password_fills_only_its_own_doors_placeholders`,
+`test_a_snippet_holds_a_password_only_inside_the_shown_once_panel`,
+`test_every_value_on_connect_has_a_copy_control`,
+`test_connect_draws_the_clients_the_server_serves`,
+`test_the_guide_line_is_read_when_served`, `test_a_result_is_copied_as_csv`,
+`test_the_copies_module_is_dom_free_and_keeps_nothing`; `test_console_sql.py::`
+`test_no_close_is_worded_outside_messages_js`,
+`test_the_session_limits_beside_run_are_the_relays`,
+`test_the_editor_hides_its_form_while_connected`,
+`test_the_editors_actions_are_busy_buttons_and_its_first_statement_changes_nothing`.
+Rows **D3017–D3019, D3032–D3034**. NEXT FREE D3035 (D3040+ Run 8's, D3060+ Run 10's).
 
 ### Run 7 — notifications, help and onboarding
 

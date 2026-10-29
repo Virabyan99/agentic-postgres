@@ -164,8 +164,6 @@ main { min-width: 0; padding: var(--space-6) var(--space-4) var(--space-11); }
 .card-actions { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); margin-top: var(--space-3); }
 .links { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
 .sub { display: block; }
-.door { margin-top: var(--space-4); }
-.door p { margin-bottom: var(--space-2); }
 .facts { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-7); margin: 0; }
 .facts dt { color: var(--text-3); font-size: 13px; }
 .facts dd { margin: 0; font-weight: 600; }
@@ -185,7 +183,7 @@ label .hint { display: block; font-size: 13px; font-weight: 400; color: var(--te
 input, select, textarea { font: 400 15px/1.4 var(--font-text); color: var(--ink); background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-control); }
 input { display: block; width: 100%; max-width: 28rem; margin-top: var(--space-1); padding: 10px 12px; }
 input[disabled] { background: var(--surface-sunk); color: var(--text-3); }
-select { padding: 9px 12px; }
+select { max-width: 100%; padding: 9px 12px; }
 label select { display: block; margin-top: var(--space-1); }
 textarea { font: 400 14px/1.6 var(--font-mono); resize: vertical; }
 button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); margin: var(--space-2) var(--space-2) var(--space-2) 0; padding: 9px 16px; min-height: 40px; font: 600 15px/1.2 var(--font-text); color: var(--surface); background: var(--accent); border: 1px solid var(--accent); border-radius: var(--radius-control); cursor: pointer; }
@@ -320,10 +318,62 @@ time[title] { text-decoration: underline dotted var(--rule); text-underline-offs
 .qr { display: block; width: 12rem; height: 12rem; margin: var(--space-4) 0; image-rendering: pixelated; }
 .panel-narrow .qr { box-sizing: content-box; padding: 16px; background: var(--surface); }
 
-/* The SQL editor (ADR 0285): its own client, styled by structure. */
+/* Connect (the brief's screen 6): three numbered steps, the doors as two radio cards. */
+.steps-num { counter-reset: step; list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-6); }
+.steps-num > li { counter-increment: step; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: var(--space-3); }
+.steps-num > li::before { content: counter(step); width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: var(--surface); font-weight: 700; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; }
+.steps-num > li > div { display: grid; gap: var(--space-3); min-width: 0; }
+.steps-num h2 { margin: 2px 0 0; font-size: 16px; }
+.steps-num p { margin: 0; }
+.segment { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: var(--space-3); }
+.segment label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-content: start; gap: 4px var(--space-3); margin: 0; padding: var(--space-4); font-weight: 400; background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-control); cursor: pointer; }
+.segment label:has(input:checked) { border-color: var(--accent); background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent); }
+.segment input { grid-row: span 3; width: 18px; height: 18px; margin: 2px 0 0; padding: 0; accent-color: var(--accent); }
+.segment .title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-weight: 700; }
+.segment .desc { color: var(--text-2); font-size: 14px; }
+.held { display: grid; gap: var(--space-3); padding: var(--space-4); border: 2px solid var(--once-border); border-radius: var(--radius-panel); }
+.held > p, .once h3 { margin: 0; }
+.where { display: grid; gap: 2px; margin: var(--space-2) 0 0; font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+.tabs, .tabs [role="tabpanel"], .held > * { min-width: 0; }
+.code-head > span { min-width: 0; overflow-wrap: anywhere; }
+.code-head > button.copy { flex: none; }
+.tabs [role="tabpanel"] { padding-top: var(--space-3); }
+.stack > button, .once > button, .steps-num > li > div > button { justify-self: start; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: var(--space-5); }
+.parts { display: grid; gap: var(--space-3); margin: 0 0 var(--space-3); }
+.parts > div { display: grid; grid-template-columns: minmax(0, 8rem) minmax(0, 1fr); gap: var(--space-1) var(--space-4); align-items: start; }
+.parts dt { font-weight: 600; }
+.parts dt .sub { font-weight: 400; font-size: 12px; color: var(--text-3); }
+.parts dd { margin: 0; min-width: 0; }
+@media (max-width: 600px) { .parts > div { grid-template-columns: minmax(0, 1fr); } }
+
+/* The SQL editor (ADR 0285, the brief's screen 7): the state bar at the top. */
+.statebar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius-control); }
+.statebar.off { border-color: var(--rule); }
+.statebar .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; }
+.statebar.off .dot { background: var(--chip-absent-bar); }
+.statebar dl { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: 0; font-size: 13px; min-width: 0; }
+.statebar dl div { display: flex; gap: 4px; min-width: 0; }
+.statebar dt { color: var(--text-3); }
+.statebar dd { margin: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.statebar .grow { flex: 1; }
+.statebar .status { flex-basis: 100%; margin: 0; color: var(--text-2); font-size: 14px; }
+.statebar button, .run-row button { margin: 0; }
+button.secondary { color: var(--ink); background: var(--surface); border-color: var(--border-control); }
+button.secondary:hover { background: var(--surface-hover); border-color: var(--border-control); }
+button.secondary[disabled] { color: var(--text-3); background: var(--surface-sunk); }
 #main textarea { display: block; width: 100%; padding: 12px; }
-section.result { overflow-x: auto; }
-section.result table { font-family: var(--font-mono); font-size: 13px; }
+.run-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.run-row p { margin: 0; flex: 1 1 16rem; }
+section.result { display: grid; gap: var(--space-2); min-width: 0; }
+.result-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); font-size: 13px; color: var(--text-3); }
+.result-meta strong { color: var(--ink); }
+.result-meta button.copy { color: var(--ink); border-color: var(--border-control); }
+.result-meta button.copy:hover { background: var(--surface-hover); }
+.result-meta button.copy.copied { color: var(--surface); background: var(--accent); border-color: var(--accent); }
+.results { max-height: 360px; overflow: auto; border: 1px solid var(--rule); border-radius: var(--radius-control); }
+.results table { font-family: var(--font-mono); font-size: 13px; }
+.results th { position: sticky; top: 0; z-index: 1; }
 
 footer { padding: var(--space-5) var(--space-4); color: var(--text-3); font-size: 13px; border-top: 1px solid var(--rule); background: var(--surface); }
 

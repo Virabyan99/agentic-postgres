@@ -219,3 +219,20 @@ export function refusal(error, options) {
 export function closeWords(code) {
   return Object.hasOwn(CLOSES, code) ? CLOSES[code] : null;
 }
+
+// A close code no entry names -- none can arrive from this page and its relay
+// (D3018 decides 1009) -- still said in words and with its number, never dropped.
+function unknownClose(code) {
+  return { sentence: `The editor's connection was closed (code ${code}).`, action: "Connect again", link: null };
+}
+
+// The editor's sentence for a close (sql.js is handed this, D3012): what
+// happened, then what to do, as one line of the status the editor shows.
+export function closeSentence(code) {
+  const words = closeWords(code) || unknownClose(code);
+  return words.action ? `${words.sentence} ${words.action}.` : words.sentence;
+}
+
+// The editor's session limits, said beside Run: the relay's IDLE_SECONDS and
+// TOTAL_SECONDS (ADR 0286), held to them by tests/contract/test_console_sql.py.
+export const SESSION_LIMITS = "A session ends after 5 idle minutes, or after 30 minutes in all.";

@@ -13,8 +13,9 @@
 // a fragment route. A feature the Ledger does not offer has no control here.
 
 import { call, Refusal, relayOrigin } from "/console/api.js";
+import { connectionString, csv, fillPassword, guide, parts } from "/console/copies.js";
 import { CLAIM_SENTENCE, claimLine, createProject } from "/console/create.js";
-import { refusal, said, sentence } from "/console/messages.js";
+import { closeSentence, refusal, said, sentence, SESSION_LIMITS } from "/console/messages.js";
 import { begin, current, frame, isCurrent, loadContext, mayCreate, narrow, PAGES, setPage, show, useActions } from "/console/nav.js";
 import { connect } from "/console/pg.js";
 import {
@@ -24,8 +25,8 @@ import {
 import { newPassword, verifier } from "/console/scram.js";
 import { DEADLINE_SENTENCE, doors, openDoor, runStatement } from "/console/sql.js";
 import {
-  banner, busyButton, button, callout, card, choice, codeBlock, emptyState, field, h, inlineCopy, link, once, siteDomain,
-  siteLink, skeleton, stateChip, table, value, when,
+  banner, busyButton, button, callout, card, choice, codeBlock, copyButton, emptyState, field, h, inlineCopy, link, once,
+  siteDomain, siteLink, skeleton, stateChip, table, tabs, value, when,
 } from "/console/ui.js";
 
 const KEY = /^[a-z][a-z0-9-]{1,62}$/;
@@ -844,58 +845,203 @@ async function projectOverviewView(me, key) {
       h("a", { href: `#/projects/${key}${suffix}` }, PAGES[page].label), h("span", { className: "muted" }, " — " + PAGES[page].purpose))))));
 }
 
-function door(found) {
-  return `postgresql://${found.user}@${found.host}:${found.port}/${found.database}?sslmode=verify-full`;
+// -- Connect (D2956, D2991; the brief's screen 6) -------------------------------
+//
+// Three steps: choose a door, make its password, copy the code for your tool.
+// Rules held by tests/contract/test_console_connect.py: every value drawn here
+// carries its copy control (`inlineCopy`, `codeBlock`), never a bare `code`;
+// the snippets are the server's, drawn as served and in the order served; and
+// the password is filled into them only inside the shown-once panel
+// (`heldCode`), from the rotation that made it, and leaves with that panel.
+
+// Each door: its title, the role a new password is made for (ADR 0269), its
+// step-2 button and the shown-once panel's heading (both read by the walk
+// drivers), and two lines of what to use it for (drawn fresh on every visit).
+const DOOR_WORDS = {
+  pooled: {
+    title: "Pooled", role: "customer_app",
+    make: "Make a new password for the pooled door", made: "Your new password for the pooled door",
+    uses: () => ["For your application: many short connections share a few to the database.",
+      "Use it for web servers, serverless functions, scripts and other application traffic."],
+  },
+  direct: {
+    title: "Direct", role: "customer_admin",
+    make: "Make a new password for the direct door", made: "Your new password for the direct door",
+    uses: () => ["One session per connection, kept for as long as you hold it.",
+      ["Use it for migrations, ", h("code", {}, "pg_dump"), ", ", h("code", {}, "LISTEN"), ", advisory locks and long analytics."]],
+  },
+};
+
+// A served client's name as a tab says it; a client this table does not name
+// is shown by its own name, never dropped.
+const CLIENT_LABELS = {
+  "psql": "psql", "prisma": "Prisma", "node-pg": "Node (pg)", "psycopg": "Python (psycopg)",
+  "drizzle": "Drizzle", "go-pgx": "Go (pgx)", "env": ".env",
+};
+
+function clientLabel(client) {
+  return Object.hasOwn(CLIENT_LABELS, client) ? CLIENT_LABELS[client] : client;
 }
 
-function withPassword(found, password) {
-  return `postgresql://${found.user}:${encodeURIComponent(password)}@${found.host}:${found.port}/${found.database}?sslmode=verify-full`;
+// Which file the code goes in and what to install, when the server says (its `where`).
+function guideLine(served, client) {
+  const found = guide(served, client);
+  if (!found) {
+    return null;
+  }
+  if (found.text) {
+    return h("p", { className: "where" }, found.text);
+  }
+  return h("p", { className: "where" },
+    found.file ? h("span", {}, h("strong", {}, "Where it goes: "), found.file) : null,
+    found.install ? h("span", {}, h("strong", {}, "What to install: "), found.install) : null);
 }
 
-async function connectView(me, key, turn) {
-  const served = await call("GET", `/projects/${key}/connections`);
-  const result = h("div", { className: "stack" });
-  const rotate = (role, doorName) => async () => {
-    result.replaceChildren();
+// The server's snippets as served: the placeholder where a password goes.
+function snippetTabs(served) {
+  const clients = Object.keys(served.snippets || {});
+  if (!clients.length) {
+    return emptyState("The server serves no code for this project's doors; the connection string below works with any PostgreSQL client.");
+  }
+  return tabs(clients.map((client) => ({
+    label: clientLabel(client),
+    panel: [codeBlock(served.snippets[client], { label: clientLabel(client) }), guideLine(served, client)],
+  })), "Your tool");
+}
+
+// The same snippets with a door's new password, inside the shown-once panel
+// only: each placeholder of THIS door filled (copies.js decides which), the
+// others left as served.
+function heldCode(served, name, password) {
+  const user = served[name].user;
+  const others = ["pooled", "direct"].filter((other) => other !== name).map((other) => served[other].user);
+  const clients = Object.keys(served.snippets || {});
+  return h("div", { className: "held" },
+    h("p", {}, h("strong", {}, `This code holds your new ${name} password.`), " Copy what you need now: it is shown once, and leaves when you leave this page."),
+    tabs(clients.map((client) => {
+      const text = fillPassword(served.snippets[client], { placeholder: served.password, user, others, password });
+      const holds = text !== served.snippets[client];
+      return {
+        label: clientLabel(client),
+        panel: [codeBlock(text, { label: holds ? `${clientLabel(client)}, with the password` : clientLabel(client), secret: holds }),
+          guideLine(served, client)],
+      };
+    }), "Your tool, with the new password"));
+}
+
+// What a door's connection string is made of, each part with its copy control.
+function doorAnatomy(served, name) {
+  const door = served[name];
+  return h("div", { className: "stack" },
+    codeBlock(connectionString(door), { label: `The ${name} door, without its password` }),
+    h("dl", { className: "parts" }, parts(door).map((part) => h("div", {},
+      h("dt", {}, part.label, h("span", { className: "sub" }, part.about)),
+      h("dd", {}, inlineCopy(part.value))))),
+    h("p", { className: "small muted" }, "The password goes after the user: ",
+      h("code", {}, "postgresql://user:password@host:port/database"), ". Make one in step 2."));
+}
+
+// Step 2 for one door: what making a password does, the busy button, and the
+// shown-once panel when it is made. The rotation is the one the CLI makes
+// (ADR 0269): the password is made here, only its SCRAM verifier is sent.
+function doorPassword(key, served, name, turn, held, refresh) {
+  const door = served[name];
+  const answer = h("div", { className: "stack" });
+  const make = async () => {
     const status = h("p", { className: "muted" }, "Setting a new password…");
-    result.append(status);
+    answer.replaceChildren(status);
+    held.replaceChildren();
+    refresh();
     let password = newPassword();
     try {
-      const answer = await call("POST", `/projects/${key}/credentials`, { role, verifier: await verifier(password) });
+      const accepted = await call("POST", `/projects/${key}/credentials`, { role: DOOR_WORDS[name].role, verifier: await verifier(password) });
       // No link to the tracker here: the password is shown on THIS page once the
       // rotation succeeds, and a person who left would never see it.
-      const final = await waitFor(answer.operation.id, status, turn);
+      const final = await waitFor(accepted.operation.id, status, turn);
       if (final === null) {
         return;
       }
       if (final.status !== "succeeded") {
-        result.append(outcome(final));
+        answer.replaceChildren(outcome(final));
         return;
       }
-      const found = served[doorName];
-      result.append(
-        once(`The new password for ${role}:`, password),
-        codeBlock(withPassword(found, password), { label: "The connection string with it", secret: true }),
-        codeBlock(`psql "${withPassword(found, password)}"`, { label: "Or with psql", secret: true }),
-        h("p", { className: "muted" }, "The previous password no longer works."),
-      );
+      const forget = async () => {
+        held.replaceChildren();
+        answer.replaceChildren(h("p", { className: "once-done" },
+          `The ${name} door's password was shown once and is not shown again. If it is lost, make a new one.`));
+        refresh();
+      };
+      answer.replaceChildren(h("div", { className: "once" },
+        h("h3", {}, DOOR_WORDS[name].made),
+        h("p", {}, "Copy it now, into your password manager or your application's settings.",
+          h("strong", {}, " Shown once: this page forgets it when you leave, and it cannot be shown again."),
+          " The previous password no longer works."),
+        codeBlock(password, { label: `Password for ${door.user}`, secret: true }),
+        codeBlock(connectionString(door, password), { label: "The connection string with it", secret: true }),
+        h("p", { className: "small" }, "It is filled into the code in step 3 for as long as this page stays open."),
+        busyButton("I have saved the password", forget, { busy: "Forgetting it…" })));
+      held.replaceChildren(heldCode(served, name, password));
+      refresh();
     } catch (error) {
-      result.append(refusal(error));
+      answer.replaceChildren(refusal(error));
     } finally {
       password = null;
     }
   };
-  frame(me, "Connect",
-    card(h("p", {}, "Two doors, both TLS (", h("code", {}, "sslmode=verify-full"), ") on port 5432."),
-      ["pooled", "direct"].map((name) => h("div", { className: "door" },
-        h("p", {}, h("strong", {}, `The ${name} door`), ", as ", h("code", {}, served[name].user)),
-        inlineCopy(door(served[name]))))),
-    card(h("p", {}, "The password is not stored anywhere you can read it back. Set a new one to see it once:"),
-      busyButton("New password for the pooled door (customer_app)", rotate("customer_app", "pooled"), { busy: "Setting a new password…" }),
-      busyButton("New password for the direct door (customer_admin)", rotate("customer_admin", "direct"), { busy: "Setting a new password…" }),
-      h("p", {}, link(`#/projects/${key}/sql`, "Open the SQL editor"))),
-    result);
+  return h("div", { className: "stack" },
+    busyButton(DOOR_WORDS[name].make, make, { busy: "Making the password…" }),
+    h("p", { className: "small muted" }, "The door's user: ", inlineCopy(door.user)),
+    answer);
 }
+
+async function connectView(me, key, turn) {
+  const served = await call("GET", `/projects/${key}/connections`);
+  const names = ["pooled", "direct"];
+  let chosen = "pooled";
+  const plain = snippetTabs(served);
+  const perDoor = {};
+  // Only the chosen door's step 2 and anatomy are shown; step 3 shows the
+  // door's shown-once code while the page holds a new password, else the
+  // snippets as served. Choosing a door changes nothing anywhere but here.
+  const refresh = () => {
+    for (const name of names) {
+      perDoor[name].password.hidden = name !== chosen;
+      perDoor[name].anatomy.hidden = name !== chosen;
+      perDoor[name].held.hidden = name !== chosen || !perDoor[name].held.firstChild;
+    }
+    plain.hidden = Boolean(perDoor[chosen].held.firstChild);
+  };
+  for (const name of names) {
+    const held = h("div", {});
+    perDoor[name] = { held, password: doorPassword(key, served, name, turn, held, refresh), anatomy: doorAnatomy(served, name) };
+  }
+  const segment = h("div", { className: "segment", role: "radiogroup", "aria-label": "Door to show" },
+    names.map((name) => h("label", {},
+      h("input", { type: "radio", name: "door", value: name, checked: name === chosen, onchange: () => { chosen = name; refresh(); } }),
+      h("span", { className: "title" }, DOOR_WORDS[name].title, name === "pooled" ? h("span", { className: "chip state-ready" }, "Recommended") : null),
+      DOOR_WORDS[name].uses().map((line) => h("span", { className: "desc" }, line)))));
+  refresh();
+  frame(me, "Connect",
+    card(h("ol", { className: "steps-num" },
+      h("li", {}, h("div", {},
+        h("h2", {}, "Choose a door"), segment,
+        h("p", { className: "small muted" }, "Both doors always exist, both with TLS. Choosing one only changes what this page shows."))),
+      h("li", {}, h("div", {},
+        h("h2", {}, "Make a password for this door"),
+        h("p", { className: "small" }, "Your browser makes the password; only its fingerprint (a SCRAM verifier) is sent, so the platform never holds it. It is shown once. Making a new one replaces the old one, and connections using the old one stop working."),
+        names.map((name) => perDoor[name].password))),
+      h("li", {}, h("div", {},
+        h("h2", {}, "Copy the code for your tool"), plain, names.map((name) => perDoor[name].held))))),
+    h("div", { className: "grid-2" },
+      card(h("h2", {}, "What the connection string means"), names.map((name) => perDoor[name].anatomy)),
+      card(h("h2", {}, "No psql yet?"),
+        h("p", { className: "small" }, "psql is PostgreSQL's own terminal client. The documentation says how to install it and connect with it, step by step."),
+        h("ul", { className: "links" },
+          h("li", {}, h("a", { href: siteLink("/docs/connecting/") }, "Connecting, in the documentation")),
+          h("li", {}, link(`#/projects/${key}/sql`, "Or use the SQL editor in your browser"))))));
+}
+
+// -- branches ---------------------------------------------------------------------
 
 // The plan's branch limit against the project's live branches (ADR 0297
 // decision 6): a banner when the project holds all it may. The plan's number
@@ -1365,7 +1511,14 @@ function helpView(me) {
       h("ul", { className: "links" }, docs.map(([title, path]) => h("li", {}, h("a", { href: siteLink(path) }, title))))));
 }
 
-// -- the SQL editor (Session 44, ADR 0285) -------------------------------------
+// -- the SQL editor (Session 44, ADR 0285; D2957, the brief's screen 7) ----------
+//
+// The state bar at the top says whether the editor is connected, to which
+// door, as which user and to which database, with Disconnect; its status line
+// says what last happened, every close in messages.js's words (D3012). While
+// connected the credentials form is gone; while not, it is the only thing
+// below the bar (ADR 0295 decision 8). The password is read once, the input
+// cleared, never stored (ADR 0285).
 
 // The open editor session, if any: closed -- and its password with it -- on
 // every navigation, on Disconnect and when the page is hidden (D2756).
@@ -1373,22 +1526,40 @@ let editor = null;
 
 function closeEditor() {
   if (editor) {
-    editor.close();
+    const closing = editor;
     editor = null;
+    closing.close();
   }
 }
 
 window.addEventListener("pagehide", closeEditor);
 
-function resultView(result) {
+// A first statement to try, which changes nothing.
+const FIRST_STATEMENT = "select now(), current_user;";
+
+function rowsWords(count) {
+  return `${count.toLocaleString("en-GB")} ${count === 1 ? "row" : "rows"}`;
+}
+
+function took(milliseconds) {
+  return milliseconds < 1000 ? `${Math.round(milliseconds)} ms` : `${(milliseconds / 1000).toFixed(1)} s`;
+}
+
+// One result: how many rows and how long, Copy as CSV (built in the page,
+// copies.js), then the rows in a box of their own with a sticky header.
+function resultView(result, milliseconds) {
+  const shaped = result.columns.length > 0;
   return h("section", { className: "result" },
-    result.columns.length
-      ? h("table", {},
-        h("thead", {}, h("tr", {}, result.columns.map((name) => h("th", {}, name)))),
-        h("tbody", {}, result.rows.map((cells) => h("tr", {}, cells.map((cell) => h("td", {}, cell === null ? "NULL" : cell))))))
+    h("div", { className: "result-meta" },
+      h("span", {}, shaped ? h("strong", {}, rowsWords(result.rows.length)) : h("strong", {}, result.command || "Done"),
+        ` in ${took(milliseconds)}`),
+      shaped ? copyButton(csv(result.columns, result.rows), { label: "Copy as CSV" }) : null),
+    shaped
+      ? h("div", { className: "results" }, h("table", {},
+        h("thead", {}, h("tr", {}, result.columns.map((name) => h("th", { scope: "col" }, name)))),
+        h("tbody", {}, result.rows.map((cells) => h("tr", {}, cells.map((cell) => h("td", {}, cell === null ? "NULL" : cell)))))))
       : null,
     result.truncated ? h("p", { className: "muted" }, result.truncated) : null,
-    result.command ? h("p", { className: "muted" }, result.command) : null,
     result.notices.map((notice) => h("p", { className: "muted" }, notice)));
 }
 
@@ -1399,56 +1570,120 @@ async function sqlView(me, key) {
     return;
   }
   const relay = await relayOrigin();
-  const status = h("p", { className: "muted", role: "status" }, "Not connected.");
-  const results = h("div", {});
-  const [doorLabel, doorChoice] = choice("Door", found.doors.map((door) => ({ value: door.name, label: `${door.name} — ${door.user}` })), "pooled");
-  const [passwordLabel, password] = field("Password", { type: "password", autocomplete: "off" });
-  const statement = h("textarea", { rows: 8, placeholder: "Write a statement", spellcheck: false });
+  const status = h("p", { className: "status", role: "status", "aria-live": "polite" });
+  const state = h("strong", {});
+  const details = h("dl", {});
+  const results = h("div", { className: "stack" });
   const say = (text) => { status.textContent = text; };
-  const connectForm = h("form", {
-    onsubmit: async (event) => {
-      event.preventDefault();
-      closeEditor();
-      const door = found.doors.find((candidate) => candidate.name === doorChoice.value);
-      say("Connecting…");
-      const opened = await openDoor({
-        call, connect, relay, key, door,
-        readPassword: () => {
-          const typed = password.value;
-          password.value = "";
-          return typed;
-        },
-      });
-      if (!opened.opened) {
-        say(opened.say);
-        return;
+  let running = false;
+  const [doorLabel, doorChoice] = choice("Door", found.doors.map((door) => ({ value: door.name, label: `${door.name} — ${door.user}` })), "pooled");
+  const [passwordField, password] = field("Password", { type: "password", autocomplete: "off" },
+    ["The password you made for this door on ", link(`#/projects/${key}/connect`, "Connect"),
+      ". It is used once to connect, then cleared from this page; it is never stored."]);
+  const statement = h("textarea", { id: "statement", rows: 6, spellcheck: false, value: FIRST_STATEMENT });
+  const disconnect = busyButton("Disconnect", async () => {
+    closeEditor();
+    showConnected(null, "Disconnected. The password is not kept: enter it again to connect.");
+  }, { busy: "Disconnecting…", className: "secondary" });
+  const bar = h("div", { className: "statebar off" },
+    h("span", { className: "dot", "aria-hidden": "true" }), state, details, h("span", { className: "grow" }), disconnect, status);
+  const connectButton = busyButton("Connect", async () => {
+    closeEditor();
+    const door = found.doors.find((candidate) => candidate.name === doorChoice.value);
+    say("Connecting…");
+    const opened = await openDoor({
+      call, connect, relay, key, door, closeSentence,
+      readPassword: () => {
+        const typed = password.value;
+        password.value = "";
+        return typed;
+      },
+    });
+    if (!opened.opened) {
+      showConnected(null, opened.say);
+      return;
+    }
+    const session = opened.session;
+    editor = session;
+    // A close the page did not ask for -- the relay's 30 minutes, 5 idle
+    // minutes, a lost network -- is said the moment it happens.
+    session.socket.addEventListener("close", (event) => {
+      if (editor === session) {
+        editor = null;
+        showConnected(null, closeSentence(event.code));
       }
-      editor = opened.session;
-      say(`Connected to the ${door.name} door as ${door.user}.`);
+    });
+    showConnected(door, `Connected to the ${door.name} door as ${door.user}.`);
+  }, { busy: "Connecting…" });
+  const connectForm = h("form", {
+    className: "card",
+    onsubmit: (event) => {
+      event.preventDefault();
+      connectButton.click();
     },
-  }, doorLabel, passwordLabel, h("button", { type: "submit" }, "Connect"),
-  button("Disconnect", () => { closeEditor(); say("Not connected."); }));
-  const run = async () => {
-    if (!editor) {
+  }, h("h2", {}, "Connect the editor"), doorLabel, passwordField, connectButton);
+  const cancel = busyButton("Cancel", async () => {
+    if (running && editor) {
+      await editor.cancel();
+    }
+  }, { busy: "Cancelling…", className: "secondary", disabled: true, enabled: () => running });
+  const run = busyButton("Run", async () => {
+    const session = editor;
+    if (!session) {
       say("Connect first.");
       return;
     }
     results.replaceChildren();
     say("Running…");
-    const failed = await runStatement(editor, statement.value, (result) => results.append(resultView(result)));
-    say(failed || "Done.");
-    if (failed && editor && editor.reader && editor.reader.failure) {
-      closeEditor();
+    running = true;
+    cancel.disabled = false;
+    const began = performance.now();
+    let failed;
+    try {
+      failed = await runStatement(session, statement.value,
+        (result) => results.append(resultView(result, performance.now() - began)), closeSentence);
+    } finally {
+      running = false;
+      cancel.disabled = true;
     }
-  };
-  frame(me, "SQL editor",
-    h("p", {}, "Your own client: it connects as your database role with the password you type here, which stays in this page."),
-    connectForm,
-    statement,
-    h("p", {}, button("Run", run), " ", button("Cancel", () => { if (editor) editor.cancel(); })),
-    h("p", { className: "muted" }, DEADLINE_SENTENCE),
-    status,
+    if (editor !== session) {
+      return; // the session closed while it ran, and its ending is already said
+    }
+    if (failed && session.reader && session.reader.failure) {
+      closeEditor();
+      showConnected(null, failed);
+      return;
+    }
+    say(failed || `Done in ${took(performance.now() - began)}.`);
+  }, { busy: "Running…" });
+  const work = h("div", { className: "card stack" },
+    h("label", { htmlFor: "statement" }, "Statement"), statement,
+    h("div", { className: "run-row" }, run, cancel,
+      h("p", { className: "small muted" }, SESSION_LIMITS, " ", DEADLINE_SENTENCE)),
     results);
+  // The one place the editor's state is drawn (ADR 0295 decision 8).
+  function showConnected(door, words) {
+    const connected = door !== null;
+    connectForm.hidden = connected;
+    work.hidden = !connected;
+    disconnect.hidden = !connected;
+    bar.classList.toggle("off", !connected);
+    state.textContent = connected ? "Connected" : "Not connected";
+    details.replaceChildren(...(connected
+      ? [["Door", door.name], ["User", door.user], ["Database", door.database]].map(([term, shown]) => h("div", {}, h("dt", {}, term), h("dd", {}, shown)))
+      : []));
+    if (!connected) {
+      results.replaceChildren();
+    }
+    say(words);
+  }
+  showConnected(null, "Choose a door, enter the password you made for it on Connect, then connect.");
+  frame(me, "SQL editor",
+    bar,
+    connectForm,
+    work,
+    h("p", { className: "small muted" }, "The editor is your own client: it reaches your database through a relay that keeps nothing it carries. ",
+      h("a", { href: siteLink("/docs/sql-editor/") }, "How the editor connects")));
 }
 
 // -- the router ----------------------------------------------------------------

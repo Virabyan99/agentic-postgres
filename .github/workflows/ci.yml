@@ -44,7 +44,11 @@ jobs:
     # 30 since Session 40 (D2467): the suite took ~14.5 of 20 minutes at
     # 002cb4f, and the branch cluster proof (a real backup and three
     # restores) took both suite jobs past 20 at 212904a with no failure.
-    timeout-minutes: 30
+    # 45 since Session 47 (D3034): the jobs ran 21.7-28.9 minutes at c0f9b40
+    # and ae2da7e, and the executed connection snippets (five client images,
+    # a golang pull among them) took the offline job past 30 at 8f953b3 with
+    # no failure -- the gate passed in 26.7.
+    timeout-minutes: 45
 
     steps:
       - name: Check out the tested commit
@@ -143,7 +147,7 @@ jobs:
   session-2-contract:
     name: Session 2 offline contract
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # D2467, as the gate's
+    timeout-minutes: 45  # D2467, D3034, as the gate's
 
     # What this job can and cannot assert is worth stating plainly. It has
     # Docker and no credentials, so it proves everything that is a property of

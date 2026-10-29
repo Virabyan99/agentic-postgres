@@ -74,6 +74,10 @@ ROUTES: dict[str, tuple[Path, str]] = {
     "/console/nav.js": (PUBLIC / "nav.js", JAVASCRIPT),
     "/console/messages.js": (PUBLIC / "messages.js", JAVASCRIPT),
     "/console/progress.js": (PUBLIC / "progress.js", JAVASCRIPT),
+    # Session 47 Run 6 (D3017): what Connect and the editor hand a person to
+    # copy -- a connection string, a snippet with its password, a result as
+    # CSV -- DOM-free.
+    "/console/copies.js": (PUBLIC / "copies.js", JAVASCRIPT),
     "/console/pages.json": (PUBLIC / "pages.json", JSON),
     # Session 45 (ADR 0288): one copy of the shared assets, which the site's
     # builder copies (D2814) -- the files rig 45a made, pinned by sha256.

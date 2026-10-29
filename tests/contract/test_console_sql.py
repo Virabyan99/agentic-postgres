@@ -13,12 +13,14 @@ from __future__ import annotations
 # ruff: noqa: E501 -- the embedded JavaScript drivers keep one statement per line.
 import ast
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.contract.test_console_refusals import DOM
 from tests.contract.test_image_contracts import LOCK, requires_docker
 
 from agentic_postgres import REPO_ROOT
@@ -159,28 +161,57 @@ def test_the_password_reaches_only_the_socket(tmp_path: Path) -> None:
 
 
 def test_every_ending_has_a_sentence(tmp_path: Path) -> None:
-    driver = r"""
-import { endSentence, runStatement, TRUNCATED_SENTENCE } from "/console/sql.js";
-const codes = [4400, 4408, 4413, 4429, 4502, 1009, 1006];
-const out = { close: {}, pg: {} };
-for (const code of codes) out.close[code] = endSentence({ closeCode: code, message: "x" });
-for (const code of ["08P01", "28P01"]) out.pg[code] = endSentence({ code, message: "SASL authentication failed" });
-out.pg.other = endSentence({ code: "22012", message: "division by zero" });
+    """Since Session 47 Run 6 (D3012, ADR 0297 decision 3) a close of the
+    relay's socket is worded by `messages.js`: `sql.js` hands the close code to
+    the `closeSentence` the page passes in -- as it is handed `call` and
+    `connect` -- on opening a door and during a statement alike, and words none
+    itself. A PostgreSQL error keeps its own words and its code. 1009 has no
+    entry (D3018: neither this page nor its relay can send it) and, like any
+    code with no entry, is still said with its number."""
+    driver = (
+        DOM
+        + r"""
+const { endSentence, openDoor, runStatement } = await import("/console/sql.js");
+const { closeSentence, CLOSES } = await import("/console/messages.js");
+const stand = (code) => `words for ${code}`;
+const codes = [4400, 4408, 4413, 4429, 4502, 1000, 1006, 1011, 1009, 4999];
+const out = { close: {}, bare: {}, pg: {}, messages: {} };
+for (const code of codes) out.close[code] = endSentence({ closeCode: code, message: `the relay closed the session (${code})` }, stand);
+for (const code of codes) out.bare[code] = endSentence({ closeCode: code, message: `the relay closed the session (${code})` });
+for (const code of codes) out.messages[code] = closeSentence(code);
+out.entries = CLOSES;
+for (const code of ["08P01", "28P01"]) out.pg[code] = endSentence({ code, message: "SASL authentication failed" }, stand);
+out.pg.other = endSentence({ code: "22012", message: "division by zero" }, stand);
 const session = (results, error) => ({ async *query() { for (const r of results) yield r; if (error) throw error; } });
 const rows = [];
-out.capped = await runStatement(session([{ columns: [{ name: "n" }], rows: [["1"]], command: null, notices: [], truncated: true }]), "x", (r) => rows.push(r));
+out.capped = await runStatement(session([{ columns: [{ name: "n" }], rows: [["1"]], command: null, notices: [], truncated: true }]), "x", (r) => rows.push(r), stand);
 out.rows = rows;
-out.deadline = await runStatement(session([], { code: "57014", deadline: true, message: "canceling statement due to user request" }), "x", () => {});
-out.cancelled = await runStatement(session([], { code: "57014", deadline: false, message: "canceling statement due to user request" }), "x", () => {});
+out.deadline = await runStatement(session([], { code: "57014", deadline: true, message: "canceling statement due to user request" }), "x", () => {}, stand);
+out.cancelled = await runStatement(session([], { code: "57014", deadline: false, message: "canceling statement due to user request" }), "x", () => {}, stand);
+out.closedMidStatement = await runStatement(session([], { closeCode: 4413, message: "x" }), "x", () => {}, stand);
+const refused = async () => { const e = new Error("the relay closed the session (4429)"); e.closeCode = 4429; throw e; };
+out.opened = await openDoor({ call: async () => ({ state: "ready" }), connect: refused, relay: "wss://r", key: "k", door: { host: "h", user: "u", database: "d" }, readPassword: () => "p", closeSentence: stand });
 console.log(JSON.stringify(out));
 """
+    )
     out = _node(tmp_path, driver)
-    assert out["close"]["4502"] == "The database could not be reached."
-    assert out["close"]["4429"] == "Too many editor sessions are open; try again in a minute."
-    assert out["close"]["4408"] == "The session ended after 30 minutes, or after 5 idle minutes."
-    assert all(out["close"][str(code)] for code in (4400, 4413, 1009))
-    assert out["close"]["1006"] == "The relay could not be reached."
-    assert "asleep" not in json.dumps(out["close"])  # a closed door is never "asleep" (ADR 0195)
+    for code in (4400, 4408, 4413, 4429, 4502, 1000, 1006, 1011, 1009, 4999):
+        assert out["close"][str(code)] == f"words for {code}", code
+        # Without the page's words, pg.js's own message -- never a table of sql.js's.
+        assert out["bare"][str(code)] == f"the relay closed the session ({code})", code
+    assert out["closedMidStatement"] == "words for 4413"
+    assert out["opened"] == {"opened": False, "say": "words for 4429"}
+    for code, words in out["entries"].items():
+        expected = words["sentence"] + (f" {words['action']}." if words["action"] else "")
+        assert out["messages"][code] == expected, code
+    assert "1009" not in out["entries"]
+    for code in ("1009", "4999"):
+        assert out["messages"][code] == (
+            f"The editor's connection was closed (code {code}). Connect again."
+        )
+    # A closed door is never SAID to be asleep (ADR 0195): only the control API
+    # knows; 4502's action may say what to do IF it is.
+    assert not [code for code, words in out["entries"].items() if "asleep" in words["sentence"]]
     assert out["pg"]["08P01"] == out["pg"]["28P01"] == "The database refused the password."
     assert out["pg"]["other"] == "division by zero (22012)"
     assert (
@@ -190,3 +221,132 @@ console.log(JSON.stringify(out));
     assert out["rows"][0]["columns"] == ["n"]
     assert out["deadline"] == "The statement ran for 60 seconds and was cancelled."
     assert out["cancelled"] == "canceling statement due to user request (57014)"
+
+
+#: A table of words keyed by a close code (`4408: "..."`), or a branch on one
+#: (`closeCode === 4408`, `event.code == 1006`): the shapes a close is worded in.
+CLOSE_WORDING = re.compile(
+    r"\b(?:4\d{3}|10\d\d)\s*:\s*[\"'`{]|(?:closeCode|\.code)\s*[!=]==?\s*(?:4\d{3}|10\d\d)\b"
+)
+
+
+def test_no_close_is_worded_outside_messages_js() -> None:
+    """D3012 (ADR 0297 decision 3): every close code the editor can meet is
+    worded in `messages.js`'s CLOSES and nowhere else -- no other console
+    script maps a close code to words or branches on one. `pg.js` may NAME a
+    close code it makes (its own 1006 error, its 1000 goodbye); it words none."""
+    scripts = {path.name: path.read_text(encoding="utf-8") for path in PUBLIC.glob("*.js")}
+    for name, text in scripts.items():
+        if name == "messages.js":
+            continue
+        code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("//"))
+        found = CLOSE_WORDING.findall(code)
+        assert not found, f"{name} words a close code outside messages.js: {found}"
+    assert len(CLOSE_WORDING.findall(scripts["messages.js"])) >= 8
+    # The controls: the shapes are recognised, a code merely named is not.
+    assert CLOSE_WORDING.search('    4408: "The session ended."')
+    assert CLOSE_WORDING.search("if (error.closeCode === 4502) say(x);")
+    assert not CLOSE_WORDING.search(
+        'new PgError("the relay connection failed", { closeCode: 1006 })'
+    )
+    assert not CLOSE_WORDING.search("socket.close(1000);")
+
+
+def _relay_seconds(name: str) -> float:
+    tree = ast.parse(
+        (REPO_ROOT / "services" / "sql-relay" / "relay.py").read_text(encoding="utf-8")
+    )
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == name:
+            return float(ast.literal_eval(node.value))
+    raise AssertionError(f"relay.py names no {name}")
+
+
+def test_the_session_limits_beside_run_are_the_relays() -> None:
+    """The brief's screen 7: the limits are said beside Run, in the numbers the
+    relay enforces (ADR 0286: `IDLE_SECONDS`, `TOTAL_SECONDS`) and the
+    statement deadline `pg.js` keeps (`STATEMENT_DEADLINE_SECONDS`) -- and the
+    4408 close says the same two numbers."""
+    idle, total = _relay_seconds("IDLE_SECONDS") / 60, _relay_seconds("TOTAL_SECONDS") / 60
+    assert idle == int(idle) and total == int(total), (idle, total)
+    messages = (PUBLIC / "messages.js").read_text(encoding="utf-8")
+    limits = re.search(r'export const SESSION_LIMITS = "([^"]+)";', messages)
+    assert limits, "messages.js holds no SESSION_LIMITS"
+    assert f"{int(idle)} idle minutes" in limits.group(
+        1
+    ) and f"{int(total)} minutes in all" in limits.group(1)
+    close = messages[messages.index("  4408: {") : messages.index("  4413: {")]
+    assert f"{int(total)} minutes" in close and f"idle for {int(idle)}" in close
+    deadline = re.search(
+        r"STATEMENT_DEADLINE_SECONDS = (\d+);", (PUBLIC / "pg.js").read_text("utf-8")
+    )
+    assert deadline and f"after {deadline.group(1)} seconds" in (PUBLIC / "sql.js").read_text(
+        "utf-8"
+    )
+    editor = _editor()
+    assert 'h("p", { className: "small muted" }, SESSION_LIMITS, " ", DEADLINE_SENTENCE)' in editor
+    assert editor.index("SESSION_LIMITS") > editor.index('const run = busyButton("Run"')
+
+
+def _editor() -> str:
+    text = (PUBLIC / "app.js").read_text(encoding="utf-8")
+    start, end = "// -- the SQL editor (", "// -- the router ---"
+    assert text.count(start) == 1 and text.count(end) == 1
+    return text[text.index(start) : text.index(end)]
+
+
+def test_the_editor_hides_its_form_while_connected() -> None:
+    """D2957 (the person: *"the new-password option is still there even though
+    we are already connected"*), ADR 0295 decision 8: the editor's state is
+    drawn in ONE place, `showConnected` -- connected, the credentials form is
+    hidden and the statement shown; not, the form is the only thing below the
+    bar. Every way the session starts or ends goes through it: the connect,
+    a refused connect, Disconnect, a close the page did not ask for, and a
+    statement that broke the connection. The state bar, with its one status
+    line, comes first on the page."""
+    editor = _editor()
+    shown = editor[editor.index("function showConnected(door, words) {") :]
+    shown = shown[: shown.index("\n  }\n")]
+    for line in (
+        "const connected = door !== null;",
+        "connectForm.hidden = connected;",
+        "work.hidden = !connected;",
+        "disconnect.hidden = !connected;",
+        'state.textContent = connected ? "Connected" : "Not connected";',
+    ):
+        assert line in shown, line
+    assert editor.count(".hidden =") == shown.count(".hidden ="), (
+        "the state is drawn somewhere else too"
+    )
+    for start in (
+        "showConnected(door, `Connected to the ${door.name} door as ${door.user}.`);",
+        "showConnected(null, opened.say);",
+        "showConnected(null, closeSentence(event.code));",
+        "showConnected(null, failed);",
+        'showConnected(null, "Disconnected. ',
+    ):
+        assert start in editor, start
+    frame = editor[editor.index('frame(me, "SQL editor",\n') :]
+    assert frame.index("bar,") < frame.index("connectForm,") < frame.index("work,")
+    assert 'role: "status", "aria-live": "polite"' in editor
+    assert "disconnect, status);" in editor  # the status line sits in the bar
+
+
+def test_the_editors_actions_are_busy_buttons_and_its_first_statement_changes_nothing() -> None:
+    """D3006: Connect, Run, Cancel and Disconnect are busy buttons (Cancel
+    pressable only while a statement runs); the first statement is filled in
+    and only reads; results scroll in their own box under a sticky header, with
+    their row count, their time and *Copy as CSV*."""
+    editor = _editor()
+    for name in ("Connect", "Run", "Cancel", "Disconnect"):
+        assert f'busyButton("{name}", ' in editor, name
+        assert f'button("{name}"' not in editor.replace(f'busyButton("{name}"', ""), name
+    assert "enabled: () => running" in editor and "disabled: true" in editor
+    first = re.search(r'const FIRST_STATEMENT = "([^"]+)";', editor)
+    assert first and re.fullmatch(r"select [a-z_(), ]+;", first.group(1)), first
+    assert "value: FIRST_STATEMENT" in editor
+    assert 'copyButton(csv(result.columns, result.rows), { label: "Copy as CSV" })' in editor
+    assert "rowsWords(result.rows.length)" in editor and "took(milliseconds)" in editor
+    css = (PUBLIC / "app.css").read_text(encoding="utf-8")
+    assert ".results th { position: sticky; top: 0;" in css
+    assert re.search(r"\.results \{[^}]*max-height: \d+px; overflow: auto;", css)

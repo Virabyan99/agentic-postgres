@@ -35,7 +35,7 @@ export const PAGES = {
   "notifications": { label: "Notifications", group: "organization", item: "notifications", purpose: "What happened to this organisation's projects. Nothing is emailed.", help: "/docs/plans-and-usage/" },
   "organization-settings": { label: "Members and keys", group: "organization", item: "organization-settings", purpose: "Who belongs to this organisation, the invitations, and the management keys.", help: "/docs/cli/" },
   "project-overview": { label: "Overview", group: "project", item: "project-overview", purpose: "This project's state, and where to go next.", help: "/docs/projects/" },
-  "connect": { label: "Connect", group: "project", item: "connect", purpose: "The connection strings for your application, and a password for each door.", help: "/docs/connecting/" },
+  "connect": { label: "Connect", group: "project", item: "connect", purpose: "Connect psql, your application or a database tool to this project, in three steps.", help: "/docs/connecting/" },
   "sql-editor": { label: "SQL editor", group: "project", item: "sql-editor", purpose: "Run SQL you write yourself, as your own database role, from this page.", help: "/docs/sql-editor/" },
   "branches": { label: "Branches", group: "project", item: "branches", purpose: "Copies of this project's database to try things on, and restores to a point in time.", help: "/docs/branches/" },
   "backups": { label: "Backups", group: "project", item: "backups", purpose: "The window this project can be restored to.", help: "/docs/backups/" },

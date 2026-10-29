@@ -649,10 +649,13 @@ def run_the_rest(
     record["create_seconds"] = round(time.monotonic() - accepted, 1)
 
     def j08() -> tuple[str, str]:
+        # Session 47 Run 6 (D2956): Connect's step 2, the pooled door chosen by default.
         page.goto(f"{base}/console/#/projects/{key}/connect")
-        page.get_by_role("button", name="New password for the pooled door (customer_app)").click()
-        page.locator(".once code.secret").wait_for(timeout=300_000)
-        shown = page.locator("#main code.secret").all()
+        page.get_by_role("button", name="Make a new password for the pooled door").click()
+        page.get_by_role("heading", name="Your new password for the pooled door").wait_for(
+            timeout=300_000
+        )
+        shown = page.locator("#main .once code.secret").all()
         return shown[0].inner_text().strip(), shown[1].inner_text().strip()
 
     rotated, string = journey.step("j08", j08)

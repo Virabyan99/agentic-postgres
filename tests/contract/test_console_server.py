@@ -66,6 +66,8 @@ LISTED = (
     "/console/nav.js",
     "/console/messages.js",
     "/console/progress.js",
+    # Session 47 Run 6 (D3017): Connect's and the editor's copies, DOM-free.
+    "/console/copies.js",
     "/console/pages.json",
     "/console/fonts/schibsted-grotesk.woff2",
     "/console/fonts/jetbrains-mono.woff2",

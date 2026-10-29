@@ -137,9 +137,11 @@ export function link(route, text) {
 }
 
 // A button whose work is a promise: while it runs the button is disabled and
-// says what it is doing, so a second click sends nothing (D2955).
+// says what it is doing, so a second click sends nothing (D2955). `enabled`,
+// when given, says whether the button may be pressed once its work is done
+// (the editor's Cancel: only while a statement runs).
 export function busyButton(text, work, options) {
-  const { busy, ...properties } = options || {};
+  const { busy, enabled, ...properties } = options || {};
   const element = h("button", { type: "button", ...properties }, text);
   element.addEventListener("click", async (event) => {
     if (element.disabled) {
@@ -151,7 +153,7 @@ export function busyButton(text, work, options) {
     try {
       await work(event);
     } finally {
-      element.disabled = false;
+      element.disabled = enabled ? !enabled() : false;
       element.removeAttribute("aria-busy");
       element.replaceChildren(text);
     }
@@ -284,10 +286,18 @@ export function skeleton() {
     h("div", { className: "sk block" }));
 }
 
-// Tabs with tab semantics: `items` is [{label, panel}], one panel shown.
-export function tabs(items) {
+// Tabs with tab semantics: `items` is [{label, panel}], one panel shown. Each
+// tab controls its panel and each panel is labelled by its tab; the arrow
+// keys, Home and End move between tabs; `name` labels the tab list.
+let tabSets = 0;
+
+export function tabs(items, name) {
+  tabSets += 1;
+  const id = (kind, index) => `tabs-${tabSets}-${kind}-${index}`;
   const buttons = [];
-  const panels = items.map((item) => h("div", { role: "tabpanel" }, item.panel));
+  const panels = items.map((item, index) => h("div", {
+    role: "tabpanel", id: id("panel", index), tabIndex: 0, "aria-labelledby": id("tab", index),
+  }, item.panel));
   const choose = (index) => {
     buttons.forEach((tab, at) => {
       tab.setAttribute("aria-selected", String(at === index));
@@ -297,18 +307,20 @@ export function tabs(items) {
   };
   items.forEach((item, index) => {
     buttons.push(h("button", {
-      type: "button", role: "tab",
+      type: "button", role: "tab", id: id("tab", index), "aria-controls": id("panel", index),
       onclick: () => choose(index),
       onkeydown: (event) => {
-        const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-        if (step) {
-          const next = (index + step + items.length) % items.length;
-          choose(next);
-          buttons[next].focus();
+        const last = items.length - 1;
+        const moves = { ArrowRight: index === last ? 0 : index + 1, ArrowLeft: index === 0 ? last : index - 1, Home: 0, End: last };
+        if (Object.hasOwn(moves, event.key)) {
+          event.preventDefault();
+          choose(moves[event.key]);
+          buttons[moves[event.key]].focus();
         }
       },
     }, item.label));
   });
   choose(0);
-  return h("div", { className: "tabs" }, h("div", { className: "tablist", role: "tablist" }, buttons), panels);
+  const list = h("div", { className: "tablist", role: "tablist", ...(name ? { "aria-label": name } : {}) }, buttons);
+  return h("div", { className: "tabs" }, list, panels);
 }

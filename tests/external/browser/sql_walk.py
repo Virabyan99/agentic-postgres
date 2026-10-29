@@ -13,7 +13,10 @@ times 20 `SELECT 1`; on the **direct door** (`customer_admin`) reads
 `current_user` and the count. Then the relay's refusals from raw clients (a
 foreign `Origin`, a name outside the grammar, a door name with no router), and
 sign out. It writes ONE record the external proofs read through
-`APG_SQL_EDITOR_RECORD_FILE`.
+`APG_SQL_EDITOR_RECORD_FILE`. Since Session 47 Run 6 (D2957) it also records,
+on each connect, that the credentials form was hidden and what the state bar
+named; on each Disconnect, that the form came back and the statement went; and
+that *Copy as CSV* put the drawn result on the clipboard.
 
 **The record holds no secret** (D2416, D2420): the console password, the TOTP
 seed, both database passwords and the cookies stay in variables, and the
@@ -446,7 +449,8 @@ def walk(arguments: argparse.Namespace) -> int:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         walker.record["chromium"] = browser.version
-        context = browser.new_context()
+        # The clipboard, for *Copy as CSV* read back (rig 47a: granted, it reads the exact string).
+        context = browser.new_context(permissions=["clipboard-read", "clipboard-write"])
         backend = None
         if arguments.rehearse:
             doors = {
@@ -513,9 +517,43 @@ def walk(arguments: argparse.Namespace) -> int:
                 walker.record.setdefault("password_field_cleared", []).append(
                     page.get_by_label("Password").input_value() == ""
                 )
+                # Session 47 Run 6 (D2957): connected, the credentials form is gone
+                # and the state bar names the door, its user and its database.
+                walker.record.setdefault("form_hidden_while_connected", []).append(
+                    page.locator("#main form").is_hidden()
+                )
+                walker.record.setdefault("state_bar", []).append(
+                    dict(
+                        zip(
+                            [t.inner_text() for t in page.locator("#main .statebar dt").all()],
+                            [d.inner_text() for d in page.locator("#main .statebar dd").all()],
+                            strict=True,
+                        )
+                    )
+                )
                 if not said.startswith("Connected"):
                     raise RuntimeError("not connected")
                 return said
+
+            def disconnect() -> None:
+                page.get_by_role("button", name="Disconnect").click()
+                page.get_by_role("button", name="Connect", exact=True).wait_for()
+                walker.record.setdefault("form_shown_after_disconnect", []).append(
+                    page.locator("#main form").is_visible()
+                    and page.locator("#main textarea").is_hidden()
+                )
+
+            def copy_csv() -> bool:
+                """*Copy as CSV* on the last result, read back from the clipboard,
+                against the header and cells the page drew."""
+                page.get_by_role("button", name="Copy as CSV").first.click()
+                page.get_by_role("button", name="Copied").first.wait_for()
+                # The DOM's text, not the rendered: the header row is drawn in capitals.
+                header = [
+                    th.text_content() or "" for th in page.locator("#main section.result th").all()
+                ]
+                drawn = "".join(",".join(row) + "\r\n" for row in [header, *tables(page)[0]])
+                return page.evaluate("() => navigator.clipboard.readText()") == drawn
 
             def run(text: str) -> dict[str, Any]:
                 page.locator("#main textarea").fill(text)
@@ -540,6 +578,7 @@ def walk(arguments: argparse.Namespace) -> int:
                 "pooled: who am I", lambda: run("SELECT current_user, current_database()")
             )
             walker.record["sign_in_to_first_result_seconds"] = round(time.monotonic() - started, 1)
+            readings["csv_copied"] = walker.step("pooled: Copy as CSV", copy_csv)
             readings["marker"] = walker.step(
                 "pooled: the marker", lambda: run(f"SELECT 1 /* {marker} */")
             )
@@ -579,7 +618,7 @@ def walk(arguments: argparse.Namespace) -> int:
                 ]
                 readings["select1_seconds"] = timings
                 readings["select1_median"] = statistics.median(timings)
-            walker.step("disconnect", lambda: page.get_by_role("button", name="Disconnect").click())
+            walker.step("disconnect", disconnect)
             direct: dict[str, Any] = {}
             walker.record["direct"] = direct
             walker.step(
@@ -591,10 +630,7 @@ def walk(arguments: argparse.Namespace) -> int:
                 "direct: the role's connections",
                 lambda: run("SELECT count(*) FROM pg_stat_activity WHERE usename = current_user"),
             )
-            walker.step(
-                "disconnect the direct door",
-                lambda: page.get_by_role("button", name="Disconnect").click(),
-            )
+            walker.step("disconnect the direct door", disconnect)
             if not arguments.rehearse:
                 relay = urlsplit(walker.record["relay"]).hostname
                 pooled_host = walker.record["doors"]["pooled"]["host"]

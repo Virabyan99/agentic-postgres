@@ -6,8 +6,10 @@
 // the connections answer -- the page types no host, D2738); whether a door may
 // be opened now (only the control API can say a project is asleep: a sleeping
 // door and a wrong name fail alike in the handshake, D2737); and the sentence
-// for every way a session can end. The password is read by `readPassword` at
-// the moment of connecting and handed to `connect` and nothing else (D2756).
+// for every way a session can end -- a close of the socket in the words the
+// page hands in (`closeSentence`, messages.js's, since Session 47 Run 6, D3012).
+// The password is read by `readPassword` at the moment of connecting and
+// handed to `connect` and nothing else (D2756).
 
 export const DEADLINE_SENTENCE = "A statement still running after 60 seconds is cancelled.";
 export const TRUNCATED_SENTENCE = "Showing the first 1,000 rows; the rest were not read.";
@@ -38,25 +40,19 @@ export async function doors(call, key) {
   return { offered: true, doors: [pick("pooled", answer.pooled), pick("direct", answer.direct)] };
 }
 
-// The sentence for a session that ended or never began.
-export function endSentence(error) {
-  const close = {
-    4400: "The relay refused a message it does not carry; the session was closed.",
-    4408: "The session ended after 30 minutes, or after 5 idle minutes.",
-    4413: "The session carried more than the relay allows and was closed.",
-    4429: "Too many editor sessions are open; try again in a minute.",
-    4502: "The database could not be reached.",
-    1009: "A message was larger than 1 MiB; the session was closed.",
-  };
-  if (error && close[error.closeCode]) return close[error.closeCode];
+// The sentence for a session that ended or never began. A close of the
+// relay's socket is worded by the page's `closeSentence` (messages.js's
+// CLOSES, ADR 0297, D3012), handed in as `call` and `connect` are: this file
+// words no close code itself.
+export function endSentence(error, closeSentence) {
+  if (error && error.closeCode && closeSentence) return closeSentence(error.closeCode);
   if (error && (error.code === "08P01" || error.code === "28P01")) return "The database refused the password.";
   if (error && error.code) return `${error.message} (${error.code})`;
-  if (error && error.closeCode) return "The relay could not be reached.";
   return error && error.message ? error.message : "The session ended.";
 }
 
 // Read the project's state, then -- only if it may -- the password, then connect.
-export async function openDoor({ call, connect, relay, key, door, readPassword }) {
+export async function openDoor({ call, connect, relay, key, door, readPassword, closeSentence }) {
   let project;
   try {
     project = await call("GET", `/projects/${encodeURIComponent(key)}`);
@@ -70,12 +66,12 @@ export async function openDoor({ call, connect, relay, key, door, readPassword }
     const session = await connect({ relay, host: door.host, user: door.user, database: door.database, password });
     return { opened: true, session };
   } catch (error) {
-    return { opened: false, say: endSentence(error) };
+    return { opened: false, say: endSentence(error, closeSentence) };
   }
 }
 
 // One statement's results, as plain values the page renders as text.
-export async function runStatement(session, text, onResult) {
+export async function runStatement(session, text, onResult, closeSentence) {
   try {
     for await (const result of session.query(text)) {
       onResult({
@@ -89,6 +85,6 @@ export async function runStatement(session, text, onResult) {
     return null;
   } catch (error) {
     if (error.deadline) return "The statement ran for 60 seconds and was cancelled.";
-    return endSentence(error);
+    return endSentence(error, closeSentence);
   }
 }
