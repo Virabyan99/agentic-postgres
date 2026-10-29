@@ -299,6 +299,16 @@ runs add go in a second table below it, in execution order.
 
 | # | Brief says | Tree does | Decision | Why | ADR |
 |---|---|---|---|---|---|
+| **D2981** | D2951: *"if capacity is checked before the plan, `plan_limit_reached` is answered first"*; Run 3 *"reads the server's refusal order"*. | **The order is already plan-first** (`control_service.py:689-716`). The defect is a reader: `_projects_held` (`:730-747`) counts an open creation only while `project_key IS NULL`; the control set (`0008:233-249`) counts it while the key is NULL **or not yet in `control_projects`**. A creation is keyed at `allocate` and registered at `registry`, so for ~99 % of it the service counts it nowhere: the plan passes, the slot reading refuses — the person's `capacity_exhausted` (Session 46 notes `:83`). The same function serves `GET …/plan`'s `held`: **0 of 1** during a creation. | **Run 3**: `_projects_held` counts as the SQL counts; a test seeds a running, keyed, unregistered creation and reads `plan_limit_reached` from `POST /v1/projects` and `held = 1` from `GET …/plan` (control: the creation finished). Run 3 step 3's *"refusal order … changed"* becomes this. | Two readers of one fact must agree; the planning row guessed the wrong one. | 0297 |
+| **D2982** | — | The banners (D2954) and *New project* disabled (D2951) read `held` from `GET …/plan`. | **Both wait on D2981's fix**; Run 5's tests seed a running creation, never only a finished one. | A banner over the wrong count is a wrong banner. | 0297 |
+| **D2983** | Sheet H0: *"`slot3`'s and `slot10`'s `domain` and the control manifest's `project.domain` moved"*. | `slot.sh redeploy` deploys from the slot's **own** manifest `/etc/agentic-postgres/slots/<key>/manifest.yaml` (`bin/slot.py:391-448`), not `host.yaml`; a render whose domain moved without `api.rest.allowed_cors_origins` is **refused, exit 2** (rig 47b). `allocated` reads the file's presence only (`slot.state`). | **H0 moves three places** per slot: both `host.yaml` copies, **and the slot manifest's `project.domain` and `allowed_cors_origins` together** (the old origin replaced by the new, as `slot.prepare` writes it), backups first; the control manifest's `project.domain`. Sheet H0 amended below. | Rig 47b; the product's own refusal is the guard. | 0299 |
+| **D2984** | — | `jwt.issuer` is `https://<domain>/api/app/auth` (`naming.py:1515`; rig 47b). | **Every token a moved project issued stops verifying at its redeploy**: console sessions, and any customer application's sessions on `slot3-prod` / `slot10-prod`. **Sheet M0 says so** to slot10's person. No identity moves (rig 47b: no key, role, network, volume, bucket or stanza). | Said before, not discovered after. | 0299 |
+| **D2985** | D2946 (6), D2966: the old site **and console** names 301. | urllib (the CLI's transport) follows a **301 POST as a body-less GET** and does **not** follow a 308 (`HTTPError 308`); measured on Python 3.12.15 and 3.14.4, control a direct POST (rig 47c). A 301 on the old `control.` name would turn `POST /v1/projects` into `GET /v1/projects` → 200. | **Apex and `www.` 301; old `control.` 308 for every path** (a browser follows it for pages as a 301). Sheet N2 amended below. | A redirect must not change what a request does. | 0299 |
+| **D2986** | D2892: a string-evaluated Playwright wait is refused under the console's policy. | **Not reproduced** (rig 47a, Playwright 1.63.0, the same policy imported from `serve.py`): `wait_for_function` with an expression string and with an arrow-function string both ran; the inline-script control did not run, so the policy was applied. | **The locator-only rule stays** (it costs nothing); D2892's reason recorded as not reproduced. | A reason that did not hold twice is not a reason. | 0295 |
+| **D2987** | D2974: read both apt pins. | Rig 47d (in the pinned base image, control `0.0.0-nope` ABSENT): `ca-certificates 20250419~deb12u2` **PRESENT**, `pgbackrest 2.59.3-1.pgdg12+1` **PRESENT**; `2.60.0-1.pgdg12+1` now offered. | **No repin; the Postgres image does not move; no database restart** at R1. 2.60.0 not taken (a product change for its own session). | Read before a release. | — |
+| **D2988** | Sheets N1/N2 as if the endpoints existed. | Neither zone has an `http_request_dynamic_redirect` entrypoint (GET 404 10003); Free = 10 Single Redirect rules per zone, wildcards, no regex, 301/302/307/308; Email Routing `unconfigured` on `nomipg.com`, `ready` on the old zone; Pages `agentic-postgres-site` serves the old apex and `www.` (rig 47c, read-only). | N2 **creates** the entrypoint with a `PUT` (two rules); N1 enables Email Routing by `POST /zones/{id}/email/routing/dns` and adds the Pages domains by `POST …/pages/projects/agentic-postgres-site/domains`. **Whether the MCP's grant holds Pages Write, Zone Settings Write and a rulesets write** is read by the first write after the operator's word — a 403 names the permission (§9: read, never retried). | Measure a third party before a sheet names it. | 0299 |
+| **D2989** | D2952: *"the generic four"*. | The inventory (derived, `~/s47/run1/inventory.py` → `docs/design/session-47/inventory.md`): **20 words** reach `/v1`; `malformed_request` only through the helper `errors.malformed()` (`control_routes.py:202`), so a scan of names alone misses it; **5 without an entry**: `could_not_determine`, `interrupted`, `last_owner`, `malformed_request`, `operation_failed`; eight agent-plane documents are not `/v1`'s. | **`test_console_refusals` uses the inventory's method** — the AST of `errors.py`, the control modules' uses including through `errors.*()` helpers, `OPERATION_ERROR_CODES`, the relay's `CLOSE_*` with 1000/1006/1011, `console_unconfigured`. | The set is derived; a typed list goes stale. | 0297 |
+| **D2990** | D2949: a step log. | Rig 47e: the draft table, policy and advance work on a real control set — three steps in order, a repeat keeps its first time (`ON CONFLICT DO NOTHING`, `clock_timestamp()`), the request role denied (control: superuser 3), a non-member 0 rows, a late advance `not_running` with no row; the subject `{name, profile}` without the digest or the administrator name. | **0011 is written from the rig's draft** (ADR 0296 decisions 1–2); `expected` steps, labels and typical seconds served by the service from `operation_steps` (one source; the console holds no copy). | Measured before migrated. | 0296 |
 
 ---
 
@@ -403,7 +413,43 @@ guard and `test_environment_gates` for any new module; `test_suite_shape` and
    the redirects, the cutover, the re-logins) — written, indexed in
    `docs/decisions/README.md`. Commit, push, no CI read.
 
-**Done.**
+**Done.** 2026-10-29, at `de996bf` (the plan committed `4c7db66`; the stage
+plan's Status line `de996bf`, pushed by the planning session). Notes and rigs in
+WSL `~/s47/run1/` and `~/s47/rigs/47a..47e/`.
+(1) **The inventory**, derived (`inventory.py` → `docs/design/session-47/inventory.md`):
+20 refusal words reach `/v1`, 16 in `REFUSALS`, 5 without an entry, none with a
+next action; the relay's 5 close codes all worded; 11 types' steps; 17 views, 45
+calls, `GET /v1/operations` called by none. **`backup` is 92 % of a creation at
+progress 90** (D2989). (2) **Rig 47a** in the pinned Playwright image, the
+console's own policy imported: a static module import, `:has()`, a cloned static
+SVG (16 × 16, SVG namespace), `<progress>`, a modal `<dialog>`, `aria-live`, the
+clipboard written and read back, no overflow at 390 and 1280, the first `Tab` on
+the first link; the inline-script control did not run. **D2892 not reproduced**:
+both string forms of `wait_for_function` ran (D2986). (3) **Rig 47b**: a domain
+move changes routes, the issuer, the doors, the CORS origin and (control) the
+console and relay origins — **no identity**; a domain without its CORS origin is
+refused at render, exit 2; `redeploy` deploys from the slot's own manifest
+(D2983, D2984). No §9 stop. (4) **Rig 47c**: urllib follows a 301 POST as a
+body-less GET and does not follow a 308 (Python 3.12.15 and 3.14.4; control the
+direct POST) → **the old `control.` answers 308** (D2985); Cloudflare read-only:
+no redirect entrypoint on either zone, Free 10 rules, Email Routing unconfigured
+on `nomipg.com` (D2988). (5) **Rig 47d**: both apt pins PRESENT (control ABSENT)
+— no repin, no database restart (D2987). (6) **Rig 47e**: the step log's draft on
+a real control set, 1 passed in 34.4 s (D2990). **Found on the way, a product
+defect: D2981** — the service's `_projects_held` and the control set count an
+open creation differently, which is why the person read `capacity_exhausted`
+and why `GET …/plan` reads 0 held during a creation; Run 3 repairs it. (7) **The
+research** (D2977): `docs/design/session-47/research.md`, 64 patterns over nine
+topics from Neon, Convex, Supabase, Vercel and PlanetScale, each row a fetched
+URL; gathered by a research sub-agent and read whole before commit; no copy
+controls, creation-progress screen or checklist were documented by any source
+read — ours to design. (8) **ADRs 0295–0299** written and indexed; **ADR 0288
+marked *"Accepted, decision 8 superseded by 0295"*** (the index's status is read
+to the first comma, `test_the_index_status_agrees_with_each_adr`). Sheets H0, N2
+and M0 amended by D2983–D2985. Targeted once: `test_documentation_index`,
+`test_repository_contract`, `test_mcp_catalog`, `test_suite_shape`, `test_fleet`
+passed; `test_acceptance_registry` failed on the index separator, fixed, re-run
+alone: 24 passed. Rows **D2981–D2990**. **NEXT FREE: D2991, ADR 0300.**
 
 ### Run 2 — the design brief, the prototypes, Sheet D1 (documentation)
 
@@ -750,12 +796,18 @@ reads each back with `dig @1.1.1.1`.
 ### Sheet H0 — the domains moved on the host (Run 13)
 As Session 46's H1, with `slot3`'s and `slot10`'s `domain` and the control
 manifest's `project.domain`; backups first; `/home/op/etc-host.yaml` refreshed
-from `/etc` first (D2930).
+from `/etc` first (D2930). **And (D2983) each slot's own manifest,
+`/etc/agentic-postgres/slots/<key>/manifest.yaml`: `project.domain` and
+`api.rest.allowed_cors_origins` together**, the old origin replaced by the new —
+`slot.sh redeploy` deploys from that file, and a render with one moved and not
+the other is refused (exit 2). A `--render-only` of each edited manifest, read
+for `jwt.issuer` and the two door hosts, before the sheet's deploy.
 
 ### Sheet M0 — the message to slot10's person (Run 13; the operator, by their own email)
 A short message: the service's new address, that their project's connection
-strings change at a stated time, where to read the new ones (*Connect*), and that
-nothing is lost.
+strings change at a stated time, where to read the new ones (*Connect*), that
+nothing is lost, and **that anyone signed in to an application built on their
+project signs in again after the change** (D2984: the issuer moves).
 
 ### Sheets R1, R2a–R2e (Run 13)
 As Session 46's, with **R2d** `slot10-prod` by `slot.sh redeploy` after M0, and
@@ -763,9 +815,12 @@ As Session 46's, with **R2d** `slot10-prod` by `slot.sh redeploy` after M0, and
 origin.
 
 ### Sheet N2 — the old zone's redirects (Run 13)
-Single Redirect rules on `agenticpostgresql.com`: the apex, `www.` and `control.`
-→ the same path on `nomipg.com`, 301; the old `control.` record proxied,
-redirect-only (D2966). Read back with `curl -sI`.
+Single Redirect rules on `agenticpostgresql.com` (the entrypoint created by `PUT`,
+D2988): the apex and `www.` → the same path and query on `nomipg.com`, **301**;
+`control.` → the same path and query on `control.nomipg.com`, **308** (D2985: a
+301 turns the old CLI's POST into a GET); the old `control.` record proxied,
+redirect-only (D2966). Read back with `curl -sI` (the code and `Location`) and a
+`curl -sI -X POST` on the old `control.` (308, not followed).
 
 ### Sheet L1 — the operator's re-login (Run 13)
 `apg login password --endpoint https://control.nomipg.com/api/v1` as

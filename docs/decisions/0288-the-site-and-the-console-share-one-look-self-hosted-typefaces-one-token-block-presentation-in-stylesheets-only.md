@@ -1,6 +1,6 @@
 # 0288 — The site and the console share one look: self-hosted typefaces, one token block, presentation in stylesheets only
 
-- **Status:** Accepted
+- **Status:** Accepted; **decision 8, the joint 30,720 B stylesheet budget and the freeze of the walk drivers' anchors superseded by [0295](0295-the-console-gains-features-inside-first-party-rules-fixed-route-modules-no-build-step-its-own-stylesheet-budget.md)** (Session 47); every other decision stands
 - **Date:** 2026-10-23
 - **Session:** 45, Run 1 (`docs/plans/session-45-implementation-plan.md`,
   D2810, D2812–D2831, D2843, D2844, D2847, D2848; rigs 45a, 45b)
