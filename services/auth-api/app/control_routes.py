@@ -768,6 +768,12 @@ ORGANIZATION_QUERY = openapi_docs.query_parameter(
     schema={"type": "string", "format": "uuid"},
     description="One of the caller's organisations. A foreign or missing one is `not_found`.",
 )
+#: Session 47 (ADR 0296 decision 3): the one filter, `open` = pending or running.
+STATUS_QUERY = openapi_docs.query_parameter(
+    "status",
+    schema={"type": "string", "enum": ["open"]},
+    description="`open`: only the operations pending or running. Any other value is refused.",
+)
 
 
 @router.get(
@@ -1254,8 +1260,12 @@ async def get_project(request: Request, key: str) -> Response:
     "/operations",
     openapi_extra=openapi_docs.described(
         summary="An organisation's operations, newest first",
-        description="`organization` is required. Empty while no operation type is accepted.",
-        query_parameters=[{**ORGANIZATION_QUERY, "required": True}],
+        description=(
+            "`organization` is required. Empty while no operation type is accepted. "
+            "`status=open` lists only those pending or running. Each names its `steps` "
+            "(when each began), its `subject` (never its arguments) and `expected` (ADR 0296)."
+        ),
+        query_parameters=[{**ORGANIZATION_QUERY, "required": True}, STATUS_QUERY],
     ),
     responses={200: openapi_docs.ok("The operations."), 401: openapi_docs.UNAUTHENTICATED,
                403: FACTOR_GATE, 404: NOT_A_MEMBER, 422: openapi_docs.INVALID},
@@ -1263,10 +1273,16 @@ async def get_project(request: Request, key: str) -> Response:
 async def list_operations(request: Request) -> Response:
     async def run() -> Response:
         caller = await _caller(request)
-        named = _query(request, ("organization",)).get("organization")
+        query = _query(request, ("organization", "status"))
+        named = query.get("organization")
         if named is None:
             raise errors.InvalidRequest("organization is required")
-        rows = await _service(request).list_operations(caller, _uuid(named))
+        status = query.get("status")
+        if status not in (None, "open"):
+            raise errors.InvalidRequest("status is open or absent")
+        rows = await _service(request).list_operations(
+            caller, _uuid(named), open_only=status == "open"
+        )
         return JSONResponse({"operations": rows})
 
     return await _guard(run)

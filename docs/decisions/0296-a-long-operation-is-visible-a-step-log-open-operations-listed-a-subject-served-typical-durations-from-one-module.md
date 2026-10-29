@@ -8,7 +8,8 @@
   (new; control set 10 → 11), `services/auth-api/app/control_routes.py`
   (`GET /v1/operations` gains `status`), `control_service.py`, `control_repository.py`,
   `models.py`, `contracts/control-openapi.canonical.json`, new
-  `src/agentic_postgres/operation_steps.py` (a shared module, ADR 0084),
+  `services/auth-api/app/operation_steps.py` (a shared module, ADR 0084) and its
+  re-export `src/agentic_postgres/operation_steps.py` (D2992),
   `services/console/public/progress.js` and the tracker view. Tests: new
   `tests/contract/test_control_operation_steps.py`, `test_operation_steps.py`;
   widened `test_control_set`, `test_control_routes`, `test_auth_service_shape`
@@ -60,23 +61,30 @@ absent from the whole row. The request role selecting the table directly:
    again, wider, with their grants (0007's shape). `steps` is `[{step, started_at}]`
    in start order (`[]` for an operation not yet claimed). **`subject` names the
    thing the operation acts on and nothing else**: `{name, profile}` for
-   `project.create`; the branch's name for the four branch types (Run 3 reads the
-   member's name from `schemas/operation-arguments.schema.json`); `{profile}` for
-   `project.resize`; `{}` for the rest. **Never `handoff_sha256`,
-   `admin_username`, `verifier` or any other argument** — a test lists every
-   argument member of the schema and asserts each one absent unless named here.
+   `project.create`; `{branch}` for the four branch types (the schema's member);
+   `{profile}` for `project.resize`; `{}` for the rest — computed by one helper,
+   `app.control_operation_subject(type, arguments)`, executable by no role
+   (D2994). **Never `handoff_sha256`, `admin_username`, a verifier or any other
+   argument** — a test writes every argument member the schema allows and asserts
+   each absent unless named here.
 3. **`GET /v1/operations?organization=<id>&status=open`**: `status` takes the one
-   value `open` (`pending` or `running`); anything else is `malformed_request`;
+   value `open` (`pending` or `running`); anything else is `invalid_request`, 422 —
+   the route's own answer to a bad query, as for a missing `organization` (D2993);
    absent, the list is unchanged. Filtered in the service over the existing
    reader — no new SQL argument.
-4. **`src/agentic_postgres/operation_steps.py`** (standard library only, a
-   `SHARED_MODULE` the service loads as it loads `plans`): per operation type, the
-   ordered steps, a plain label each (*"Taking the first backup"*, never
-   `backup`), and its **typical seconds**. Every operation read serves
-   `expected: [{step, label, typical_seconds}]` for its type — computed by the
-   service, never stored. `tests/contract/test_operation_steps.py` holds the
-   steps equal to `STEPS` and the typical seconds equal to the newest measured rows
-   of `capacity.ENVELOPE`; Run 14 moves them from the step log's own readings.
+4. **`services/auth-api/app/operation_steps.py`** (standard library only, a
+   `SHARED_MODULE` like `plans`, re-exported by `src/agentic_postgres/
+   operation_steps.py`, D2992): per operation type, the ordered steps, a plain
+   label each (*"Taking the first full backup"*, never `backup`), the measured
+   **typical time** as a range (`low`, `high`, each citing its envelope record),
+   **per-step seconds where a per-step measurement exists** (`project.create`'s,
+   slot6-prod), and the reconciler's **bound**. Every operation read serves
+   `expected: {steps: [{step, label, typical_seconds}], typical_seconds: {low,
+   high}, bound_seconds}` — computed by the service, never stored; `null` for a
+   type the module does not know (D2995). `tests/contract/test_operation_steps.py`
+   holds the steps equal to `STEPS`, the bounds to `bin/reconciler.py`'s, and every
+   number to the words of the measurement it cites; Run 14 moves them from the step
+   log's own readings.
 5. **The tracker is a route**: `#/operations/<id>`. Every load reads the operation
    from the API; the page holds nothing a refresh could lose. It shows each
    expected step as done / current / to come, the elapsed time of the whole and of

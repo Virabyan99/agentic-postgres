@@ -35,6 +35,9 @@ VERIFIER = (
     "U2VydmVyS2V5U2VydmVyS2V5U2VydmVyS2V5U2VydmU="
 )
 BRANCH = {"branch": "dev", "app_verifier": VERIFIER, "admin_verifier": VERIFIER}
+#: ADR 0297 decision 4: the refusal names the plan and its number, as
+#: `plan_limit_reached` does.
+BRANCH_LIMIT = {"error": "branch_limit_reached", "limit": 1, "plan": "free"}
 
 
 @pytest.fixture(scope="module")
@@ -120,7 +123,7 @@ def test_a_second_branch_is_refused_before_a_row(drive: Any, accepting: None) ->
     assert first.json()["operation"]["type"] == "branch.create"
     assert _rows(drive, key) == 1
     second = drive.call("POST", f"/v1/projects/{key}/branches", token=member, body=BRANCH)
-    assert (second.status_code, second.json()) == (409, {"error": "branch_limit_reached"})
+    assert (second.status_code, second.json()) == (409, BRANCH_LIMIT)
     assert _rows(drive, key) == 1
 
     _finish(drive, key)
@@ -128,7 +131,7 @@ def test_a_second_branch_is_refused_before_a_row(drive: Any, accepting: None) ->
     restore = {**BRANCH, "branch": "qa", "target_time": "2026-10-14T08:00:00Z"}
     for path, body in (("branches", {**BRANCH, "branch": "qa"}), ("restores", restore)):
         again = drive.call("POST", f"/v1/projects/{key}/{path}", token=member, body=body)
-        assert (again.status_code, again.json()) == (409, {"error": "branch_limit_reached"})
+        assert (again.status_code, again.json()) == (409, BRANCH_LIMIT)
     assert _rows(drive, key) == 1
 
     arguments = json.dumps({**BRANCH, "branch": "qa"})
@@ -172,7 +175,7 @@ def test_the_route_refuses_a_second_branch_without_asking_the_set(
     for org in (live, flight):
         answer = drive.call("POST", f"/v1/projects/{org['project']}/branches",
                             token=org["tokens"]["member"], body=BRANCH)  # fmt: skip
-        assert (answer.status_code, answer.json()) == (409, {"error": "branch_limit_reached"})
+        assert (answer.status_code, answer.json()) == (409, BRANCH_LIMIT)
     assert asked == [], asked
     reached = drive.call("POST", f"/v1/projects/{empty['project']}/branches",
                          token=empty["tokens"]["member"], body=BRANCH)  # fmt: skip

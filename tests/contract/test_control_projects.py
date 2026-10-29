@@ -410,6 +410,9 @@ PLAN_LIMIT_PRODUCERS = frozenset({
     "services/auth-api/app/control_service.py",
     "services/auth-api/app/control_routes.py",
     "projects/control/migrations/templates/0008-control-plans-usage.sql",
+    # Session 47 (ADR 0297): 0011 re-creates the same reader,
+    # `control_request_operation`, as 0008's text plus its started notice.
+    "projects/control/migrations/templates/0011-control-operation-steps.sql",
     "projects/control/migrations/manifest.json",
     "contracts/control-openapi.canonical.json",
 })  # fmt: skip

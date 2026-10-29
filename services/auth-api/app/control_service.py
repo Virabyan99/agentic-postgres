@@ -64,6 +64,7 @@ from app import (
     control_states,
     errors,
     one_time_tokens,
+    operation_steps,
     operations,
     plans,
     refresh_sessions,
@@ -111,6 +112,9 @@ STALE_SLOT_MESSAGE = (
 #: Session 39 (D2351): what a project without recorded doors is refused with --
 #: the Reality Ledger row of the concept that is not there for it.
 NO_ENDPOINT_LEDGER_ROW = "pooled_endpoint"
+
+#: Session 47 (ADR 0296): what `?status=open` admits -- an operation in flight.
+OPEN_STATUSES = ("pending", "running")
 
 #: The members of a door `GET /v1/projects/{key}/connections` serves, from the
 #: deployed document's `database.public` (ADR 0268 item 6). No URL, no password.
@@ -732,17 +736,23 @@ class ControlService:
     ) -> tuple[str, int, int]:
         """`(plan, projects_active, held)`: the organisation's projects not
         deleted -- a sleeping one holds its slot -- plus its open creations, as
-        the control set counts them (ADR 0274)."""
+        the control set counts them (ADR 0274): a creation counts while its key
+        is NULL **or names no registered project** -- it is keyed at `allocate`
+        and registered at `registry`, and counting only a NULL key left it
+        counted nowhere for most of its run (D2981, ADR 0297)."""
         row = await self.repository.organization_plan(caller.user_id, organization)
         plan = str(row["plan"]) if row and row.get("plan") else plans.DEFAULT_PLAN
         limit = plans.PLANS[plan].entitlements["projects_active"].value
         assert isinstance(limit, int)
         projects = int(row["projects_active"]) if row else 0
         history = await self.repository.list_operations(caller.user_id, organization)
+        registered = {
+            p["key"] for p in await self.repository.list_projects(caller.user_id, organization)
+        }
         creating = sum(
             1 for o in history
             if o["type"] == "project.create" and o["status"] in ("pending", "running")
-            and o.get("project_key") is None
+            and (o.get("project_key") is None or o["project_key"] not in registered)
         )  # fmt: skip
         return plan, limit, projects + creating
 
@@ -934,7 +944,10 @@ class ControlService:
         rows = await self.repository.list_notifications(caller.user_id, org, limit)
         return {"organization": str(org), "notifications": [
             {"id": str(r["id"]), "project": r["project_key"], "kind": r["kind"],
-             "text": r["text"], "created_at": _iso(r["created_at"])}
+             "text": r["text"], "created_at": _iso(r["created_at"]),
+             # ADR 0297: the operation that wrote it, when one did.
+             "operation_id": None if r["operation_id"] is None else str(r["operation_id"]),
+             "operation_type": r["operation_type"]}
             for r in rows
         ]}  # fmt: skip
 
@@ -1033,7 +1046,8 @@ class ControlService:
             allowed = plans.PLANS[plan].entitlements["branches_total"].value
             assert isinstance(allowed, int)
             if len(live) + len(creating) >= allowed:
-                raise errors.ControlRefused(errors.BRANCH_LIMIT_REACHED)
+                # ADR 0297 decision 4: the plan and its number, as plan_limit_reached says.
+                raise errors.ControlRefused(errors.BRANCH_LIMIT_REACHED, limit=allowed, plan=plan)
         else:
             if await self.repository.get_branch(caller.user_id, key, arguments["branch"]) is None:
                 raise errors.ControlRefused(errors.NOT_FOUND)
@@ -1091,11 +1105,17 @@ class ControlService:
         return _operation(cancelled)
 
     async def list_operations(
-        self, caller: ControlPrincipal, organization: UUID
+        self, caller: ControlPrincipal, organization: UUID, *, open_only: bool = False
     ) -> list[dict[str, Any]]:
+        """The organisation's operations, newest first; with `open_only`, only
+        those pending or running (`?status=open`, ADR 0296 decision 3)."""
         self.require_role(caller, organization, "viewer")
         rows = await self.repository.list_operations(caller.user_id, organization)
-        return [_operation(row) for row in rows if self._visible(caller, row["organization_id"])]
+        return [
+            _operation(row) for row in rows
+            if self._visible(caller, row["organization_id"])
+            and (not open_only or row["status"] in OPEN_STATUSES)
+        ]  # fmt: skip
 
     async def get_operation(self, caller: ControlPrincipal, operation: UUID) -> dict[str, Any]:
         """One operation; for the PERSON who requested a succeeded export, its
@@ -1308,4 +1328,11 @@ def _operation(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": row["created_at"].isoformat(),
         "started_at": _iso(row["started_at"]),
         "finished_at": _iso(row["finished_at"]),
+        # ADR 0296: when each step began, what the operation acts on (never its
+        # arguments), and what the type is expected to do.
+        "steps": [
+            {"step": s["step"], "started_at": s["started_at"]} for s in (row.get("steps") or [])
+        ],
+        "subject": row.get("subject") or {},
+        "expected": operation_steps.expected(row["type"]),
     }

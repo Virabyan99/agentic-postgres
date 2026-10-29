@@ -729,10 +729,15 @@ class ResetBranchRequest(_BranchCredentials):
 
 
 class BranchLimitReachedResponse(BaseModel):
-    """The project already has its one live branch, or a creation of one is in
-    flight; nothing was recorded (D2430)."""
+    """The project already has its plan's live branches, or a creation of one is
+    in flight; nothing was recorded (D2430). Since Session 47 (ADR 0297) the
+    route's own reader names the plan and its number, as the plan's project
+    refusal does; the control set's answer to a concurrent request carries the
+    word alone."""
 
     error: Literal["branch_limit_reached"]
+    limit: int | None = None
+    plan: str | None = None
 
 
 class PlanInterestRequest(_Strict):

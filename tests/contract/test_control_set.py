@@ -54,6 +54,8 @@ TABLES = {
     "control_insight_samples",
     # Session 46 (ADR 0292): the support bundle's readings.
     "control_diagnostic_readings",
+    # Session 47 (ADR 0296): when each step of an operation began.
+    "control_operation_steps",
 }
 #: Every function the identity service may execute, and no other (ADR 0251).
 GRANTED = {
@@ -148,6 +150,8 @@ HELPERS = {
     "control_project_organization",
     # Session 41: the usage document the two usage readers compute (ADR 0275).
     "control_usage_document",
+    # Session 47: the subject the two operation readers serve (ADR 0296).
+    "control_operation_subject",
 }
 
 
@@ -371,7 +375,7 @@ def test_the_control_example_renders_as_the_control_plane() -> None:
         assert outputs["control"] == {"enabled": True}
         assert outputs["routes"]["control"] == "https://control.fixture-dev.test/api/v1"
         assert outputs["migrations"]["project_set"]["root"] == "projects/control"
-        assert outputs["migrations"]["project_set"]["count"] == 10  # Session 46: 0010
+        assert outputs["migrations"]["project_set"]["count"] == 11  # Session 47: 0011
         assert outputs["storage"]["enabled"] is False
         values = dict(
             line.split("=", 1)
@@ -382,7 +386,7 @@ def test_the_control_example_renders_as_the_control_plane() -> None:
         assert values["CONTROL_ROUTE_PATH"] == "/api/v1"
         assert values["API_CONTROL_PATH"] == "/api"
         rendered_set = sorted(p.name for p in (directory / "migrations-project").glob("*.sql"))
-        assert len(rendered_set) == 10, rendered_set  # Session 46: 0010
+        assert len(rendered_set) == 11, rendered_set  # Session 47: 0011
     finally:
         # CLAUDE.md §1: a proof that renders deletes what it published.
         shutil.rmtree(directory, ignore_errors=True)

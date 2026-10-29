@@ -310,6 +310,12 @@ runs add go in a second table below it, in execution order.
 | **D2989** | D2952: *"the generic four"*. | The inventory (derived, `~/s47/run1/inventory.py` → `docs/design/session-47/inventory.md`): **20 words** reach `/v1`; `malformed_request` only through the helper `errors.malformed()` (`control_routes.py:202`), so a scan of names alone misses it; **5 without an entry**: `could_not_determine`, `interrupted`, `last_owner`, `malformed_request`, `operation_failed`; eight agent-plane documents are not `/v1`'s. | **`test_console_refusals` uses the inventory's method** — the AST of `errors.py`, the control modules' uses including through `errors.*()` helpers, `OPERATION_ERROR_CODES`, the relay's `CLOSE_*` with 1000/1006/1011, `console_unconfigured`. | The set is derived; a typed list goes stale. | 0297 |
 | **D2990** | D2949: a step log. | Rig 47e: the draft table, policy and advance work on a real control set — three steps in order, a repeat keeps its first time (`ON CONFLICT DO NOTHING`, `clock_timestamp()`), the request role denied (control: superuser 3), a non-member 0 rows, a late advance `not_running` with no row; the subject `{name, profile}` without the digest or the administrator name. | **0011 is written from the rig's draft** (ADR 0296 decisions 1–2); `expected` steps, labels and typical seconds served by the service from `operation_steps` (one source; the console holds no copy). | Measured before migrated. | 0296 |
 | **D2991** | D2956: Connect's snippets from **`snippets.js`** (DOM-free, Node-tested) in the console. | **The server already serves them**: `services/auth-api/app/connection_snippets.py` (`CLIENTS = psql, prisma, node-pg, psycopg`, measured by rig 39c: `sslrootcert=system`, Prisma's `DIRECT_URL` and no `pgbouncer=true`, the password always `PASSWORD_PLACEHOLDER`), served by `GET /v1/projects/{key}/connections`, tested by `test_connection_snippets.py` and `test_control_connections.py`. | **No `snippets.js`**: Run 6 widens the server's `CLIENTS` by `drizzle`, `go-pgx` and `env`, each executed against a TLS rig in its client's pinned image (`test_connection_snippets` grows the executions; D2956's rule kept) with a **`where`** line per client (which file, which install command). The console fills the placeholder **only inside the shown-once panel**, in the page. ADR 0295 decisions 3 and 7 read *the server's snippets*; the console's module list loses `snippets.js` (ten files, not eleven). | One source for a measured text; the plan would have made a second. | 0295 |
+| **D2992** | D2950: *"`src/agentic_postgres/operation_steps.py` … a `SHARED_MODULE` the service loads"*. | A shared module lives **in the service** (`services/auth-api/app/plans.py`, `control_states.py`), and `src/` re-exports it through `service_source.load` (ADR 0084): the service cannot import `src/`. | `services/auth-api/app/operation_steps.py` + the re-export `src/agentic_postgres/operation_steps.py`; `SHARED_MODULES` gains `operation_steps`. ADR 0296 amended. | The tree's direction. | 0296 |
+| **D2993** | ADR 0296: a bad `status` is `malformed_request`. | The route answers a bad query `invalid_request`, 422 (a missing `organization` already does; `_query` raises `InvalidRequest`). | **`invalid_request`, 422.** ADR 0296 decision 3 amended. | One answer for one kind of mistake. | 0296 |
+| **D2994** | ADR 0296: both readers compute the subject. | Two copies of one CASE would drift; `test_control_set` requires every `app` function be GRANTED, OPERATOR or HELPER. | One helper **`app.control_operation_subject(type, arguments)`**, revoked from PUBLIC, called by both readers as their owner; **`HELPERS` gains it**. | One allowlist, one place. | 0296 |
+| **D2995** | D2950: *"typical seconds"* per step. | The envelope has per-step seconds **only for `project.create`** (slot6, 1.20.0); every other type has end-to-end totals (sleep 19.6, wake 20.1, resize 58.8–59.4, export 1.9–9.2, delete 16.4, rotate 1.7–5.1, branch 571.5, restore 486.9, reset 474.5, branch delete 4.5–7.8 s), and creations measured three times (1,375.9 / 1,565.5 / 1,708.4 s). | `expected` = `{steps: [{step, label, typical_seconds or null}], typical_seconds: {low, high}, bound_seconds}`; each number cites its record by subject and words, read back by `test_operation_steps`; `low/high` for creation are 1,375.9 / 1,708.4. The console says *"usually about N to M minutes"*, and a step without a measurement shows no time. | A number on a customer's screen names its measurement. | 0296 |
+| **D2996** | ADR 0297: `branch_limit_reached` carries `limit` and `plan`. | Two readers produce it: the route's own (Python, D2430) and the control set's under the lock (`AP409`), which carries the word alone. | **The route's reader carries `limit` and `plan`**; the set's concurrent-request answer stays the bare word, and the model's two members are optional. The four route pins in `test_control_branches` moved to the full body. | The set's answer is a race's; it is rarely seen and still correct. | 0297 |
+| **D2997** | — | `test_control_projects::test_plan_limit_reached_is_produced_only_by_the_entitlement_readers` reads every file that contains the word; 0011 re-creates `control_request_operation` from 0008's text. | **`PLAN_LIMIT_PRODUCERS` gains `0011-control-operation-steps.sql`** (exactly the new name, D2901); a docstring in `models.py` that only mentioned the word was reworded instead of widening. | A re-created reader is the same reader; a mention is not a producer. | 0297 |
 
 ---
 
@@ -521,7 +527,29 @@ no revision. Targeted: `test_documentation_index`, `test_acceptance_registry`,
    step not logged; the digest served; `open` including `succeeded`; a typical
    second drifting from the envelope), each with its control.
 
-**Done.**
+**Done.** 2026-10-29 (notes and scripts WSL `~/s47/run3/`). **Red first**: 16
+tests FAILED, 0 ERROR, before any product line (`red.txt`); D2981's test failed
+exactly as the person saw it — `{"error":"capacity_exhausted","reason":"no_slot"}`
+where `plan_limit_reached` belongs. **0011** generated by `make-0011.py` so its
+request and finish are 0008's text with counted insertions (held by
+`test_0011s_finish_is_0008s_but_for_the_operation`); the step log, the subject
+helper, both readers wider, notifications' `operation_id`/`operation_type`, the kind
+`operation_started` and its INSERT policy (the request's definer writes as the
+owner under FORCE RLS). Frozen (11 migrations, follows `20261003120039`); proposed
+**`f7626621`** (`--by "claude-opus-5-5 Session 47 executor"`): lint passed, **50
+migrations from empty, exit 0, 25.1 s**; 21 destructive findings = Session 46's 17 +
+exactly 0011's four by design (three readers dropped and re-created, the kind check
+replaced). **D2981 repaired** (`_projects_held` counts a keyed, unregistered
+creation, as the SQL does); `branch_limit_reached` names `limit` and `plan` from the
+route's reader (D2996); `?status=open`; `expected` served from `operation_steps`
+(D2992, D2995). Snapshot regenerated (`contracts/control-openapi.canonical.json`).
+**Battery `battery3.py` 6/6 killed, every control green**, restored and compared byte
+for byte: M1 a step not logged, M2 the digest served, M3 `open` including
+`succeeded`, M4 a typical second drifting, M5 D2981 reverted, M6 every request
+saying it started (the SQL mutations re-froze the lock and restored it). **Targeted
+once** in four shards: C 372 passed + `app-contract --check` 0; A 47; B1 80; B2 72 +
+1 failed (`test_plan_limit_reached_is_produced_only_by_the_entitlement_readers`:
+D2997) → the module alone 10 passed. Rows **D2992–D2997**. NEXT FREE D2998.
 
 ### Run 4 — the console's foundation (ADR 0295)
 

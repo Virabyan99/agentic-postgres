@@ -111,6 +111,17 @@
       "template": "templates/0010-control-diagnostics.sql",
       "template_sha256": "1ad46bd8948858b03e2287ec54855474cfb1c83a3e1fbb839bc6b2bc33b59f98",
       "version": "20261024120010"
+    },
+    {
+      "canonical_render_sha256": "08d268634c9a6341fa9a3c6a1d9ccfa5b0837ef66c26bf204705eb29f641f79c",
+      "name": "control_operation_steps",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0011-control-operation-steps.sql",
+      "template_sha256": "02cd7e2fbf0577faf410d46a29cfde40c3d4a515d82119ebecd9c251cef20542",
+      "version": "20261029120011"
     }
   ],
   "schema_version": 3

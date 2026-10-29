@@ -92,6 +92,8 @@ def test_the_frozen_profile_module_needs_only_the_standard_library() -> None:
 #: release table through `agentic_postgres.plans`.
 #: Session 46 adds "control_states" (ADR 0293): `control.sh status` derives each
 #: project's state with the service's own `project_state`.
+#: Session 47 adds "operation_steps" (ADR 0296): the steps and typical times the
+#: control mode serves, held to the reconciler's and the envelope's by a test.
 SHARED_MODULES = (
     "profile",
     "claims",
@@ -101,6 +103,7 @@ SHARED_MODULES = (
     "compute_profiles",
     "plans",
     "control_states",
+    "operation_steps",
 )
 
 

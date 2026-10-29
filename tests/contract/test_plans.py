@@ -421,6 +421,45 @@ def test_each_refusal_comes_from_its_own_reader(drive: Any, accepting: None) -> 
     assert _create(drive, empty).status_code == 202
 
 
+def test_a_keyed_creation_counts_against_the_plan_in_both_readers(
+    drive: Any, accepting: None
+) -> None:
+    """D2981 (ADR 0297 decision 1): a creation the reconciler has keyed at
+    `allocate` and not yet registered holds the organisation's project in the
+    SERVICE's reader exactly as in the control set's. With no slot ready -- the
+    first person's server -- a second creation reads `plan_limit_reached`, never
+    `capacity_exhausted`, and `GET .../plan` reads 1 of 1, not 0.
+
+    Goes red if: `_projects_held` counts an open creation only while its key is
+    NULL (the 1.24.0 defect). Control: the same creation finished failed holds
+    nothing, and the slot reading answers again."""
+    people = _people(drive, "keyed", project=False)
+    key = f"k{uuid.uuid4().hex[:8]}-prod"
+    op = drive.cluster.query(
+        "INSERT INTO app.control_operations (organization_id, project_key, type, status, "
+        "requested_by, arguments, started_at, claimed_by, attempt) VALUES "
+        f"('{people['id']}', '{key}', 'project.create', 'running', "
+        f"'{people['users']['owner']}', '{{}}', now(), 'proof', 1) RETURNING id"
+    )[0]
+    _slots(drive, "consumed")
+    refused = _create(drive, people)
+    assert (refused.status_code, refused.json()["error"]) == (409, "plan_limit_reached"), (
+        refused.text
+    )
+    plan_path = f"/v1/organizations/{people['id']}/plan"
+    held = drive.call("GET", plan_path, token=people["tokens"]["viewer"]).json()
+    assert held["projects_active"] == {"held": 1, "limit": 1}, held
+    assert _rows(drive.cluster, people["id"]) == 1
+    drive.cluster.query(
+        "UPDATE app.control_operations SET status = 'failed', error_code = 'operation_failed', "
+        f"finished_at = now() WHERE id = '{op}'"
+    )
+    released = drive.call("GET", plan_path, token=people["tokens"]["viewer"]).json()
+    assert released["projects_active"] == {"held": 0, "limit": 1}, released
+    again = _create(drive, people)
+    assert (again.status_code, again.json()["error"]) == (409, "capacity_exhausted"), again.text
+
+
 def test_the_plans_route_says_what_is_enforced(drive: Any) -> None:
     """`/v1/plans`: both plans, every entitlement of the release table with
     `enforced` and its reader, the SQL-enforced numbers as the control set

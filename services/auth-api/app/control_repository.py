@@ -249,7 +249,8 @@ class ControlRepository:
     )
     _OPERATION = (
         "SELECT id, organization_id, project_key, type, status, progress, error_code, "
-        "created_at, started_at, finished_at, requested_by, step, result, origin FROM "
+        "created_at, started_at, finished_at, requested_by, step, result, origin, steps, "
+        "subject FROM "
     )
 
     async def list_projects(self, user: UUID, org: UUID | None) -> list[dict[str, Any]]:
@@ -420,7 +421,7 @@ class ControlRepository:
     ) -> list[dict[str, Any]]:
         return await self._rows(
             user,
-            "SELECT id, project_key, kind, text, created_at "
+            "SELECT id, project_key, kind, text, created_at, operation_id, operation_type "
             "FROM app.control_list_notifications(%s, %s, %s)",
             (user, organization, limit),
         )

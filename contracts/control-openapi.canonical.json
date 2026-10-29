@@ -17,12 +17,34 @@
         "type": "object"
       },
       "BranchLimitReachedResponse": {
-        "description": "The project already has its one live branch, or a creation of one is in\nflight; nothing was recorded (D2430).",
+        "description": "The project already has its plan's live branches, or a creation of one is\nin flight; nothing was recorded (D2430). Since Session 47 (ADR 0297) the\nroute's own reader names the plan and its number, as the plan's project\nrefusal does; the control set's answer to a concurrent request carries the\nword alone.",
         "properties": {
           "error": {
             "const": "branch_limit_reached",
             "title": "Error",
             "type": "string"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan"
           }
         },
         "required": [
@@ -722,7 +744,7 @@
     },
     "/v1/operations": {
       "get": {
-        "description": "`organization` is required. Empty while no operation type is accepted.",
+        "description": "`organization` is required. Empty while no operation type is accepted. `status=open` lists only those pending or running. Each names its `steps` (when each began), its `subject` (never its arguments) and `expected` (ADR 0296).",
         "operationId": "list_operations_v1_operations_get",
         "parameters": [
           {
@@ -732,6 +754,18 @@
             "required": true,
             "schema": {
               "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`open`: only the operations pending or running. Any other value is refused.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "open"
+              ],
               "type": "string"
             }
           }

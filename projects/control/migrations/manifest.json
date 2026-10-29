@@ -112,6 +112,16 @@
         "auth_service"
       ],
       "description": "The support bundle (Session 46; ADR 0292): control_diagnostic_readings, one row per check per project in the doctor's order -- name, verdict (the doctor's vocabulary, and asleep for a stopped database), a detail the reconciler reduced (a host path and an opaque run replaced inside it, at most 300 characters) and read_at -- written by control_record_diagnostics (granted to nobody; a project's set replaced whole, {checks} or {asleep}, any other member refused AP422, an evidence member included) and read through control_project_diagnostics, member and above."
+    },
+    {
+      "version": "20261029120011",
+      "name": "control_operation_steps",
+      "template": "templates/0011-control-operation-steps.sql",
+      "placeholders": [
+        "object_owner",
+        "auth_service"
+      ],
+      "description": "Long operations made visible (Session 47; ADR 0296, ADR 0297): control_operation_steps, when each step of an operation first began, written by control_advance_operation (granted to nobody) and read only through the two operation readers, which serve it as steps beside a subject from a closed allowlist (never the arguments, the handoff digest, an administrator name or a verifier); notifications gain operation_id and operation_type, and the kind operation_started, written by control_request_operation for a creation, a branch, a restore and a reset."
     }
   ]
 }
