@@ -197,6 +197,39 @@ def test_every_value_on_connect_has_a_copy_control() -> None:
     assert BARE.search('h("code", {}, door.host)') and not BARE.search('h("code", {}, "pg_dump")')
 
 
+def test_the_connection_string_says_which_clients_take_it() -> None:
+    """D3019 (Session 47 Run 9): beside both connection strings on Connect --
+    the door's, and the shown-once one with its password -- one line names
+    the served clients `copies.js`'s `STRING_TAKEN_BY` holds (measured by
+    `test_connection_snippets.py::test_the_consoles_string_is_labelled_for_
+    exactly_the_clients_that_take_it`) by their tab names, and points every
+    other served client to its own tab. Each name it holds is a served client."""
+    text = COPIES.read_text(encoding="utf-8")
+    found = re.search(r"^export const STRING_TAKEN_BY = \[([^\]]*)\];$", text, re.MULTILINE)
+    assert found, "copies.js names no STRING_TAKEN_BY"
+    taken = re.findall(r'"([a-z-]+)"', found.group(1))
+    assert taken and set(taken) <= set(connection_snippets.CLIENTS), taken
+    connect = _connect()
+    note = _function(connect, "stringNote")
+    assert "const clients = Object.keys(served.snippets || {});" in note
+    assert "clients.filter((client) => STRING_TAKEN_BY.includes(client)).map(clientLabel)" in note
+    assert "clients.filter((client) => !STRING_TAKEN_BY.includes(client)).map(clientLabel)" in note
+    assert "copy the code from its own tab in step 3" in note
+    assert (
+        "codeBlock(connectionString(door), { label: `The ${name} door, without its password` }),\n    stringNote(served),"
+        in connect
+    )
+    assert (
+        'codeBlock(connectionString(door, password), { label: "The connection string with it", secret: true }),\n        stringNote(served),'
+        in connect
+    )
+    assert connect.count("stringNote(served)") == 3  # its definition and the two strings
+    # The string itself is unchanged: J8's and J9's readings parse exactly this.
+    built = text[text.index("export function connectionString") :]
+    built = built[: built.index("\n}\n")]
+    assert built.endswith("?sslmode=verify-full`;") and "sslrootcert" not in built, built
+
+
 def test_connect_draws_the_clients_the_server_serves() -> None:
     """D2991: one source for a measured text. The tabs are the served
     clients, in the order served, each with the server's `where` line when the

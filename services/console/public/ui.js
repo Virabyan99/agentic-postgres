@@ -122,9 +122,19 @@ export function field(label, properties, hint) {
   return [h("div", { className: "field" }, h("label", {}, label, input), h("p", { className: "hint", id }, hint)), input];
 }
 
-export function choice(label, options, selected) {
-  const select = h("select", {}, options.map((option) => h("option", { value: option.value ?? option, selected: (option.value ?? option) === selected }, option.label ?? option)));
+function options(list, selected) {
+  return list.map((option) => h("option", { value: option.value ?? option, selected: (option.value ?? option) === selected }, option.label ?? option));
+}
+
+export function choice(label, list, selected) {
+  const select = h("select", {}, options(list, selected));
   return [h("label", {}, label, select), select];
+}
+
+// A choice inside a table row, whose column head is its visible label: named
+// for a screen reader by its row ("Role of example-owner"), never unnamed.
+export function cellChoice(name, list, selected) {
+  return h("select", { "aria-label": name }, options(list, selected));
 }
 
 export function button(text, onclick, properties) {

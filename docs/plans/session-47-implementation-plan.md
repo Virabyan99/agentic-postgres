@@ -381,6 +381,18 @@ runs add go in a second table below it, in execution order.
 | **D3075** | — | Notifications draws the limit banner (brief §4). | `pages.json`'s notifications view lists `GET /v1/organizations/{organization}/plan` (an existing route). | The guard reads the union. | — |
 | **D3076** | ADR 0298 d4: the checklist hides when every item is done. | A member whose role needs no second factor has no voluntary enrolment control in the console, so *Turn on a second factor* stays *not yet* and the checklist never hides for them. | **Open → Run 9**: the item reads *not required for your role* when `second_factor.required` is false. | A step a person cannot take is not theirs. | 0298 |
 | **D3077** | — | `journey_walk`'s usage fixture serves `status: "read"` with 0 samples, which the server never sends. | The console draws the empty state for any document with no sample, so both render; Run 11 aligns the fixture. | Fixtures say what production says. | — |
+| **D3079** | D3019/D3044: which clients take the console's bare string. | **Measured** (`test_connection_snippets::test_the_consoles_string_is_labelled_for_exactly_the_clients_that_take_it`, the string built by `copies.js` in Node, the Run 6 rig, the CA where each client reads roots): **node-pg, Drizzle, Go pgx** connect and refuse a misnamed host by name; **psql and psycopg refuse** for the missing `~/.postgresql/root.crt` (control: `&sslrootcert=system` connects psql). | The string unchanged (J8/J9/`console_walk` untouched); Connect labels it for **exactly node-pg, Drizzle, pgx** and sends the rest to their tab. | Label what was measured. | 0295 |
+| **D3080** | — | **Prisma 6 with `sslmode=verify-full` connects to a name the certificate does not carry** — it does not verify that string. The served Prisma snippet (`sslaccept=strict`) is unaffected (D3020's run). | Prisma counted as *not taking* the string; **Run 12 checks the parked site pages tell no Prisma reader to use a `verify-full` URL**. | An unverified connection is not a working one. | 0295 |
+| **D3081** | D3078: the server's notice text. | The real `limit_approaching` text comes from the control set's SQL; the notification row has an `entitlement` column that is **not served**. | The console finds the entitlement from the plan's own names; **serving `entitlement` is a control-set widening — owed (Stage 6)**. | No new migration for a wording. | 0297 |
+| **D3082** | Run 9: `console_look.py`. | Like `site_look.py`, it cannot be collected (no `test_` prefix; Playwright not in the venv). | Rehearsed (40 pages, 0 problems; `--plant-foreign` and `--dry` work); **Run 12 owes its reader proof, launcher and claim**; live, it signs in as the probe owner (D2860's TOTP rule). | A browser proof is run, not collected. | 0295 |
+| **D3083** | Brief §8: `prefers-reduced-motion` stops motion. | **It stopped nothing**: a class's `animation` outranks `*`, and `*` does not reach `::after` (measured in Chromium). | `*, *::before, *::after { … !important }`; a test reaches every animation. `site.css` has the same block but no animations. | A floor proved, not assumed. | 0295 |
+| **D3084** | Every control named. | At ≤ 900 px the Help link's label was `display: none` — **no accessible name on all 20 pages** (found by the look's snapshot). | The label is clipped, not hidden. | A name for a screen reader too. | 0295 |
+| **D3085** | Every input labelled. | The per-member role select was `choice("")` — unnamed. | `cellChoice` with *"Role of <username>"*. | — | 0295 |
+| **D3086** | Focus on every control; targets ≥ 24 px. | Tab panels (`tabIndex 0`) had no ring; the token panel's `<summary>` was 23.25 px; checkbox labels unsized. | All three fixed; a test computes each control's height from the stylesheet. | — | 0295 |
+| **D3087** | State never by colour alone. | A stopped tracker step differed from one to come only by colour. | A `!` mark (and *–* for *not required*). | — | 0295 |
+| **D3088** | Brief screen 9 + D3006: the delete dialog (type the name to confirm) and §5's three danger tokens. | **Not built** — D3006 assigned it to Run 9, and the main session left it out of Run 9's brief. | **Run 9b builds it** before Run 11. | The approved design is the build's. | 0295 |
+| **D3089** | Plain language. | The plan page showed `free (active)`, `premium (unavailable_during_beta)`. | *Free (active)*, *Premium (not available during the beta)*. | — | 0297 |
+| **D3090** | Plain language. | Usage's figure names (`database_bytes`, …) and raw byte counts are machine words. | **Run 9b words them** with human units. | — | 0297 |
 | **D3078** | Brief §1: plain language. | The `limit_approaching` notification shows the server template's machine word (*"storage_gb is at 4.1 of 5"*; seen in the 390 px look). | **Run 9** words entitlements in the console (*"Storage: 4.1 of 5 GB"*, *"Agent calls today"*), from `plans` names, never the raw key. | A key is not a sentence. | 0297 |
 
 ---
@@ -905,7 +917,34 @@ console's Help link `/docs/support/`. Rows **D3040–D3049**.
    need. Rehearsed against a local console.
 3. Targeted: `test_look`, the console set. The battery.
 
-**Done.**
+**Done.** 2026-10-30, by a delegated agent (Opus 5.5), reviewed and re-run in the main
+session (WSL `~/s47/run9/`). **Floors as offline tests**: every rule setting both a
+colour and a background computed ≥ 4.5:1 (31 pairs; lowest 5.30) plus 18 new
+`TEXT_PAIRS`; the focus ring on anything a script makes focusable; reduced motion
+reaches every animation; every control ≥ 24 px computed from the stylesheet; every
+form control labelled; no state by colour alone. **`tests/external/browser/console_look.py`**
+(ADR 0295 d9): 20 views × 2 widths, overflow, origins, CSP, Tab on the ring, the aria
+snapshot, motion with and without reduce — rehearsed 40 pages in 51 s, 0 problems; a
+control against `HEAD`'s stylesheet showed the walk detects both fixed defects.
+**D3019 measured** (D3079, D3080); **D3013** a `datetime-local` restore picker sent as an
+instant in the browser's zone; **D3076** *not required for your role*; **D3078/D3089**
+entitlements and plan names in words. **Defects found and fixed: D3083–D3087.**
+**Battery 24/24. Rehearsed twice, green** (12/12, 36, j01–j13; no selector changed).
+**Main-session review**: rule scan clean (`app.css` 29,250 B); Connect's string note at
+1280 read; **re-run** 134 passed; 357 + D2945's decided failure; the executed snippet and
+connection tests 51 passed (none skipped). New node ids for Run 12: `test_look.py::`
+`test_every_rule_that_sets_both_colours_meets_4_5`,
+`test_the_console_rings_whatever_a_script_makes_focusable`,
+`test_reduced_motion_stops_every_animation`, `test_every_control_is_at_least_24_px`;
+`test_console_look.py::` `test_every_form_control_is_labelled`,
+`test_no_state_is_told_by_colour_alone`; `test_console_progress.py::`
+`test_a_factor_the_role_does_not_need_is_not_the_persons_step`,
+`test_a_restore_time_is_the_browsers_own_zone_sent_as_an_instant`,
+`test_an_entitlement_is_said_in_words_never_by_its_key`;
+`test_console_connect.py::test_the_connection_string_says_which_clients_take_it`;
+`test_connection_snippets.py::test_the_consoles_string_is_labelled_for_exactly_the_clients_that_take_it`.
+Rows **D3079–D3090**. **Owed: Run 9b** (D3088 the delete dialog and danger tokens,
+D3090 usage in words).
 
 ### Run 10 — the domain move and the small repairs
 

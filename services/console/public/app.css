@@ -195,7 +195,7 @@ button[disabled] { cursor: not-allowed; color: var(--text-3); background: var(--
 .row-actions button { min-height: 32px; margin: 0; padding: 5px 10px; font-size: 13px; color: var(--ink); background: var(--surface); border-color: var(--border-control); }
 .row-actions button:hover { background: var(--surface-hover); }
 fieldset { border: 1px solid var(--border-control); border-radius: var(--radius-control); margin: var(--space-3) 0; }
-label.inline { display: inline-block; margin: var(--space-1) var(--space-4) var(--space-1) 0; font-weight: 500; }
+label.inline { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; margin: var(--space-1) var(--space-4) var(--space-1) 0; font-weight: 500; }
 label.inline input { display: inline; width: auto; margin: 0; }
 
 /* Chips: the state word, its colour by class (ADR 0288). */
@@ -277,7 +277,7 @@ button.copy.copied { color: var(--on-ink-action-text); background: var(--on-ink-
 .token-panel h2 { margin: 0; font-size: 18px; }
 .token-panel > p { margin: 0; }
 .token-panel .once { padding: var(--space-4); }
-.token-panel summary { cursor: pointer; font-weight: 600; }
+.token-panel summary { cursor: pointer; font-weight: 600; padding: var(--space-1) 0; }
 .token-panel details p { margin: var(--space-2) 0; }
 .once-done { margin: 0; padding: var(--space-3) var(--space-4); background: var(--surface-sunk); border: 1px solid var(--rule); border-radius: var(--radius-control); color: var(--text-2); }
 .callout .card-actions { margin: var(--space-3) 0 var(--space-2); }
@@ -383,12 +383,16 @@ footer { padding: var(--space-5) var(--space-4); color: var(--text-3); font-size
   .side > summary { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 8px 16px; cursor: pointer; list-style: none; font-weight: 600; }
   .side > summary .where-now { color: var(--text-3); font-weight: 500; font-size: 14px; }
   .side-inner { position: static; padding-top: 0; }
-  .top-link .label { display: none; }
+  .top-link .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .top-link:not(:first-child) { display: none; }
   h1 { font-size: 24px; }
   .panel-narrow { padding: var(--space-5); }
 }
-a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+/* Session 47 Run 9 (the brief's §8): the ring on every control and on every
+   element a script makes focusable (a tab panel); reduced motion stops the bar,
+   the skeleton and the spinner -- `!important` and the pseudo-elements, since a
+   class's animation outranks `*` and `*` does not match `::after`. */
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none; animation: none; }
+  *, *::before, *::after { transition: none !important; animation: none !important; }
 }

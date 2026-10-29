@@ -43,13 +43,15 @@ IMPORT = (
 NOW = datetime(2026, 10, 29, 12, 0, 0, tzinfo=UTC)
 
 
-def _node(tmp_path: Path, driver: str, zone: str = "UTC") -> Any:
-    """`zone` is the browser's time zone (`TZ`): a local time is the reader's."""
+def _node(tmp_path: Path, driver: str, zone: str = "UTC", imports: tuple[str, ...] = ()) -> Any:
+    """`zone` is the browser's time zone (`TZ`): a local time is the reader's.
+    `imports` are further names of `progress.js` the driver uses."""
     directory = tmp_path / "console"
     directory.mkdir(parents=True)
     shutil.copy(PROGRESS, directory / "progress.js")
     (directory / "package.json").write_text('{"type": "module"}\n', encoding="utf-8")
-    (directory / "driver.js").write_text(IMPORT + driver, encoding="utf-8")
+    more = f'import {{ {", ".join(imports)} }} from "/console/progress.js";\n' if imports else ""
+    (directory / "driver.js").write_text(IMPORT + more + driver, encoding="utf-8")
     done = subprocess.run(
         ["docker", "run", "--rm", "--network", "none", "-e", f"TZ={zone}",
          "-v", f"{directory}:/console:ro", NODE, "node", "/console/driver.js"],
@@ -394,11 +396,12 @@ def test_the_checklist_is_derived_from_the_api_alone(tmp_path: Path) -> None:
     )
     out = _node(tmp_path, driver)
     assert out["all"] == ["done"] * 5
-    assert out["fresh"] == ["not yet", "done", "current", "not yet", "not yet"]
+    # `me_off`'s role needs no factor: since D3076 that step reads *not required*.
+    assert out["fresh"] == ["not required", "done", "current", "not yet", "not yet"]
     assert out["quiet"] == ["done", "done", "done", "not yet", "not yet"]
     assert out["unread"] == ["not read"] * 5
     assert out["unsampled"] == ["done", "done", "done", "done", "not read"]
-    assert out["nothing"] == ["not yet"] * 5
+    assert out["nothing"] == ["not required"] + ["not yet"] * 4
     assert out["again"] is True
     app = (PUBLIC / "app.js").read_text(encoding="utf-8")
     card = _function(app, "function checklistCard(")
@@ -408,6 +411,197 @@ def test_the_checklist_is_derived_from_the_api_alone(tmp_path: Path) -> None:
     reading = _function(app, "async function readOrganization(")
     assert 'call("GET", "/operations?organization=" + id)' in reading
     assert 'call("GET", `/organizations/${organization}/usage?hours=720`)' in reading
+
+
+def test_a_factor_the_role_does_not_need_is_not_the_persons_step(tmp_path: Path) -> None:
+    """D3076 (Session 47 Run 9): `GET /v1/me` says `second_factor.required`.
+    Not required and not on: the step reads *not required for your role* and
+    counts as done for hiding the card -- a person cannot enrol voluntarily in
+    the console, so the card would never leave them. Required and not on, or
+    `required` not served: *not yet*, as before. On: done, whatever the role."""
+
+    def me(required: Any, enabled: bool) -> dict[str, Any]:
+        factor: dict[str, Any] = {"enabled": enabled}
+        if required is not None:
+            factor["required"] = required
+        return {"username": "a", "second_factor": factor}
+
+    rest = {"organizations": [{"id": "o", "name": "E", "role": "member"}],
+            "projects": [[{"key": "k", "state": "ready"}]], "creating": [[]],
+            "operations": [[{"type": "credential.rotate", "status": "succeeded"}]],
+            "usage": [[{"status": "read", "figures": {"customer_connections": {"latest": 1, "max": 1}}}]]}  # fmt: skip
+    cases = {
+        "not_needed": me(False, False),
+        "needed": me(True, False),
+        "unsaid": me(None, False),
+        "on_needed": me(True, True),
+        "on_not_needed": me(False, True),
+    }
+    driver = (
+        f"const rest = {json.dumps(rest)};\nconst cases = {json.dumps(cases)};\n"
+        "const out = {};\n"
+        "for (const [name, me] of Object.entries(cases)) {\n"
+        "  const states = checklist({ me, ...rest });\n"
+        "  out[name] = [states[0].state, checklistComplete(states)];\n"
+        "}\n"
+        "out.empty = checklistComplete([]);\n"
+        "out.one_left = checklistComplete([{ state: 'done' }, { state: 'not yet' }]);\n"
+        "console.log(JSON.stringify(out));\n"
+    )
+    out = _node(tmp_path, driver, imports=("checklistComplete",))
+    assert out["not_needed"] == ["not required", True]
+    assert out["needed"] == ["not yet", False]
+    assert out["unsaid"] == ["not yet", False]
+    assert out["on_needed"] == ["done", True] and out["on_not_needed"] == ["done", True]
+    assert out["empty"] is False and out["one_left"] is False
+    app = (PUBLIC / "app.js").read_text(encoding="utf-8")
+    card = _function(app, "function checklistCard(")
+    assert "if (checklistComplete(states)) {\n    return null;\n  }" in card
+    assert '[NOT_NEEDED]: "not required for your role"' in app
+    detail = _function(app, "function checkDetail(")
+    assert (
+        'if (state === NOT_NEEDED) {\n      return ["Not required for your role.", null];' in detail
+    )
+
+
+def test_a_restore_time_is_the_browsers_own_zone_sent_as_an_instant(tmp_path: Path) -> None:
+    """D3013 (Session 47 Run 9): Branches' restore field is a `datetime-local`
+    picker -- a wall-clock time with no zone -- and the page sends it as the
+    instant it names in the browser's zone (`instantOf`), in the shape the API
+    accepts (its own `INSTANT_PATTERN`, read from `models.py`); the zone is
+    said beside the field; a value that is no time is null, never sent. The
+    expected instants are this test's own, from `zoneinfo`."""
+    from zoneinfo import ZoneInfo
+
+    models = (REPO_ROOT / "services" / "auth-api" / "app" / "models.py").read_text("utf-8")
+    pattern = re.search(r'^INSTANT_PATTERN = r"(.+)"$', models, re.MULTILINE)
+    assert pattern, "models.py names no INSTANT_PATTERN"
+    local = ["2026-10-20T09:30", "2026-10-20T09:30:15", "2026-03-29T01:30", "2026-07-01T23:59:59"]
+    bad = ["", "2026-10-20", "20/10/2026 09:30", "2026-13-01T00:00", "2026-10-20T09:30:00Z", None]
+    driver = (
+        f"const local = {json.dumps(local)};\nconst bad = {json.dumps(bad)};\n"
+        "console.log(JSON.stringify({ good: local.map(instantOf), bad: bad.map(instantOf), zone: zoneName() }));\n"
+    )
+    for zone in ("Europe/Paris", "America/New_York", "Asia/Tokyo", "UTC"):
+        out = _node(
+            tmp_path / zone.replace("/", "-"), driver, zone=zone, imports=("instantOf", "zoneName")
+        )
+        assert out["zone"] == zone, out["zone"]
+        for wall, sent in zip(local, out["good"], strict=True):
+            expected = datetime.fromisoformat(wall).replace(tzinfo=ZoneInfo(zone)).astimezone(UTC)
+            assert re.fullmatch(pattern.group(1), sent), sent
+            assert datetime.fromisoformat(sent.replace("Z", "+00:00")) == expected, (
+                zone,
+                wall,
+                sent,
+            )
+        assert out["bad"] == [None] * len(bad), out["bad"]
+    app = (PUBLIC / "app.js").read_text(encoding="utf-8")
+    view = _function(app, "async function branchesView(")
+    assert 'field("Restore to (optional)", { type: "datetime-local", step: 1 },' in view
+    assert 'browser\'s time zone${zone ? `, ${zone}` : ""}' in view
+    assert "const target = () => (at.value ? instantOf(at.value) || false : null);" in view
+    assert view.count("target_time: instant") == 2 and "at.value.trim()" not in view
+    assert not re.search(r"e\.g\. \d{4}-", view), "an input format is shown as the label"
+
+
+#: The server's own sentence for a limit notice: the control set's SQL.
+LIMIT_SQL = (
+    REPO_ROOT / "projects" / "control" / "migrations" / "templates" / "0008-control-plans-usage.sql"
+)
+
+
+def _limit_notices() -> dict[str, str]:
+    """`app.control_record_limit_notice`'s text for each entitlement it names,
+    evaluated from its own `||` expression (literals and three variables)."""
+    sql = LIMIT_SQL.read_text(encoding="utf-8")
+    function = sql[sql.index("CREATE FUNCTION app.control_record_limit_notice") :]
+    names = re.findall(
+        r"'([a-z_]+)'", re.search(r"IF p_entitlement NOT IN \(([^)]*)\)", function).group(1)
+    )  # type: ignore[union-attr]
+    expression = re.search(r"p_entitlement,\n(.*?)\n  \)", function, re.DOTALL)
+    assert names and expression, "the limit notice's text moved"
+    texts = {}
+    for name in names:
+        values = {"p_project": "slot3-prod", "v_plan": "free", "p_entitlement": name}
+        parts = [part.strip() for part in expression.group(1).split("||")]
+        texts[name] = "".join(
+            part[1:-1].replace("''", "'") if part.startswith("'") else values[part]
+            for part in parts
+        )
+    return texts
+
+
+def test_an_entitlement_is_said_in_words_never_by_its_key(tmp_path: Path) -> None:
+    """D3078 (Session 47 Run 9): every entitlement the release's plans serve has
+    a title and a value in words (*Storage*, *5 GB*); a use is *Storage: 4.1 of
+    5 GB* from the figure it is read against; the control set's own limit
+    notice, built from its SQL, is said with the title in place of the key --
+    and no word the console draws for any of these holds a key. An entitlement
+    the console does not know is said by its served unit, never its name."""
+    from app import plans as release_plans
+
+    served = {
+        plan: [{"name": name, "value": list(spec.value) if isinstance(spec.value, tuple) else spec.value,
+                "unit": spec.unit, "enforced": spec.enforced} for name, spec in found.entitlements.items()]
+        for plan, found in release_plans.PLANS.items()
+    }  # fmt: skip
+    keys = sorted({name for found in release_plans.PLANS.values() for name in found.entitlements})
+    notices = _limit_notices()
+    usage = [{"name": "storage_gb", "value": 5, "enforced": False, "against": "database_bytes"},
+             {"name": "agent_calls_per_day", "value": 10000, "enforced": False, "against": "agent_calls"}]  # fmt: skip
+    figures = {"database_bytes": {"latest": 4.1e9, "max": 4.2e9}}
+    driver = (
+        f"const served = {json.dumps(served)};\nconst notices = {json.dumps(notices)};\n"
+        f"const usage = {json.dumps(usage)};\nconst figures = {json.dumps(figures)};\n"
+        "const out = { plans: {}, notices: {} };\n"
+        "for (const [plan, list] of Object.entries(served)) out.plans[plan] = list.map((e) => [e.name, entitlementTitle(e), entitlementValue(e)]);\n"
+        "for (const [name, text] of Object.entries(notices)) {\n"
+        "  const named = noticeEntitlement(text, served.free);\n"
+        "  out.notices[name] = [plainNotice(text, served.free), named && named.name];\n"
+        "}\n"
+        "out.use = usage.map((e) => entitlementUse(e, figures));\n"
+        "out.stranger = [entitlementTitle({ name: 'disk_iops', unit: 'operations per second' }), entitlementTitle({ name: 'x_y' })];\n"
+        "out.unnamed = plainNotice('nothing here', served.free);\n"
+        "console.log(JSON.stringify(out));\n"
+    )
+    out = _node(tmp_path, driver, imports=(
+        "entitlementTitle", "entitlementUse", "entitlementValue", "noticeEntitlement", "plainNotice",
+    ))  # fmt: skip
+    drawn = []
+    for plan, rows in out["plans"].items():
+        assert [row[0] for row in rows] == list(release_plans.PLANS[plan].entitlements), plan
+        drawn += [row[1] for row in rows] + [row[2] for row in rows]
+    free = {row[0]: row[1:] for row in out["plans"]["free"]}
+    assert free["storage_gb"] == ["Storage", "5 GB"]
+    assert free["agent_calls_per_day"] == ["Agent calls per day", "10,000"]
+    assert free["compute_profiles"][1] == "small, standard, large"
+    assert out["use"] == [
+        "Storage: 4.1 of 5 GB",
+        "Agent calls today: not read in this period (the limit is 10,000)",
+    ]
+    for name, (said, named) in out["notices"].items():
+        assert named == name and name not in said, (name, said)
+        assert said.startswith("slot3-prod is past 80% of the free plan's "), said
+        drawn.append(said)
+    assert out["stranger"] == ["Operations per second", "A limit of your plan"]
+    assert out["unnamed"] == "nothing here"
+    for word in [*drawn, *out["use"], *out["stranger"]]:
+        assert not any(re.search(rf"\b{key}\b", word) for key in keys), word
+    # The views draw entitlements only through these words.
+    app = (PUBLIC / "app.js").read_text(encoding="utf-8")
+    plan_view = _function(app, "async function planView(")
+    assert (
+        "title: entitlementTitle(entitlement)," in plan_view
+        and '["name", "Entitlement"]' not in plan_view
+    )
+    usage_view = _function(app, "function usageSection(")
+    assert (
+        "use: entitlementUse(limit, figures)," in usage_view
+        and '["name", "Limit"]' not in usage_view
+    )
+    notice = _function(app, "function noticeWords(")
+    assert "plainNotice(notice.text, entitlements)" in notice and "value(notice.text)" not in notice
 
 
 def test_the_notification_count_is_of_what_the_api_served(tmp_path: Path) -> None:

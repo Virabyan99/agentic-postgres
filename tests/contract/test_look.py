@@ -55,6 +55,19 @@ TEXT_PAIRS = (
     ("warning-text", "warning-bg"),
     ("on-ink-text", "ink"), ("on-ink-muted", "ink"), ("on-ink-comment", "ink"),
     ("on-ink-action", "ink"), ("on-ink-action-text", "on-ink-action"),
+    # Session 47 Run 9 (the brief's §8): the console's text on the surfaces it
+    # inherits -- the navigation's and the callout's sunk ground, a hovered
+    # tab, a chosen door card, the warning panels, a step's colour, the
+    # numbered step on ink. A rule that sets both colours is read by
+    # `test_every_rule_that_sets_both_colours_meets_4_5` instead.
+    ("ink-body", "surface-sunk"), ("ink", "surface-sunk"), ("text-2", "surface-sunk"),
+    ("accent", "surface-sunk"), ("warning-text", "surface-sunk"),
+    ("text-2", "surface-hover"), ("ink-body", "surface-hover"), ("accent", "surface-hover"),
+    ("text-2", "accent-wash"), ("text-3", "accent-wash"),
+    ("chip-verify-text", "surface"), ("warning-text", "surface"),
+    ("ink", "warning-bg"), ("ink-body", "warning-bg"), ("text-2", "warning-bg"),
+    ("text-3", "warning-bg"), ("accent", "warning-bg"),
+    ("surface", "ink"),
 )  # fmt: skip
 
 #: The elements a person can reach with the keyboard on either surface.
@@ -154,6 +167,177 @@ def test_every_interactive_element_shows_focus() -> None:
         covered = set().union(*rings) if rings else set()
         for element in FOCUSABLE:
             assert f"{element}:focus-visible" in covered, (path.name, element)
+
+
+def _token(value: str) -> str | None:
+    found = re.fullmatch(r"var\(--([a-z0-9-]+)\)", value.strip())
+    return found.group(1) if found else None
+
+
+def _body(body: str) -> dict[str, str]:
+    """A rule's declarations, by property (the last wins, as in the cascade)."""
+    found: dict[str, str] = {}
+    for part in body.split(";"):
+        if ":" in part:
+            name, _, value = part.partition(":")
+            found[name.strip()] = value.strip()
+    return found
+
+
+def _px(value: str | None) -> float | None:
+    found = re.fullmatch(r"(\d+(?:\.\d+)?)px", (value or "").strip())
+    return float(found.group(1)) if found else None
+
+
+def test_every_rule_that_sets_both_colours_meets_4_5() -> None:
+    """Session 47 Run 9 (the brief's §8): every console rule that sets a text
+    colour AND a background, each a token, is a pair -- computed from the
+    stylesheet itself, so a rule added later is read without a list. The
+    control: the pattern reads a pair from a rule written here."""
+    tokens = _tokens()
+    pairs = set()
+    for selector, body in _rules(CONSOLE_CSS.read_text(encoding="utf-8")):
+        declared = _body(body)
+        text = _token(declared.get("color", ""))
+        ground = _token(declared.get("background", declared.get("background-color", "")))
+        if text and ground:
+            pairs.add((text, ground, selector))
+    assert len(pairs) >= 15, sorted(pairs)
+    for text, ground, selector in sorted(pairs):
+        ratio = contrast(tokens[text], tokens[ground])
+        assert ratio >= 4.5, f"{selector}: {text} on {ground} is {ratio:.2f}"
+    probe = _rules(".x { color: var(--text-3); background: var(--surface-hover); }")
+    assert (_token(_body(probe[0][1])["color"]), _token(_body(probe[0][1])["background"])) == (
+        "text-3", "surface-hover",
+    )  # fmt: skip
+
+
+def test_the_console_rings_whatever_a_script_makes_focusable() -> None:
+    """The 2 px ring reaches every element the console's scripts make
+    focusable by `tabIndex` (a tab panel) -- `[tabindex]:focus-visible` -- and
+    no rule takes an outline away from anything."""
+    rings = [
+        {part.strip() for part in selector.split(",")}
+        for selector, body in _rules(CONSOLE_CSS.read_text(encoding="utf-8"))
+        if "outline: 2px solid var(--focus)" in body
+    ]
+    scripts = "".join(p.read_text(encoding="utf-8") for p in (CONSOLE / "public").glob("*.js"))
+    assert "tabIndex: 0" in scripts, "no script makes an element focusable: the guard reads nothing"
+    assert "[tabindex]:focus-visible" in set().union(*rings)
+    for selector, body in _rules(CONSOLE_CSS.read_text(encoding="utf-8")):
+        if "outline" in body and "outline: 2px solid var(--focus)" not in body:
+            raise AssertionError(f"{selector} sets an outline: {body.strip()}")
+
+
+def test_reduced_motion_stops_every_animation() -> None:
+    """The brief's §8: with `prefers-reduced-motion` the bar, the skeleton and
+    the spinner stop. A class's `animation` outranks `*`, and `*` matches no
+    pseudo-element (the bar is `.indeterminate::after`), so the block covers
+    `*`, `*::before` and `*::after` with `!important`; and every animation the
+    stylesheet runs is one the block reaches."""
+    text = CONSOLE_CSS.read_text(encoding="utf-8")
+    block = re.search(
+        r"@media \(prefers-reduced-motion: reduce\) \{\s*([^{}]+)\{([^{}]*)\}\s*\}", text
+    )
+    assert block, "no reduced-motion block"
+    selectors = {part.strip() for part in block.group(1).split(",")}
+    assert selectors == {"*", "*::before", "*::after"}, selectors
+    declared = _body(block.group(2))
+    assert declared.get("animation") == "none !important", declared
+    assert declared.get("transition") == "none !important", declared
+    animated = [
+        s for s, b in _rules(text) if "animation:" in b and "none" not in _body(b)["animation"]
+    ]
+    assert len(animated) >= 3, animated  # the spinner, the bar, the skeleton
+
+
+#: A control by the stylesheet's own selector: its last compound names a
+#: button, a summary, a select, a text input, or one of the links drawn as a
+#: control. Links inside a sentence are WCAG 2.5.8's inline exception.
+CONTROL = re.compile(
+    r"(?:^|[\s>])(?:button|summary|select|input|textarea)(?:[.\[:][^\s>]*)?$"
+    r"|\.(?:top-link|nav-group a|menu a|head-actions > a(?::not\(\.help-link\))?)$"
+)
+#: The smallest target WCAG 2.2 AA allows (2.5.8), in CSS pixels.
+TARGET_PX = 24
+
+
+#: The body's line box (`font: 400 15px/1.55`), which a rule that sets no font inherits.
+BODY_FONT = (15.0, 1.55)
+
+
+def _spaced(value: str) -> float | None:
+    """A length in px, a `--space-N` token resolved from the token block."""
+    token = _token(value)
+    if token:
+        spaces = dict(re.findall(r"--(space-\d+):\s*(\d+)px;", _block(CONSOLE_CSS)))
+        return float(spaces[token]) if token in spaces else None
+    return _px(value)
+
+
+def _block_size(declared: dict[str, str]) -> float | None:
+    """The height a rule gives its element: its `height`/`min-height` when it
+    sets one above 0, else -- when it sets a vertical padding -- that padding
+    plus its line box (its own font, or the body's); None when it sets none."""
+    for name in ("height", "min-height"):
+        size = _px(declared.get(name))
+        if size:
+            return size
+    padding = declared.get("padding", "").split()
+    if not padding:
+        return None
+    vertical = [_spaced(padding[0]), _spaced(padding[2] if len(padding) > 2 else padding[0])]
+    if any(v is None for v in vertical):
+        return None
+    size, line = BODY_FONT
+    font = re.search(r"(\d+(?:\.\d+)?)px/(\d+(?:\.\d+)?)\b", declared.get("font", ""))
+    if font:
+        size, line = float(font.group(1)), float(font.group(2))
+    elif _px(declared.get("font-size")):
+        size = _px(declared.get("font-size")) or size
+    return sum(v for v in vertical if v is not None) + size * line
+
+
+def test_every_control_is_at_least_24_px() -> None:
+    """WCAG 2.2 AA 2.5.8 (the brief's §8: controls are 32-44 px): every rule
+    that sizes a control sizes it to 24 px or more. A checkbox or radio is
+    clicked through its label, so ITS label's rule is read (`label.inline`,
+    `.segment label`). The control: a 20 px button rule written here fails."""
+    rules = _rules(CONSOLE_CSS.read_text(encoding="utf-8"))
+    by_selector = {}
+    for selector, body in rules:
+        for part in selector.split(","):
+            by_selector.setdefault(part.strip(), {}).update(_body(body))
+    read = 0
+    for selector, declared in by_selector.items():
+        if "::" in selector or not CONTROL.search(selector):
+            continue
+        size = _block_size(declared)
+        if size is None and re.search(r"(?:^|[\s>])summary$", selector):
+            # A summary is no button: unsized, it is one inherited line box.
+            size = BODY_FONT[0] * BODY_FONT[1]
+        if size is None:
+            continue  # every other control inherits `button`'s or `input`'s size
+        read += 1
+        if size < TARGET_PX and selector.endswith(" input"):
+            owner = selector[: -len(" input")]
+            label = by_selector.get(owner if owner.endswith("label") else f"{owner} label", {})
+            size = _block_size(label)
+            assert size is not None and size >= TARGET_PX, (selector, "its label", size)
+            continue
+        assert size >= TARGET_PX, (selector, size)
+    assert read >= 10, read
+    # Every checkbox sits in a `label.inline`, which is sized as a target.
+    assert (_block_size(by_selector["label.inline"]) or 0) >= TARGET_PX
+    scripts = (CONSOLE / "public" / "app.js").read_text(encoding="utf-8")
+    assert (
+        scripts.count('type: "checkbox"')
+        == scripts.count('h("label", { className: "inline" }')
+        == 1
+    )
+    # The control: the reader sees a small target and sizes what it is meant to.
+    assert _block_size({"min-height": "20px"}) == 20 and _block_size({}) is None
+    assert _block_size({"min-height": "0", "padding": "8px 10px", "font": "500 15px/1.4 x"}) == 37
 
 
 def test_the_stylesheets_fit_the_budget() -> None:

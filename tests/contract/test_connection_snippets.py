@@ -989,3 +989,204 @@ await client.end();
     assert done.returncode == 0, printed
     refusals = [line for line in done.stdout.splitlines() if line.startswith("REFUSED ")]
     assert refusals == ["REFUSED permission denied for database app"] * 2, printed
+
+
+# ---------------------------------------------------------------------------
+# The console's own connection string, executed as it is (D3019, Session 47 Run 9)
+# ---------------------------------------------------------------------------
+
+COPIES = REPO_ROOT / "services" / "console" / "public" / "copies.js"
+
+#: Built by the console's own `copies.js` -- never retyped here -- for the
+#: pooled door, with the rig's password (`PW`, from the environment), and for
+#: the misnamed name; with the clients Connect says take it.
+STRING_DRIVER = """\
+import { connectionString, STRING_TAKEN_BY } from "./copies.js";
+const door = (host) => ({ host, port: Number(process.env.P), user: "customer_app", database: "app" });
+console.log("RESULT " + JSON.stringify({
+  good: connectionString(door(process.env.H), process.env.PW),
+  misnamed: connectionString(door(process.env.M), process.env.PW),
+  plain: connectionString(door(process.env.H)),
+  taken_by: STRING_TAKEN_BY,
+}));
+"""
+
+NODE_TAKE = """\
+import pg from "pg";
+const client = new pg.Client({ connectionString: process.env.URL });
+await client.connect();
+const r = await client.query("select current_user as u");
+console.log("RESULT " + JSON.stringify({ user: r.rows[0].u }));
+await client.end();
+"""
+
+DRIZZLE_TAKE = """\
+import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+const db = drizzle(process.env.URL);
+const r = await db.execute(sql`select current_user as u`);
+console.log("RESULT " + JSON.stringify({ user: r.rows[0].u }));
+await db.$client.end();
+"""
+
+PRISMA_TAKE = """\
+import { PrismaClient } from "@prisma/client";
+const p = new PrismaClient();
+try {
+  const who = await p.$queryRaw`select current_user::text as u`;
+  console.log("RESULT " + JSON.stringify({ user: who[0].u }));
+} finally {
+  await p.$disconnect();
+}
+"""
+
+PSYCOPG_TAKE = """\
+import json, os, psycopg
+with psycopg.connect(os.environ["URL"]) as conn:
+    print("RESULT " + json.dumps({"user": conn.execute("select current_user").fetchone()[0]}))
+"""
+
+GO_TAKE = """\
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/jackc/pgx/v5"
+)
+
+func main() {
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, os.Getenv("URL"))
+	if err != nil {
+		fmt.Println("FAILED connect:", err)
+		os.Exit(1)
+	}
+	defer conn.Close(ctx)
+	var user string
+	if err := conn.QueryRow(ctx, "select current_user").Scan(&user); err != nil {
+		fmt.Println("FAILED query:", err)
+		os.Exit(1)
+	}
+	out, _ := json.Marshal(map[string]any{"user": user})
+	fmt.Println("RESULT " + string(out))
+}
+"""
+
+#: Measured at Session 47 Run 9 (D3019, D3079): node-pg, Drizzle and pgx take the
+#: string (each refuses the misnamed name: ERR_TLS_CERT_ALTNAME_INVALID, "x509:
+#: certificate is valid for ..."); psql and psycopg[binary] refuse it before any
+#: name check (libpq reads ~/.postgresql/root.crt without `sslrootcert`); Prisma 6
+#: CONNECTS to the misnamed name too -- it does not verify `sslmode=verify-full`.
+#:
+#: How each served client is handed ONE connection string, the way its own
+#: documentation takes one -- with the rig's CA where that client reads roots
+#: by default: the system bundle (libpq's and Go's, Prisma's OpenSSL), Node's
+#: store (`NODE_EXTRA_CA_CERTS`), certifi's AND the system's for psycopg.
+#: `.env` is not a client: its readers are psql and pgx, run here by name.
+STRING_CLIENTS = ("psql", "prisma", "node-pg", "psycopg", "drizzle", "go-pgx")
+#: What libpq (psql, psycopg[binary]) says with `verify-full` and no `sslrootcert` (measured).
+LIBPQ_NO_ROOTS = 'root certificate file "/root/.postgresql/root.crt" does not exist'
+
+
+def _take(rig: TlsRig, client: str, url: str, label: str) -> subprocess.CompletedProcess[str]:
+    env = {"URL": url}
+    node = {"NODE_EXTRA_CA_CERTS": "/rig/ca.crt"}
+    if client == "psql":
+        script = f"set -eu; {SYSTEM_TRUST}; psql \"$URL\" -XAtc \"select 'RESULT ' || json_build_object('user', current_user)\""
+        return _run(rig, label, _image("psql"), script, {}, env=env)
+    if client == "prisma":
+        return _run(
+            rig, label, _image(client), f"set -eu; {SYSTEM_TRUST}; node take.mjs", {"take.mjs": PRISMA_TAKE},
+            mounts={"take.mjs": "/app/take.mjs"}, workdir="/app",
+            env={"DATABASE_URL": url, "DIRECT_URL": url},
+        )  # fmt: skip
+    if client in ("node-pg", "drizzle"):
+        program = NODE_TAKE if client == "node-pg" else DRIZZLE_TAKE
+        return _run(
+            rig, label, _image(client), "node take.mjs", {"take.mjs": program},
+            mounts={"": "/app/w"}, workdir="/app/w", env={**env, **node},
+        )  # fmt: skip
+    if client == "psycopg":
+        return _run(
+            rig, label, _image(client), f"set -eu; {SYSTEM_TRUST}; {CERTIFI_TRUST}; python -u take.py",
+            {"take.py": PSYCOPG_TAKE}, env=env,
+        )  # fmt: skip
+    if client == "go-pgx":
+        return _run(
+            rig, label, _image(client), f"set -eu; {SYSTEM_TRUST}; go run .",
+            {"main.go": GO_TAKE, **_go_module()}, env=env,
+        )  # fmt: skip
+    raise AssertionError(f"no way to hand {client} a string")
+
+
+def _taken(done: subprocess.CompletedProcess[str]) -> bool:
+    """Connected, as the pooled door's role: one RESULT naming `customer_app`."""
+    found = [line for line in done.stdout.splitlines() if line.startswith("RESULT ")]
+    return (
+        done.returncode == 0
+        and len(found) == 1
+        and json.loads(found[0][7:]) == {"user": "customer_app"}
+    )
+
+
+@requires_docker
+def test_the_consoles_string_is_labelled_for_exactly_the_clients_that_take_it(
+    rig: TlsRig,
+) -> None:
+    """D3019: Connect shows ONE connection string (`copies.js`
+    `connectionString`: `...?sslmode=verify-full`, no `sslrootcert`), and
+    `STRING_TAKEN_BY` says which clients take it as it is. Each served client
+    is handed that string, built by `copies.js` itself, with the rig's CA where
+    the client reads roots by default: a client TAKES it when it connects AND
+    refuses the same string for a name the certificate does not carry (a
+    client that connects to both did not verify, and is not one that takes
+    it). The label must name exactly the clients that took it.
+
+    The controls, in the same run: the string with `&sslrootcert=system`
+    appended is taken by psql -- so libpq's refusal is the missing root file,
+    not the rig -- and every served snippet runs (the tests above)."""
+    built = _result(
+        _run(
+            rig, "console-string", LOCK["NODE_RUNTIME_IMAGE"], "node string.mjs",
+            {"copies.js": COPIES.read_text("utf-8"), "package.json": '{"type": "module"}\n',
+             "string.mjs": STRING_DRIVER},
+            env={"H": POOL_HOST, "M": MISNAMED, "P": str(rig.port), "PW": rig.password},
+        ),
+        rig,
+    )[0]  # fmt: skip
+    assert built["plain"].endswith("?sslmode=verify-full") and "sslrootcert" not in built["plain"]
+    assert rig.password not in built["plain"]
+    readings: dict[str, dict[str, Any]] = {}
+    said: dict[str, tuple[str, str]] = {}
+    for client in STRING_CLIENTS:
+        good = _take(rig, client, built["good"], f"string-{client}")
+        misnamed = _take(rig, client, built["misnamed"], f"string-{client}-misnamed")
+        said[client] = (
+            rig.scrub(good.stdout + good.stderr),
+            rig.scrub(misnamed.stdout + misnamed.stderr),
+        )
+        readings[client] = {
+            "connects": _taken(good),
+            "connects_to_the_misnamed_name": _taken(misnamed),
+            "refuses_the_misnamed_name": misnamed.returncode != 0
+            and "RESULT " not in misnamed.stdout,
+        }
+    print("D3019 " + json.dumps(readings, sort_keys=True))
+    took = {c for c, r in readings.items() if r["connects"] and r["refuses_the_misnamed_name"]}
+    for client, reading in readings.items():
+        good_said, misnamed_said = said[client]
+        if client in took:  # refused for the NAME, in the client's own words
+            assert NAME_MISMATCH[client] in misnamed_said, (client, misnamed_said[-1500:])
+        elif not reading["connects"]:  # refused for the missing root file, nothing else
+            assert LIBPQ_NO_ROOTS in good_said, (client, good_said[-1500:])
+        else:  # connected to a name the certificate does not carry: did not verify
+            assert reading["connects_to_the_misnamed_name"], (client, misnamed_said[-1500:])
+    control = _take(rig, "psql", built["good"] + "&sslrootcert=system", "string-psql-system")
+    assert _taken(control), rig.scrub(control.stdout + control.stderr)
+    assert took, readings
+    assert set(built["taken_by"]) == took, (built["taken_by"], readings)
+    assert set(built["taken_by"]) <= set(SERVED), built["taken_by"]

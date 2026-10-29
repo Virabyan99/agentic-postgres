@@ -15,6 +15,15 @@ export function connectionString(door, password) {
   return `postgresql://${door.user}${secret}@${door.host}:${door.port}/${door.database}?sslmode=verify-full`;
 }
 
+// The served clients that take `connectionString`'s text exactly as it is
+// (D3019, Session 47 Run 9): measured by tests/contract/test_connection_
+// snippets.py, each connected with the server's CA where it reads roots by
+// default, and refused the same text for a name the certificate does not
+// carry. Connect says so beside the string and points every other client to
+// its own tab: libpq (psql, psycopg) reads ~/.postgresql/root.crt without
+// `sslrootcert`, and node-postgres reads `sslrootcert=system` as a file.
+export const STRING_TAKEN_BY = ["node-pg", "drizzle", "go-pgx"];
+
 // The parts of a door's connection string, each a value a person copies, with
 // what it is. The password is not a part: it is made on this page, shown once.
 export function parts(door) {

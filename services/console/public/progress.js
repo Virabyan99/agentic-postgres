@@ -245,6 +245,9 @@ export function creationBlocked({ creating, plan }) {
 
 export const NOT_YET = "not yet";
 export const NOT_READ = "not read";
+// D3076 (Session 47 Run 9): a second factor the person's role does not need --
+// a step they cannot take is not theirs, so it counts as done for hiding the card.
+export const NOT_NEEDED = "not required";
 
 // Lists read one per organisation, each an array or null when that reading
 // failed: what was found, and whether any could not be read.
@@ -273,7 +276,7 @@ function found(items, unread) {
 // remembered between calls.
 export function checklist({ me, organizations, projects, creating, operations, usage }) {
   const factor = me && me.second_factor && typeof me.second_factor.enabled === "boolean"
-    ? (me.second_factor.enabled ? DONE : NOT_YET)
+    ? (me.second_factor.enabled ? DONE : me.second_factor.required === false ? NOT_NEEDED : NOT_YET)
     : NOT_READ;
   const organization = Array.isArray(organizations) ? (organizations.length ? DONE : NOT_YET) : NOT_READ;
   const held = gathered(projects);
@@ -308,6 +311,120 @@ export function checklist({ me, organizations, projects, creating, operations, u
     { item: "password", state: password },
     { item: "connection", state: connection },
   ];
+}
+
+// The card is gone when every step is done -- a step the person's role does
+// not need counts as done (D3076).
+export function checklistComplete(states) {
+  return Array.isArray(states) && states.length > 0 && states.every((entry) => entry.state === DONE || entry.state === NOT_NEEDED);
+}
+
+// -- a restore time (D3013) -----------------------------------------------------
+
+// A `datetime-local` value -- the browser's own wall-clock time, with no zone
+// -- as the instant the API takes (RFC 3339, UTC, `...Z`): ECMA-262 reads a
+// date-time with no offset as local time. Null when it is empty or not one.
+export function instantOf(local) {
+  if (typeof local !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/.test(local)) {
+    return null;
+  }
+  const at = new Date(local);
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+}
+
+// The browser's time zone, by name ("Europe/Paris"), or null when it says none.
+export function zoneName() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+// -- a plan's entitlements in plain words (D3078) -------------------------------
+
+// What a person calls each entitlement the plans serve (`GET /v1/plans`, the
+// release's `plans.PLANS`), and the unit its number is said in. A name this
+// table does not hold is said by its served unit -- never by its key.
+const ENTITLEMENT_WORDS = {
+  projects_active: { title: "Active projects", unit: "" },
+  branches_total: { title: "Branches per project", unit: "" },
+  compute_profiles: { title: "Compute sizes", unit: "" },
+  storage_gb: { title: "Storage", unit: "GB" },
+  agent_calls_per_day: { title: "Agent calls per day", used: "Agent calls today", unit: "" },
+  backup_retention: { title: "Backups kept", unit: "" },
+};
+
+function capital(text) {
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+}
+
+// An entitlement's title: "Storage", "Agent calls today".
+export function entitlementTitle(entitlement) {
+  const name = entitlement && typeof entitlement.name === "string" ? entitlement.name : "";
+  if (Object.hasOwn(ENTITLEMENT_WORDS, name)) {
+    return ENTITLEMENT_WORDS[name].title;
+  }
+  const unit = entitlement && typeof entitlement.unit === "string" ? entitlement.unit : "";
+  return unit && unit !== "text" ? capital(unit) : "A limit of your plan";
+}
+
+function unitOf(entitlement) {
+  const name = entitlement && entitlement.name;
+  return Object.hasOwn(ENTITLEMENT_WORDS, name) ? ENTITLEMENT_WORDS[name].unit : "";
+}
+
+// An entitlement's value as words: "5 GB", "10,000", "small, standard, large",
+// or its sentence; "not set" when the plan holds no number for it.
+export function entitlementValue(entitlement) {
+  const held = entitlement ? entitlement.value : null;
+  if (typeof held === "number" && Number.isFinite(held)) {
+    const unit = unitOf(entitlement);
+    return `${held.toLocaleString("en-US")}${unit ? ` ${unit}` : ""}`;
+  }
+  if (Array.isArray(held)) {
+    return held.join(", ");
+  }
+  return typeof held === "string" && held ? held : "not set";
+}
+
+// What is used of a read-not-enforced entitlement, from the usage figure the
+// server reads it against: "Storage: 4.1 of 5 GB". Bytes are said in GB (10^9);
+// a figure not read in the period is said, never read as none.
+export function entitlementUse(entitlement, figures) {
+  const name = entitlement && entitlement.name;
+  const words = Object.hasOwn(ENTITLEMENT_WORDS, name) ? ENTITLEMENT_WORDS[name] : null;
+  const title = words && words.used ? words.used : entitlementTitle(entitlement);
+  const figure = figures && entitlement && typeof entitlement.against === "string" ? figures[entitlement.against] : null;
+  const latest = figure && typeof figure.latest === "number" && Number.isFinite(figure.latest) ? figure.latest : null;
+  const limit = entitlementValue(entitlement);
+  if (latest === null) {
+    return `${title}: not read in this period (the limit is ${limit})`;
+  }
+  const used = unitOf(entitlement) === "GB" ? (latest / 1e9).toFixed(1) : latest.toLocaleString("en-US");
+  return `${title}: ${used} of ${limit}`;
+}
+
+// A server's sentence with every entitlement key it names replaced by that
+// entitlement's title (the `limit_approaching` notice names its key, D3078).
+// Keys from the served plan; a word that is no key is left as it is.
+export function plainNotice(text, entitlements) {
+  let said = typeof text === "string" ? text : "";
+  for (const entitlement of Array.isArray(entitlements) ? entitlements : []) {
+    const name = entitlement && typeof entitlement.name === "string" ? entitlement.name : "";
+    if (/^[a-z][a-z0-9_]*$/.test(name)) {
+      said = said.replace(new RegExp(`\\b${name}\\b`, "g"), entitlementTitle(entitlement));
+    }
+  }
+  return said;
+}
+
+// The served entitlement a notice names by its key, or null.
+export function noticeEntitlement(text, entitlements) {
+  const said = typeof text === "string" ? text : "";
+  return (Array.isArray(entitlements) ? entitlements : []).find((entitlement) =>
+    entitlement && typeof entitlement.name === "string" && /^[a-z][a-z0-9_]*$/.test(entitlement.name)
+      && new RegExp(`\\b${entitlement.name}\\b`).test(said)) || null;
 }
 
 // -- the notifications' count (D3001) ---------------------------------------------

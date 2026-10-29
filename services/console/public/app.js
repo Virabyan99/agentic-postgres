@@ -13,20 +13,21 @@
 // a fragment route. A feature the Ledger does not offer has no control here.
 
 import { call, Refusal, relayOrigin } from "/console/api.js";
-import { connectionString, csv, fillPassword, guide, parts } from "/console/copies.js";
+import { connectionString, csv, fillPassword, guide, parts, STRING_TAKEN_BY } from "/console/copies.js";
 import { CLAIM_SENTENCE, claimLine, createProject } from "/console/create.js";
 import { closeSentence, refusal, said, sentence, SESSION_LIMITS } from "/console/messages.js";
 import { CREATE_ON_POOLED, DIRECT_DOOR_HINT, needsDirectDoor } from "/console/messages.js";
 import { begin, current, frame, isCurrent, loadContext, mayCreate, narrow, PAGES, setPage, show, useActions } from "/console/nav.js";
 import { connect } from "/console/pg.js";
 import {
-  checklist, creationBlocked, CURRENT, describe, DONE, formatDuration, limitText, NOT_READ, NOT_YET, operationSeconds,
-  recentNotices, STOPPED, stepStates, TERMINAL, typicalRange,
+  checklist, checklistComplete, creationBlocked, CURRENT, describe, DONE, entitlementTitle, entitlementUse, entitlementValue,
+  formatDuration, instantOf, limitText, NOT_NEEDED, NOT_READ, NOT_YET, noticeEntitlement, operationSeconds, plainNotice,
+  recentNotices, STOPPED, stepStates, TERMINAL, typicalRange, zoneName,
 } from "/console/progress.js";
 import { newPassword, verifier } from "/console/scram.js";
 import { DEADLINE_SENTENCE, doors, openDoor, runStatement } from "/console/sql.js";
 import {
-  banner, busyButton, button, callout, card, choice, codeBlock, copyButton, emptyState, field, h, inlineCopy, link, once,
+  banner, busyButton, button, callout, card, cellChoice, choice, codeBlock, copyButton, emptyState, field, h, inlineCopy, link, once,
   siteDomain, siteLink, skeleton, stateChip, table, tabs, value, when,
 } from "/console/ui.js";
 
@@ -471,7 +472,12 @@ const CHECKLIST_TITLES = {
   password: "Make a password for a door",
   connection: "Connect your application",
 };
-const CHECK_WORDS = { [DONE]: "done", [CURRENT]: "in progress", [NOT_YET]: "not yet", [NOT_READ]: "not read" };
+const CHECK_WORDS = {
+  [DONE]: "done", [CURRENT]: "in progress", [NOT_YET]: "not yet", [NOT_READ]: "not read",
+  [NOT_NEEDED]: "not required for your role",
+};
+// Each state's mark, so no state is told by its colour alone (the brief's §8).
+const CHECK_MARKS = { [DONE]: "✓", [NOT_NEEDED]: "–" };
 
 // What one item says under its title, and where it leads.
 function checkDetail(item, state, me, organizations, readings) {
@@ -483,6 +489,9 @@ function checkDetail(item, state, me, organizations, readings) {
   if (item === "factor") {
     if (state === DONE) {
       return ["On", null];
+    }
+    if (state === NOT_NEEDED) {
+      return ["Not required for your role.", null];
     }
     return [me.second_factor && me.second_factor.required ? "Your role needs one; the console asks for it when you sign in." : "Not on. The console asks for one when your role needs it.", null];
   }
@@ -527,15 +536,15 @@ function checklistCard(me, organizations, readings) {
     operations: readings.map((reading) => reading.operations),
     usage: readings.map((reading) => reading.usage),
   });
-  if (states.every((entry) => entry.state === DONE)) {
+  if (checklistComplete(states)) {
     return null;
   }
   return card(h("h2", {}, "Getting started"),
     h("p", { className: "small muted" }, "From your invitation to a connected application. Each step is read from your account, so it is the same on any device."),
     h("ol", { className: "checklist" }, states.map(({ item, state }) => {
       const [detail, action] = checkDetail(item, state, me, organizations, readings);
-      return h("li", { className: state === DONE ? "done" : state === CURRENT ? "current" : state === NOT_READ ? "unread" : "todo" },
-        h("span", { className: "mark", "aria-hidden": "true" }, state === DONE ? "✓" : ""),
+      return h("li", { className: state === DONE ? "done" : state === CURRENT ? "current" : state === NOT_READ ? "unread" : state === NOT_NEEDED ? "skip" : "todo" },
+        h("span", { className: "mark", "aria-hidden": "true" }, CHECK_MARKS[state] || ""),
         h("div", {}, h("strong", {}, CHECKLIST_TITLES[item]), h("span", { className: "sr" }, `, ${CHECK_WORDS[state]}`),
           h("span", { className: "sub" }, detail)),
         action || h("span", {}));
@@ -674,7 +683,7 @@ function trackerParts(row, shownHere) {
       time = usually(step.typical_seconds);
     }
     return h("li", { className: step.state === "to come" ? "todo" : step.state },
-      h("span", { className: "mark", "aria-hidden": "true" }, step.state === DONE ? "✓" : ""),
+      h("span", { className: "mark", "aria-hidden": "true" }, step.state === DONE ? "✓" : step.state === STOPPED ? "!" : ""),
       h("div", {}, h("strong", {}, step.label), h("span", { className: "sr" }, `, ${words[step.state]}`),
         step.state === CURRENT ? h("div", { className: "indeterminate", "aria-hidden": "true" }) : null),
       h("span", { className: "time" }, time));
@@ -957,11 +966,29 @@ function heldCode(served, name, password) {
     }), "Your tool, with the new password"));
 }
 
+// The names a list holds, as a sentence: "A, B and C".
+function listed(names) {
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names.join("");
+}
+
+// Beside the connection string (D3019): the served clients that take it as it
+// is -- `STRING_TAKEN_BY`, measured by executing it -- and every other served
+// client pointed to its own tab in step 3.
+function stringNote(served) {
+  const clients = Object.keys(served.snippets || {});
+  const takers = clients.filter((client) => STRING_TAKEN_BY.includes(client)).map(clientLabel);
+  const others = clients.filter((client) => !STRING_TAKEN_BY.includes(client)).map(clientLabel);
+  return h("p", { className: "small" },
+    takers.length ? h("strong", {}, `This string works as it is with ${listed(takers)}.`) : null,
+    others.length ? ` For ${listed(others)}, copy the code from its own tab in step 3: this string is not enough for them.` : null);
+}
+
 // What a door's connection string is made of, each part with its copy control.
 function doorAnatomy(served, name) {
   const door = served[name];
   return h("div", { className: "stack" },
     codeBlock(connectionString(door), { label: `The ${name} door, without its password` }),
+    stringNote(served),
     h("dl", { className: "parts" }, parts(door).map((part) => h("div", {},
       h("dt", {}, part.label, h("span", { className: "sub" }, part.about)),
       h("dd", {}, inlineCopy(part.value))))),
@@ -1006,6 +1033,7 @@ function doorPassword(key, served, name, turn, held, refresh) {
           " The previous password no longer works."),
         codeBlock(password, { label: `Password for ${door.user}`, secret: true }),
         codeBlock(connectionString(door, password), { label: "The connection string with it", secret: true }),
+        stringNote(served),
         h("p", { className: "small" }, "It is filled into the code in step 3 for as long as this page stays open."),
         busyButton("I have saved the password", forget, { busy: "Forgetting it…" })));
       held.replaceChildren(heldCode(served, name, password));
@@ -1092,7 +1120,15 @@ async function branchesView(me, key, turn) {
     organization ? readPlan(organization.id) : Promise.resolve(null)]);
   const result = h("div", { className: "stack" });
   const [nameLabel, name] = field("Branch name", { maxLength: 12 });
-  const [atLabel, at] = field("Restore to (optional, e.g. 2026-10-20T09:30:00Z)", {});
+  // D3013: a date and time picker in the browser's own zone, converted here to
+  // the instant the API takes (`instantOf`); the zone is said beside it.
+  const zone = zoneName();
+  const [atLabel, at] = field("Restore to (optional)", { type: "datetime-local", step: 1 },
+    `A date and time in your browser's time zone${zone ? `, ${zone}` : ""}; it is sent as that instant. Leave it empty to branch from now. Reset uses it too.`);
+  // The restore time as the API takes it: null for none, false when it cannot be read.
+  const target = () => (at.value ? instantOf(at.value) || false : null);
+  const unreadable = () => result.replaceChildren(h("p", { className: "refusal" },
+    "The restore time could not be read as a date and time; nothing was sent."));
   const [confirmLabel, confirm] = field("To delete a branch, type its name here first", { maxLength: 12 });
   // Two passwords made here; only their verifiers leave (D2449, D2660).
   async function request(route, body, what) {
@@ -1126,8 +1162,15 @@ async function branchesView(me, key, turn) {
     expires_at: when(branch.expires_at),
     state: stateChip(branch.state),
     actions: h("span", { className: "row-actions" },
-      busyButton("Reset", () => request(`/projects/${key}/branches/${encodeURIComponent(branch.name)}/reset`,
-        at.value.trim() ? { target_time: at.value.trim() } : {}, `Resetting ${branch.name}`), { busy: "Resetting…" }),
+      busyButton("Reset", async () => {
+        const instant = target();
+        if (instant === false) {
+          unreadable();
+          return;
+        }
+        await request(`/projects/${key}/branches/${encodeURIComponent(branch.name)}/reset`,
+          instant ? { target_time: instant } : {}, `Resetting ${branch.name}`);
+      }, { busy: "Resetting…" }),
       busyButton("Delete", async () => {
         if (confirm.value !== branch.name) {
           result.replaceChildren(h("p", { className: "refusal" }, `Type ${branch.name} in the field below first; a branch is not backed up, and nothing was sent.`));
@@ -1164,9 +1207,13 @@ async function branchesView(me, key, turn) {
           result.replaceChildren(h("p", { className: "refusal" }, "A branch name is 2 to 12 lowercase letters and digits, starting with a letter, and not main."));
           return;
         }
-        const target = at.value.trim();
-        if (target) {
-          await request(`/projects/${key}/restores`, { branch, target_time: target }, `Restoring into ${branch}`);
+        const instant = target();
+        if (instant === false) {
+          unreadable();
+          return;
+        }
+        if (instant) {
+          await request(`/projects/${key}/restores`, { branch, target_time: instant }, `Restoring into ${branch}`);
         } else {
           await request(`/projects/${key}/branches`, { branch }, `Branching into ${branch}`);
         }
@@ -1227,9 +1274,13 @@ function usageSection(document) {
       `; ${document.samples.present} of ${document.samples.expected} samples recorded.`),
     table([["name", "Figure"], ["latest", "Latest"], ["max", "Window maximum"]], rows, new Set(["max"])),
     h("p", {}, "Requests answered below 400: ", document.requests ? String(document.requests.increase) : "not read in this window"),
+    // D3078: "Storage: 4.1 of 5 GB", from the figure each limit is read against.
     (document.entitlements || []).length
-      ? table([["name", "Limit"], ["value", "Value"], ["against", "Against"], ["enforced", "Enforced"]],
-        document.entitlements.map((limit) => ({ ...limit, enforced: limit.enforced ? "enforced" : "shown, not enforced during the beta" })))
+      ? table([["use", "Your plan's limits"], ["enforced", "Enforced"]],
+        document.entitlements.map((limit) => ({
+          use: entitlementUse(limit, figures),
+          enforced: limit.enforced ? "enforced" : "shown, not enforced during the beta",
+        })))
       : null);
 }
 
@@ -1372,21 +1423,26 @@ async function projectSettingsView(me, key, turn) {
 
 // -- an organisation's views --------------------------------------------------
 
+const PLAN_STATUS = { active: "active", unavailable_during_beta: "not available during the beta" };
+
 async function planView(me, org) {
   const [plans, held] = await Promise.all([call("GET", "/plans"), call("GET", `/organizations/${org}/plan`)]);
   const message = h("div", {});
+  // D3078: each entitlement by its title and its value in words, never its key.
   const entitlementRows = (document) => document.entitlements.map((entitlement) => ({
-    ...entitlement,
-    value: Array.isArray(entitlement.value) ? entitlement.value.join(", ") : value(entitlement.value),
+    title: entitlementTitle(entitlement),
+    value: entitlementValue(entitlement),
     enforced: entitlement.enforced ? "enforced" : "shown, not enforced",
   }));
+  // A plan's status as words; one this table does not hold is said as served.
+  const status = (word) => (Object.hasOwn(PLAN_STATUS, word) ? PLAN_STATUS[word] : value(word));
   frame(me, "Plan and usage",
-    card(h("p", {}, `This organisation is on ${held.plan} (${held.status}); projects held ${held.projects_active.held} of ${held.projects_active.limit}.`),
+    card(h("p", {}, `This organisation is on the ${planName(held)} plan (${status(held.status)}); projects held ${held.projects_active.held} of ${held.projects_active.limit}.`),
       h("p", {}, link(`#/org/${org}/usage`, "Each project's usage in the last 24 hours"), " · ",
         h("a", { href: siteLink("/pricing/") }, "Compare the plans"))),
     plans.plans.map((document) => h("section", { className: "card" },
-      h("h2", {}, `${document.plan} (${document.status})`),
-      table([["name", "Entitlement"], ["value", "Value"], ["unit", "Unit"], ["enforced", ""]], entitlementRows(document)),
+      h("h2", {}, `${planName(document)} (${status(document.status)})`),
+      table([["title", "Entitlement"], ["value", "Limit"], ["enforced", ""]], entitlementRows(document)),
       document.status !== "active" ? busyButton("Notify me", async () => {
         try {
           const answer = await call("POST", `/organizations/${org}/plan-interest`, { plan: document.plan });
@@ -1421,7 +1477,7 @@ const NOTICE_KINDS = [
 // wrote it (`#/operations/<id>`, D2953), or -- when it names none -- the page
 // that acts on it: its project, else the organisation's activity. A kind this
 // page does not know reads the server's own text, and still links onward.
-function noticeWords(notice, org) {
+function noticeWords(notice, org, entitlements) {
   const title = OPERATION_TITLES[notice.operation_type] || "An operation";
   const key = typeof notice.project === "string" ? notice.project : null;
   const on = key ? ` on ${key}` : "";
@@ -1449,10 +1505,14 @@ function noticeWords(notice, org) {
       key ? link(`#/projects/${key}/branches`, "See the branches") : link(`#/org/${org}`, "See the projects")];
   }
   if (notice.kind === "limit_approaching") {
-    return [h("strong", {}, `${key || "A project"} is near a limit your plan shows.`), " ", value(notice.text), " ",
-      planLinks(org)];
+    // D3078: the server's sentence names the entitlement by its key; it is
+    // said by its title, with the plan's limit, from the plan the page read.
+    const named = noticeEntitlement(notice.text, entitlements);
+    const said = plainNotice(notice.text, entitlements).replace(/\.\s*$/, "");
+    return [h("strong", {}, named ? `${entitlementTitle(named)} on ${key || "a project"} is near your plan's limit.` : `${key || "A project"} is near a limit your plan shows.`),
+      " ", said ? `${said}.` : "", named ? ` The limit is ${entitlementValue(named)}.` : "", " ", planLinks(org)];
   }
-  return [value(notice.text), " ", operation("Details")];
+  return [value(plainNotice(notice.text, entitlements)), " ", operation("Details")];
 }
 
 // How many the page asks for: the newest, as `apg notifications list` does.
@@ -1478,7 +1538,7 @@ async function notificationsView(me, org) {
         h("p", { className: "small muted" }, recentNotices(notices, Date.now(), NOTICES_READ),
           " The server does not record which ones you have read, so nothing here is marked unread."),
         h("ul", { className: "feed" }, notices.map((notice) => h("li", {},
-          h("span", {}, noticeWords(notice, org)), when(notice.created_at)))))
+          h("span", {}, noticeWords(notice, org, plan ? plan.entitlements : null)), when(notice.created_at)))))
       : emptyState("No notification yet. One appears here when a project's creation, a branch, a restore or a reset starts, and when an operation finishes.",
         firstOperationAction(org)),
     card(h("h2", {}, "What makes a notification"),
@@ -1546,7 +1606,7 @@ async function orgSettingsView(me, org) {
     }
   };
   const memberRows = members.members.map((member) => {
-    const [, role] = choice("", ROLES, member.role);
+    const role = cellChoice(`Role of ${member.username}`, ROLES, member.role);
     return {
       ...member,
       role,

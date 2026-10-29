@@ -150,6 +150,105 @@ def test_a_hidden_field_stays_hidden() -> None:
     assert "codeLabel.hidden = true;" in APP.read_text(encoding="utf-8")
 
 
+#: The components that make a form control, and how each names it (ui.js).
+LABELLED_BY = {
+    "field": 'return [h("label", {}, label, input), input];',
+    "choice": 'return [h("label", {}, label, select), select];',
+    "cellChoice": 'return h("select", { "aria-label": name }, options(list, selected));',
+}
+
+
+def _function(text: str, name: str) -> str:
+    found = re.search(rf"^(?:export )?(?:async )?function {name}\(", text, re.MULTILINE)
+    assert found, f"no function {name}"
+    rest = text[found.start() :]
+    return rest[: rest.index("\n}\n") + 2]
+
+
+def _unlabelled(text: str) -> list[str]:
+    """Each control a view script makes by hand (`h("input"`, `h("select"`,
+    `h("textarea"`) that nothing names: it must sit directly inside an
+    `h("label"` call, be assigned to a name that an `h("label"` call holds, or
+    carry an `id` that a label's `htmlFor` names. And every `field(`,
+    `choice(` and `cellChoice(` call names its control with a non-empty label."""
+    found = []
+    for match in re.finditer(r'h\("(input|select|textarea)", \{([^}]*)\}', text):
+        before = text[max(0, match.start() - 200) : match.start()]
+        if re.search(r'h\("label", \{[^}]*\},\s*$', before):
+            continue
+        ident = re.search(r'\bid: "([^"]+)"', match.group(2))
+        if ident and f'htmlFor: "{ident.group(1)}"' in text:
+            continue
+        assigned = re.search(r"const (\w+) = (?:[\w.]+\.map\(\([^)]*\) => )?$", before)
+        if assigned:
+            name = assigned.group(1)
+            if re.search(rf'h\("label", \{{[^}}]*\}}[^;]*\b{name}\b', text):
+                continue
+        found.append(text[match.start() : match.start() + 80])
+    for match in re.finditer(r"\b(field|choice|cellChoice)\((\"\"|''|``)", text):
+        found.append(text[match.start() : match.start() + 60])
+    return found
+
+
+def test_every_form_control_is_labelled() -> None:
+    """The brief's §8: every input, select and textarea has a name a screen
+    reader says -- its label, or (a choice in a table row, whose column head
+    is its visible label) an `aria-label` naming the row. The components
+    label what they make; every view's own control is read by `_unlabelled`.
+    The control: the reader finds an unnamed input and an empty label."""
+    ui = UI.read_text(encoding="utf-8")
+    for name, labelled in LABELLED_BY.items():
+        assert labelled in _function(ui, name), name
+    modules = _modules()
+    for name, text in modules.items():
+        if name == "ui.js":
+            continue
+        assert not _unlabelled(text), (name, _unlabelled(text))
+    made = sum(len(re.findall(r'h\("(?:input|select|textarea)", ', t)) for t in modules.values())
+    assert made >= 5, made
+    assert _unlabelled('const x = h("input", { type: "text" });\nh("p", {}, x);')
+    assert _unlabelled('const [, role] = choice("", ROLES, "owner");')
+    assert not _unlabelled('h("label", {}, h("input", { type: "radio" }), "A")')
+
+
+def test_no_state_is_told_by_colour_alone() -> None:
+    """The brief's §8: a chip says its state in words (the state word itself);
+    a checklist item and a tracker step carry their state as words for a
+    screen reader (*done / in progress / to come*) AND a mark whose shape
+    differs where its colour does: a tick when done, a dot when in progress, a
+    `!` where an operation stopped, a dash when the role needs no factor, a
+    dashed ring when unread. The statebar's dot sits beside its state word."""
+    ui = UI.read_text(encoding="utf-8")
+    assert (
+        'className: "chip " + (known ? STATE_CHIPS[state] : "state-unknown") }, value(state))' in ui
+    )
+    app = APP.read_text(encoding="utf-8")
+    for chip in re.finditer(r'h\("span", \{ className: "chip [^"]*" \}, ([^)]*)\)', app):
+        assert chip.group(1).strip() not in ('""', ""), chip.group(0)
+    tracker = _function(app, "trackerParts")
+    assert 'h("span", { className: "sr" }, `, ${words[step.state]}`)' in tracker
+    assert 'step.state === DONE ? "✓" : step.state === STOPPED ? "!" : ""' in tracker
+    for word in (
+        '[DONE]: "done"',
+        '[CURRENT]: "in progress"',
+        '"to come": "to come"',
+        '[STOPPED]: "stopped here"',
+    ):
+        assert word in tracker, word
+    card = _function(app, "checklistCard")
+    assert 'h("span", { className: "sr" }, `, ${CHECK_WORDS[state]}`)' in card
+    assert 'CHECK_MARKS[state] || ""' in card
+    marks = re.search(r"const CHECK_MARKS = \{([^}]*)\};", app)
+    assert marks and '[DONE]: "✓"' in marks.group(1) and '[NOT_NEEDED]: "\u2013"' in marks.group(1)
+    css = CSS.read_text(encoding="utf-8")
+    assert (
+        ".current .mark::after {" in css
+        and ".checklist li.unread .mark { border-style: dashed; }" in css
+    )
+    sql = _function(app, "sqlView")
+    assert 'h("span", { className: "dot", "aria-hidden": "true" }), state,' in sql
+
+
 def test_the_drivers_anchors_are_unchanged() -> None:
     """Each literal the walk drivers select by occurs across the console's
     modules exactly as often as `ANCHORS` says (re-counted with the drivers,
