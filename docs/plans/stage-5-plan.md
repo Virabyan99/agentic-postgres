@@ -71,8 +71,9 @@ DIRECTION       HOSTED (D1946). Session 36 paid the preconditions; Session 37
                 control status (ADRs 0290-0293) and the runner's own units
                 classified (ADR 0294).
 SESSIONS        36-47 (D1945, D2510, D2591-D2593, D2809, D2945). 36-46 DONE;
-                47 unplanned -- its planning prompt is in the launch folder
-                (session-47-planning-prompt.md). Its re-earning needs
+                47 PLANNED 2026-10-29: docs/plans/session-47-implementation-
+                plan.md (15 runs, one sitting, rows D2946-D2980, ADRs
+                0295-0299 reserved; next free D2981, ADR 0300). Its re-earning needs
                 slot12-prod, named under the new domain (slot1-9 and slot11
                 consumed; slot10-prod the person's, KEPT).
 CURRENT_SESSION 46. Moves 46 -> 47, all-or-nothing per session (D690).
