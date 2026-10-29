@@ -1,0 +1,896 @@
+<title>Console Prototype 47</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Session 47 Run 2 (ADR 0295): the console prototype for Sheet D1. Example data only.
+   Layout: a left navigation (organisation and project switchers, then the project's
+   pages, then the organisation's) beside one page template (breadcrumb, title,
+   one-line purpose, help link, primary action); below 900 px the navigation folds
+   into a Menu disclosure. Light only (D2946 (2)), so every colour is set here. */
+/* tokens: begin -- ADR 0288. This block is byte-equal in site/static/site.css
+   and services/console/public/app.css (test_look); edit both or neither. The
+   values are the design brief's (docs/design/session-45/design-brief.md). */
+:root {
+  color-scheme: light;
+  --ground: #F4F6F5;
+  --surface: #FFFFFF;
+  --surface-sunk: #F8FAF9;
+  --surface-hover: #E8EDEB;
+  --ink: #142027;
+  --ink-body: #26333B;
+  --text-2: #3D4A52;
+  --text-3: #55626B;
+  --rule: #D3DBD8;
+  --rule-soft: #E1E7E5;
+  --border-control: #C3CDCA;
+  --accent: #0B6B4F;
+  --accent-hover: #084E3A;
+  --accent-tint: #DCEFE6;
+  --accent-wash: #F1F8F4;
+  --focus: #1F4FA3;
+  --on-ink-text: #E6ECEA;
+  --on-ink-muted: #9FB0AB;
+  --on-ink-rule: #2A3A43;
+  --on-ink-action: #6FCF9F;
+  --on-ink-action-text: #0B2A1F;
+  --on-ink-comment: #8FA59E;
+  --on-ink-border: #3A4B54;
+  --chip-beta-text: #0B6B4F;
+  --chip-beta-bg: #DCEFE6;
+  --chip-beta-bar: #0B6B4F;
+  --chip-verify-text: #1F4FA3;
+  --chip-verify-bg: #E1E9F7;
+  --chip-verify-bar: #1F4FA3;
+  --chip-planned-text: #7A4F00;
+  --chip-planned-bg: #F6EBD3;
+  --chip-planned-bar: #E3B65A;
+  --chip-absent-text: #3F4A51;
+  --chip-absent-bg: #E6EAEC;
+  --chip-absent-bar: #AEB8BE;
+  --chip-unmetered-text: #FFFFFF;
+  --chip-unmetered-bg: #5D6A72;
+  --chip-unmetered-bar: #5D6A72;
+  --window-stripe-a: #CFE7DB;
+  --window-stripe-b: #DCEFE6;
+  --window-border: #A9D2BF;
+  --warning-bg: #F6EBD3;
+  --warning-text: #3B2A00;
+  --once-border: #E3B65A;
+  --destructive-border: #7A4F00;
+  --font-text: "Schibsted Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --radius-chip: 4px;
+  --radius-control: 8px;
+  --radius-panel: 12px;
+  --radius-large: 16px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 56px;
+  --space-11: 64px;
+  --space-12: 88px;
+  --space-13: 96px;
+}
+/* tokens: end */
+/* Session 47 additions, light only: three derived from the block above. */
+:root {
+  --danger-text: #8A2B16;
+  --danger-bg: #FBE9E4;
+  --danger-border: #B5482F;
+  --nav-width: 248px;
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  src: url(../../../../services/console/public/fonts/schibsted-grotesk.woff2) format("woff2");
+  font-weight: 400 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url(../../../../services/console/public/fonts/jetbrains-mono.woff2) format("woff2");
+  font-weight: 400 500; font-style: normal; font-display: swap;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { background: var(--ground); }
+body { margin: 0; color: var(--ink); font: 400 15px/1.55 var(--font-text); }
+a { color: var(--accent); text-underline-offset: 2px; }
+a:hover { color: var(--accent-hover); }
+code, pre, kbd { font-family: var(--font-mono); }
+code { font-size: 0.9em; }
+h1, h2, h3 { text-wrap: balance; color: var(--ink); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+main:focus, main:focus-visible { outline: none; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* The prototype's own strip: not part of the console. */
+.proto { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); padding-block: var(--space-2); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); background: var(--ink); color: var(--on-ink-text); font-size: 13px; }
+.proto strong { color: var(--on-ink-action); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; font-size: 12px; }
+.proto label { display: inline-flex; align-items: center; gap: var(--space-2); }
+.proto select { font: inherit; color: var(--ink); background: var(--surface); border: 0; border-radius: 6px; padding: 4px 8px; max-width: 100%; }
+.proto .note { color: var(--on-ink-muted); }
+
+/* Top bar */
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; align-items: center; gap: var(--space-4); min-height: 56px; padding-block: var(--space-2); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); background: var(--surface); border-bottom: 1px solid var(--rule); }
+.brand { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--ink); font-size: 17px; font-weight: 700; letter-spacing: -0.01em; text-decoration: none; }
+.top .grow { flex: 1; }
+.top-links { display: flex; align-items: center; gap: var(--space-2); }
+.top-link { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 10px; border-radius: var(--radius-control); color: var(--ink-body); text-decoration: none; font-weight: 500; }
+.top-link:hover { background: var(--surface-hover); color: var(--ink); }
+.count { min-width: 20px; padding: 0 6px; border-radius: 10px; background: var(--accent); color: var(--surface); font-size: 12px; font-weight: 700; line-height: 20px; text-align: center; }
+.account { position: relative; }
+.account > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: var(--accent-tint); color: var(--accent); font-weight: 700; }
+.account > summary::-webkit-details-marker { display: none; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 220px; padding: var(--space-2); background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-panel); box-shadow: 0 8px 24px rgba(20, 32, 39, 0.12); }
+.menu a, .menu span { display: block; padding: 8px 10px; border-radius: 6px; color: var(--ink-body); text-decoration: none; }
+.menu span { color: var(--text-3); font-size: 13px; }
+.menu a:hover { background: var(--surface-hover); }
+
+/* Shell */
+.shell { display: grid; grid-template-columns: var(--nav-width) minmax(0, 1fr); min-height: calc(100vh - 100px); }
+.side { border-right: 1px solid var(--rule); background: var(--surface-sunk); }
+.side > summary { display: none; }
+.side-inner { position: sticky; top: 64px; display: grid; gap: var(--space-5); padding: var(--space-5) var(--space-4); }
+.switch { display: grid; gap: 2px; }
+.switch-label { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+.switch details { position: relative; }
+.switch summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: 40px; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-control); font-weight: 600; }
+.switch summary::-webkit-details-marker { display: none; }
+.switch summary::after { content: ""; width: 8px; height: 8px; border-right: 2px solid var(--text-3); border-bottom: 2px solid var(--text-3); transform: rotate(45deg) translateY(-2px); flex: none; }
+.switch .menu { left: 0; right: auto; width: 100%; z-index: 6; }
+.nav-group { display: grid; gap: 2px; }
+.nav-group h2 { margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+.nav-group a { display: flex; align-items: center; justify-content: space-between; min-height: 34px; padding: 6px 10px; border-radius: 6px; color: var(--ink-body); text-decoration: none; font-weight: 500; }
+.nav-group a:hover { background: var(--surface-hover); color: var(--ink); }
+.nav-group a[aria-current="page"] { background: var(--accent-tint); color: var(--accent); font-weight: 600; }
+.nav-group a[aria-disabled="true"] { color: var(--text-3); }
+
+/* Page template */
+.page { min-width: 0; padding-block: var(--space-6) var(--space-11); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.page-inner { max-width: 960px; margin: 0 auto; display: grid; gap: var(--space-5); }
+.crumbs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; color: var(--text-3); font-size: 13px; }
+.crumbs li + li::before { content: "/"; margin-right: 6px; color: var(--rule); }
+.crumbs a { color: var(--text-3); }
+.page-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-3) var(--space-6); }
+.page-head h1 { margin: 0; font-size: 28px; line-height: 1.2; letter-spacing: -0.02em; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.page-head p { margin: 6px 0 0; color: var(--text-2); max-width: 62ch; }
+.head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.help-link { font-size: 14px; font-weight: 500; }
+
+/* Surfaces */
+.card { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-panel); padding: var(--space-5); min-width: 0; }
+.card > h2, .section-title { margin: 0 0 var(--space-3); font-size: 17px; letter-spacing: -0.01em; }
+.card > p { margin: 0 0 var(--space-3); color: var(--text-2); }
+.grid-2 { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--space-5); align-items: start; }
+.stack { display: grid; gap: var(--space-5); }
+.muted { color: var(--text-3); }
+.small { font-size: 13px; }
+
+/* Controls */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: 40px; padding: 9px 16px; font: 600 15px/1.2 var(--font-text); color: var(--surface); background: var(--accent); border: 1px solid var(--accent); border-radius: var(--radius-control); cursor: pointer; text-decoration: none; }
+.btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--surface); }
+.btn.secondary { color: var(--ink); background: var(--surface); border-color: var(--border-control); }
+.btn.secondary:hover { background: var(--surface-hover); color: var(--ink); }
+.btn.danger { color: var(--surface); background: var(--danger-border); border-color: var(--danger-border); }
+.btn.small { min-height: 32px; padding: 5px 10px; font-size: 13px; }
+.btn[disabled], .btn[aria-disabled="true"] { cursor: not-allowed; color: var(--text-3); background: var(--surface-hover); border-color: var(--rule); }
+.btn .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.field { display: grid; gap: 6px; max-width: 28rem; }
+.field label { font-weight: 600; font-size: 14px; }
+.field .hint { font-size: 13px; color: var(--text-3); }
+input[type="text"], input[type="password"], select, textarea { width: 100%; padding: 10px 12px; font: 400 15px/1.4 var(--font-text); color: var(--ink); background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-control); }
+textarea { font: 400 14px/1.6 var(--font-mono); resize: vertical; }
+input[disabled] { background: var(--surface-sunk); color: var(--text-3); }
+form.stack { gap: var(--space-4); }
+
+/* Chips */
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: var(--radius-chip); font-size: 12px; font-weight: 600; line-height: 1.4; }
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.state-ready { color: var(--chip-beta-text); background: var(--chip-beta-bg); }
+.state-busy { color: var(--chip-verify-text); background: var(--chip-verify-bg); }
+.state-asleep { color: var(--chip-planned-text); background: var(--chip-planned-bg); }
+.state-unknown { color: var(--chip-unmetered-text); background: var(--chip-unmetered-bg); }
+
+/* Callouts and banners */
+.banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); background: var(--accent-wash); border: 1px solid var(--accent-tint); border-radius: var(--radius-control); }
+.banner p { margin: 0; }
+.callout { padding: var(--space-4); border-radius: var(--radius-control); background: var(--surface-sunk); border: 1px solid var(--rule); }
+.callout.warn { background: var(--warning-bg); border-color: var(--once-border); color: var(--warning-text); }
+.callout h3 { margin: 0 0 6px; font-size: 15px; color: inherit; }
+.callout p { margin: 0 0 var(--space-2); }
+.callout .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.word { font-family: var(--font-mono); font-size: 12px; color: var(--text-3); }
+
+/* Checklist */
+.checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.checklist li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: var(--space-3); align-items: start; padding: 10px 0; border-bottom: 1px solid var(--rule-soft); }
+.checklist li:last-child { border-bottom: 0; }
+.mark { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border-control); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+.done .mark { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.current .mark { border-color: var(--chip-verify-text); background: var(--chip-verify-bg); }
+.current .mark::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--chip-verify-text); }
+.checklist strong { display: block; font-weight: 600; }
+.checklist .sub { color: var(--text-3); font-size: 13px; }
+
+/* Tables */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+th { color: var(--text-3); font-weight: 600; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; background: var(--surface-sunk); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Tracker */
+.steps { list-style: none; margin: 0; padding: 0; display: grid; }
+.steps li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: var(--space-3); padding: 12px 0; border-bottom: 1px solid var(--rule-soft); align-items: start; }
+.steps li:last-child { border-bottom: 0; }
+.steps .time { font-variant-numeric: tabular-nums; color: var(--text-3); font-size: 13px; white-space: nowrap; }
+.steps .current { }
+.steps li.current strong { color: var(--chip-verify-text); }
+.steps li.todo strong { color: var(--text-3); font-weight: 500; }
+.indeterminate { position: relative; height: 6px; margin-top: 8px; border-radius: 3px; background: var(--chip-verify-bg); overflow: hidden; }
+.indeterminate::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: 3px; background: var(--chip-verify-text); animation: slide 1.8s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+.meta-row { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-6); color: var(--text-2); font-size: 14px; }
+.meta-row b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* Shown once */
+.once { padding: var(--space-5); background: var(--surface); border: 2px solid var(--once-border); border-radius: var(--radius-panel); display: grid; gap: var(--space-3); }
+.once h2 { margin: 0; font-size: 17px; }
+.once p { margin: 0; color: var(--ink-body); }
+.once-done { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-control); color: var(--text-2); }
+
+/* Code blocks */
+.code { position: relative; background: var(--ink); color: var(--on-ink-text); border-radius: var(--radius-control); min-width: 0; }
+.code-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 6px 8px 6px 14px; border-bottom: 1px solid var(--on-ink-rule); color: var(--on-ink-muted); font-size: 12px; }
+.code pre { margin: 0; padding: 12px 14px; overflow-x: auto; font-size: 13px; line-height: 1.6; }
+.code .c { color: var(--on-ink-comment); }
+.copy { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 10px; font: 600 12px/1 var(--font-text); color: var(--on-ink-text); background: transparent; border: 1px solid var(--on-ink-border); border-radius: 6px; cursor: pointer; }
+.copy:hover { border-color: var(--on-ink-muted); }
+.copy.copied { color: var(--on-ink-action-text); background: var(--on-ink-action); border-color: var(--on-ink-action); }
+.copy svg { width: 14px; height: 14px; }
+.inline-copy { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.inline-copy code { padding: 4px 8px; background: var(--surface-sunk); border: 1px solid var(--rule); border-radius: var(--radius-chip); word-break: break-all; }
+.inline-copy .copy { color: var(--ink); border-color: var(--border-control); }
+.inline-copy .copy.copied { color: var(--surface); background: var(--accent); border-color: var(--accent); }
+
+/* Segmented choice and tabs */
+.segment { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.segment label { display: grid; gap: 4px; padding: var(--space-4); background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-control); cursor: pointer; }
+.segment input { position: absolute; opacity: 0; pointer-events: none; }
+.segment label:has(input:checked) { border: 2px solid var(--accent); background: var(--accent-wash); }
+.segment label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 3px; }
+.segment .title { font-weight: 700; display: flex; align-items: center; gap: var(--space-2); }
+.segment .desc { color: var(--text-2); font-size: 14px; }
+.tablist { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--rule); }
+.tablist button { min-height: 36px; padding: 6px 12px; font: 500 14px/1.2 var(--font-text); color: var(--text-2); background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; }
+.tablist button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.where { margin: var(--space-2) 0 0; font-size: 13px; color: var(--text-2); }
+.anatomy { display: flex; flex-wrap: wrap; gap: 2px; font-family: var(--font-mono); font-size: 13px; }
+.anatomy span { display: grid; gap: 2px; padding: 6px 8px; background: var(--surface-sunk); border-radius: 4px; }
+.anatomy small { font-family: var(--font-text); font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.steps-num { counter-reset: n; list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-5); }
+.steps-num > li { counter-increment: n; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: var(--space-3); }
+.steps-num > li::before { content: counter(n); width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: var(--surface); font-weight: 700; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; }
+.steps-num h3 { margin: 2px 0 var(--space-2); font-size: 16px; }
+.steps-num > li > div { display: grid; gap: var(--space-3); min-width: 0; }
+
+/* SQL editor */
+.statebar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); border-radius: var(--radius-control); background: var(--surface); border: 1px solid var(--rule); }
+.statebar .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; }
+.statebar.off .dot { background: var(--chip-absent-bar); }
+.statebar dl { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: 0; font-size: 13px; }
+.statebar dt { color: var(--text-3); }
+.statebar dd { margin: 0 0 0 4px; font-family: var(--font-mono); }
+.statebar dl div { display: flex; }
+.statebar .grow { flex: 1; }
+.results { max-height: 320px; overflow: auto; border: 1px solid var(--rule); border-radius: var(--radius-control); }
+.results th { position: sticky; top: 0; }
+.results td { font-family: var(--font-mono); font-size: 13px; }
+.result-meta { display: flex; justify-content: space-between; gap: var(--space-3); font-size: 13px; color: var(--text-3); }
+
+/* Lists */
+.feed { list-style: none; margin: 0; padding: 0; }
+.feed li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: var(--space-3); align-items: baseline; padding: 12px 0; border-bottom: 1px solid var(--rule-soft); }
+.feed li:last-child { border-bottom: 0; }
+.feed .pip { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); align-self: center; }
+.feed .pip.blue { background: var(--chip-verify-text); }
+.feed .pip.amber { background: var(--chip-planned-bar); }
+.feed time { color: var(--text-3); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kinds { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px var(--space-4); margin: 0; font-size: 14px; }
+.kinds dt { font-weight: 600; }
+.kinds dd { margin: 0; color: var(--text-2); }
+.setting { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3) var(--space-6); align-items: center; padding: var(--space-4) 0; border-bottom: 1px solid var(--rule-soft); }
+.setting:last-child { border-bottom: 0; }
+.setting h3 { margin: 0 0 4px; font-size: 15px; }
+.setting p { margin: 0; color: var(--text-2); font-size: 14px; }
+.scope { display: inline-block; margin-left: 6px; font-size: 12px; font-weight: 500; color: var(--text-3); }
+.card.danger-zone { border-color: var(--danger-border); }
+.card.danger-zone > h2 { color: var(--danger-text); }
+.links { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+
+/* Skeleton */
+.skeleton { display: grid; gap: var(--space-4); }
+.sk { height: 14px; border-radius: 4px; background: linear-gradient(90deg, var(--surface-hover) 0%, var(--surface-sunk) 50%, var(--surface-hover) 100%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+.sk.h { height: 28px; width: 40%; }
+.sk.w60 { width: 60%; }
+.sk.block { height: 120px; border-radius: var(--radius-panel); }
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+/* Toast and dialog */
+.toasts { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: grid; gap: var(--space-2); z-index: 20; }
+.toast { padding: 10px 14px; background: var(--ink); color: var(--on-ink-text); border-radius: var(--radius-control); box-shadow: 0 8px 24px rgba(20, 32, 39, 0.2); font-size: 14px; }
+dialog { width: min(480px, calc(100vw - 32px)); padding: var(--space-6); border: 1px solid var(--rule); border-radius: var(--radius-panel); color: var(--ink); background: var(--surface); }
+dialog::backdrop { background: rgba(20, 32, 39, 0.45); }
+dialog h2 { margin: 0 0 var(--space-3); font-size: 18px; }
+dialog .row { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+footer.foot { padding-block: var(--space-5); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); color: var(--text-3); font-size: 13px; border-top: 1px solid var(--rule); background: var(--surface); }
+
+@media (max-width: 900px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .side { border-right: 0; border-bottom: 1px solid var(--rule); }
+  .side > summary { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px)); cursor: pointer; list-style: none; font-weight: 600; }
+  .side > summary::-webkit-details-marker { display: none; }
+  .side > summary .where-now { color: var(--text-3); font-weight: 500; font-size: 14px; }
+  .side-inner { position: static; padding-top: 0; }
+  .grid-2 { grid-template-columns: minmax(0, 1fr); }
+  .segment { grid-template-columns: minmax(0, 1fr); }
+  .top-link .label { display: none; }
+  .page-head h1 { font-size: 24px; }
+  .setting { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+
+<div class="proto" role="region" aria-label="Prototype controls">
+  <strong>Prototype</strong>
+  <label for="screen">Screen
+    <select id="screen">
+      <option value="overview">1 · Overview, a project being created</option>
+      <option value="new-project">2 · New project</option>
+      <option value="tracker">3 · Creation, just started (token shown once)</option>
+      <option value="tracker-after-refresh">4 · Creation, the same page after a refresh</option>
+      <option value="new-project-limit">5 · New project while one is being created</option>
+      <option value="connect">6 · Connect (project ready)</option>
+      <option value="sql-editor">7 · SQL editor</option>
+      <option value="notifications">8 · Notifications</option>
+      <option value="project-settings">9 · Project settings</option>
+      <option value="help">10 · Help</option>
+    </select>
+  </label>
+  <span class="note">Example data, not a real account. Every link and button works inside the prototype.</span>
+</div>
+
+<template id="i-copy"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M5 1.5h7.5A1.5 1.5 0 0 1 14 3v8h-1.5V3H5z M3 4.5h7A1.5 1.5 0 0 1 11.5 6v7.5A1.5 1.5 0 0 1 10 15H3a1.5 1.5 0 0 1-1.5-1.5V6A1.5 1.5 0 0 1 3 4.5zm0 1.5v7.5h7V6z" fill="currentColor"/></svg></template>
+
+<header class="top">
+  <a class="brand" href="#overview"><svg width="26" height="26" viewBox="0 0 28 28" aria-hidden="true" focusable="false"><rect x="1" y="1" width="26" height="26" rx="6" fill="none" stroke="#142027" stroke-width="2"/><rect x="8" y="7" width="4" height="14" rx="1" fill="#0B6B4F"/><rect x="16" y="7" width="4" height="14" rx="1" fill="#142027"/></svg>Agentic Postgres</a>
+  <span class="grow"></span>
+  <nav class="top-links" aria-label="Account">
+    <a class="top-link" href="#help"><span aria-hidden="true">?</span><span class="label">Help</span></a>
+    <a class="top-link" href="#notifications" aria-label="Notifications, 2 new"><span class="label">Notifications</span><span class="count">2</span></a>
+    <details class="account">
+      <summary aria-label="Your account">ES</summary>
+      <div class="menu">
+        <span>Signed in as example-owner</span>
+        <a href="#project-settings">Account and second factor</a>
+        <a href="#help">Help and support</a>
+        <a href="#overview">Sign out</a>
+      </div>
+    </details>
+  </nav>
+</header>
+
+<div class="shell">
+  <details class="side" id="side" open>
+    <summary><span>Menu</span><span class="where-now" id="where-now">Overview</span></summary>
+    <div class="side-inner">
+      <div class="switch">
+        <span class="switch-label" id="org-label">Organisation</span>
+        <details>
+          <summary aria-labelledby="org-label org-name"><span id="org-name">Example Studio</span></summary>
+          <div class="menu">
+            <a href="#overview">Example Studio <span class="scope">owner</span></a>
+            <a href="#help">Create an organisation</a>
+          </div>
+        </details>
+      </div>
+      <div class="switch">
+        <span class="switch-label" id="project-label">Project</span>
+        <details>
+          <summary aria-labelledby="project-label project-name"><span id="project-name">notes-app</span> <span class="chip state-busy" id="project-chip">Creating</span></summary>
+          <div class="menu">
+            <a href="#tracker-after-refresh">notes-app <span class="scope" id="project-menu-state">being created</span></a>
+            <a href="#new-project-limit">New project</a>
+          </div>
+        </details>
+      </div>
+      <nav class="nav-group" aria-label="Project">
+        <h2>Project</h2>
+        <a href="#tracker-after-refresh" data-nav="tracker tracker-after-refresh">Overview</a>
+        <a href="#connect" data-nav="connect">Connect</a>
+        <a href="#sql-editor" data-nav="sql-editor">SQL editor</a>
+        <a href="#connect" data-nav="branches">Branches <span class="small muted">1 of 1</span></a>
+        <a href="#connect" data-nav="backups">Backups</a>
+        <a href="#connect" data-nav="usage">Usage</a>
+        <a href="#connect" data-nav="insights">Slowest queries</a>
+        <a href="#connect" data-nav="monitoring">Monitoring</a>
+        <a href="#project-settings" data-nav="project-settings">Settings</a>
+      </nav>
+      <nav class="nav-group" aria-label="Organisation">
+        <h2>Organisation</h2>
+        <a href="#overview" data-nav="overview new-project new-project-limit">Projects</a>
+        <a href="#notifications" data-nav="activity">Activity</a>
+        <a href="#overview" data-nav="plan">Plan and usage</a>
+        <a href="#notifications" data-nav="notifications">Notifications <span class="count">2</span></a>
+        <a href="#overview" data-nav="members">Members and keys</a>
+      </nav>
+    </div>
+  </details>
+
+  <main class="page" id="main" tabindex="-1">
+    <div class="page-inner skeleton" id="skeleton" hidden aria-hidden="true">
+      <div class="sk w60"></div><div class="sk h"></div><div class="sk"></div><div class="sk block"></div><div class="sk block"></div>
+    </div>
+
+    <!-- 1. Overview while a project is being created -->
+    <section class="page-inner" data-view="overview" data-state="creating" hidden>
+      <ol class="crumbs" aria-label="You are here"><li><a href="#overview">Example Studio</a></li><li aria-current="page">Projects</li></ol>
+      <div class="page-head">
+        <div><h1>Projects</h1><p>Your organisation's projects, and what to do next.</p></div>
+        <div class="head-actions">
+          <a class="help-link" href="#help">How projects work</a>
+          <a class="btn" href="#new-project-limit" aria-disabled="true" aria-describedby="np-why">New project</a>
+        </div>
+      </div>
+      <div class="banner" id="np-why"><p><strong>Free plan: 1 of 1 projects.</strong> notes-app is being created, so it already counts.</p><a href="#overview">See plans</a></div>
+      <div class="grid-2">
+        <div class="stack">
+          <div class="card">
+            <h2>Projects</h2>
+            <div class="table-wrap"><table>
+              <thead><tr><th scope="col">Name</th><th scope="col">State</th><th scope="col">Now</th><th scope="col"><span class="sr">Open</span></th></tr></thead>
+              <tbody><tr><td><strong>notes-app</strong><br><span class="small muted">slot12-prod</span></td><td><span class="chip state-busy">Creating</span></td><td>Taking the first full backup<br><span class="small muted">14 min so far, usually 23 to 28 min</span></td><td><a href="#tracker-after-refresh">Follow</a></td></tr></tbody>
+            </table></div>
+          </div>
+          <div class="card">
+            <h2>Recent activity</h2>
+            <ul class="feed">
+              <li><span class="pip blue"></span><span>Creation of <strong>notes-app</strong> started</span><time>14 min ago</time></li>
+              <li><span class="pip"></span><span>Second factor turned on for example-owner</span><time>22 min ago</time></li>
+              <li><span class="pip"></span><span>Organisation <strong>Example Studio</strong> created</span><time>27 min ago</time></li>
+            </ul>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Getting started</h2>
+          <p class="small">From your invitation to a connected application. Each step is read from your account, so it is the same on any device.</p>
+          <ol class="checklist">
+            <li class="done"><span class="mark" aria-hidden="true">✓</span><div><strong>Turn on a second factor</strong><span class="sub">Done</span></div><span></span></li>
+            <li class="done"><span class="mark" aria-hidden="true">✓</span><div><strong>Create an organisation</strong><span class="sub">Example Studio</span></div><span></span></li>
+            <li class="current"><span class="mark" aria-hidden="true"></span><div><strong>Create a project</strong><span class="sub">notes-app is being created</span></div><a class="small" href="#tracker-after-refresh">Follow</a></li>
+            <li><span class="mark" aria-hidden="true"></span><div><strong>Make a password for a door</strong><span class="sub">Once the project is ready</span></div><span></span></li>
+            <li><span class="mark" aria-hidden="true"></span><div><strong>Connect your application</strong><span class="sub">Not seen yet</span></div><a class="small" href="#help">How</a></li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. New project -->
+    <section class="page-inner" data-view="new-project" data-state="none" hidden>
+      <ol class="crumbs" aria-label="You are here"><li><a href="#overview">Example Studio</a></li><li><a href="#overview">Projects</a></li><li aria-current="page">New project</li></ol>
+      <div class="page-head">
+        <div><h1>New project</h1><p>A PostgreSQL 18 database with its own API, backups and two connection doors.</p></div>
+        <div class="head-actions"><a class="help-link" href="#help">What a project includes</a></div>
+      </div>
+      <div class="grid-2">
+        <form class="card stack" id="create-form">
+          <div class="field"><label for="np-name">Project name</label><input type="text" id="np-name" value="notes-app" maxlength="48" autocomplete="off"><span class="hint">Letters, numbers, spaces, dots, dashes. Only you see it.</span></div>
+          <div class="field"><label for="np-admin">Administrator username</label><input type="text" id="np-admin" value="ana" autocomplete="off"><span class="hint">The first user of the project's own sign-in (its API), not your console account.</span></div>
+          <div class="field"><label for="np-size">Size</label><select id="np-size"><option>small</option><option>standard</option><option>large</option></select><span class="hint">You can change it later in Settings.</span></div>
+          <div><button class="btn" type="submit" data-busy="Starting the creation…" data-then="tracker">Create project</button></div>
+        </form>
+        <div class="card">
+          <h2>What happens next</h2>
+          <p>Creating a project usually takes <strong>23 to 28 minutes</strong>. Most of that is the first full backup, which makes sure your data can be restored from the start.</p>
+          <p>You can close this page. The project shows on <a href="#overview">Projects</a> while it is being created, and <a href="#notifications">Notifications</a> tells you when it is ready.</p>
+          <p class="small muted">Your Free plan holds one project and one branch.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Creation tracker, just started: the token shown once -->
+    <section class="page-inner" data-view="tracker" data-state="creating" hidden>
+      <ol class="crumbs" aria-label="You are here"><li><a href="#overview">Example Studio</a></li><li><a href="#overview">Projects</a></li><li aria-current="page">notes-app</li></ol>
+      <div class="page-head">
+        <div><h1>Creating notes-app <span class="chip state-busy">Running</span></h1><p>You can close this page. This address keeps showing the creation, on any device.</p></div>
+        <div class="head-actions"><a class="help-link" href="#help">What each step does</a></div>
+      </div>
+      <div class="once" id="once-token">
+        <h2>Save the administrator's handoff token now, if you want it</h2>
+        <p>This token lets someone using the command line take over the project's administrator account (<code>ana</code>). <strong>You do not need it to connect</strong>, from the console or from your application. It is shown once, now, and never again.</p>
+        <div class="code"><div class="code-head"><span>Handoff token (example)</span><button class="copy" type="button" data-copy="tok">Copy</button></div><pre id="tok">apg-handoff-EXAMPLE-3f9c1e7a5b2d4c6e8f0a1b3c5d7e9f2a</pre></div>
+        <details><summary>Using it from a terminal (optional)</summary>
+          <p class="small">Save the token to a file only you can read, then, once the project is ready, run:</p>
+          <div class="code"><div class="code-head"><span>Terminal</span><button class="copy" type="button" data-copy="claim">Copy</button></div><pre id="claim">apg project claim --project-key slot12-prod --token-file ./notes-app.token</pre></div>
+        </details>
+        <div><button class="btn secondary" type="button" id="saved">I've saved it, or I don't need it</button></div>
+      </div>
+      <div class="once-done" id="once-done" hidden><span class="chip state-ready">Done</span><span>The handoff token was shown once and is not shown again. You do not need it to connect.</span></div>
+      <div class="card">
+        <div class="meta-row"><span>Started <b>14:13</b></span><span>Running for <b id="elapsed">14 min 06 s</b></span><span>Usually <b>23 to 28 min</b></span><span>Stops by itself after <b>30 min</b> on one step</span></div>
+      </div>
+      <div class="card">
+        <h2>Steps</h2>
+        <ol class="steps" id="steps"></ol>
+      </div>
+    </section>
+
+    <!-- 4. The same tracker after a refresh -->
+    <section class="page-inner" data-view="tracker-after-refresh" data-state="creating" hidden>
+      <ol class="crumbs" aria-label="You are here"><li><a href="#overview">Example Studio</a></li><li><a href="#overview">Projects</a></li><li aria-current="page">notes-app</li></ol>
+      <div class="page-head">
+        <div><h1>Creating notes-app <span class="chip state-busy">Running</span></h1><p>Read again from your account just now. Nothing was lost when the page reloaded.</p></div>
+        <div class="head-actions"><a class="help-link" href="#help">What each step does</a></div>
+      </div>
+      <div class="callout"><p><strong>The handoff token was shown once, when the creation started, and cannot be shown again.</strong> You do not need it to connect.</p></div>
+      <div class="card">
+        <div class="meta-row"><span>Started <b>14:13</b></span><span>Running for <b>14 min 20 s</b></span><span>Usually <b>23 to 28 min</b></span><span>Stops by itself after <b>30 min</b> on one step</span></div>
+      </div>
+      <div class="card"><h2>Steps</h2><ol class="steps" data-steps-copy></ol></div>
+    </section>
+
+    <!-- 5. New project refused before the form: the plan holds one -->
+    <section class="page-inner" data-view="new-project-limit" data-state="creating" hidden>
+      <ol class="crumbs" aria-label="You are here"><li><a href="#overview">Example Studio</a></li><li><a href="#overview">Projects</a></li><li aria-current="page">New project</li></ol>
+      <div class="page-head"><div><h1>New project</h1><p>A PostgreSQL 18 database with its own API, backups and two connection doors.</p></div><div class="head-actions"><a class="help-link" href="#help">About plans</a></div></div>
+      <div class="callout warn" role="status">
+        <h3>Your Free plan holds one project, and notes-app is being created.</h3>
+        <p>A new project can start once notes-app is deleted, or on a plan with more projects. Nothing was recorded.</p>
+        <div class="actions"><a class="btn" href="#tracker-after-refresh">Follow notes-app</a><a class="btn secondary" href="#overview">See plans</a></div>
+        <p class="word">plan_limit_reached</p>
+      </div>
+      <form class="card stack" aria-disabled="true">
+        <div class="field"><label for="np2-name">Project name</label><input type="text" id="np2-name" disabled></div>
+        <div class="field"><label for="np2-admin">Administrator username</label><input type="text" id="np2-admin" disabled></div>
+        <div><button class="btn" type="button" disabled>Create project</button></div>
+      </form>
+    </section>
+
+    <!-- 6. Connect -->
+    <section class="page-inner" data-view="connect" data-state="ready" hidden>
+      <ol class="crumbs" aria-label="You are here"><li><a href="#overview">Example Studio</a></li><li><a href="#overview">notes-app</a></li><li aria-current="page">Connect</li></ol>
+      <div class="page-head">
+        <div><h1>Connect</h1><p>Connect psql, your application or a database tool to notes-app in three steps.</p></div>
+        <div class="head-actions"><a class="help-link" href="#help">Connecting, in the docs</a></div>
+      </div>
+      <ol class="steps-num">
+        <li><div>
+          <h3>Choose a door</h3>
+          <div class="segment" role="radiogroup" aria-label="Door">
+            <label><input type="radio" name="door" value="pooled" checked><span class="title">Pooled <span class="chip state-ready">Recommended</span></span><span class="desc">For your application: many short connections share a few to the database. Use it for web servers, serverless functions and scripts.</span></label>
+            <label><input type="radio" name="door" value="direct"><span class="title">Direct</span><span class="desc">One session per connection. Use it for migrations, <code>pg_dump</code>, <code>LISTEN</code>, advisory locks and long analytics.</span></label>
+          </div>
+          <p class="small muted">Both doors always exist. Choosing one only changes what this page shows.</p>
+        </div></li>
+        <li><div>
+          <h3>Make a password for this door</h3>
+          <p class="small">Your browser makes the password; only its fingerprint is sent, so we never hold it. It is shown once. Making a new one replaces the old one, and connections using the old one stop working.</p>
+          <div><button class="btn" type="button" id="make-pw" data-busy="Making the password…">Make a password for the <span data-door-name>pooled</span> door</button></div>
+          <div class="once" id="pw-once" hidden>
+            <h2>Your password for the <span data-door-name>pooled</span> door</h2>
+            <p>Copy it now, into your password manager or your application's settings. It is not shown again.</p>
+            <div class="code"><div class="code-head"><span>Password (example)</span><button class="copy" type="button" data-copy="pw">Copy</button></div><pre id="pw">EXAMPLE-k7Rq2v9Lm4Xw8Tz3</pre></div>
+            <p class="small">It is already filled into the code below, for as long as this page stays open.</p>
+          </div>
+        </div></li>
+        <li><div>
+          <h3>Copy the code for your tool</h3>
+          <div class="tablist" role="tablist" aria-label="Client" id="clients"></div>
+          <div class="code" role="tabpanel" id="snippet-panel"><div class="code-head"><span id="snippet-file">Terminal</span><button class="copy" type="button" data-copy="snippet">Copy</button></div><pre id="snippet"></pre></div>
+          <p class="where" id="snippet-where"></p>
+        </div></li>
+      </ol>
+      <div class="grid-2">
+        <div class="card">
+          <h2>What the connection string means</h2>
+          <div class="anatomy" id="anatomy"></div>
+          <p class="small muted">TLS is required; the certificate is a public one, so <code>sslmode=verify-full</code> works with your system's certificates.</p>
+        </div>
+        <div class="card">
+          <h2>No psql yet?</h2>
+          <p class="small">Install it on macOS, Windows or Linux, then come back for step 3.</p>
+          <ul class="links small"><li><a href="#help">Install psql on macOS</a></li><li><a href="#help">Install psql on Windows</a></li><li><a href="#help">Install psql on Debian or Ubuntu</a></li><li><a href="#sql-editor">Or use the SQL editor in your browser</a></li></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. SQL editor -->
+    <section class="page-inner" data-view="sql-editor" data-state="ready" hidden>
+      <ol class="crumbs" aria-label="You are here"><li><a href="#overview">Example Studio</a></li><li><a href="#overview">notes-app</a></li><li aria-current="page">SQL editor</li></ol>
+      <div class="page-head">
+        <div><h1>SQL editor</h1><p>Run SQL you write yourself, from your browser, with your own password.</p></div>
+        <div class="head-actions"><a class="help-link" href="#help">How the editor connects</a></div>
+      </div>
+      <div class="statebar" id="statebar" role="status">
+        <span class="dot" aria-hidden="true"></span>
+        <strong id="sb-state">Connected</strong>
+        <dl id="sb-details"><div><dt>Door</dt><dd>pooled</dd></div><div><dt>User</dt><dd>apg_slot12_prod_customer_app</dd></div><div><dt>Database</dt><dd>slot12_prod</dd></div></dl>
+        <span class="grow"></span>
+        <button class="btn secondary small" type="button" id="sb-toggle">Disconnect</button>
+      </div>
+      <form class="card stack" id="sql-connect" hidden>
+        <h2 class="section-title">Connect the editor</h2>
+        <div class="field"><label for="sql-door">Door</label><select id="sql-door"><option>pooled</option><option>direct</option></select></div>
+        <div class="field"><label for="sql-pw">Password for this door</label><input type="password" id="sql-pw" autocomplete="off" value="example"><span class="hint">The password you made on <a href="#connect">Connect</a>. It is used once to connect and cleared; it is never stored.</span></div>
+        <div><button class="btn" type="submit" data-busy="Connecting…">Connect</button></div>
+      </form>
+      <div class="card stack" id="sql-work">
+        <div class="field"><label for="sql-text">Statement</label><textarea id="sql-text" rows="6">-- A first statement to try: it changes nothing.
+select now() as server_time, current_user, version();</textarea></div>
+        <div class="head-actions"><button class="btn" type="button" id="run" data-busy="Running…">Run</button><span class="small muted">Sessions end after 5 idle minutes, or after 30 minutes.</span></div>
+        <div id="result" hidden>
+          <div class="result-meta"><span><strong>1 row</strong> in <span class="num">41 ms</span></span><button class="btn secondary small" type="button" data-copy-text="server_time,current_user,version">Copy as CSV</button></div>
+          <div class="results"><table><thead><tr><th scope="col">server_time</th><th scope="col">current_user</th><th scope="col">version</th></tr></thead><tbody><tr><td>2026-10-29 14:41:07+00</td><td>apg_slot12_prod_customer_app</td><td>PostgreSQL 18.4 on x86_64</td></tr></tbody></table></div>
+        </div>
+      </div>
+      <p class="small muted">The editor talks to your database through a relay that keeps nothing it carries. <a href="#help">Read how it works.</a></p>
+    </section>
+
+    <!-- 8. Notifications -->
+    <section class="page-inner" data-view="notifications" data-state="ready" hidden>
+      <ol class="crumbs" aria-label="You are here"><li><a href="#overview">Example Studio</a></li><li aria-current="page">Notifications</li></ol>
+      <div class="page-head">
+        <div><h1>Notifications</h1><p>What happened to your organisation's projects. They appear here and in the bell at the top. Nothing is emailed.</p></div>
+        <div class="head-actions"><a class="help-link" href="#help">About notifications</a></div>
+      </div>
+      <div class="banner"><p><strong>notes-app uses 4.1 of the 5 GB</strong> your Free plan shows for one project.</p><a href="#overview">See plans</a></div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>Latest</h2>
+          <ul class="feed">
+            <li><span class="pip"></span><span><strong>notes-app is ready.</strong> It took 24 min. <a href="#connect">Connect to it</a></span><time>Today 14:37</time></li>
+            <li><span class="pip amber"></span><span><strong>Storage on notes-app passed 80%</strong> of what your plan shows. <a href="#overview">See plans</a></span><time>Today 14:36</time></li>
+            <li><span class="pip blue"></span><span><strong>Creation of notes-app started.</strong> <a href="#tracker-after-refresh">Follow it</a></span><time>Today 14:13</time></li>
+          </ul>
+        </div>
+        <div class="card">
+          <h2>What makes a notification</h2>
+          <dl class="kinds">
+            <dt>Started</dt><dd>A project creation, a branch, a restore or a branch reset began.</dd>
+            <dt>Finished</dt><dd>A long operation succeeded, or failed and said why.</dd>
+            <dt>Asleep</dt><dd>A project went to sleep after its idle time.</dd>
+            <dt>Expired</dt><dd>A branch reached its expiry and was deleted.</dd>
+            <dt>Limit near</dt><dd>Storage or agent calls passed 80% of what your plan shows.</dd>
+          </dl>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9. Project settings -->
+    <section class="page-inner" data-view="project-settings" data-state="ready" hidden>
+      <ol class="crumbs" aria-label="You are here"><li><a href="#overview">Example Studio</a></li><li><a href="#overview">notes-app</a></li><li aria-current="page">Settings</li></ol>
+      <div class="page-head"><div><h1>Settings</h1><p>How notes-app runs, and what to do when you need help with it.</p></div><div class="head-actions"><a class="help-link" href="#help">Settings, in the docs</a></div></div>
+      <div class="card">
+        <div class="setting"><div><h3>Idle sleep <span class="scope">Whole project</span></h3><p>Stop the project after this long without connections. The next connection wakes it in about 20 seconds.</p></div><div class="head-actions"><select id="idle" aria-label="Idle sleep"><option>Never</option><option selected>After 15 minutes</option><option>After 1 hour</option></select><button class="btn secondary small" type="button" data-busy="Saving…" data-toast="Idle sleep saved">Save</button></div></div>
+        <div class="setting"><div><h3>Size <span class="scope">Whole project</span></h3><p>small: the database's memory and CPU share on this server. Changing it restarts the project for a few seconds.</p></div><div class="head-actions"><select id="size" aria-label="Size"><option selected>small</option><option>standard</option><option>large</option></select><button class="btn secondary small" type="button" data-busy="Starting…" data-toast="Resize started. Follow it in Activity.">Change</button></div></div>
+        <div class="setting"><div><h3>Sleep now</h3><p>Stop it until you wake it. Your data and connection strings stay the same.</p></div><button class="btn secondary small" type="button" data-busy="Starting…" data-toast="Sleep started. Follow it in Activity.">Sleep</button></div>
+        <div class="setting"><div><h3>Export</h3><p>A full dump of the database you can download for 24 hours.</p></div><button class="btn secondary small" type="button" data-busy="Starting…" data-toast="Export started. Follow it in Activity.">Export</button></div>
+        <div class="setting"><div><h3>Support bundle</h3><p>A file with the project's health checks and recent operations, and no data or passwords. Send it with a support request.</p></div><button class="btn secondary small" type="button" data-busy="Making…" data-toast="Support bundle saved">Make a bundle</button></div>
+      </div>
+      <div class="card danger-zone">
+        <h2>Delete notes-app</h2>
+        <p>Deletes the database, its branches and its backups. This cannot be undone. Your plan's project becomes free again.</p>
+        <div><button class="btn danger" type="button" id="del-open">Delete project…</button></div>
+      </div>
+      <dialog id="del-dialog" aria-labelledby="del-title">
+        <form method="dialog" id="del-form">
+          <h2 id="del-title">Delete notes-app?</h2>
+          <p>Everything in it is deleted: the database, its branches and its backups.</p>
+          <div class="field"><label for="del-confirm">Type <strong>notes-app</strong> to confirm</label><input type="text" id="del-confirm" autocomplete="off"></div>
+          <div class="row"><button class="btn secondary" type="button" id="del-cancel">Keep it</button><button class="btn danger" type="submit" id="del-go" disabled>Delete</button></div>
+        </form>
+      </dialog>
+    </section>
+
+    <!-- 10. Help -->
+    <section class="page-inner" data-view="help" data-state="ready" hidden>
+      <ol class="crumbs" aria-label="You are here"><li><a href="#overview">Example Studio</a></li><li aria-current="page">Help</li></ol>
+      <div class="page-head"><div><h1>Help</h1><p>Where to find an answer, and how to ask a person.</p></div></div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>Ask a person</h2>
+          <p>Write to us. A person reads every message.</p>
+          <div class="inline-copy"><code id="mail">invite@nomipg.com</code><button class="copy" type="button" data-copy="mail">Copy</button></div>
+          <h2 class="section-title">What to send</h2>
+          <ul class="small">
+            <li>The project's key, for example <code>slot12-prod</code></li>
+            <li>What you did, and what the page said (the word under a message helps)</li>
+            <li>A support bundle, from the project's <a href="#project-settings">Settings</a></li>
+          </ul>
+          <p class="small muted">Never send a password or a key. We never ask for one.</p>
+        </div>
+        <div class="card">
+          <h2>Read the docs</h2>
+          <ul class="links">
+            <li><a href="#help">Quickstart: from your invitation to a connected application</a></li>
+            <li><a href="#help">Connecting, with code for each language</a></li>
+            <li><a href="#help">The SQL editor</a></li>
+            <li><a href="#help">Branches and restores</a></li>
+            <li><a href="#help">Plans, usage and notifications</a></li>
+            <li><a href="#help">Every message the console shows, and what to do</a></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<footer class="foot">Agentic Postgres 1.25.0, beta. This is a prototype for review.</footer>
+<div class="toasts" id="toasts"></div>
+<div class="sr" aria-live="polite" id="live"></div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const live = $("#live");
+  const say = (text) => { live.textContent = ""; setTimeout(() => { live.textContent = text; }, 30); };
+  const toast = (text) => {
+    const t = document.createElement("div");
+    t.className = "toast"; t.textContent = text; $("#toasts").append(t); say(text);
+    setTimeout(() => t.remove(), 3200);
+  };
+
+  // Copy controls: the value, "Copied" for two seconds, one announcement.
+  const iconCopy = () => $("#i-copy").content.firstElementChild.cloneNode(true);
+  $$("button.copy").forEach((b) => b.prepend(iconCopy()));
+  const copyText = async (button, text) => {
+    try { await navigator.clipboard.writeText(text); }
+    catch { const r = document.createRange(); const n = button.closest(".code, .inline-copy")?.querySelector("pre, code"); if (n) { r.selectNodeContents(n); getSelection().removeAllRanges(); getSelection().addRange(r); } }
+    const label = button.lastChild; const before = label.textContent;
+    button.classList.add("copied"); label.textContent = "Copied"; say("Copied");
+    setTimeout(() => { button.classList.remove("copied"); label.textContent = before; }, 2000);
+  };
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-copy]");
+    if (b) copyText(b, $("#" + b.dataset.copy).textContent);
+    const c = e.target.closest("[data-copy-text]");
+    if (c) { navigator.clipboard?.writeText(c.dataset.copyText).catch(() => {}); toast("Copied as CSV"); }
+  });
+
+  // Busy buttons: disabled and relabelled while the request runs.
+  const busy = (button, then) => {
+    if (button.disabled) return;
+    const html = button.innerHTML;
+    button.disabled = true; button.setAttribute("aria-busy", "true");
+    button.innerHTML = '<span class="spinner" aria-hidden="true"></span>' + button.dataset.busy;
+    setTimeout(() => { button.disabled = false; button.removeAttribute("aria-busy"); button.innerHTML = html; then?.(); }, 1100);
+  };
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-busy]");
+    if (!b || b.type === "submit") return;
+    busy(b, () => {
+      if (b.dataset.toast) toast(b.dataset.toast);
+      if (b.id === "make-pw") { $("#pw-once").hidden = false; filled = true; renderSnippet(); say("Password made. It is shown once."); }
+      if (b.id === "run") { $("#result").hidden = false; say("1 row in 41 milliseconds"); }
+    });
+  });
+  $("#create-form").addEventListener("submit", (e) => { e.preventDefault(); const b = e.submitter; $$("input, select", e.target).forEach((i) => i.disabled = true); busy(b, () => { $$("input, select", e.target).forEach((i) => i.disabled = false); location.hash = "tracker"; }); });
+  $("#sql-connect").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, () => { $("#sql-pw").value = ""; setConnected(true); }); });
+
+  // The creation's steps (the reconciler's nine, with plain labels).
+  const STEPS = [
+    ["Reserving a server slot", "done", "1 s"],
+    ["Checking there is room on the server", "done", "1 s"],
+    ["Starting the database", "done", "1 min 04 s"],
+    ["Creating your administrator", "done", "1 s"],
+    ["Opening the two connection doors", "done", "1 s"],
+    ["Starting the API and storage", "done", "41 s"],
+    ["Making it start again after a reboot", "done", "1 s"],
+    ["Taking the first full backup", "current", "11 min so far · usually about 21 min"],
+    ["Recording the project", "todo", "a few seconds"],
+  ];
+  const WORD = { done: " (done)", current: " (in progress)", todo: " (to come)" };
+  const drawSteps = (ol) => {
+    ol.replaceChildren(...STEPS.map(([label, state, time]) => {
+      const li = document.createElement("li"); li.className = state;
+      const mark = document.createElement("span"); mark.className = "mark"; mark.setAttribute("aria-hidden", "true");
+      if (state === "done") mark.textContent = "✓";
+      const body = document.createElement("div");
+      const s = document.createElement("strong"); s.textContent = label;
+      const sr = document.createElement("span"); sr.className = "sr"; sr.textContent = WORD[state];
+      s.append(sr); body.append(s);
+      if (state === "current") {
+        const bar = document.createElement("div"); bar.className = "indeterminate";
+        bar.setAttribute("role", "progressbar"); bar.setAttribute("aria-label", label + ", in progress");
+        body.append(bar);
+      }
+      const t = document.createElement("span"); t.className = "time"; t.textContent = time;
+      li.append(mark, body, t);
+      return li;
+    }));
+  };
+  drawSteps($("#steps")); drawSteps($("[data-steps-copy]"));
+  let seconds = 14 * 60 + 6;
+  setInterval(() => { seconds += 1; const m = Math.floor(seconds / 60), s = String(seconds % 60).padStart(2, "0"); const el = $("#elapsed"); if (el) el.textContent = `${m} min ${s} s`; }, 1000);
+  $("#saved").addEventListener("click", () => { $("#once-token").hidden = true; $("#once-done").hidden = false; say("The token panel is closed. The creation continues."); });
+
+  // Connect: the door, the clients (the server's measured snippets, widened).
+  const DOORS = {
+    pooled: { host: "pool.slot12.nomipg.com", user: "apg_slot12_prod_customer_app" },
+    direct: { host: "direct.slot12.nomipg.com", user: "apg_slot12_prod_customer_admin" },
+  };
+  const DB = "slot12_prod", PORT = 5432, PH = "<password from your file>";
+  let door = "pooled", filled = false, client = "psql";
+  const pw = () => filled ? $("#pw").textContent : PH;
+  const CLIENTS = {
+    "psql": { file: "Terminal", where: "Run it in a terminal. It asks for nothing else.", text: () => `psql "host=${DOORS[door].host} port=${PORT} user=${DOORS[door].user} dbname=${DB} sslmode=verify-full sslrootcert=system"` },
+    "Node (pg)": { file: "db.js", where: "Put it in the file that opens your database connection. Install the driver with npm install pg.", text: () => `import pg from "pg";\n\nconst pool = new pg.Pool({\n  host: "${DOORS[door].host}",\n  port: ${PORT},\n  user: "${DOORS[door].user}",\n  database: "${DB}",\n  password: process.env.DB_PASSWORD, // ${filled ? "set it to the password above" : PH}\n  ssl: { rejectUnauthorized: true },\n});` },
+    "Prisma": { file: ".env", where: "Put both lines in your project's .env. Prisma uses DIRECT_URL for migrations, which need a session.", text: () => `DATABASE_URL="postgresql://${DOORS.pooled.user}:${pw()}@${DOORS.pooled.host}:${PORT}/${DB}?sslmode=require&sslaccept=strict"\nDIRECT_URL="postgresql://${DOORS.direct.user}:${pw()}@${DOORS.direct.host}:${PORT}/${DB}?sslmode=require&sslaccept=strict"` },
+    "Drizzle": { file: "db.ts", where: "Drizzle uses the pg driver above. Run drizzle-kit migrations against the direct door.", text: () => `import { drizzle } from "drizzle-orm/node-postgres";\nimport pg from "pg";\n\nconst pool = new pg.Pool({\n  connectionString: process.env.DATABASE_URL,\n  ssl: { rejectUnauthorized: true },\n});\nexport const db = drizzle(pool);` },
+    "Python (psycopg)": { file: "app.py", where: "Install the driver with pip install \"psycopg[binary]\".", text: () => `import psycopg\n\nconn = psycopg.connect(\n    "host=${DOORS[door].host} port=${PORT} user=${DOORS[door].user} "\n    "dbname=${DB} sslmode=verify-full sslrootcert=system",\n    password=${filled ? '"' + pw() + '"' : 'os.environ["DB_PASSWORD"]'},\n)` },
+    "Go (pgx)": { file: "main.go", where: "Install the driver with go get github.com/jackc/pgx/v5.", text: () => `pool, err := pgxpool.New(ctx,\n    "postgres://${DOORS[door].user}:"+os.Getenv("DB_PASSWORD")+\n    "@${DOORS[door].host}:${PORT}/${DB}?sslmode=verify-full")` },
+    ".env": { file: ".env", where: "Most frameworks read DATABASE_URL. Keep this file out of version control.", text: () => `DATABASE_URL="postgresql://${DOORS.pooled.user}:${pw()}@${DOORS.pooled.host}:${PORT}/${DB}?sslmode=verify-full"\nDIRECT_URL="postgresql://${DOORS.direct.user}:${pw()}@${DOORS.direct.host}:${PORT}/${DB}?sslmode=verify-full"` },
+  };
+  const tabs = $("#clients");
+  Object.keys(CLIENTS).forEach((name, i) => {
+    const b = document.createElement("button"); b.type = "button"; b.setAttribute("role", "tab"); b.textContent = name;
+    b.setAttribute("aria-selected", i === 0 ? "true" : "false"); b.setAttribute("aria-controls", "snippet-panel");
+    b.addEventListener("click", () => { client = name; $$("button", tabs).forEach((x) => x.setAttribute("aria-selected", x === b ? "true" : "false")); renderSnippet(); });
+    tabs.append(b);
+  });
+  const renderSnippet = () => {
+    const c = CLIENTS[client]; $("#snippet").textContent = c.text(); $("#snippet-file").textContent = c.file; $("#snippet-where").textContent = c.where;
+    const parts = [["scheme", "postgresql://"], ["user", DOORS[door].user], ["", ":"], ["password", filled ? "••••••" : "<password>"], ["", "@"], ["host", DOORS[door].host], ["port", ":" + PORT], ["database", "/" + DB], ["TLS", "?sslmode=verify-full"]];
+    $("#anatomy").replaceChildren(...parts.map(([k, v]) => { const s = document.createElement("span"); if (k) { const sm = document.createElement("small"); sm.textContent = k; s.append(sm); } s.append(document.createTextNode(v)); return s; }));
+    $$("[data-door-name]").forEach((n) => n.textContent = door);
+  };
+  $$('input[name="door"]').forEach((r) => r.addEventListener("change", () => { door = r.value; filled = false; $("#pw-once").hidden = true; renderSnippet(); }));
+  renderSnippet();
+
+  // SQL editor: connected state at the top; the form only while disconnected.
+  const setConnected = (on) => {
+    $("#statebar").classList.toggle("off", !on); $("#sb-state").textContent = on ? "Connected" : "Not connected";
+    $("#sb-details").hidden = !on; $("#sb-toggle").textContent = on ? "Disconnect" : "Connect…";
+    $("#sql-connect").hidden = on; $("#sql-work").hidden = !on; say(on ? "Connected to the pooled door" : "Disconnected");
+  };
+  $("#sb-toggle").addEventListener("click", () => { const on = $("#statebar").classList.contains("off"); if (on) { $("#sql-connect").hidden = false; $("#sql-pw").focus(); } else setConnected(false); });
+
+  // Delete: type the name to enable the button.
+  const dlg = $("#del-dialog");
+  $("#del-open").addEventListener("click", () => { $("#del-confirm").value = ""; $("#del-go").disabled = true; dlg.showModal(); });
+  $("#del-cancel").addEventListener("click", () => dlg.close());
+  $("#del-confirm").addEventListener("input", (e) => { $("#del-go").disabled = e.target.value !== "notes-app"; });
+  $("#del-form").addEventListener("submit", () => toast("Deletion started. Follow it in Activity."));
+
+  // Routing on plain #names; a short skeleton between screens.
+  const views = $$("[data-view]");
+  const titles = { overview: "Projects", "new-project": "New project", tracker: "notes-app", "tracker-after-refresh": "notes-app", "new-project-limit": "New project", connect: "Connect", "sql-editor": "SQL editor", notifications: "Notifications", "project-settings": "Settings", help: "Help" };
+  const wide = matchMedia("(min-width: 901px)");
+  const syncSide = () => { $("#side").open = wide.matches; };
+  wide.addEventListener("change", syncSide); syncSide();
+  let first = true;
+  const show = () => {
+    const name = (location.hash || "#overview").slice(1);
+    const view = views.find((v) => v.dataset.view === name) || views[0];
+    $("#screen").value = view.dataset.view;
+    const state = view.dataset.state;
+    $("#project-chip").className = "chip " + (state === "ready" ? "state-ready" : "state-busy");
+    $("#project-chip").textContent = state === "ready" ? "Ready" : "Creating";
+    $("#project-menu-state").textContent = state === "ready" ? "ready" : "being created";
+    $$(".nav-group a").forEach((a) => { if ((a.dataset.nav || "").split(" ").includes(view.dataset.view)) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+    $("#where-now").textContent = titles[view.dataset.view];
+    if (!wide.matches) $("#side").open = false;
+    views.forEach((v) => v.hidden = true);
+    const reveal = () => { $("#skeleton").hidden = true; view.hidden = false; if (!first) $("#main").focus({ preventScroll: true }); first = false; };
+    if (first) reveal(); else { $("#skeleton").hidden = false; setTimeout(reveal, 320); }
+    document.title = titles[view.dataset.view] + " · Console Prototype 47";
+  };
+  $("#screen").addEventListener("change", (e) => { location.hash = e.target.value; });
+  addEventListener("hashchange", show); show();
+})();
+</script>

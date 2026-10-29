@@ -11,13 +11,14 @@
   stays a test, re-counted under decision 5 below); and the Consequences line that
   forecloses copy buttons. Every other decision of ADR 0288 stands.
 - **Affects:** `services/console/public/` (new modules `ui.js`, `nav.js`,
-  `messages.js`, `progress.js`, `snippets.js`; `app.js`, `app.css`, `index.html`,
-  `pages.json`), `services/console/serve.py` (`ROUTES`),
+  `messages.js`, `progress.js`; `app.js`, `app.css`, `index.html`, `pages.json`),
+  `services/auth-api/app/connection_snippets.py` (three clients added, D2991),
+  `services/console/serve.py` (`ROUTES`),
   `tests/contract/test_console_server.py` (`LISTED`),
   `tests/contract/test_console_scram.py::test_every_script_parses`,
   `tests/contract/test_look.py` (the budget), `tests/contract/test_console_look.py`
   (`ANCHORS`), the three walk drivers (`console_walk.py`, `journey_walk.py`,
-  `sql_walk.py`), new `tests/contract/test_console_snippets.py` and
+  `sql_walk.py`), `tests/contract/test_connection_snippets.py` (the executions) and
   `tests/external/browser/console_look.py`. Runs 4–9.
 - **Related:** ADRs 0280 (the fixed-route static server), 0281 (the cookies and the
   Origin), 0285–0287 (the editor and its relay), 0288, 0291 (the token shown once).
@@ -82,9 +83,9 @@ stays (decision 5).
    `ROUTES` entry of `serve.py` and an entry of `test_console_server.py`'s `LISTED`
    and `test_every_script_parses`'s set, widened in the same commit (D2908's
    method): `ui.js` (the components), `nav.js` (the shell, the switchers, the
-   breadcrumb), `messages.js` (ADR 0297), and **two DOM-free modules**,
-   `progress.js` (ADR 0296) and `snippets.js` (decision 7), tested in the pinned
-   Node image. Static `import` only — no dynamic `import()`, no `eval`, no
+   breadcrumb), `messages.js` (ADR 0297), and the **DOM-free** `progress.js` (ADR 0296), tested
+   in the pinned Node image. Connect's snippets are the server's (decision 7,
+   D2991), not a console module. Static `import` only — no dynamic `import()`, no `eval`, no
    `Function`.
 4. **Two budgets.** `site.css` ≤ **30,720 B** (unchanged for the site);
    `app.css` ≤ **40,960 B**; each measured alone. The token block they share is
@@ -102,13 +103,16 @@ stays (decision 5).
    `STATE_CHIPS`, unchanged: an unknown state never looks `ready`); a skeleton; an
    empty state with its next action; a callout. **Every action button is a busy
    button and every value a customer copies is in a code block.**
-7. **Connect's snippets are executed before they ship** (D2956). `snippets.js`
-   holds one template per client — psql, Node `pg`, Prisma, Drizzle, Python
-   `psycopg`, Go `pgx`, an `.env` block — filled from the `/v1` connection
-   document, the password a placeholder unless inside the shown-once panel.
-   `tests/contract/test_console_snippets.py` renders each through `snippets.js` in
-   Node and runs it in its client's image, pinned by digest, against a TLS
-   Postgres rig with `sslmode=verify-full`. A snippet nobody ran does not ship.
+7. **Connect's snippets are the server's, and executed before they ship** (D2956,
+   D2991). `services/auth-api/app/connection_snippets.py` — rig 39c's
+   measurements, served by `GET /v1/projects/{key}/connections` — holds one
+   template per client: today psql, Prisma, node-pg and psycopg; Run 6 adds
+   Drizzle, Go `pgx` and an `.env` block, each with a line saying which file it
+   goes in. The password is always the placeholder in what the server serves; the
+   console fills it **only inside the shown-once panel**, in the page.
+   `tests/contract/test_connection_snippets.py` runs each new client's text in its
+   client's image, pinned by digest, against a TLS Postgres rig with
+   `sslmode=verify-full`. A snippet nobody ran does not ship.
 8. **The editor's state is at the top** (D2957): a state bar (door, role, state,
    *Disconnect*); the credentials form hidden while connected; the statement above
    the results; results with a sticky header, the row count and the time. ADR
@@ -127,7 +131,7 @@ stays (decision 5).
 - The person's findings become buildable; the walk drivers stop being a reason
   not to change the page, and become a cost each DOM change pays in its own
   commit.
-- The console's script grows from six files to eleven; every one is listed by
+- The console's script grows from six files to ten; every one is listed by
   name in three places, so an unlisted file is a red test, not a silent 404.
 - The console stylesheet may grow by 32,318 B over today's 8,642 B; the site's
   limit does not move.

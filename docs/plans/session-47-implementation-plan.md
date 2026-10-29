@@ -309,6 +309,7 @@ runs add go in a second table below it, in execution order.
 | **D2988** | Sheets N1/N2 as if the endpoints existed. | Neither zone has an `http_request_dynamic_redirect` entrypoint (GET 404 10003); Free = 10 Single Redirect rules per zone, wildcards, no regex, 301/302/307/308; Email Routing `unconfigured` on `nomipg.com`, `ready` on the old zone; Pages `agentic-postgres-site` serves the old apex and `www.` (rig 47c, read-only). | N2 **creates** the entrypoint with a `PUT` (two rules); N1 enables Email Routing by `POST /zones/{id}/email/routing/dns` and adds the Pages domains by `POST …/pages/projects/agentic-postgres-site/domains`. **Whether the MCP's grant holds Pages Write, Zone Settings Write and a rulesets write** is read by the first write after the operator's word — a 403 names the permission (§9: read, never retried). | Measure a third party before a sheet names it. | 0299 |
 | **D2989** | D2952: *"the generic four"*. | The inventory (derived, `~/s47/run1/inventory.py` → `docs/design/session-47/inventory.md`): **20 words** reach `/v1`; `malformed_request` only through the helper `errors.malformed()` (`control_routes.py:202`), so a scan of names alone misses it; **5 without an entry**: `could_not_determine`, `interrupted`, `last_owner`, `malformed_request`, `operation_failed`; eight agent-plane documents are not `/v1`'s. | **`test_console_refusals` uses the inventory's method** — the AST of `errors.py`, the control modules' uses including through `errors.*()` helpers, `OPERATION_ERROR_CODES`, the relay's `CLOSE_*` with 1000/1006/1011, `console_unconfigured`. | The set is derived; a typed list goes stale. | 0297 |
 | **D2990** | D2949: a step log. | Rig 47e: the draft table, policy and advance work on a real control set — three steps in order, a repeat keeps its first time (`ON CONFLICT DO NOTHING`, `clock_timestamp()`), the request role denied (control: superuser 3), a non-member 0 rows, a late advance `not_running` with no row; the subject `{name, profile}` without the digest or the administrator name. | **0011 is written from the rig's draft** (ADR 0296 decisions 1–2); `expected` steps, labels and typical seconds served by the service from `operation_steps` (one source; the console holds no copy). | Measured before migrated. | 0296 |
+| **D2991** | D2956: Connect's snippets from **`snippets.js`** (DOM-free, Node-tested) in the console. | **The server already serves them**: `services/auth-api/app/connection_snippets.py` (`CLIENTS = psql, prisma, node-pg, psycopg`, measured by rig 39c: `sslrootcert=system`, Prisma's `DIRECT_URL` and no `pgbouncer=true`, the password always `PASSWORD_PLACEHOLDER`), served by `GET /v1/projects/{key}/connections`, tested by `test_connection_snippets.py` and `test_control_connections.py`. | **No `snippets.js`**: Run 6 widens the server's `CLIENTS` by `drizzle`, `go-pgx` and `env`, each executed against a TLS rig in its client's pinned image (`test_connection_snippets` grows the executions; D2956's rule kept) with a **`where`** line per client (which file, which install command). The console fills the placeholder **only inside the shown-once panel**, in the page. ADR 0295 decisions 3 and 7 read *the server's snippets*; the console's module list loses `snippets.js` (ten files, not eleven). | One source for a measured text; the plan would have made a second. | 0295 |
 
 ---
 
@@ -511,8 +512,8 @@ alone: 24 passed. Rows **D2981–D2990**. **NEXT FREE: D2991, ADR 0300.**
 ### Run 4 — the console's foundation (ADR 0295)
 
 1. **The module split**: `ui.js` (the components, D2955), `nav.js` (the shell, the
-   switchers, the breadcrumb), `messages.js` (D2952), `progress.js` and
-   `snippets.js` (DOM-free); `app.js` draws. `serve.py` `ROUTES`,
+   switchers, the breadcrumb), `messages.js` (D2952), `progress.js` (DOM-free);
+   `app.js` draws. **No `snippets.js`** (D2991: the snippets are the server's). `serve.py` `ROUTES`,
    `test_console_server.py` `LISTED` and `test_every_script_parses` widened
    together (D2908's method).
 2. **The shell and the page template** from the approved brief; new routes
@@ -546,12 +547,15 @@ alone: 24 passed. Rows **D2981–D2990**. **NEXT FREE: D2991, ADR 0300.**
 
 ### Run 6 — Connect and the SQL editor
 
-1. Connect (D2956): the explanations, the password flow per door, the snippets,
-   copy on every value; `tests/contract/test_console_snippets.py` (each client's
-   image pinned by digest, a TLS rig, `verify-full`).
+1. Connect (D2956, D2991): the explanations, the password flow per door, copy on
+   every value; the snippets from `GET /v1/projects/{key}/connections`, the server's
+   `connection_snippets.CLIENTS` widened by `drizzle`, `go-pgx`, `env` with a `where`
+   line each; `tests/contract/test_connection_snippets.py` executes each new
+   client's text (its image pinned by digest, a TLS rig, `verify-full`) beside the
+   existing contract.
 2. The editor (D2957).
-3. Targeted: the console set, `test_console_sql`, `test_console_snippets`. The
-   battery.
+3. Targeted: the console set, `test_console_sql`, `test_connection_snippets`,
+   `test_control_connections`, `bin/app-contract.sh --check`. The battery.
 
 **Done.**
 
