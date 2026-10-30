@@ -408,6 +408,16 @@ runs add go in a second table below it, in execution order.
 | **D3107** | — | This workstation has no `dig` and no `sudo apt`. | `~/s47/run11/bin/dig` runs bind-tools in a local Alpine container. | — | — |
 | **D3108** | D3082: the console look's record. | Run 12's gate has `--console-look-record-file`. | `s47-external.sh` passes `~/s47/console-look/record.json`; X0 skips `session47_look`; **the path must equal Run 12's launcher's**. | One path, two readers. | 0295 |
 | **D3109** | — | `s47-walk-record.py`'s route pattern. | Recognises `nomipg.com` only (a functional derivation); notes naming the old domain are not read as routes. | The walk is on the new site. | 0290 |
+| **D3120** | D3063: seven page literals of the old domain. | **Three Ledger texts typed it too** (`accounts.today`, `management_api.customer_text`, `console.customer_text`), and the site's `/ledger/` page is built from them; `_named_hosts_of_ours` admits `control.` under either zone, so no test could see it. | Moved with the seven; `test_site::test_no_page_names_the_former_zone` (no page source or built file names the former zone) and `test_every_endpoint_and_console_link_on_a_page_is_the_builds`. The operator documents that still name it are Run 14's (D3128). | A move counted by one kind of file misses the others. | 0299 |
+| **D3121** | D3082: `console_look.py` rehearsed (40 pages, 0 problems). | The walk read `probe["password"]`; the probe owner's own file (`~/s37/probe.json`) holds `password_file` (as `sql_walk.py` reads it) -- **the live walk would have stopped at a `KeyError` before its first page**; the rehearsal's synthetic probe carried a password. | The walk reads the file the probe names; `test_session47_look_reading::test_the_walk_reads_the_probe_owners_own_file`; the launcher's rehearsal uses a probe in the owner's shape (40 pages, 0 problems). | A rehearsal's fixture shared a belief the real file does not. | 0295 |
+| **D3122** | §2: `CTL-NOTIFY-002` -> `notifications_started`, `notifications_started_live`. | ADR 0089: each requirement its own claim; an offline and a live half on one requirement is two claims on one id. | **`CTL-NOTIFY-002` (offline) and `CTL-NOTIFY-003` (external).** | One id, one claim. | — |
+| **D3123** | Plan: statuses move at Run 14 from evidence; Run 12 moves none. | **Moving `CURRENT_SESSION` to 47 makes ADR 0261 refuse the two `trial` rows Session 46 left** (`projects_self_service` on `console_create_live`, `support_bundle` on `support_bundle_live`, target 46): CI on the bump would be red. | **D2857's precedent**: two claims of THIS session, `console_create_reearned_live` (`CON-CREATE-003`) and `support_bundle_reearned_live` (`CTL-DIAG-003`), naming Session 46's journey proofs read on Session 47's record; the rows' `evidence` moves to them and `target_session` to 47; **no status moved**; the Ledger schema's `target_session` maximum 46 -> 47. The main session agreed (2026-10-30). | A bump must not leave a guard red; a precedent, not a new rule. | 0261 |
+| **D3124** | §2's live claims; D3082, D3104. | No run had written the proofs for `domain_live`, `console_reload_live`, `operation_steps_live` or `notifications_started_live`, nor `console_look_live`'s reader. | Run 12 wrote `tests/external/test_session47_domain.py`, `test_session47_journey.py` and `test_session47_look.py`, each with an offline reading test (`test_session47_*_reading.py`). **`notifications_started_live` reads the lifecycle's `notifications_after_delete`** (the journey record carries the views' words only), the creation's organisation as the CLI lists it. | A claim needs a proof that exists. | 0296, 0297, 0299 |
+| **D3125** | §2 `CON-NAV-001`: two clicks, a breadcrumb, switchers listing what `/v1` returns. | No test reads the two-click reach, the breadcrumb or the switchers' lists; Run 4 wrote the page table and help-route tests. | Registered what the runs wrote (pages, help, empty states, skeletons, the support page, the step count); **the three properties are owed** (Run 14 notes it; Stage 6). | Register what exists. | 0295 |
+| **D3126** | §2 `OPS-SLOTDNS-001`. | Its proof, `test_a_slot_is_ready_only_when_all_five_records_are`, is also `LIFE-SLOT-002`'s since D3067 moved the renamed test there. | Registered under both, with `test_an_unreadable_dns_reading_is_undetermined_never_ready`. | — | 0195 |
+| **D3127** | D3049: the build's count. | `test_site_look::test_the_counts_are_the_ledgers` counted every `## ` too -- the same belief in the test. | It counts the `::: steps` block on its own. | A test that shares the code's belief (§7 q6). | 0283 |
+| **D3128** | — | Operator documents still name the old zone (`docs/README.md`, `control-plane.md`, `managed-projects.md`, `monitoring.md`, `operator-guide.md`); the store's names stay by design (D2964). | **Run 14's** (the operator guide's cutover); the site and the Ledger are clean. | Customer text moves with the release; operator text with the cutover's record. | 0299 |
+| **D3129** | Session 46 Run 8: *"17 `--session 45` literals"*. | Its own table sums to 16, the same five files; this bump moved 16. | Counted from the table. | — | — |
 | **D3078** | Brief §1: plain language. | The `limit_approaching` notification shows the server template's machine word (*"storage_gb is at 4.1 of 5"*; seen in the 390 px look). | **Run 9** words entitlements in the console (*"Storage: 4.1 of 5 GB"*, *"Agent calls today"*), from `plans` names, never the raw key. | A key is not a sentence. | 0297 |
 
 ---
@@ -1076,7 +1086,48 @@ repository). Rows **D3100–D3109**. **Owed to Run 12**: the `console_reload_liv
 4. Both gates in shards (the `~/s43/run11` method). **Committed; not pushed until
    the sitting's first day** (D2973).
 
-**Done.**
+**Done.** 2026-10-30, by a delegated agent (Opus 5.5), committed LOCALLY as `d076b85` on
+Run 11's `17413bc` and **not pushed** (D2973: the main session pushes it on the sitting's first
+day). Scripts and outputs in WSL `~/s47/run12/`. **The bump** (`bump47.py`, `docs47.py`,
+`paragraph47.py`): `CURRENT_SESSION = 47` with its paragraph (the price and the schema sentences on
+one comment line each), `VERSION` 1.25.0, `README.md:7`; **16** `--session`/`--through-session 46`
+literals moved (pool-operations 1, upgrade-guide 2, api-operations 4, operator-guide 7, README 2 --
+Session 46's "17" was a miscount of the same table, D3129); both guides' release lines and the
+upgrade table's 1.25.0 row. **The price** (`upgrade47.sh`, D1624's rig against the deployed and
+tagged `55467b5`): `bump minor`, `requires patch`, verdict `ok`, `changes [image_digest]`, two
+leaves (`template_version`, and `inputs.versions_lock_sha256` from D3025's test-only Go image);
+ADR 0162 prices it a MINOR; the example client regenerated. **The registry** (`registry47.py`,
+`claims47.py`, `journey47.py`, node ids from `--collect-only`): **eighteen requirements** --
+CON-NAV-001, CON-OPS-001, CTL-STEPS-001/002, CON-REFUSAL-001, CON-COPY-001, CON-CONNECT-001,
+CTL-NOTIFY-002/003 (D3122), UI-A11Y-001/002, OPS-SLOTDNS-001 (D3126), OPS-DOMAIN-001/002, JRN-003,
+CON-RELOAD-001, CON-CREATE-003, CTL-DIAG-003 (D3123); requirements **441 -> 459**, `CLAIMS`
+**348 -> 366**, `OFFLINE_CLAIMS` **164 -> 175** (eleven offline, seven external, no host); no new
+family. **D3123**: the bump makes ADR 0261 refuse the two `trial` rows Session 46 left; following
+D2857, they name `console_create_reearned_live` and `support_bundle_reearned_live` with
+`target_session` 47 -- **no status moved**; the Ledger schema admits 47. **The proofs §2 needed and
+no run had written** (D3124): `tests/external/test_session47_look.py` (`console_look_live`, the
+roster's `APG_CONSOLE_LOOK_RECORD_FILE`), `test_session47_domain.py` (`domain_live`),
+`test_session47_journey.py` (`console_reload_live`, `operation_steps_live`,
+`notifications_started_live` -- reading Run 11's `reload` and `tracker_steps`, D3104, and the
+lifecycle's notifications), each with an offline reading test; the launcher
+`~/s47/run12/s47-console-look.sh` writes `~/s47/console-look/record.json` (D3108), rehearsed against
+this tree's console image: 40 pages, 0 problems. **D3121**: `console_look.py` would have stopped at
+a `KeyError` on the probe owner's real file; repaired. **The gate** (`derive47.py`):
+`bin/session-47-check.sh` from 46's, the header and usage rewritten whole, ONE flag
+(`--console-look-record-file`, external only) -- flag tokens 71 -> 72, parser arms 38 -> 39,
+**the diff read whole, 32 hunks**; `SHELL_COMMANDS`; `test_session_forty_seven_gate_modes.py` with
+its claim table and the export test. The record-reading proofs' session pins gain 47
+(`widen47.py`, ten files). **The parks**: Run 8's (`apply.py`, exit 0, 12 files and the Ledger page),
+then Run 10's (exit 0, 10 replacements); **D3063**'s seven literals and **D3120**'s three Ledger
+texts moved and guarded; **D3074** `PAGES.help.help` -> `/docs/support/`; **D3049** the quickstart's
+count is its steps block's (8, in `site_build` and in `test_site_look`, D3127); **D3080**: no page
+tells a Prisma reader to use a `verify-full` URL (Prisma's own lines are `sslaccept=strict`); the
+`.env` prose now names Prisma among the clients that must use their own code, in the page and its
+generator; **D3030**: `apg endpoint show` prints each snippet's `where` lines (a test against a real
+control cluster). `build-site --check` exit 0, 24 files. The Ledger texts the parks carry; threat
+rows `THR-OPS-SUBJECT` and `THR-REDIRECT` (items 31-32). **Batteries** 13/13 and 5/5 KILLED (each
+FAILED, never ERROR), the control passing, every file cmp-restored. **Targeted**: the registry, claims, gate-modes (46 and 47), CLI, release, Ledger, environment-gate, suite and deployment shape, fleet, repository, site, site look, documentation, documented-path, console and the new reading modules **1,531 passed, 24 skipped** + D2945's decided failure; the console set, look, DX, CLI package and the widened live modules 240 passed, 96 skipped (one D3127 failure, fixed, re-run 10 passed); `test_endpoint_cli` + `test_slot_command` 19 passed (a real control cluster). **The gates, in shards, once, on `d076b85` with the tree clean** (`make-gates47.py` from `~/s46/run8`'s scripts, timed by its shards; the three new container-heavy modules each isolated, `isolate.py`): **`bin/session-01-check.sh`** -- steps 1-3, 5-7 passed (step 2's PyPI reading from WSL, the network up), 14 shards, the JUnit merged: **8,727 = collected, 8,723 passed, 3 skipped, 1 failed** -- `test_available_and_beta_rows_name_evidence_that_resolves`, D2945's decided reading of `plan_free`/`plan_premium` against `session-46.json` (CI skips it); step 8 therefore wrote `evidence/session-01.json` `failed`, exit 5, on that one test alone. Session 46 did not run this gate at its close for this reason (Run 11, *"Not run"*); here it was run, and the decided failure is the only one. **`bin/session-47-check.sh --mode offline`** -- steps 1, 2, 2b, 4-7 and 8, 8b, 8c passed, 15 shards: **8,736 = collected, 8,732 passed, 3 skipped, the same 1 failed**; step 9 exit 0: `evidence/session-47-offline.json` **175 claims, 175 passed**, `checkout_commit` `d076b85` (the failing test is no offline claim's node, D2030's split). Found on the way: the detached runner for the offline shards did not start its first pytest for ~88 minutes after launch (log opened 15:17, pytest began 16:45) -- unexplained; nothing was lost.
+Rows **D3120-D3129**. NEXT FREE D3130.
 
 ### Run 13 — the sitting
 
