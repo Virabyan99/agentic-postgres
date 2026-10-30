@@ -393,6 +393,11 @@ runs add go in a second table below it, in execution order.
 | **D3088** | Brief screen 9 + D3006: the delete dialog (type the name to confirm) and §5's three danger tokens. | **Not built** — D3006 assigned it to Run 9, and the main session left it out of Run 9's brief. | **Run 9b builds it** before Run 11. | The approved design is the build's. | 0295 |
 | **D3089** | Plain language. | The plan page showed `free (active)`, `premium (unavailable_during_beta)`. | *Free (active)*, *Premium (not available during the beta)*. | — | 0297 |
 | **D3090** | Plain language. | Usage's figure names (`database_bytes`, …) and raw byte counts are machine words. | **Run 9b words them** with human units. | — | 0297 |
+| **D3091** | D3078: *Agent calls today* against its limit. | `entitlementUse` reads `figures["agent_calls"]`; the usage document carries `agent_calls` at the top level, a **sum over the period**, so the limit line always reads *not read*. | Run 9b draws the sum as the *Agent calls* total; the *today* limit line's wording against a 24-hour sum is **owed (Stage 6)**. | A limit per day needs a reading per day. | 0297 |
+| **D3092** | — | `.card > :last-child { margin-bottom: 0 }` reached the modal dialog (the card's last child) and pinned it to the viewport's bottom (found in the 1280 look). | `dialog.dialog[open] { margin: auto; }`. | — | 0295 |
+| **D3093** | D3090's class: plain words. | **Monitoring** still draws signal names by their keys (`database_bytes`, `cache_hit_ratio`) and sizes raw (*41000000 bytes*). | **Owed** (outside Run 9b's brief; `formatBytes` makes it small) — Run 11 or Stage 6. | — | 0297 |
+| **D3094** | D3088: every destructive action confirmed by its name. | Removing a member, revoking an invitation and **revoking a key** are one-click busy buttons (no data removed — but a key revoke cannot be undone). | **The operator's call** (asked at Run 9b's close); listed in the test as `UNDESTRUCTIVE_DELETES` until decided. | Irreversible is the operator's word to weigh. | 0295 |
+| **D3095** | — | `console_look.py`'s usage fixture lacked `agent_calls`, `workflow_runs`, `active_seconds`, `sleeping_seconds`, which the server serves (D3077's class). | Added. | Fixtures say what production says. | — |
 | **D3078** | Brief §1: plain language. | The `limit_approaching` notification shows the server template's machine word (*"storage_gb is at 4.1 of 5"*; seen in the 390 px look). | **Run 9** words entitlements in the console (*"Storage: 4.1 of 5 GB"*, *"Agent calls today"*), from `plans` names, never the raw key. | A key is not a sentence. | 0297 |
 
 ---
@@ -944,7 +949,29 @@ connection tests 51 passed (none skipped). New node ids for Run 12: `test_look.p
 `test_console_connect.py::test_the_connection_string_says_which_clients_take_it`;
 `test_connection_snippets.py::test_the_consoles_string_is_labelled_for_exactly_the_clients_that_take_it`.
 Rows **D3079–D3090**. **Owed: Run 9b** (D3088 the delete dialog and danger tokens,
-D3090 usage in words).
+D3090 usage in words). **CI on `8a7daf9`: contract 40966030542 success, site success.**
+
+**Run 9b — done.** 2026-10-30, by a delegated agent (Opus 5.5; stalled once and was
+resumed with its context), reviewed and re-run in the main session (WSL `~/s47/run9b/`).
+**D3088**: `ui.js` `dialog()` (`<dialog>` + `showModal()`, named by its heading, focus in
+and back to the opener, Escape refused while a request is in flight) and
+`confirmDialog()` — **Delete stays disabled until the name is typed exactly**
+(`progress.js` `nameConfirmed`: no trim, no case fold); the project's deletion in its
+own danger card in Settings, each branch's *Delete…* in Branches; the three danger
+tokens (light only, outside the shared block, which stays byte-equal) with
+`CONSOLE_TEXT_PAIRS` ≥ 4.5:1. **D3090**: Usage in words and decimal units (*Database
+size 4.1 GB*, *Backup storage 960 MB*, *Connections 3*, durations awake/asleep), the
+exact bytes in a `title`, *not read* never 0. **Battery 16/16. Rehearsed twice, green**
+(12/12, 36, j01–j13); the look 40 pages, 0 problems, twice; the dialog checked at both
+widths (Delete disabled for *slot3* and with a trailing space; Escape sends nothing;
+exactly one `DELETE` on the exact key). **Main-session review**: rule scan clean
+(`app.css` 31,161 B); the half-typed dialog at 390 read; **re-run** 138 passed; 357 +
+D2945's decided failure. New node ids for Run 12:
+`test_look.py::test_the_danger_colours_meet_4_5`,
+`test_console_look.py::test_every_destructive_action_is_confirmed_by_its_name`,
+`test_console_progress.py::test_a_destructive_action_waits_for_the_name_typed_exactly`,
+`test_console_progress.py::test_usage_is_said_in_words_and_units`. Rows
+**D3091–D3095**. NEXT FREE D3096.
 
 ### Run 10 — the domain move and the small repairs
 

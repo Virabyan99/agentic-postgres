@@ -288,7 +288,8 @@ class Fixtures:
         return {"project_key": self.project, "status": "read", "plan": "free",
                 "samples": {"present": 286, "expected": 288},
                 "window": {"from": self.ago(86400), "to": self.ago(0)}, "figures": figures,
-                "requests": {"increase": 18342},
+                "requests": {"increase": 18342, "resets": 0}, "agent_calls": 412, "workflow_runs": None,
+                "active_seconds": 80000, "sleeping_seconds": 6400,
                 "entitlements": [{"name": "storage_gb", "value": 5, "enforced": False, "against": "database_bytes"},
                                  {"name": "agent_calls_per_day", "value": 10000, "enforced": False,
                                   "against": "agent_calls"}]}  # fmt: skip

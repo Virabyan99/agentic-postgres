@@ -71,8 +71,11 @@
   --space-13: 96px;
 }
 /* tokens: end */
-/* Session 47 (ADR 0295, the design brief's §5): light only, one more value. */
-:root { --nav-width: 248px; }
+/* Session 47 (ADR 0295, the design brief's §5): light only, the console's own
+   values outside the shared block -- the navigation's width and, since Run 9b
+   (D3088), the three colours of a destructive action (test_look's
+   CONSOLE_TEXT_PAIRS holds their contrast). */
+:root { --nav-width: 248px; --danger-text: #8A2B16; --danger-bg: #FBE9E4; --danger-border: #B5482F; }
 @font-face {
   font-family: "Schibsted Grotesk";
   src: url(/console/fonts/schibsted-grotesk.woff2) format("woff2");
@@ -374,6 +377,26 @@ section.result { display: grid; gap: var(--space-2); min-width: 0; }
 .results { max-height: 360px; overflow: auto; border: 1px solid var(--rule); border-radius: var(--radius-control); }
 .results table { font-family: var(--font-mono); font-size: 13px; }
 .results th { position: sticky; top: 0; z-index: 1; }
+
+/* Session 47 Run 9b (D3088, the brief's §4 and screen 9): a destructive
+   action in its own card, confirmed in a modal dialog. */
+.card.danger-zone { border-color: var(--danger-border); }
+.card.danger-zone > h2 { color: var(--danger-text); }
+button.danger { color: var(--surface); background: var(--danger-border); border-color: var(--danger-border); }
+button.danger:hover { color: var(--surface); background: var(--danger-text); border-color: var(--danger-text); }
+button.danger[disabled] { color: var(--text-3); background: var(--surface-hover); border-color: var(--rule); }
+.row-actions button.danger-quiet { color: var(--danger-text); background: var(--surface); border-color: var(--danger-border); }
+.row-actions button.danger-quiet:hover { color: var(--danger-text); background: var(--danger-bg); }
+dialog.dialog { width: min(480px, calc(100vw - 32px)); padding: var(--space-6); color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-panel); box-shadow: 0 16px 48px rgba(20, 32, 39, 0.24); }
+/* Centred: a card gives its last child no bottom margin, which a modal needs. */
+dialog.dialog[open] { margin: auto; }
+dialog.dialog::backdrop { background: rgba(20, 32, 39, 0.45); }
+dialog.dialog h2 { margin: 0 0 var(--space-3); font-size: 18px; }
+dialog.dialog input { max-width: none; }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
+.dialog-actions button { margin: 0; }
+data[title] { text-decoration: underline dotted var(--rule); text-underline-offset: 3px; }
+.card > .facts { margin: var(--space-4) 0; }
 
 footer { padding: var(--space-5) var(--space-4); color: var(--text-3); font-size: 13px; border-top: 1px solid var(--rule); background: var(--surface); }
 

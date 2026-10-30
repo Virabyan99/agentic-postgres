@@ -10,9 +10,10 @@
 // a copy button; the shown-once panel; the state chip (ADR 0288's STATE_CHIPS,
 // unchanged); callout, banner, empty state, skeleton, toast and tabs; and the
 // site's origin, derived from this page's host, never typed. Since Session 47
-// Run 5: a time as words (`when`, D3007).
+// Run 5: a time as words (`when`, D3007). Since Run 9b: the modal dialog, and
+// a destructive action confirmed in one by typing its name (D3088).
 
-import { absoluteTime, machineTime, relativeAge } from "/console/progress.js";
+import { absoluteTime, machineTime, nameConfirmed, relativeAge } from "/console/progress.js";
 
 // One element, its properties and its children -- strings become text nodes.
 // A property whose name holds a dash (`aria-selected`, `data-x`) is an
@@ -333,4 +334,101 @@ export function tabs(items, name) {
   choose(0);
   const list = h("div", { className: "tablist", role: "tablist", ...(name ? { "aria-label": name } : {}) }, buttons);
   return h("div", { className: "tabs" }, list, panels);
+}
+
+// -- dialogs (ADR 0295 decision 6, the brief's §4) --------------------------------
+
+// A modal <dialog>, named by its heading (`aria-labelledby`) and described by
+// its first sentence. `open(opener)` shows it with `showModal()` -- the page
+// behind is inert -- and moves focus to `focus` (or the first control); every
+// close, by Escape (the browser's own cancel) or by a button calling `close`,
+// hands focus back to the opener. `onclose` runs after each close.
+let dialogs = 0;
+
+export function dialog(title, sentence, children, options) {
+  const { focus = null, onclose = null } = options || {};
+  dialogs += 1;
+  const id = `dialog-${dialogs}`;
+  const element = h("dialog", { className: "dialog", "aria-labelledby": `${id}-title`, "aria-describedby": `${id}-says` },
+    h("h2", { id: `${id}-title` }, title), h("p", { id: `${id}-says` }, sentence), children);
+  let opener = null;
+  element.addEventListener("close", () => {
+    if (onclose) {
+      onclose();
+    }
+    if (opener && opener.isConnected) {
+      opener.focus();
+    }
+    opener = null;
+  });
+  return {
+    element,
+    open(from) {
+      opener = from || null;
+      element.showModal();
+      const target = focus || element.querySelector("input, select, textarea, button");
+      if (target) {
+        target.focus();
+      }
+    },
+    close() {
+      if (element.open) {
+        element.close();
+      }
+    },
+  };
+}
+
+// A destructive action (deleting a project or a branch), confirmed in a
+// dialog by typing `name` exactly: the action's button is disabled until
+// `nameConfirmed(typed, name)`, then a busy button whose `work` sends the
+// request. When `work` resolves the dialog closes and `done(answer)` follows
+// the operation on the page; when it throws, `refused(error)` is drawn inside
+// the dialog, which stays open. *Keep it* and Escape close it with nothing
+// sent; Escape is refused while the request is in flight. Answers the opener
+// button and the dialog element, for the view to place.
+export function confirmDialog({ opener, title, sentence, name, action = "Delete", busy, work, done, refused, quiet = false }) {
+  const [label, typed] = field(["Type ", h("strong", {}, name), " to confirm"], { type: "text", autocomplete: "off", spellcheck: false });
+  const said = h("div", { className: "stack" });
+  const matches = () => nameConfirmed(typed.value, name);
+  let modal = null;
+  const go = busyButton(action, async () => {
+    said.replaceChildren();
+    let answer;
+    try {
+      answer = await work();
+    } catch (error) {
+      said.append(refused(error));
+      return;
+    }
+    modal.close();
+    done(answer);
+  }, { busy, className: "danger", disabled: true, enabled: matches });
+  typed.addEventListener("input", () => {
+    if (!go.hasAttribute("aria-busy")) {
+      go.disabled = !matches();
+    }
+  });
+  const keep = button("Keep it", () => modal.close(), { className: "secondary" });
+  modal = dialog(title, sentence, [label, said, h("div", { className: "dialog-actions" }, keep, go)], {
+    focus: typed,
+    onclose: () => {
+      typed.value = "";
+      go.disabled = true;
+      said.replaceChildren();
+    },
+  });
+  modal.element.addEventListener("cancel", (event) => {
+    if (go.hasAttribute("aria-busy")) {
+      event.preventDefault();
+    }
+  });
+  const start = h("button", { type: "button", className: quiet ? "danger-quiet" : "danger" }, opener);
+  start.addEventListener("click", () => {
+    typed.value = "";
+    go.disabled = true;
+    said.replaceChildren();
+    modal.open(start);
+  });
+  return [start, modal.element];
 }

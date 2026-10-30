@@ -639,3 +639,156 @@ def test_the_notification_count_is_of_what_the_api_served(tmp_path: Path) -> Non
     assert out["again"] is True
     for words in out.values():
         assert "unread" not in str(words).lower() and "new" not in str(words).lower()
+
+
+# -- Session 47 Run 9b: the delete dialog's name, usage in words ------------------
+
+
+def test_a_destructive_action_waits_for_the_name_typed_exactly(tmp_path: Path) -> None:
+    """D3088 (ADR 0295 decision 6, the brief's screen 9): a deletion's button
+    is enabled only when the thing's own name is typed EXACTLY -- not a part of
+    it, not with a space, not in another case, not longer; an empty name
+    confirms nothing, and neither does a value that is not text."""
+    name = "slot3-prod"
+    typed = [
+        "",
+        "s",
+        "slot3",
+        "slot3-pro",
+        " slot3-prod",
+        "slot3-prod ",
+        "SLOT3-PROD",
+        "slot3-prodx",
+        name,
+    ]
+    driver = (
+        f"const typed = {json.dumps(typed)};\n"
+        f"const out = typed.map((t) => nameConfirmed(t, {json.dumps(name)}));\n"
+        'out.push(nameConfirmed("", ""), nameConfirmed(null, "tmp"), nameConfirmed("tmp", null), nameConfirmed("tmp", "tmp"));\n'
+        "console.log(JSON.stringify(out));\n"
+    )
+    out = _node(tmp_path, driver, imports=("nameConfirmed",))
+    assert out == [False] * (len(typed) - 1) + [True, False, False, False, True], out
+
+
+def _usage_figures_in_sql() -> list[str]:
+    """The gauges `app.control_usage_document` serves, in its own order."""
+    sql = LIMIT_SQL.read_text(encoding="utf-8")
+    function = sql[sql.index("CREATE FUNCTION app.control_usage_document") :]
+    array = re.search(r"FOREACH v_figure IN ARRAY ARRAY\[(.*?)\]", function, re.DOTALL)
+    assert array, "the usage document's gauges moved"
+    return re.findall(r"'([a-z_]+)'", array.group(1))
+
+
+def _si(bytes_: float) -> str:
+    """A size as this test words it: decimal units, one decimal below 10."""
+    if bytes_ < 1000:
+        return f"{round(bytes_)} byte{'' if round(bytes_) == 1 else 's'}"
+    scaled = bytes_
+    for unit in ("KB", "MB", "GB", "TB", "PB"):
+        scaled /= 1000
+        small = scaled < 9.95
+        shown = math.floor(scaled * 10 + 0.5) / 10 if small else _half_up(scaled)
+        if shown < 1000 or unit == "PB":
+            return f"{shown:.1f} {unit}" if small else f"{shown:,} {unit}"
+    raise AssertionError(bytes_)
+
+
+def test_usage_is_said_in_words_and_units(tmp_path: Path) -> None:
+    """D3090 (ADR 0297: plain language): every gauge the usage document serves
+    -- read from the control set's own SQL -- has a plain title, never its key;
+    a size is said in KB/MB/GB (10^3 steps, as the plans' GB is read) with its
+    exact bytes kept for the title only; a count with its thousands; the time
+    awake and asleep as durations; and a figure the server did not read --
+    null, absent, or not a number -- is *not read*, never 0 and never raw
+    (ADR 0195). `usageSection` draws only these words."""
+    sizes = [
+        0,
+        1,
+        999,
+        1000,
+        4096,
+        9949,
+        9950,
+        31_000_000,
+        960_000_000,
+        999_600,
+        4.1e9,
+        4.2e9,
+        12.5e12,
+    ]
+    figures = {
+        "database_bytes": {
+            "latest": 4.1e9,
+            "latest_at": _iso(300),
+            "max": 4.2e9,
+            "unread_samples": 0,
+        },
+        "repository_bytes": {"latest": None, "latest_at": None, "max": None, "unread_samples": 288},
+        "branch_count": {"latest": 1, "latest_at": _iso(300), "max": 2, "unread_samples": 2},
+        "branch_bytes": {"latest": 31_000_000, "latest_at": _iso(300), "max": "lots"},
+        "customer_connections": {"latest": 18342, "latest_at": _iso(300), "max": 18342},
+    }
+    served = {"figures": figures, "requests": {"increase": 18342, "resets": 0}, "agent_calls": None,
+              "workflow_runs": 3, "active_seconds": 80_000, "sleeping_seconds": 6_400}  # fmt: skip
+    driver = (
+        f"const sizes = {json.dumps(sizes)};\nconst figures = {json.dumps(figures)};\n"
+        f"const served = {json.dumps(served)};\n"
+        "console.log(JSON.stringify({ sizes: sizes.map(formatBytes), bad: [formatBytes(-1), formatBytes('5'), formatBytes(NaN), formatCount(1.5), formatCount(-2)],\n"
+        "  keys: USAGE_FIGURES.map((f) => f.figure), rows: usageRows(figures), empty: usageRows(undefined),\n"
+        "  totals: usageTotals(served), none: usageTotals({}) }));\n"
+    )
+    out = _node(
+        tmp_path,
+        driver,
+        imports=("USAGE_FIGURES", "formatBytes", "formatCount", "usageRows", "usageTotals"),
+    )
+    assert out["sizes"] == [_si(size) for size in sizes], out["sizes"]
+    assert out["sizes"][:4] == ["0 bytes", "1 byte", "999 bytes", "1.0 KB"]
+    assert out["sizes"][9:12] == ["1.0 MB", "4.1 GB", "4.2 GB"] and out["sizes"][7] == "31 MB"
+    assert out["bad"] == [None] * 5
+    assert out["keys"] == _usage_figures_in_sql()
+    rows = {row["figure"]: row for row in out["rows"]}
+    assert [row["title"] for row in out["rows"]] == [
+        "Database size", "Backup storage", "Branches", "Branch storage", "Connections",
+    ]  # fmt: skip
+    assert (
+        rows["database_bytes"]["latest"] == "4.1 GB" and rows["database_bytes"]["max"] == "4.2 GB"
+    )
+    assert rows["database_bytes"]["latest_detail"] == "4,100,000,000 bytes"
+    assert rows["database_bytes"]["latest_at"] == figures["database_bytes"]["latest_at"]
+    assert rows["repository_bytes"]["latest"] == rows["repository_bytes"]["max"] == "not read"
+    assert (
+        rows["repository_bytes"]["latest_at"] is None
+        and rows["repository_bytes"]["unread_samples"] == 288
+    )
+    assert rows["branch_count"]["latest"] == "1" and rows["branch_count"]["latest_detail"] is None
+    assert rows["branch_bytes"]["latest"] == "31 MB" and rows["branch_bytes"]["max"] == "not read"
+    assert rows["customer_connections"]["latest"] == "18,342"
+    assert all(row["latest"] == row["max"] == "not read" for row in out["empty"])
+    assert [(t["title"], t["value"]) for t in out["totals"]] == [
+        ("Requests answered (below 400)", "18,342"), ("Agent calls", "not read"),
+        ("Workflow runs", "3"), ("Time awake", "22 h 13 min"), ("Time asleep", "1 h 47 min"),
+    ]  # fmt: skip
+    assert {t["value"] for t in out["none"]} == {"not read"}
+    keys = set(_usage_figures_in_sql()) | {"requests", "agent_calls", "workflow_runs"}
+    for word in [v for row in out["rows"] for v in (row["title"], row["latest"], row["max"])] + [
+        t["title"] for t in out["totals"]
+    ]:
+        assert not any(re.search(rf"\b{key}\b", word) for key in keys), word
+    # The view draws a figure only through these words: never its key, never a raw number.
+    app = (PUBLIC / "app.js").read_text(encoding="utf-8")
+    view = "\n".join(
+        line
+        for line in _function(app, "function usageSection(").splitlines()
+        if not line.lstrip().startswith("//")
+    )
+    assert "usageRows(figures).map((row) => ({" in view and "usageTotals(document).map(" in view
+    assert "title: row.title," in view and '["title", "Figure"]' in view
+    assert not re.search(r"\bname[,:]|\[\"name\",", view), "a figure is drawn by its key"
+    assert not re.search(
+        r"String\(|\.latest\b(?!_)|\.max\b(?!_)|\.increase\b|figure\.",
+        view.replace("row.latest", "").replace("row.max", ""),
+    ), "a figure's number is drawn raw"
+    helper = _function(app, "function amount(")
+    assert 'h("data", { value: detail.replace(/\\D/g, ""), title: detail }, words)' in helper

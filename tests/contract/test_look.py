@@ -70,6 +70,17 @@ TEXT_PAIRS = (
     ("surface", "ink"),
 )  # fmt: skip
 
+#: Session 47 Run 9b (D3088, the brief's §5): the console's own text pairs, on
+#: tokens it holds OUTSIDE the shared block -- a destructive action's three
+#: colours: its text on white and on its tint, white on its button and on the
+#: button hovered.
+CONSOLE_TEXT_PAIRS = (
+    ("danger-text", "surface"), ("danger-text", "danger-bg"),
+    ("surface", "danger-border"), ("surface", "danger-text"),
+)  # fmt: skip
+#: The brief's §5 values for them, light only.
+DANGER = {"danger-text": "#8A2B16", "danger-bg": "#FBE9E4", "danger-border": "#B5482F"}
+
 #: The elements a person can reach with the keyboard on either surface.
 FOCUSABLE = ("a", "button", "input", "select", "textarea", "summary")
 #: ADR 0295 decision 4: one budget per stylesheet, each measured alone.
@@ -89,6 +100,21 @@ def _tokens() -> dict[str, str]:
     tokens = dict(pairs)
     assert len(tokens) == len(pairs) and len(tokens) > 40, "the token block parsed to nothing"
     return tokens
+
+
+def _console_tokens() -> dict[str, str]:
+    """The shared block's tokens and the console's own, from its `:root`
+    rules outside the block (each a name the shared block does not hold)."""
+    tokens = _tokens()
+    text = CONSOLE_CSS.read_text(encoding="utf-8").replace(_block(CONSOLE_CSS), "")
+    own = [
+        pair
+        for selector, body in _rules(text)
+        if selector == ":root"
+        for pair in re.findall(r"--([a-z0-9-]+):\s*(#[0-9A-Fa-f]{6});", body)
+    ]
+    assert not set(dict(own)) & set(tokens), "a console token shadows a shared one"
+    return {**tokens, **dict(own)}
 
 
 def _luminance(colour: str) -> float:
@@ -145,6 +171,21 @@ def test_every_text_pair_meets_4_5() -> None:
     assert contrast(tokens["on-ink-muted"], tokens["surface"]) < 4.5
 
 
+def test_the_danger_colours_meet_4_5() -> None:
+    """D3088 (the brief's §5): the console's three destructive-action colours
+    are the brief's values, held outside the shared block (which stays
+    byte-equal to the site's), and each of their text pairs meets 4.5:1 from
+    the tokens as parsed. The control: the tint as text on white fails."""
+    tokens = _console_tokens()
+    assert {name: tokens.get(name, "").upper() for name in DANGER} == DANGER
+    for name in DANGER:
+        assert f"--{name}:" not in _block(CONSOLE_CSS), name
+    for text, background in CONSOLE_TEXT_PAIRS:
+        ratio = contrast(tokens[text], tokens[background])
+        assert ratio >= 4.5, f"{text} on {background}: {ratio:.2f}"
+    assert contrast(tokens["danger-bg"], tokens["surface"]) < 4.5
+
+
 def test_there_is_no_dark_theme() -> None:
     """Light only (D2825): no `prefers-color-scheme` block and one
     `color-scheme` declaration, `light`, in the shared block."""
@@ -193,8 +234,9 @@ def test_every_rule_that_sets_both_colours_meets_4_5() -> None:
     """Session 47 Run 9 (the brief's §8): every console rule that sets a text
     colour AND a background, each a token, is a pair -- computed from the
     stylesheet itself, so a rule added later is read without a list. The
-    control: the pattern reads a pair from a rule written here."""
-    tokens = _tokens()
+    control: the pattern reads a pair from a rule written here. Since Run 9b
+    the console's own tokens (the danger colours) are read too."""
+    tokens = _console_tokens()
     pairs = set()
     for selector, body in _rules(CONSOLE_CSS.read_text(encoding="utf-8")):
         declared = _body(body)

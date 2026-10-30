@@ -22,12 +22,12 @@ import { connect } from "/console/pg.js";
 import {
   checklist, checklistComplete, creationBlocked, CURRENT, describe, DONE, entitlementTitle, entitlementUse, entitlementValue,
   formatDuration, instantOf, limitText, NOT_NEEDED, NOT_READ, NOT_YET, noticeEntitlement, operationSeconds, plainNotice,
-  recentNotices, STOPPED, stepStates, TERMINAL, typicalRange, zoneName,
+  recentNotices, STOPPED, stepStates, TERMINAL, typicalRange, usageRows, usageTotals, zoneName,
 } from "/console/progress.js";
 import { newPassword, verifier } from "/console/scram.js";
 import { DEADLINE_SENTENCE, doors, openDoor, runStatement } from "/console/sql.js";
 import {
-  banner, busyButton, button, callout, card, cellChoice, choice, codeBlock, copyButton, emptyState, field, h, inlineCopy, link, once,
+  banner, busyButton, button, callout, card, cellChoice, choice, codeBlock, confirmDialog, copyButton, emptyState, field, h, inlineCopy, link, once,
   siteDomain, siteLink, skeleton, stateChip, table, tabs, value, when,
 } from "/console/ui.js";
 
@@ -1129,7 +1129,21 @@ async function branchesView(me, key, turn) {
   const target = () => (at.value ? instantOf(at.value) || false : null);
   const unreadable = () => result.replaceChildren(h("p", { className: "refusal" },
     "The restore time could not be read as a date and time; nothing was sent."));
-  const [confirmLabel, confirm] = field("To delete a branch, type its name here first", { maxLength: 12 });
+  // A deletion started in its dialog, followed here while the page is open
+  // (D3015: the reading stops when the page is left).
+  async function follow(answer, what) {
+    result.replaceChildren();
+    const status = h("p", { className: "muted" }, what + "…");
+    result.append(status, followLink(answer.operation));
+    try {
+      const final = await waitFor(answer.operation.id, status, turn);
+      if (final !== null) {
+        result.append(outcome(final));
+      }
+    } catch (error) {
+      result.append(refusal(error));
+    }
+  }
   // Two passwords made here; only their verifiers leave (D2449, D2660).
   async function request(route, body, what) {
     result.replaceChildren();
@@ -1156,6 +1170,24 @@ async function branchesView(me, key, turn) {
       admin = null;
     }
   }
+  // D3088: each branch's deletion is confirmed in a dialog by typing its name.
+  const dialogs = [];
+  const deletion = (branch) => {
+    const [start, modal] = confirmDialog({
+      opener: "Delete…",
+      title: `Delete the branch ${branch.name}?`,
+      sentence: "A branch is not backed up: its data is gone once it is deleted. This cannot be undone.",
+      name: branch.name,
+      busy: "Deleting…",
+      quiet: true,
+      work: () => call("DELETE", `/projects/${key}/branches/${encodeURIComponent(branch.name)}`),
+      done: (answer) => follow(answer, `Deleting ${branch.name}`),
+      refused: (error) => refusal(error),
+    });
+    start.setAttribute("aria-label", `Delete the branch ${branch.name}`);
+    dialogs.push(modal);
+    return start;
+  };
   const rows = served.branches.map((branch) => ({
     ...branch,
     reached_point: when(branch.reached_point, "absolute"),
@@ -1171,25 +1203,7 @@ async function branchesView(me, key, turn) {
         await request(`/projects/${key}/branches/${encodeURIComponent(branch.name)}/reset`,
           instant ? { target_time: instant } : {}, `Resetting ${branch.name}`);
       }, { busy: "Resetting…" }),
-      busyButton("Delete", async () => {
-        if (confirm.value !== branch.name) {
-          result.replaceChildren(h("p", { className: "refusal" }, `Type ${branch.name} in the field below first; a branch is not backed up, and nothing was sent.`));
-          return;
-        }
-        result.replaceChildren();
-        const status = h("p", { className: "muted" }, "Deleting…");
-        result.append(status);
-        try {
-          const answer = await call("DELETE", `/projects/${key}/branches/${encodeURIComponent(branch.name)}`);
-          result.append(followLink(answer.operation));
-          const final = await waitFor(answer.operation.id, status, turn);
-          if (final !== null) {
-            result.append(outcome(final));
-          }
-        } catch (error) {
-          result.append(refusal(error));
-        }
-      }, { busy: "Deleting…" })),
+      deletion(branch)),
   }));
   frame(me, "Branches",
     organization ? branchLimitBanner(organization.id, plan, served.branches.length) : null,
@@ -1199,7 +1213,7 @@ async function branchesView(me, key, turn) {
       : emptyState("No branch yet. A branch is a copy of this project's database to try things on; it is not backed up.",
         button("Make a branch", () => name.focus(), { className: "secondary" })),
     h("p", { className: "muted" }, value(served.notice)),
-    confirmLabel),
+    dialogs),
     card(h("h2", {}, "New branch"), nameLabel, atLabel,
       busyButton("Create the branch", async () => {
         const branch = name.value.trim();
@@ -1242,7 +1256,11 @@ async function backupsView(me, key) {
   frame(me, "Backups", card(...body));
 }
 
-const USAGE_FIGURES = ["database_bytes", "repository_bytes", "branch_count", "branch_bytes", "customer_connections"];
+// D3090: a usage figure as words -- the size in human units with its exact
+// bytes as the element's title, or "not read" when the server read none.
+function amount(words, detail) {
+  return detail ? h("data", { value: detail.replace(/\D/g, ""), title: detail }, words) : h("span", {}, words);
+}
 
 function usageSection(document) {
   // Before data: no sample in the window -- the server's own "could not
@@ -1257,23 +1275,22 @@ function usageSection(document) {
     return h("p", { className: "refusal" }, `${document.project_key}: usage could not be determined: ${value(document.reason)}`);
   }
   const figures = document.figures || {};
-  const rows = USAGE_FIGURES.map((name) => {
-    const figure = figures[name] || {};
-    return {
-      name,
-      latest: figure.latest === null || figure.latest === undefined
-        ? "not read in this window"
-        : h("span", {}, String(figure.latest), ", ", when(figure.latest_at)),
-      max: figure.max,
-    };
-  });
+  // D3090: each figure by its plain name, in human units (`progress.js`).
+  const rows = usageRows(figures).map((row) => ({
+    title: row.title,
+    latest: row.latest_at
+      ? h("span", {}, amount(row.latest, row.latest_detail), h("span", { className: "sub muted small" }, "read ", when(row.latest_at)))
+      : amount(row.latest, row.latest_detail),
+    max: amount(row.max, row.max_detail),
+  }));
   const window_ = document.window || {};
   return h("section", { className: "card" },
     h("h2", {}, value(document.project_key)),
     h("p", { className: "muted" }, "From ", when(window_.from, "absolute"), " to ", when(window_.to, "absolute"),
-      `; ${document.samples.present} of ${document.samples.expected} samples recorded.`),
-    table([["name", "Figure"], ["latest", "Latest"], ["max", "Window maximum"]], rows, new Set(["max"])),
-    h("p", {}, "Requests answered below 400: ", document.requests ? String(document.requests.increase) : "not read in this window"),
+      `; ${document.samples.present} of ${document.samples.expected} samples recorded. A figure the server could not read is said as not read, never as zero.`),
+    table([["title", "Figure"], ["latest", "Latest"], ["max", "Highest in this period"]], rows, new Set(["latest", "max"])),
+    h("dl", { className: "facts" }, usageTotals(document).map((total) =>
+      h("div", {}, h("dt", {}, total.title), h("dd", {}, total.value)))),
     // D3078: "Storage: 4.1 of 5 GB", from the figure each limit is read against.
     (document.entitlements || []).length
       ? table([["use", "Your plan's limits"], ["enforced", "Enforced"]],
@@ -1348,28 +1365,47 @@ async function projectSettingsView(me, key, turn) {
   const result = h("div", { className: "stack" });
   // Each operation is followed here while the page is open, and on its own
   // page (D2975) from the link; leaving this page stops this page's reading.
+  async function follow(answer, status) {
+    result.append(followLink(answer.operation));
+    const final = await waitFor(answer.operation.id, status, turn);
+    if (final !== null) {
+      result.append(outcome(final));
+    }
+    return final;
+  }
   async function operate(method, path, body, what) {
     result.replaceChildren();
     const status = h("p", { className: "muted" }, what + "…");
     result.append(status);
     try {
-      const answer = await call(method, path, body);
-      result.append(followLink(answer.operation));
-      const final = await waitFor(answer.operation.id, status, turn);
-      if (final !== null) {
-        result.append(outcome(final));
-      }
-      return final;
+      return await follow(await call(method, path, body), status);
     } catch (error) {
       result.append(refusal(error));
       return null;
     }
   }
+  // D3088 (the brief's screen 9): the deletion in its own card, confirmed in a
+  // dialog by typing the project's key; the request is the dialog's busy
+  // button, and the operation is followed below once the dialog closes.
+  const [deleteStart, deleteDialog] = confirmDialog({
+    opener: "Delete project…",
+    title: `Delete ${key}?`,
+    sentence: "Everything in it is deleted: the database, its branches and its backups. This cannot be undone.",
+    name: key,
+    busy: "Deleting…",
+    work: () => call("DELETE", `/projects/${key}`),
+    done: (answer) => {
+      result.replaceChildren();
+      const status = h("p", { className: "muted" }, "Deleting…");
+      result.append(status);
+      follow(answer, status).catch((error) => result.append(refusal(error)));
+    },
+    refused: (error) => refusal(error),
+  });
   const [idleLabel, idle] = choice("Sleep when idle", [
     { value: "never", label: "never" }, { value: "15", label: "after 15 minutes" },
     { value: "30", label: "after 30 minutes" }, { value: "60", label: "after 60 minutes" }], "never");
   const [profileLabel, profile] = choice("Compute size", PROFILES, project.profile);
-  const [confirmLabel, confirm] = field(`Type ${key} to delete the project`, {});
   const bundle = h("div", {});
   try {
     bundle.append(...supportBundle(await call("GET", `/projects/${key}/diagnostics`)));
@@ -1409,15 +1445,9 @@ async function projectSettingsView(me, key, turn) {
       "To send it to whoever helps you: ",
       h("code", {}, `apg project diagnostics --project-key ${key} --output FILE`), "."),
     bundle),
-    card(h("h2", {}, "Delete"),
-      confirmLabel,
-      busyButton("Delete the project", async () => {
-        if (confirm.value !== key) {
-          result.replaceChildren(h("p", { className: "refusal" }, "Type the project's key exactly; nothing was sent."));
-          return;
-        }
-        await operate("DELETE", `/projects/${key}`, undefined, "Deleting");
-      }, { busy: "Deleting…" })),
+    h("section", { className: "card danger-zone" }, h("h2", {}, `Delete ${key}`),
+      h("p", {}, "Deletes the database, its branches and its backups. This cannot be undone."),
+      deleteStart, deleteDialog),
     result);
 }
 

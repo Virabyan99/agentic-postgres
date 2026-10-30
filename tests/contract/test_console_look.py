@@ -41,7 +41,9 @@ PAGES = (PUBLIC / "index.html", PUBLIC / "accept.html")
 #: and at Run 6 (`~/s47/run6c/anchors.py`), when Connect became three steps and
 #: the editor gained its state bar (D2956, D2957); and at Run 7
 #: (`~/s47/run7/anchors.py`), when a project's usage before its first sample
-#: became an empty state under the project's own heading (one more `h2`).
+#: became an empty state under the project's own heading (one more `h2`); and
+#: at Run 9b (`~/s47/run9b/anchors.py`), when the dialog's heading joined
+#: `ui.js` (one more `h2`, D3088).
 ANCHORS = {
     '"Create your account"': 2, '"Username"': 3, '"Display name"': 1, '"Password"': 3,
     '"Password again"': 1, 'className: "qr"': 1, 'className: "secret"': 3,
@@ -49,7 +51,7 @@ ANCHORS = {
     '"Sign in"': 4, '"Projects"': 5, '"Sign out"': 1, 'className: "account"': 1,
     'role: "status"': 1,
     'h("textarea"': 1, 'className: "result"': 1, '"Door"': 2, '"Connect"': 6, '"Run"': 1,
-    '"Cancel"': 1, '"Disconnect"': 1, 'className: "once"': 2, 'h("h1"': 7, 'h("h2"': 26,
+    '"Cancel"': 1, '"Disconnect"': 1, 'className: "once"': 2, 'h("h1"': 7, 'h("h2"': 27,
     # Session 47 Run 6 (D2956, D2957): Connect's step 2 and its shown-once box,
     # the client tabs, the editor's Copy as CSV.
     '"Make a new password for the pooled door"': 1, '"Your new password for the pooled door"': 1,
@@ -247,6 +249,89 @@ def test_no_state_is_told_by_colour_alone() -> None:
     )
     sql = _function(app, "sqlView")
     assert 'h("span", { className: "dot", "aria-hidden": "true" }), state,' in sql
+
+
+#: The DELETE routes that remove no data a person cannot make again: signing
+#: out, a member's membership, an open invitation, an API key. Every other
+#: DELETE the console sends -- a project, a branch -- is destructive.
+UNDESTRUCTIVE_DELETES = (
+    '"/sessions/current"',
+    "`/organizations/${org}/members/",
+    "`/organizations/${org}/invitations/",
+    "`/organizations/${org}/keys/",
+)
+
+
+def _calls(text: str, head: str) -> list[tuple[int, int]]:
+    """The span of each `head(` call in `text`, to its matching parenthesis."""
+    spans = []
+    for found in re.finditer(re.escape(head) + r"\(", text):
+        depth, at = 0, found.end() - 1
+        for at in range(found.end() - 1, len(text)):
+            depth += {"(": 1, ")": -1}.get(text[at], 0)
+            if depth == 0:
+                break
+        spans.append((found.start(), at))
+    return spans
+
+
+def test_every_destructive_action_is_confirmed_by_its_name() -> None:
+    """D3088 (ADR 0295 decision 6, the brief's §4 and screen 9): every DELETE
+    in `app.js` that removes data -- a project, a branch -- is the `work` of a
+    `confirmDialog` whose `name` is the thing's own name; and the component
+    opens a modal `<dialog>` named by its heading, its action button disabled
+    until `nameConfirmed` and then a busy button, focus handed back to the
+    opener on every close, Escape refused while the request is in flight. The
+    control: the reader finds a DELETE sent outside a dialog."""
+    app = APP.read_text(encoding="utf-8")
+    code = "\n".join(line for line in app.splitlines() if not line.lstrip().startswith("//"))
+    dialogs = _calls(code, "confirmDialog")
+    assert len(dialogs) == 2, dialogs
+
+    def unconfirmed(text: str, spans: list[tuple[int, int]]) -> list[str]:
+        found = []
+        for delete in re.finditer(r'"DELETE"', text):
+            rest = text[delete.end() : delete.end() + 80].lstrip(", ")
+            if any(rest.startswith(route) for route in UNDESTRUCTIVE_DELETES):
+                continue
+            if not any(start < delete.start() < end for start, end in spans):
+                found.append(text[delete.start() - 40 : delete.end() + 60])
+        return found
+
+    assert not unconfirmed(code, dialogs), unconfirmed(code, dialogs)
+    routes = {
+        re.search(r'call\("DELETE", `([^`]+)`', code[start:end]).group(1)  # type: ignore[union-attr]
+        for start, end in dialogs
+    }
+    assert routes == {
+        "/projects/${key}",
+        "/projects/${key}/branches/${encodeURIComponent(branch.name)}",
+    }
+    names = {re.search(r"\bname: ([\w.]+),", code[start:end]).group(1) for start, end in dialogs}  # type: ignore[union-attr]
+    assert names == {"key", "branch.name"}, names
+    assert code.count('"DELETE"') == 6
+    ui = UI.read_text(encoding="utf-8")
+    component = _function(ui, "confirmDialog")
+    for part in (
+        "const matches = () => nameConfirmed(typed.value, name);",
+        '{ busy, className: "danger", disabled: true, enabled: matches }',
+        "go.disabled = !matches();",
+        "busyButton(action, ",
+        'if (go.hasAttribute("aria-busy")) {\n      event.preventDefault();',
+        "modal.open(start);",
+    ):
+        assert part in component, part
+    modal = _function(ui, "dialog")
+    for part in (
+        'h("dialog", { className: "dialog", "aria-labelledby": `${id}-title`',
+        'h("h2", { id: `${id}-title` }, title)',
+        "element.showModal();",
+        "opener.focus();",
+    ):
+        assert part in modal, part
+    # The control: a DELETE of a project sent from a plain button is found.
+    planted = 'busyButton("Delete", () => call("DELETE", `/projects/${key}`))'
+    assert unconfirmed(planted, []) and not unconfirmed('call("DELETE", "/sessions/current")', [])
 
 
 def test_the_drivers_anchors_are_unchanged() -> None:

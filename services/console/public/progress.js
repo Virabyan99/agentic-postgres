@@ -12,6 +12,8 @@
 // relative age, the absolute local time beside it -- never the server's ISO
 // text), decides whether a new project may start (D2951), and derives the
 // getting-started checklist from API readings alone (ADR 0298 decision 4).
+// Since Run 9b: whether a destructive action's name was typed (D3088), and
+// usage in words and human units (D3090).
 
 export const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
 
@@ -425,6 +427,113 @@ export function noticeEntitlement(text, entitlements) {
   return (Array.isArray(entitlements) ? entitlements : []).find((entitlement) =>
     entitlement && typeof entitlement.name === "string" && /^[a-z][a-z0-9_]*$/.test(entitlement.name)
       && new RegExp(`\\b${entitlement.name}\\b`).test(said)) || null;
+}
+
+// -- a destructive action's confirmation (D3088) ---------------------------------
+
+// Whether what a person typed is the name of the thing a destructive action
+// removes, exactly: the same characters, case and length -- nothing trimmed,
+// nothing folded. An empty name confirms nothing. The dialog's button stays
+// disabled until this is true (ADR 0295 decision 6, the brief's screen 9).
+export function nameConfirmed(typed, name) {
+  return typeof typed === "string" && typeof name === "string" && name.length > 0 && typed === name;
+}
+
+// -- usage in words (D3090) -------------------------------------------------------
+
+// The usage document's gauges (`app.control_usage_document`'s `figures`, ADR
+// 0275), in the order drawn, each with what a person calls it and how its
+// number is said. A figure's key is never drawn.
+export const USAGE_FIGURES = [
+  { figure: "database_bytes", title: "Database size", kind: "bytes" },
+  { figure: "repository_bytes", title: "Backup storage", kind: "bytes" },
+  { figure: "branch_count", title: "Branches", kind: "count" },
+  { figure: "branch_bytes", title: "Branch storage", kind: "bytes" },
+  { figure: "customer_connections", title: "Connections", kind: "count" },
+];
+
+const BYTE_UNITS = ["KB", "MB", "GB", "TB", "PB"];
+
+// A size in bytes as words: "512 bytes", "4.1 GB", "960 MB" -- decimal units
+// (1 GB = 10^9 bytes, as the plans' `storage_gb` is read), one decimal below
+// 10 and whole numbers above; a figure that would round to 1000 is said in the
+// next unit. Null for anything that is not a size.
+export function formatBytes(bytes) {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
+    return null;
+  }
+  if (bytes < 1000) {
+    const whole = Math.round(bytes);
+    return `${whole} byte${whole === 1 ? "" : "s"}`;
+  }
+  let scaled = bytes;
+  for (let unit = 0; unit < BYTE_UNITS.length; unit += 1) {
+    scaled /= 1000;
+    const small = scaled < 9.95;
+    const shown = small ? Math.round(scaled * 10) / 10 : Math.round(scaled);
+    if (shown < 1000 || unit === BYTE_UNITS.length - 1) {
+      return `${small ? shown.toFixed(1) : shown.toLocaleString("en-US")} ${BYTE_UNITS[unit]}`;
+    }
+  }
+  return null;
+}
+
+// A count as words: "1", "18,342". Null for anything that is not a count.
+export function formatCount(count) {
+  return Number.isInteger(count) && count >= 0 ? count.toLocaleString("en-US") : null;
+}
+
+// One amount as words by its kind -- bytes, a count, or seconds -- or
+// NOT_READ when the server read none (null or absent) or served something
+// that is not one (ADR 0195: never a zero, never the raw value).
+export function usageAmount(kind, amount) {
+  if (amount === null || amount === undefined) {
+    return NOT_READ;
+  }
+  const words = kind === "bytes" ? formatBytes(amount) : kind === "seconds" ? formatDuration(amount) : formatCount(amount);
+  return words === null ? NOT_READ : words;
+}
+
+// The exact byte count behind a size, for a title ("4,100,000,000 bytes");
+// null for any other kind, or an amount that is not a size.
+export function usageDetail(kind, amount) {
+  return kind === "bytes" && formatBytes(amount) !== null ? `${amount.toLocaleString("en-US")} bytes` : null;
+}
+
+// Each gauge of a usage document's `figures` as a row of words: its title,
+// the latest reading and when it was read (only when it was), the highest in
+// the period, each size's exact bytes, and how many samples could not read it.
+export function usageRows(figures) {
+  const all = figures && typeof figures === "object" ? figures : {};
+  return USAGE_FIGURES.map(({ figure, title, kind }) => {
+    const read = all[figure] && typeof all[figure] === "object" ? all[figure] : {};
+    const latest = usageAmount(kind, read.latest);
+    return {
+      figure,
+      title,
+      latest,
+      latest_detail: usageDetail(kind, read.latest),
+      latest_at: latest === NOT_READ ? null : read.latest_at || null,
+      max: usageAmount(kind, read.max),
+      max_detail: usageDetail(kind, read.max),
+      unread_samples: Number.isInteger(read.unread_samples) ? read.unread_samples : null,
+    };
+  });
+}
+
+// The usage document's other figures, as words: the requests answered, the
+// agent calls and workflow runs summed over the period, and the time awake and
+// asleep from the project's history (`app.control_usage_document`).
+export function usageTotals(served) {
+  const read = served && typeof served === "object" ? served : {};
+  const requests = read.requests && typeof read.requests === "object" ? read.requests.increase : null;
+  return [
+    { figure: "requests", title: "Requests answered (below 400)", value: usageAmount("count", requests) },
+    { figure: "agent_calls", title: "Agent calls", value: usageAmount("count", read.agent_calls) },
+    { figure: "workflow_runs", title: "Workflow runs", value: usageAmount("count", read.workflow_runs) },
+    { figure: "active_seconds", title: "Time awake", value: usageAmount("seconds", read.active_seconds) },
+    { figure: "sleeping_seconds", title: "Time asleep", value: usageAmount("seconds", read.sleeping_seconds) },
+  ];
 }
 
 // -- the notifications' count (D3001) ---------------------------------------------
