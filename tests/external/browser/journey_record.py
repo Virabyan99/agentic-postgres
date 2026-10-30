@@ -1,4 +1,4 @@
-"""The journey's record, and the reading that decides it (Session 46, JRN-001, JRN-002).
+"""The journey's record, and the reading that decides it (Sessions 46-47, JRN-001, JRN-002).
 
 **Pure: no browser import.** `journey_walk.py` drives Chromium and writes the
 record through `Journey`; `problems` reads it. The offline suite holds the
@@ -8,9 +8,12 @@ call the same function on the record the trip wrote -- one reading, not two.
 
 The journey is the agent's, never the person's walk (ADR 0290 §9, D2871): it
 starts from a MEMBERSHIP invitation the probe owner mints, makes its own
-organisation, and creates a project in the console on `slot11-prod`, which the
-lifecycle then continues (`--from-journey`, D2872). It moves `JRN-001`,
-`CON-CREATE-002` and `CTL-DIAG-002`, never `documented_path`.
+organisation, and creates a project in the console on the session's fresh slot
+(Session 46's `slot11-prod`, Session 47's `slot13-prod`), which the lifecycle
+then continues (`--from-journey`, D2872). It moves `JRN-001`, `CON-CREATE-002`
+and `CTL-DIAG-002`, never `documented_path`. **Since Session 47** the driver
+reloads the page while the creation runs (`CON-RELOAD-001`) and the record
+carries that reading (`reload`), judged by its proof, never here (D3065).
 
 **The record holds no secret** (D2416): the driver keeps every password, the
 factor's seed, the handoff token, the link and the cookies in `Journey.held`,
@@ -54,6 +57,19 @@ STEPS: tuple[tuple[str, str], ...] = (
 
 #: J9's reading, 0600, beside the record (D2945).
 CONNECTED_FILE = "connected.json"
+
+#: The session this driver writes, and the sessions whose records it reads
+#: (D3065): Session 46's record (kept, `evidence/session-46.json`) and this one.
+#: WIDENED by a row, never derived from the record.
+SESSION = 47
+SESSIONS = (46, 47)
+
+#: Since Session 47 (`CON-RELOAD-001`): what the reload during the creation
+#: read -- the tracker resumed at its own address, the Overview listed the
+#: creation. Each a boolean READING; whether it found the creation is the
+#: proof's to judge, so a `false` is a record, an absent one a problem.
+RELOAD_READINGS = ("tracker", "overview")
+RELOAD_SINCE = 47
 
 #: A `--dry` journey stops before the creation: a slot is consumed by J6 alone.
 DRY_STEPS = STEPS[:5]
@@ -103,7 +119,7 @@ class Journey:
     def __init__(self, base: str, relay: str, site: str, mode: str) -> None:
         self.record: dict[str, Any] = {
             "version": 1,
-            "session": 46,
+            "session": SESSION,
             "base": base.rstrip("/"),
             "relay": relay.rstrip("/"),
             "site": site.rstrip("/"),
@@ -155,8 +171,9 @@ def problems(record: Any, *, dry: bool = False) -> list[str]:
     if not isinstance(record, dict):
         return [f"the record is a {type(record).__name__}, not an object"]
     found: list[str] = []
-    if record.get("session") != 46:
-        found.append(f"session is {record.get('session')!r}, not 46")
+    session = record.get("session")
+    if type(session) is not int or session not in SESSIONS:
+        found.append(f"session is {session!r}, not one of {list(SESSIONS)}")
     expected = [code for code, _ in (DRY_STEPS if dry else STEPS)]
     steps = record.get("steps") if isinstance(record.get("steps"), list) else []
     taken = [s.get("step") for s in steps if isinstance(s, dict)]
@@ -205,4 +222,9 @@ def problems(record: Any, *, dry: bool = False) -> list[str]:
             f"the support bundle listed {bundle.get('checks')!r} checks, "
             f"{bundle.get('aged')!r} with an age; the doctor has {BUNDLE_CHECKS}"
         )
+    if type(session) is int and session >= RELOAD_SINCE:
+        reload = record.get("reload") if isinstance(record.get("reload"), dict) else {}
+        unread = [name for name in RELOAD_READINGS if type(reload.get(name)) is not bool]
+        if unread:
+            found.append(f"the reload during the creation was not read: {unread}")
     return found

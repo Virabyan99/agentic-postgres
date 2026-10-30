@@ -398,6 +398,16 @@ runs add go in a second table below it, in execution order.
 | **D3093** | D3090's class: plain words. | **Monitoring** still draws signal names by their keys (`database_bytes`, `cache_hit_ratio`) and sizes raw (*41000000 bytes*). | **Owed** (outside Run 9b's brief; `formatBytes` makes it small) — Run 11 or Stage 6. | — | 0297 |
 | **D3094** | D3088: every destructive action confirmed by its name. | Removing a member, revoking an invitation and **revoking a key** are one-click busy buttons (no data removed — but a key revoke cannot be undone). | **The operator, 2026-10-30: *"Confirm key revoke only"*.** Revoking a key opens the type-the-name dialog (*Anything using this key stops working at once…*); removing a member and revoking an invitation stay one click (both redone by inviting again). `UNDESTRUCTIVE_DELETES` loses the keys route; the guard reads three dialogs. Proved: the console set + `test_look` 56 passed; a mutation restoring the one-click revoke FAILED the guard, its control passed; the look rehearsal 40 pages, 0 problems. | Irreversible is the operator's word to weigh. | 0295 |
 | **D3095** | — | `console_look.py`'s usage fixture lacked `agent_calls`, `workflow_runs`, `active_seconds`, `sleeping_seconds`, which the server serves (D3077's class). | Added. | Fixtures say what production says. | — |
+| **D3100** | N0/N1 read back by `dig @1.1.1.1`. | **On this workstation every port-53 query is answered by WSL's stub** (`@192.0.2.1` answered `example.com`; `id.server CH TXT` empty): a workstation `dig @1.1.1.1` is a cache's answer. | The read-back prints who answered; `--require-identity` exits 6 when it cannot tell; **at the sitting the DNS read-back runs on the host** (`s47-cutover-readback.py --require-identity`). | A reading names its source. | 0195 |
+| **D3101** | N0 writes the new zone's 19 records. | N1's `email/routing/dns` call writes the 5 mail records itself. | The plan marks them `written_by: N1`; **N0 writes 14**, and the read-back after N1 compares all 19. | One writer per record. | 0299 |
+| **D3102** | D2937: the `/home/op` copy list by `grep '/home/op/…'`. | The grep cannot see a script the host runs that no other script names (`dns`, `hostyaml`, `v1`, `r2shape`, `launch`) — D2937's class again. | `s47-copy-list.py` adds host-run detection and the Session 35 helpers: **64 paths, 14 COPY rows with sha256**, 3 SITTING rows; `s47-copy-to-host.sh` copies and reads back by sum. | A list built by the class that missed four. | — |
+| **D3103** | — | The sweep's `--lifecycle-record-file`/`--branch-record-file` inputs are copies made at the sitting, not host outputs. | SITTING rows in the copy list. | — | — |
+| **D3104** | §2: `console_reload_live`, `operation_steps_live`. | The journey record now carries `reload` (tracker, overview, …) and `tracker_steps`; `problems()` requires the reload **read** for session ≥ 47. | **Run 12 writes the two proofs** reading them. | The record is built; the proof reads it. | 0296 |
+| **D3105** | — | A battery survivor: a non-boolean reload reading was accepted. | The test strengthened; the mutation now killed. | A survivor named a weak test. | — |
+| **D3106** | D2938: the lifecycle's administrator name. | The Session 46 rehearsal's fake slot accepted any username. | The Session 47 rehearsal records every `/auth/login` username and requires `journey.admin` — passed (30/30). | The rehearsal tests the trip's last failure. | — |
+| **D3107** | — | This workstation has no `dig` and no `sudo apt`. | `~/s47/run11/bin/dig` runs bind-tools in a local Alpine container. | — | — |
+| **D3108** | D3082: the console look's record. | Run 12's gate has `--console-look-record-file`. | `s47-external.sh` passes `~/s47/console-look/record.json`; X0 skips `session47_look`; **the path must equal Run 12's launcher's**. | One path, two readers. | 0295 |
+| **D3109** | — | `s47-walk-record.py`'s route pattern. | Recognises `nomipg.com` only (a functional derivation); notes naming the old domain are not read as routes. | The walk is on the new site. | 0290 |
 | **D3078** | Brief §1: plain language. | The `limit_approaching` notification shows the server template's machine word (*"storage_gb is at 4.1 of 5"*; seen in the 390 px look). | **Run 9** words entitlements in the console (*"Storage: 4.1 of 5 GB"*, *"Agent calls today"*), from `plans` names, never the raw key. | A key is not a sentence. | 0297 |
 
 ---
@@ -1024,7 +1034,35 @@ D3063's literals, then `build-site --check`.
 4. **The `/home/op` copy list** by `grep -oh '/home/op/[^ "]*'` over the trip's
    scripts (D2937).
 
-**Done.**
+**Done.** 2026-10-30, by a delegated agent (Opus 5.5), reviewed in the main session.
+**Instruments** in WSL `~/s47/run11/` (`README.md` lists each, its flags, inputs,
+outputs and its place in Run 13): `s47-derive.py` derives 30 children from Session 46's
+by functional strings only (95 named substitutions, 255 replacements, counts frozen;
+a leftover Session 46 name or old-zone name fatal; `slot11`→`slot13`, `slot10`→`slot12`);
+`s47-post-derive.py` re-applies the hand edits (`s47-dns.sh` five names by default;
+`s47-journey.sh` derives console/relay/site from `site_build` and exits 95 until the
+bump moves them; `jr-start.sh` runs **J9 at once**; `life-start.sh` requires the plans
+record and J9's code, `--admin-username journey.admin`); new `pl-start.sh`,
+`s47-cutover-plan.py` (**19 records**: apex/www proxied CNAMEs, `control.`, `sql.`,
+slot3's and slot10's five, MX×3/SPF/DKIM from the old zone), `s47-cutover-readback.py`,
+`s47-redirects.sh` (301 site, **308** `control.`, a POST not followed), `s47-h0.py`
+(slot manifest + host.yaml + control manifest, then a render read of the issuer and
+doors), `s47-copy-list.py` + `s47-copy-to-host.sh`. **Rehearsed**: the three drivers twice
+(journey controls `--leak` 6, `--plant-foreign` 5, `--hide-creation` → overview false);
+PL then LC on a local control cluster **30/30** (LC carried PL's refusal; signed in as
+`journey.admin`); the cutover plan read back absent before N0, and **GO 19/19 over the
+OLD zone** (the reader checked against real records); H0 on real manifests (issuer
+`https://slot3.nomipg.com/api/app/auth`; a half-moved manifest refused by the product);
+the redirect read-back GO/NO/6; **the external half on a Session 47 journey-mode record
+19/19** (controls: a 46 stamp fails j02/j04/j07; no reload → 18 errors). **In-tree**
+(D3065, D3077): `journey_record` accepts sessions 46/47 and requires the reload read for
+47; `journey_walk` reloads during the creation (`record["reload"]`, `tracker_steps`),
+Session 47 names, `nomipg.com` defaults; `site_look` defaults; `test_journey_driver`
+extended (no node id renamed or added). **Main-session check**: those four files alone
+on `e8b7dac` (as CI sees them) — ruff clean, **326 passed** (`test_journey_driver`,
+`test_console_look`, `test_session_forty_six_gate_modes`, shape, registry, gates,
+repository). Rows **D3100–D3109**. **Owed to Run 12**: the `console_reload_live` and
+`operation_steps_live` proofs (D3104); the console-look record path (D3108).
 
 ### Run 12 — the bump
 

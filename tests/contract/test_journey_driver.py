@@ -1,4 +1,4 @@
-"""JRN-002: the journey's record and the reading that decides it, offline (Session 46).
+"""JRN-002: the journey's record and the reading that decides it, offline (Sessions 46-47).
 
 The driver (`tests/external/browser/journey_walk.py`) needs Chromium, which this
 suite does not have; like the console's two walk drivers it is rehearsed by a
@@ -42,7 +42,7 @@ def _journey(codes: list[str] | None = None, **members: Any) -> dict[str, Any]:
     journey.record.update(
         exit=0,
         operation_id="6f1d2b7c-9e11-4c3a-9a4e-0b5c6f0e8d0e",
-        project_key="slot11-prod",
+        project_key="slot13-prod",
         organization="0b5c6f0e-8d0e-4c3a-9a4e-3f1d2b7c9e11",
         source_commit="c" * 40,
         site_digest="0" * 64,
@@ -52,6 +52,7 @@ def _journey(codes: list[str] | None = None, **members: Any) -> dict[str, Any]:
         string_parameters={"sslmode": "verify-full"},
         views={view: {"read": True, "words": 9} for view in jr.VIEWS},
         support_bundle={"checks": jr.BUNDLE_CHECKS, "aged": jr.BUNDLE_CHECKS, "said": True},
+        reload={"tracker": True, "overview": True},
     )
     journey.record.update(members)
     return journey.record
@@ -129,3 +130,20 @@ def test_a_missing_step_fails_the_record() -> None:
     plain = _journey(string_parameters={"sslmode": "require"})
     assert any("verify-full" in p for p in jr.problems(plain))
     assert jr.problems("not a record") == ["the record is a str, not an object"]
+    # D3065: the driver writes this session's record and the reading accepts
+    # Session 46's and 47's alone, by type; since 47 the reload during the
+    # creation must have been READ -- a `false` is a reading the proof judges,
+    # an absent or non-boolean one is a record that did not read it.
+    assert jr.Journey(BASE, RELAY, "https://s.test", "rehearsal").record["session"] == jr.SESSION
+    assert jr.SESSION in jr.SESSIONS and set(jr.SESSIONS) == {46, 47}
+    for other in (45, 48, "47", True, None):
+        assert any("session is" in p for p in jr.problems(_journey(session=other))), other
+    unread = _journey(reload={"tracker": True})
+    assert jr.problems(unread) == ["the reload during the creation was not read: ['overview']"]
+    assert any("reload" in p for p in jr.problems(_journey(reload="yes")))
+    worded = _journey(reload={"tracker": True, "overview": "found it"})
+    assert jr.problems(worded) == ["the reload during the creation was not read: ['overview']"]
+    assert jr.problems(_journey(reload={"tracker": False, "overview": False})) == []
+    earlier = _journey(session=46)
+    del earlier["reload"]
+    assert jr.problems(earlier) == []

@@ -11,6 +11,16 @@ file, the panel dismissed (J6) -- the creation followed to `succeeded` (J7),
 the five readings (J11), the support bundle's checks (J12), and sign-out (J13).
 J9 (the string connects) is the live proof's; J14 the lifecycle record's.
 
+**Session 47** (D3065; `CON-RELOAD-001`, claim `console_reload_live`): J7 first
+RELOADS the creation's tracker while the creation runs and reads it resumed
+at its own address from the API, then opens the Overview and reads the
+creation listed there with its *Follow* link, and follows that link to the
+end -- each reading recorded as `reload` (`tracker`, `overview`), never
+raised: the proof judges it, and the slot is consumed either way. The steps
+the tracker drew at the end are recorded as `tracker_steps` (`CTL-STEPS-002`).
+The account is `journey-s<N>-…`, the organisation `lifecycle-s<N>` and the
+project *Journey s<N>*, N the record's session (`journey_record.SESSION`).
+
 **One record** (`journey_record.Journey`), written 0600 into `--out`, holds no
 secret: the link, the password, the seed, the token and the cookies are held
 and searched for before it is written (exit 6). The three a later step needs
@@ -22,8 +32,10 @@ recorded by origin and must stay on the console's and the relay's (exit 5).
 `--rehearse` answers every `/api/v1` call from a stand-in inside the browser and
 the editor's socket with `sql_walk`'s fake PostgreSQL; `--leak` makes the
 stand-in put the account's password into the page (exit 6); `--plant-foreign`
-adds one request to a foreign origin (exit 5). `--dry` stops after J5, before
-anything consumes a slot.
+adds one request to a foreign origin (exit 5); `--hide-creation` makes the
+stand-in list no open creation, so the Overview reading is recorded `false`
+(the reload reading's control). `--dry` stops after J5, before anything
+consumes a slot.
 
 Exit codes: 0 walked and the record is clean; 2 usage; 4 a step failed (the
 record says which); 5 the record has a problem (`journey_record.problems`);
@@ -46,7 +58,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from console_walk import STEP_SECONDS, fresh_code, seed_of, totp, write_private
-from journey_record import BUNDLE_CHECKS, DRY_STEPS, Journey, now, problems
+from journey_record import BUNDLE_CHECKS, DRY_STEPS, SESSION, Journey, now, problems
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, Route, sync_playwright
 from sql_walk import FakeBackend, settle, tables
 
@@ -69,6 +82,10 @@ CREATION_STEPS = [
 ]
 #: The operation the console shows as its tracker's address (ADR 0296 decision 5).
 TRACKER = re.compile(r"#/operations/([0-9a-f-]{36})$")
+#: The tracker's title for a creation (`app.js` `OPERATION_TITLES["project.create"]`).
+CREATING = "Creating a project"
+#: What the server says of a usage window with no sample (`control_service.NO_SAMPLE_REASON`).
+NO_SAMPLE_REASON = "no usage sample was recorded in this window"
 
 
 def ago(seconds: float) -> str:
@@ -87,8 +104,14 @@ class Fixtures:
     does: a member needs no factor, an owner does; a creation runs, then
     succeeds with its key; the support bundle is unread before its first pass."""
 
-    def __init__(self, leak: bool) -> None:
+    def __init__(self, leak: bool, hide_creation: bool = False) -> None:
         self.leak = leak
+        self.hide_creation = hide_creation
+        #: The stand-in's creation runs until the driver has taken its reload
+        #: reading (a real one runs ~25 minutes; this one three polls after).
+        self.reloaded = False
+        self.query: dict[str, list[str]] = {}
+        self.subject_name = "Journey"
         self.seed = secrets.token_bytes(20)
         self.secret = base64.b32encode(self.seed).decode("ascii").rstrip("=")
         self.account: dict[str, str] | None = None
@@ -105,12 +128,12 @@ class Fixtures:
         ]
         self.operation = str(uuid.uuid4())
         self.polls = 0
-        self.key = "slot11-prod"
+        self.key = "slot13-prod"
         self.created_in: str | None = None
         self.bundle_reads = 0
         self.doors = {
-            "pooled": "apg_slot11_prod_customer_app",
-            "direct": "apg_slot11_prod_customer_admin",
+            "pooled": "apg_slot13_prod_customer_app",
+            "direct": "apg_slot13_prod_customer_admin",
         }
         self.digest_seen = ""
 
@@ -194,9 +217,17 @@ class Fixtures:
             self.organizations.append(created)
             return 201, created, headers
         if (method, path) == ("GET", "/operations"):
-            return 200, {"operations": []}, headers
+            # As the plane lists them: an organisation's operations, `status=open`
+            # the unfinished ones alone (ADR 0296) -- the creation while it runs.
+            org = (self.query.get("organization") or [""])[0]
+            listed = []
+            if self.created_in and org == self.created_in and not self.hide_creation:
+                row = self._operation(self.done())
+                if self.query.get("status") != ["open"] or row["status"] != "succeeded":
+                    listed.append(row)
+            return 200, {"operations": listed}, headers
         if (method, path) == ("GET", "/projects"):
-            return 200, {"projects": [self._project()] if self.polls >= 3 else []}, headers
+            return 200, {"projects": [self._project()] if self.done() else []}, headers
         if (method, path) == ("POST", "/projects"):
             assert set(body) == {
                 "organization",
@@ -207,48 +238,15 @@ class Fixtures:
             }, sorted(body)
             assert re.fullmatch(r"[0-9a-f]{64}", body["handoff_sha256"])
             self.created_in = body["organization"]
+            self.subject_name = body["name"]
             return (
                 202,
                 {"operation": {"id": self.operation, "status": "pending", "project_key": None}},
                 headers,
             )
         if (method, path) == ("GET", f"/operations/{self.operation}"):
-            # Shaped as the plane serves an operation since Session 47 Run 3
-            # (ADR 0296): its step log, its subject and what is expected of it.
             self.polls += 1
-            done = self.polls >= 3
-            began = [("allocate", 30), ("admit", 29), ("deploy-1", 28)]
-            if done:
-                began += [(step, 5) for step, _ in CREATION_STEPS[3:]]
-            return (
-                200,
-                {
-                    "id": self.operation,
-                    "organization_id": self.created_in,
-                    "type": "project.create",
-                    "status": "succeeded" if done else "running",
-                    "step": "registry" if done else "deploy-1",
-                    "progress": 100 if done else 30,
-                    "project_key": key,
-                    "error_code": None,
-                    "created_at": ago(31),
-                    "started_at": ago(30),
-                    "finished_at": ago(0) if done else None,
-                    "steps": [
-                        {"step": step, "started_at": ago(seconds)} for step, seconds in began
-                    ],
-                    "subject": {"name": "Journey s46", "profile": "small"},
-                    "expected": {
-                        "steps": [
-                            {"step": step, "label": label, "typical_seconds": 1.0}
-                            for step, label in CREATION_STEPS
-                        ],
-                        "typical_seconds": {"low": 1375.9, "high": 1708.4},
-                        "bound_seconds": 1800,
-                    },
-                },
-                headers,
-            )
+            return 200, self._operation(self.done()), headers
         if (method, path) == ("GET", "/operations/credential-rehearsal"):
             return 200, {"id": "credential-rehearsal", "status": "succeeded"}, headers
         if (method, path) == ("GET", f"/projects/{key}"):
@@ -256,7 +254,7 @@ class Fixtures:
         if (method, path) == ("GET", f"/projects/{key}/connections"):
             door = {
                 "port": 5432,
-                "database": "slot11_prod",
+                "database": "slot13_prod",
                 "sslmode": "verify-full",
                 "connection_limit": 2,
             }
@@ -266,12 +264,12 @@ class Fixtures:
                     "project": key,
                     "pooled": {
                         **door,
-                        "host": "pool.slot11.rehearsal.test",
+                        "host": "pool.slot13.rehearsal.test",
                         "user": self.doors["pooled"],
                     },
                     "direct": {
                         **door,
-                        "host": "direct.slot11.rehearsal.test",
+                        "host": "direct.slot13.rehearsal.test",
                         "user": self.doors["direct"],
                     },
                     "password": "<password from your file>",
@@ -285,16 +283,47 @@ class Fixtures:
             )
             return 202, {"operation": {"id": "credential-rehearsal", "status": "pending"}}, headers
         if (method, path) == ("GET", f"/projects/{key}/usage"):
+            # D3077: shaped as the server serves a new project's first window --
+            # the control set's document (0008), no sample yet, so the status is
+            # `could_not_determine` with its reason, never `read` (ADR 0275) --
+            # and each read-not-enforced entitlement beside its figure.
+            unread = {"latest": None, "latest_at": None, "max": None, "unread_samples": 0}
+            figures = (
+                "database_bytes",
+                "repository_bytes",
+                "branch_count",
+                "branch_bytes",
+                "customer_connections",
+            )
             return (
                 200,
                 {
                     "project_key": key,
-                    "status": "read",
-                    "window": {"from": now(), "to": now()},
-                    "samples": {"present": 0, "expected": 288},
-                    "figures": {},
+                    "window": {"from": ago(86400), "to": now()},
+                    "samples": {"expected": 288, "present": 0},
+                    "figures": {figure: dict(unread) for figure in figures},
                     "requests": None,
-                    "entitlements": [],
+                    "agent_calls": None,
+                    "workflow_runs": None,
+                    "active_seconds": 60,
+                    "sleeping_seconds": 0,
+                    "status": "could_not_determine",
+                    "reason": NO_SAMPLE_REASON,
+                    "plan": "free",
+                    "entitlements": [
+                        {
+                            "name": "storage_gb",
+                            "value": 5,
+                            "enforced": False,
+                            "against": "database_bytes",
+                        },
+                        {
+                            "name": "agent_calls_per_day",
+                            "value": 10000,
+                            "enforced": False,
+                            "against": "agent_calls",
+                        },
+                    ],
                 },
                 headers,
             )
@@ -389,6 +418,39 @@ class Fixtures:
             )
         return 404, {"error": "not_found"}, headers
 
+    def done(self) -> bool:
+        return self.polls >= 3 and self.reloaded
+
+    def _operation(self, done: bool) -> dict[str, Any]:
+        """The creation shaped as the plane serves an operation since Session 47
+        Run 3 (ADR 0296): its step log, its subject and what is expected of it."""
+        began = [("allocate", 30), ("admit", 29), ("deploy-1", 28)]
+        if done:
+            began += [(step, 5) for step, _ in CREATION_STEPS[3:]]
+        return {
+            "id": self.operation,
+            "organization_id": self.created_in,
+            "type": "project.create",
+            "status": "succeeded" if done else "running",
+            "step": "registry" if done else "deploy-1",
+            "progress": 100 if done else 30,
+            "project_key": self.key,
+            "error_code": None,
+            "created_at": ago(31),
+            "started_at": ago(30),
+            "finished_at": ago(0) if done else None,
+            "steps": [{"step": step, "started_at": ago(seconds)} for step, seconds in began],
+            "subject": {"name": self.subject_name, "profile": "small"},
+            "expected": {
+                "steps": [
+                    {"step": step, "label": label, "typical_seconds": 1.0}
+                    for step, label in CREATION_STEPS
+                ],
+                "typical_seconds": {"low": 1375.9, "high": 1708.4},
+                "bound_seconds": 1800,
+            },
+        }
+
     def _project(self) -> dict[str, Any]:
         return {
             "key": self.key,
@@ -402,6 +464,7 @@ class Fixtures:
     def handle(self, route: Route) -> None:
         request = route.request
         path = urlsplit(request.url).path.split("/api/v1", 1)[1]
+        self.query = parse_qs(urlsplit(request.url).query)
         body = json.loads(request.post_data) if request.post_data else {}
         if (request.method, path) == ("DELETE", "/sessions/current"):
             self.signed_in = False
@@ -450,6 +513,62 @@ def heading(page: Page, *names: str, timeout: float = 30_000) -> str:
     return wanted.first.inner_text().strip()
 
 
+def drawn_steps(page: Page) -> list[dict[str, str]]:
+    """The tracker's step list as drawn: each step's label, its state (the
+    item's class: done, current, stopped, todo) and the time it says."""
+    return [
+        {
+            "label": item.locator("strong").first.inner_text().strip(),
+            "state": str(item.get_attribute("class") or ""),
+            "time": item.locator("span.time").first.inner_text().strip(),
+        }
+        for item in page.locator("#main ol.steps li").all()
+    ]
+
+
+def reload_reading(page: Page, base: str, operation: str) -> dict[str, Any]:
+    """Session 47 (`CON-RELOAD-001`): the creation's tracker reloaded while it
+    runs -- read back from the API at its own address, its steps drawn, the
+    token said to be gone -- then the Overview, read for the creation's
+    *Follow* link. Two boolean readings and what each saw; a Playwright
+    failure is recorded by its type and reads `false`, never raised."""
+    tracker = f"#/operations/{operation}"
+    reading: dict[str, Any] = {"at": now(), "tracker": False, "overview": False}
+    try:
+        page.reload(wait_until="load")
+        heading(page, CREATING)
+        page.locator("#main ol.steps li").first.wait_for(timeout=30_000)
+        reading["address_kept"] = "#" + urlsplit(page.url).fragment == tracker
+        reading["status"] = page.locator("#main .meta-row b").first.inner_text().strip()
+        reading["steps_drawn"] = len(drawn_steps(page))
+        reading["token_said_gone"] = (
+            page.get_by_text("The handoff token was shown once, when the creation started").count()
+            == 1
+        )
+        reading["tracker"] = bool(reading["address_kept"] and reading["steps_drawn"])
+    except PlaywrightError as error:
+        reading["tracker_error"] = type(error).__name__
+    try:
+        page.goto(f"{base}/console/#/")
+        heading(page, "Projects")
+        listed = page.locator(f'#main a[href="{tracker}"]')
+        try:
+            listed.first.wait_for(timeout=30_000)
+        except PlaywrightError as error:
+            reading["overview_error"] = type(error).__name__
+        reading["overview_links"] = listed.count()
+        # The project list's row for it (`projectList`): its Follow link and its
+        # "Being created: <step>" line (case-sensitive: the checklist's own
+        # "is being created" is another element).
+        follow = page.locator(f'a[href="{tracker}"]')
+        rows = page.locator("#main tr", has=follow).filter(has_text=re.compile(r"Being created: "))
+        reading["overview_row_creating"] = rows.count() == 1
+        reading["overview"] = reading["overview_links"] >= 1
+    except PlaywrightError as error:
+        reading["overview_error"] = type(error).__name__
+    return reading
+
+
 def walk(arguments: argparse.Namespace) -> int:
     out = Path(arguments.out)
     link = Path(arguments.link_file).read_text(encoding="utf-8").strip()
@@ -459,7 +578,7 @@ def walk(arguments: argparse.Namespace) -> int:
     site = REHEARSAL_SITE if arguments.rehearse else arguments.site
     journey = Journey(base, relay, site, "rehearsal" if arguments.rehearse else "live")
     journey.held += [link, parts.fragment]
-    username = f"journey-s46-{secrets.token_hex(3)}"
+    username = f"journey-s{journey.record['session']}-{secrets.token_hex(3)}"
     password = base64.urlsafe_b64encode(secrets.token_bytes(24)).decode("ascii").rstrip("=")
     journey.held.append(password)
     record = journey.record
@@ -471,7 +590,7 @@ def walk(arguments: argparse.Namespace) -> int:
         seed_file="totp-seed",
         account_password_file="account-password",  # noqa: S106 -- a file's name, not its content
     )
-    fixtures = Fixtures(arguments.leak) if arguments.rehearse else None
+    fixtures = Fixtures(arguments.leak, arguments.hide_creation) if arguments.rehearse else None
     exit_code = 0
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
@@ -562,7 +681,9 @@ def walk(arguments: argparse.Namespace) -> int:
             if arguments.dry:
                 record["dry"] = True
             else:
-                run_the_rest(arguments, journey, page, context, backend, organization, out)
+                run_the_rest(
+                    arguments, journey, page, context, backend, fixtures, organization, out
+                )
         except Exception as error:
             # Playwright's message names a selector and a timeout, never a value
             # this journey typed; the record keeps the type alone.
@@ -598,6 +719,7 @@ def run_the_rest(
     page: Page,
     context: Any,
     backend: FakeBackend | None,
+    fixtures: Fixtures | None,
     organization: str,
     out: Path,
 ) -> None:
@@ -636,10 +758,25 @@ def run_the_rest(
     accepted = time.monotonic()
 
     def j07() -> str:
+        # Session 47 (CON-RELOAD-001): the creation reloaded while it runs, then
+        # found on the Overview and followed from there to the end. A reading
+        # that did not find it is recorded, never raised (the proof judges it).
+        operation = record["operation_id"]
+        reading = reload_reading(page, base, operation)
+        record["reload"] = reading
+        if fixtures is not None:
+            fixtures.reloaded = True
+        if reading["overview"]:
+            page.locator(f'#main a[href="#/operations/{operation}"]').first.click()
+            reading["followed_from"] = "overview"
+        else:
+            page.goto(f"{base}/console/#/operations/{operation}")
+            reading["followed_from"] = "address"
         done = page.get_by_role("link", name="Connect to it").or_(page.locator("#main p.refusal"))
         done.first.wait_for(timeout=arguments.create_timeout * 1000)
         if page.locator("#main p.refusal").count():
             raise RuntimeError("the creation did not succeed")
+        record["tracker_steps"] = drawn_steps(page)
         return (
             page.locator("#main p", has_text="is ready").locator("code").first.inner_text().strip()
         )
@@ -765,10 +902,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--link-file", required=True, help="the membership invitation link (0600)")
     parser.add_argument("--out", required=True, help="an existing directory for the four files")
     parser.add_argument("--base", help="the console's origin (default: the link's)")
-    parser.add_argument("--relay", default="wss://sql.agenticpostgresql.com")
-    parser.add_argument("--site", default="https://agenticpostgresql.com")
-    parser.add_argument("--organization", default="lifecycle-s46")
-    parser.add_argument("--project-name", default="Journey s46")
+    # The product's names since ADR 0299 (`site_build`, which this image cannot
+    # import: the trip's launcher passes them derived from it).
+    parser.add_argument("--relay", default="wss://sql.nomipg.com")
+    parser.add_argument("--site", default="https://nomipg.com")
+    parser.add_argument("--organization", default=f"lifecycle-s{SESSION}")
+    parser.add_argument("--project-name", default=f"Journey s{SESSION}")
     parser.add_argument("--admin-username", default="journey.admin")
     parser.add_argument("--create-timeout", type=int, default=3900)
     parser.add_argument("--bundle-timeout", type=int, default=1800)
@@ -777,9 +916,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rehearse", action="store_true")
     parser.add_argument("--leak", action="store_true", help="rehearsal: a fixture leaks a password")
     parser.add_argument("--plant-foreign", action="store_true", help="rehearsal: a foreign request")
+    parser.add_argument(
+        "--hide-creation", action="store_true", help="rehearsal: no open creation is listed"
+    )
     arguments = parser.parse_args(argv)
-    if (arguments.leak or arguments.plant_foreign) and not arguments.rehearse:
-        parser.error("--leak and --plant-foreign are rehearsal fixtures")
+    if (arguments.leak or arguments.plant_foreign or arguments.hide_creation) and not (
+        arguments.rehearse
+    ):
+        parser.error("--leak, --plant-foreign and --hide-creation are rehearsal fixtures")
     out = Path(arguments.out)
     if not out.is_dir():
         parser.error(f"{out} is not a directory")

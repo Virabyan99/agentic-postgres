@@ -156,8 +156,10 @@ def walk(arguments: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="site_look", allow_abbrev=False)
-    parser.add_argument("--site", default="https://agenticpostgresql.com")
-    parser.add_argument("--console", default="https://control.agenticpostgresql.com")
+    # The product's names since ADR 0299 (`site_build.SITE_URL` and the console's
+    # origin, which this image cannot import; a launcher passes them).
+    parser.add_argument("--site", default="https://nomipg.com")
+    parser.add_argument("--console", default="https://control.nomipg.com")
     parser.add_argument("--pages-root", type=Path, default=Path("/repo/site/pages"))
     parser.add_argument("--record", type=Path)
     parser.add_argument("--shots", type=Path, default=None)
