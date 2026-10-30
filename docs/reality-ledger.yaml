@@ -119,7 +119,7 @@ rows:
       with a password and signs in to the management API; there is no public
       signup.
     today: >-
-      Accounts live in the control project (control.agenticpostgresql.com),
+      Accounts live in the control project (control.nomipg.com),
       created only by accepting an invitation, and span the projects their
       organizations hold. Each project's own auth service still holds that
       project's people.
@@ -185,7 +185,7 @@ rows:
     concept: Management API (/api/v1)
     status: beta
     customer_text: >-
-      https://control.agenticpostgresql.com/api/v1 manages accounts,
+      https://control.nomipg.com/api/v1 manages accounts,
       organizations, members, invitations and keys, and creates and manages
       your projects, their branches, their connections and their backups.
     today: >-
@@ -244,12 +244,15 @@ rows:
     concept: Web console
     status: beta
     customer_text: >-
-      The console at https://control.agenticpostgresql.com/console/: accept an
-      invitation link, set up your second factor, sign in, and see your
-      organizations, projects, connection strings, branches, backups, usage,
-      insights, monitoring, plan, notifications and settings, and create a
-      project; the console runs no SQL on the platform's side, and its SQL
-      editor is your own client.
+      The console at https://control.nomipg.com/console/: accept an
+      invitation link, set up your second factor, sign in, and follow a
+      getting-started checklist to a connected application. Every page has a
+      help link, and Help is at the top of each; it shows your organizations
+      and projects, each creation step by step with its usual time, Connect in
+      three steps with the code for seven clients, branches, backups, usage,
+      slowest queries, monitoring, plan, notifications and settings, and
+      creates a project; the console runs no SQL on the platform's side, and
+      its SQL editor is your own client.
     today: >-
       Static pages served by the control project's console service (ADR 0280) at
       /, /accept and /console/, every page a named /api/v1 call, signed in with
@@ -292,12 +295,16 @@ rows:
     status: trial
     customer_text: >-
       Being verified: a member of an organization creates a project in the
-      console or with the command-line client, on a slot the operator prepared;
-      the console shows a one-time token once, which claims the project's first
-      administrator from a terminal if you want its admin API. On the Free plan
-      an organization holds one project; a second is refused with "plan limit
-      reached", and when no slot is ready the request is refused with "capacity
-      exhausted" -- in both cases nothing is created.
+      console or with the command-line client, on a slot the operator prepared.
+      The console follows the creation step by step -- each step's time and the
+      usual total, about 23 to 28 minutes, with no percentage -- on a page that
+      a refresh reads again, and the organization's Activity lists every
+      operation. The one-time token it shows once is optional: it claims the
+      project's first administrator from a terminal, and connecting does not
+      need it. On the Free plan an organization holds one project, one being
+      created included; a second is refused with "plan limit reached", and
+      when no slot is ready the request is refused with "capacity exhausted"
+      -- in both cases nothing is created.
     today: >-
       POST /v1/projects (bin/project.sh create) records a project.create
       operation once the organisation's plan admits it (ADR 0274: Free's
@@ -322,10 +329,12 @@ rows:
       token made in the page, only its SHA-256 sent, shown once at acceptance --
       and apg project claim --token-file claims with it; console_create_live
       reads the journey's creation on slot11-prod, the one the lifecycle
-      continues (D2872).
+      continues (D2872). Being verified again in Session 47 (D3123): the
+      journey on slot13-prod creates in the console it rebuilt, read by
+      console_create_reearned_live.
     today_evidence: null
     evidence:
-      - console_create_live
+      - console_create_reearned_live
     stage5_reality: >-
       POST /v1/projects records a project.create operation (member and above,
       a person only), refused "capacity exhausted" with no slot ready before
@@ -339,7 +348,7 @@ rows:
       - bin/project.sh create
       - /console/
     since_session: 38
-    target_session: 46
+    target_session: 47
 
   - id: project_deletion
     concept: Delete a project
@@ -959,9 +968,11 @@ rows:
     concept: Notifications
     status: beta
     customer_text: >-
-      In-app notifications for an organization: one for every finished
-      operation, and a notice once a day when a project passes 80% of a shown
-      limit. Nothing is emailed.
+      In-app notifications for an organization, each a sentence with a link:
+      one when a project creation, a branch, a restore or a branch reset
+      starts, one for every finished operation, one when a project goes to
+      sleep after its idle time or a branch expires, and a notice once a day
+      when a project passes 80% of a shown limit. Nothing is emailed.
     today: >-
       control_finish_operation writes ONE notification from a fixed template in
       the transaction that finishes the operation -- its type, its project, how
@@ -1092,10 +1103,11 @@ rows:
       one asleep row. GET /v1/projects/{key}/diagnostics (a member, a person's
       session only) serves the readings with their ages, stale past 1,800 s, and
       the project's newest 50 operations (ADR 0292). Built in Session 46; being
-      verified on slot11-prod's journey: support_bundle_live.
+      verified on slot11-prod's journey: support_bundle_live; again in
+      Session 47 on slot13-prod's (D3123): support_bundle_reearned_live.
     today_evidence: null
     evidence:
-      - support_bundle_live
+      - support_bundle_reearned_live
     stage5_reality: >-
       The doctor's verdicts recorded by the reconciler, read by a member with
       the project's operations; the control plane holds no credential to the
@@ -1106,7 +1118,7 @@ rows:
       - bin/project.sh diagnostics
       - /console/
     since_session: 46
-    target_session: 46
+    target_session: 47
 
   - id: autoscaling
     concept: Autoscaling

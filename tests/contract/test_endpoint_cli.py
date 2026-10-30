@@ -287,6 +287,27 @@ def test_show_names_both_doors_and_no_password(person: Person, served: Any) -> N
     assert "<password from your file>" in text.stdout
 
 
+def test_show_says_where_each_snippet_goes_and_what_to_install(person: Person, served: Any) -> None:
+    """D3030: the text form prints, under each client's heading, the file its
+    snippet goes in and what to install -- exactly the `where` lines the server's
+    connections document serves, one pair per served client, in its order."""
+    user, _org, key = _project(served, "where", role="viewer")
+    person.login(user)
+    document = json.loads(person.run("endpoint", "show", "--project-key", key, "--json").stdout)
+    where = document["where"]
+    assert set(where) == set(document["snippets"]), (sorted(where), sorted(document["snippets"]))
+    text = person.run("endpoint", "show", "--project-key", key)
+    assert text.returncode == 0, text.stderr
+    lines = text.stdout.splitlines()
+    for client in document["snippets"]:
+        at = lines.index(f"# {client}")
+        assert lines[at + 1 : at + 3] == [
+            f"# where it goes: {where[client]['file']}",
+            f"# what to install: {where[client]['install']}",
+        ], (client, lines[at : at + 3])
+    assert text.stdout.count("# where it goes: ") == len(document["snippets"])
+
+
 def test_connect_hands_psql_a_private_passfile_and_removes_it(person: Person, served: Any) -> None:
     """psql gets the door's conninfo -- `verify-full` against the system's
     authorities -- and the arguments after `--`; the password only through a

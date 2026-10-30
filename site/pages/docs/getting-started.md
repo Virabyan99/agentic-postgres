@@ -25,7 +25,7 @@ In the console, *Members and keys* makes an invitation link for a role and shows
 apg org invite --role member --output ./invitation
 ```
 
-The file holds the link; the person opens it, or runs `apg login accept --invitation-file ./invitation --endpoint https://control.agenticpostgresql.com/api/v1 --username NAME`.
+The file holds the link; the person opens it, or runs `apg login accept --invitation-file ./invitation --endpoint https://control.nomipg.com/api/v1 --username NAME`.
 
 ## Management keys
 
@@ -33,5 +33,5 @@ A key reads your organisations and projects through the management API. It is sh
 
 ```
 apg org key-create --name ci --scopes projects:read --output ./key
-apg login key --endpoint https://control.agenticpostgresql.com/api/v1 --key-file ./key
+apg login key --endpoint https://control.nomipg.com/api/v1 --key-file ./key
 ```

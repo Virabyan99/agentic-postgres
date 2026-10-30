@@ -10,7 +10,7 @@ ledger: [accounts, organizations, projects_self_service, postgresql, pooled_endp
 Your team's own PostgreSQL 18 projects, with pgvector, on one hosted server. Each project has a pooled and a direct connection, both over TLS; a branch is a full copy you can restore to a point in time; backups run continuously off-site, and the console shows the window you can restore to.
 :::
 ::: actions
-[Request an invitation](mailto:invite@agenticpostgresql.com?subject=Invitation%20request) [Read the quickstart](/quickstart/) Already invited? [Open the console](https://control.agenticpostgresql.com/console/)
+[Request an invitation](mailto:invite@nomipg.com?subject=Invitation%20request) [Read the quickstart](/quickstart/) Already invited? [Open the console](https://control.nomipg.com/console/)
 :::
 @restore-example
 :::
@@ -124,5 +124,5 @@ During the beta every organisation is on the Free plan, at no cost.
 
 There is no public signup. To ask for an invitation, write and say who you are and what you would build. The invitation arrives as a link; opening it creates your account.
 
-[Email for an invitation](mailto:invite@agenticpostgresql.com?subject=Invitation%20request) [I have an account, open the console](https://control.agenticpostgresql.com/console/)
+[Email for an invitation](mailto:invite@nomipg.com?subject=Invitation%20request) [I have an account, open the console](https://control.nomipg.com/console/)
 :::

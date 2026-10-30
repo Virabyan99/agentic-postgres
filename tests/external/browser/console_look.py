@@ -395,6 +395,10 @@ def read(page: Page, url: str, shots: Path | None, name: str) -> dict[str, Any]:
 def walk(arguments: argparse.Namespace) -> int:
     base = arguments.base.rstrip("/")
     probe = json.loads(Path(arguments.probe_file).read_text(encoding="utf-8"))
+    if "password" not in probe:
+        # The probe owner's own file names its password's 0600 file, as
+        # sql_walk.py reads it (D3121); a rehearsal's synthetic probe carries one.
+        probe["password"] = Path(probe["password_file"]).read_text(encoding="utf-8").strip()
     held = [probe["password"], probe["totp_seed"]]
     pages = json.loads(Path(arguments.pages).read_text(encoding="utf-8"))
     record: dict[str, Any] = {

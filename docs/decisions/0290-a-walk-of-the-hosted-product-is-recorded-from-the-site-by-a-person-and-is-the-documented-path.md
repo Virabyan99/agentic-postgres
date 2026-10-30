@@ -208,3 +208,18 @@ name must still be a route the build produces, and every command a line the
 site gives. `dx_record`'s readers already read both lists this way; the change
 is `tests/external/test_session46_walk.py`'s. Everything else in this ADR,
 and any other amendment, stands.
+
+## Amendment — 2026-10-30 (Session 47, Run 8; D2959)
+
+**Goal 2 of the statement is reworded.** The first person did not understand
+*"your own SQL"* (D2936, finding 10). The statement's goal 2 now reads *"Run SQL
+you write yourself against it: create a table, put a few rows in it, and read
+them back"*, and its line in the notes form is `2 run SQL you write yourself:`
+— so the goals this ADR's decision 2 reads from the statement (`goals`, in its
+order) are `connect`, `run SQL you write yourself`, `a branch`, `usage`,
+`slowest queries`, `support page`. `tests/contract/test_dx_record.py`'s
+`HOSTED_GOALS` moves with it: a contract test changes with its ADR. The
+statement names the site as `https://nomipg.com` (ADR 0299) and the walker's
+slot as `slot12-prod`. A record made against the old statement (Session 46's)
+names the old label and is read against the statement of its own commit;
+nothing else in this ADR, or in any other amendment, moves.

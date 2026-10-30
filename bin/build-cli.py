@@ -72,9 +72,9 @@ monitoring -- every family the hosted service offers to a customer.
 
     pipx install agentic-postgres-cli      # or: uv tool install agentic-postgres-cli
     apg --version
-    apg login password --endpoint https://control.agenticpostgresql.com/api/v1 --username NAME
+    apg login password --endpoint https://control.nomipg.com/api/v1 --username NAME
 
-The documentation is at https://agenticpostgresql.com/docs/cli/. The service is
+The documentation is at https://nomipg.com/docs/cli/. The service is
 invite-only during the beta.
 """
 
@@ -114,7 +114,7 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://agenticpostgresql.com/"
+Homepage = "https://nomipg.com/"
 Source = "https://github.com/Virabyan99/agentic-postgres"
 
 [project.scripts]

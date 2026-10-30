@@ -275,6 +275,10 @@ SHELL_COMMANDS = (
     # Derived from 45's by diff with TWO flags added, `--journey-record-file`
     # and `--walk-record-file`.
     "bin/session-46-check.sh",
+    # Session 47 (ADR 0295-0299): the console made for a newcomer, nomipg.com,
+    # the last re-earning. Derived from 46's by diff with ONE flag added,
+    # `--console-look-record-file` (D3082).
+    "bin/session-47-check.sh",
     # Session 38 (ADR 0257, D2150): customer slots -- prepare, status, revoke.
     # Listed the run it landed (D1014), `git add`ed first (D1188).
     "bin/slot.sh",

@@ -9,4 +9,4 @@ Everything here is what the beta does today; [What exists](/ledger/) says the sa
 
 @docs-index
 
-The management API is `https://control.agenticpostgresql.com/api/v1`; the console and the command-line client both act through it.
+The management API is `https://control.nomipg.com/api/v1`; the console and the command-line client both act through it.

@@ -43,11 +43,11 @@ export const PAGES = {
   "insights": { label: "Slowest queries", group: "project", item: "insights", purpose: "The statements your roles ran in the last 24 hours, slowest in total first.", help: "/docs/insights-and-monitoring/" },
   "monitoring": { label: "Monitoring", group: "project", item: "monitoring", purpose: "Ten readings about this project, each naming where it comes from.", help: "/docs/insights-and-monitoring/" },
   "project-settings": { label: "Settings", group: "project", item: "project-settings", purpose: "Sleep, size, export, the support bundle and deletion.", help: "/docs/projects/" },
-  // The site's support page (ADR 0298 decision 1, D2958) is PARKED until Run
-  // 12 applies it: this entry's help path is the console's ONE link to it, and
-  // moves to "/docs/support/" in the same change -- test_console_pages fails
-  // until it does, once the site builds that route.
-  "help": { label: "Help", group: null, purpose: "Ask a person, or read the documentation.", help: "/docs/" },
+  // The site's support page (ADR 0298 decision 1, D2958), applied with
+  // Session 47's bump (D3074): this entry's help path is the console's ONE link
+  // to it -- test_console_pages requires "/docs/support/" while the site builds
+  // that route.
+  "help": { label: "Help", group: null, purpose: "Ask a person, or read the documentation.", help: "/docs/support/" },
   "missing": { label: "Not found", group: null, purpose: "", help: "/docs/" },
 };
 

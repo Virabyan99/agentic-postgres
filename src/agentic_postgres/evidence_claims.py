@@ -558,6 +558,32 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "control_status",
         "console_create",
         "journey_driver",
+        # Session 47 (ADR 0295-0299). ELEVEN, each a property of a CHECKOUT: the
+        # console's navigation and help (`console_navigation`), its progress and
+        # tracker (`console_progress`), control set 0011's step log
+        # (`operation_steps`), every refusal worded with its action
+        # (`console_refusals`), copy, busy and confirm-by-name controls
+        # (`console_copy`), every Connect snippet executed against a TLS rig
+        # (`console_snippets`), `operation_started` (`notifications_started`), the
+        # quality floors and the look walk's reading (`console_a11y`), a slot ready
+        # only with five names (`slot_dns_five`), the domain derived from the build
+        # (`domain_derived`) and the live proofs' readings (`live_proof_readings`).
+        #
+        # The session's other SEVEN are deliberately not here: all are read from
+        # the workstation (EXTERNAL) -- the console look walk, the domain move, the
+        # journey's steps, started notification and reload, and Session 46's
+        # creation and support-bundle proofs re-earned (D3123).
+        "console_navigation",
+        "console_progress",
+        "operation_steps",
+        "console_refusals",
+        "console_copy",
+        "console_snippets",
+        "notifications_started",
+        "console_a11y",
+        "slot_dns_five",
+        "domain_derived",
+        "live_proof_readings",
     }
 )
 
@@ -1115,6 +1141,37 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "console_create_live": ("CON-CREATE-002",),
     "journey_live": ("JRN-001",),
     "appliance_documented_path": ("DX-001",),
+    # Session 47 (ADR 0295-0299). EIGHTEEN claims, landing with the constant
+    # (D690): eleven offline and seven external, each requirement its own claim
+    # (ADR 0089) -- so `operation_started`'s offline and live halves are two
+    # requirements, CTL-NOTIFY-002 and CTL-NOTIFY-003 (D3122). The session's
+    # subject: the console made for a newcomer, long operations made visible,
+    # every refusal a sentence with an action, Connect executed, the floors, five
+    # DNS names per slot, and the move to nomipg.com. The three Session 46 claims
+    # it re-earns (`plans_live`, `journey_live`, `console_create_live`) keep
+    # their ids and their session (D2945).
+    "console_navigation": ("CON-NAV-001",),
+    "console_progress": ("CON-OPS-001",),
+    "operation_steps": ("CTL-STEPS-001",),
+    "console_refusals": ("CON-REFUSAL-001",),
+    "console_copy": ("CON-COPY-001",),
+    "console_snippets": ("CON-CONNECT-001",),
+    "notifications_started": ("CTL-NOTIFY-002",),
+    "console_a11y": ("UI-A11Y-001",),
+    "slot_dns_five": ("OPS-SLOTDNS-001",),
+    "domain_derived": ("OPS-DOMAIN-002",),
+    "live_proof_readings": ("JRN-003",),
+    "console_look_live": ("UI-A11Y-002",),
+    "domain_live": ("OPS-DOMAIN-001",),
+    # The journey's (read from Session 47's journey record): its steps, its started
+    # notification and its reload; and Session 46's creation and support-bundle
+    # proofs re-earned under claims of this session, so the two `trial` rows
+    # Session 46 left name evidence ADR 0261 admits (D3123, D2857's precedent).
+    "operation_steps_live": ("CTL-STEPS-002",),
+    "notifications_started_live": ("CTL-NOTIFY-003",),
+    "console_reload_live": ("CON-RELOAD-001",),
+    "console_create_reearned_live": ("CON-CREATE-003",),
+    "support_bundle_reearned_live": ("CTL-DIAG-003",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

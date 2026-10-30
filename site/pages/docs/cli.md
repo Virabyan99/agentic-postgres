@@ -17,7 +17,7 @@ It needs Python 3.11 or newer and nothing else. `apg --version` names the releas
 ## Signing in
 
 ```
-apg login password --endpoint https://control.agenticpostgresql.com/api/v1 --username NAME --totp-code-stdin
+apg login password --endpoint https://control.nomipg.com/api/v1 --username NAME --totp-code-stdin
 ```
 
 It asks for your password, and reads the six-digit code from standard input when your account has a second factor. A password, a key or a code is read from a prompt or a file only you can read, never from an argument. `apg logout` ends the session.

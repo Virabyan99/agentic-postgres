@@ -126,13 +126,12 @@ def test_the_counts_are_the_ledgers(built: dict[str, str], ledger: dict[str, Any
     documents = [
         p for p in site_build.pages() if p.route.startswith("/docs/") and p.route != "/docs/"
     ]
-    steps = sum(
-        1
-        for line in (REPO_ROOT / "site" / "pages" / "quickstart.md")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.startswith("## ")
-    )
+    # D3049: the steps are the `## ` headings inside the quickstart's `::: steps`
+    # block -- the heading after it is an alternative -- counted here on their own.
+    quickstart = (REPO_ROOT / "site" / "pages" / "quickstart.md").read_text(encoding="utf-8")
+    block = quickstart.split("\n::: steps\n", 1)[1].split("\n:::\n", 1)[0]
+    steps = sum(1 for line in block.splitlines() if line.startswith("## "))
+    assert 0 < steps < quickstart.count("\n## "), steps
     notes = [e["text"] for e in _elements(built["index.html"]) if _classes(e) == {"menu-note"}]
     assert notes == [
         f"{steps} steps",

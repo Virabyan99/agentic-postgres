@@ -254,6 +254,14 @@ ENVIRONMENT_VARIABLES = (
     # bundle's verdicts and ages -- never a password, seed, token or cookie
     # value (its self-check exits 6 first). Four 0600 files sit beside it.
     "APG_JOURNEY_RECORD_FILE",
+    # Session 47 (ADR 0295 decision 9, D3082). `APG_CONSOLE_LOOK_RECORD_FILE`
+    # (external) is the 0600 record `tests/external/browser/console_look.py` wrote
+    # while a real Chromium, signed in as the probe owner, read every signed-in
+    # console view at two widths: widths, attempted request URLs and origins,
+    # policy violations, the four Tabs' rings, the accessibility snapshot's sha256
+    # and its unnamed controls, the motion readings -- never a password, seed or
+    # cookie value (its self-check exits 6 first).
+    "APG_CONSOLE_LOOK_RECORD_FILE",
 )
 
 

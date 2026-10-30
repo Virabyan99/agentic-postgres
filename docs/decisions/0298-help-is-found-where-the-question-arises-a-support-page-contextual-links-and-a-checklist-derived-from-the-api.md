@@ -57,3 +57,16 @@ connected application.
 - **A chat widget or a ticketing provider** — a third party in the page.
 - **A checklist with ticks the customer sets** — storage, and a state the API
   does not know.
+
+## Amendment — 2026-10-30 (Session 47, Run 8; D2958)
+
+**Decision 1 as built.** `site/pages/docs/support.md` is in the *Reference*
+group (`DOCS_GROUPS`, after *What a refusal means*). The address it gives is
+not typed in the page: a new generated block, `@contact`, renders
+`site_build.INVITATION_ADDRESS` as a `mailto:` link with the subject *Help with
+Agentic Postgres* — so the page moves with the address when ADR 0299 moves it,
+as the footer and the console's `#/help` (which derives it from its own host
+name) already do. It is ADR 0288's block vocabulary widened by one name, built
+the way the other blocks are: a line that is exactly the name, nothing after
+it. `test_site.py::test_the_support_page_gives_the_address_the_build_derives`
+holds it.

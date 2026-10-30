@@ -1486,7 +1486,62 @@ from pathlib import Path
 #: trip** confirms the class against a DEPLOYMENT: `upgrade plan` on every
 #: project before the first 1.24.0 deploy -- and a `major` there is a stop
 #: condition.
-CURRENT_SESSION = 46
+#:
+#: **Session 47 moves it to 47, all-or-nothing again** (D690): EIGHTEEN requirements
+#: and 18 claims -- `CLAIMS` 348 -> 366 and `OFFLINE_CLAIMS` 164 -> 175, counted
+#: from the tuples (D1628) -- 11 declared offline and 7 EXTERNAL, every offline
+#: half written in the run that built its piece (Runs 3-10, and this one's
+#: readings) and every live half here. No family joins the registry. **Three of
+#: Session 46's claims are re-earned, not re-declared** (D2940, D2945):
+#: `plans_live`, `journey_live` and `console_create_live` keep their ids and
+#: their session, read on Session 47's records on `slot13-prod`; and the two
+#: `trial` rows Session 46 left name two new claims of this session that read
+#: Session 46's creation and support-bundle proofs again (D3123, D2857's
+#: precedent: ADR 0261 admits only this session's evidence).
+#:
+#: **The session's subject is the console made for a newcomer, and the move to
+#: `nomipg.com`.** ADR 0295: the console reworked inside first-party rules --
+#: modules, a shell, the floors. ADR 0296: long operations made visible -- the
+#: step log, `status=open`, each operation's subject (never the handoff digest),
+#: the tracker. ADR 0297: every refusal and notice a sentence with a next action,
+#: `operation_started`. ADR 0298: help, the support page and a checklist derived
+#: from the API. ADR 0299: the customer-facing names move to `nomipg.com`; the
+#: old site 301s and the old console name 308s for twelve months.
+#:
+#: **No released migration; ONE control-set migration, `0011`** (the step log,
+#: the subject, `status=open`, `operation_started`, on the control project's
+#: deploy). No outputs, manifest, host, capability, lock or secret schema moves
+#: (outputs stay v22, the project manifest 11, `host.yaml` 4).
+#:
+#: **`VERSION` moves to `1.25.0`.** What moved: the console's files (its
+#: modules, stylesheet, `pages.json`), so the console image moves on the control
+#: project; the auth service's control mode (the readers' steps and subject, the
+#: `status` filter) and the shared `operation_steps`; the reconciler (the step
+#: log); `bin/cloud.py` (`endpoint show` prints each snippet's `where`, D3030);
+#: the site's pages and its domain. No Postgres image moves, so **no database
+#: restarts**; the versions lock gains one test-only image (D3025).
+#:
+#: **The price, read rather than chosen** (D704), by D1624's rig: a git worktree
+#: at `55467b5`, the commit that IS deployed and tagged, and a `tar`-piped copy
+#: of this working tree, both rendering the INSTALLED tree's
+#: `project.example.yaml`: `bump minor`, **`requires patch`**, verdict `ok`,
+#: `changes [image_digest]`, `reasons []`, `operator_digests_moved []`; two
+#: leaves differ (`template_version` 1.24.0 -> 1.25.0, and
+#: `inputs.versions_lock_sha256` -- the test-only Go image, D3025). No pair of
+#: rendered documents can see a console module, a control-set migration or a
+#: domain the manifest has not moved, so the reading prices the template alone.
+#: **ADR 0162 prices it a MINOR, and `1.25.0` is proposed above the reading's floor**
+#: -- a rebuilt console, a new reader surface and a new operator verb are
+#: features, and minor covers patch: no manifest, outputs, capability, lock or secret schema moves.
+#: What an operator must KNOW the reading cannot show: the control project's
+#: deploy applies control migration `0011` and recreates the console; no
+#: database restarts; **the reconciler is restarted after the checkout moves**
+#: (D2179, D2411) -- the step log is written by it; and **each moved project's
+#: domain is the operator's edit** before its deploy (ADR 0299, D2983). **The
+#: trip** confirms the class against a DEPLOYMENT: `upgrade plan` on every
+#: project before the first 1.25.0 deploy -- and a `major` there is a stop
+#: condition.
+CURRENT_SESSION = 47
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

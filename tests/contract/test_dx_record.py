@@ -416,7 +416,10 @@ def test_the_command_scan_reads_a_script_and_never_a_flag() -> None:
 # invitation link. The clone path above is untouched; these read the second.
 # ---------------------------------------------------------------------------
 
-HOSTED_GOALS = ("connect", "your own SQL", "a branch", "usage", "slowest queries", "support page")
+HOSTED_GOALS = (
+    "connect", "run SQL you write yourself", "a branch", "usage", "slowest queries",
+    "support page",
+)  # fmt: skip
 HOSTED_LINES = (
     "pipx install agentic-postgres-cli",
     "apg login password --endpoint https://control.agenticpostgresql.com/api/v1 --username NAME",

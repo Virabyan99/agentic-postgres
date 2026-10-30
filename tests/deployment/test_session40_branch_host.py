@@ -100,7 +100,7 @@ def record(parent: dict[str, Any]) -> dict[str, Any]:
         pytest.fail(f"APG_BRANCH_RECORD_FILE points at {path}, which does not exist")
     document = json.loads(path.read_text(encoding="utf-8"))
     # Session 41 re-runs these against its own record (D2518), Session 42 too (D2623).
-    sessions = (40, 41, 42, 43, 44, 45, 46)  # the record sessions this proof reads (D2714)
+    sessions = (40, 41, 42, 43, 44, 45, 46, 47)  # the record sessions this proof reads (D2714)
     assert document.get("session") in sessions and document.get("kind") == "branches", (
         document.get("session"), document.get("kind"),
     )  # fmt: skip

@@ -21,7 +21,7 @@ the customer, and the session's close moves it to `beta` or back to
 | [Management API (/api/v1)](#management_api) | `beta` | 39 |
 | [CLI against the hosted service](#cli_remote) | `beta` | 37 |
 | [Web console](#console) | `beta` | 43 |
-| [Create a project](#projects_self_service) | `trial` | 46 |
+| [Create a project](#projects_self_service) | `trial` | 47 |
 | [Delete a project](#project_deletion) | `beta` | 42 |
 | [Export a project](#export) | `beta` | 42 |
 | [Region](#region) | `beta` | 42 |
@@ -46,7 +46,7 @@ the customer, and the session's close moves it to `beta` or back to
 | [Passkeys](#passkeys) | `planned` | — |
 | [SQL editor](#sql_editor) | `beta` | 44 |
 | [Temporary support access](#support_access) | `not_offered` | — |
-| [Support bundle](#support_bundle) | `trial` | 46 |
+| [Support bundle](#support_bundle) | `trial` | 47 |
 | [Autoscaling](#autoscaling) | `not_offered` | — |
 | [High availability](#high_availability) | `not_offered` | — |
 | [Multiple regions](#multi_region) | `not_offered` | — |
@@ -70,7 +70,7 @@ the customer, and the session's close moves it to `beta` or back to
 
 **What a customer reads.** By invitation only. A person who receives an invitation creates an account with a password and signs in to the management API; there is no public signup.
 
-**Today.** Accounts live in the control project (control.agenticpostgresql.com), created only by accepting an invitation, and span the projects their organizations hold. Each project's own auth service still holds that project's people.
+**Today.** Accounts live in the control project (control.nomipg.com), created only by accepting an invitation, and span the projects their organizations hold. Each project's own auth service still holds that project's people.
 
 *Customer-facing evidence:* `control_invitations`, `control_invitations_live`.
 
@@ -116,7 +116,7 @@ the customer, and the session's close moves it to `beta` or back to
 
 `management_api` · **beta** · since Session 36
 
-**What a customer reads.** https://control.agenticpostgresql.com/api/v1 manages accounts, organizations, members, invitations and keys, and creates and manages your projects, their branches, their connections and their backups.
+**What a customer reads.** https://control.nomipg.com/api/v1 manages accounts, organizations, members, invitations and keys, and creates and manages your projects, their branches, their connections and their backups.
 
 **Today.** One management API in the control project's app mode, frozen as a contract (contracts/control-openapi.canonical.json). A project operation is accepted only while its concept's ledger row is available, beta or trial, and refused as not available otherwise (ADR 0254, ADR 0261). Planned at Session 38's close because control_plane_live did not pass (D2317); it passed on 1.17.0 in Session 39's sweep, and the row is beta again (D2322).
 
@@ -148,7 +148,7 @@ the customer, and the session's close moves it to `beta` or back to
 
 `console` · **beta** · since Session 43
 
-**What a customer reads.** The console at https://control.agenticpostgresql.com/console/: accept an invitation link, set up your second factor, sign in, and see your organizations, projects, connection strings, branches, backups, usage, insights, monitoring, plan, notifications and settings, and create a project; the console runs no SQL on the platform's side, and its SQL editor is your own client.
+**What a customer reads.** The console at https://control.nomipg.com/console/: accept an invitation link, set up your second factor, sign in, and follow a getting-started checklist to a connected application. Every page has a help link, and Help is at the top of each; it shows your organizations and projects, each creation step by step with its usual time, Connect in three steps with the code for seven clients, branches, backups, usage, slowest queries, monitoring, plan, notifications and settings, and creates a project; the console runs no SQL on the platform's side, and its SQL editor is your own client.
 
 **Today.** Static pages served by the control project's console service (ADR 0280) at /, /accept and /console/, every page a named /api/v1 call, signed in with two __Host- cookies honoured only with the console's header and, for a write, its own origin (ADR 0281). Built in Session 43 and walked on 1.21.0 in a real browser: an invitation link to a working connection string in 26.1 s, the second factor read by a phone, the CSRF rule and the cookies read live, the console bounded on the host -- console_walk_live, console_csrf_live and console_live_host passed on the tagged evidence (1.21.0 on 012ac06).
 
@@ -166,11 +166,11 @@ the customer, and the session's close moves it to `beta` or back to
 
 `projects_self_service` · **trial** · since Session 38
 
-**What a customer reads.** Being verified: a member of an organization creates a project in the console or with the command-line client, on a slot the operator prepared; the console shows a one-time token once, which claims the project's first administrator from a terminal if you want its admin API. On the Free plan an organization holds one project; a second is refused with "plan limit reached", and when no slot is ready the request is refused with "capacity exhausted" -- in both cases nothing is created.
+**What a customer reads.** Being verified: a member of an organization creates a project in the console or with the command-line client, on a slot the operator prepared. The console follows the creation step by step -- each step's time and the usual total, about 23 to 28 minutes, with no percentage -- on a page that a refresh reads again, and the organization's Activity lists every operation. The one-time token it shows once is optional: it claims the project's first administrator from a terminal, and connecting does not need it. On the Free plan an organization holds one project, one being created included; a second is refused with "plan limit reached", and when no slot is ready the request is refused with "capacity exhausted" -- in both cases nothing is created.
 
-**Today.** POST /v1/projects (bin/project.sh create) records a project.create operation once the organisation's plan admits it (ADR 0274: Free's projects_active, read under the organisation's lock before the slot); the reconciler, a root unit on the host, executes it into a prepared slot through admission and the deploy, and bin/project.sh claim sets the first administrator's password through the project's own reset route. The operator still creates every other project by hand. Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Re-earned a fourth time in Session 42 on 1.20.0 on a new slot, slot6-prod, in a new organisation, its probe samples written as they are taken: lifecycle_fourth_trial_live passed on the tagged evidence (1.20.0 on 77303e4, D2581). Being verified in Session 46: the console creates a project (ADR 0291) -- the handoff token made in the page, only its SHA-256 sent, shown once at acceptance -- and apg project claim --token-file claims with it; console_create_live reads the journey's creation on slot11-prod, the one the lifecycle continues (D2872).
+**Today.** POST /v1/projects (bin/project.sh create) records a project.create operation once the organisation's plan admits it (ADR 0274: Free's projects_active, read under the organisation's lock before the slot); the reconciler, a root unit on the host, executes it into a prepared slot through admission and the deploy, and bin/project.sh claim sets the first administrator's password through the project's own reset route. The operator still creates every other project by hand. Built in Session 38 and run end to end on 1.16.0; re-trialed in Session 39 on 1.17.0 (D2415) and in Session 40 on 1.18.0, where lifecycle_reearned_live did not pass (D2500: the instrument's pool probe died). Re-trialed a third time in Session 41 on 1.19.0 on a new slot, slot5-prod, in a new organisation, where every operation of its lifecycle ran at the tagged commit but lifecycle_third_trial_live did not pass: the first export's upload was refused by a mis-entered storage credential, the run resumed at the export, and the four windows its probes had read (sleep, wake, both resizes) were lost with the first attempt (D2557). Re-earned a fourth time in Session 42 on 1.20.0 on a new slot, slot6-prod, in a new organisation, its probe samples written as they are taken: lifecycle_fourth_trial_live passed on the tagged evidence (1.20.0 on 77303e4, D2581). Being verified in Session 46: the console creates a project (ADR 0291) -- the handoff token made in the page, only its SHA-256 sent, shown once at acceptance -- and apg project claim --token-file claims with it; console_create_live reads the journey's creation on slot11-prod, the one the lifecycle continues (D2872). Being verified again in Session 47 (D3123): the journey on slot13-prod creates in the console it rebuilt, read by console_create_reearned_live.
 
-*Customer-facing evidence:* `console_create_live`.
+*Customer-facing evidence:* `console_create_reearned_live`.
 
 **Stage 5.** POST /v1/projects records a project.create operation (member and above, a person only), refused "capacity exhausted" with no slot ready before anything is recorded; the reconciler (Session 38) executes it into a prepared slot through the same admission and deploy, and the first administrator claims the account with a token only its requester holds (ADR 0256, ADR 0260).
 
@@ -526,7 +526,7 @@ the customer, and the session's close moves it to `beta` or back to
 
 `notifications` · **beta** · since Session 45
 
-**What a customer reads.** In-app notifications for an organization: one for every finished operation, and a notice once a day when a project passes 80% of a shown limit. Nothing is emailed.
+**What a customer reads.** In-app notifications for an organization, each a sentence with a link: one when a project creation, a branch, a restore or a branch reset starts, one for every finished operation, one when a project goes to sleep after its idle time or a branch expires, and a notice once a day when a project passes 80% of a shown limit. Nothing is emailed.
 
 **Today.** control_finish_operation writes ONE notification from a fixed template in the transaction that finishes the operation -- its type, its project, how it ended, why the server requested it -- never a result member, a URL or a caller value; the reconciler writes the daily limit notice (ADR 0275). GET /v1/organizations/{organization}/notifications (bin/notifications.sh list) lists them newest first. Built in Session 41; re-earned in Session 42 (notifications_retrial_live passed on the tagged evidence, 1.20.0 on 77303e4); not re-earned in Session 44 (D2798: a record finished from its first attempt). Re-earned in Session 45 on 1.23.0 (4f4b207), slot9-prod's lifecycle run in ONE attempt (D2837): notifications_reearned_live and Session 42's proofs read again on that record (D2857), notifications_live and notifications_retrial_live, passed on the tagged evidence -- the console shows them again.
 
@@ -606,9 +606,9 @@ the customer, and the session's close moves it to `beta` or back to
 
 **What a customer reads.** Being verified: a project's Settings in the console shows its support bundle -- the latest reading of each of the server's health checks for your project, a verdict and one sentence each, never a file path or a secret, with how old it is -- and the project's recent operations; `apg project diagnostics` writes the same to a new file only you can read.
 
-**Today.** The reconciler runs the doctor on each deployed slot every 900 s and records each check's name, verdict and detail -- never its evidence, a host path or an opaque run in a detail replaced -- through a control-set function granted to nobody (control migration 0010); a stopped database is one asleep row. GET /v1/projects/{key}/diagnostics (a member, a person's session only) serves the readings with their ages, stale past 1,800 s, and the project's newest 50 operations (ADR 0292). Built in Session 46; being verified on slot11-prod's journey: support_bundle_live.
+**Today.** The reconciler runs the doctor on each deployed slot every 900 s and records each check's name, verdict and detail -- never its evidence, a host path or an opaque run in a detail replaced -- through a control-set function granted to nobody (control migration 0010); a stopped database is one asleep row. GET /v1/projects/{key}/diagnostics (a member, a person's session only) serves the readings with their ages, stale past 1,800 s, and the project's newest 50 operations (ADR 0292). Built in Session 46; being verified on slot11-prod's journey: support_bundle_live; again in Session 47 on slot13-prod's (D3123): support_bundle_reearned_live.
 
-*Customer-facing evidence:* `support_bundle_live`.
+*Customer-facing evidence:* `support_bundle_reearned_live`.
 
 **Stage 5.** The doctor's verdicts recorded by the reconciler, read by a member with the project's operations; the control plane holds no credential to the node and reads none itself (ADR 0246, ADR 0292).
 

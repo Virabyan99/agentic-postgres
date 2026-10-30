@@ -1074,8 +1074,17 @@ def endpoint_show(arguments: argparse.Namespace) -> int:
     lines.append(
         f"  the password is the file `credential` wrote; snippets say {served['password']}"
     )
+    # D3030: each snippet's `where` lines as the server serves them (Session 47's
+    # connections document); a server that serves none prints none.
+    where = served.get("where") if isinstance(served.get("where"), dict) else {}
     for client, snippet in served["snippets"].items():
-        lines += ["", f"# {client}", snippet]
+        lines += ["", f"# {client}"]
+        guide = where.get(client) if isinstance(where.get(client), dict) else {}
+        if guide.get("file"):
+            lines.append(f"# where it goes: {guide['file']}")
+        if guide.get("install"):
+            lines.append(f"# what to install: {guide['install']}")
+        lines.append(snippet)
     emit(served, arguments.json, lines)
     return cc.EXIT_OK
 

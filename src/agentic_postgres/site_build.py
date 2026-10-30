@@ -52,20 +52,20 @@ SHARED_ASSETS = (
 
 #: The product's published address for a request for an invitation (D2654):
 #: forwarded by Cloudflare Email Routing; the product sends and stores nothing.
-INVITATION_ADDRESS = "invite@agenticpostgresql.com"
+INVITATION_ADDRESS = "invite@nomipg.com"
 #: The production control plane's domain, from which the console and the API
 #: addresses are DERIVED by `naming`, never typed twice.
-CONTROL_DOMAIN = "control.agenticpostgresql.com"
+CONTROL_DOMAIN = "control.nomipg.com"
 CONSOLE_URL = naming.console_origin(CONTROL_DOMAIN) + "/console/"
 CONTROL_ENDPOINT = naming.console_origin(CONTROL_DOMAIN) + "/api" + naming.CONTROL_PATH_SUFFIX
-SITE_URL = "https://agenticpostgresql.com"
+SITE_URL = "https://nomipg.com"
 
 #: Every `https://` a page may name: the site itself, the control plane, and the
 #: repository. Anything else is a third party (D2596, ADR 0283 item 8).
 ALLOWED_ORIGINS = (
-    "https://agenticpostgresql.com",
-    "https://www.agenticpostgresql.com",
-    "https://control.agenticpostgresql.com",
+    "https://nomipg.com",
+    "https://www.nomipg.com",
+    "https://control.nomipg.com",
     "https://github.com/Virabyan99/agentic-postgres",
     "https://pypi.org/project/agentic-postgres-cli",
 )
@@ -126,7 +126,7 @@ DOCS_GROUPS = (
     ("Use a project", ("/docs/projects/", "/docs/connecting/", "/docs/sql-editor/",
                        "/docs/branches/", "/docs/backups/")),
     ("Watch and plan", ("/docs/plans-and-usage/", "/docs/insights-and-monitoring/")),
-    ("Reference", ("/docs/refusals/", "/ledger/")),
+    ("Reference", ("/docs/refusals/", "/docs/support/", "/ledger/")),
 )  # fmt: skip
 
 #: A page whose body is generated from data rather than written: the line is
@@ -143,10 +143,12 @@ CONTAINERS = (
 )  # fmt: skip
 #: ADR 0288 (D2821): a line that is exactly one of these is replaced by HTML the
 #: builder makes from the Ledger, the plan table or the docs groups; `@chips`
-#: takes row ids from the page's own `ledger:` list.
+#: takes row ids from the page's own `ledger:` list; `@contact` is the address
+#: a person writes to for help, `INVITATION_ADDRESS`, so no page types it
+#: (ADR 0298, Session 47 Run 8).
 BLOCKS = (
     "@restore-example", "@ledger-summary", "@ledger-examples", "@plan-summary",
-    "@docs-index", "@chips",
+    "@docs-index", "@chips", "@contact",
 )  # fmt: skip
 
 
@@ -855,6 +857,18 @@ def docs_index(all_pages: list[Page]) -> str:
     return "\n".join(parts) + "\n"
 
 
+#: `@contact`'s subject line: a request for help, not for an invitation.
+SUPPORT_SUBJECT = "Help%20with%20Agentic%20Postgres"
+
+
+def contact() -> str:
+    """`@contact` (ADR 0298): the address a person writes to for help --
+    `INVITATION_ADDRESS`, derived here, so a page never types it and a move
+    of the address moves every page that gives it."""
+    href = f"mailto:{INVITATION_ADDRESS}?subject={SUPPORT_SUBJECT}"
+    return f'<p><a href="{html.escape(href)}">{html.escape(INVITATION_ADDRESS)}</a></p>\n'
+
+
 def _blocks_for(page: Page, ledger: dict[str, Any], all_pages: list[Page]) -> Any:
     """The resolver of a page's generated blocks (ADR 0288, D2821)."""
 
@@ -874,6 +888,8 @@ def _blocks_for(page: Page, ledger: dict[str, Any], all_pages: list[Page]) -> An
             return plan_summary()
         if name == "@docs-index":
             return docs_index(all_pages)
+        if name == "@contact":
+            return contact()
         rows = tuple(rest.split())
         if not rows or any(row not in page.ledger for row in rows):
             raise SiteError(source, number, "@chips names rows of the page's own ledger: list")
@@ -951,6 +967,21 @@ def _check_anchors(rendered: dict[str, tuple[Page, str]]) -> None:
                 raise SiteError(page.source, page.body_line, f"links to {href}, which names no id")
 
 
+def quickstart_steps(body: str) -> int:
+    """The quickstart's steps: the `## ` headings inside its `::: steps` block,
+    never one outside it -- *Or, from a terminal* is an alternative, not a step
+    (D3049: the nav said *9 steps* for eight)."""
+    inside, count = False, 0
+    for line in body.splitlines():
+        if line.strip() == "::: steps":
+            inside = True
+        elif inside and line.strip() == ":::":
+            inside = False
+        elif inside and line.startswith("## "):
+            count += 1
+    return count
+
+
 def build() -> dict[str, bytes]:
     """`{relative path: bytes}` for the whole site, or `SiteError`."""
     ledger = reality_ledger.load()
@@ -961,7 +992,7 @@ def build() -> dict[str, bytes]:
     check_groups(all_pages)
     titles = {page.route: page.title for page in all_pages}
     by_route = {page.route: page for page in all_pages}
-    steps = sum(1 for line in by_route["/quickstart/"].body.splitlines() if line.startswith("## "))
+    steps = quickstart_steps(by_route["/quickstart/"].body)
     documents = sum(1 for route in titles if route.startswith("/docs/") and route != "/docs/")
     descriptions = {
         "/quickstart/": f"{steps} steps",

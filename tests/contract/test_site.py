@@ -124,6 +124,46 @@ def test_raw_html_is_refused(line: str) -> None:
     assert rendered == f"<p><code>{site_build.html.escape(line)}</code></p>\n"
 
 
+#: ADR 0299: the zone the site moved from. It still holds the operator's own
+#: names (`secrets.`, `alpha-db.`, `beta-db.`), so a name of ours under it is
+#: refused exactly as under the site's own zone.
+FORMER_ZONE = "agenticpostgresql.com"
+
+
+def _site_zone() -> str:
+    """The site's zone, read from the build's own constants (D2962): the control
+    domain without its first label, which `SITE_URL` must be the apex of."""
+    zone = naming.sql_relay_zone(site_build.CONTROL_DOMAIN)
+    assert site_build.SITE_URL == f"https://{zone}", (site_build.SITE_URL, zone)
+    return zone
+
+
+def _named_hosts_of_ours(text: str) -> list[str]:
+    """Every name under the site's zone or the former one but the apex, `www`
+    and `control` (D2651: the records this site owns name no host of ours)."""
+    found: list[str] = []
+    for zone in dict.fromkeys((_site_zone(), FORMER_ZONE)):
+        for prefix in re.findall(rf"\b((?:[a-z0-9-]+\.)+){re.escape(zone)}\b", text):
+            if prefix not in ("www.", "control."):
+                found.append(prefix + zone)
+    return found
+
+
+def test_the_host_reading_reads_the_sites_own_zone() -> None:
+    """D2962: the reading `test_the_site_names_no_host_address` runs is the
+    build's zone's -- a host of ours under it is found, the three names the site
+    may print are not, and the former zone is read too. A regex over a typed
+    domain would pass every page vacuously once the domain moved."""
+    zone = _site_zone()
+    assert _named_hosts_of_ours(f"see secrets.{zone} and pool.slot3.{zone}.") == [
+        f"secrets.{zone}",
+        f"pool.slot3.{zone}",
+    ]
+    allowed = f"https://{zone}/ https://www.{zone}/ https://control.{zone}/console/"
+    assert _named_hosts_of_ours(allowed) == []
+    assert _named_hosts_of_ours(f"secrets.{FORMER_ZONE}") == [f"secrets.{FORMER_ZONE}"]
+
+
 def test_the_site_names_no_host_address(built: dict[str, bytes]) -> None:
     """No address of the host, no IPv4 literal, and no name under the zone but
     the apex, `www` and `control` -- in the build, its sources or the workflow
@@ -143,8 +183,8 @@ def test_the_site_names_no_host_address(built: dict[str, bytes]) -> None:
     texts["site.yml"] = WORKFLOW.read_text(encoding="utf-8")
     for name, text in texts.items():
         assert not re.search(r"\b\d{1,3}(\.\d{1,3}){3}\b", text), f"{name} holds an IPv4 literal"
-        for host in re.findall(r"\b((?:[a-z0-9-]+\.)+)agenticpostgresql\.com", text):
-            assert host in ("www.", "control."), f"{name} names {host}agenticpostgresql.com"
+        # D2962: the zone is the build's own constant's, never a typed domain.
+        assert _named_hosts_of_ours(text) == [], f"{name} names a host of ours"
 
 
 def test_the_published_names_are_naming_s() -> None:
@@ -309,3 +349,172 @@ def test_the_live_proofs_name_themselves_to_the_site() -> None:
     assert arrived == [USER_AGENT, USER_AGENT]
     assert USER_AGENT == "agentic-postgres-proof"
     assert not USER_AGENT.startswith("Python-urllib")
+
+
+# ---------------------------------------------------------------------------
+# Session 47 Run 8 (ADR 0298; D2956, D2958, D2991, D3020-D3024): the pages that
+# say what the console and the server do are held to the console's and the
+# server's own text, never a second copy of it.
+# ---------------------------------------------------------------------------
+
+#: The example project whose code the connecting page shows.
+EXAMPLE_DOORS = {
+    "enabled": True,
+    "pooled": {"host": "pool.shop.example.com", "port": 5432,
+               "user": "shop_prod_customer_app", "database": "shop_prod"},
+    "direct": {"host": "direct.shop.example.com", "port": 5432,
+               "user": "shop_prod_customer_admin", "database": "shop_prod"},
+}  # fmt: skip
+CONSOLE = REPO_ROOT / "services" / "console" / "public"
+
+
+def _body(route: str) -> str:
+    return next(page.body for page in site_build.pages() if page.route == route)
+
+
+def _section(body: str, heading: str) -> str:
+    assert f"\n## {heading}\n" in body, heading
+    return body.split(f"\n## {heading}\n", 1)[1].split("\n## ", 1)[0]
+
+
+def _fenced(text: str) -> list[str]:
+    return re.findall(r"^```[a-z]*\n(.*?)\n```$", text, flags=re.MULTILINE | re.DOTALL)
+
+
+def _js_round(value: float) -> int:
+    """JavaScript's `Math.round`, which `progress.js` words a range with."""
+    return int(value + 0.5)
+
+
+def test_the_connecting_page_shows_the_code_the_server_serves() -> None:
+    """D2991: the server's snippets are the one text. The connecting page's code
+    for each client is `connection_snippets.snippets()` for the example doors,
+    every client in `CLIENTS`' order, and each with its `where` line as served;
+    no other block on the page names a door. The control: the section is read,
+    so a page with no code at all fails here rather than passing empty."""
+    from agentic_postgres import service_source
+
+    module = service_source.load("connection_snippets")
+    served = module.snippets(EXAMPLE_DOORS)
+    where = module.where()
+    body = _body("/docs/connecting/")
+    section = _section(body, "3. Copy the code for your tool")
+    hosts = (EXAMPLE_DOORS["pooled"]["host"], EXAMPLE_DOORS["direct"]["host"])
+    shown = [block for block in _fenced(section) if any(host in block for host in hosts)]
+    assert len(shown) == len(module.CLIENTS) == 7, len(shown)
+    assert shown == [served[client] for client in module.CLIENTS]
+    for client in module.CLIENTS:
+        guide = where[client]
+        line = f"Where it goes: {guide['file']}. What to install: {guide['install']}."
+        assert section.count(line) == 1, client
+    outside = body.replace(section, "")
+    assert not any(host in block for block in _fenced(outside) for host in hosts)
+    assert module.PASSWORD_PLACEHOLDER in section
+
+
+def test_the_quickstart_says_what_the_creation_tracker_says() -> None:
+    """ADR 0296: the creation's step count, first and last step, usual time and
+    bound are the server's `operation_steps`, worded as `progress.js` words
+    them -- the quickstart cannot drift from the tracker it describes."""
+    from agentic_postgres import service_source
+
+    expected = service_source.load("operation_steps").expected("project.create")
+    labels = [step["label"] for step in expected["steps"]]
+    low, high = expected["typical_seconds"]["low"], expected["typical_seconds"]["high"]
+    usual = f"about {max(1, _js_round(low / 60))} to {max(1, _js_round(high / 60))} minutes"
+    body = _body("/quickstart/")
+    assert f"{len(labels)} named steps, from *{labels[0]}* to *{labels[-1]}*" in body
+    assert f"usually takes {usual}**" in body
+    assert f"has not finished {round(expected['bound_seconds'] / 60)} minutes after" in body
+
+
+def test_the_sql_editor_page_says_what_the_editor_says() -> None:
+    """D2957: the editor's limits and every way a session ends are the
+    console's own sentences -- `sql.js`'s deadline, `messages.js`'s session
+    limits and each of its `CLOSES` -- on the page, so a sentence the console
+    changes is a page that moves with it. The control: `CLOSES` parses to the
+    relay's codes."""
+    body = _body("/docs/sql-editor/")
+    sql = (CONSOLE / "sql.js").read_text(encoding="utf-8")
+    messages = (CONSOLE / "messages.js").read_text(encoding="utf-8")
+    deadline = re.search(r'DEADLINE_SENTENCE = "([^"]+)"', sql)
+    limits = re.search(r'SESSION_LIMITS = "([^"]+)"', messages)
+    assert deadline and limits
+    assert deadline.group(1) in body and limits.group(1) in body
+    closes = messages.split("export const CLOSES = {", 1)[1].split("\n};", 1)[0]
+    codes = re.findall(r"^  (\d{4}): \{", closes, flags=re.MULTILINE)
+    sentences = re.findall(r'sentence: "([^"]+)"', closes)
+    assert codes == ["1000", "1006", "1011", "4400", "4408", "4413", "4429", "4502"]
+    assert len(sentences) == len(codes)
+    for sentence in sentences:
+        assert f"| {sentence} |" in body, sentence
+
+
+def test_the_support_page_gives_the_address_the_build_derives() -> None:
+    """ADR 0298: the support page is in the docs groups and gives the address a
+    person writes to for help through `@contact` -- `INVITATION_ADDRESS`, never
+    typed in the page -- and the block takes nothing after it."""
+    built = site_build.build()["docs/support/index.html"].decode("utf-8")
+    address = site_build.INVITATION_ADDRESS
+    href = f"mailto:{address}?subject={site_build.SUPPORT_SUBJECT}"
+    assert f'<a href="{href}">{address}</a>' in built
+    assert "/docs/support/" in site_build.docs_order()
+    source = (site_build.PAGES_ROOT / "docs" / "support.md").read_text(encoding="utf-8")
+    assert "\n@contact\n" in source and address not in source
+    page = next(p for p in site_build.pages() if p.route == "/docs/support/")
+    resolve = site_build._blocks_for(page, reality_ledger.load(), site_build.pages())
+    with pytest.raises(site_build.SiteError, match="takes nothing after it"):
+        resolve(page.source, 1, "@contact someone@example.com")
+
+
+# ---------------------------------------------------------------------------
+# Session 47 Run 12: the domain moved on every page (D3063), the count (D3049)
+# ---------------------------------------------------------------------------
+
+
+def test_no_page_names_the_former_zone(built: dict[str, bytes]) -> None:
+    """D3063: with both parks applied, seven page literals still typed the old
+    zone -- and `_named_hosts_of_ours` admits `control.` under either zone, so
+    it could not see them. No page source and no built text file names the
+    former zone at all."""
+    texts = {name: data.decode("utf-8") for name, data in built.items() if name not in BINARY}
+    texts.update({str(path): path.read_text(encoding="utf-8")
+                  for path in site_build.PAGES_ROOT.rglob("*.md")})  # fmt: skip
+    assert len(texts) > 30, len(texts)
+    named = sorted(name for name, body in texts.items() if FORMER_ZONE in body)
+    assert named == [], named
+
+
+def test_every_endpoint_and_console_link_on_a_page_is_the_builds() -> None:
+    """D3063: a page cannot substitute a constant, so each `--endpoint` it types
+    must BE `site_build.CONTROL_ENDPOINT` and each console link
+    `site_build.CONSOLE_URL` -- the control: a planted old endpoint is found."""
+    endpoint = re.compile(r"--endpoint (\S+)")
+    console = re.compile(r"\((https://control\.[^)\s]+/console/)\)")
+    seen = {"endpoint": 0, "console": 0}
+    for path in sorted(site_build.PAGES_ROOT.rglob("*.md")):
+        body = path.read_text(encoding="utf-8")
+        for found in endpoint.findall(body):
+            assert found == site_build.CONTROL_ENDPOINT, (str(path), found)
+            seen["endpoint"] += 1
+        for found in console.findall(body):
+            assert found == site_build.CONSOLE_URL, (str(path), found)
+            seen["console"] += 1
+    assert seen["endpoint"] >= 4 and seen["console"] >= 2, seen
+    planted = f"apg login password --endpoint https://control.{FORMER_ZONE}/api/v1"
+    assert endpoint.findall(planted) != [site_build.CONTROL_ENDPOINT]
+
+
+def test_the_quickstart_counts_only_its_steps(built: dict[str, bytes]) -> None:
+    """D3049: the nav's *N steps* is the number of `## ` headings inside the
+    quickstart's `::: steps` block -- *Or, from a terminal*, after the block, is
+    an alternative, not a step. The control: a synthetic page with a heading
+    outside its block counts only the inside ones."""
+    synthetic = "## Before\n\n::: steps\n## One\n\ntext\n\n## Two\n:::\n\n## After\n"
+    assert site_build.quickstart_steps(synthetic) == 2
+    page = next(p for p in site_build.pages() if p.route == "/quickstart/")
+    steps = site_build.quickstart_steps(page.body)
+    headings = sum(1 for line in page.body.splitlines() if line.startswith("## "))
+    assert 0 < steps < headings, (steps, headings)
+    home = built["index.html"].decode("utf-8")
+    assert f"{steps} steps" in home and f"{headings} steps" not in home

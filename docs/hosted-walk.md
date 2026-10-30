@@ -21,7 +21,7 @@ The operator recruits them (D2862).
 
 They hold **three things and nothing else**:
 
-- the site's address, `https://agenticpostgresql.com`;
+- the site's address, `https://nomipg.com`;
 - the statement in §2, copied verbatim between its markers;
 - an **account invitation link**, which opens an account that belongs to no
   organisation yet.
@@ -41,7 +41,7 @@ and the goals stay.
 
 <!-- walk-statement:begin -->
 Thank you for trying Agentic Postgres. It is a hosted PostgreSQL service in an
-invite-only beta. Its website is https://agenticpostgresql.com.
+invite-only beta. Its website is https://nomipg.com.
 
 You will receive an invitation link in a separate email. It is personal: it
 opens one account, it works once, and it expires after 72 hours. Do not share
@@ -54,8 +54,8 @@ you.** Go as far as you can, in this order:
    can connect to: find its connection details, and connect with any PostgreSQL
    client you already use. If you have none, the website's own way of running
    SQL in your browser counts.
-2. Run a few statements of your own against it: create a table, put a few rows
-   in it, read them back.
+2. Run SQL you write yourself against it: create a table, put a few rows in it,
+   and read them back.
 3. Make a branch of your database as it was at an earlier moment, and find out
    which moments you could have chosen from.
 4. Find out how much your database has used so far.
@@ -92,7 +92,7 @@ NOT ON ANY PAGE:
   - <each thing you had to work out yourself, in your own words>
 GOALS:
   1 connect:          reached at <time> / not reached: <why>
-  2 your own SQL:     reached at <time> / not reached: <why>
+  2 run SQL you write yourself: reached at <time> / not reached: <why>
   3 a branch:         reached at <time> / not reached: <why>
   4 usage:            reached at <time> / not reached: <why>
   5 slowest queries:  reached at <time> / not reached: <why>
@@ -110,7 +110,7 @@ notes typed up as a file and say whether they are yours.
 ## 3. The arrangement
 
 **When.** On a day the operator agrees with the person, after the release the
-site describes is deployed and the person's slot (`slot10-prod`) is prepared
+site describes is deployed and the person's slot (`slot12-prod`) is prepared
 alone, so their database lands on it (D2870). From the release's push until the
 person confirms their record, **no commit changes anything the site is built
 from** (ADR 0290 §7, D2883): the page they read is the page the gate rebuilds.

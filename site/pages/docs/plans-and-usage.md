@@ -26,11 +26,23 @@ apg usage show --organization ORGANIZATION
 
 ## Notifications
 
-One for every finished operation, and a notice once a day when a project passes 80% of a shown limit. Nothing is emailed.
+An organisation's *Notifications* page lists what happened to its projects, newest first, each in one sentence with a link onward. **Nothing is emailed**: the page is where they appear. Five kinds of event make one:
+
+| Kind | Made when | Its link |
+|---|---|---|
+| Started | a project creation, a branch, a restore or a branch reset began | the operation's own page, to follow it |
+| Finished | an operation succeeded, or failed and said why | the operation's page; a finished creation links to *Connect* |
+| Asleep | a project went to sleep after its idle time | the project's *Settings*, to wake it |
+| Expired | a branch reached its expiry time and was deleted | the project's *Branches* |
+| Limit near | a project passed 80% of a limit your plan shows, at most once a day | the organisation's *Plan and usage* |
 
 ```
 apg notifications list --limit 50
 ```
+
+## Limits, before you reach them
+
+When an organisation holds every project its plan allows -- or all but one, on a plan with more than one -- a banner at the top of *Projects* and *New project* says so, such as *Free plan: 1 of 1 project*, with *See plans* and *Your plan*. A project being created already counts. While the plan is full, or while a creation is under way, *New project* is disabled and says why, and a creation is refused before its form is sent, `plan_limit_reached`, with nothing recorded. A project that holds every branch its plan allows shows the same banner on *Branches*.
 
 ## Sleep, idle sleep and size
 
