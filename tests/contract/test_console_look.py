@@ -251,14 +251,14 @@ def test_no_state_is_told_by_colour_alone() -> None:
     assert 'h("span", { className: "dot", "aria-hidden": "true" }), state,' in sql
 
 
-#: The DELETE routes that remove no data a person cannot make again: signing
-#: out, a member's membership, an open invitation, an API key. Every other
-#: DELETE the console sends -- a project, a branch -- is destructive.
+#: The DELETE routes that remove nothing a person cannot make again: signing
+#: out, a member's membership, an open invitation. Every other DELETE the
+#: console sends -- a project, a branch, and since D3094 (the operator,
+#: 2026-10-30) an API key, which cannot be restored -- is confirmed by name.
 UNDESTRUCTIVE_DELETES = (
     '"/sessions/current"',
     "`/organizations/${org}/members/",
     "`/organizations/${org}/invitations/",
-    "`/organizations/${org}/keys/",
 )
 
 
@@ -286,7 +286,7 @@ def test_every_destructive_action_is_confirmed_by_its_name() -> None:
     app = APP.read_text(encoding="utf-8")
     code = "\n".join(line for line in app.splitlines() if not line.lstrip().startswith("//"))
     dialogs = _calls(code, "confirmDialog")
-    assert len(dialogs) == 2, dialogs
+    assert len(dialogs) == 3, dialogs
 
     def unconfirmed(text: str, spans: list[tuple[int, int]]) -> list[str]:
         found = []
@@ -306,9 +306,10 @@ def test_every_destructive_action_is_confirmed_by_its_name() -> None:
     assert routes == {
         "/projects/${key}",
         "/projects/${key}/branches/${encodeURIComponent(branch.name)}",
+        "/organizations/${org}/keys/${apiKey.key_id}",
     }
     names = {re.search(r"\bname: ([\w.]+),", code[start:end]).group(1) for start, end in dialogs}  # type: ignore[union-attr]
-    assert names == {"key", "branch.name"}, names
+    assert names == {"key", "branch.name", "apiKey.name"}, names
     assert code.count('"DELETE"') == 6
     ui = UI.read_text(encoding="utf-8")
     component = _function(ui, "confirmDialog")

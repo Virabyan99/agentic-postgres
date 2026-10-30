@@ -1648,6 +1648,7 @@ async function orgSettingsView(me, org) {
   const [inviteRoleLabel, inviteRole] = choice("Role", ROLES, "member");
   const [keyNameLabel, keyName] = field("Key name", { maxLength: 64 });
   const scopes = KEY_SCOPES.map((scope) => h("input", { type: "checkbox", value: scope }));
+  const keyDialogs = [];
   frame(me, "Members and keys",
     card(h("h2", {}, "Members"),
       table([["username", "Username"], ["display_name", "Name"], ["role", "Role"], ["actions", ""]], memberRows)),
@@ -1666,8 +1667,28 @@ async function orgSettingsView(me, org) {
       invitationList(invitations, () => inviteRole.focus(), (invitation) => busyButton("Revoke",
         act(() => call("DELETE", `/organizations/${org}/invitations/${invitation.id}`)), { busy: "Revoking…" }))),
     card(h("h2", {}, "Management keys"),
-      keyList(keys, () => keyName.focus(), (key) => busyButton("Revoke",
-        act(() => call("DELETE", `/organizations/${org}/keys/${key.key_id}`)), { busy: "Revoking…" })),
+      keyList(keys, () => keyName.focus(), (apiKey) => {
+        // D3094 (the operator, 2026-10-30): a revoked key cannot be restored --
+        // whatever uses it stops at once -- so its revocation is confirmed by
+        // typing the key's name. Members and invitations stay one click: both
+        // are redone by inviting again.
+        const [start, modal] = confirmDialog({
+          opener: "Revoke…",
+          title: `Revoke the key ${apiKey.name}?`,
+          sentence: "Anything using this key stops working at once. A revoked key cannot be restored: make a new one instead.",
+          name: apiKey.name,
+          action: "Revoke",
+          busy: "Revoking…",
+          quiet: true,
+          work: () => call("DELETE", `/organizations/${org}/keys/${apiKey.key_id}`),
+          done: () => route(),
+          refused: (error) => refusal(error),
+        });
+        start.setAttribute("aria-label", `Revoke the key ${apiKey.name}`);
+        keyDialogs.push(modal);
+        return start;
+      }),
+      keyDialogs,
       keyNameLabel,
       h("fieldset", {}, h("legend", {}, "Scopes"), KEY_SCOPES.map((scope, index) => h("label", { className: "inline" }, scopes[index], " ", scope))),
       busyButton("Make a key", async () => {
