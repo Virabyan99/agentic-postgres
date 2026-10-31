@@ -85,7 +85,7 @@ operation step log (ADR 0296), and **the move of every customer-facing name to
 | The SQL relay | `memory.peak` 35.4 MiB on the host; a cancel in 2.03 s; `SELECT 1` 224 ms against psql's 160 ms (S45) | scope-closure §37; CLAUDE.md MEASURED |
 | The browser walk (a driver) | invitation link to a working connection string 26.1 s (S43); at 1.25.0 W0′ 110.8 s, first contentful paint 4,860 / 1,816 / 1,304 ms, the first cold | scope-closure §36; NOTES W0′ |
 | The first person's walk | goal 1 reached — account, factor, organisation, a project created in the console, their own application connected — in 30 minutes by their clock; **11 steps no page told them** | scope-closure §39; D2936 |
-| The second person's walk | a project created in the console on `slot12-prod` and their own test application connected; the record is §5's | NOTES, *the operator's decision* and A1″ |
+| The second person's walk | all six goals in 53 minutes on `slot12-prod`, **no undocumented step**, no terminal, no document opened; the creation 23 minutes | their confirmed record, D3141 (§5) |
 | The filtered host check at 1.25.0 (V1, `-k`, writes no evidence) | 413 passed, 2 failed, 8 skipped, 64 min 22 s; the failures D1935 (by decision) and the relay-log proof's control (an ordering fact after DM3 recreated the relay) | NOTES V1 |
 | The external preflight at 1.25.0 (X0) | 48 passed, 48 skipped (7 for no IPv6 on the host, 41 awaiting the lifecycle and journey records), 305 s | NOTES X0 attempt 2 |
 | Slots | 13 declared; `slot1`–`slot9` and `slot11` consumed (one per re-earning or walk); `slot3`, `slot10`, `slot12` allocated (kept); `slot13` declared, never prepared | NOTES A1″ |
@@ -95,7 +95,7 @@ operation step log (ADR 0296), and **the move of every customer-facing name to
 | Claim or item | Status | Why |
 |---|---|---|
 | `appliance_documented_path` | failed | **By decision** (D1935): the clone walk is deferred; every trip reads it failed. |
-| `documented_path` | failed in `session-46.json` | The first person's 11 undocumented steps (D2936). The second person's record may move it; it has not been read by `apg dx-record check --path hosted`, and no sweep has run that could read it. |
+| `documented_path` | failed in `session-46.json` | The first person's 11 undocumented steps (D2936). **The second person's confirmed record reads clean** under `apg dx-record check --path hosted` (D3141), but no sweep has run that could read it into evidence. |
 | `plans_live`, `journey_live`, `console_create_live` | failed in `session-46.json` | A proof's **order** in the journey mode, not the product (D2940 (3), (4)). The fixes were built at Session 46's close and carried (D2945); the slot that would re-earn them (`slot13-prod`) was never prepared: **the operator closed the stage without PL, J1, J9 or the lifecycle**. |
 | **Session 47's live half** | not run | No sweep, no external half, no merge. Its **seven external claims** — among them `domain_live`, `console_reload_live`, `operation_steps_live`, `notifications_started_live`, `console_look_live`, `console_create_reearned_live`, `support_bundle_reearned_live` (D3123, D3124) — have never been executed live. Every earlier live claim was last read at 1.24.0. |
 | **The Ledger** | not moved at the close | 44 rows: 25 `beta`, 8 `planned`, 8 `not_offered`, 1 `not_metered`, **2 `trial`** (`projects_self_service` on `console_create_reearned_live`, `support_bundle` on `support_bundle_reearned_live`, both `target_session` 47 since D3123). `plan_free` and `plan_premium` are `beta` naming the failed `plans_live` — the workstation's reading against `session-46.json` fails them by decision (D2945), and a session-01 gate on the workstation fails on that one test (Run 12). D2878 (five `planned` rows at target 38) and D2875 (`support_access`) are unmoved. **The stage closes with two rows `trial`**, against ADR 0261's close rule. |
@@ -157,7 +157,7 @@ bears on it:
 | **A customer can create what Stage 6 branches** | Yes, but only into a **hand-prepared slot**: five DNS records, two R2 buckets with tokens, a B2 bucket and key, a secret-store project with six values — the operator's work each time | ten slots consumed across the stage, one per re-earning or walk (§2); the review's §4.1 |
 | **Customers configure the agentic layer** (evaluation branches, branch-aware agent policy) | No: agents, workflows, connectors and migration sets are files the operator deploys; `/v1` has no route for them | the review's §4.2 and §5.2 — a product decision |
 | **A hosted migration artefact** (migration rehearsal) | No: customers migrate over the direct door themselves; only the direct door's role may create tables (D3045) | the review's §4.3 |
-| **Demand for branches** | Not shown by either walk. The first person's branch was refused by a provisioning defect (D2933, repaired in Session 47 as five records per slot) | D2936; the second record is below |
+| **Demand for branches** | Not measured by either walk, which asked for one. The first person's branch was refused by a provisioning defect (D2933); the second person, on a slot made with all five records, made one without help | D2936; D3141 |
 | **What newcomers needed** | The console and the documents, not depth | the first person's 11; the operator's verdict (*"looks and feels terrible while using"*, D2936); Session 47 rebuilt the console for them |
 
 **The first person's findings** (Session 46, D2936, summarised; their own files
@@ -175,9 +175,20 @@ brief's mapping, `docs/design/session-47/`).
 
 **The second person's findings** (Session 47, `slot12-prod`, kept, theirs).
 
-<!-- SECOND-WALK: the main session fills this from ~/s47/person/record.json -->
-The second person's written record is still being collected; it is filled here
-from their confirmed record, recorded and never argued (ADR 0290).
+Their confirmed record (`~/s47/person/record.json`, outside the repository;
+Session 47's D3141) reads **clean** under `apg dx-record check --path hosted`:
+**no undocumented step**, the first walk of either kind that records none. They
+reached **all six goals in 53 minutes** -- an account in 2, the factor and an
+organisation in 3, the creation pressed at 6 and finished 23 minutes later,
+their own note application connected through the pooled and direct strings 37
+minutes in, then their own SQL, usage, the support page, a branch and the
+slowest queries -- with no terminal and no document opened. In their words,
+summarised: every step was described on the page and everything worked in one
+go. The longest single wait was the creation (23 minutes, inside the 23-28
+minutes measured for the journey); the next, from the project's creation to a
+working connection (14 minutes), is their own application's setup and is not
+broken down in the notes. **`documented_path` is not moved by this**: no sweep
+read the record (D3140); it is the input Stage 6's sweep reads.
 
 ## 6. Recommendation
 
