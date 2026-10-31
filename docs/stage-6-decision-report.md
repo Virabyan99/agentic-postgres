@@ -194,7 +194,8 @@ read the record (D3140); it is the input Stage 6's sweep reads.
 
 *This section is the executor's reading of §1–§5, written for the operator, who
 accepts or rewrites it before Stage 6 is planned (the recommendation is a
-decision, and decisions here are the operator's).*
+decision, and decisions here are the operator's).* **Accepted by the operator,
+unchanged, on 2026-10-31** (*"I accept your recommendation for Stage 6"*).
 
 **Open Stage 6 with one session that finishes Stage 5's release, then settle
 the review's five decisions, and only then freeze the vision's roadmap — with
