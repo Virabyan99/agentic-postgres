@@ -1957,3 +1957,82 @@ the rules would have removed working features to stay true (D2945).
 4. **Stage 5's close**: the Ledger (D2884, D2878, D2875), this file's stage
    section with §28's lists re-audited, the stage plan's Status, then the Stage
    6 decision report.
+
+---
+
+## 40. What Session 47 closed, what it left, and Stage 5's close -- what Stage 6 inherits
+
+**Session 47 is the console made for a newcomer, the move to `nomipg.com`, and
+Stage 5's close** (D2946-D3141, ADRs 0295-0299). The console was reworked from
+the first person's findings and the operator's verdict (a design brief and
+prototypes the operator approved, Sheet D1), the customer-facing names moved to
+`nomipg.com`, and **a second person walked the hosted product on `slot12-prod`
+(kept, theirs): they created a project in the console and connected their own
+test application.** **`1.25.0` is deployed on all five projects at `8e0f3b6`, with
+no database restart, and is NOT tagged**: after the walk the operator closed Stage
+5 with documents only (D3140), so the sweep, the tag, the PyPI release and the
+re-earning of `plans_live`, `journey_live` and `console_create_live` did not run.
+The evidence of record stays `evidence/session-46.json` (348 claims, 343 passed, 5
+failed); Session 47's offline half passed 175/175 on `d076b85`; no
+`evidence/session-47.json` exists.
+
+**The sentence this session would most want carried forward: a reading from the
+workstation's own network stack is one path, not the internet's.** Every probe of
+the new console passed from WSL, whose MTU is 1,280; the first person to open the
+invitation link, and then the operator's own browser, timed out on a path below
+1,500 bytes that drops large packets silently (D3138). The fix was one line at the
+host; finding it needed a reading from the client's side.
+
+### What it closed
+
+| Row | How |
+|---|---|
+| **The console's UX** (D2936, the operator's first priority) | Reworked from the first person's eleven findings (ADRs 0295-0298): features inside first-party rules (0295), a creation tracker whose state lives in the API and survives a refresh (0296, control migration 0011), every refusal and notice a sentence with a next action (0297), help where the question arises (0298); copy controls and executed Connect snippets. **A second person walked it end to end** -- the record of their own words is D3141. |
+| **The domain move** (D2943, ADR 0299) | `nomipg.com` carries the site, the console, the API, the relay and every slot's five names; the old names redirect (301 the site, 308 `control.`) until 2027-10-29; 38 stale old records deleted; `slot10-prod`'s person told before their names moved (M0). Done as two operations because the product's own pricing refused the move inside the release (D3134). |
+| **D2933** -- the slot sheet's five records | `slot12-prod` made with all five; `ready` requires all five (D2960). |
+| **D2932** -- `slot.sh status`'s wording | Reads *"not prepared: missing the slot manifest, …"* on the host. |
+| **D3138** -- the console unreachable on a sub-1,500-byte path | The MSS of forwarded TCP clamped to 1,400 (`apg-mss-clamp.service`); read open from the affected client. |
+
+### What it left, and why
+
+| Row | Why it is still open |
+|---|---|
+| **`plans_live`, `journey_live`, `console_create_live`** (D2940, D2945, D3140) | Not re-earned: the operator closed before the slot13 journey and lifecycle. Their fixes are built and rehearsed (Runs 11-12). |
+| **1.25.0 untagged; PyPI at `agentic-postgres-cli` 1.24.0** (D3140, D3135) | No sweep, so D1425 (deploy, sweep and tag on one commit) is not met. The published CLI names the old endpoint, and a CLI holding a session there cannot log out under the 308 (D3135). |
+| **The Ledger** (D2884, D2878, D2875) | Moves only from tagged evidence; unmoved. `projects_self_service` and `support_bundle` stay `trial`; `plan_free` and `plan_premium` still cite the failed `plans_live`, and the workstation's `test_reality_ledger` reading fails them, by decision (D2945). |
+| **D3138 across a reboot** | The clamp unit is enabled and active; no reboot read it back (B1 not run). It belongs in `provision-host.sh`. |
+| **D3125, D3128** | The console's two-click reach, breadcrumb and switchers have no test; five operator documents still name the old zone. |
+| **Bot Fight Mode on the proxied `nomipg.com`** | Turned on by the operator 2026-10-30 with client-side security and leaked-credentials mitigation; unread against the site proofs (D2728's class). |
+| **Session 47's envelope section** | Not written; its numbers are in the plan's Run 13 **Done.** (the release windows, the walk's times). |
+| **`slot13-prod`** | Declared, never prepared; its records and buckets removed (D3139). |
+
+### Stage 5's inheritance from §28, re-audited row by row
+
+| §28 row (2026-10-03) | At Stage 5's close |
+|---|---|
+| **The retention plane** (D1886, D1700, D1775) | **Closed** -- Session 36, ADR 0248 (§29). |
+| **The three remaining rotations and a schedule** | **Partly**: alpha's trio rotated 2026-10-04 (D2040), `port_allocation` and the rotation trio passed (§29), `doctor secrets` reads each age (ADR 0250); **beta's three never rotated** (D1995). |
+| **The shared edge's window** (D1975) | **Open**: the 24.4-s reading stands; nothing in Stage 5 avoided an edge recreation. |
+| **D1918** | **Closed** -- ADR 0249 (§29). |
+| **D1547** -- no `delete_note` | **Open**, deferred with its cost (D1990). |
+| **D1581 / D1713 / D1941** | **Closed as a measurement** (D2034, §29). |
+| **The hosted question as an ADR** | **Decided and built**: hosted (D1946); the control plane, managed projects, public TLS endpoints and the console (ADRs 0251-0299). |
+| **The documentation walk** (D1935) | **Two persons walked the hosted product** (Session 46, D2936; Session 47, D3141). `appliance_documented_path` (the clone walk) stays failed by D1935. |
+| **D1936 / D2005** -- beta does not read the approval | **Open**: still schema 7; the operator's edit. |
+| **D1642, D1798, D1869, D1871, D1722 / D1806, D1784, D1792, ADR 0241's bound** | **Unchanged.** |
+| **`replacement_host_restore`** | **Passed** on Session 38's evidence (the move to OVH, D2246/D2301). |
+
+### What Stage 6 inherits, in order
+
+1. **The release Stage 5 did not finish**: one sweep on the deployed `8e0f3b6` (or
+   a successor deployed fully first), the tag, `agentic-postgres-cli` published so
+   the CLI names `nomipg.com`, and D3135 (moving a CLI's endpoint).
+2. **The three claims re-earned** on a fresh slot (`slot13-prod` is declared), the
+   plan refusal first, the journey with J9, the lifecycle in one attempt -- then
+   the Ledger moves (D2884, D2878, D2875), no row `trial`.
+3. **D3138 read across a reboot**, and the clamp made part of the host's
+   provisioning.
+4. **D3125, D3128**, Bot Fight Mode against the site proofs, Session 47's envelope
+   section.
+5. **The Stage 6 question itself** -- `docs/stage-6-decision-report.md`, whose §6
+   is the executor's recommendation for the operator to accept or rewrite.

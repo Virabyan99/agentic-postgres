@@ -38,21 +38,19 @@ shape those take.
 ## Status — read this first
 
 ```
-STAGE 5 IS EXECUTING. SESSION 46 CLOSED 2026-10-29: 1.24.0 -- a PERSON
-                walked the hosted product (ADR 0290), the console creates a
-                project (ADR 0291), the support bundle (ADR 0292), `apg control
-                status` (ADR 0293), the journey, the eighth re-earning --
-                deployed on four projects with no database restart, swept,
-                merged and TAGGED on 55467b5 (D1425); agentic-postgres-cli
-                1.24.0 PUBLISHED to PyPI from the tag. The old Hetzner host
-                RETIRED (M7, Session 46 Run 10). **SESSION 47 IS STAGE 5'S LAST
-                SESSION** (the operator, 2026-10-29, D2945): the console's UX
-                rework first, the domain move to nomipg.com (D2943), one slot
-                that re-earns plans_live, journey_live and console_create_live,
-                then the stage close and the Stage 6 decision report.
-                docs/plans/session-46-implementation-plan.md is Session 46's
-                record; docs/scope-closure.md §39 what it closed, left and
-                hands Session 47. This plan was written 2026-10-03 at 42bf306.
+STAGE 5 CLOSED 2026-10-31, by the operator's decision, with documents only
+                (Session 47, D3140). Its last session reworked the console
+                (ADRs 0295-0298), moved the customer-facing names to nomipg.com
+                (ADR 0299) and had a SECOND PERSON walk it on slot12-prod (kept,
+                theirs). 1.25.0 is DEPLOYED on all five projects at 8e0f3b6 and
+                NOT TAGGED (no sweep, D1425 unmet); PyPI stays at
+                agentic-postgres-cli 1.24.0; plans_live, journey_live and
+                console_create_live stay failed; the Ledger did not move.
+                docs/scope-closure.md §40 is the stage's close and Stage 6's
+                inheritance, in order; docs/stage-6-decision-report.md the
+                Stage 6 question. Session 46 (1.24.0, tagged on 55467b5, PyPI
+                1.24.0) is the last session that swept and tagged. This plan
+                was written 2026-10-03 at 42bf306.
 DIRECTION       HOSTED (D1946). Session 36 paid the preconditions; Session 37
                 built the control plane (ADRs 0251-0255); Session 38 managed
                 projects (ADRs 0256-0261) and the move (ADRs 0262-0267);
@@ -70,16 +68,16 @@ DIRECTION       HOSTED (D1946). Session 36 paid the preconditions; Session 37
                 the hosted walk, the console's creation, the support bundle,
                 control status (ADRs 0290-0293) and the runner's own units
                 classified (ADR 0294).
-SESSIONS        36-47 (D1945, D2510, D2591-D2593, D2809, D2945). 36-46 DONE;
-                47 PLANNED 2026-10-29: docs/plans/session-47-implementation-
-                plan.md (15 runs, one sitting, rows D2946-D2980, ADRs
-                0295-0299 reserved; next free D2981, ADR 0300). Its re-earning needs
-                slot12-prod, named under the new domain (slot1-9 and slot11
-                consumed; slot10-prod the person's, KEPT).
-CURRENT_SESSION 46. Moves 46 -> 47, all-or-nothing per session (D690).
-template_version 1.24.0. host.yaml schema 4. Outputs v22, project manifest 11,
-                capability manifest 4, lock 4, project lock 3, api-surface 2,
-                control set 10.
+SESSIONS        36-47 (D1945, D2510, D2591-D2593, D2809, D2945), ALL DONE.
+                47: docs/plans/session-47-implementation-plan.md (Status
+                COMPLETE, closed early; rows D2946-D3141, ADRs 0295-0299; next
+                free D3142, ADR 0300). slot1-9 and slot11 consumed; slot3,
+                slot10 (the first person's) and slot12 (the second's)
+                allocated; slot13 declared, never prepared.
+CURRENT_SESSION 47 (since d076b85).
+template_version 1.25.0 (deployed, untagged). host.yaml schema 4. Outputs v22,
+                project manifest 11, capability manifest 4, lock 4, project
+                lock 3, api-surface 2, control set 11.
 POSTGRESQL      18.4 STAYS -- the operator, 2026-10-03 (D1947). Measured that
                 day on Docker Hub: postgres 19beta4 is the newest 19 tag; no
                 19rc, no 19 GA, no pgvector pg19 image.
@@ -87,17 +85,20 @@ HOST            OVH VPS US-East (Reston VA), apg-ovh-01, 15.204.231.45 -- the
                 move of 2026-10-08..10 (D2223, D2251), UPGRADED 2026-10-18 to
                 6 vCPU, 11,671 MiB, 95 GiB, no swap (D2628). alpha-dev,
                 beta-dev, control-prod (with the console and the SQL relay on
-                sql.agenticpostgresql.com), slot3-prod (the probe's customer
-                project) and slot10-prod (the first person's, KEPT) at 1.24.0
-                on 55467b5, beside the telemetry plane (ADR 0277). The edge
-                publishes 80, 443 and 5432. A reboot brings all eight units
-                back by themselves. The Hetzner host is GONE (M7, 2026-10-29).
-                Secrets: a self-hosted Infisical (ADR 0262), 443 admitted from
+                sql.nomipg.com), slot3-prod (the probe's customer project),
+                slot10-prod (the first person's, KEPT) and slot12-prod (the
+                second person's, KEPT) at 1.25.0 on 8e0f3b6, beside the
+                telemetry plane (ADR 0277). The edge publishes 80, 443 and
+                5432; forwarded TCP's MSS is clamped to 1,400
+                (apg-mss-clamp.service, D3138 -- not yet read across a
+                reboot). The Hetzner host is GONE (M7, 2026-10-29). Secrets: a
+                self-hosted Infisical (ADR 0262), 443 admitted from
                 15.204.231.45 only.
-SITE            https://agenticpostgresql.com (and www) on Cloudflare Pages,
-                deployed by CI on every green push to main (ADR 0283); the
-                console at https://control.agenticpostgresql.com/console/.
-                The move to nomipg.com is Session 47's (D2943).
+SITE            https://nomipg.com (and www) on Cloudflare Pages, deployed by
+                CI on every green push to main (ADR 0283); the console at
+                https://control.nomipg.com/console/ (ADR 0299). The old
+                agenticpostgresql.com names redirect until 2027-10-29 (301 the
+                site, 308 control.); secrets. stays there.
 CONTROL PLANE   PYTHON, DOGFOODED -- the operator, 2026-10-03 (D1950): the
                 control plane is a project the product itself deploys, with
                 its own migration set and the existing auth service. No
@@ -111,14 +112,16 @@ OBSERVABILITY   ClickStack ADDED, bounded, on-host -- the operator, 2026-10-03,
 EVIDENCE        evidence/session-46.json: 348 claims, 343 passed, 5 failed --
                 appliance_documented_path (D1935), documented_path (the
                 person's 11, D2936), plans_live, journey_live,
-                console_create_live (a proof's order, D2940; re-earned in
-                Session 47, D2945). Ledger as Session 46's bump left it:
-                projects_self_service and support_bundle `trial`; plan_free
-                and plan_premium `beta` naming the failed plans_live -- the
-                workstation's reading against session-46.json fails them,
-                reported; every Ledger move is Session 47's close.
-ADRs            294, next free 0295.   migrations 39.   requirements 441.
-                claims 348, 164 declared offline.
+                console_create_live (a proof's order, D2940; NOT re-earned:
+                Session 47 closed before its journey, D3140). It stays the
+                evidence of record. Session 47's offline half 175/175 on
+                d076b85; no evidence/session-47.json. The Ledger did not move
+                (D2884, D2878, D2875 carried to Stage 6): projects_self_service
+                and support_bundle `trial` (target 47, D3123); plan_free and
+                plan_premium `beta` naming the failed plans_live -- the
+                workstation's reading fails them, by decision (D2945).
+ADRs            299, next free 0300.   migrations 39.   requirements 459.
+                claims 366, 175 declared offline.
 divergences     D1-D1944 in earlier plans; D1945-D1984 and D2808-D2811 here; D1985-D2041 in
                 Session 36's; D2042-D2144 in Session 37's; D2145-D2324 in
                 Session 38's and its migration plan's; D2325-D2421 in Session
@@ -126,11 +129,11 @@ divergences     D1-D1944 in earlier plans; D1945-D1984 and D2808-D2811 here; D19
                 D2561-D2649 in Session 42's (D2591-D2596 Sessions 43-45's
                 choices); D2650-D2731 in Session 43's; D2732-D2807 in Session
                 44's; D2812-D2861 in Session 45's; D2862-D2945 in Session
-                46's. **Next free: D2946.**
+                46's; D2946-D3141 in Session 47's. **Next free: D3142.**
 ```
 
 **Every number in §0 onward was measured on 2026-10-03 at `42bf306`**, or says
-whose it is. **The Status block above is re-read at each session's close.** (Re-read and rewritten at Session 46's close, 2026-10-29.)
+whose it is. **The Status block above is re-read at each session's close.** (Re-read and rewritten at Session 47's close -- Stage 5's -- 2026-10-31.)
 
 ---
 

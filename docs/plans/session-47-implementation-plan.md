@@ -1,9 +1,15 @@
 # Session 47 — The console made for a newcomer, nomipg.com, the last re-earning, Stage 5's close
 
-**Status: PLANNED 2026-10-29 at `ec75870`** (Session 46's close, tree clean, `main`
-= `origin/main`). Rows **D2946–D2980** at planning; the runs add theirs from
-**D2981**. ADRs **0295–0299** are reserved for Run 1. **NEXT FREE after this
-table: D2981, ADR 0300.**
+**Status: COMPLETE 2026-10-31 -- CLOSED EARLY by the operator's decision (D3140).**
+Runs 1–12 done; Run 13 (the sitting) done through the domain move, the second
+person's walk and A1″, then stopped; Runs 14–15 written as documents only. **1.25.0
+is deployed on all five projects at `8e0f3b6` under `nomipg.com` and is NOT tagged**;
+the three claims stay failed. Stage 6's first session owes the rest (scope-closure
+§40). Rows **D2946–D3141**. **NEXT FREE: D3142, ADR 0300.**
+
+*Planned 2026-10-29 at `ec75870`* (Session 46's close, tree clean, `main` =
+`origin/main`). Rows **D2946–D2980** at planning; the runs added theirs from
+**D2981**. ADRs **0295–0299** were reserved for Run 1.
 
 **Stage 5's last session** (D2945): the operator's brief is the launch folder's
 `session-47-planning-prompt.md`. In order: **the console's UX/UI first and
@@ -419,6 +425,18 @@ runs add go in a second table below it, in execution order.
 | **D3128** | — | Operator documents still name the old zone (`docs/README.md`, `control-plane.md`, `managed-projects.md`, `monitoring.md`, `operator-guide.md`); the store's names stay by design (D2964). | **Run 14's** (the operator guide's cutover); the site and the Ledger are clean. | Customer text moves with the release; operator text with the cutover's record. | 0299 |
 | **D3129** | Session 46 Run 8: *"17 `--session 45` literals"*. | Its own table sums to 16, the same five files; this bump moved 16. | Counted from the table. | — | — |
 | **D3078** | Brief §1: plain language. | The `limit_approaching` notification shows the server template's machine word (*"storage_gb is at 4.1 of 5"*; seen in the 390 px look). | **Run 9** words entitlements in the console (*"Storage: 4.1 of 5 GB"*, *"Agent calls today"*), from `plans` names, never the raw key. | A key is not a sentence. | 0297 |
+| **D3130** | Run 11: `s47-cutover-plan.py` reads each name with one `dig`. | Through WSL's stub about one `dig` in 30 timed out, and the generator read nothing for that name. | The instrument (`~/s47/run11/`) reads up to three times; a name that fails all three is reported **not read**. | A reading that can time out reports it (ADR 0195). | 0195 |
+| **D3131** | N0's plan: the new zone's MX records copy the old zone's priorities. | Email Routing assigns its OWN priorities per zone (59/15/42 against 13/18/53); the read-back read the 3 MX "NO" on priority alone, the hosts `route1-3.mx.cloudflare.net` right. | Recorded; the hosts are the reading. | The provider writes its own records (D3101). | 0299 |
+| **D3132** | — | A wrapper printed `readback exit 0` after `READBACK: NO`: the `$?` was Git Bash's, read through `wsl bash -lc "…"` (CLAUDE.md §1). The reader's own status was **5**. | Every status read inside a script file. | The trap again; the instrument was right. | — |
+| **D3133** | Sheet H0: the hostyaml helper's `--in-place`. | It wrote `host.yaml.before-s47` INSIDE the checkout, which then read dirty (D2179: the reconciler and every deploy refuse). | Moved to `/home/op/checkout-host.yaml.before-s47`; H1's helper writes its backups outside the checkout. | A backup beside its file can dirty a release. | — |
+| **D3134** | Run 13 step 5: the domain move AT the release (R2c–R2e). | **`upgrade.sh plan` refuses it** for control-prod (exit 6, *"the operator's own inputs moved: project_sha256 … deploy the manifest change as its own operation"*): a release is priced against the manifests the deployment was rendered from. | **The operator: two operations** -- 1.25.0 to all five on their current domains (R2a–R2e), then the domain move of `slot3-prod`, `slot10-prod` and control-prod as one redeploy each (DM1–DM3); the moved manifests set aside and put back. | The product's own refusal is right; the plan was not. | 0299 |
+| **D3135** | N2: the old `control.` answers 308 to the new. | **A CLI holding a session at the old endpoint cannot end it**: `logout` sends DELETE to the old endpoint, `control_client.send` refuses the redirect (exit 6), and `login` refuses while a session is held -- short of deleting `session.json` by hand (the refresh token then lives to its expiry). The operator's `admin-config` held no session, so L1 was not blocked. | **Stage 6**: the CLI needs a way to move its endpoint, or `logout` to accept a 308 to the same control plane; the published CLI is still 1.24.0. | A redirect a client refuses strands the client. | — |
+| **D3136** | Run 11: `s47-derive.py` moved every name in the instruments. | The agent's walk STATE (`~/s37/probe.json`) still named the old endpoint: X0 refused at its preflight (exit 94, nothing run). | `~/s47/run13/probe-move.py`: only `endpoint` moved, a 0600 byte copy kept, written atomically; the other CLI contexts move by a re-login when needed. | A derivation of code misses the state the code reads. | 0299 |
+| **D3137** | — | Cloudflare's `result_info.total_count` read 20 right after five creates; a full paginated listing read 24. | Read the records, never a count read immediately after a write. | — | — |
+| **D3138** | — | **The console timed out for any visitor on a path below 1,500 bytes** (the second person; the operator's own browser, `ERR_TIMED_OUT`): DF pings lost 1,472 B in both directions with no *"Frag needed"* (a PMTU black hole); HTTPS hung exactly when the edge sent its certificate chain; WSL (MTU 1280) never saw it. The host's `tcp_mtu_probing=1` (Sheet MTU1, kept) could not help: Docker runs `userland-proxy: false`, so :443 is DNAT'd into the edge's own namespace. | **Sheet MTU2**: `iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -m tcpmss --mss 1401:65535 -j TCPMSS --set-mss 1400` (lowers only); Windows then read `/accept` and `/console/` 200 in 0.4–0.8 s. **Sheet MTU3**: `/etc/systemd/system/apg-mss-clamp.service` (idempotent `-C \|\| -A`, enabled, active; one rule). **Not read across a reboot** (B1 was not run) -- Stage 6; the clamp belongs in `provision-host.sh`. | A reading from the workstation's own stack is one path, not the internet's. | — |
+| **D3139** | §0 sentence 11 (D2870): SL1′–SL3′ only after A1″. | The operator's word wrote `slot13-prod`'s five records and two buckets while the person walked, before A1″: neither can make a slot `ready` (prepared AND its records). | Recorded; then undone by D3140 (the five records deleted, the two empty buckets deleted). `slot13-prod` stays declared, never prepared. | An order kept by what decides readiness. | — |
+| **D3140** | Run 13 steps 9–13; Runs 14–15 from the TAGGED evidence (§0 sentence 14). | **The operator (2026-10-31), after the second person's walk: close Stage 5 now, documentation only.** Offered: close + sweep + tag (recommended), docs only, the full plan. | **No** slot13, PL/J1/J9, lifecycle, branches, B1, sweep, external half, tag, publish or SL4. `plans_live`, `journey_live`, `console_create_live` stay failed (`evidence/session-46.json`); **1.25.0 deployed ×5 at `8e0f3b6`, UNTAGGED** (D1425 not met); PyPI stays 1.24.0; no `evidence/session-47.json`; the Ledger does not move (D2884, D2878, D2875 carried); no envelope section. Runs 14–15 are the documents only. All of it is Stage 6's first session's. | The operator's call: the product works for a person; the proof of it is owed. | — |
+| **D3141** | Run 13 step 8: PR -- the second person's record transcribed, confirmed, checked (`apg dx-record check --path hosted`). | **Being collected at the close**: the person created a project on `slot12-prod` and connected their own test application (the operator's relay); their notes not yet returned. | Recorded from `~/s47/person/record.json` once they confirm it; findings recorded, never argued (ADR 0290). Until then `documented_path` reads as `session-46.json` has it. | A person's words are the record, not the operator's summary of them. | 0290 |
 
 ---
 
@@ -1165,7 +1183,34 @@ D2930–D2945. **Before the first sheet**: the operator's go for the sitting.
     `info.version`; `apg --version` → `apg 1.25.0` in a clean `python:3.12-slim`.
 13. **SL4**.
 
-**Done.**
+**Done -- in part, by the operator's decision (D3140).** 2026-10-30 → 31; the raw notes are
+WSL `~/s47/run13/NOTES.md`. **Steps 1–8 done; 9–13 not run.** **N0/N1**: 14 records written to
+`nomipg.com` and Email Routing's five (19 read back on the host; D3130, D3131, D3132). **The bump
+pushed** (`d076b85` + `8e0f3b6`); the host checkout moved by bundle to `8e0f3b6`, `FETCH_HEAD`
+confirmed, clean (D3133). **R1**: alpha and beta `minor`/`ok`; control-prod **blocked** by the moved
+manifest (D3134) -> **two operations**. **R2a–R2e, the release 1.25.0 on all five**, no database
+restart: rest never down on any; auth down 8.5 / 8.9 / 9.3 / 9.3 / 9.9 s (alpha, beta, slot3,
+slot10, control); the console 7.3 s; control migration 0011 applied in 29.4 ms (ledger 50); the
+relay's container untouched. **The domain move** (DM1 `slot3-prod`, DM2 `slot10-prod` after M0 --
+the operator emailed its person -- DM3 control-prod): each read under its new name -- certificates
+issued once, the doors' one certificate carrying `pool.` and `direct.`, a real login through each of
+`slot3`'s doors, the old names unrouted; the console at `https://control.nomipg.com/console/` with
+`connect-src 'self' wss://sql.nomipg.com`; the site's link right from 15:39Z. **N2**: the old zone's
+apex/www 301 and `control.` 308 (proxied, D2966), GO 4/4 (D3135). **L1, A1** (registry agrees ×5),
+**RA**, **K1** (`kit-2026-10-30-s47`, release `8e0f3b6`). **V1** 413 passed, 2 failed --
+`documented_path`'s D1935 and the relay control's ordering (DM3 recreated the relay; E0 had not
+run) -- 64 min 22 s. **X0** (after D3136) 48 passed, 48 skipped by design. **E0** through
+`wss://sql.nomipg.com`, refusals 403 / 400 / 4502; **L0** 34 pages in 71 s; **W0′** every step ok,
+FCP 4,860 / 1,816 / 1,304 ms. **N3**: 38 stale old-zone records deleted, 12 kept. **H1**
+(`slot12-prod` and `slot13-prod` declared, the inserted comment read); **SL1–SL3 for `slot12-prod`**:
+five grey records (D3137), two EEUR buckets, prepare, the operator's provider half (`--apply`
+created 16), r2shape ALL YES, materialised (29 files), **`ready` -- the only ready slot**. **P0**:
+the operator minted the account invitation (72 h); **D3138** -- the console timed out for the
+person and the operator alike on a sub-1,500-byte path; Sheets MTU1–MTU3 clamp the MSS to 1,400
+and the link then opened, unchanged. **PW**: the second person walked, created a project in the
+console and connected their own test application (*"everything works very well"*, the operator's
+relay). **A1″**: `slot12-prod` **allocated**, `slot13-prod` declared. SL1′'s records and buckets
+were written early (D3139) and removed at the close. **PR**: see D3141.
 
 ### Run 14 — the close (Stage 5's)
 
@@ -1187,7 +1232,14 @@ D2930–D2945. **Before the first sheet**: the operator's go for the sitting.
    `test_console_pages`, `test_session12_documented_path`;
    `bin/session-01-check.sh` once. Commit, push, CI.
 
-**Done.**
+**Done -- as documents only (D3140), 2026-10-31.** With no tagged evidence, steps 1, 2 and 5 did
+not run: **the Ledger did not move** (D2884, D2878, D2875 carried), **no envelope section** (the
+sitting's numbers are Run 13's **Done.**), the operator guide's release row and cutover owed with
+D3128. Written: **`docs/scope-closure.md` §40** (Stage 5's close, §28's inheritance re-audited row
+by row, Stage 6's inheritance in order); **the stage plan's Status: STAGE 5 CLOSED**; this plan's
+Status COMPLETE; the handoff (CLAUDE.md copied to the scratchpad first; the memory). No code moved,
+so no gate ran (the bump's gates passed on `d076b85`, Run 12); `test_documentation_index` for the new
+page. Pushed; documentation reads no CI verdict.
 
 ### Run 15 — the Stage 6 decision report
 
@@ -1203,7 +1255,18 @@ D2930–D2945. **Before the first sheet**: the operator's go for the sitting.
 3. The inputs committed under `docs/stage-6/` only at the operator's word (D2887).
 4. `test_documentation_index`; commit, push, no CI read.
 
-**Done.**
+**Done -- by hand, not by `fill.py` (D3140), 2026-10-31.** With no tagged commit and no
+`evidence/session-47.json`, `docs/stage-6-decision-report.md` was drafted by a delegated agent (Opus
+5.5) from the sources each row names (scope-closure §29-§39, the session plans' **Done.**
+paragraphs, `~/s47/run13/NOTES.md`, the vision and the review in the launch folder) and reviewed:
+§1 what 1.25.0 is (deployed, untagged), §2 what Stage 5 measured (25 rows, each sourced), §3 what
+stayed failed or not run, §4 sessions 36-47 against the stage plan, §5 the vision's premises
+against the evidence with both persons' findings (the first summarised, never quoted; the second
+from their confirmed record, D3141), §6 **the executor's recommendation, for the operator to accept
+or rewrite before Stage 6 is planned**: first finish Stage 5's release (the three claims, a tag,
+the CLI), then the review's five decisions, then the vision's roadmap with the storage substrate
+measured first and slot preparation priced. Indexed in `docs/README.md`. The vision and review stay
+outside the repository (D2887: no word to commit them).
 
 ---
 
